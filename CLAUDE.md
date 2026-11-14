@@ -13,6 +13,18 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 - **Resets are designed in.** The announced-reset list and the ledger-went-backwards check live in `league-season`, ported from xrpl-lab's `resets.py`. A new announced reset is added in xrpl-lab, xrpl-camp, sovereignty and here.
 - **Only XRPL features enabled on Mainnet.** After a reset the Testnet's amendments are set to match Mainnet's, so a Testnet-only feature could vanish. Check the amendment status before using a new transaction type.
 
+## Toolchain
+
+- `rust-toolchain.toml` pins the current stable Rust by exact version (1.100.0, released 2026-11-09). Check the stable channel when bumping; never write a version from memory. A new stable lands by PR.
+- Edition 2024 throughout.
+
+## Tables and roll
+
+- Game tables (road events, market shocks, town tables) are roll tables in `tables/`. CI validates them and computes their exact odds with roll 2.1.1, pinned, through roll's library API (its 2.1.1 command line reads only the older loot format). Node is CI-only, never in the game.
+- `league-core` reads the same JSON in Rust. Every draw's value comes from `league-dice`, never from a local RNG.
+- Do not write the roll conformance test, or depend on anything newer than roll 2.1.1, until the conformance fixture ships. Whether roll becomes a Rust crate (roll 3.0.0) is decided after M2.
+- roll changes go to R&D as tickets (`rnd-local/projects/antigravity/tickets/`), never straight to the roll repo. Credit roll (MIT, same org) in the notes wherever its code or design is used.
+
 ## Workflow
 
 - Branch per change; one PR per milestone; the Publisher merges. Once a PR's head is sent for merge, push nothing more to it.
@@ -29,7 +41,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 4. **M1, rules:** `league-core`, only after the design review has been ruled on.
 5. **M4:** one table of three people on Testnet, with a receipt.
 
-The client (terminal or otherwise) is not decided yet; no client crate until it is.
+The client is a ratatui and crossterm terminal client, `league-tui` (decided 2026-11-14). A stub until the rules exist.
 
 ## Crates
 
@@ -39,3 +51,4 @@ The client (terminal or otherwise) is not decided yet; no client crate until it 
 | `league-dice` | Commit and reveal through hash-locked escrows, the roll, the drand round rule. Stubs for now. |
 | `league-ledger` | Testnet access. The network guard and endpoints now; transactions in M2. |
 | `league-season` | Announced resets, the ledger-went-backwards check; the season record later. |
+| `league-tui` | The terminal client: title screen and key handling for now. |

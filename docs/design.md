@@ -11,7 +11,7 @@ Made on 2026-11-14.
 | Decision | Chosen | Why |
 | --- | --- | --- |
 | What the game is | Merchant League: caravans, towns, goods and contracts between players | The XRPL already has a trading engine (offers, an order book, escrows, checks), so a trading game uses the ledger for what it is good at |
-| How it is played | A Rust client; which kind (terminal or other) is still being confirmed | A transaction takes 3 to 5 seconds to settle, so real-time play is out; slow turns suit a public ledger |
+| How it is played | A terminal client in current stable Rust (ratatui and crossterm) | A transaction takes 3 to 5 seconds to settle, so real-time play is out; slow turns suit a public ledger |
 | Who runs the season issuer | One studio-run issuer account per season | One issuer keeps the game currency's supply readable and auditable |
 | Where the fairness comes from | Hash-locked escrows for commit and reveal, mixed with the public drand beacon | No single player, and not the studio, can steer a roll |
 
@@ -123,6 +123,16 @@ Every Testnet reset ends a season, and the game treats that as the season finale
 **An unannounced reset is handled the same way, late.** The client notices the ledger index fall below the one it saw before (with a 1,000-ledger tolerance for server lag). It then closes the season at the last state it saw, with the same carry-over rule. Carry-over depends on what a player did during the season, never on being online at the moment of the wipe.
 
 **Proofs outlive the ledger.** A season record includes its transaction hashes, which can no longer be checked once the ledger is gone. Verifying an old record reports "can no longer be checked", never a pass.
+
+## Tables with roll
+
+Road events, market shocks and town tables are written as tables for roll, the studio's dice and table engine (@mcptoolshop/roll, MIT, same org). They live in a `tables/` folder, so each event's exact odds are on record and a table change shows its new odds in the pull request.
+
+- **Design time, in CI:** roll validates every table and computes its exact odds, pinned to roll 2.1.1. roll 2.1.1's command line only reads its older loot-table format, so CI calls roll's library (`validateGameTables`, `analyzeTable`) through a small Node script with roll pinned in a lockfile. Node runs only in CI, never in the game.
+- **Play time, in Rust:** `league-core` reads the same table JSON. The value for each draw comes from `league-dice` (the escrow reveals plus the drand round), never from a local random number generator. roll's own table roller already takes its random source as a parameter, so a disputed draw can be replayed in roll with the same value.
+- **What roll 2.1.1 already covers:** weighted rows, conditions on context values (a town's or season's state), nested tables and chained tables. No schema change is needed for the first tables.
+- **One engine or two:** decided after M2, once it is clear how much table logic the game needs. Either the Rust resolver is tested row-for-row against a conformance fixture that roll's maintainers are adding, or roll's parser, evaluator and table engine become a Rust crate (roll 3.0.0) that the game depends on directly, with no conformance gap. Until then roll stays pinned at 2.1.1 and no conformance test is written.
+- Changes to roll itself go to R&D as tickets, never straight to the roll repository.
 
 ## How it runs on Testnet
 

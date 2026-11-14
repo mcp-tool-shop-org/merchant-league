@@ -62,8 +62,8 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      # Coverage floor 90, the org bar: the scaffold measured 100% (117 of
-      # 117 lines) on 2026-11-14, so the bar is adopted from the start.
+      # Coverage floor 90, the org bar: the scaffold measured 100% (173 of
+      # 173 lines) on 2026-11-14, so the bar is adopted from the start.
       # Never lowered to make a build green.
       - name: Coverage
         run: |
