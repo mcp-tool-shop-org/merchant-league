@@ -12,3 +12,7 @@
 - CI (`ci.yml`): format, clippy with warnings denied, tests, coverage, `cargo audit --deny warnings` with no ignores, a Testnet-only check, a no-real-money-language check, and `atlas check`.
 - `CLAUDE.md`, `SECURITY.md` and `docs/design.md`, which now covers writing game tables for roll (@mcptoolshop/roll 2.1.1).
 - Coverage 100% (173 of 173 lines), floor 90.
+- Guard scripts tightened after Argon's review of the scaffold (PASS WITH FOLLOW-UPS, 2026-11-14).
+  - `check-testnet-only.sh` catches `s.ripple.com` on every scheme and bare, more Mainnet and Devnet hosts, and a network id of 0 in any spelling. It now scans the docs, README and CI as well as the crates, and requires the guard's constant on its own line, used by `require_testnet`.
+  - `check-copy.sh` scans the docs, catches inflections, snake_case and "real money", and lets ordinary trading language and the "no real money" disclaimer through.
+  - `test-guards.sh`, run in CI, plants every pattern and checks each verdict.

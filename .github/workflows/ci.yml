@@ -14,6 +14,7 @@ on:
       - "scripts/**"
       - "atlas/**"
       - "README.md"
+      - "docs/**"
       - ".github/workflows/**"
   pull_request:
   workflow_dispatch:
@@ -81,6 +82,10 @@ jobs:
 
       - name: No real-money language
         run: bash scripts/check-copy.sh
+
+      # Every guard pattern, planted: each bad case must fail, each good one pass.
+      - name: Guard controls
+        run: bash scripts/test-guards.sh
 
       - name: Set up Node for Atlas
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

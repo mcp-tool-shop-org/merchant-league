@@ -38,7 +38,7 @@ These conditions are fixed. Each is enforced by the code or by CI, not by good i
 | Condition | How it is enforced |
 | --- | --- |
 | Testnet only, no mainnet code paths | The client knows only Testnet endpoints, and on connecting it checks the server's `network_id` is 1 (Testnet) and refuses anything else. A CI test fails on any Mainnet hostname, or on `network_id` 0, anywhere in the source. |
-| No real-money language | Game words only: marks, goods, purse, caravan. A copy check in CI fails on money words (buy-in, cash out, profit, invest, wallet value) in strings and docs. |
+| No real-money language | Game words only: marks, goods, purse, caravan. A copy check in CI fails on money words (buy-in, cash out, profit, invest, wallet value) in strings and docs. | <!-- copy-check: allow -->
 | Faucet calls rate-limited | One faucet call per new player per season. The seed stays on the player's machine; a 429 waits and retries with backoff. 100 test XRP covers the reserves for about 490 owned objects, far more than a season needs. |
 | Wipes designed in from day one | Seasons end at resets (see Seasons and resets); the season record lives off the ledger. |
 | One shared reset module | The announced-reset list and the "ledger went backwards" check come from an existing shared module used by three other Testnet tools. A new reset is added in all four places. |
@@ -169,7 +169,7 @@ The biggest risk is that the game is less fun than the ledger is clever. The fir
 | A reset comes with no notice | The season ends early | The "ledger went backwards" check closes the season from the last state seen |
 | The reset changes a feature the game uses | Part of the game stops working | Only features enabled on Mainnet are used; check the amendment list after every reset |
 | Testnet history is pruned | Old moves can no longer be looked up | The season record keeps what matters, off the ledger |
-| Players treat marks as worth money | Real-money language, trading off-platform | Marks never leave the game's rules, copy checks in CI, and every season wipes them |
+| Players treat marks as worth money | Real-money language, trading off-platform | Marks never leave the game's rules, copy checks in CI, and every season wipes them | <!-- copy-check: allow -->
 | One issuer account is a single point of trust | The studio could mint marks unfairly | The flow dashboard publishes every issue and burn from the ledger itself |
 
 ## Sources

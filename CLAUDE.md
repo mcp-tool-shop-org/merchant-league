@@ -6,8 +6,9 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 
 ## Hard rules (non-negotiable)
 
-- **Testnet only. No Mainnet code path, ever.** The only endpoints in the code are the Testnet ones in `league-ledger`. Every connection passes `require_testnet` (network id 1) before anything else is sent; a server reporting any other id, or none, is refused. `scripts/check-testnet-only.sh` fails CI on any Mainnet hostname.
-- **No real-money language.** Game words only: marks, table coin, goods, purse, caravan, merchant. Never buy-in, cash out, profit, invest, payout, wallet value. `scripts/check-copy.sh` fails CI on those words in player-facing text (`crates/`, `README.md`). A line that must name one to forbid it carries `copy-check: allow`.
+- **Testnet only. No Mainnet code path, ever.** The only endpoints in the code are the Testnet ones in `league-ledger`. Every connection passes `require_testnet` (network id 1) before anything else is sent; a server reporting any other id, or none, is refused. `scripts/check-testnet-only.sh` fails CI on any Mainnet or Devnet host (every scheme, and bare) in the crates, scripts, docs, README or CI, on any network id of 0 written as code, and if the guard's constant changes. A test that must name one carries `testnet-check: allow`.
+- **No real-money language.** Game words only: marks, table coin, goods, purse, caravan, merchant. Ordinary trading language is fine ("buy in Varn", "sell at a profit"). Never buy-in, cash out, payout (or "pay out", so write "pay from"), invest, wallet value, withdraw funds, earn or win money. `scripts/check-copy.sh` fails CI on those in the crates, README and docs; the disclaimer "no real money" is allowed. A line that must name one to forbid it carries `copy-check: allow`.
+- **Guards are tested.** `scripts/test-guards.sh` plants every pattern and checks each verdict. A new pattern gets a planted case there.
 - **One faucet call per player per season.** Keep the seed on the player's machine (`.league/`, git-ignored). On HTTP 429, wait and retry with backoff; never loop.
 - **Secrets never print.** Seeds, dice secrets and keys are redacted in `Debug` output and never logged.
 - **Resets are designed in.** The announced-reset list and the ledger-went-backwards check live in `league-season`, ported from xrpl-lab's `resets.py`. A new announced reset is added in xrpl-lab, xrpl-camp, sovereignty and here.
@@ -29,7 +30,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 
 - Branch per change; one PR per milestone; the Publisher merges. Once a PR's head is sent for merge, push nothing more to it.
 - Stage files explicitly. Never `git add .` or `git add -A`.
-- Before every push: `cargo fmt --all --check`, `cargo clippy --all-targets --workspace -- -D warnings`, `cargo test --workspace`, both check scripts, `npx --yes @dogfood-lab/atlas@1.26.0 check` (after committing; new files need `atlas map` and a commit), and the identity scan on `git archive HEAD`.
+- Before every push: `cargo fmt --all --check`, `cargo clippy --all-targets --workspace -- -D warnings`, `cargo test --workspace`, both check scripts and `scripts/test-guards.sh`, `npx --yes @dogfood-lab/atlas@1.26.0 check` (after committing; new files need `atlas map` and a commit), and the identity scan on `git archive HEAD`.
 - Advisories are fixed by upgrading, never ignored (`cargo audit --deny warnings`, no `--ignore`).
 - Coverage: the floor is the latest measurement, rounded down, ratcheting toward 90. Never lower it.
 
