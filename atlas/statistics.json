@@ -112,6 +112,22 @@
       "cohesionDropped": false,
       "confidence": "low",
       "highWater": null,
+      "name": "league-tui",
+      "qualifyingSourceCommits": 0,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
       "name": "root",
       "qualifyingSourceCommits": 0,
       "rebaseline": null
@@ -137,8 +153,8 @@
     "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
     "files": [
       {
-        "commits": 1,
-        "lines": 91,
+        "commits": 2,
+        "lines": 95,
         "path": ".github/workflows/ci.yml"
       },
       {
@@ -147,23 +163,23 @@
         "path": ".gitignore"
       },
       {
-        "commits": 2,
-        "lines": 13,
+        "commits": 3,
+        "lines": 20,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 1,
-        "lines": 41,
+        "commits": 2,
+        "lines": 56,
         "path": "CLAUDE.md"
       },
       {
-        "commits": 1,
-        "lines": 19,
+        "commits": 2,
+        "lines": 1756,
         "path": "Cargo.lock"
       },
       {
-        "commits": 1,
-        "lines": 25,
+        "commits": 2,
+        "lines": 32,
         "path": "Cargo.toml"
       },
       {
@@ -180,6 +196,31 @@
         "commits": 1,
         "lines": 28,
         "path": "SECURITY.md"
+      },
+      {
+        "commits": 1,
+        "lines": 79,
+        "path": "atlas/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 34,
+        "path": "atlas/boundaries.yaml"
+      },
+      {
+        "commits": 1,
+        "lines": 135,
+        "path": "atlas/page.json"
+      },
+      {
+        "commits": 1,
+        "lines": 295,
+        "path": "atlas/statistics.json"
+      },
+      {
+        "commits": 1,
+        "lines": 625,
+        "path": "atlas/structure.json"
       },
       {
         "commits": 1,
@@ -223,12 +264,22 @@
       },
       {
         "commits": 1,
-        "lines": 198,
-        "path": "docs/design.md"
+        "lines": 16,
+        "path": "crates/league-tui/Cargo.toml"
       },
       {
         "commits": 1,
-        "lines": 4,
+        "lines": 109,
+        "path": "crates/league-tui/src/lib.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 210,
+        "path": "docs/design.md"
+      },
+      {
+        "commits": 2,
+        "lines": 6,
         "path": "rust-toolchain.toml"
       },
       {
@@ -245,15 +296,15 @@
   },
   "confidence": {
     "level": "low",
-    "reason": "fewer than 30 qualifying commits in the window, and fewer than 20 source files reach 10 revisions"
+    "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T05:16:09.027Z",
+  "generatedAt": "2026-11-14T05:20:32.429Z",
   "generatedFrom": {
-    "commit": "4c4f13937d7db36d630406ef5e158e4860ee5dc4"
+    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663"
   },
   "pairs": [],
   "parameters": {
-    "appliedChangesetLimit": 5.25,
+    "appliedChangesetLimit": 7,
     "changeset": 50,
     "changesetFraction": 0.25,
     "cohesionDrop": 0.2,
@@ -262,16 +313,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T00:15:33-05:00",
-    "inScopeFiles": 21,
+    "headDate": "2026-11-14T00:20:16-05:00",
+    "inScopeFiles": 28,
     "pinnedStart": null,
-    "priorFloor": null,
-    "qualifyingCommits": 1,
+    "priorFloor": "fallen",
+    "qualifyingCommits": 2,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T05:15:33.000Z",
+    "since": "2026-05-18T05:20:16.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

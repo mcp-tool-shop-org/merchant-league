@@ -24,6 +24,10 @@ boundaries:
     globs:
       - crates/league-season/**
     role: code
+  - name: league-tui
+    globs:
+      - crates/league-tui/**
+    role: code
   - name: root
     globs:
       - "*"

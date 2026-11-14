@@ -1,16 +1,18 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit 4c4f139 by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit c0d6c62 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-8 parts, mostly Rust (4 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 5 parts.
+9 parts, mostly Rust (5 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 6 parts.
 
-## What changed since the last map
+## What changed since 2026-11-14 (4c4f139)
 
-This is the first map.
+- crates/league-tui/ is now read by Cargo.toml.
+- league-tui is a new part, drawn from `crates/league-tui/**`.
+- 2 files added and 7 changed content, across 4 parts.
 
 ## What comes in
 
@@ -18,7 +20,7 @@ This is the first map.
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh and scripts/check-testnet-only.sh in scripts and crates/ (4 parts).
+1. The workflow runs scripts/check-copy.sh and scripts/check-testnet-only.sh in scripts and crates/ (5 parts).
 
 ## Who reads the results
 
@@ -48,6 +50,8 @@ league-ledger is tested only by the unit tests in its own files.
 
 league-season is tested only by the unit tests in its own files.
 
+league-tui is tested only by the unit tests in its own files.
+
 scripts holds only shell files, which this map does not read, so whether a test touches it cannot be seen.
 
 ## Written but never read
@@ -74,6 +78,6 @@ Read those in order to follow one pull request end to end.
 
 ## What this map cannot see
 
-- Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 20 source files reach 10 revisions.
+- Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

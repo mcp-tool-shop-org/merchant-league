@@ -9,7 +9,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "4e508a176395a3598726aca15515f3e22da6e98a42f07060851ce9f64daf4453",
+          "hash": "f938b205d3921c2e47097dcbb34556332e3ce85bbfb857e0b235c931a4a263db",
           "path": ".github/workflows/ci.yml"
         }
       ],
@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "0bb401070bfe673c3313b22662b3ba8240e49fcd4957eba7a838906bae65ea02",
+          "hash": "351eb23e7e04ebf14d47e90426c480565fb858ee459fa36a43976b5243b5a4df",
           "path": "docs/design.md"
         }
       ],
@@ -200,6 +200,44 @@
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 0,
+      "entryPoints": [
+        "crates/league-tui/src/lib.rs"
+      ],
+      "externals": 0,
+      "files": [
+        {
+          "hash": "5c208b3c9ed672159008f50813b0240bf9569a39d360b9155fdb97d00839d82f",
+          "path": "crates/league-tui/Cargo.toml"
+        },
+        {
+          "exports": [
+            "action_for",
+            "draw_title"
+          ],
+          "hash": "c14e918f49ac48d666a6ac538622dac0f9c0896f29783ff070e6b2bbc2ab1dae",
+          "path": "crates/league-tui/src/lib.rs",
+          "testsInside": true
+        }
+      ],
+      "globs": [
+        "crates/league-tui/**"
+      ],
+      "importConfidence": "full",
+      "name": "league-tui",
+      "origin": "authored",
+      "role": "code",
+      "testRunners": [
+        "cargo test"
+      ],
+      "testedBy": 1,
+      "testedInside": true,
+      "unresolvedSites": 0
+    },
+    {
+      "dynamicReads": 0,
+      "dynamicSpawns": 0,
+      "dynamicSpawnsInTests": 0,
+      "dynamicWrites": 0,
       "entryPoints": [],
       "externals": 0,
       "files": [
@@ -208,19 +246,19 @@
           "path": ".gitignore"
         },
         {
-          "hash": "212c5beedcc1c5eef711ad64033998eb1b606ddff80aa6accd5171d51ea01247",
+          "hash": "738b4f322614e42893fe218e4918bc95641348cc6950a0ae88cc38808e8eedb5",
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "b2dedb2db8cf732a3c86ded07b34f1b95597dfbb05866ee99395daaeffae6136",
+          "hash": "a6ecede67dafaf961a0193b9baf656443dda17b064afdc779942de33f115ea08",
           "path": "CLAUDE.md"
         },
         {
-          "hash": "199aa73559a7f7305db310040dadd02501644f49dc1086d0eb2279712b224ec4",
+          "hash": "89431402fb2626972ffc4e0998c2c8f871234d70bcf8e920969da9d8ee8a1451",
           "path": "Cargo.lock"
         },
         {
-          "hash": "34920e0fec13ffbf7638c838aac5dfa51c59b2f696b190d54791502d136754c9",
+          "hash": "057cd839edc222e5dc43c9f5f7561d4b1cd27e166eb35c621b942e1e3f8bfff0",
           "path": "Cargo.toml"
         },
         {
@@ -236,7 +274,7 @@
           "path": "SECURITY.md"
         },
         {
-          "hash": "c95f97b37fb9d5b9733c40d64a03f173ba5aabe8dbb6b29931ae94c2106e5a5b",
+          "hash": "2048caac098def2f2147966e69ca934a9c1f6ea17e62a5fcb506254161bed5c5",
           "path": "rust-toolchain.toml"
         }
       ],
@@ -419,6 +457,11 @@
           "files": 1
         },
         {
+          "boundary": "league-tui",
+          "depth": 0,
+          "files": 1
+        },
+        {
           "boundary": "scripts",
           "depth": 0,
           "files": 2
@@ -460,14 +503,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 4,
+          "files": 5,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 4,
+          "files": 5,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -508,8 +551,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "4c4f13937d7db36d630406ef5e158e4860ee5dc4",
-    "tracked": 21
+    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
+    "tracked": 23
   },
   "landings": [
     {
@@ -608,6 +651,17 @@
     {
       "readers": [
         {
+          "by": "Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        }
+      ],
+      "target": "crates/league-tui",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
           "by": "scripts/check-testnet-only.sh",
           "call": "literal",
           "confidence": "text"
@@ -620,6 +674,6 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 4,
+  "testFiles": 5,
   "unassigned": []
 }
