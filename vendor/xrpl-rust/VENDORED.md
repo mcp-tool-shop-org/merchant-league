@@ -34,6 +34,7 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
      - the other condition types are refused, as rippled refuses them.
 
      An empty or malformed condition is refused before signing.
+     Long-form DER lengths are read as 64-bit values (up to 8 length bytes), so the check gives 64-bit rippled's answer on any build target, 32-bit and wasm included. That was checked on wasm32 under Node's WASI.
 
      This decoder is a port of rippled's: XRPLF/rippled, tag 3.4.1, commit `00e640751460c137636fdb6dae6b4280de355d81`, from Condition.cpp and conditions/detail/utils.h. rippled is ISC.
      - Its notice is in `LICENSE-rippled`: rippled's `LICENSE.md` at that tag, copied verbatim, sha256 `4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c`.
