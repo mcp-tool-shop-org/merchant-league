@@ -1,0 +1,11 @@
+{"build":"3.4.1","network_id":1,"step":"network_guard"}
+{"faucet_calls":2,"issuer":"rEEqp7VSF5kucjctk2tzwxm4irPyCsMFca","merchant":"rh47S1xYMwPHP3tkK76mPjThYBm8373XEj","seed_derives_to_reported_address":true,"step":"accounts"}
+{"hash":"E091F493411B44E0BCE1E38731BD5F8BEB27C5F4F1744A741BFEDB486EFFBB87","ledger_index":22311593,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_allow_clawback","validated":true}
+{"hash":"DDA370BE75A99763930632B23CDA0120932C58FBD27F8D73D7A9E03AB7DC87C5","ledger_index":22311596,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_default_ripple","validated":true}
+{"hash":"1702DB0CE5B9E3689A3EA4F99D6D84551A31EE47A1930597C47B71AA8BE7E892","ledger_index":22311599,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_trust_set","validated":true}
+{"hash":"D140A0CA5524C0C37A157EE0AECB43374A01F3AF4773F8813D1665435CA97B4B","ledger_index":22311601,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_pays_100","validated":true}
+{"hash":"EED687306FD52C66BC61A2C887D1AE8F9C106CC8176B1504EA35770EBC225EA9","ledger_index":22311603,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_offer_create","validated":true}
+{"hash":"B704775964496C8EFB9AC1E0525F9129C98DFE773C6969B2F3F1BBFB3CB7A7EF","ledger_index":22311606,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_offer_cancel","validated":true}
+{"hash":"C8E3B375549C1E4EECCC8E8F1DF640EA07DE798E44963F62A58400DB3E2A3577","ledger_index":22311608,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_check_create","validated":true}
+{"hash":"2A76148608C117D310B1ACA4532A8B3DB55F0817F0720F129311B75996A8DBB7","ledger_index":22311611,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_check_cash","validated":true}
+{"hash":"9CA578689AF6DE8D99942DDD7FE0EBE6A7C946DBE28321F57126150FA701EAB6","ledger_index":22311613,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_escrow_create","validated":true}

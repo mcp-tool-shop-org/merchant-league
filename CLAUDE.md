@@ -23,7 +23,16 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 - Game tables (road events, market shocks, town tables) are roll tables in `tables/`. CI validates them and computes their exact odds with roll 2.1.1, pinned, through roll's library API (its 2.1.1 command line reads only the older loot format). Node is CI-only, never in the game.
 - `league-core` reads the same JSON in Rust. Every draw's value comes from `league-dice`, never from a local RNG.
 - Do not write the roll conformance test, or depend on anything newer than roll 2.1.1, until the conformance fixture ships. Whether roll becomes a Rust crate (roll 3.0.0) is decided after M2.
+- Known limits of roll 2.1.1 (R&D's audit, 2026-11-14): combined modifiers (reroll, min/max with explode) get odds labelled exact that are wrong, and drawing several distinct rows can return fewer than asked. Tables use plain weights, conditions, nested tables and chains only, and the game never asks roll for several distinct rows at once.
 - roll changes go to R&D as tickets (`rnd-local/projects/antigravity/tickets/`), never straight to the roll repo. Credit roll (MIT, same org) in the notes wherever its code or design is used.
+
+## The XRPL layer
+
+- Our own, not xrpl-rust (Publisher, 2026-11-14): xrpl-rust carries crypto-bigint 0.5 (RUSTSEC-2026-0387) with no fixed version it can take.
+- ed25519 only. The crates do the cryptography (`ed25519-dalek`, `sha2`, `ripemd`); our code only arranges bytes. No secp256k1, and no hand-written crypto.
+- The serializer covers exactly the ten transaction types in `codec::TRANSACTION_TYPES` and the fields in `codec::FIELDS`. A new type or field needs a vector from a real transaction or an official fixture before it is used.
+- A transaction's hash is computed before submission and is its receipt key, for `tec` results too.
+- Argon reviews any change to `keys.rs`, `codec.rs` or signing before it merges.
 
 ## Workflow
 
@@ -49,6 +58,6 @@ The client is a ratatui and crossterm terminal client, `league-tui` (decided 202
 | --- | --- |
 | `league-core` | Game rules. Pure, no I/O, deterministic from a seed. Types only for now. |
 | `league-dice` | Commit and reveal through hash-locked escrows, the roll, the drand round rule. Stubs for now. |
-| `league-ledger` | Testnet access. The network guard and endpoints now; transactions in M2. |
+| `league-ledger` | Testnet access: the network guard, ed25519 keys, the serializer for the ten transaction types, and the JSON-RPC client. |
 | `league-season` | Announced resets, the ledger-went-backwards check; the season record later. |
 | `league-tui` | The terminal client: title screen and key handling for now. |
