@@ -85,6 +85,33 @@ mod tests {
         assert_eq!(require_testnet(None), Err(NotTestnet { reported: None }));
     }
 
+    // These two are the Testnet guarantee that the grep checks used to try
+    // to hold. A changed constant, or another `Ok` arm in require_testnet
+    // (say for Mainnet's 0, or for no id), fails them.
+
+    #[test]
+    fn the_testnet_network_id_is_1() {
+        assert_eq!(TESTNET_NETWORK_ID, 1);
+    }
+
+    #[test]
+    fn only_network_1_is_accepted_across_the_whole_range() {
+        let low = 0..=65_536u32;
+        let high = (u32::MAX - 65_536)..=u32::MAX;
+        let accepted: Vec<u32> = low
+            .chain(high)
+            .filter(|&id| require_testnet(Some(id)).is_ok())
+            .collect();
+        assert_eq!(accepted, vec![1]);
+        for id in [0, 2, 1_000, 21_337, 1 << 31, u32::MAX] {
+            assert_eq!(
+                require_testnet(Some(id)),
+                Err(NotTestnet { reported: Some(id) })
+            );
+        }
+        assert!(require_testnet(None).is_err());
+    }
+
     #[test]
     fn the_refusal_says_testnet_only() {
         let other = NotTestnet { reported: Some(0) }.to_string();

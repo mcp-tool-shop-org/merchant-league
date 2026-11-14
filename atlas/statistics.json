@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-ledger",
-      "qualifyingSourceCommits": 4,
+      "qualifyingSourceCommits": 5,
       "rebaseline": null
     },
     {
@@ -198,8 +198,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 5,
-        "lines": 253,
+        "commits": 6,
+        "lines": 269,
         "path": "atlas/README.md"
       },
       {
@@ -208,18 +208,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 5,
-        "lines": 685,
+        "commits": 6,
+        "lines": 730,
         "path": "atlas/page.json"
       },
       {
-        "commits": 5,
-        "lines": 2768,
+        "commits": 6,
+        "lines": 2823,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 5,
-        "lines": 10131,
+        "commits": 6,
+        "lines": 10185,
         "path": "atlas/structure.json"
       },
       {
@@ -253,8 +253,8 @@
         "path": "crates/league-ledger/examples/testnet_proof.rs"
       },
       {
-        "commits": 3,
-        "lines": 821,
+        "commits": 4,
+        "lines": 987,
         "path": "crates/league-ledger/src/client.rs"
       },
       {
@@ -2183,11 +2183,54 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T09:31:36.362Z",
+  "generatedAt": "2026-11-14T10:22:50.681Z",
   "generatedFrom": {
-    "commit": "eae861add2d9e2425d1f6458446141aa0a31704a"
+    "commit": "d40880cde0e913f802d8c00494367a083a83cfa4"
   },
-  "pairs": [],
+  "pairs": [
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/page.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/statistics.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/page.json",
+      "b": "atlas/statistics.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/page.json",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/statistics.json",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    }
+  ],
   "parameters": {
     "appliedChangesetLimit": 50,
     "changeset": 50,
@@ -2198,16 +2241,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T03:56:33-05:00",
-    "inScopeFiles": 404,
+    "headDate": "2026-11-14T04:31:54-05:00",
+    "inScopeFiles": 412,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 10,
+    "qualifyingCommits": 11,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T08:56:33.000Z",
+    "since": "2026-05-18T09:31:54.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

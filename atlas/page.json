@@ -17,15 +17,30 @@
   "changes": {
     "fileCounts": {
       "added": 1,
-      "changed": 3,
+      "changed": 7,
       "moved": 0,
-      "parts": 2,
+      "parts": 5,
       "removed": 1
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "CI now also runs scripts/test-copy-check.sh.",
+        "sentence": "CI's push trigger now also names `docs/**`.",
+        "subjects": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs scripts/test-guards.sh.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI no longer runs scripts/test-copy-check.sh.",
         "subjects": [
           ".github/workflows/ci.yml",
           "scripts/test-copy-check.sh"
@@ -33,21 +48,42 @@
       },
       {
         "kind": "landing",
-        "sentence": "README.md is now also read by scripts/test-copy-check.sh.",
+        "sentence": "CHANGELOG.md is now read by scripts/test-guards.sh.",
         "subjects": [
-          "README.md",
-          "scripts/test-copy-check.sh"
+          "CHANGELOG.md",
+          "scripts/test-guards.sh"
         ]
       },
       {
+        "kind": "landing",
+        "sentence": "CLAUDE.md is now read by scripts/test-guards.sh.",
+        "subjects": [
+          "CLAUDE.md",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "Cargo.toml is now also read by scripts/test-guards.sh.",
+        "subjects": [
+          "Cargo.toml",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 5 more new writers and readers of places.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "1 file added, 1 removed and 3 changed content, across 2 parts.",
+        "sentence": "1 file added, 1 removed and 7 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3",
-      "generatedAt": "2026-11-14T08:24:54.511Z"
+      "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
+      "generatedAt": "2026-11-14T09:31:36.362Z"
     },
     "unchanged": false
   },
@@ -56,7 +92,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
+  "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -104,7 +140,7 @@
       "runs": [
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
-        "scripts/test-copy-check.sh",
+        "scripts/test-guards.sh",
         "crates/league-core/",
         "crates/league-dice/",
         "crates/league-ledger/examples/",
@@ -119,7 +155,7 @@
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 8 paths",
+        "on a push to main touching 9 paths",
         "or by hand"
       ]
     },
@@ -180,7 +216,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T09:31:36.362Z",
+  "generatedAt": "2026-11-14T10:22:50.681Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "2 writes and 1 read go to a path their caller passes, not to this repository.",

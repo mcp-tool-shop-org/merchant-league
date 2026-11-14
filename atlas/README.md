@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit eae861a by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit d40880c by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,21 +8,26 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (043373e)
+## What changed since 2026-11-14 (eae861a)
 
-- CI now also runs scripts/test-copy-check.sh.
-- README.md is now also read by scripts/test-copy-check.sh.
-- 1 file added, 1 removed and 3 changed content, across 2 parts.
+- CI's push trigger now also names `docs/**`.
+- CI now also runs scripts/test-guards.sh.
+- CI no longer runs scripts/test-copy-check.sh.
+- CHANGELOG.md is now read by scripts/test-guards.sh.
+- CLAUDE.md is now read by scripts/test-guards.sh.
+- Cargo.toml is now also read by scripts/test-guards.sh.
+- And 5 more new writers and readers of places.
+- 1 file added, 1 removed and 7 changed content, across 5 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 8 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-copy-check.sh and 8 more.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 8 more.
 2. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 3. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
-1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-copy-check.sh in scripts.
+1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts.
 
 ## Who reads the results
 
