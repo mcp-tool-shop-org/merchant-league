@@ -1,0 +1,135 @@
+{
+  "authored": [
+    ".github/",
+    "docs/",
+    "root"
+  ],
+  "breaks": [],
+  "changes": {
+    "first": true
+  },
+  "changesTogether": [],
+  "changesTogetherNote": [
+    "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
+  ],
+  "changesTogetherWithTests": 0,
+  "commit": "4c4f13937d7db36d630406ef5e158e4860ee5dc4",
+  "defaultBranch": "scaffold/workspace",
+  "derived": "8 parts, mostly Rust (4 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 5 parts.",
+  "doors": [
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": ".github/workflows/ci.yml",
+      "id": ".github/workflows/ci.yml",
+      "landings": [],
+      "name": "CI",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-core",
+          "depth": 0,
+          "files": 1
+        },
+        {
+          "boundary": "league-dice",
+          "depth": 0,
+          "files": 1
+        },
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 1
+        },
+        {
+          "boundary": "league-season",
+          "depth": 0,
+          "files": 1
+        },
+        {
+          "boundary": "scripts",
+          "depth": 0,
+          "files": 2
+        }
+      ],
+      "runs": [
+        "scripts/check-copy.sh",
+        "scripts/check-testnet-only.sh",
+        "crates/"
+      ],
+      "runsCount": 3,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": [
+        "on a pull request",
+        "on a push to main touching 8 paths",
+        "or by hand"
+      ]
+    }
+  ],
+  "duplicates": [],
+  "duplicatesLead": null,
+  "duplicatesNote": [],
+  "edges": [],
+  "engine": "1.26.0",
+  "generated": [],
+  "generatedAt": "2026-11-14T05:16:09.027Z",
+  "limits": [
+    "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 20 source files reach 10 revisions."
+  ],
+  "mainDoor": ".github/workflows/ci.yml",
+  "partLabels": {
+    ".github": ".github",
+    "docs": "docs",
+    "league-core": "league-core",
+    "league-dice": "league-dice",
+    "league-ledger": "league-ledger",
+    "league-season": "league-season",
+    "root": "the repository root",
+    "scripts": "scripts"
+  },
+  "parts": 8,
+  "readers": [],
+  "repo": "mcp-tool-shop-org/merchant-league",
+  "sequences": [],
+  "startDoor": ".github/workflows/ci.yml",
+  "startHere": [
+    ".github/workflows/ci.yml",
+    "crates/league-core/src/lib.rs"
+  ],
+  "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
+  "summaryFrom": "person",
+  "testFiles": 4,
+  "testedBy": {
+    "league-core": 1,
+    "league-dice": 1,
+    "league-ledger": 1,
+    "league-season": 1
+  },
+  "testedCodeParts": 4,
+  "testedInside": [
+    "league-core",
+    "league-dice",
+    "league-ledger",
+    "league-season"
+  ],
+  "unnamedWrites": 0,
+  "unread": [],
+  "unreadCode": [
+    "scripts"
+  ],
+  "unreadCodeUses": "scripts holds only shell files, which this map does not read, so what uses it cannot be seen.",
+  "unreadFiles": 0,
+  "unreadNote": [],
+  "untested": [],
+  "untestedNote": [
+    "league-core is tested only by the unit tests in its own files.",
+    "league-dice is tested only by the unit tests in its own files.",
+    "league-ledger is tested only by the unit tests in its own files.",
+    "league-season is tested only by the unit tests in its own files.",
+    "scripts holds only shell files, which this map does not read, so whether a test touches it cannot be seen."
+  ],
+  "written": 0
+}

@@ -1,0 +1,34 @@
+summary: "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet."
+boundaries:
+  - name: .github
+    globs:
+      - .github/**
+    role: config
+  - name: docs
+    globs:
+      - docs/**
+    role: docs
+  - name: league-core
+    globs:
+      - crates/league-core/**
+    role: code
+  - name: league-dice
+    globs:
+      - crates/league-dice/**
+    role: code
+  - name: league-ledger
+    globs:
+      - crates/league-ledger/**
+    role: code
+  - name: league-season
+    globs:
+      - crates/league-season/**
+    role: code
+  - name: root
+    globs:
+      - "*"
+    role: config
+  - name: scripts
+    globs:
+      - scripts/**
+    role: code
