@@ -1,0 +1,67 @@
+use alloc::borrow::Cow;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
+
+use crate::models::{requests::RequestMethod, Model};
+
+use super::{CommonFields, Request};
+
+/// The manifest method reports the current "manifest"
+/// information for a given validator public key. The
+/// "manifest" is the public portion of that validator's
+/// configured token.
+///
+/// See Manifest:
+/// `<https://xrpl.org/manifest.html#manifest>`
+#[skip_serializing_none]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct Manifest<'a> {
+    /// The common fields shared by all requests.
+    #[serde(flatten)]
+    pub common_fields: CommonFields<'a>,
+    /// The base58-encoded public key of the validator
+    /// to look up. This can be the master public key or
+    /// ephemeral public key.
+    pub public_key: Cow<'a, str>,
+}
+
+impl<'a> Model for Manifest<'a> {}
+
+impl<'a> Request<'a> for Manifest<'a> {
+    fn get_common_fields(&self) -> &CommonFields<'a> {
+        &self.common_fields
+    }
+
+    fn get_common_fields_mut(&mut self) -> &mut CommonFields<'a> {
+        &mut self.common_fields
+    }
+}
+
+impl<'a> Manifest<'a> {
+    pub fn new(id: Option<Cow<'a, str>>, public_key: Cow<'a, str>) -> Self {
+        Self {
+            common_fields: CommonFields {
+                command: RequestMethod::Manifest,
+                id,
+            },
+            public_key,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serde_round_trip() {
+        let req = Manifest::new(
+            Some("mf-1".into()),
+            "nHUFE9prPXPrHcG3SkwP1UzAQbSphqyQkQK9ATXLZsfkezhhda3p".into(),
+        );
+        let serialized = serde_json::to_string(&req).unwrap();
+        let deserialized: Manifest = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(req, deserialized);
+        assert!(serialized.contains("\"command\":\"manifest\""));
+    }
+}
