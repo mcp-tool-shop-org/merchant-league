@@ -1,0 +1,5 @@
+date_utc: 2026-11-14T10:50:45Z
+branch: ledger/follow-ups
+head: 606e9b074d331e51c5b7906de02fe42fd780fb60 (plus the uncommitted probe example)
+rustc 1.100.0 (0ef1bc386 2026-11-09)
+rippled source read: 3.4.1 src/libxrpl/tx/transactors/escrow/EscrowCreate.cpp, EscrowCreate::preflight

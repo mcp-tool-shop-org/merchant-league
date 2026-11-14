@@ -36,7 +36,69 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "7fc82b43fbd668240fabc2501761e21546239d8b110e4d015b1bc5e34b5cfae5",
+          "hash": "3f53abd96033d337b5635e02b5aa185f2ede93711fffec2e3c2ec772fedfa057",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/README.md"
+        },
+        {
+          "hash": "aa90a53c70c6e69222c42b0013b65145886c1e3377bd941663865b58ad011c68",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/01_probe.err"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/01_probe.exit"
+        },
+        {
+          "hash": "3566565e682fa126480ad8864d09f031b10a13560137da7cdb2f51624dafa5c1",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/01_probe.out"
+        },
+        {
+          "hash": "b9fba579e9d51bda953bbc00a3ac3640efdc47ec2ec2694fea3d63a9588cecb2",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/02_hash_check.json"
+        },
+        {
+          "exports": [
+            "call"
+          ],
+          "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
+          "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/hash_check.py"
+        },
+        {
+          "hash": "48df9f28025461aeb6daee9e2d116d2894bcf8ab137ac9a971bfa9314bb4459f",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/README.md"
+        },
+        {
+          "hash": "93cd3a83e5334bd7f92389ea91c8920e972154066908e67750a988b95dda0a36",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.err"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.exit"
+        },
+        {
+          "hash": "0b15dc2a079fec8edfb76760b7cc8e78dc0571d3665c0f5e8326f3c52442fc7f",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.out"
+        },
+        {
+          "hash": "3b532460c0d92d0f85991b5d730494f9762566e2d1d1710786b489b51b81deee",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/02_hash_check.json"
+        },
+        {
+          "exports": [
+            "call"
+          ],
+          "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
+        },
+        {
+          "hash": "885a8deaa251d4bbd513645d6e442fcdaf62aa4418e643231ae884ce0727d0a0",
           "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/README.md"
         },
         {
@@ -75,15 +137,15 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 1,
+          "reads": 3,
           "where": [
             "caller"
           ],
-          "writes": 2
+          "writes": 6
         }
       ],
-      "outsideReads": 1,
-      "outsideWrites": 2,
+      "outsideReads": 3,
+      "outsideWrites": 6,
       "role": "docs",
       "testedBy": 0,
       "unresolvedSites": 0
@@ -177,6 +239,42 @@
             {
               "in": "main",
               "kind": "err",
+              "line": 207
+            }
+          ],
+          "hash": "96ada71a220a3b14ffdb0bc523209984db91570153490182028fa5c0974bee5f",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs"
+          ],
+          "library": "crates/league-ledger/src/lib.rs",
+          "path": "crates/league-ledger/examples/testnet_escrow_expiry.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 88,
+                  "name": "connect",
+                  "receiver": "Testnet",
+                  "target": {
+                    "file": "crates/league-ledger/src/client.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": true,
+              "isDefaultExport": false,
+              "name": "main"
+            }
+          ],
+          "testsInside": true
+        },
+        {
+          "entry": "main",
+          "entryRule": 1,
+          "failurePaths": [
+            {
+              "in": "main",
+              "kind": "err",
               "line": 516
             }
           ],
@@ -191,6 +289,42 @@
               "calls": [
                 {
                   "line": 171,
+                  "name": "connect",
+                  "receiver": "Testnet",
+                  "target": {
+                    "file": "crates/league-ledger/src/client.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": true,
+              "isDefaultExport": false,
+              "name": "main"
+            }
+          ],
+          "testsInside": true
+        },
+        {
+          "entry": "main",
+          "entryRule": 1,
+          "failurePaths": [
+            {
+              "in": "main",
+              "kind": "err",
+              "line": 315
+            }
+          ],
+          "hash": "c83c09b05152ac490f2c9ab7c492cc4f089585a11880ba57a554950aa1f73837",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs"
+          ],
+          "library": "crates/league-ledger/src/lib.rs",
+          "path": "crates/league-ledger/examples/testnet_requireauth.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 107,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
@@ -299,7 +433,7 @@
           "testsInside": true
         },
         {
-          "hash": "73feae5784d1b3fef609ccb2831e3c611a67c96da94a7e08726134467e3c93bd",
+          "hash": "a6acd146acd1ff9c550b3790c40396cdc93db1e68854244358928a828d5d7796",
           "importsFiles": [
             "crates/league-ledger/src/client.rs"
           ],
@@ -343,7 +477,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 4,
+      "testedBy": 6,
       "unresolvedSites": 0
     },
     {
@@ -434,7 +568,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "7ad523940ecc2c24d478eaf4da43a2b88f038eab8fc96c0853d8fec08455510d",
+          "hash": "7cf69fadc03987574cd9d5876dbbf3bf50a50595dc667c53c713180c91013b89",
           "path": "CHANGELOG.md"
         },
         {
@@ -485,15 +619,15 @@
       "externals": 0,
       "files": [
         {
-          "hash": "833f4c4257c765c57492aec836b77af8b64aa41219b74f07945ae4691a748607",
+          "hash": "6da94f142e2ec3a2e7ca01a98343c8d71fc5fe7366f49cb14b6da5b570afa9c8",
           "path": "scripts/check-copy.sh"
         },
         {
-          "hash": "ad11f08efc100edc6312a295e0b16c5861f35ebacd1e9275f96219d928668d25",
+          "hash": "825e7f302f7663d33d6fcc65a31a5f8b0ef3ad6a5a55c51cf58e36299d15addf",
           "path": "scripts/check-testnet-only.sh"
         },
         {
-          "hash": "5ba04ff565875a826c5606e4d100a89a9e70fec12ccb3a6bb99fde3800b95f63",
+          "hash": "cb3eed722c978cfaf9896b3f8139c3980d1008484603c541da3e0ee4c5692b00",
           "path": "scripts/test-guards.sh"
         }
       ],
@@ -649,7 +783,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 6
         },
         {
           "boundary": "league-season",
@@ -755,14 +889,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 8,
+          "files": 10,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 8,
+          "files": 10,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -809,6 +943,49 @@
       "kind": "command",
       "landings": [],
       "mentions": [],
+      "name": "testnet_escrow_expiry",
+      "permissions": [],
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "readers": [],
+      "runs": [
+        {
+          "path": "crates/league-ledger/examples/testnet_escrow_expiry.rs",
+          "runKind": "executes"
+        }
+      ],
+      "runsCount": 1,
+      "secrets": [],
+      "sends": {
+        "deploysPages": false,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [],
+      "uses": [],
+      "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
+      "commands": [],
+      "elsewhere": [],
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "kind": "command",
+      "landings": [],
+      "mentions": [],
       "name": "testnet_proof",
       "permissions": [],
       "pushes": false,
@@ -823,6 +1000,49 @@
       "runs": [
         {
           "path": "crates/league-ledger/examples/testnet_proof.rs",
+          "runKind": "executes"
+        }
+      ],
+      "runsCount": 1,
+      "secrets": [],
+      "sends": {
+        "deploysPages": false,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [],
+      "uses": [],
+      "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
+      "commands": [],
+      "elsewhere": [],
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "kind": "command",
+      "landings": [],
+      "mentions": [],
+      "name": "testnet_requireauth",
+      "permissions": [],
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "readers": [],
+      "runs": [
+        {
+          "path": "crates/league-ledger/examples/testnet_requireauth.rs",
           "runKind": "executes"
         }
       ],
@@ -884,8 +1104,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
-    "tracked": 399
+    "commit": "606e9b074d331e51c5b7906de02fe42fd780fb60",
+    "tracked": 415
   },
   "landings": [
     {
@@ -1521,7 +1741,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 18,
+  "testFiles": 20,
   "unassigned": [
     {
       "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",
@@ -1540,7 +1760,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "95ed399a95ecfe0a89ce32a12ac7f9732fa9f61b7a2c5cef13a9223020bfe5ec",
+      "hash": "37c34994b1912eb2306fb03976f821f584578f79faf45329a1d63751ec65507a",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
@@ -7128,12 +7348,22 @@
     {
       "failurePaths": [
         {
+          "in": "_get_expiry_error",
+          "kind": "err",
+          "line": 176
+        },
+        {
+          "in": "_get_expiry_error",
+          "kind": "err",
+          "line": 181
+        },
+        {
           "in": "_get_finish_after_error",
           "kind": "err",
-          "line": 172
+          "line": 192
         }
       ],
-      "hash": "b53ea99c814a37cc5ad98b49e80880242b2385ba2c18199cb816520f62e4408c",
+      "hash": "cf6a2536ef6e0c033a9cc4ddf706b3764e77d4b0ca33dac8621e1640116f353e",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
@@ -7838,23 +8068,18 @@
       "testsInside": true
     },
     {
-      "failurePaths": [
-        {
-          "in": "_get_domain_id_error",
-          "kind": "err",
-          "line": 204
-        }
-      ],
-      "hash": "251dcdc82c367ea4154666aa75ef53623cc5c28951ff657663f362f9397e1c8e",
+      "hash": "1c2d239ce61ddaead6e850c3e5f7b5b0c904694d74c2bd266fc7533c9a164997",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
-        "vendor/xrpl-rust/src/models/mod.rs"
+        "vendor/xrpl-rust/src/models/mod.rs",
+        "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs"
       ],
       "importsFiles": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/mod.rs",
-        "vendor/xrpl-rust/src/models/transactions/mod.rs"
+        "vendor/xrpl-rust/src/models/transactions/mod.rs",
+        "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs"
       ],
       "path": "vendor/xrpl-rust/src/models/transactions/offer_create.rs",
       "testsInside": true
@@ -7952,19 +8177,15 @@
           "in": "_get_exchange_error",
           "kind": "err",
           "line": 214
-        },
-        {
-          "in": "_get_domain_id_error",
-          "kind": "err",
-          "line": 348
         }
       ],
-      "hash": "0145f346c98e6ab3dfbbbe7a27000c235d87b0c9fca38a9220f04f27f564d24e",
+      "hash": "df46aec47cfb935ade7e40775f5c973a388ee0e919bd305373ec7f8fb04a78d5",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
         "vendor/xrpl-rust/src/models/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/exceptions.rs",
+        "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs",
         "vendor/xrpl-rust/src/asynch/exceptions.rs",
         "vendor/xrpl-rust/src/signing/mod.rs",
         "vendor/xrpl-rust/src/wallet/mod.rs"
@@ -7975,6 +8196,7 @@
         "vendor/xrpl-rust/src/models/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/exceptions.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
+        "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs",
         "vendor/xrpl-rust/src/signing/mod.rs",
         "vendor/xrpl-rust/src/wallet/mod.rs"
       ],

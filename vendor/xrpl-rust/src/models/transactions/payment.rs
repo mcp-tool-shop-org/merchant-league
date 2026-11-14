@@ -341,17 +341,12 @@ pub trait PaymentError {
     fn _get_exchange_error(&self) -> XRPLModelResult<()>;
 }
 
-/// A DomainID is a 256-bit ledger entry ID: 64 hex digits.
+/// A DomainID is a 256-bit ledger entry ID: 64 hex digits, not all zero.
+/// Checked by PermissionedDomainSet's own validator, so the rule is in one place.
 fn _get_domain_id_error(domain_id: &Option<Cow<'_, str>>) -> crate::models::XRPLModelResult<()> {
     match domain_id {
-        Some(id) if id.len() != 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) => {
-            Err(crate::models::XRPLModelException::InvalidValueFormat {
-                field: "domain_id".into(),
-                format: "64 hex digits (a 256-bit ledger entry ID)".into(),
-                found: id.to_string(),
-            })
-        }
-        _ => Ok(()),
+        Some(id) => super::permissioned_domain_set::validate_domain_id(id),
+        None => Ok(()),
     }
 }
 
@@ -679,21 +674,32 @@ mod tests {
         }
         .with_domain_id("C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901".into());
         let value = serde_json::to_value(&txn).unwrap();
-        assert_eq!(value["DomainID"], "C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901");
+        assert_eq!(
+            value["DomainID"],
+            "C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901"
+        );
         let back: Payment = serde_json::from_value(value).unwrap();
-        assert_eq!(back.domain_id.as_deref(), Some("C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901"));
+        assert_eq!(
+            back.domain_id.as_deref(),
+            Some("C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901")
+        );
         assert!(txn.get_errors().is_ok());
 
         let short = txn.clone().with_domain_id("ABCD".into());
         assert!(short.get_errors().is_err());
         let not_hex = txn.clone().with_domain_id("Z".repeat(64).into());
         assert!(not_hex.get_errors().is_err());
+        let zero = txn.clone().with_domain_id("0".repeat(64).into());
+        assert!(zero.get_errors().is_err());
         let none = {
             let mut t = txn.clone();
             t.domain_id = None;
             t
         };
         assert!(none.get_errors().is_ok());
-        assert!(serde_json::to_value(&none).unwrap().get("DomainID").is_none());
+        assert!(serde_json::to_value(&none)
+            .unwrap()
+            .get("DomainID")
+            .is_none());
     }
 }

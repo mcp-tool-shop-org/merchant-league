@@ -81,7 +81,9 @@ for url in "https://s.ripple.com:51234" "http://s.ripple.com:51234" "ws://s.ripp
   "https://xrplcluster.com" "wss://xrpl.ws" "https://xrpl.link" "wss://xrpl.to" \
   "https://mainnet.xrpl-labs.com" "https://xrpscan.com/account/r1" "https://bithomp.com/explorer" \
   "https://livenet.xrpl.org" "https://xrpl.org/mainnet" "https://rpc.ankr.com/xrpl_mainnet" \
-  "wss://example.net/livenet" "https://s.devnet.rippletest.net:51234"; do
+  "wss://example.net/livenet" "https://s.devnet.rippletest.net:51234" \
+  "mainnet.xrpl-labs.com" "livenet.xrpl.org" "xrpl.org/mainnet" \
+  "https://www.bithomp.com" "https://dev.bithomp.com/explorer" "https://devnet.xrpl.org"; do
   run_case $t fail "$src" "const U: &str = \"$url\";"
 done
 # Everywhere in the repository, not just the crates.
@@ -112,6 +114,7 @@ c=check-copy.sh
 tui=crates/league-tui/src/planted.rs
 clean $c
 for phrase in "Pay the buy-in" "buy_in" "buy-ins" "Pay a 50 XRP buy in to join the table." \
+  "Pay a 50 XRP buy in." "Sell marks for USD." \
   "a buy in to join" "the buy in fee" \
   "cash out" "cash  out" "cashes out" "cashed out" "cashing out" "cashout" "cash_out" \
   "win cash prizes" "Redeem marks for cash." \
@@ -152,7 +155,9 @@ for phrase in "Choose which goods to buy in town." "You cannot buy in Varn today
   "No real money." "There is no real money in this game." "This is not real money." \
   "It is never real money." "Played without real money." "This game is not for real money." \
   "Pay 5 marks." '{ "currency": "USD", "value": "10" }' "An IOU in USD on the Testnet." \
-  "A hash, cut short: 40D45E1EE03B8EA1…" "Salt — and only salt — sells in Varn." "ISO 4217 codes"; do
+  "A hash, cut short: 40D45E1EE03B8EA1…" "Salt — and only salt — sells in Varn." "ISO 4217 codes" \
+  "The guild pays its carters' wages." "A jack of all trades." "The jackdaw nests in Kell." \
+  "An IOU in USD, held for the table."; do
   run_case $c pass "$tui" "// $phrase"
 done
 # Licence files under crates/ are skipped by exact name, and nothing else is.
@@ -161,7 +166,8 @@ for lic in crates/league-ledger/tests/vectors/LICENSE-xrpl.js crates/league-tui/
   run_case $c pass "$lic" "Cash out now."
 done
 for other in docs/LICENSE docs/LICENSE-notes.md crates/league-tui/src/LICENSE_screen.rs \
-  crates/league-tui/src/LICENSE-screen.rs crates/league-tui/LICENCE crates/league-tui/license.txt \
+  crates/league-tui/src/LICENSE-screen.rs crates/league-tui/src/LICENSE-screen.RS \
+  crates/league-tui/LICENCE crates/league-tui/license.txt \
   crates/league-tui/LICENSES/notes.md crates/league-ledger/tests/vectors/notes.md \
   crates/league-tui/src/licence_cash.rs; do
   run_case $c fail "$other" "Cash out now."

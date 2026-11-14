@@ -1,0 +1,198 @@
+{
+  "server": {
+    "network_id": 1,
+    "build": "3.4.1"
+  },
+  "checks": [
+    {
+      "step": "issuer_require_auth",
+      "hash": "2E5CDF55F40BD0D47CE22F46AED744DFDB30FB631DACF0251C4711503F448E3D",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317006,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "issuer_allow_clawback",
+      "hash": "A129AFA324332DCC8941F2C8C6EA74A36BB07219169F6FE0341418D588772E4C",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317008,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "issuer_allow_locking",
+      "hash": "B9E1638BD44697BCAF21FC95CDB05B9209B3898BD8079A8D468F86DA05A769C7",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317010,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "issuer_default_ripple",
+      "hash": "F48B7499640FA7CE0A96D0F817D9CC518CE4E6C0B84E70B4644DD44F119CDDC3",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317012,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "alice_trust",
+      "hash": "534F181C02F3110D9DF7370D86EB6A7912D70A369F3DD7B14982D9B2D601DB47",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317014,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "bob_trust",
+      "hash": "5CABB56D5C21303568E72697702D27706D45E2089F778142C6F9CEC772DDA8D1",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317016,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "outsider_trust",
+      "hash": "1BB80C21206C6CF6641AF614A1C04BCE8BE646D251D0EBAA782F512FEAEC4D98",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317018,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "issuer_pays_unauthorized_outsider",
+      "hash": "ED72C7DA70628941E2269DF3784B1510F0BBAE780254A3433659C2CBD7A7AE04",
+      "found": true,
+      "validated": true,
+      "result": "tecPATH_DRY",
+      "ledger_index": 22317020,
+      "matches_proof": true,
+      "type": "Payment"
+    },
+    {
+      "step": "issuer_authorizes_alice",
+      "hash": "57A4A977FF9C09F89A5641582F5632F9CB319C69BA4A504D2782B6948D0737A7",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317022,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "issuer_authorizes_bob",
+      "hash": "A8C336BED8E0810B2083AF7A34FDC5EABE43ACFAE3EC5C5AC47E02CFDF29C0B3",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317024,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "issuer_pays_alice_100",
+      "hash": "8D04CEAFB06FAA9ABCCBDCA9E01E0AB390A839CB8690105F080C457DF94B2A43",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317026,
+      "matches_proof": true,
+      "type": "Payment"
+    },
+    {
+      "step": "alice_pays_unauthorized_outsider",
+      "hash": "CD6099FC93CEC3A82E227723F33D8848506F6E9354680FA166B5535C61C2201C",
+      "found": true,
+      "validated": true,
+      "result": "tecPATH_DRY",
+      "ledger_index": 22317028,
+      "matches_proof": true,
+      "type": "Payment"
+    },
+    {
+      "step": "alice_escrows_10_to_bob",
+      "hash": "3740A06E905129FA3961CF56BDA127499350E8EB56D0B67E9A47A3768849CF36",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317030,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "bob_finishes_10",
+      "hash": "0F2CEA2C7D37BCB1987B8E057F931038889C002BBC07FB135F3F9D492462C0FA",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317032,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    },
+    {
+      "step": "alice_escrows_5_to_unauthorized_outsider",
+      "hash": "B4FAFD379DDB0121E65E0DEF2398EB7983C8B5507752CFB5FBA193B214816143",
+      "found": true,
+      "validated": true,
+      "result": "tecNO_AUTH",
+      "ledger_index": 22317034,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "issuer_claws_3_from_alice",
+      "hash": "F2B7AE66BE3E63AFA65247D1E72F2D051727483AB2CB64D2758BE648980229DD",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317036,
+      "matches_proof": true,
+      "type": "Clawback"
+    },
+    {
+      "step": "alice_escrows_20_to_bob",
+      "hash": "201D16DB26313C2F4B0AD0C9ABC78E7A9B23B26D6A008DFC73DD1BAE3247CE23",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317039,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "issuer_claws_87_from_alice",
+      "hash": "80AC46CECD50FB0741D74167ACE5D1B0EA97D71A212326EB86E00D9A1255AA5C",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317041,
+      "matches_proof": true,
+      "type": "Clawback"
+    },
+    {
+      "step": "bob_finishes_20_after_clawback",
+      "hash": "6E5A5EC4FBC691633ECB8A2A9F80DE16F465B947791F179B8C6856677850437A",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317043,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    }
+  ]
+}
