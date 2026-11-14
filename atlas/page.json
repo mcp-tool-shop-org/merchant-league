@@ -4,14 +4,23 @@
     "docs/",
     "root"
   ],
-  "breaks": [],
+  "breaks": [
+    {
+      "doors": 2,
+      "importedBy": [],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-ledger",
+      "partLabel": "league-ledger"
+    }
+  ],
   "changes": {
     "fileCounts": {
       "added": 1,
       "changed": 7,
       "moved": 0,
       "parts": 5,
-      "removed": 0
+      "removed": 1
     },
     "items": [
       {
@@ -27,6 +36,14 @@
         "subjects": [
           ".github/workflows/ci.yml",
           "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI no longer runs scripts/test-copy-check.sh.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "scripts/test-copy-check.sh"
         ]
       },
       {
@@ -55,18 +72,18 @@
       },
       {
         "kind": "landing",
-        "sentence": "And 4 more new writers and readers of places.",
+        "sentence": "And 5 more new writers and readers of places.",
         "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "1 file added and 7 changed content, across 5 parts.",
+        "sentence": "1 file added, 1 removed and 7 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-      "generatedAt": "2026-11-14T05:20:32.429Z"
+      "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
+      "generatedAt": "2026-11-14T09:31:36.362Z"
     },
     "unchanged": false
   },
@@ -75,9 +92,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "b614ae9c111c25a7093dfb49d9a6bf44984006ed",
+  "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (5 files) and shell (3). Work enters through 1 door; the busiest is CI, which reaches 6 parts.",
+  "derived": "9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [],
@@ -102,7 +119,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 1
+          "files": 4
         },
         {
           "boundary": "league-season",
@@ -124,10 +141,16 @@
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
         "scripts/test-guards.sh",
-        "crates/"
+        "crates/league-core/",
+        "crates/league-dice/",
+        "crates/league-ledger/examples/",
+        "crates/league-ledger/src/",
+        "crates/league-ledger/tests/vectors.rs",
+        "crates/league-season/",
+        "crates/league-tui/"
       ],
-      "runsCount": 4,
-      "runsMore": 5,
+      "runsCount": 10,
+      "runsMore": 8,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -135,6 +158,56 @@
         "on a push to main touching 9 paths",
         "or by hand"
       ]
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "id": "crates/league-ledger/Cargo.toml#testnet_proof",
+      "kind": "command",
+      "landings": [],
+      "name": "testnet_proof",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "runWith": "cargo run --example testnet_proof",
+      "runs": [
+        "crates/league-ledger/examples/testnet_proof.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
+    },
+    {
+      "builtFrom": "vendor/xrpl-rust",
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": "vendor/xrpl-rust/Cargo.toml",
+      "id": "vendor/xrpl-rust/Cargo.toml#xrpl",
+      "kind": "command",
+      "landings": [],
+      "name": "xrpl",
+      "pushes": false,
+      "reach": [],
+      "runs": [
+        "vendor/xrpl-rust/src/bin/xrpl.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": [],
+      "unshipped": true
     }
   ],
   "duplicates": [],
@@ -143,8 +216,11 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T09:13:54.714Z",
+  "generatedAt": "2026-11-14T10:22:50.681Z",
   "limits": [
+    "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
+    "2 writes and 1 read go to a path their caller passes, not to this repository.",
+    "359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -163,18 +239,24 @@
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
-  "startDoor": ".github/workflows/ci.yml",
+  "startDoor": "vendor/xrpl-rust/Cargo.toml#xrpl",
   "startHere": [
-    ".github/workflows/ci.yml",
-    "crates/league-core/src/lib.rs"
+    "vendor/xrpl-rust/src/bin/xrpl.rs",
+    "vendor/xrpl-rust/src/lib.rs",
+    "vendor/xrpl-rust/src/account/mod.rs",
+    "vendor/xrpl-rust/src/asynch/account/mod.rs",
+    "vendor/xrpl-rust/src/core/addresscodec/mod.rs",
+    "vendor/xrpl-rust/src/core/addresscodec/utils.rs",
+    "vendor/xrpl-rust/src/core/addresscodec/exceptions.rs"
   ],
+  "startReason": "This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 5,
+  "testFiles": 18,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
-    "league-ledger": 1,
+    "league-ledger": 4,
     "league-season": 1,
     "league-tui": 1
   },
@@ -182,7 +264,6 @@
   "testedInside": [
     "league-core",
     "league-dice",
-    "league-ledger",
     "league-season",
     "league-tui"
   ],
@@ -192,13 +273,12 @@
     "scripts"
   ],
   "unreadCodeUses": "scripts holds only shell files, which this map does not read, so what uses it cannot be seen.",
-  "unreadFiles": 0,
+  "unreadFiles": 1,
   "unreadNote": [],
   "untested": [],
   "untestedNote": [
     "league-core is tested only by the unit tests in its own files.",
     "league-dice is tested only by the unit tests in its own files.",
-    "league-ledger is tested only by the unit tests in its own files.",
     "league-season is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files.",
     "scripts holds only shell files, which this map does not read, so whether a test touches it cannot be seen."

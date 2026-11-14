@@ -5,10 +5,13 @@
 //! [`require_testnet`] before anything else is sent. A server that reports a
 //! different network id, or none, is refused.
 //!
-//! Transaction building and signing arrive with milestone M2, which first
-//! proves the chosen XRPL library on Testnet.
+//! Transactions are built and signed with xrpl-rust (vendored with upstream's
+//! security fix; see `vendor/xrpl-rust/VENDORED.md`) and submitted through
+//! [`client::Testnet`].
 
 use std::fmt;
+
+pub mod client;
 
 /// The Testnet's network id, as its servers report it in `server_info`
 /// (measured on 2026-11-14: rippled 3.4.1, `network_id` 1).

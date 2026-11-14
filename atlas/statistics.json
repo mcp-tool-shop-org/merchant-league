@@ -33,7 +33,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "docs",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -49,7 +49,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-core",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -65,7 +65,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-dice",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-ledger",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 5,
       "rebaseline": null
     },
     {
@@ -97,7 +97,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-season",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -113,7 +113,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-tui",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -154,32 +154,32 @@
     "files": [
       {
         "commits": 4,
-        "lines": 191,
+        "lines": 190,
         "path": ".github/workflows/ci.yml"
       },
       {
-        "commits": 1,
-        "lines": 4,
+        "commits": 2,
+        "lines": 5,
         "path": ".gitignore"
       },
       {
         "commits": 5,
-        "lines": 33,
+        "lines": 35,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 5,
-        "lines": 118,
+        "commits": 3,
+        "lines": 110,
         "path": "CLAUDE.md"
       },
       {
-        "commits": 3,
-        "lines": 3512,
+        "commits": 5,
+        "lines": 5927,
         "path": "Cargo.lock"
       },
       {
-        "commits": 3,
-        "lines": 62,
+        "commits": 4,
+        "lines": 70,
         "path": "Cargo.toml"
       },
       {
@@ -198,8 +198,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 3,
-        "lines": 178,
+        "commits": 6,
+        "lines": 269,
         "path": "atlas/README.md"
       },
       {
@@ -208,18 +208,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 3,
-        "lines": 374,
+        "commits": 6,
+        "lines": 730,
         "path": "atlas/page.json"
       },
       {
-        "commits": 3,
-        "lines": 736,
+        "commits": 6,
+        "lines": 2823,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 3,
-        "lines": 1382,
+        "commits": 6,
+        "lines": 10185,
         "path": "atlas/structure.json"
       },
       {
@@ -243,14 +243,59 @@
         "path": "crates/league-dice/src/lib.rs"
       },
       {
-        "commits": 2,
-        "lines": 24,
+        "commits": 4,
+        "lines": 36,
         "path": "crates/league-ledger/Cargo.toml"
       },
       {
         "commits": 2,
-        "lines": 202,
+        "lines": 636,
+        "path": "crates/league-ledger/examples/testnet_proof.rs"
+      },
+      {
+        "commits": 4,
+        "lines": 987,
+        "path": "crates/league-ledger/src/client.rs"
+      },
+      {
+        "commits": 3,
+        "lines": 209,
         "path": "crates/league-ledger/src/lib.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 152,
+        "path": "crates/league-ledger/tests/vectors.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 57,
+        "path": "crates/league-ledger/tests/vectors/LICENSE-xrpl.js"
+      },
+      {
+        "commits": 1,
+        "lines": 14,
+        "path": "crates/league-ledger/tests/vectors/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 248,
+        "path": "crates/league-ledger/tests/vectors/testnet-m2c-2026-11-14.json"
+      },
+      {
+        "commits": 1,
+        "lines": 264,
+        "path": "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json"
+      },
+      {
+        "commits": 1,
+        "lines": 5329,
+        "path": "crates/league-ledger/tests/vectors/xrpljs-codec-fixtures.json"
+      },
+      {
+        "commits": 1,
+        "lines": 30,
+        "path": "crates/league-ledger/tests/vectors/xrpljs-keypairs-api.json"
       },
       {
         "commits": 2,
@@ -273,9 +318,44 @@
         "path": "crates/league-tui/src/lib.rs"
       },
       {
-        "commits": 4,
-        "lines": 422,
+        "commits": 3,
+        "lines": 418,
         "path": "docs/design.md"
+      },
+      {
+        "commits": 1,
+        "lines": 94,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 8,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/00_snapshot.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/01_proof.err"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/01_proof.exit"
+      },
+      {
+        "commits": 1,
+        "lines": 35,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/01_proof.out"
+      },
+      {
+        "commits": 1,
+        "lines": 298,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/02_hash_check.json"
+      },
+      {
+        "commits": 1,
+        "lines": 93,
+        "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/hash_check.py"
       },
       {
         "commits": 3,
@@ -283,19 +363,1819 @@
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 4,
-        "lines": 93,
+        "commits": 3,
+        "lines": 42,
         "path": "scripts/check-copy.sh"
       },
       {
-        "commits": 3,
-        "lines": 111,
+        "commits": 2,
+        "lines": 48,
         "path": "scripts/check-testnet-only.sh"
       },
       {
+        "commits": 1,
+        "lines": 54,
+        "path": "scripts/test-copy-check.sh"
+      },
+      {
         "commits": 2,
+        "lines": 8724,
+        "path": "vendor/xrpl-rust/Cargo.lock"
+      },
+      {
+        "commits": 1,
+        "lines": 355,
+        "path": "vendor/xrpl-rust/Cargo.toml"
+      },
+      {
+        "commits": 1,
+        "lines": 194,
+        "path": "vendor/xrpl-rust/Cargo.toml.orig"
+      },
+      {
+        "commits": 1,
+        "lines": 10,
+        "path": "vendor/xrpl-rust/LICENSE"
+      },
+      {
+        "commits": 1,
+        "lines": 835,
+        "path": "vendor/xrpl-rust/README.md"
+      },
+      {
+        "commits": 3,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/VENDORED.md"
+      },
+      {
+        "commits": 1,
+        "lines": 321,
+        "path": "vendor/xrpl-rust/src/_serde/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 78,
+        "path": "vendor/xrpl-rust/src/account/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 110,
+        "path": "vendor/xrpl-rust/src/asynch/account/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 28,
+        "path": "vendor/xrpl-rust/src/asynch/clients/async_client.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 41,
+        "path": "vendor/xrpl-rust/src/asynch/clients/client.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 163,
+        "path": "vendor/xrpl-rust/src/asynch/clients/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 48,
+        "path": "vendor/xrpl-rust/src/asynch/clients/json_rpc/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 274,
+        "path": "vendor/xrpl-rust/src/asynch/clients/json_rpc/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 69,
+        "path": "vendor/xrpl-rust/src/asynch/clients/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 272,
+        "path": "vendor/xrpl-rust/src/asynch/clients/websocket/_no_std.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 269,
+        "path": "vendor/xrpl-rust/src/asynch/clients/websocket/_std.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 222,
+        "path": "vendor/xrpl-rust/src/asynch/clients/websocket/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 102,
+        "path": "vendor/xrpl-rust/src/asynch/clients/websocket/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 108,
+        "path": "vendor/xrpl-rust/src/asynch/clients/websocket/websocket_base.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 82,
+        "path": "vendor/xrpl-rust/src/asynch/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 79,
+        "path": "vendor/xrpl-rust/src/asynch/ledger/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 43,
+        "path": "vendor/xrpl-rust/src/asynch/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 38,
+        "path": "vendor/xrpl-rust/src/asynch/transaction/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 659,
+        "path": "vendor/xrpl-rust/src/asynch/transaction/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 371,
+        "path": "vendor/xrpl-rust/src/asynch/transaction/submit_and_wait.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 14,
+        "path": "vendor/xrpl-rust/src/asynch/wallet/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 187,
+        "path": "vendor/xrpl-rust/src/asynch/wallet/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 19,
+        "path": "vendor/xrpl-rust/src/bin/xrpl.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1109,
+        "path": "vendor/xrpl-rust/src/cli/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "vendor/xrpl-rust/src/cli/std_cli.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 307,
+        "path": "vendor/xrpl-rust/src/clients/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 994,
+        "path": "vendor/xrpl-rust/src/confidential.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 45,
+        "path": "vendor/xrpl-rust/src/constants.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 37,
+        "path": "vendor/xrpl-rust/src/core/addresscodec/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 752,
+        "path": "vendor/xrpl-rust/src/core/addresscodec/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 153,
+        "path": "vendor/xrpl-rust/src/core/addresscodec/test_cases.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 185,
+        "path": "vendor/xrpl-rust/src/core/addresscodec/utils.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1229,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/binary_wrappers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 7358,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/definitions/definitions.json"
+      },
+      {
+        "commits": 1,
+        "lines": 169,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/definitions/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 580,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/definitions/types.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 725,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 118,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test/binary_json_tests.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 218,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test/binary_serializer_tests.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1080,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test/tx_encode_decode_tests.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 205,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test/x_address_tests.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 143,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_cases.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 5234,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/codec-fixtures.json"
+      },
+      {
+        "commits": 1,
+        "lines": 3083,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/data-driven-tests.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/delivermin-tx-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 98,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/delivermin-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/deposit-preauth-tx-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/deposit-preauth-tx-meta-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/deposit-preauth-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-cancel-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 6,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-cancel-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-create-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 10,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-create-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-finish-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-finish-meta-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 95,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/escrow-finish-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/iou-tests.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/ledger-full-38129.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/ledger-full-40000.json"
+      },
+      {
+        "commits": 1,
+        "lines": 12,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/negative-unl.json"
+      },
+      {
+        "commits": 1,
+        "lines": 547,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/nf-token.json"
+      },
+      {
+        "commits": 1,
+        "lines": 63,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/path-set-test.json"
+      },
+      {
+        "commits": 1,
+        "lines": 19,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/path-test.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-claim-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 8,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-claim-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-create-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-create-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-fund-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/payment-channel-fund-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/signerlistset-tx-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/signerlistset-tx-meta-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 94,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/signerlistset-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/ticket-create-binary.json"
+      },
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/ticket-create-tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 190,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/test_data/x-codec-fixtures.json"
+      },
+      {
+        "commits": 1,
+        "lines": 152,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/account_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 612,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/amount.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 106,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/blob.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 213,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/currency.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 116,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 606,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/hash.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 181,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/issue.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 768,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 296,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/number.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 627,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/paths.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 97,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/quality.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 51,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/test_cases.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/utils.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 155,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/vector256.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 144,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/types/xchain_bridge.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 257,
+        "path": "vendor/xrpl-rust/src/core/binarycodec/utils.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 88,
+        "path": "vendor/xrpl-rust/src/core/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 562,
+        "path": "vendor/xrpl-rust/src/core/keypairs/algorithms.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 38,
+        "path": "vendor/xrpl-rust/src/core/keypairs/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 350,
+        "path": "vendor/xrpl-rust/src/core/keypairs/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 53,
+        "path": "vendor/xrpl-rust/src/core/keypairs/test_cases.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 114,
+        "path": "vendor/xrpl-rust/src/core/keypairs/utils.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "vendor/xrpl-rust/src/core/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 41,
+        "path": "vendor/xrpl-rust/src/ledger/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 137,
+        "path": "vendor/xrpl-rust/src/lib.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 9,
+        "path": "vendor/xrpl-rust/src/macros.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 52,
+        "path": "vendor/xrpl-rust/src/models/amount/issued_currency_amount.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 412,
+        "path": "vendor/xrpl-rust/src/models/amount/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 125,
+        "path": "vendor/xrpl-rust/src/models/amount/mpt_amount.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 298,
+        "path": "vendor/xrpl-rust/src/models/amount/xrp_amount.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 19,
+        "path": "vendor/xrpl-rust/src/models/credential_authorization.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 62,
+        "path": "vendor/xrpl-rust/src/models/currency/issued_currency.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 185,
+        "path": "vendor/xrpl-rust/src/models/currency/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 69,
+        "path": "vendor/xrpl-rust/src/models/currency/mpt_currency.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 102,
+        "path": "vendor/xrpl-rust/src/models/currency/xrp.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 169,
+        "path": "vendor/xrpl-rust/src/models/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 163,
+        "path": "vendor/xrpl-rust/src/models/flag_collection.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 51,
+        "path": "vendor/xrpl-rust/src/models/ledger/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 229,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/account_root.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 115,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/amendments.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 184,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/amm.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 97,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/bridge.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 146,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/check.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 249,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/credential.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 474,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/deposit_preauth.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 137,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/did.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 142,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/directory_node.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 161,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/escrow.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 94,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/fee_settings.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 106,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/ledger_hashes.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 251,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 301,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/mptoken.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 409,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/mptoken_issuance.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 111,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/negative_unl.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 147,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/nftoken_offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 118,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/nftoken_page.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 153,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 258,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/oracle.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 158,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/pay_channel.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 298,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/permissioned_domain.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 183,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/ripple_state.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 149,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/signer_list.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 98,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/ticket.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 392,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/vault.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 103,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/xchain_owned_claim_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 21,
+        "path": "vendor/xrpl-rust/src/models/ledger/objects/xchain_owned_create_account_claim_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 103,
+        "path": "vendor/xrpl-rust/src/models/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 21,
+        "path": "vendor/xrpl-rust/src/models/model.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 120,
+        "path": "vendor/xrpl-rust/src/models/requests/account_channels.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 90,
+        "path": "vendor/xrpl-rust/src/models/requests/account_currencies.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 80,
+        "path": "vendor/xrpl-rust/src/models/requests/account_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 94,
+        "path": "vendor/xrpl-rust/src/models/requests/account_lines.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 80,
+        "path": "vendor/xrpl-rust/src/models/requests/account_nfts.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 170,
+        "path": "vendor/xrpl-rust/src/models/requests/account_objects.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 98,
+        "path": "vendor/xrpl-rust/src/models/requests/account_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 122,
+        "path": "vendor/xrpl-rust/src/models/requests/account_tx.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 72,
+        "path": "vendor/xrpl-rust/src/models/requests/amm_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 107,
+        "path": "vendor/xrpl-rust/src/models/requests/book_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 194,
+        "path": "vendor/xrpl-rust/src/models/requests/channel_authorize.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 82,
+        "path": "vendor/xrpl-rust/src/models/requests/channel_verify.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 228,
+        "path": "vendor/xrpl-rust/src/models/requests/deposit_authorize.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 45,
+        "path": "vendor/xrpl-rust/src/models/requests/fee.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 93,
+        "path": "vendor/xrpl-rust/src/models/requests/gateway_balances.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 132,
+        "path": "vendor/xrpl-rust/src/models/requests/get_aggregate_price.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 100,
+        "path": "vendor/xrpl-rust/src/models/requests/ledger.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/models/requests/ledger_closed.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/models/requests/ledger_current.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 92,
+        "path": "vendor/xrpl-rust/src/models/requests/ledger_data.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 737,
+        "path": "vendor/xrpl-rust/src/models/requests/ledger_entry.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 67,
+        "path": "vendor/xrpl-rust/src/models/requests/manifest.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 597,
+        "path": "vendor/xrpl-rust/src/models/requests/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 89,
+        "path": "vendor/xrpl-rust/src/models/requests/nft_buy_offers.rs"
+      },
+      {
+        "commits": 1,
         "lines": 99,
-        "path": "scripts/test-guards.sh"
+        "path": "vendor/xrpl-rust/src/models/requests/nft_history.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 75,
+        "path": "vendor/xrpl-rust/src/models/requests/nft_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 62,
+        "path": "vendor/xrpl-rust/src/models/requests/nft_sell_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 87,
+        "path": "vendor/xrpl-rust/src/models/requests/nfts_by_issuer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 116,
+        "path": "vendor/xrpl-rust/src/models/requests/no_ripple_check.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 155,
+        "path": "vendor/xrpl-rust/src/models/requests/path_find.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 66,
+        "path": "vendor/xrpl-rust/src/models/requests/ping.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/models/requests/random.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 126,
+        "path": "vendor/xrpl-rust/src/models/requests/ripple_path_find.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 58,
+        "path": "vendor/xrpl-rust/src/models/requests/server_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 51,
+        "path": "vendor/xrpl-rust/src/models/requests/server_state.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 73,
+        "path": "vendor/xrpl-rust/src/models/requests/submit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 78,
+        "path": "vendor/xrpl-rust/src/models/requests/submit_multisigned.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 162,
+        "path": "vendor/xrpl-rust/src/models/requests/subscribe.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 80,
+        "path": "vendor/xrpl-rust/src/models/requests/transaction_entry.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 68,
+        "path": "vendor/xrpl-rust/src/models/requests/tx.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 137,
+        "path": "vendor/xrpl-rust/src/models/requests/unsubscribe.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 330,
+        "path": "vendor/xrpl-rust/src/models/requests/vault_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 132,
+        "path": "vendor/xrpl-rust/src/models/results/account_channels.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 96,
+        "path": "vendor/xrpl-rust/src/models/results/account_currencies.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 291,
+        "path": "vendor/xrpl-rust/src/models/results/account_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 171,
+        "path": "vendor/xrpl-rust/src/models/results/account_lines.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 145,
+        "path": "vendor/xrpl-rust/src/models/results/account_nfts.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 124,
+        "path": "vendor/xrpl-rust/src/models/results/account_objects.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 151,
+        "path": "vendor/xrpl-rust/src/models/results/account_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 423,
+        "path": "vendor/xrpl-rust/src/models/results/account_tx.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 185,
+        "path": "vendor/xrpl-rust/src/models/results/amm_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 191,
+        "path": "vendor/xrpl-rust/src/models/results/book_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 59,
+        "path": "vendor/xrpl-rust/src/models/results/channel_authorize.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 67,
+        "path": "vendor/xrpl-rust/src/models/results/channel_verify.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 106,
+        "path": "vendor/xrpl-rust/src/models/results/deposit_authorize.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 19,
+        "path": "vendor/xrpl-rust/src/models/results/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 143,
+        "path": "vendor/xrpl-rust/src/models/results/fee.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 196,
+        "path": "vendor/xrpl-rust/src/models/results/gateway_balances.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 110,
+        "path": "vendor/xrpl-rust/src/models/results/get_aggregate_price.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 206,
+        "path": "vendor/xrpl-rust/src/models/results/ledger.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 51,
+        "path": "vendor/xrpl-rust/src/models/results/ledger_closed.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 48,
+        "path": "vendor/xrpl-rust/src/models/results/ledger_current.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 128,
+        "path": "vendor/xrpl-rust/src/models/results/ledger_data.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 179,
+        "path": "vendor/xrpl-rust/src/models/results/ledger_entry.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 111,
+        "path": "vendor/xrpl-rust/src/models/results/manifest.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 223,
+        "path": "vendor/xrpl-rust/src/models/results/metadata.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1327,
+        "path": "vendor/xrpl-rust/src/models/results/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 76,
+        "path": "vendor/xrpl-rust/src/models/results/nft_buy_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 61,
+        "path": "vendor/xrpl-rust/src/models/results/nft_history.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 83,
+        "path": "vendor/xrpl-rust/src/models/results/nft_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 104,
+        "path": "vendor/xrpl-rust/src/models/results/nft_offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 72,
+        "path": "vendor/xrpl-rust/src/models/results/nft_sell_offers.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 215,
+        "path": "vendor/xrpl-rust/src/models/results/nftoken.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 41,
+        "path": "vendor/xrpl-rust/src/models/results/nfts_by_issuer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 162,
+        "path": "vendor/xrpl-rust/src/models/results/no_ripple_check.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 153,
+        "path": "vendor/xrpl-rust/src/models/results/path_find.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 12,
+        "path": "vendor/xrpl-rust/src/models/results/ping.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 54,
+        "path": "vendor/xrpl-rust/src/models/results/random.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 136,
+        "path": "vendor/xrpl-rust/src/models/results/ripple_path_find.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 263,
+        "path": "vendor/xrpl-rust/src/models/results/server_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 226,
+        "path": "vendor/xrpl-rust/src/models/results/server_state.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 141,
+        "path": "vendor/xrpl-rust/src/models/results/submit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 106,
+        "path": "vendor/xrpl-rust/src/models/results/submit_multisigned.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 12,
+        "path": "vendor/xrpl-rust/src/models/results/subscribe.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 114,
+        "path": "vendor/xrpl-rust/src/models/results/transaction_entry.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 493,
+        "path": "vendor/xrpl-rust/src/models/results/tx.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 12,
+        "path": "vendor/xrpl-rust/src/models/results/unsubscribe.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 214,
+        "path": "vendor/xrpl-rust/src/models/results/vault_info.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 452,
+        "path": "vendor/xrpl-rust/src/models/transactions/account_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 856,
+        "path": "vendor/xrpl-rust/src/models/transactions/account_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 460,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_bid.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 487,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 434,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 356,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_deposit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 270,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_vote.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 331,
+        "path": "vendor/xrpl-rust/src/models/transactions/amm_withdraw.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 219,
+        "path": "vendor/xrpl-rust/src/models/transactions/check_cancel.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 277,
+        "path": "vendor/xrpl-rust/src/models/transactions/check_cash.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 273,
+        "path": "vendor/xrpl-rust/src/models/transactions/check_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 635,
+        "path": "vendor/xrpl-rust/src/models/transactions/clawback.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 296,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_clawback.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 191,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_constants.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 420,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_convert.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 326,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_convert_back.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 227,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_merge_inbox.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 401,
+        "path": "vendor/xrpl-rust/src/models/transactions/confidential_mpt_send.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 296,
+        "path": "vendor/xrpl-rust/src/models/transactions/credential_accept.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 537,
+        "path": "vendor/xrpl-rust/src/models/transactions/credential_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 477,
+        "path": "vendor/xrpl-rust/src/models/transactions/credential_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 919,
+        "path": "vendor/xrpl-rust/src/models/transactions/deposit_preauth.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 172,
+        "path": "vendor/xrpl-rust/src/models/transactions/did_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 465,
+        "path": "vendor/xrpl-rust/src/models/transactions/did_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 214,
+        "path": "vendor/xrpl-rust/src/models/transactions/escrow_cancel.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 382,
+        "path": "vendor/xrpl-rust/src/models/transactions/escrow_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 363,
+        "path": "vendor/xrpl-rust/src/models/transactions/escrow_finish.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 260,
+        "path": "vendor/xrpl-rust/src/models/transactions/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 214,
+        "path": "vendor/xrpl-rust/src/models/transactions/metadata.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1286,
+        "path": "vendor/xrpl-rust/src/models/transactions/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 312,
+        "path": "vendor/xrpl-rust/src/models/transactions/mptoken_authorize.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 905,
+        "path": "vendor/xrpl-rust/src/models/transactions/mptoken_issuance_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 179,
+        "path": "vendor/xrpl-rust/src/models/transactions/mptoken_issuance_destroy.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 1373,
+        "path": "vendor/xrpl-rust/src/models/transactions/mptoken_issuance_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 512,
+        "path": "vendor/xrpl-rust/src/models/transactions/nftoken_accept_offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 329,
+        "path": "vendor/xrpl-rust/src/models/transactions/nftoken_burn.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 392,
+        "path": "vendor/xrpl-rust/src/models/transactions/nftoken_cancel_offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 526,
+        "path": "vendor/xrpl-rust/src/models/transactions/nftoken_create_offer.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 565,
+        "path": "vendor/xrpl-rust/src/models/transactions/nftoken_mint.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 273,
+        "path": "vendor/xrpl-rust/src/models/transactions/offer_cancel.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 510,
+        "path": "vendor/xrpl-rust/src/models/transactions/offer_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 279,
+        "path": "vendor/xrpl-rust/src/models/transactions/oracle_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 993,
+        "path": "vendor/xrpl-rust/src/models/transactions/oracle_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 699,
+        "path": "vendor/xrpl-rust/src/models/transactions/payment.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 445,
+        "path": "vendor/xrpl-rust/src/models/transactions/payment_channel_claim.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 356,
+        "path": "vendor/xrpl-rust/src/models/transactions/payment_channel_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 321,
+        "path": "vendor/xrpl-rust/src/models/transactions/payment_channel_fund.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 353,
+        "path": "vendor/xrpl-rust/src/models/transactions/permissioned_domain_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 810,
+        "path": "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 167,
+        "path": "vendor/xrpl-rust/src/models/transactions/pseudo_transactions/enable_amendment.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": "vendor/xrpl-rust/src/models/transactions/pseudo_transactions/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 132,
+        "path": "vendor/xrpl-rust/src/models/transactions/pseudo_transactions/set_fee.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 153,
+        "path": "vendor/xrpl-rust/src/models/transactions/pseudo_transactions/unl_modify.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 235,
+        "path": "vendor/xrpl-rust/src/models/transactions/set_regular_key.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 488,
+        "path": "vendor/xrpl-rust/src/models/transactions/signer_list_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 224,
+        "path": "vendor/xrpl-rust/src/models/transactions/ticket_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 336,
+        "path": "vendor/xrpl-rust/src/models/transactions/trust_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 593,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_clawback.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 193,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_common.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 910,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_create.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 299,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_delete.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 369,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_deposit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 445,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_set.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 558,
+        "path": "vendor/xrpl-rust/src/models/transactions/vault_withdraw.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 217,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_account_create_commit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 338,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_add_account_create_attestation.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 178,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_add_claim_attestation.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 208,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_claim.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 189,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_commit.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 390,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_create_bridge.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 175,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_create_claim_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 335,
+        "path": "vendor/xrpl-rust/src/models/transactions/xchain_modify_bridge.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 20,
+        "path": "vendor/xrpl-rust/src/signing/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 194,
+        "path": "vendor/xrpl-rust/src/signing/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "vendor/xrpl-rust/src/transaction/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 186,
+        "path": "vendor/xrpl-rust/src/transaction/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 71,
+        "path": "vendor/xrpl-rust/src/transaction/multisign.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 158,
+        "path": "vendor/xrpl-rust/src/utils/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 149,
+        "path": "vendor/xrpl-rust/src/utils/get_nftoken_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 141,
+        "path": "vendor/xrpl-rust/src/utils/get_xchain_claim_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 126,
+        "path": "vendor/xrpl-rust/src/utils/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 812,
+        "path": "vendor/xrpl-rust/src/utils/mptoken_metadata.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 96,
+        "path": "vendor/xrpl-rust/src/utils/parse_nftoken_id.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 66,
+        "path": "vendor/xrpl-rust/src/utils/str_conversion.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 298,
+        "path": "vendor/xrpl-rust/src/utils/test_data/mptoken_metadata_encode_decode.json"
+      },
+      {
+        "commits": 1,
+        "lines": 562,
+        "path": "vendor/xrpl-rust/src/utils/test_data/mptoken_metadata_validation.json"
+      },
+      {
+        "commits": 1,
+        "lines": 118,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/XChainCreateClaimID.json"
+      },
+      {
+        "commits": 1,
+        "lines": 118,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/XChainCreateClaimID2.json"
+      },
+      {
+        "commits": 1,
+        "lines": 480,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/nftokenmint_response1.json"
+      },
+      {
+        "commits": 1,
+        "lines": 348,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/nftokenmint_response2.json"
+      },
+      {
+        "commits": 1,
+        "lines": 90,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/offer_cancelled.json"
+      },
+      {
+        "commits": 1,
+        "lines": 93,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/offer_created.json"
+      },
+      {
+        "commits": 1,
+        "lines": 391,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/offer_partially_filled_and_filled.json"
+      },
+      {
+        "commits": 1,
+        "lines": 127,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/offer_with_expiration.json"
+      },
+      {
+        "commits": 1,
+        "lines": 123,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou.json"
+      },
+      {
+        "commits": 1,
+        "lines": 121,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou_destination_no_balance.json"
+      },
+      {
+        "commits": 1,
+        "lines": 285,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou_multipath.json"
+      },
+      {
+        "commits": 1,
+        "lines": 81,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou_redeem.json"
+      },
+      {
+        "commits": 1,
+        "lines": 81,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou_redeem_then_issue.json"
+      },
+      {
+        "commits": 1,
+        "lines": 123,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_iou_spend_full_balance.json"
+      },
+      {
+        "commits": 1,
+        "lines": 60,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/payment_xrp_create_account.json"
+      },
+      {
+        "commits": 1,
+        "lines": 108,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/trustline_create.json"
+      },
+      {
+        "commits": 1,
+        "lines": 156,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/trustline_delete.json"
+      },
+      {
+        "commits": 1,
+        "lines": 87,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/trustline_set_limit.json"
+      },
+      {
+        "commits": 1,
+        "lines": 107,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/trustline_set_limit2.json"
+      },
+      {
+        "commits": 1,
+        "lines": 87,
+        "path": "vendor/xrpl-rust/src/utils/test_data/transaction_jsons/trustline_set_limit_zero.json"
+      },
+      {
+        "commits": 1,
+        "lines": 345,
+        "path": "vendor/xrpl-rust/src/utils/testing.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 223,
+        "path": "vendor/xrpl-rust/src/utils/time_conversion.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 66,
+        "path": "vendor/xrpl-rust/src/utils/transactions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 112,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/get_balance_changes.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 99,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/get_final_balances.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 93,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/test_data/offer_created.json"
+      },
+      {
+        "commits": 1,
+        "lines": 123,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/test_data/payment_iou.json"
+      },
+      {
+        "commits": 1,
+        "lines": 186,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/utils/balance_parser.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 247,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/utils/mod.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 172,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/utils/nodes.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 162,
+        "path": "vendor/xrpl-rust/src/utils/txn_parser/utils/parser.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 417,
+        "path": "vendor/xrpl-rust/src/utils/xrpl_conversion.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 12,
+        "path": "vendor/xrpl-rust/src/wallet/exceptions.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 30,
+        "path": "vendor/xrpl-rust/src/wallet/faucet_generation.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 153,
+        "path": "vendor/xrpl-rust/src/wallet/mod.rs"
       }
     ]
   },
@@ -303,13 +2183,56 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T09:13:54.714Z",
+  "generatedAt": "2026-11-14T10:22:50.681Z",
   "generatedFrom": {
-    "commit": "b614ae9c111c25a7093dfb49d9a6bf44984006ed"
+    "commit": "d40880cde0e913f802d8c00494367a083a83cfa4"
   },
-  "pairs": [],
+  "pairs": [
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/page.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/statistics.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/README.md",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/page.json",
+      "b": "atlas/statistics.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/page.json",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    },
+    {
+      "a": "atlas/statistics.json",
+      "b": "atlas/structure.json",
+      "either": 5,
+      "shared": 5,
+      "strength": 1
+    }
+  ],
   "parameters": {
-    "appliedChangesetLimit": 7.25,
+    "appliedChangesetLimit": 50,
     "changeset": 50,
     "changesetFraction": 0.25,
     "cohesionDrop": 0.2,
@@ -318,16 +2241,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T03:47:42-05:00",
-    "inScopeFiles": 29,
+    "headDate": "2026-11-14T04:31:54-05:00",
+    "inScopeFiles": 412,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 6,
+    "qualifyingCommits": 11,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T08:47:42.000Z",
+    "since": "2026-05-18T09:31:54.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

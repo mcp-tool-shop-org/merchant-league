@@ -1,0 +1,659 @@
+pub mod exceptions;
+mod submit_and_wait;
+
+use bigdecimal::{BigDecimal, RoundingMode};
+pub use submit_and_wait::*;
+
+// `sign` lives in `crate::signing` (pure crypto, no async client required).
+// Re-exported here for backward compatibility.
+pub use crate::signing::sign;
+
+use crate::{
+    asynch::{
+        account::get_next_valid_seq_number,
+        clients::{CommonFields, XRPLAsyncClient},
+        ledger::{get_fee, get_latest_validated_ledger_sequence},
+        transaction::exceptions::XRPLSignTransactionException,
+    },
+    core::binarycodec::encode,
+    models::{
+        requests::{server_state::ServerState, submit::Submit},
+        results::{server_state::ServerState as ServerStateResult, submit::Submit as SubmitResult},
+        transactions::{Transaction, TransactionType},
+        Model, XRPAmount, XRPLModelException,
+    },
+    wallet::Wallet,
+};
+
+use alloc::borrow::Cow;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::convert::TryInto;
+use core::fmt::Debug;
+use exceptions::XRPLTransactionHelperException;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use strum::IntoEnumIterator;
+
+use super::exceptions::XRPLHelperResult;
+
+const OWNER_RESERVE: &str = "2000000"; // 2 XRP
+const RESTRICTED_NETWORKS: u16 = 1024;
+const REQUIRED_NETWORKID_VERSION: &str = "1.11.0";
+const LEDGER_OFFSET: u8 = 20;
+/// ConfidentialMPT transactions pay 10× the reference base fee, covering the
+/// cost of verifying the transaction's zero-knowledge proof. rippled computes
+/// this *additively* — `base + base × kConfidentialFeeMultiplier` with
+/// `kConfidentialFeeMultiplier = 9`, for a total of `10 × base`. This constant
+/// names that total (10), so it is applied multiplicatively here; the on-ledger
+/// result is identical.
+const CONFIDENTIAL_MPT_FEE_MULTIPLIER: u64 = 10;
+
+pub async fn sign_and_submit<'a, 'b, T, F, C>(
+    transaction: &mut T,
+    client: &'b C,
+    wallet: &Wallet,
+    autofill: bool,
+    check_fee: bool,
+) -> XRPLHelperResult<SubmitResult<'a>>
+where
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    T: Transaction<'a, F> + Model + Serialize + DeserializeOwned + Clone + Debug,
+    C: XRPLAsyncClient,
+{
+    if autofill {
+        autofill_and_sign(transaction, client, wallet, check_fee).await?;
+    } else {
+        if check_fee {
+            check_txn_fee(transaction, client).await?;
+        }
+        sign(transaction, wallet, false)?;
+    }
+    submit(transaction, client).await
+}
+
+pub async fn autofill<'a, 'b, F, T, C>(
+    transaction: &mut T,
+    client: &'b C,
+    signers_count: Option<u8>,
+) -> XRPLHelperResult<()>
+where
+    T: Transaction<'a, F> + Model + Clone,
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    C: XRPLAsyncClient,
+{
+    let txn = transaction.clone();
+    let txn_common_fields = transaction.get_mut_common_fields();
+    let common_fields = client.get_common_fields().await?;
+    if txn_common_fields.network_id.is_none() && txn_needs_network_id(common_fields.clone())? {
+        txn_common_fields.network_id = common_fields.network_id;
+    }
+    if txn_common_fields.sequence.is_none() {
+        txn_common_fields.sequence =
+            Some(get_next_valid_seq_number(txn_common_fields.account.clone(), client, None).await?);
+    }
+    if txn_common_fields.fee.is_none() {
+        txn_common_fields.fee =
+            Some(calculate_fee_per_transaction_type(&txn, Some(client), signers_count).await?);
+    }
+    if txn_common_fields.last_ledger_sequence.is_none() {
+        let ledger_sequence = get_latest_validated_ledger_sequence(client).await?;
+        txn_common_fields.last_ledger_sequence = Some(ledger_sequence + LEDGER_OFFSET as u32);
+    }
+
+    Ok(())
+}
+
+pub async fn autofill_and_sign<'a, 'b, T, F, C>(
+    transaction: &mut T,
+    client: &'b C,
+    wallet: &Wallet,
+    check_fee: bool,
+) -> XRPLHelperResult<()>
+where
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    T: Transaction<'a, F> + Model + Serialize + DeserializeOwned + Clone + Debug,
+    C: XRPLAsyncClient,
+{
+    if check_fee {
+        check_txn_fee(transaction, client).await?;
+    }
+    autofill(transaction, client, None).await?;
+    sign(transaction, wallet, false)?;
+
+    Ok(())
+}
+
+pub async fn submit<'a, T, F, C>(transaction: &T, client: &C) -> XRPLHelperResult<SubmitResult<'a>>
+where
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    T: Transaction<'a, F> + Model + Serialize + DeserializeOwned + Clone + Debug,
+    C: XRPLAsyncClient,
+{
+    transaction.validate()?;
+    let txn_blob = encode(transaction)?;
+    let req = Submit::new(None, txn_blob.into(), None);
+    let res = client.request(req.into()).await?;
+
+    Ok(res.try_into()?)
+}
+
+pub async fn calculate_fee_per_transaction_type<'a, 'b, 'c, T, F, C>(
+    transaction: &T,
+    client: Option<&'b C>,
+    signers_count: Option<u8>,
+) -> XRPLHelperResult<XRPAmount<'c>>
+where
+    T: Transaction<'a, F>,
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    C: XRPLAsyncClient,
+{
+    let mut net_fee = XRPAmount::from("10");
+    let base_fee;
+    if let Some(client) = client {
+        net_fee = get_fee(client, None, None).await?;
+        base_fee = match transaction.get_transaction_type() {
+            TransactionType::EscrowFinish => calculate_base_fee_for_escrow_finish(
+                net_fee.clone(),
+                transaction
+                    .get_field_value("fulfillment")?
+                    .map(|fulfillment| fulfillment.into()),
+            )?,
+            TransactionType::AMMCreate | TransactionType::AccountDelete => {
+                get_owner_reserve_from_response(client).await?
+            }
+            TransactionType::ConfidentialMPTConvert
+            | TransactionType::ConfidentialMPTConvertBack
+            | TransactionType::ConfidentialMPTSend
+            | TransactionType::ConfidentialMPTClawback
+            | TransactionType::ConfidentialMPTMergeInbox => {
+                calculate_base_fee_for_confidential_mpt(net_fee.clone())?
+            }
+            _ => net_fee.clone(),
+        };
+    } else {
+        base_fee = match transaction.get_transaction_type() {
+            TransactionType::EscrowFinish => calculate_base_fee_for_escrow_finish(
+                net_fee.clone(),
+                transaction
+                    .get_field_value("fulfillment")?
+                    .map(|fulfillment| fulfillment.into()),
+            )?,
+            TransactionType::AMMCreate | TransactionType::AccountDelete => {
+                XRPAmount::from(OWNER_RESERVE)
+            }
+            TransactionType::ConfidentialMPTConvert
+            | TransactionType::ConfidentialMPTConvertBack
+            | TransactionType::ConfidentialMPTSend
+            | TransactionType::ConfidentialMPTClawback
+            | TransactionType::ConfidentialMPTMergeInbox => {
+                calculate_base_fee_for_confidential_mpt(net_fee.clone())?
+            }
+            _ => net_fee.clone(),
+        };
+    }
+    let mut base_fee_decimal: BigDecimal = base_fee.try_into()?;
+    if let Some(signers_count) = signers_count {
+        // rippled charges one extra reference base fee per signer on top of the
+        // transaction's own base cost (Transactor::calculateBaseFee:
+        // `base + signerCount * base`). base_fee already includes the reference
+        // "1", so add only `signers_count` more — NOT `1 + signers_count`, which
+        // would double-count the reference fee and overcharge by one base fee.
+        let net_fee_decimal: BigDecimal = net_fee.try_into()?;
+        let signer_count_fee_decimal: BigDecimal = signers_count.into();
+        base_fee_decimal += &(net_fee_decimal * signer_count_fee_decimal);
+    }
+
+    Ok(base_fee_decimal
+        .with_scale_round(0, RoundingMode::Down)
+        .into())
+}
+
+async fn get_owner_reserve_from_response(
+    client: &impl XRPLAsyncClient,
+) -> XRPLHelperResult<XRPAmount<'_>> {
+    let owner_reserve_response = client.request(ServerState::new(None).into()).await?;
+    let result: ServerStateResult = owner_reserve_response.try_into()?;
+    match result.state.validated_ledger {
+        Some(validated_ledger) => Ok(validated_ledger.reserve_base),
+        None => Err(XRPLModelException::MissingField("validated_ledger".to_string()).into()),
+    }
+}
+
+fn calculate_base_fee_for_escrow_finish<'a: 'b, 'b>(
+    net_fee: XRPAmount<'a>,
+    fulfillment: Option<Cow<str>>,
+) -> XRPLHelperResult<XRPAmount<'b>> {
+    if let Some(fulfillment) = fulfillment {
+        calculate_based_on_fulfillment(fulfillment, net_fee)
+    } else {
+        Ok(net_fee)
+    }
+}
+
+fn calculate_based_on_fulfillment<'a>(
+    fulfillment: Cow<str>,
+    net_fee: XRPAmount<'_>,
+) -> XRPLHelperResult<XRPAmount<'a>> {
+    let fulfillment_bytes: Vec<u8> = fulfillment.chars().map(|c| c as u8).collect();
+    let net_fee_f64: f64 = net_fee.try_into()?;
+    let base_fee_string =
+        (net_fee_f64 * (33.0 + (fulfillment_bytes.len() as f64 / 16.0))).to_string();
+    let base_fee: XRPAmount = base_fee_string.into();
+    let base_fee_decimal: BigDecimal = base_fee.try_into()?;
+
+    Ok(base_fee_decimal
+        .with_scale_round(0, RoundingMode::Down)
+        .into())
+}
+
+/// ConfidentialMPT transactions pay [`CONFIDENTIAL_MPT_FEE_MULTIPLIER`]× the
+/// reference base fee (rippled's `kCONFIDENTIAL_FEE_MULTIPLIER`), reflecting the
+/// cost of verifying the transaction's zero-knowledge proof.
+fn calculate_base_fee_for_confidential_mpt<'a: 'b, 'b>(
+    net_fee: XRPAmount<'a>,
+) -> XRPLHelperResult<XRPAmount<'b>> {
+    let net_fee_decimal: BigDecimal = net_fee.try_into()?;
+    let base_fee_decimal = net_fee_decimal * BigDecimal::from(CONFIDENTIAL_MPT_FEE_MULTIPLIER);
+    Ok(base_fee_decimal
+        .with_scale_round(0, RoundingMode::Down)
+        .into())
+}
+
+fn txn_needs_network_id(common_fields: CommonFields<'_>) -> XRPLHelperResult<bool> {
+    let is_higher_restricted_networks = if let Some(network_id) = common_fields.network_id {
+        network_id > RESTRICTED_NETWORKS as u32
+    } else {
+        false
+    };
+    if let Some(build_version) = common_fields.build_version {
+        match is_not_later_rippled_version(REQUIRED_NETWORKID_VERSION.into(), build_version.into())
+        {
+            Ok(is_not_later_rippled_version) => {
+                Ok(is_higher_restricted_networks && is_not_later_rippled_version)
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        Ok(false)
+    }
+}
+
+fn is_not_later_rippled_version(source: String, target: String) -> XRPLHelperResult<bool> {
+    if source == target {
+        Ok(true)
+    } else {
+        let source_decomp = source
+            .split('.')
+            .map(|i| i.to_string())
+            .collect::<Vec<String>>();
+        let target_decomp = target
+            .split('.')
+            .map(|i| i.to_string())
+            .collect::<Vec<String>>();
+        let (source_major, source_minor) = (
+            source_decomp[0]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?,
+            source_decomp[1]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?,
+        );
+        let (target_major, target_minor) = (
+            target_decomp[0]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?,
+            target_decomp[1]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?,
+        );
+        if source_major != target_major {
+            Ok(source_major < target_major)
+        } else if source_minor != target_minor {
+            Ok(source_minor < target_minor)
+        } else {
+            let source_patch = source_decomp[2]
+                .split('-')
+                .map(|i| i.to_string())
+                .collect::<Vec<String>>();
+            let target_patch = target_decomp[2]
+                .split('-')
+                .map(|i| i.to_string())
+                .collect::<Vec<String>>();
+            let source_patch_version = source_patch[0]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?;
+            let target_patch_version = target_patch[0]
+                .parse::<u8>()
+                .map_err(XRPLTransactionHelperException::ParseRippledVersionError)?;
+            if source_patch_version != target_patch_version {
+                Ok(source_patch_version < target_patch_version)
+            } else if source_patch.len() != target_patch.len() {
+                Ok(source_patch.len() < target_patch.len())
+            } else if source_patch.len() == 2 {
+                if source_patch[1].chars().next().ok_or(
+                    XRPLTransactionHelperException::InvalidRippledVersion(
+                        "source patch version".into(),
+                    ),
+                )? != target_patch[1].chars().next().ok_or(
+                    XRPLTransactionHelperException::InvalidRippledVersion(
+                        "target patch version".into(),
+                    ),
+                )? {
+                    Ok(source_patch[1] < target_patch[1])
+                } else if source_patch[1].starts_with('b') {
+                    Ok(source_patch[1][1..] < target_patch[1][1..])
+                } else {
+                    Ok(source_patch[1][2..] < target_patch[1][2..])
+                }
+            } else {
+                Ok(false)
+            }
+        }
+    }
+}
+
+async fn check_txn_fee<'a, 'b, T, F, C>(transaction: &mut T, client: &'b C) -> XRPLHelperResult<()>
+where
+    F: IntoEnumIterator + Serialize + Debug + PartialEq,
+    T: Transaction<'a, F> + Model + Serialize + DeserializeOwned + Clone,
+    C: XRPLAsyncClient,
+{
+    // max of xrp_to_drops(0.1) and calculate_fee_per_transaction_type
+    let expected_fee = XRPAmount::from("100000")
+        .max(calculate_fee_per_transaction_type(transaction, Some(client), None).await?);
+    let transaction_fee = transaction
+        .get_common_fields()
+        .fee
+        .clone()
+        .unwrap_or(XRPAmount::from("0"));
+    if transaction_fee > expected_fee {
+        Err(XRPLSignTransactionException::FeeTooHigh(transaction_fee.to_string()).into())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "websocket", feature = "std", feature = "integration"))]
+#[cfg(test)]
+mod test_autofill {
+    use super::autofill;
+    use crate::{
+        asynch::{
+            clients::{AsyncWebSocketClient, SingleExecutorMutex},
+            exceptions::XRPLHelperResult,
+        },
+        models::{
+            transactions::{offer_create::OfferCreate, Transaction},
+            IssuedCurrencyAmount, XRPAmount,
+        },
+    };
+
+    #[tokio::test]
+    async fn test_autofill_txn() -> XRPLHelperResult<()> {
+        let ws_url = std::env::var("XRPL_WS_URL")
+            .unwrap_or_else(|_| "wss://s.altnet.rippletest.net:51233/".to_string());
+
+        let account = if ws_url.contains("localhost") || ws_url.contains("127.0.0.1") {
+            "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+        } else {
+            "r9mhdWo1NXVZr2pDnCtC1xwxE85kFtSzYR"
+        };
+
+        let mut txn = OfferCreate::new(
+            account.into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            XRPAmount::from("1000000").into(),
+            IssuedCurrencyAmount::new(
+                "USD".into(),
+                "rhub8VRN55s94qWKDv6jmDy1pUykJzF3wq".into(),
+                "0.3".into(),
+            )
+            .into(),
+            None,
+            None,
+        );
+        let open_result =
+            AsyncWebSocketClient::<SingleExecutorMutex, _>::open(ws_url.parse().unwrap()).await;
+        let client = match open_result {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = e.to_string();
+                if crate::utils::testing::is_known_network_error(&msg) {
+                    return Ok(());
+                }
+                return Err(e.into());
+            }
+        };
+        let fill_result = autofill(&mut txn, &client, None).await;
+        if let Err(ref e) = fill_result {
+            let msg = e.to_string();
+            if crate::utils::testing::is_known_network_error(&msg) {
+                return Ok(());
+            }
+        }
+        fill_result?;
+
+        assert!(txn.get_common_fields().network_id.is_none());
+        assert!(txn.get_common_fields().sequence.is_some());
+        assert!(txn.get_common_fields().fee.is_some());
+        assert!(txn.get_common_fields().last_ledger_sequence.is_some());
+
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "json-rpc", feature = "std"))]
+#[cfg(test)]
+mod test_sign {
+    use alloc::borrow::Cow;
+
+    use crate::{
+        asynch::{
+            clients::AsyncJsonRpcClient,
+            transaction::{autofill_and_sign, sign},
+            wallet::generate_faucet_wallet,
+        },
+        handle_test_result,
+        models::transactions::{
+            account_set::AccountSet, CommonFields, Transaction, TransactionType,
+        },
+        utils::testing::{
+            assertions, test_constants, test_network_operation, test_wallets, TestTimeouts,
+        },
+    };
+
+    #[test]
+    fn test_sign() {
+        let wallet = test_wallets::create_test_wallet_unwrap();
+        let mut tx = AccountSet {
+            common_fields: CommonFields::from_account(&wallet.classic_address)
+                .with_transaction_type(TransactionType::AccountSet)
+                .with_fee("10".into())
+                .with_sequence(227234),
+            domain: Some(test_constants::EXAMPLE_COM_HEX.into()),
+            ..Default::default()
+        };
+
+        sign(&mut tx, &wallet, false).unwrap();
+
+        let expected_signature: Cow<str> =
+            "C3F435CFBFAE996FE297F3A71BEAB68FF5322CBF039E41A9615BC48A59FB4EC\
+            5A55F8D4EC0225D47056E02ECCCDF7E8FF5F8B7FAA1EBBCBF7D0491FCB2D98807"
+                .into();
+        let actual_signature = tx.get_common_fields().txn_signature.as_ref().unwrap();
+        assert_eq!(expected_signature, *actual_signature);
+
+        assertions::assert_transaction_signed(&tx);
+    }
+
+    #[test]
+    fn test_multisign() {
+        let wallet = test_wallets::create_test_wallet_unwrap();
+        let mut tx = AccountSet {
+            common_fields: CommonFields::from_account(&wallet.classic_address)
+                .with_transaction_type(TransactionType::AccountSet)
+                .with_fee("10".into())
+                .with_sequence(227234),
+            domain: Some(test_constants::EXAMPLE_COM_HEX.into()),
+            ..Default::default()
+        };
+
+        sign(&mut tx, &wallet, true).unwrap();
+        assertions::assert_transaction_multisigned(&tx);
+    }
+
+    #[cfg(feature = "integration")]
+    #[tokio::test]
+    async fn test_autofill_and_sign() {
+        let client = AsyncJsonRpcClient::connect(test_constants::TESTNET_URL.parse().unwrap());
+        let wallet_result = test_network_operation(
+            generate_faucet_wallet(&client, None, None, None, None),
+            TestTimeouts::FAUCET,
+            "faucet wallet generation for autofill test",
+        )
+        .await;
+
+        let wallet =
+            handle_test_result!(wallet_result, "test_autofill_and_sign - wallet generation");
+        let mut tx = AccountSet {
+            common_fields: CommonFields::from_account(&wallet.classic_address)
+                .with_transaction_type(TransactionType::AccountSet),
+            domain: Some(test_constants::EXAMPLE_COM_HEX.into()),
+            ..Default::default()
+        };
+
+        // Try autofill_and_sign with timeout and error handling
+        let autofill_result = test_network_operation(
+            autofill_and_sign(&mut tx, &client, &wallet, true),
+            TestTimeouts::NETWORK,
+            "autofill and sign",
+        )
+        .await;
+
+        handle_test_result!(
+            autofill_result,
+            "test_autofill_and_sign - autofill operation"
+        );
+
+        // Verify the transaction was properly filled and signed
+        assertions::assert_transaction_autofilled(&tx);
+        assertions::assert_transaction_signed(&tx);
+    }
+
+    #[test]
+    fn test_transaction_creation() {
+        // Test the transaction builder pattern without network calls
+        let wallet = test_wallets::create_test_wallet_unwrap();
+        let tx = AccountSet {
+            common_fields: CommonFields::from_account(&wallet.classic_address)
+                .with_transaction_type(TransactionType::AccountSet)
+                .with_fee("12".into())
+                .with_sequence(100),
+            domain: Some(test_constants::EXAMPLE_COM_HEX.into()),
+            ..Default::default()
+        };
+
+        assert_eq!(tx.common_fields.account, wallet.classic_address);
+        assert_eq!(
+            tx.common_fields.transaction_type,
+            TransactionType::AccountSet
+        );
+        assert_eq!(tx.common_fields.fee, Some("12".into()));
+        assert_eq!(tx.common_fields.sequence, Some(100));
+        assert_eq!(tx.domain, Some(test_constants::EXAMPLE_COM_HEX.into()));
+
+        // Test that we can get common fields
+        let common_fields = tx.get_common_fields();
+        assert_eq!(common_fields.account, wallet.classic_address);
+        assert!(!common_fields.is_signed()); // Should not be signed yet
+    }
+}
+
+#[cfg(all(feature = "json-rpc", feature = "std"))]
+#[cfg(test)]
+mod test_calculate_fee {
+    use super::calculate_base_fee_for_confidential_mpt;
+    use crate::models::XRPAmount;
+
+    #[test]
+    fn confidential_mpt_base_fee_is_ten_times_base() {
+        let fee = calculate_base_fee_for_confidential_mpt(XRPAmount::from("200")).unwrap();
+        assert_eq!(fee, XRPAmount::from("2000"));
+    }
+}
+
+// Autofill flow for every ConfidentialMPT transaction (akin to `test_autofill`'s
+// OfferCreate test). These tests use `AsyncJsonRpcClient` against `localhost:5005`. They
+// assert autofill populates the common fields and applies the 10× cMPT fee.
+#[cfg(all(
+    feature = "json-rpc",
+    feature = "std",
+    feature = "integration",
+    feature = "confidential-mpt"
+))]
+#[cfg(test)]
+mod test_autofill_confidential_mpt {
+    use super::autofill;
+    use crate::asynch::clients::AsyncJsonRpcClient;
+    use crate::models::transactions::{
+        confidential_mpt_clawback::ConfidentialMPTClawback,
+        confidential_mpt_convert::ConfidentialMPTConvert,
+        confidential_mpt_convert_back::ConfidentialMPTConvertBack,
+        confidential_mpt_merge_inbox::ConfidentialMPTMergeInbox,
+        confidential_mpt_send::ConfidentialMPTSend, CommonFields, Transaction, TransactionType,
+    };
+    use crate::models::XRPAmount;
+
+    // Genesis account on the standalone node — exists + funded, so autofill can
+    // resolve its sequence. autofill never submits, so each transaction's
+    // cMPT-specific fields are left at their defaults.
+    const GENESIS: &str = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
+    const STANDALONE_URL: &str = "http://localhost:5005";
+
+    // Each ConfidentialMPT transaction autofills to 10× the reference base fee
+    // (rippled's kCONFIDENTIAL_FEE_MULTIPLIER); the node's 200-drop base → 2000,
+    // alongside an autofilled sequence + last_ledger_sequence.
+    macro_rules! autofill_fee_test {
+        ($name:ident, $ty:ident) => {
+            #[tokio::test]
+            async fn $name() {
+                let mut tx = $ty {
+                    common_fields: CommonFields {
+                        account: GENESIS.into(),
+                        transaction_type: TransactionType::$ty,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let client = AsyncJsonRpcClient::connect(STANDALONE_URL.parse().unwrap());
+                autofill(&mut tx, &client, None)
+                    .await
+                    .expect("autofill should populate the common fields");
+
+                let common = tx.get_common_fields();
+                assert!(common.sequence.is_some(), "autofill should set sequence");
+                assert!(
+                    common.last_ledger_sequence.is_some(),
+                    "autofill should set last_ledger_sequence"
+                );
+                assert_eq!(common.fee, Some(XRPAmount::from("2000")));
+            }
+        };
+    }
+
+    autofill_fee_test!(merge_inbox_autofill, ConfidentialMPTMergeInbox);
+    autofill_fee_test!(convert_autofill, ConfidentialMPTConvert);
+    autofill_fee_test!(convert_back_autofill, ConfidentialMPTConvertBack);
+    autofill_fee_test!(send_autofill, ConfidentialMPTSend);
+    autofill_fee_test!(clawback_autofill, ConfidentialMPTClawback);
+}

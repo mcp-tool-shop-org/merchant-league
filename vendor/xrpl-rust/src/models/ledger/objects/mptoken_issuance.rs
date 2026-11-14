@@ -1,0 +1,409 @@
+use alloc::borrow::Cow;
+use core::convert::TryFrom;
+
+use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde_with::skip_serializing_none;
+use strum_macros::{AsRefStr, Display, EnumIter};
+
+use crate::_serde::opt_lgr_obj_flags;
+use crate::models::{
+    ledger::objects::LedgerEntryType, FlagCollection, Model, XRPLModelException, XRPLModelResult,
+};
+
+use super::{CommonFields, LedgerObject};
+
+/// Flags that describe the persistent state of an `MPTokenIssuance` ledger object.
+///
+/// See MPTokenIssuance flags:
+/// `<https://xrpl.org/docs/references/protocol/ledger-data/ledger-entry-types/mptokenissuance>`
+#[derive(
+    Debug, Eq, PartialEq, Clone, Serialize_repr, Deserialize_repr, Display, AsRefStr, EnumIter,
+)]
+#[repr(u32)]
+pub enum MPTokenIssuanceFlag {
+    /// The issuance is currently locked.
+    LsfMPTLocked = 0x00000001,
+    /// The issuer can lock individual holders or the entire issuance.
+    LsfMPTCanLock = 0x00000002,
+    /// Individual holders must be authorized before they can hold this token.
+    LsfMPTRequireAuth = 0x00000004,
+    /// This MPT can be held in escrow.
+    LsfMPTCanEscrow = 0x00000008,
+    /// This MPT can be traded on the DEX.
+    LsfMPTCanTrade = 0x00000010,
+    /// This MPT can be transferred between accounts (other than issuer ↔ holder).
+    LsfMPTCanTransfer = 0x00000020,
+    /// The issuer can claw back tokens from holders.
+    LsfMPTCanClawback = 0x00000040,
+    /// This MPT can hold confidential balances (XLS-0096). Must be set for any
+    /// `ConfidentialMPT*` transaction against this issuance to succeed.
+    LsfMPTCanHoldConfidentialBalance = 0x00000080,
+}
+
+impl TryFrom<u32> for MPTokenIssuanceFlag {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0x00000001 => Ok(MPTokenIssuanceFlag::LsfMPTLocked),
+            0x00000002 => Ok(MPTokenIssuanceFlag::LsfMPTCanLock),
+            0x00000004 => Ok(MPTokenIssuanceFlag::LsfMPTRequireAuth),
+            0x00000008 => Ok(MPTokenIssuanceFlag::LsfMPTCanEscrow),
+            0x00000010 => Ok(MPTokenIssuanceFlag::LsfMPTCanTrade),
+            0x00000020 => Ok(MPTokenIssuanceFlag::LsfMPTCanTransfer),
+            0x00000040 => Ok(MPTokenIssuanceFlag::LsfMPTCanClawback),
+            0x00000080 => Ok(MPTokenIssuanceFlag::LsfMPTCanHoldConfidentialBalance),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Immutable-flags bitmask stored in `sfImmutableFlags` on an `MPTokenIssuance` ledger object.
+/// Each bit indicates that the corresponding field or capability flag has been permanently locked
+/// and can no longer be modified via `MPTokenIssuanceSet`. Bits are monotonic — once set they can
+/// never be cleared.
+///
+/// See MPTokenIssuanceImmutable flags (XLS-94D / rippled `LedgerFormats.h`).
+#[derive(
+    Debug, Eq, PartialEq, Clone, Serialize_repr, Deserialize_repr, Display, AsRefStr, EnumIter,
+)]
+#[repr(u32)]
+pub enum MPTokenIssuanceImmutableFlag {
+    /// The `lsfMPTCanLock` flag is permanently immutable.
+    LsifMPTCanLock = 0x00000002,
+    /// The `lsfMPTRequireAuth` flag is permanently immutable.
+    LsifMPTRequireAuth = 0x00000004,
+    /// The `lsfMPTCanEscrow` flag is permanently immutable.
+    LsifMPTCanEscrow = 0x00000008,
+    /// The `lsfMPTCanTrade` flag is permanently immutable.
+    LsifMPTCanTrade = 0x00000010,
+    /// The `lsfMPTCanTransfer` flag is permanently immutable.
+    LsifMPTCanTransfer = 0x00000020,
+    /// The `lsfMPTCanClawback` flag is permanently immutable.
+    LsifMPTCanClawback = 0x00000040,
+    /// The `lsfMPTCanHoldConfidentialBalance` flag is permanently immutable (XLS-96).
+    LsifMPTCanHoldConfidentialBalance = 0x00000080,
+    /// The `MPTokenMetadata` field is permanently immutable.
+    LsifMPTMetadata = 0x00010000,
+    /// The `TransferFee` field is permanently immutable.
+    LsifMPTTransferFee = 0x00020000,
+}
+
+impl TryFrom<u32> for MPTokenIssuanceImmutableFlag {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0x00000002 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanLock),
+            0x00000004 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTRequireAuth),
+            0x00000008 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanEscrow),
+            0x00000010 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanTrade),
+            0x00000020 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanTransfer),
+            0x00000040 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanClawback),
+            0x00000080 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTCanHoldConfidentialBalance),
+            0x00010000 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTMetadata),
+            0x00020000 => Ok(MPTokenIssuanceImmutableFlag::LsifMPTTransferFee),
+            _ => Err(()),
+        }
+    }
+}
+
+/// The `MPTokenIssuance` ledger object defines the properties and metadata of
+/// a Multi-Purpose Token issuance on the XRP Ledger.
+///
+/// `<https://xrpl.org/docs/references/protocol/ledger-data/ledger-entry-types/mptokenissuance>`
+#[skip_serializing_none]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct MPTokenIssuance<'a> {
+    /// The base fields for all ledger object models.
+    #[serde(flatten)]
+    pub common_fields: CommonFields<'a, MPTokenIssuanceFlag>,
+    /// The account that issued this MPT.
+    pub issuer: Cow<'a, str>,
+    /// An asset scale is the difference, in terms of orders of magnitude,
+    /// between a standard unit and a corresponding fractional unit. The
+    /// asset scale is a non-negative integer (0, 1, 2, ...) and defaults
+    /// to 0.
+    pub asset_scale: Option<u8>,
+    /// The maximum number of MPTs that can exist at one time. If omitted,
+    /// the maximum is currently limited to 2^63-1.
+    pub maximum_amount: Option<Cow<'a, str>>,
+    /// The total amount of MPTs of this issuance currently in circulation.
+    /// This value increases when the issuer sends MPTs to a non-issuer, and
+    /// decreases whenever the issuer receives MPTs.
+    pub outstanding_amount: Cow<'a, str>,
+    /// This value specifies the fee, in tenths of a basis point, charged by
+    /// the issuer for secondary sales of the token, from 0 to 50,000
+    /// inclusive (where 50,000 = 50%).
+    pub transfer_fee: Option<u16>,
+    /// Arbitrary metadata about this issuance, in hex format. The limit is
+    /// 1024 bytes.
+    #[serde(rename = "MPTokenMetadata")]
+    pub mptoken_metadata: Option<Cow<'a, str>>,
+    /// The Sequence (or Ticket) number of the transaction that created this
+    /// issuance, helping uniquely identify it.
+    pub sequence: u32,
+    /// A hint indicating which page of the owner directory links to this
+    /// entry.
+    pub owner_node: Option<Cow<'a, str>>,
+    /// The identifying hash of the transaction that most recently modified
+    /// this entry.
+    #[serde(rename = "PreviousTxnID")]
+    pub previous_txn_id: Cow<'a, str>,
+    /// The index of the ledger that contains the transaction that most
+    /// recently modified this object.
+    pub previous_txn_lgr_seq: u32,
+    /// Bitmask of fields and capability flags that have been permanently locked.
+    /// Stored as `sfImmutableFlags` on-ledger. Absent means nothing is permanently locked.
+    /// Bits are monotonic — once set they can never be cleared.
+    #[serde(
+        default,
+        rename = "ImmutableFlags",
+        with = "opt_lgr_obj_flags",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub immutable_flags: Option<FlagCollection<MPTokenIssuanceImmutableFlag>>,
+    /// The total amount of this MPT currently locked in escrow or by other
+    /// mechanisms across all holders. Present only when the TokenEscrow
+    /// amendment is active.
+    pub locked_amount: Option<Cow<'a, str>>,
+    /// The issuer's 33-byte compressed EC-ElGamal public key, used to mirror
+    /// every holder's confidential balance (XLS-0096). Registered via
+    /// `MPTokenIssuanceSet`; its presence is what enables confidential
+    /// participation for this issuance.
+    pub issuer_encryption_key: Option<Cow<'a, str>>,
+    /// An optional auditor's 33-byte compressed EC-ElGamal public key for
+    /// regulatory oversight. When present, every confidential transaction must
+    /// carry a matching `AuditorEncryptedAmount`.
+    pub auditor_encryption_key: Option<Cow<'a, str>>,
+    /// `COA` — the plaintext total of this issuance currently held in
+    /// confidential form. Maintained in the clear alongside
+    /// `OutstandingAmount`.
+    pub confidential_outstanding_amount: Option<Cow<'a, str>>,
+}
+
+impl<'a> Model for MPTokenIssuance<'a> {
+    fn get_errors(&self) -> XRPLModelResult<()> {
+        if self.common_fields.index.is_none() && self.common_fields.ledger_index.is_none() {
+            return Err(XRPLModelException::MissingField(
+                "index or ledger_index".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<'a> LedgerObject<MPTokenIssuanceFlag> for MPTokenIssuance<'a> {
+    fn get_ledger_entry_type(&self) -> LedgerEntryType {
+        self.common_fields.get_ledger_entry_type()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::borrow::Cow;
+    use alloc::vec;
+
+    use crate::models::FlagCollection;
+
+    use super::*;
+    use crate::utils::testing::test_constants::*;
+
+    #[test]
+    fn test_serde() {
+        let issuance = MPTokenIssuance {
+            common_fields: CommonFields {
+                flags: FlagCollection(vec![MPTokenIssuanceFlag::LsfMPTCanTransfer]),
+                ledger_entry_type: LedgerEntryType::MPTokenIssuance,
+                index: Some(Cow::from(
+                    "BFA9BE27383FA315651E26FDE1FA30815C5A5D0544EE10EC33D3E92532993769",
+                )),
+                ledger_index: Some(Cow::from("87654321")),
+            },
+            issuer: ACCOUNT_ISSUER.into(),
+            asset_scale: Some(2),
+            maximum_amount: Some("1000000".into()),
+            outstanding_amount: "500000".into(),
+            transfer_fee: Some(314),
+            mptoken_metadata: Some("CAFEBABE".into()),
+            sequence: 42,
+            owner_node: Some("0".into()),
+            previous_txn_id: "E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879"
+                .into(),
+            previous_txn_lgr_seq: 654321,
+            immutable_flags: Some(FlagCollection(vec![
+                MPTokenIssuanceImmutableFlag::LsifMPTTransferFee,
+            ])),
+            locked_amount: None,
+            issuer_encryption_key: None,
+            auditor_encryption_key: None,
+            confidential_outstanding_amount: None,
+        };
+
+        let serialized = serde_json::to_string(&issuance).unwrap();
+        // ImmutableFlags must serialize as an integer (rippled format), not an array.
+        assert!(
+            serialized.contains("\"ImmutableFlags\":131072"),
+            "ImmutableFlags should serialize as integer 131072, got: {serialized}"
+        );
+        let deserialized: MPTokenIssuance = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(issuance, deserialized);
+    }
+
+    #[test]
+    fn test_ledger_entry_type() {
+        let issuance = MPTokenIssuance {
+            common_fields: CommonFields {
+                flags: FlagCollection(vec![]),
+                ledger_entry_type: LedgerEntryType::MPTokenIssuance,
+                index: Some(Cow::from(
+                    "A44128B79CAB60A1C97A72F5A4B0F43F04ABBE65B8B1C6AC24CF27E6DEA3B2A",
+                )),
+                ledger_index: Some(Cow::from("1000000")),
+            },
+            issuer: ACCOUNT_ISSUER.into(),
+            asset_scale: None,
+            maximum_amount: None,
+            outstanding_amount: "0".into(),
+            transfer_fee: None,
+            mptoken_metadata: None,
+            sequence: 1,
+            owner_node: None,
+            previous_txn_id: "E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879"
+                .into(),
+            previous_txn_lgr_seq: 100,
+            immutable_flags: None,
+            locked_amount: None,
+            issuer_encryption_key: None,
+            auditor_encryption_key: None,
+            confidential_outstanding_amount: None,
+        };
+
+        assert_eq!(
+            issuance.get_ledger_entry_type(),
+            LedgerEntryType::MPTokenIssuance
+        );
+    }
+
+    #[test]
+    fn test_minimal_issuance() {
+        let issuance = MPTokenIssuance {
+            common_fields: CommonFields {
+                flags: FlagCollection(vec![]),
+                ledger_entry_type: LedgerEntryType::MPTokenIssuance,
+                index: None,
+                ledger_index: Some(Cow::from("1000000")),
+            },
+            issuer: ACCOUNT_ISSUER.into(),
+            asset_scale: None,
+            maximum_amount: None,
+            outstanding_amount: "0".into(),
+            transfer_fee: None,
+            mptoken_metadata: None,
+            sequence: 1,
+            owner_node: None,
+            previous_txn_id: "0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            previous_txn_lgr_seq: 0,
+            immutable_flags: None,
+            locked_amount: None,
+            issuer_encryption_key: None,
+            auditor_encryption_key: None,
+            confidential_outstanding_amount: None,
+        };
+
+        assert!(issuance.validate().is_ok());
+    }
+
+    #[test]
+    fn test_missing_index_and_ledger_index_error() {
+        let issuance = MPTokenIssuance {
+            common_fields: CommonFields {
+                flags: FlagCollection(vec![]),
+                ledger_entry_type: LedgerEntryType::MPTokenIssuance,
+                index: None,
+                ledger_index: None,
+            },
+            issuer: ACCOUNT_ISSUER.into(),
+            asset_scale: None,
+            maximum_amount: None,
+            outstanding_amount: "0".into(),
+            transfer_fee: None,
+            mptoken_metadata: None,
+            sequence: 1,
+            owner_node: None,
+            previous_txn_id: "0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            previous_txn_lgr_seq: 0,
+            immutable_flags: None,
+            locked_amount: None,
+            issuer_encryption_key: None,
+            auditor_encryption_key: None,
+            confidential_outstanding_amount: None,
+        };
+
+        assert!(issuance.validate().is_err());
+    }
+
+    #[test]
+    fn test_immutable_flag_variants() {
+        assert!(
+            MPTokenIssuanceImmutableFlag::try_from(0x00020000).is_ok(),
+            "LsifMPTTransferFee should parse"
+        );
+        assert!(
+            MPTokenIssuanceImmutableFlag::try_from(0x00010000).is_ok(),
+            "LsifMPTMetadata should parse"
+        );
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000001).is_err());
+        // cover all remaining match arms
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000002).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000004).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000008).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000010).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000020).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000040).is_ok());
+        assert!(MPTokenIssuanceImmutableFlag::try_from(0x00000080).is_ok());
+    }
+
+    #[test]
+    fn test_issuance_flag_try_from() {
+        assert!(MPTokenIssuanceFlag::try_from(0x00000001).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000002).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000004).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000008).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000010).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000020).is_ok());
+        assert!(MPTokenIssuanceFlag::try_from(0x00000040).is_ok());
+        // XLS-96 CanHoldConfidentialBalance.
+        assert!(MPTokenIssuanceFlag::try_from(0x00000080).is_ok());
+        // An unrecognized flag value still errors.
+        assert!(MPTokenIssuanceFlag::try_from(0x00000100).is_err());
+    }
+
+    /// Regression: sfImmutableFlags is SoeDefault in xrpld — it may be absent from
+    /// server JSON. The `#[serde(default)]` attribute ensures deserialization succeeds
+    /// for any on-ledger MPTokenIssuance that has not set any immutable flags.
+    #[test]
+    fn test_deserialize_without_immutable_flags() {
+        let json = r#"{
+            "Flags": 0,
+            "Issuer": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+            "MPTokenIssuanceID": "00000001A407AF5856CEFBF81F3D4A0000000000A407AF58",
+            "OutstandingAmount": "0",
+            "OwnerNode": "0000000000000000",
+            "PreviousTxnID": "ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+            "PreviousTxnLgrSeq": 1,
+            "Sequence": 1,
+            "LedgerEntryType": "MPTokenIssuance"
+        }"#;
+        let obj: MPTokenIssuance =
+            serde_json::from_str(json).expect("must deserialize without ImmutableFlags key");
+        assert!(
+            obj.immutable_flags.is_none(),
+            "absent ImmutableFlags should deserialize as None"
+        );
+    }
+}

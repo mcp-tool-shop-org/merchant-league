@@ -2,3 +2,4 @@
 .league/
 *.seed
 .env
+vendor/*/target/

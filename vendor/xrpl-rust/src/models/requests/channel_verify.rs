@@ -1,0 +1,82 @@
+use alloc::borrow::Cow;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
+
+use crate::models::{amount::XRPAmount, requests::RequestMethod, Model};
+
+use super::{CommonFields, Request};
+
+/// The channel_verify method checks the validity of a signature
+/// that can be used to redeem a specific amount of XRP from a
+/// payment channel.
+#[skip_serializing_none]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct ChannelVerify<'a> {
+    /// The common fields shared by all requests.
+    #[serde(flatten)]
+    pub common_fields: CommonFields<'a>,
+    /// The amount of XRP, in drops, the provided signature authorizes.
+    pub amount: XRPAmount<'a>,
+    /// The Channel ID of the channel that provides the XRP.
+    /// This is a 64-character hexadecimal string.
+    pub channel_id: Cow<'a, str>,
+    /// The public key of the channel and the key pair that was used to
+    /// create the signature, in hexadecimal or the XRP Ledger's
+    /// base58 format.
+    pub public_key: Cow<'a, str>,
+    /// The signature to verify, in hexadecimal.
+    pub signature: Cow<'a, str>,
+}
+
+impl<'a> Model for ChannelVerify<'a> {}
+
+impl<'a> Request<'a> for ChannelVerify<'a> {
+    fn get_common_fields(&self) -> &CommonFields<'a> {
+        &self.common_fields
+    }
+
+    fn get_common_fields_mut(&mut self) -> &mut CommonFields<'a> {
+        &mut self.common_fields
+    }
+}
+
+impl<'a> ChannelVerify<'a> {
+    pub fn new(
+        id: Option<Cow<'a, str>>,
+        amount: XRPAmount<'a>,
+        channel_id: Cow<'a, str>,
+        public_key: Cow<'a, str>,
+        signature: Cow<'a, str>,
+    ) -> Self {
+        Self {
+            common_fields: CommonFields {
+                command: RequestMethod::ChannelVerify,
+                id,
+            },
+            channel_id,
+            amount,
+            public_key,
+            signature,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serde_round_trip() {
+        let req = ChannelVerify::new(
+            Some("cv-1".into()),
+            "1000000".into(),
+            "5DB01B7FFED6B67E6B0414DED11E051D2EE2B7619CE0EAA6286D67A3A4D5BDB3".into(),
+            "aBQG8RQAzjs1eTKFEAQXr2gS4utcDiEC9wmi7pfUPTi27VCahwgw".into(),
+            "30440220...".into(),
+        );
+        let serialized = serde_json::to_string(&req).unwrap();
+        let deserialized: ChannelVerify = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(req, deserialized);
+        assert!(serialized.contains("\"command\":\"channel_verify\""));
+    }
+}
