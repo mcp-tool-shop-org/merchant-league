@@ -6,7 +6,7 @@
   ],
   "breaks": [
     {
-      "doors": 3,
+      "doors": 4,
       "importedBy": [],
       "importedByTests": [],
       "kind": "part",
@@ -17,29 +17,29 @@
   "changes": {
     "fileCounts": {
       "added": 8,
-      "changed": 1,
+      "changed": 10,
       "moved": 0,
-      "parts": 3,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "testnet_requireauth (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_requireauth.rs.",
+        "sentence": "testnet_escrow_expiry (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_escrow_expiry.rs.",
         "subjects": [
           "crates/league-ledger/Cargo.toml",
-          "crates/league-ledger/examples/testnet_requireauth.rs"
+          "crates/league-ledger/examples/testnet_escrow_expiry.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "8 files added and 1 changed content, across 3 parts.",
+        "sentence": "8 files added and 10 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
-      "generatedAt": "2026-11-14T10:22:50.681Z"
+      "commit": "0cd56ce17f3b0fddeb55f9775dc184097b801eac",
+      "generatedAt": "2026-11-14T10:48:20.069Z"
     },
     "unchanged": false
   },
@@ -48,9 +48,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "0cd56ce17f3b0fddeb55f9775dc184097b801eac",
+  "commit": "606e9b074d331e51c5b7906de02fe42fd780fb60",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (305 files), shell (3), Python (2) and JavaScript (1). Work enters through 4 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [],
@@ -75,7 +75,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 5
+          "files": 6
         },
         {
           "boundary": "league-season",
@@ -106,7 +106,7 @@
         "crates/league-tui/"
       ],
       "runsCount": 10,
-      "runsMore": 9,
+      "runsMore": 10,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -114,6 +114,34 @@
         "on a push to main touching 9 paths",
         "or by hand"
       ]
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "id": "crates/league-ledger/Cargo.toml#testnet_escrow_expiry",
+      "kind": "command",
+      "landings": [],
+      "name": "testnet_escrow_expiry",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "runWith": "cargo run --example testnet_escrow_expiry",
+      "runs": [
+        "crates/league-ledger/examples/testnet_escrow_expiry.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
     },
     {
       "checks": [],
@@ -200,10 +228,10 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T10:48:20.069Z",
+  "generatedAt": "2026-11-14T11:03:44.710Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "4 writes and 2 reads go to a path their caller passes, not to this repository.",
+    "6 writes and 3 reads go to a path their caller passes, not to this repository.",
     "359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
@@ -236,11 +264,11 @@
   "startReason": "This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 19,
+  "testFiles": 20,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
-    "league-ledger": 5,
+    "league-ledger": 6,
     "league-season": 1,
     "league-tui": 1
   },

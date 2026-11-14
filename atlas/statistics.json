@@ -33,7 +33,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "docs",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-ledger",
-      "qualifyingSourceCommits": 6,
+      "qualifyingSourceCommits": 7,
       "rebaseline": null
     },
     {
@@ -198,8 +198,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 10,
-        "lines": 372,
+        "commits": 11,
+        "lines": 399,
         "path": "atlas/README.md"
       },
       {
@@ -208,18 +208,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 10,
-        "lines": 1050,
+        "commits": 11,
+        "lines": 1160,
         "path": "atlas/page.json"
       },
       {
-        "commits": 10,
-        "lines": 5167,
+        "commits": 11,
+        "lines": 6784,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 10,
-        "lines": 19182,
+        "commits": 11,
+        "lines": 19316,
         "path": "atlas/structure.json"
       },
       {
@@ -251,6 +251,11 @@
         "commits": 3,
         "lines": 1266,
         "path": "crates/league-ledger/examples/testnet_proof.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 376,
+        "path": "crates/league-ledger/examples/testnet_requireauth.rs"
       },
       {
         "commits": 5,
@@ -321,6 +326,41 @@
         "commits": 7,
         "lines": 440,
         "path": "docs/design.md"
+      },
+      {
+        "commits": 1,
+        "lines": 61,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 4,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/00_snapshot.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.err"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.exit"
+      },
+      {
+        "commits": 1,
+        "lines": 26,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.out"
+      },
+      {
+        "commits": 1,
+        "lines": 198,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/02_hash_check.json"
+      },
+      {
+        "commits": 1,
+        "lines": 93,
+        "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
       },
       {
         "commits": 2,
@@ -2188,9 +2228,9 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T10:48:20.069Z",
+  "generatedAt": "2026-11-14T11:03:44.710Z",
   "generatedFrom": {
-    "commit": "0cd56ce17f3b0fddeb55f9775dc184097b801eac"
+    "commit": "606e9b074d331e51c5b7906de02fe42fd780fb60"
   },
   "pairs": [
     {
@@ -2203,43 +2243,43 @@
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 6,
-      "shared": 6,
+      "either": 7,
+      "shared": 7,
       "strength": 1
     },
     {
@@ -2260,16 +2300,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T05:30:40-05:00",
-    "inScopeFiles": 412,
+    "headDate": "2026-11-14T05:48:20-05:00",
+    "inScopeFiles": 420,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 17,
+    "qualifyingCommits": 18,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T10:30:40.000Z",
+    "since": "2026-05-18T10:48:20.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

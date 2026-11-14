@@ -72,6 +72,7 @@ pub struct EscrowCreate<'a> {
 impl<'a> Model for EscrowCreate<'a> {
     fn get_errors(&self) -> XRPLModelResult<()> {
         self._get_finish_after_error()?;
+        self._get_expiry_error()?;
         self.validate_currencies()
     }
 }
@@ -166,6 +167,25 @@ impl<'a> EscrowCreate<'a> {
 }
 
 impl<'a> EscrowCreateError for EscrowCreate<'a> {
+    /// rippled's EscrowCreate preflight (3.4.1), for XRP and tokens alike:
+    /// an escrow needs FinishAfter or CancelAfter (`temBAD_EXPIRATION`), and
+    /// one without FinishAfter needs a Condition (`temMALFORMED`), so it
+    /// can't be finished at once.
+    fn _get_expiry_error(&self) -> XRPLModelResult<()> {
+        if self.finish_after.is_none() && self.cancel_after.is_none() {
+            return Err(XRPLModelException::MissingField(
+                "finish_after or cancel_after".into(),
+            ));
+        }
+        if self.finish_after.is_none() && self.condition.is_none() {
+            return Err(XRPLModelException::FieldRequiresField {
+                field1: "cancel_after (without finish_after)".into(),
+                field2: "condition".into(),
+            });
+        }
+        Ok(())
+    }
+
     fn _get_finish_after_error(&self) -> XRPLModelResult<()> {
         if let (Some(finish_after), Some(cancel_after)) = (self.finish_after, self.cancel_after) {
             if finish_after >= cancel_after {
@@ -186,6 +206,7 @@ impl<'a> EscrowCreateError for EscrowCreate<'a> {
 
 pub trait EscrowCreateError {
     fn _get_finish_after_error(&self) -> XRPLModelResult<()>;
+    fn _get_expiry_error(&self) -> XRPLModelResult<()>;
 }
 
 #[cfg(test)]
@@ -283,7 +304,10 @@ mod tests {
         .with_fee("12".into())
         .with_sequence(123);
 
-        assert_eq!(escrow_create.amount, Amount::XRPAmount(XRPAmount::from("10000")));
+        assert_eq!(
+            escrow_create.amount,
+            Amount::XRPAmount(XRPAmount::from("10000"))
+        );
         assert_eq!(
             escrow_create.destination,
             "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW"
@@ -316,13 +340,79 @@ mod tests {
             .into(),
             destination: "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW".into(),
             cancel_after: Some(533257958),
+            finish_after: Some(533171558),
             ..Default::default()
         };
-        let json = r#"{"Account":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn","TransactionType":"EscrowCreate","Flags":0,"Amount":{"currency":"MRK","issuer":"rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW","value":"10"},"Destination":"rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW","CancelAfter":533257958}"#;
+        let json = r#"{"Account":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn","TransactionType":"EscrowCreate","Flags":0,"Amount":{"currency":"MRK","issuer":"rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW","value":"10"},"Destination":"rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW","CancelAfter":533257958,"FinishAfter":533171558}"#;
         let expected: serde_json::Value = serde_json::from_str(json).unwrap();
         assert_eq!(serde_json::to_value(&txn).unwrap(), expected);
         let back: EscrowCreate = serde_json::from_str(json).unwrap();
         assert_eq!(back, txn);
+        assert!(txn.get_errors().is_ok());
+    }
+
+    #[test]
+    fn test_expiry_rules_match_rippled() {
+        use crate::models::amount::IssuedCurrencyAmount;
+
+        let token = |cancel_after, finish_after, condition: Option<&'static str>| EscrowCreate {
+            common_fields: CommonFields {
+                account: "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn".into(),
+                transaction_type: TransactionType::EscrowCreate,
+                ..Default::default()
+            },
+            amount: IssuedCurrencyAmount::new(
+                "MRK".into(),
+                "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW".into(),
+                "5".into(),
+            )
+            .into(),
+            destination: "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW".into(),
+            cancel_after,
+            finish_after,
+            condition: condition.map(Into::into),
+            ..Default::default()
+        };
+        let cond =
+            Some("A0258020E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855810100");
+        // Neither expiry: refused (temBAD_EXPIRATION on the ledger).
+        assert!(token(None, None, cond).get_errors().is_err());
+        // CancelAfter only, no Condition: refused (temMALFORMED).
+        assert!(token(Some(600), None, None).get_errors().is_err());
+        // CancelAfter with a Condition, FinishAfter alone, or both: accepted.
+        assert!(token(Some(600), None, cond).get_errors().is_ok());
+        assert!(token(None, Some(600), None).get_errors().is_ok());
+        assert!(token(Some(700), Some(600), None).get_errors().is_ok());
+        // The same rules hold for XRP.
+        let mut xrp = token(None, None, cond);
+        xrp.amount = XRPAmount::from("1000").into();
+        assert!(xrp.get_errors().is_err());
+        xrp.finish_after = Some(600);
+        assert!(xrp.get_errors().is_ok());
+    }
+
+    #[test]
+    fn test_mpt_escrow_serde() {
+        use crate::models::amount::MPTAmount;
+
+        let id = "00000001A407AF5856CCF3C42619DAA925813FC955C72983";
+        let txn = EscrowCreate {
+            common_fields: CommonFields {
+                account: "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn".into(),
+                transaction_type: TransactionType::EscrowCreate,
+                ..Default::default()
+            },
+            amount: MPTAmount::new("100".into(), id.into()).into(),
+            destination: "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW".into(),
+            finish_after: Some(533171558),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&txn).unwrap();
+        assert_eq!(value["Amount"]["mpt_issuance_id"], id);
+        assert_eq!(value["Amount"]["value"], "100");
+        let back: EscrowCreate = serde_json::from_value(value).unwrap();
+        assert_eq!(back, txn);
+        assert!(matches!(back.amount, Amount::MPTAmount(_)));
         assert!(txn.get_errors().is_ok());
     }
 
@@ -369,7 +459,10 @@ mod tests {
             escrow_create.common_fields.transaction_type,
             TransactionType::EscrowCreate
         );
-        assert_eq!(escrow_create.amount, Amount::XRPAmount(XRPAmount::from("10000")));
+        assert_eq!(
+            escrow_create.amount,
+            Amount::XRPAmount(XRPAmount::from("10000"))
+        );
         assert_eq!(
             escrow_create.destination,
             "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW"

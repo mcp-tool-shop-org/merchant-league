@@ -20,8 +20,14 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
    - `src/core/keypairs/algorithms.rs`: secp256k1 secret-key validation goes through libsecp256k1 (`SecretKey::from_byte_array`), in constant time. This also fixes an off-by-one: the old check accepted a key equal to the curve order. Upstream's test for it is included.
 
    Not taken: the commit's `.cargo/audit.toml`, CI workflow and CHANGELOG edits. Both files were identical at the tag and at the fix's parent (`4d579ffe66`), so the change applied cleanly.
-2. **TokenEscrow:** `EscrowCreate.amount` is a full `Amount`, XRP or a fungible token, where it was `XRPAmount` only. `EscrowCreate::new` takes `impl Into<Amount>`, so code passing an `XRPAmount` keeps compiling. Tests: a token escrow's JSON round trip, and the constructor still taking drops.
-3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated as a 256-bit ledger entry ID (64 hex digits). The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
+2. **TokenEscrow:** `EscrowCreate.amount` is a full `Amount`, XRP or a fungible token, where it was `XRPAmount` only. `EscrowCreate::new` takes `impl Into<Amount>`, so code passing an `XRPAmount` keeps compiling. Tests: a token escrow's JSON round trip, an MPT escrow's, and the constructor still taking drops.
+   - **Expiry rules, as rippled checks them** (`EscrowCreate::preflight`, rippled 3.4.1), the same for XRP and tokens:
+     - `FinishAfter` or `CancelAfter` is required;
+     - without `FinishAfter`, a `Condition` is required;
+     - `CancelAfter` must be after `FinishAfter` (already checked by upstream).
+
+     Measured on the Testnet in `docs/receipts/design-check-escrow-expiry-2026-11-14/`.
+3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.
 
@@ -35,14 +41,18 @@ Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the Domain
 
 - `cargo tree -i crypto-bigint`: no such package in the lock.
 - `cargo audit --deny warnings`: clean, with no ignores.
-- The vendored crate's own tests: 1,279 pass with these features, including the new ones.
+- The vendored crate's own tests: 1,281 pass with these features, including the new ones.
 
 ## Live proof
 
 Both new features were proved on the XRPL Testnet on 2026-11-14 (`docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/`):
 
 - **Token escrow.** It was refused (`tecNO_PERMISSION`) until the issuer set Allow Trust Line Locking, then created and finished.
-- **No `CancelAfter`.** A token escrow without it is refused with `temBAD_EXPIRATION`. xrpl.org's reference doesn't state this rule, so the model doesn't enforce it yet.
+- **Expiry.** A token escrow with a condition and no expiry was refused with `temBAD_EXPIRATION`.
+  - This was first written up as "token escrows need `CancelAfter`", which was wrong.
+  - rippled's rule is general: `FinishAfter` or `CancelAfter`, and a `Condition` without `FinishAfter`.
+  - A token escrow with only `FinishAfter` was accepted live.
+  - The model now checks the general rule.
 - **DomainID.** Domain offers were accepted for credentialed accounts and refused for an outsider. An open-book offer did not cross a domain offer.
 
 The validated transactions are test vectors in `crates/league-ledger/tests/vectors/`.

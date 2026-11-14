@@ -54,7 +54,7 @@ banned=(
   "\b[0-9]+${sep}*(usd|eur|gbp)\b"                                     # 5 USD
   "\b(usd|eur|gbp)${sep}*[0-9]"                                        # USD 5
   "[0-9]${sep}*(dollars?|euros?)\b"                                    # 5 dollars
-  "\b(for|into|to)${sep}+(dollars|euros)\b"                            # sell marks for dollars
+  "\b(for|into|to)${sep}+(dollars|euros|usd|eur|gbp)\b"               # sell marks for dollars, for USD
   # Alternation, not a bracket: where grep reads bytes, a bracket of
   # multi-byte symbols would match any of their bytes, such as the first
   # byte of an ellipsis.
@@ -68,7 +68,7 @@ disclaimer="\b(no|not|never|without)(${sep}+for)?${sep}+real${sep}*money\b"
 # The files: the crates, the docs and the README, less the licence files.
 licence='^crates/(.*/)?(LICENSE|LICENSE\.md|LICENSE\.txt|LICENSE-[^/]+)$'
 all=$( { find crates docs -type f 2>/dev/null; [ -f README.md ] && echo README.md; } | sort)
-skip=$(printf '%s\n' "$all" | grep -E "$licence" | grep -vE '\.rs$' || true)
+skip=$(printf '%s\n' "$all" | grep -E "$licence" | grep -viE '\.rs$' || true)
 files=$(printf '%s\n' "$all" | grep -vxF -e "$skip" -e '' || true)
 [ -z "$skip" ] && files=$all
 # Text files only.

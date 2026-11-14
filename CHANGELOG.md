@@ -29,3 +29,21 @@
   - Test vectors: 12 validated Testnet transactions from M2b and 9 from M2c re-encode to their blobs and hashes. All 39 of xrpl.js's codec fixtures and its ed25519 keypair fixture also pass (ISC notice in `tests/vectors/LICENSE-xrpl.js`, which the copy check skips by exact name).
   - Live Testnet proof: the M2 escrow suite, TokenEscrow and DomainID, all as expected (`docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/`).
   - Coverage 92.95% of lines, floor 90.
+- Ledger follow-ups after Carbon's reviews of #5 and #4.
+  - **Escrow expiry.** The vendored `EscrowCreate` checks rippled's own expiry rules, the same for XRP and tokens: `FinishAfter` or `CancelAfter`, and a `Condition` without `FinishAfter`.
+    - This corrects an earlier reading that token escrows need `CancelAfter`. That reading came from one refused probe; rippled's source and a live probe show the general rule.
+    - The M2c receipt carries a dated correction.
+  - **DomainID:** checked by `PermissionedDomainSet`'s own validator, which also refuses an all-zero ID.
+  - **Tests:**
+    - an MPT escrow round trip;
+    - all 21 validated Testnet transactions parsed into their typed models and re-encoded to the same blob and hash.
+  - **Tripwires (Carbon r2):**
+    - the bare Mainnet hosts, www. and dev. bithomp, and the Devnet explorer;
+    - "for USD";
+    - a case-insensitive `.rs` exception to the licence skip;
+    - near misses for wager and jackpot.
+  - **Design checks on the Testnet**, for PR #6:
+    - RequireAuth, clawback and token escrow work together;
+    - an unauthorized line holds nothing;
+    - clawback doesn't reach escrowed tokens;
+    - the escrow expiry rules.

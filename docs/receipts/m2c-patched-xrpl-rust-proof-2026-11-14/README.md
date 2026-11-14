@@ -65,6 +65,17 @@ Full hashes, sequences and preliminary results are in `raw/01_proof.out`.
    - **The issuer must set Allow Trust Line Locking** (flag 17). Before the flag, a token escrow fails with `tecNO_PERMISSION`, validated.
    - **A token escrow must have `CancelAfter`.** Without it, the server refuses the transaction with `temBAD_EXPIRATION`, and it never reaches a ledger. xrpl.org's EscrowCreate reference doesn't state this; the seed 25 harvest did. The league's escrow bonds will always set `CancelAfter`.
    - The model doesn't enforce `CancelAfter`, because the reference doesn't state the rule. It's a candidate for the upstream offer, as a validation with this receipt as evidence.
+
+   > **Correction, 2026-11-14 (later the same day).** Point 2's second bullet is wrong. The refused probe had a condition and no expiry at all.
+>
+   > rippled 3.4.1's `EscrowCreate::preflight` refuses that for **any** escrow, XRP or token. Its rules:
+>
+   > - an escrow needs `FinishAfter` or `CancelAfter`;
+   > - one without `FinishAfter` needs a condition.
+>
+   > A token escrow doesn't need `CancelAfter`: one with only `FinishAfter` was accepted live. See `docs/receipts/design-check-escrow-expiry-2026-11-14/`.
+>
+   > The bonds still set `CancelAfter`, by design. The vendored model now checks the general rule. This receipt's results stand; only that reading of them was wrong.
 3. **DomainID works, and keeps a domain's market apart.**
    - A credentialed member's offer was accepted in the domain.
    - An account without the credential was refused (`tecNO_PERMISSION`).

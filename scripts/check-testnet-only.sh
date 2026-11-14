@@ -31,11 +31,12 @@ hosts=(
   "\bxrpl\.to\b"
   "\bmainnet\.xrpl-labs\.com\b"
   "\bxrpscan\.com\b"                                        # Mainnet explorers
-  "(^|[^a-z0-9.-])bithomp\.com\b"                           # (test.bithomp.com is the Testnet's)
+  "(^|[^a-z0-9.-])((www|dev)\.)?bithomp\.com\b"             # bare, www. and dev. (test.bithomp.com is the Testnet's)
   "\blivenet\.xrpl\.org\b"
   "\bxrpl\.org/mainnet\b"
   "(https?|wss?)://[^[:space:]\"'<>)]*(mainnet|livenet)"    # any URL that says mainnet or livenet
   "\bdevnet\.rippletest\.net\b"                             # Devnet
+  "\bdevnet\.xrpl\.org\b"                                    # the Devnet explorer
 )
 pattern=$(IFS='|'; echo "${hosts[*]}")
 

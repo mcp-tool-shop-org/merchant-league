@@ -1,24 +1,25 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit 0cd56ce by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit 606e9b0 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-9 parts, mostly Rust (305 files), shell (3), Python (2) and JavaScript (1). Work enters through 4 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (d40880c)
+## What changed since 2026-11-14 (0cd56ce)
 
-- testnet_requireauth (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_requireauth.rs.
-- 8 files added and 1 changed content, across 3 parts.
+- testnet_escrow_expiry (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
+- 8 files added and 10 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 9 more.
-2. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
-3. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
-4. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 10 more.
+2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
+3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
+4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
+5. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
@@ -30,6 +31,8 @@ CI writes nothing in the files this map could read; 1 file could not be.
 
 ## The other doors
 
+**testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`) runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
+
 **testnet_proof** (a command people run with `cargo run --example testnet_proof`) runs crates/league-ledger/examples/testnet_proof.rs.
 
 **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`) runs crates/league-ledger/examples/testnet_requireauth.rs.
@@ -38,7 +41,7 @@ CI writes nothing in the files this map could read; 1 file could not be.
 
 ## What breaks what
 
-- **league-ledger** is imported by no other part and sits on the path of 3 doors.
+- **league-ledger** is imported by no other part and sits on the path of 4 doors.
 
 scripts holds only shell files, which this map does not read, so what uses it cannot be seen.
 
@@ -87,7 +90,7 @@ Read those in order to follow one run of xrpl end to end. This path follows xrpl
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 4 writes and 2 reads go to a path their caller passes, not to this repository.
+- 6 writes and 3 reads go to a path their caller passes, not to this repository.
 - 359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.
 - Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 

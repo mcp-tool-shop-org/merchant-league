@@ -1,0 +1,96 @@
+{
+  "server": {
+    "network_id": 1,
+    "build": "3.4.1"
+  },
+  "checks": [
+    {
+      "step": "issuer_allow_locking",
+      "hash": "434E656132827EC216803ECD2ED64159CBD3CFD5D617ECF05067E8AB265C67F6",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317110,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "issuer_default_ripple",
+      "hash": "5833A94884B08D8B63902927EFCE393F4DFAD306BD6ABED45B310A8950CF99A0",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317112,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "holder_trust",
+      "hash": "7BFE18CA7984D799346474EBCF44AEA669C3CBFF825146F901308A3D7618A0AA",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317114,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "issuer_pays_holder_50",
+      "hash": "17B41A64E90763EE171DDADD96DE030ACECAA9046AFF27CB1D9F941EF4B5278A",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317116,
+      "matches_proof": true,
+      "type": "Payment"
+    },
+    {
+      "step": "xrp_escrow_condition_only",
+      "hash": "0D5E8BBAFFF249B7F25DCB4C718F5CEEC6B9CBF2DCAD27279215BB05E401FFF3",
+      "found": true,
+      "validated": false,
+      "result": null,
+      "ledger_index": null,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "token_escrow_condition_only",
+      "hash": "4EFD824BD85F75FEA3A558D655307048B5323F1BD9C4A131E10ABA428E86416F",
+      "found": false,
+      "validated": null,
+      "result": "txnNotFound",
+      "ledger_index": null,
+      "matches_proof": true
+    },
+    {
+      "step": "token_escrow_cancel_after_only",
+      "hash": "A3C9EC90D075D278425AD59D351D904390C5618C2B835D5118D950A7F79D68F5",
+      "found": false,
+      "validated": null,
+      "result": "txnNotFound",
+      "ledger_index": null,
+      "matches_proof": true
+    },
+    {
+      "step": "token_escrow_finish_after_only",
+      "hash": "10C45308AE0D5CE847CC4F1F5501D859EB98A99293962BB3001ECB995C8E1001",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317140,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "token_escrow_finished_after_finish_after",
+      "hash": "44BE30F874017D1D89BDF3DD727E50B517AC423C57EFF313078A1A2A87A35A7E",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22317148,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    }
+  ]
+}

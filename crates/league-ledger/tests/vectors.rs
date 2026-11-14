@@ -150,3 +150,65 @@ fn the_validated_token_escrow_and_domain_transactions_round_trip() {
     }
     assert_eq!((token_escrows, with_domain), (2, 4));
 }
+
+/// Every validated Testnet transaction (M2b's 12 and M2c's 9), parsed into
+/// xrpl-rust's typed model for its kind and encoded from that model,
+/// reproduces the validated blob and hash. That proves the typed models carry
+/// every signed field, not only the raw JSON. (Carbon's review of #5, item 5.)
+/// Parsed from text, so a borrowed field like `Credential` deserialises.
+#[test]
+fn every_validated_transaction_round_trips_through_its_typed_model() {
+    use xrpl::models::transactions::{
+        account_set::AccountSet, check_cash::CheckCash, check_create::CheckCreate,
+        clawback::Clawback, escrow_create::EscrowCreate, escrow_finish::EscrowFinish,
+        offer_cancel::OfferCancel, offer_create::OfferCreate, payment::Payment,
+        permissioned_domain_set::PermissionedDomainSet, trust_set::TrustSet,
+    };
+
+    fn typed<'a, T: serde::Deserialize<'a> + serde::Serialize>(text: &'a str) -> String {
+        let model: T = serde_json::from_str(text).unwrap_or_else(|e| panic!("{e}: {text}"));
+        encode(&model).unwrap_or_default()
+    }
+
+    let mut seen = 0;
+    for file in [
+        "testnet-spike-2026-11-14.json",
+        "testnet-m2c-2026-11-14.json",
+    ] {
+        let txs = load(file)["transactions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for tx in txs {
+            let mut json = tx["tx_json"].clone();
+            // API v2 returns a Payment's Amount as DeliverMax.
+            if let Some(deliver_max) = json.as_object_mut().and_then(|o| o.remove("DeliverMax")) {
+                json["Amount"] = deliver_max;
+            }
+            let text = json.to_string();
+            let kind = json["TransactionType"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let blob = match kind.as_str() {
+                "AccountSet" => typed::<AccountSet>(&text),
+                "TrustSet" => typed::<TrustSet>(&text),
+                "Payment" => typed::<Payment>(&text),
+                "OfferCreate" => typed::<OfferCreate>(&text),
+                "OfferCancel" => typed::<OfferCancel>(&text),
+                "CheckCreate" => typed::<CheckCreate>(&text),
+                "CheckCash" => typed::<CheckCash>(&text),
+                "EscrowCreate" => typed::<EscrowCreate>(&text),
+                "EscrowFinish" => typed::<EscrowFinish>(&text),
+                "Clawback" => typed::<Clawback>(&text),
+                "PermissionedDomainSet" => typed::<PermissionedDomainSet>(&text),
+                other => panic!("no typed model mapped for {other}"),
+            };
+            assert_eq!(Value::from(blob.clone()), tx["tx_blob"], "{file}: {kind}");
+            let hash = transaction_hash(&decode_hex(&blob).unwrap_or_default());
+            assert_eq!(Value::from(hash), tx["hash"], "{file}: {kind}");
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 21);
+}
