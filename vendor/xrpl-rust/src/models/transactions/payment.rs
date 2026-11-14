@@ -691,6 +691,17 @@ mod tests {
         assert!(not_hex.get_errors().is_err());
         let zero = txn.clone().with_domain_id("0".repeat(64).into());
         assert!(zero.get_errors().is_err());
+        // Either case is accepted; any length but 64 is not.
+        let lower = txn.clone().with_domain_id(
+            "c6b8f21b5d6b0a8e8c2b1f4e3d2a1908172635445362718293a4b5c6d7e8f901".into(),
+        );
+        assert!(lower.get_errors().is_ok());
+        let long = txn
+            .clone()
+            .with_domain_id(format!("{}0", "A".repeat(64)).into());
+        assert!(long.get_errors().is_err());
+        let short63 = txn.clone().with_domain_id("A".repeat(63).into());
+        assert!(short63.get_errors().is_err());
         let none = {
             let mut t = txn.clone();
             t.domain_id = None;

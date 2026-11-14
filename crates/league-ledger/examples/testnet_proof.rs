@@ -357,7 +357,10 @@ fn main() -> Res<()> {
         ok
     );
     // xrpl.org's EscrowCreate reference doesn't say a token escrow needs
-    // CancelAfter. Record what the ledger does.
+    // CancelAfter. Record what the ledger does. (Since #7 the vendored model
+    // refuses this escrow locally: it has no expiry. A re-run stops here with
+    // a model error; the ledger's answer is in the M2c receipt, and the rule
+    // is in docs/receipts/design-check-escrow-expiry-2026-11-14.)
     let probe = send!(
         p,
         "token_escrow_probe_no_cancel_after",

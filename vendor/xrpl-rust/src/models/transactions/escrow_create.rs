@@ -73,6 +73,7 @@ impl<'a> Model for EscrowCreate<'a> {
     fn get_errors(&self) -> XRPLModelResult<()> {
         self._get_finish_after_error()?;
         self._get_expiry_error()?;
+        self._get_condition_error()?;
         self.validate_currencies()
     }
 }
@@ -167,6 +168,21 @@ impl<'a> EscrowCreate<'a> {
 }
 
 impl<'a> EscrowCreateError for EscrowCreate<'a> {
+    /// The condition, if any, must be one rippled can read: a DER
+    /// PREIMAGE-SHA-256 crypto-condition (see `check_preimage_condition`).
+    fn _get_condition_error(&self) -> XRPLModelResult<()> {
+        match &self.condition {
+            Some(condition) if !is_preimage_condition(condition) => {
+                Err(XRPLModelException::InvalidValueFormat {
+                    field: "condition".into(),
+                    format: "a DER PREIMAGE-SHA-256 crypto-condition, in hex".into(),
+                    found: condition.to_string(),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// rippled's EscrowCreate preflight (3.4.1), for XRP and tokens alike:
     /// an escrow needs FinishAfter or CancelAfter (`temBAD_EXPIRATION`), and
     /// one without FinishAfter needs a Condition (`temMALFORMED`), so it
@@ -204,9 +220,101 @@ impl<'a> EscrowCreateError for EscrowCreate<'a> {
     }
 }
 
+/// A DER preamble as rippled's `parsePreamble` reads it: the identifier's class
+/// and form bits, its tag, the content length (short or long form), and the
+/// bytes after the preamble. `None` where rippled reports an error.
+fn der_preamble(s: &[u8]) -> Option<(u8, u8, usize, &[u8])> {
+    if s.len() < 2 {
+        return None;
+    }
+    let (kind, tag) = (s[0] & 0xE0, s[0] & 0x1F);
+    if tag == 0x1F {
+        return None; // long tag form, unsupported
+    }
+    let mut len = s[1] as usize;
+    let mut rest = &s[2..];
+    if len & 0x80 != 0 {
+        let count = len & 0x7F;
+        if count == 0 || count > core::mem::size_of::<usize>() || count > rest.len() {
+            return None;
+        }
+        len = rest[..count]
+            .iter()
+            .fold(0usize, |acc, b| (acc << 8) + *b as usize);
+        rest = &rest[count..];
+        if len == 0 {
+            return None;
+        }
+    }
+    Some((kind, tag, len, rest))
+}
+
+const DER_CONSTRUCTED: u8 = 0x20;
+const DER_CONTEXT_SPECIFIC: u8 = 0x80;
+/// rippled: `Condition::kMaxSerializedCondition` and
+/// `PreimageSha256::kMaxPreimageLength`, both 128; the fingerprint is 32 bytes.
+const MAX_SERIALIZED_CONDITION: usize = 128;
+const MAX_PREIMAGE_LENGTH: u32 = 128;
+const FINGERPRINT_SIZE: usize = 32;
+
+/// Whether `condition` (hex, either case) is a crypto-condition rippled 3.4.1
+/// accepts for an escrow, following `Condition::deserialize`:
+/// - a context-specific, constructed `[0]` (PREIMAGE-SHA-256; the other
+///   condition types are unsupported), its contents at most 128 bytes, with
+///   nothing after them;
+/// - inside, a primitive `[0]` fingerprint of exactly 32 bytes, then a
+///   primitive `[1]` cost: an unsigned integer of 1 to 5 bytes (a leading zero
+///   octet only at 5), at most 128 (the longest preimage), with nothing after.
+pub(crate) fn is_preimage_condition(condition: &str) -> bool {
+    let Ok(bytes) = hex::decode(condition) else {
+        return false;
+    };
+    let Some((kind, tag, len, rest)) = der_preamble(&bytes) else {
+        return false;
+    };
+    if kind & DER_CONSTRUCTED == 0 || kind & 0xC0 != DER_CONTEXT_SPECIFIC {
+        return false;
+    }
+    if len > rest.len() || rest.len() > MAX_SERIALIZED_CONDITION || tag != 0 {
+        return false;
+    }
+    if rest.len() != len {
+        return false; // trailing garbage after the condition
+    }
+    // The fingerprint.
+    let Some((kind, tag, len, body)) = der_preamble(rest) else {
+        return false;
+    };
+    if kind & DER_CONSTRUCTED != 0 || kind & 0xC0 != DER_CONTEXT_SPECIFIC || tag != 0 {
+        return false;
+    }
+    if len != FINGERPRINT_SIZE || body.len() < len {
+        return false;
+    }
+    // The cost.
+    let Some((kind, tag, len, cost)) = der_preamble(&body[FINGERPRINT_SIZE..]) else {
+        return false;
+    };
+    if kind & DER_CONSTRUCTED != 0 || kind & 0xC0 != DER_CONTEXT_SPECIFIC || tag != 1 {
+        return false;
+    }
+    if cost.is_empty() || len > cost.len() || len > 5 || cost[0] & 0x80 != 0 {
+        return false;
+    }
+    if len == 5 && cost[0] != 0 {
+        return false;
+    }
+    if cost.len() != len {
+        return false; // a zero-length cost, or bytes after it
+    }
+    let value = cost.iter().fold(0u64, |acc, b| (acc << 8) | *b as u64);
+    value <= MAX_PREIMAGE_LENGTH as u64
+}
+
 pub trait EscrowCreateError {
     fn _get_finish_after_error(&self) -> XRPLModelResult<()>;
     fn _get_expiry_error(&self) -> XRPLModelResult<()>;
+    fn _get_condition_error(&self) -> XRPLModelResult<()>;
 }
 
 #[cfg(test)]
@@ -413,6 +521,68 @@ mod tests {
         let back: EscrowCreate = serde_json::from_value(value).unwrap();
         assert_eq!(back, txn);
         assert!(matches!(back.amount, Amount::MPTAmount(_)));
+        assert!(txn.get_errors().is_ok());
+        // Through the binary codec and back: the MPT amount survives.
+        #[cfg(feature = "core")]
+        {
+            let blob = crate::core::binarycodec::encode(&txn).unwrap();
+            let decoded = crate::core::binarycodec::decode(&blob).unwrap();
+            assert_eq!(decoded["Amount"]["mpt_issuance_id"], id);
+            assert_eq!(decoded["Amount"]["value"], "100");
+            assert_eq!(decoded["TransactionType"], "EscrowCreate");
+        }
+    }
+
+    #[test]
+    fn test_condition_is_checked_as_rippled_reads_it() {
+        // SHA-256 of 32 zero bytes, with a 32-byte preimage (cost 0x20).
+        let fp = "66687AADF862BD776C8FC18B8E9F8E20089714856EE233B3902A591D0D5F2925";
+        let ok = |c: &str| is_preimage_condition(c);
+        // Accepted: the usual 32-byte preimage, lower case, cost 0, cost 128
+        // (two bytes, as 128 has the high bit), a long-form outer length.
+        assert!(ok(&format!("A0258020{fp}810120")));
+        assert!(ok(&format!("a0258020{}810120", fp.to_lowercase())));
+        assert!(ok(&format!("A0258020{fp}810100")));
+        assert!(ok(&format!("A02680 20{fp}81020080").replace(' ', "")));
+        assert!(ok(&format!("A0812580 20{fp}810120").replace(' ', "")));
+        // Refused: empty, not hex, not DER, another condition type.
+        for bad in ["", "zz", "00", "A0", "A025"] {
+            assert!(!ok(bad), "{bad:?}");
+        }
+        assert!(
+            !ok(&format!("A1258020{fp}810120")),
+            "prefix-sha-256 is unsupported"
+        );
+        // Refused: a 31-byte fingerprint, trailing bytes, a cost over 128,
+        // a negative-looking cost, a zero-length cost, a short buffer.
+        assert!(!ok(&format!("A024801F{}810120", &fp[..62])));
+        assert!(!ok(&format!("A0258020{fp}81012000")));
+        assert!(!ok(&format!("A0268020{fp}81020081")));
+        assert!(!ok(&format!("A0258020{fp}810181")));
+        assert!(!ok(&format!("A0248020{fp}8100")));
+        assert!(!ok(&format!("A0308020{fp}810120")));
+    }
+
+    #[test]
+    fn test_get_errors_refuses_a_bad_condition() {
+        let mut txn = EscrowCreate {
+            common_fields: CommonFields {
+                account: "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn".into(),
+                transaction_type: TransactionType::EscrowCreate,
+                ..Default::default()
+            },
+            amount: XRPAmount::from("1000").into(),
+            destination: "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW".into(),
+            cancel_after: Some(600),
+            condition: Some("".into()),
+            ..Default::default()
+        };
+        assert!(txn.get_errors().is_err());
+        txn.condition = Some("DEADBEEF".into());
+        assert!(txn.get_errors().is_err());
+        txn.condition = Some(
+            "A025802066687AADF862BD776C8FC18B8E9F8E20089714856EE233B3902A591D0D5F2925810120".into(),
+        );
         assert!(txn.get_errors().is_ok());
     }
 

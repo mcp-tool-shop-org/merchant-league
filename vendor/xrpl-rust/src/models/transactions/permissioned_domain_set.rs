@@ -104,8 +104,9 @@ pub(crate) fn validate_accepted_credentials(
     Ok(())
 }
 
-/// Validates a DomainID per XLS-80: must be a non-zero 64-character hex string
-/// (the 32-byte hash of the PermissionedDomain ledger entry, serialized as uppercase hex).
+/// Validates a DomainID per XLS-80: a non-zero 64-character hex string, in
+/// either case (the 32-byte ID of the PermissionedDomain ledger entry; the
+/// ledger shows it in upper case, and the binary codec reads both).
 pub(crate) fn validate_domain_id(domain_id: &str) -> crate::models::XRPLModelResult<()> {
     if domain_id.len() != 64
         || !domain_id.chars().all(|c| c.is_ascii_hexdigit())

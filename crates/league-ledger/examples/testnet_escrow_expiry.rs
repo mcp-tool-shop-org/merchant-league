@@ -5,6 +5,14 @@
 //! probe saw only the first refusal and read it as "a token escrow needs
 //! CancelAfter". This checks the general rule on the Testnet.
 //!
+//! **Re-running this now stops before the server.** Since merchant-league #7,
+//! the vendored model refuses an escrow with no expiry, or with no
+//! FinishAfter and no Condition, and signing runs that check
+//! (`xrpl::signing::sign` calls `validate()`). The three refusal steps below
+//! would fail locally with a model error. Their purpose was the server's
+//! answer, which the receipt records. No way around the local check is
+//! added to the library.
+//!
 //! Run: `cargo run -p league-ledger --example testnet_escrow_expiry`
 //!
 //! Two faucet accounts: an issuer (with Allow Trust Line Locking) and a

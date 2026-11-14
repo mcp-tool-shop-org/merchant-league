@@ -21,8 +21,10 @@
 # Third-party licence files under crates/ are skipped, because their text
 # must stay verbatim (ISC asks that its notice appear unchanged in every
 # copy) and they are not player-facing. Only these exact names are skipped:
-# LICENSE, LICENSE.md, LICENSE.txt, and LICENSE-<name>. A .rs file is never
-# skipped, and nothing under docs/ or the README is.
+# LICENSE, LICENSE.md, LICENSE.txt, LICENSE-MIT, LICENSE-APACHE and
+# LICENSE-xrpl.js (the xrpl.js notice beside its test vectors). Any other
+# name, such as LICENSE-notes.md, is checked, and nothing under docs/ or the
+# README is skipped. A new licence file's exact name is added here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -66,7 +68,7 @@ pattern=$(IFS='|'; echo "${banned[*]}")
 disclaimer="\b(no|not|never|without)(${sep}+for)?${sep}+real${sep}*money\b"
 
 # The files: the crates, the docs and the README, less the licence files.
-licence='^crates/(.*/)?(LICENSE|LICENSE\.md|LICENSE\.txt|LICENSE-[^/]+)$'
+licence='^crates/(.*/)?(LICENSE|LICENSE\.md|LICENSE\.txt|LICENSE-MIT|LICENSE-APACHE|LICENSE-xrpl\.js)$'
 all=$( { find crates docs -type f 2>/dev/null; [ -f README.md ] && echo README.md; } | sort)
 skip=$(printf '%s\n' "$all" | grep -E "$licence" | grep -viE '\.rs$' || true)
 files=$(printf '%s\n' "$all" | grep -vxF -e "$skip" -e '' || true)
