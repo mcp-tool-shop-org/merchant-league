@@ -124,6 +124,7 @@ for phrase in "Pay the buy-in" "buy_in" "buy-ins" "Pay a 50 XRP buy in to join t
   "real money prizes" "play for real money" "real-money prizes" "real_money" \
   "win prize money" "earn money" "earns money" "made money" "making money" "make real money" \
   "win money" "won money" "win real money" "make_money" "earn real rewards" "Win real prizes!" \
+  "real profit" "real profits" "real_profit" "The real profit on the north road is salt." \
   "Each mark is worth \$5." "worth 5 USD" "sell marks for dollars" "10 euros a table" "10 €" "£5 a seat" "USD 5 a table"; do
   run_case $c fail "$tui" "// $phrase"
 done
@@ -142,7 +143,8 @@ run_replace $c fail README.md "no real money" "real money prizes"
 run_replace $c fail crates/league-tui/src/lib.rs "No real money." "Win real money."
 # Near misses that must pass: trading language, disclaimers, game nouns.
 for phrase in "Choose which goods to buy in town." "You cannot buy in Varn today." \
-  "Sell salt at a profit." "A profitable trade route." "The real profit on the north road is salt." \
+  "Sell salt at a profit." "A profitable trade route." "Profit on the north road is in salt." \
+  "The truly profitable road is the north one." \
   "Investigate the order book." "The seller cashes on delivery." "The cashier counts marks." \
   "The caravan pays its toll." "Pay the toll from your purse." \
   "The wallet holds marks." "Withdraw an offer from the book." "Make a deposit of salt." \

@@ -6,8 +6,8 @@
 # "sell at a profit", "a profitable route" are about goods and marks (the
 # Director ruled on 2026-11-14 that trading words are game language). What is
 # banned is language that frames the game as earning, paying out, wagering
-# or withdrawing money, or prices anything in a real currency. Saying there
-# is no real money is allowed.
+# or withdrawing money, "real profit", or a price in a real currency. Saying
+# there is no real money is allowed.
 #
 # This is a tripwire, not a proof: a word list can't catch every phrasing.
 # Review is the rest of the check. There is no allow marker: a line that
@@ -44,6 +44,7 @@ banned=(
   "\bwager(s|ed|ing)?\b"
   "\bjackpots?\b"
   "\breal${sep}*money\b"                                               # real money (disclaimers excepted)
+  "\breal${sep}+profits?\b"                                           # real profit: banned under the ruling
   "\bprize${sep}+money\b"
   "\b(earn|earns|earned|earning|make|makes|made|making|win|wins|won|winning)${sep}+(real${sep}+)?money\b"
   "\b(earn|earns|earned|earning|make|makes|made|making|win|wins|won|winning)${sep}+real${sep}+${money}\b"
