@@ -16,121 +16,31 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 376,
-      "changed": 6,
+      "added": 0,
+      "changed": 2,
       "moved": 0,
-      "parts": 3,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-core/, crates/league-dice/, crates/league-ledger/examples/ and 4 more.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-core/",
-          "crates/league-dice/",
-          "crates/league-ledger/examples/",
-          "crates/league-ledger/src/",
-          "crates/league-ledger/tests/vectors.rs",
-          "crates/league-season/",
-          "crates/league-tui/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI no longer runs crates/.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "testnet_proof (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_proof.rs.",
-        "subjects": [
-          "crates/league-ledger/Cargo.toml",
-          "crates/league-ledger/examples/testnet_proof.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "And 1 more change to a door.",
-        "subjects": []
-      },
-      {
-        "kind": "landing",
-        "sentence": "vendor/xrpl-rust/ is now read by Cargo.toml.",
-        "subjects": [
-          "vendor/xrpl-rust/",
-          "Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "vendor/xrpl-rust/README.md is now read by vendor/xrpl-rust/Cargo.toml.",
-        "subjects": [
-          "vendor/xrpl-rust/README.md",
-          "vendor/xrpl-rust/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "vendor/xrpl-rust/src/bin/xrpl.rs is now read by vendor/xrpl-rust/Cargo.toml.",
-        "subjects": [
-          "vendor/xrpl-rust/src/bin/xrpl.rs",
-          "vendor/xrpl-rust/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 38 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "vendor/xrpl-rust/Cargo.lock is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "vendor/xrpl-rust/Cargo.lock"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "vendor/xrpl-rust/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "vendor/xrpl-rust/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "vendor/xrpl-rust/Cargo.toml.orig is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "vendor/xrpl-rust/Cargo.toml.orig"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "And 357 more new files that belong to no part.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "376 files added and 6 changed content, across 3 parts.",
+        "sentence": "Nothing structural changed since 2026-11-14; 2 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-      "generatedAt": "2026-11-14T05:20:32.429Z"
+      "commit": "871b5b9e8e50fe1854afbf806dc1d078a936c1f6",
+      "generatedAt": "2026-11-14T07:26:12.370Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "871b5b9e8e50fe1854afbf806dc1d078a936c1f6",
+  "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (304 files), shell (2), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -253,7 +163,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T07:26:12.370Z",
+  "generatedAt": "2026-11-14T08:24:54.511Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "2 writes and 1 read go to a path their caller passes, not to this repository.",

@@ -80,7 +80,9 @@ jobs:
         run: bash scripts/check-testnet-only.sh
 
       - name: No real-money language
-        run: bash scripts/check-copy.sh
+        run: |
+          bash scripts/test-copy-check.sh
+          bash scripts/check-copy.sh
 
       - name: Set up Node for Atlas
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

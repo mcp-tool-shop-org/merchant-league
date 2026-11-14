@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit 871b5b9 by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit 043373e by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,21 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (304 files), shell (2), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (c0d6c62)
+## What changed since 2026-11-14 (871b5b9)
 
-- CI now also runs crates/league-core/, crates/league-dice/, crates/league-ledger/examples/ and 4 more.
-- CI no longer runs crates/.
-- testnet_proof (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_proof.rs.
-- And 1 more change to a door.
-- vendor/xrpl-rust/ is now read by Cargo.toml.
-- vendor/xrpl-rust/README.md is now read by vendor/xrpl-rust/Cargo.toml.
-- vendor/xrpl-rust/src/bin/xrpl.rs is now read by vendor/xrpl-rust/Cargo.toml.
-- And 38 more new writers and readers of places.
-- vendor/xrpl-rust/Cargo.lock is new and belongs to no part, so atlas check fails on it against the previous map.
-- vendor/xrpl-rust/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.
-- vendor/xrpl-rust/Cargo.toml.orig is new and belongs to no part, so atlas check fails on it against the previous map.
-- And 357 more new files that belong to no part.
-- 376 files added and 6 changed content, across 3 parts.
+Nothing structural changed since 2026-11-14; 2 files changed content.
 
 ## What comes in
 
