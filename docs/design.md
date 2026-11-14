@@ -1,208 +1,386 @@
 # Testnet Merchant League design
 
-Design of 2026-11-14. The game design is under an outside review (research seed 25); the game rules are not built until that review has been ruled on.
+Redesign of 2026-11-14 (ruling 1). It replaces the first draft of the same day after the outside review (research seed 25, harvested 2026-11-14). **It's for the Director to approve. No game code is written until he does.** The ledger layer it relies on is built and merged: patched xrpl-rust with TokenEscrow and DomainID, proved live on the Testnet (merchant-league #5).
 
-Merchant League is a turn-based trading game for 2 to 6 players, played entirely on the XRPL Testnet, where every move is a ledger transaction and every Testnet reset ends a season.
+Merchant League is a slow-turn trading game for 4 or 5 players, played on the XRPL **Testnet**. Each player runs a guild with its own craft. Guilds trade goods across five towns to build the towns' great works. Every move is a ledger transaction.
+
+## What changed from the draft
+
+| Draft said | Now | Why |
+|---|---|---|
+| Every merchant has the same caravan and the same coin | **Asymmetric guilds.** Each has a converter that needs other guilds' goods. | Identical merchants have nothing to trade for. At 3 players a merchant is alone in a town about two turns in three (the review's own occupancy model). |
+| "The richest reputation wins"; no formula | **A written score:** points come only from town works and sealed mandates. Standing gates bonds and tolls but never scores. | An unwritten score was solvable two ways: a wash-contract cartel or a promise-nothing hermit. |
+| Contracts are Checks the seller cashes on delivery | **Escrow bonds.** Each side locks a bond in a token escrow. The steward releases a bond only on a breach, by a public rule. | A Check sets no funds aside, and the payee can cash it at any time. Token escrow locks the bond, proved live on the Testnet. |
+| One order book for the season, shared by all tables | **Separate markets per table:** per-table goods on authorized trust lines, and a permissioned domain as the table's market | One issuer's tokens trade network-wide, so table A's offers crossed table B's. Live proof: a domain refuses outsiders and keeps open-book offers from crossing its book. |
+| Three barriers a day: commit, move, reveal | **One transaction a day.** It reveals yesterday's sealed travel order and commits today's. Roads roll straight from a drand round named in advance. | Each barrier multiplies the chance that somebody misses: 77–97% table-wide at a 2–5% daily miss, by the review's arithmetic. The dice escrows added risk with no gain in fairness. |
+| A fixed 12-day table | **A random closing bell** between days 10 and 13, and edicts in the middle of the table | A known last day invites last-day betrayal and endgame arithmetic. |
+| A season runs from one Testnet reset to the next | **Six-week studio chapters, nested in Testnet eras.** A reset is a rare era finale with a 24-hour jubilee. | The published resets were 55.8, 4.0 and 27.2 months apart, so the clock has to be the studio's own. |
+| "Our own node, eventually"; no server decides | **Two named studio services from table 1:** the steward (the issuer service) and the archivist (the archive node and indexer) | Public Testnet nodes prune history, so a week-long table can't be replayed from them. The issuer must be live to mint, run town markets and spoil goods. |
+| Marks rule: +25% a week cuts rewards 20% | **Fixed rewards by placement.** Prestige is sold at auction and the proceeds burned. | Every chapter starts near zero, so the growth rule would trip on every chapter's normal start. |
+| A flood and a thief both "break a promise" | **Force majeure vs willful breach.** A delay the road roll caused costs no standing. | The road roll is replayable, so the game can tell the two apart. |
+| 2 to 6 players | **4 or 5 players** | A 2-player table has no market. At 3 players, a merchant is alone in a town most turns. |
+| Hand-written events and table setups | **Generated table setups with proofs** (role-set's generator method) | A setup is accepted only when named lazy strategies lose on it. Variety floors keep a chapter's tables from repeating. |
+| Silent on private talk, absent players, bots and trust-line flags | Answered in "What we hadn't asked" | The review raised them. |
 
 ## Decisions
 
-Made on 2026-11-14.
-
 | Decision | Chosen | Why |
-| --- | --- | --- |
-| What the game is | Merchant League: caravans, towns, goods and contracts between players | The XRPL already has a trading engine (offers, an order book, escrows, checks), so a trading game uses the ledger for what it is good at |
-| How it is played | A terminal client in current stable Rust (ratatui and crossterm) | A transaction takes 3 to 5 seconds to settle, so real-time play is out; slow turns suit a public ledger |
-| Who runs the season issuer | One studio-run issuer account per season | One issuer keeps the game currency's supply readable and auditable |
-| Where the fairness comes from | Hash-locked escrows for commit and reveal, mixed with the public drand beacon | No single player, and not the studio, can steer a roll |
+|---|---|---|
+| What the game is | Merchant League: guilds, five towns, goods, town works and bonded contracts | The XRPL already has a trading engine (offers, order books, escrows), so a trading game uses the ledger for what it is good at |
+| How it is played | A Rust client: a terminal view (ratatui), and a small daemon that keeps standing orders and sends alerts | A transaction settles in 3 to 5 seconds, so slow turns suit a public ledger. The daemon covers a player who is away (see "What we hadn't asked"). |
+| Ledger library | xrpl-rust 1.3.0, vendored with upstream's security fix, plus TokenEscrow and DomainID (#5) | Ruled 2026-11-14. `cargo audit` is clean with no ignores. |
+| Who runs the issuer | The steward, a studio service, one issuer account per chapter | It must be live to mint, run town markets, spoil goods, act as the bond referee and issue table credentials |
+| Where history lives | The archivist: a studio archive node and indexer, from the first table | Public nodes prune. Every standing, score and bond decision has to be replayable. |
+| Where rolls come from | A drand round named in advance, read directly | No player and not the studio can steer it, and the ledger needs no dice escrows |
+| Where table setups come from | A seeded generator that proves each setup against named lazy strategies | Role-set's method: build, reduce, prove the shortcut loses, dedupe, keep a receipt |
 
 ## The game
 
-Each player is a merchant with one caravan. A table of 2 to 6 merchants plays 12 market days across five towns. The richest reputation at the end wins the table, not the richest purse.
+A table seats **4 or 5 guilds** across **five towns** joined by roads. A table runs **10 to 13 market days**: the closing bell is drawn (see "The closing bell"). The highest **score** wins.
 
-One market day, in order:
+### Guilds
 
-1. **Commit.** Each merchant commits to a secret for the day's road dice, as a hash-locked escrow (see Fair dice).
-2. **Move.** Each merchant sends one transaction: where the caravan goes, what it buys and sells there. Goods are game tokens on the ledger; buying and selling are real offers on the XRPL order book, so merchants trade with each other at prices they set.
-3. **Reveal.** Each merchant reveals the secret by finishing the escrow. The day's roll is computed from every reveal plus a drand beacon round named in advance.
-4. **Road events.** The roll decides each road: bandits, a toll, a flood, a fair. Every client computes the same outcome from the ledger, so no server decides.
-5. **Contracts settle.** Promises between merchants come due. "Deliver 3 salt to Varn by day 6 for 20 marks" is a Check the buyer writes and the seller cashes on delivery. A broken promise costs reputation, in public, on the ledger.
+Each guild holds a charter: one **converter** (a craft), a home town and a starting purse of table coin. A converter turns goods the guild doesn't make into a good only it makes. Converters interlock, so every guild needs at least two others:
 
-A day takes about two minutes when everyone is online, and up to a set number of ledgers (about a day of real time) when they are not. Turns are slow on purpose: the ledger settles in 3 to 5 seconds, and slow turns let a table play across a week.
+| Guild | Home | Converter | Needs from others |
+|---|---|---|---|
+| Saltworks | Varn (the salt flats) | 2 brine → 1 salt | brine comes from Ostra's fishers (town market) and **timber** for the pans |
+| Weavers | Ostra (the port) | 2 wool + 1 dye → 1 cloth | **dye** from the Dyers and wool from the town market |
+| Smiths | Kell (the hills) | 1 ore + 1 charcoal → 1 tools | **charcoal** from the Foresters |
+| Foresters | Hath (the woods) | 1 timber → 1 charcoal, or timber as is | **tools** to cut faster (a converter upgrade) |
+| Dyers | Mire (the marsh) | 1 madder + 1 salt → 1 dye | **salt** from the Saltworks |
 
-**A season** runs from one Testnet reset to the next. It starts with the season's issuer, five towns and one new rule (a new good, road or contract type). It ends with a hall of fame and a signed season record for every player, and the reset wipes the ledger.
+At a 4-guild table, the generator picks four of the five and adjusts the town markets so no needed good is missing. Converting takes one market day, in the guild's home town or at a works site the charter names.
+
+### A market day
+
+Each guild sends **one transaction a day**. It carries:
+1. **The reveal** of yesterday's sealed travel order: the order and its salt, matching the commitment in yesterday's memo.
+2. **Today's sealed travel order**, as a commitment: SHA-256 of the order and a fresh 32-byte salt, in the memo.
+3. Optionally, the day's conversions, deliveries to works, and contract steps, as further transactions.
+
+Trading happens all day as **ordinary offers** in the table's market: guild to guild, and with the town makers. Offers are public by nature; only travel is sealed. A merchant can't see where the others are going before committing.
+
+**At the day's close** (a fixed ledger-close time named at the table's start):
+1. The day's **drand round** is the first published after the close. Its value is the day's roll.
+2. **Road events** take their numbers from the roll by a fixed index per road: bandits, tolls, floods, fairs. Each road's odds come from a table in `tables/` (see "Tables with roll").
+3. Caravans move by the revealed orders. A missing reveal means the caravan stays in town and pays the toll, and the day goes ahead (see "Fair dice").
+4. **Perishables spoil.** The steward claws back goods past their days.
+5. **Contracts check their deadlines** (see "Contracts").
+
+A day takes about two minutes when everyone is online. Given a set ledger window (about a day of real time), a table can run across a week.
+
+### The score (written, and public before the table starts)
+
+**Score = Works points + Mandate points.** Nothing else scores: not coin, not goods, not standing.
+
+- **Town works.** Each town has one or two great works, each needing a mix of goods: for example, the Varn sea wall needs 4 tools, 6 timber and 2 cloth. A delivery to a works is a Payment of goods to the steward, which destroys them, and it is recorded by work and guild.
+  - A delivered good scores its **works value**: 1 for a raw good, 2 for a converted good, 3 for a good converted twice (dye, tools).
+  - The guild that completes a works also scores the completion bonus of 4.
+  - A completed works stops taking goods.
+- **Sealed mandates.** Each guild draws two secret mandates at the start and commits to them as a hash in its first transaction, revealing them at the bell. A mandate scores 3 to 8 points, set by the generator's graded difficulty. Examples: "Be the largest contributor to the Kell bridge"; "Deliver 5 cloth to works outside Ostra". An unrevealed mandate scores 0.
+- **Ties:** the higher standing wins, then the fewer willful breaches, then the earlier last delivery.
+
+**Standing** is not score. It starts at 0 and gates three things:
+- **bond size:** standing ≥ 3 posts half bonds;
+- **tolls:** standing ≥ 5 pays half tolls;
+- **vendetta:** a guild wronged by a willful breach may refuse that guild's caravan its town market for 2 days.
+
+Standing moves like this:
+- **+1** per contract delivered on time that bore road risk: the seller's caravan travelled at least one road between agreeing and delivering.
+- At most +1 per counterparty per 3 days.
+- **−3** per willful breach.
+- **0** for a force-majeure delay. The day's roll put a flood or bandits on the seller's road, provably from the replay, and the seller delivers within 2 days.
+
+**The anti-wash rule.** Trading between guilds scores nothing. Only goods destroyed in a works, and revealed mandates, score.
+- A wash cartel can pass coin and goods back and forth as often as it likes. Goods only come from converters and town makers, so passing them creates nothing.
+- Wash contracts earn standing only with road risk, and at most once per counterparty per 3 days.
+- Standing never scores; it only makes bonds and tolls cheaper.
+
+The generator proves each setup against this cartel before the table is offered (see "Generated tables").
+
+### Contracts (escrow bonds)
+
+A contract is a promise across days: "Deliver 3 salt at Varn by day 6 for 20 coin." It runs on token escrows, which TokenEscrow supports. Both the escrow and the steward's referee secret are already proved on the Testnet.
+
+1. **Agree.** The two guilds agree off-ledger, in the table's whisper channel. Either side then sends the terms in a memo. The steward's indexer records them.
+2. **Bond.** Each side creates a **token escrow** of its bond to the other side.
+   - The bond is the contract value, or half that at standing ≥ 3.
+   - The escrow carries a **condition**: the SHA-256 of a referee secret the steward holds for that bond.
+   - The escrow's `CancelAfter` falls two days after the deadline. The ledger refuses a token escrow without `CancelAfter` (`temBAD_EXPIRATION`, live proof).
+3. **Deliver.** Two plain payments before the deadline: the seller pays the goods, then the buyer pays the price. The seller's caravan must be in the named town that day.
+4. **Settle.** The steward reads the replay at the deadline.
+   - **Kept:** it releases nothing, and each side cancels its own bond after `CancelAfter`.
+   - **Willful breach:** it publishes that bond's referee secret, and the wronged side finishes the breaching side's bond to itself.
+   - **Force majeure:** the deadline moves 2 days, by rule.
+
+Every steward decision is a pure function of the replay and the public rules. The decision log carries each input's transaction hash, so anyone can recompute it.
+
+**Why a referee and not a self-settling escrow.** An escrow can be finished only by its condition or by time, and the ledger can't see "the caravan was in Varn". So a third party must decide, and the steward is already trusted: it issues every token and can claw back. Escrow adds what Checks lacked, a **locked** bond. Batch could make the delivery step atomic; that is an open question below.
+
+### The closing bell
+
+From the close of day 10, each day's roll also decides whether the bell rings: 1 in 3 at the close of day 10, 1 in 2 at day 11, 2 in 3 at day 12, and always at day 13. The odds are a `tables/` table, so they're on record. At the bell, mandates are revealed and the table is scored.
+
+**Edicts:** at days 4 and 8, the generator's pre-drawn edict for the table takes effect, for example "Kell closes its gate for 2 days" or "a salt levy at Varn". It's announced one day ahead. Edicts are part of the setup and are proved with it.
+
+### Town makers (the towns' markets)
+
+Each town's market is the steward's **price ladder**: offers at stepped prices, posted in the table's domain. The ladder buys and sells a few goods at a spread wide enough that trading guild to guild pays better. Ladders refill each day from the setup's schedule. They are the table's sources (raw goods) and part of its sinks (the spread).
+
+**Not AMM pools.** Whether an AMM's liquidity takes part in a permissioned domain's book is unchecked. Ladders are plain domain offers, which the live proof covered.
+
+## Separate markets per table
+
+Each table gets:
+- **Its own goods and coin:** tokens with table-specific currency codes from the chapter's issuer. Trust lines need the issuer's authorization (RequireAuth), and only the table's seated guilds are authorized. Nobody else can hold the table's goods, so nothing can cross to another table.
+- **A permissioned domain** owned by the steward, accepting the steward's credential for that table. The town ladders post there. The live proof showed:
+  - a domain refuses an uncredentialed account's offer (`tecNO_PERMISSION`);
+  - an open-book offer at a crossing price doesn't cross a domain offer;
+  - two members' domain offers do cross.
+- **What the domain doesn't do:** a credentialed account can still trade on the open book. That's why the per-table tokens do the isolating, and the domain is the table's official market.
+
+**No XRP pairs.** Test XRP is free, so it can't be a currency. The steward never posts an offer pairing a table token with XRP. The archivist flags any such offer, because auto-bridging through XRP would let a trade skip table coin.
+
+## Fair dice
+
+A day's roll is the **drand round named in advance**: the first round published after the day's close, at drand's published period. Nobody, including the studio, knows it before the close. Nobody can choose it: it's a threshold signature fixed for its round. That claim comes from drand's design, and it's checked at drand's documentation before any build (see "Check before building").
+
+- **Road events, the bell and edicts** take their numbers from the roll by a fixed index, through the table engine (`league-dice` → roll 3.0's Rust core; see "Tables with roll").
+- **Sealed travel orders** are the one thing hidden.
+  - Each order is committed in one day's transaction as SHA-256 of the order plus a fresh salt, and revealed in the next day's.
+  - Anyone can check the reveal against the memo. No escrow is needed, so each day needs one transaction, not three.
+- **A guild that doesn't reveal** stays in town and pays the toll, and the day goes ahead. There is never a re-roll: a re-roll would give the last revealer a second chance (EIP-4399).
+- **If drand is unreachable,** the close waits for it. It never falls back to the ledger hash or a studio number, since those could be steered.
+- **#2's crypto-condition encoding** (PREIMAGE-SHA-256 conditions and fulfillments) isn't needed for dice any more. It is needed for the **bonds' referee secrets**, so #2 stays and is folded into the contract work.
+
+## Generated tables (role-set's generator method)
+
+A table's setup is built by code, and each setup is proved before it is offered. A setup is:
+- the guilds and their charters;
+- the five towns, with their ladders and schedules;
+- the works and their needs;
+- the mandate pool;
+- the edicts;
+- the road odds.
+
+This takes **the method of role-set's puzzle generator, not its code**: a seeded build, a reduction, a proof that each named shortcut loses, a difficulty grade, a skeleton dedupe and a receipt. If this design is approved, the generator would be a Rust crate in this repository, after the rules.
+
+1. **Sample** a setup from the chapter's content packs (goods, towns, works, edicts), seeded.
+2. **Simulate.** A simple strategy simulator plays the setup many times, with rolls drawn from the same tables.
+   - First, a **competent baseline**: guilds that convert, trade at fair prices, keep contracts and build works.
+   - Then each **named lazy strategy**, like role-set's lazy readings:
+     - *wash cartel:* two guilds contract with each other in a safe town;
+     - *hermit:* trades only with the town ladders, makes no promises;
+     - *stay at home:* never leaves the home town;
+     - *one-works rush:* pours everything into the first works;
+     - *kingmaker:* a trailing guild gifts goods to the leader;
+     - *last-day breach:* breaks every contract due after day 9.
+3. **Prove.** Accept the setup only if every lazy strategy scores clearly below the baseline: below the baseline's 25th percentile, a config value. The kingmaker is the exception: there, the leader's gain from the gifts must be smaller than a fair trade would give. A setup where a shortcut wins is refused, like a puzzle whose lazy reading gives the key.
+4. **Grade** each mandate by the fewest days and transactions the simulator needs to complete it. Its points follow its grade, and the receipt keeps the grade. Mandates outside the table's difficulty band are refused.
+5. **Dedupe.** A setup's skeleton is its converter graph, its works' needs, its edict kinds and its ladder spreads. No two tables in a chapter share a skeleton. Floors per chapter: each guild seats at least once in every three tables, and no edict kind appears in more than half the tables.
+6. **Receipt.** The seed, generator version, content-pack hashes, each strategy's score distribution, each mandate's grade and the skeleton hash. It's published with the table, so anyone can rebuild the setup.
+
+The same generator builds the paper tables for the playtest. The paper test then checks the simulator against people (see "The paper playtest").
+
+## Seasons: chapters inside eras
+
+- **A chapter** is about **six weeks**: studio-owned, announced, with its own issuer and one new rule (a good, a guild, an edict kind).
+- **An era** runs from one Testnet reset to the next, which can be months or years apart. An era holds many chapters.
+
+| Survives a chapter's end | Ends with the chapter |
+|---|---|
+| Titles, the hall of fame, cosmetics | Marks, table coin, goods, open escrows |
+| A signed chapter record per player: tables, scores, standings, contracts kept and broken, with transaction hashes | The chapter's issuer and table accounts |
+| A capped starting standing for the next chapter | |
+
+**Marks** are earned at fixed rates by placement in finished tables: 5, 3, 2 and 1 for first to fourth, and the fifth place earns 1. Prestige items (titles, guild colours, a charter variant) are sold at the chapter's auction, and the marks are burned. That's the sink.
+
+**An era finale** (an announced reset) closes the current chapter early with a **24-hour jubilee**:
+- trading continues;
+- no new contract may have a deadline after the reset;
+- the last day's standings are snapshotted, and the hall of fame is signed.
+
+An unannounced reset is caught by the "ledger went backwards" check (1,000-ledger tolerance) in `league-season`. That check closes the chapter at the last state the archivist saw. Carry-over depends on what a player did during the chapter, never on being online at the wipe.
+
+**Proofs outlive the ledger.** A record's hashes can't be checked once the ledger is gone. The archivist keeps the era's full history and exports it at the finale, so a record can be checked against the export. Without it, verification reports "can no longer be checked", never a pass.
+
+## The studio services
+
+| Service | Does | If it's down |
+|---|---|---|
+| **Steward** (issuer service) | Holds the chapter issuer's key; issues table goods and coin on authorized trust lines; posts town ladders; spoils perishables (clawback); issues table credentials and the domain; referees bonds; signs records | The day's close waits; deadlines move with it. Nothing settles without it. |
+| **Archivist** (archive node and indexer) | A studio Testnet node with full history for the era, plus an index of every table event; serves replays, receipts and the decision log; flags rule breaches (XRP pairs, missing reveals) | Clients keep playing from public nodes; replays and settlements wait for it |
+| **Relay** (whisper channel) | Carries private messages between a table's guilds, end-to-end encrypted, never on the ledger; counts messages per player per day for the press metric, never their content | Guilds can still trade; talk waits |
+
+The steward is trusted: it can mint and claw back. The fence is publicity. Every issue, burn, clawback and referee decision is on the ledger or in the decision log, with the rule that produced it.
+
+## What we hadn't asked (answers)
+
+- **Private talk.** The Relay, off-ledger, encrypted end to end. On-ledger memos would leak who talks to whom. Agreements stay informal until they're bonded on the ledger.
+- **Absent players.** The player's daemon keeps **standing orders**: stay in town, keep offers, reveal the committed order. A guild absent for 2 days "rests": its caravan holds, and its bonds settle by the rules. Delegated signing (XRPL permission delegation) is not used until its Mainnet status is checked.
+- **Bots.** Ranked tables are for invited humans. Bots play in a separate open league with its own hall of fame. A table's setup and the generator's simulator are public, so bot authors have a fair start.
+- **Trust-line flags**, set in this order by the steward before any trust line exists:
+  1. RequireAuth;
+  2. Allow Trust Line Clawback (it must come before any line);
+  3. Allow Trust Line Locking (or a token escrow is refused, live proof);
+  4. DefaultRipple on the issuer, with NoRipple on guild lines.
+
+  The steward's setup checks each flag on the ledger before seating a table.
+- **Pruned history.** Answered by the archivist, from table 1.
+- **Kingmaking.** The simulator's kingmaker strategy is in every setup's proof. A gift of goods with no consideration back is flagged in the decision log. Whether to forbid gifts outright is left to the paper test.
+
+## The paper playtest
+
+**Who.** One table of **4 or 5 players**, seated from a generated setup and its receipt, with a human acting as the steward. The players are people the Director picks (see "Open questions").
+
+**How.**
+- 10 to 13 days, played live in about two hours. Each day gets a 10-minute window.
+- Travel orders are sealed in envelopes, and the rolls come from a printed list of drand round values fetched in advance.
+- Contracts and bonds are tracked on a ledger sheet that the steward settles by the written rules.
+
+**Before the people.** The setup runs through the simulator, and its lazy-strategy scores are written down. The paper test then shows whether people find a shortcut the simulator didn't.
+
+**What it measures.** These are the review's seven metrics with its hypothesised bands, which are design guesses, not data:
+
+| Metric | Healthy | Problem |
+|---|---|---|
+| Guild-to-guild share of trades | 35–65% | under 20%: solitaire against the towns |
+| Whisper messages per player per day | 4 or more | under 1.5 |
+| Contracts per player, and bond spread | 1.5 or more, bonds from 0% to 100%+ of value | under 0.5 |
+| Willful breaches vs force-majeure delays | 1–2 calculated breaches; no quitting over road delays | anyone quits over a delay |
+| Order timing in the window | spread across it | over 60% in the last 5% (sniping) |
+| Missed reveals | under 3% | over 8% |
+| Contenders at day 10 | 3 or more within 15% of the leader | winner clear by day 7–8 |
+
+**Also recorded:** each lazy strategy seen at the table, and whether it paid; each mandate's real difficulty against its grade; and the time a day took.
+
+**After it.** Rules change on paper first. A Testnet build starts only once a paper table lands in the healthy bands. Then come the review's four Testnet tables: two 60-minute live blitzes and two 5-day async tables.
 
 ## Hard constraints
 
 These conditions are fixed. Each is enforced by the code or by CI, not by good intentions.
 
 | Condition | How it is enforced |
-| --- | --- |
-| Testnet only, no mainnet code paths | The client knows only Testnet endpoints, and on connecting it checks the server's `network_id` is 1 (Testnet) and refuses anything else, before sending a second request. Tests prove every other id, and a missing one, is refused. A CI tripwire also fails on any Mainnet or Devnet hostname written anywhere in the repository. |
-| No real-money language | Game words only: marks, goods, purse, caravan. Ordinary trading words are game language. A copy tripwire in CI (`scripts/check-copy.sh`) fails on wording that treats marks as money, and review catches the rest. |
-| Faucet calls rate-limited | One faucet call per new player per season. The seed stays on the player's machine; a 429 waits and retries with backoff. 100 test XRP covers the reserves for about 490 owned objects, far more than a season needs. |
-| Wipes designed in from day one | Seasons end at resets (see Seasons and resets); the season record lives off the ledger. |
-| One shared reset module | The announced-reset list and the "ledger went backwards" check come from an existing shared module used by three other Testnet tools. A new reset is added in all four places. |
-
-## Research grounding
-
-Four research questions, 2026-11-14. "Checked" says how each finding was confirmed: read at the source, measured on the live ledger, or recalled and still to be confirmed. The evidence on seasons is the weakest: press and forums, no developer data.
-
-| Finding | Source | Checked | What it changes |
-| --- | --- | --- | --- |
-| With a dishonest majority, someone can always bias a coin flip by aborting | Cleve, 1986 | From memory | Fairness needs a rule for the player who does not reveal, not just a better protocol |
-| One honest reveal makes a combined roll unpredictable; a skipped reveal is the attack | EIP-4399 (Ethereum RANDAO), 2021 | Read at source | A missing reveal loses the round and never triggers a re-roll |
-| A delay or beacon value published after the reveal deadline removes the last revealer's edge | Boneh et al., "Verifiable Delay Functions", 2018; drand | Read at source | Mix in a drand round named in advance |
-| A block or ledger hash can be steered by whoever orders transactions | xrpl.org consensus principles | Partly read | The ledger hash is never the only source of a roll |
-| Faucets add value and sinks remove it; an economy is tuned as flows | Lehdonvirta and Castronova, *Virtual Economies*, 2014; CCP's monthly economic reports | Summaries only | Every source of marks gets a paired sink, and the flows are on a dashboard from day one |
-| Axie Infinity's currency collapsed when issuance scaled with players and sinks did not | Decrypt and Cointelegraph, 2022 | Press | Sinks scale with the number of players; there is a written cut rule |
-| Without a trusted authority, one person can always run many identities | Douceur, "The Sybil Attack", 2002 | Search result only | Do not try to stop extra accounts; cap what each can earn |
-| Social trust graphs limit fake identities rather than stop them | Yu et al., "SybilGuard", 2006 | Search result only | Ranked play needs an invitation from an established player |
-| Players return for a season that brings something new, not for the reset | Diablo IV, Path of Exile and Tarkov coverage, 2020 to 2025 | Press and trackers | Each season adds one new rule, announced before the wipe |
-| Rollback anger came from narrow compensation windows and exploits | Guild Wars 2 rollback, 2020 | Press | Carry-over depends on past play, not on being online at the wipe; trading freezes before it |
-| A Testnet ledger closes every 3.3 seconds; reserves are 1 XRP plus 0.2 per object | Live Testnet `server_info`, rippled 3.4.1 | Measured | Turn-based play only; one faucet grant covers a season |
-| Escrow, crypto-conditions and payment channels are retired amendments, so always on | rippled 3.4.1 `features.macro` | Read at source | Hash-locked escrows are available for commit and reveal |
-| After the 25 Nov reset, Testnet amendments are set to match Mainnet's | xrpl.org reset notice, 2026-11-09 | Read at source | Use only features enabled on Mainnet; all the ones this design uses are |
-
-## Economy
-
-Test XRP is never the currency. It only pays the ledger's reserves and fees. The game has two currencies, both tokens from the season issuer, and only one of them is earned.
-
-| Currency | How you get it | What it is for | When it goes |
-| --- | --- | --- | --- |
-| **Table coin** | Handed out at the start of each table, the same to every merchant | Trading inside that table | Burned at the table's end, so farming it gains nothing |
-| **Marks** | Earned only from a finished table, by final standing | Things that last the season: a guild charter, a new route, titles and caravan colours | Spent on those, or wiped at the reset |
-
-**Sources and sinks, paired.** Every source of marks has a sink that grows with the number of players:
-
-- Finishing a table earns marks; town charters and route licences cost marks.
-- Road events (tolls, repairs) cost table coin, paid back to the issuer. On the XRPL, a token sent back to its issuer is destroyed, so that is a real sink, not a transfer.
-- Perishable goods (fruit, fish) spoil: the issuer takes them back after a set number of days. The ledger's Clawback feature does this, and it is enabled on Mainnet, so it survives the reset.
-
-**Free accounts are made pointless, not stopped.** Accounts cost nothing, so one person can always make many (Douceur 2002). Instead:
-
-- An account earns marks from at most 3 tables a day.
-- A table pays marks only with at least 3 distinct accounts, at least 2 of them established (5 finished tables this season).
-- Ranked league play needs an invitation from an established merchant, and an inviter whose invitees cheat loses reputation.
-- Rewards are not zero-sum against other players, so a farm of alts gains only its own capped trickle.
-
-**A flow dashboard from day one.** Marks issued and destroyed per day, read straight off the issuer's ledger balances. A written rule: if marks outstanding grow more than 25% in a week, rewards per table drop 20% the next week. The 25% and 20% are starting guesses, to tune in the first season.
-
-## Fair dice
-
-A day's roll is fixed by every merchant's secret plus a public beacon value that nobody knows until after the reveal deadline. No player, and not the studio, can steer it. The ledger itself holds each commitment and enforces the deadline.
-
-1. **Commit.** Each merchant picks a random 32-byte secret and creates an escrow locked to its SHA-256 hash (a crypto-condition), with a cancel time at the reveal deadline. The escrow holds a token amount of test XRP; it is a sealed envelope, not a bet.
-2. **Reveal.** After the commit window closes, each merchant finishes their own escrow with the secret. The ledger accepts the finish only if the secret matches the hash, so every reveal is checked by the network and is public.
-3. **Beacon.** The rules name the drand round: the first one published after the reveal deadline. Nobody can know it while reveals are still open.
-4. **Roll.** The roll is SHA-256 of the secrets in account order, followed by that drand value. Each road event takes its number from this one value, by a fixed index.
-
-**A merchant who does not reveal loses the day.** The caravan stays in town and pays the toll. The roll goes ahead with the others' secrets, and there is never a re-roll: a re-roll would give the last revealer a free second chance (EIP-4399). The ledger proves the miss, because after the cancel time that escrow can no longer be finished.
-
-**Why both the secrets and the beacon.** Secrets alone let the last revealer see the outcome and pull out; the beacon alone would trust drand's operators. Together, a player can only lose by not revealing. drand's value is a threshold signature that is fixed for each round, so its operators could withhold a round but not choose its value (from drand's design, still to be confirmed at its documentation).
-
-**If drand is unreachable,** the roll waits for it. It never falls back to the ledger hash or the studio's own number, because those can be steered.
-
-## Seasons and resets
-
-Every Testnet reset ends a season, and the game treats that as the season finale, not an outage. The ledger keeps the season's play; a signed season record, kept off the ledger, keeps who did what.
-
-| Survives the reset | Wiped with the ledger |
-| --- | --- |
-| Titles and the hall of fame | Marks and table coin |
-| A signed season record per player: tables played, standings, promises kept and broken, with the transaction hashes | Goods, caravans, charters and routes |
-| Reputation, as a starting rank next season (capped, so veterans do not start rich) | Open contracts and escrows |
-| Caravan colours and other cosmetics | Every account, including the issuer |
-
-**A season ends in four steps, before the announced reset:**
-
-1. 48 hours before the earliest moment the reset could start, new tables stop opening.
-2. 24 hours before, trading and contracts freeze, so nobody can exploit the last hours.
-3. Each client writes the season record and the studio signs the hall of fame; both name the last ledger index seen.
-4. After the reset, the next season opens with a new issuer, the carried titles and one new rule announced before the wipe.
-
-**An unannounced reset is handled the same way, late.** The client notices the ledger index fall below the one it saw before (with a 1,000-ledger tolerance for server lag). It then closes the season at the last state it saw, with the same carry-over rule. Carry-over depends on what a player did during the season, never on being online at the moment of the wipe.
-
-**Proofs outlive the ledger.** A season record includes its transaction hashes, which can no longer be checked once the ledger is gone. Verifying an old record reports "can no longer be checked", never a pass.
+|---|---|
+| Testnet only, no mainnet code paths | The client knows only Testnet endpoints. A client can't exist without a checked network id: it holds a token only the network check makes. Each constructor has a test that every other id, and a missing one, is refused after one request. A CI tripwire also fails on any Mainnet or Devnet hostname written in the repository. |
+| No real-money language | Game words only: marks, goods, purse, caravan, guild. Ordinary trading words are game language (Director, 2026-11-14). A copy tripwire in CI (`scripts/check-copy.sh`) fails on wording that treats marks as money, and review catches the rest. |
+| Faucet calls rate-limited | One faucet call per new player per chapter. The seed stays on the player's machine; a 429 waits and retries with backoff. 100 test XRP covers the reserves for about 490 owned objects. |
+| Wipes designed in | Chapters end on the studio's clock; eras end at resets; records live off the ledger and are exported by the archivist. |
+| One shared reset module | The announced-reset list and the "ledger went backwards" check come from the module shared with three other Testnet tools. A new reset is added in all four places. |
+| Advisories fixed at the root | `cargo audit --deny warnings` with no ignores (the vendored xrpl-rust carries upstream's fix). |
 
 ## Tables with roll
 
-Road events, market shocks and town tables are written as tables for roll, the studio's dice and table engine (@mcptoolshop/roll, MIT, same org). They live in a `tables/` folder, so each event's exact odds are on record and a table change shows its new odds in the pull request.
+Road events, the bell's odds, edicts and the ladders' schedules are tables for roll, the studio's dice and table engine, kept in `tables/`. Each event's exact odds are on record, and a table change shows its new odds in the pull request.
 
-- **Design time, in CI:** roll validates every table and computes its exact odds, pinned to roll 2.1.1. roll 2.1.1's command line only reads its older loot-table format, so CI calls roll's library (`validateGameTables`, `analyzeTable`) through a small Node script with roll pinned in a lockfile. Node runs only in CI, never in the game.
-- **Play time, in Rust:** `league-core` reads the same table JSON. The value for each draw comes from `league-dice` (the escrow reveals plus the drand round), never from a local random number generator. roll's own table roller already takes its random source as a parameter, so a disputed draw can be replayed in roll with the same value.
-- **What roll 2.1.1 already covers:** weighted rows, conditions on context values (a town's or season's state), nested tables and chained tables. No schema change is needed for the first tables.
-- **One engine or two:** decided after M2, once it is clear how much table logic the game needs. Either the Rust resolver is tested row-for-row against a conformance fixture that roll's maintainers are adding, or roll's parser, evaluator and table engine become a Rust crate (roll 3.0.0) that the game depends on directly, with no conformance gap. Until then roll stays pinned at 2.1.1 and no conformance test is written.
-- Changes to roll itself go to R&D as tickets, never straight to the roll repository.
+- **Play time, in Rust.** Draws use **roll 3.0's Rust core**, owned by R&D:
+  - a counter-addressed integer generator, keyed per roll;
+  - integer weights;
+  - validation when a table loads;
+  - true sampling without replacement;
+  - a receipt for every roll.
+
+  The value for each draw comes from the day's drand round, never from a local random number generator. A disputed draw replays exactly.
+- **The league's needs go to R&D as tickets**, never straight to roll:
+  - a draw keyed by (table, day, road) from one drand value;
+  - a weighted table whose weights a context value changes (an edict);
+  - draws without replacement for mandate decks;
+  - the per-roll receipt as JSON that the archivist stores.
+- **Design time, in CI:** roll validates every table and computes its exact odds. This pins to roll 3.0's core once it's released, and to 2.1.1 through its library until then.
 
 ## How it runs on Testnet
 
-The game uses only XRPL features that are enabled on Mainnet as well as Testnet. After the 25 Nov reset, the Testnet's amendments are set to match Mainnet's, and anything Testnet-only could vanish. Each feature below was checked on both networks on 2026-11-14.
+The game uses only XRPL features enabled on Mainnet as well as Testnet. After the 25 Nov reset, Testnet's amendments match Mainnet's, so anything Testnet-only could vanish.
 
-| Feature | Used for | Testnet now | Mainnet, so after the reset |
-| --- | --- | --- | --- |
-| Issued tokens and trust lines | Marks, table coin, goods | Yes | Yes |
-| Offers and the order book | Trading between merchants | Yes | Yes |
-| Escrow with a crypto-condition | Dice commitments | Yes, always on (retired amendment) | Yes |
-| Checks | Contracts between merchants | Yes | Yes |
-| Clawback | Perishable goods spoiling | Yes | Yes |
-| NFTs | Optional: charters and caravan cosmetics | Yes | Yes |
-| Hooks or smart contracts | Not used | No (they run on Xahau, a separate network) | No |
+| Feature | Used for | Proved on Testnet | Mainnet status (xrpl.org known amendments, read 2026-11-14 by R&D) |
+|---|---|---|---|
+| Issued tokens, authorized trust lines | Goods, coin, marks | Tokens and trust lines: yes (M2, M2c). RequireAuth: not yet. | Yes |
+| Offers and order books | Trading | Yes | Yes |
+| Permissioned Domains, Credentials, Permissioned DEX | The table's market | Yes (M2c): domain set, credentials, member offers cross, outsider refused, open book kept apart | Enabled 2026-02-04 and 2026-02-18 |
+| Token escrow with a condition | Bonds | Yes (M2c): refused until the lock flag; `CancelAfter` required; created and finished | Enabled 2026-02-12 |
+| Clawback | Spoiling, the referee's reach | Yes (M2) | Enabled 2024-02-08 |
+| Memos | Sealed orders, contract terms | Yes | Yes |
+| Checks | **No longer used** | | |
+| Batch | Open question (atomic delivery) | Not tested | BatchV1_1: status to check |
 
 **Measured on the live Testnet, 2026-11-14:**
+- A ledger closes about every 3.3 seconds (rippled 3.4.1, network id 1).
+- The base reserve is 1 XRP, plus 0.2 XRP per owned object.
+- The base fee is 10 drops (0.00001 XRP); the client never sends less than 12.
+- A transaction's memos are limited to 1 KB in total.
 
-- A ledger closes about every 3.3 seconds (rippled 3.4.1, network id 1). A move settles in 3 to 5 seconds and is final.
-- The base reserve is 1 XRP and each owned object (trust line, offer, escrow, check) holds another 0.2 XRP. The fee is 0.00001 XRP.
-- A transaction's memos are limited to 1 KB in total, which is plenty for a move.
+## Open questions for the Director
 
-**The game needs its own server, eventually.** The public Testnet servers limit requests per IP and publish no numbers. Early tables can use them; a busy season needs the studio's own Testnet node.
+1. **Batch for delivery.** Should delivery become one atomic Batch (goods and price together) instead of two payments with bonds behind them?
+   - Batch removes the small risk between the two payments.
+   - But BatchV1_1's Mainnet status and its result codes are unchecked, and xrpl-rust has no Batch type, so using it means a third patch.
+   - Recommendation: no for v0.1. Bonds cover the gap.
+2. **The steward as referee.** Is a referee that's trusted but publicly checkable acceptable? The alternative is settling only what the ledger can see: no location rules on deliveries.
+   - Recommendation: yes. The steward is trusted already, and every decision is replayable.
+3. **Who plays the paper table:** people the Director invites, or the studio crew? Recommendation: people. The test is whether humans find the shortcuts.
+4. **Five guilds or six.** Five is enough for 4–5 players. A sixth guild would let a chapter rotate more.
+5. **Gifts.** Forbid gifts with no consideration, or let the paper test decide? Recommendation: let it decide.
+
+## Check before building
+
+- drand: the period, the round-number formula, and that a round's value can't be chosen, all at drand's documentation.
+- RequireAuth together with clawback and token escrow on one trust line, on the Testnet.
+- Whether AMM liquidity takes part in a permissioned domain's book (not used either way).
+- BatchV1_1 and permission delegation: Mainnet status.
 
 ## Risks
 
-The biggest risk is that the game is less fun than the ledger is clever. The first playable build is one table of three merchants, played by people, before any season or league work.
-
 | Risk | What happens | Fallback |
-| --- | --- | --- |
-| The game is not fun | Nobody plays a second table | Playtest one table first; change the rules before building seasons |
-| Turns feel too slow | A day takes minutes, a table takes days | Short tables (6 days) for new players; turn reminders |
-| The public Testnet server rate-limits or goes down | Moves fail or stall | Retry with backoff; the studio's own Testnet node for busy seasons |
-| drand is unreachable | Rolls wait | Waiting is safe; never fall back to a source that can be steered |
-| A reset comes with no notice | The season ends early | The "ledger went backwards" check closes the season from the last state seen |
-| The reset changes a feature the game uses | Part of the game stops working | Only features enabled on Mainnet are used; check the amendment list after every reset |
-| Testnet history is pruned | Old moves can no longer be looked up | The season record keeps what matters, off the ledger |
-| Players treat marks as worth money | Talk of marks as having outside value; trading them off-platform | Marks never leave the game's rules, the copy tripwire runs in CI, and every season wipes them |
-| One issuer account is a single point of trust | The studio could mint marks unfairly | The flow dashboard publishes every issue and burn from the ledger itself |
+|---|---|---|
+| The game is not fun | Nobody plays a second table | The paper table first; change rules on paper before any build |
+| The towns are too good | Guilds trade only with ladders: solitaire | The generator's hermit strategy must lose; widen spreads; the guild-to-guild share metric |
+| A shortcut the simulator missed | One strategy wins every table | The paper test records it; it becomes a named lazy strategy in the generator |
+| The steward goes down | Days can't close | Deadlines move with the close; the steward's state is on the ledger and in the log |
+| The steward errs | A bond goes the wrong way | Every decision replays from public inputs; a wrong one is reversed by rule and logged |
+| drand is unreachable | Closes wait | Waiting is safe; never fall back to a steerable source |
+| A reset with no notice | The chapter ends early | "Ledger went backwards" closes it from the archivist's last state |
+| A feature changes at a reset | Part of the game stops | Only Mainnet-enabled features; the amendment list is checked after every reset |
+| Players treat marks as worth money | Talk of marks as having outside value; trading them off-platform | Marks never leave the game's rules, the copy tripwire runs in CI, and every chapter wipes them |
+| Absent players stall a table | Missed reveals | Standing orders in the daemon; a resting guild holds |
+
+## Research grounding
+
+| Finding | Source | Checked | What it changes |
+|---|---|---|---|
+| Checks set no funds aside, and the payee can cash at any time | xrpl.org, Checks | Read (R&D, 2026-11-14) | Contracts use escrow bonds |
+| Token escrow needs the issuer's lock flag and `CancelAfter` | Live Testnet, M2c receipt | Measured (2026-11-14) | The bond steps and the steward's flag order |
+| A domain refuses outsiders and keeps the open book apart; it doesn't stop members using the open book | Live Testnet, M2c receipt | Measured | Per-table tokens isolate; the domain is the market |
+| Thin books and symmetric players give no trade | Seed 25 review (Gemini Deep Research, 2026-11-14), its occupancy model | The review's own arithmetic | Asymmetric guilds; 4–5 players |
+| Converters make trade necessary | Sidereal Confluence, cited by the review | Not checked at source | The converter graph |
+| Unwritten scores get solved (wash, hermit) | Seed 25 review | Reasoned in the review | The written score and the anti-wash rule |
+| Finite games invite last-round defection | Kreps, Milgrom, Roberts and Wilson, 1982 | Cited by the review | The random bell |
+| Noise needs forgiveness, or cooperation collapses | Wu and Axelrod, 1995 | Cited by the review | Force majeure costs no standing |
+| A skipped reveal is the attack; never re-roll | EIP-4399, 2021 | Read at source | A missing reveal stays in town |
+| One beacon value nobody can choose | drand | Partly read; check before building | Rolls straight from a named round |
+| Prove a shortcut gives a different answer | HANS (McCoy, Pavlick and Linzen, 2019), via role-set's generator design | Cited there | A setup is refused when a lazy strategy wins |
+| Seeded generators with verifiers rebuild the same item | Reasoning Gym (2025), via role-set's design | Cited there | Seeded setups with receipts |
+| Published Testnet resets were 55.8, 4.0 and 27.2 months apart | Seed 25 review, xrpl.org blog dates | Not checked | Studio chapters inside eras |
+| A Testnet ledger closes about every 3.3 seconds | Live `server_info` | Measured | Slow turns |
 
 ## Sources
 
-Researched on 2026-11-14. "Read" means the page was opened; "search" means only a search result was seen; "memory" means it still needs checking at the source.
+- **Seed 25 review:** "Challenging the Testnet Merchant League Hypothesis" (Gemini Deep Research, 2026-11-14), harvested by R&D: `rnd-local/projects/deep-research/2026-11-14-25-merchant-league-HARVEST.md`. The verbatim export is kept beside it.
+- **Live receipts:** `docs/receipts/m2-xrpl-rust-spike-2026-11-14/`, `docs/receipts/m2b-own-layer-proof-2026-11-14/`, `docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/`.
+- **Role-set's puzzle generator design** (Publisher, 2026-10-11, with R&D's review) and its code in `role-set/src/role_set/generate/`. Its method is taken here, not its code.
+- **XRPL:**
+  - [Checks](https://xrpl.org/docs/concepts/payment-types/checks)
+  - [Escrow](https://xrpl.org/docs/concepts/payment-types/escrow)
+  - [Permissioned DEXes](https://xrpl.org/docs/concepts/tokens/decentralized-exchange/permissioned-dexes)
+  - [Auto-bridging](https://xrpl.org/docs/concepts/tokens/decentralized-exchange/autobridging)
+  - [Testnet and Devnet reset, 25 Nov 2026](https://xrpl.org/blog/2026/testnet-devnet-reset)
+  - [Reserves](https://xrpl.org/docs/concepts/accounts/reserves)
+- **Fair randomness:**
+  - [EIP-4399](https://eips.ethereum.org/EIPS/eip-4399)
+  - [drand](https://drand.love)
+  - Boneh, Bonneau, Bünz and Fisch, ["Verifiable Delay Functions"](https://eprint.iacr.org/2018/601) (2018)
+- **Cooperation:**
+  - Kreps, Milgrom, Roberts and Wilson, "Rational Cooperation in the Finitely Repeated Prisoners' Dilemma" (1982)
+  - Wu and Axelrod, ["How to Cope with Noise in the Iterated Prisoner's Dilemma"](https://websites.umich.edu/~axe/research/PD_with_Noise.pdf) (1995)
 
-**XRPL, measured or read**
-
-- [Testnet and Devnet reset, 25 Nov 2026](https://xrpl.org/blog/2026/testnet-devnet-reset) (xrpl.org, 2026-11-09). Read.
-- [rippled 3.4.1 amendment list, `features.macro`](https://raw.githubusercontent.com/XRPLF/rippled/3.4.1/include/xrpl/protocol/detail/features.macro). Read: Escrow, PayChan and CryptoConditions are retired.
-- Live Testnet `server_info` and `feature`, and one read-only `feature` query on Mainnet, 2026-11-14. Measured.
-- [Reserves](https://xrpl.org/docs/concepts/accounts/reserves), [Transaction common fields (memos)](https://xrpl.org/docs/references/protocol/transactions/common-fields) and [Rate limiting](https://xrpl.org/docs/references/http-websocket-apis/api-conventions/rate-limiting) (xrpl.org). Read.
-- [Consensus principles and rules](https://xrpl.org/docs/concepts/consensus-protocol/consensus-principles-and-rules) (xrpl.org). Partly read.
-
-**Fair randomness**
-
-- [EIP-4399: the RANDAO opcode](https://eips.ethereum.org/EIPS/eip-4399) (Ethereum, 2021). Read.
-- [Boneh, Bonneau, Bünz and Fisch, "Verifiable Delay Functions"](https://eprint.iacr.org/2018/601) (2018). Read.
-- [drand and the League of Entropy](https://drand.love). Partly read; the threshold-signature details are from memory.
-- Cleve, "Limits on the Security of Coin Flips When Half the Processors Are Faulty" (STOC 1986); Blum, "Coin Flipping by Telephone" (1981). Memory.
-
-**Economies and identities**
-
-- [Lehdonvirta and Castronova, *Virtual Economies: Design and Analysis*](https://mitpressbookstore.mit.edu/book/9780262535069) (MIT Press, 2014). Search; the book itself was not read.
-- [CCP, EVE Online Monthly Economic Report, April 2026](https://www.eveonline.com/news/view/monthly-economic-report-april-2026). Search.
-- [Decrypt on Axie Infinity's economy changes](https://decrypt.co/92190/axie-infinity-making-big-changes-to-fix-its-ailing-play-to-earn-nft-economy) (2022). Search; figures differ between sources.
-- [Douceur, "The Sybil Attack"](https://www.microsoft.com/en-us/research/publication/the-sybil-attack/) (IPTPS 2002). Search.
-- [Yu, Kaminsky, Gibbons and Flaxman, "SybilGuard"](https://www.comp.nus.edu.sg/~yuhf/sybilguard-sigcomm06.pdf) (SIGCOMM 2006). Search.
-
-**Seasons and wipes** (press and forums only; no developer data was found)
-
-- [Mein-MMO on the Escape from Tarkov 0.12 wipe](https://mein-mmo.de/en/escape-from-tarkov-patch-that-deleted-everything-attracts-more-players-than-ever-before,510423) (2020). Read; the player count is the developer's own claim.
-- [Icy Veins on Diablo IV Season 11 retention](https://www.icy-veins.com/d4/news/diablo-4-season-11-player-retention-steam/). Search only (the page refused the fetch).
-- [Path of Exile wiki: Leagues](https://www.poewiki.net/wiki/League). Search.
-- [GameSpot: Rust force wipes explained](https://www.gamespot.com/articles/rust-force-wipes-schedule-explained/1100-6505244/). Search.
-- [Mein-MMO on the Guild Wars 2 rollback compensation](https://mein-mmo.de/en/guild-wars-2-offers-compensation-for-rollback-and-is-being-criticized,504743) (2020). Read.
+  Both were cited by the review and not read here.
