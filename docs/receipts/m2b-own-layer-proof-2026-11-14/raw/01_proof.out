@@ -1,0 +1,15 @@
+{"build":"3.4.1","network_id":1,"step":"network_guard"}
+{"faucet_calls":2,"issuer":"rDkn2nyUUazdByShc24HVVTX3E5CzPfSdq","merchant":"rfZfnZB2HhWVifp7HWnC3EQeAqVVRfnHpu","seed_derives_to_reported_address":true,"step":"accounts"}
+{"hash":"8EA39A0E067C33D90FFD11C31BD50EC9B2543CD507AF2C98BC972ECB6FECC932","ledger_index":22311628,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_allow_clawback","validated":true}
+{"hash":"34FB3AA50E00B9ED6BC7BA85BDF7EE722F29192CED2203667D6E71BC9B771A4E","ledger_index":22311630,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_default_ripple","validated":true}
+{"hash":"1B1B5D2411F6C45B0C44823F3A7D77E5DC0581EEEAF603AC1994DAA163D9555D","ledger_index":22311632,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_trust_set","validated":true}
+{"hash":"E980E177255A20F0DA608C788A072B291C6511C77E2A4D531DD0A225F3C17718","ledger_index":22311634,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_pays_100","validated":true}
+{"hash":"BDDDDDAB21F20648B605CF0B34B8CBD9B7E82BD8DE9EEABB49273092F8CB6EE9","ledger_index":22311636,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_offer_create","validated":true}
+{"hash":"32CE471014E57F73998EB98037A3A4D48851D9FF22349FE38DBE01CF6EFD5AFF","ledger_index":22311638,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_offer_cancel","validated":true}
+{"hash":"146D3327DB1C2F21C4AD5DC836B46BE944CDA17B726A74DD66AFB6568F0EECCC","ledger_index":22311640,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_check_create","validated":true}
+{"hash":"36463081699BC9DD0CF1211053489F04743BBD0A40616E156AE3F6755FCE98A0","ledger_index":22311643,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_check_cash","validated":true}
+{"hash":"BA671A14F963D5840071AD9CE3481A1AF78E04DDBB99240D6A0E5B4089CC9AA3","ledger_index":22311645,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_escrow_create","validated":true}
+{"hash":"3169CDE4766F622AA89D66426289BE90061ED233CE550EC3C09A9A1ECF58C3BC","ledger_index":22311647,"preliminary":"tecCRYPTOCONDITION_ERROR","result":"tecCRYPTOCONDITION_ERROR","step":"merchant_escrow_finish_wrong_secret","validated":true}
+{"hash":"8D8046B6F01C2B2FD3B3A3BC255BF9C32575AFD098D370EE7F1E5A620B535F02","ledger_index":22311649,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"merchant_escrow_finish","validated":true}
+{"hash":"3EB4F708871FC888C9C1FDFA124B57636880FC92A4896731AEF452FD6486BE2B","ledger_index":22311651,"preliminary":"tesSUCCESS","result":"tesSUCCESS","step":"issuer_clawback_3","validated":true}
+{"checks_left":0,"escrows_left":0,"expected_balance":"102","merchant_mrk_balance":"102","offers_left":0,"step":"final_state"}
