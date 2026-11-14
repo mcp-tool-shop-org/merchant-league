@@ -9,7 +9,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "f938b205d3921c2e47097dcbb34556332e3ce85bbfb857e0b235c931a4a263db",
+          "hash": "33b2778be9f2e945efd48c1b1e35a9582df8d43b7e9ce5a21567831f797b8176",
           "path": ".github/workflows/ci.yml"
         }
       ],
@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "351eb23e7e04ebf14d47e90426c480565fb858ee459fa36a43976b5243b5a4df",
+          "hash": "cbd10211dde8696632f2819d8e1d14be26b543ee44f81dc66d304f26dc06c870",
           "path": "docs/design.md"
         }
       ],
@@ -139,7 +139,7 @@
               "line": 57
             }
           ],
-          "hash": "19d278fd3acec5732463d1a1e6f651b097439b550fab51ee66491b3071f30bd8",
+          "hash": "5bc25772375da1c73153071cebdd93ec6742d8db6d1bc9ab5f6ee62489750842",
           "path": "crates/league-ledger/src/lib.rs",
           "testsInside": true
         }
@@ -246,11 +246,11 @@
           "path": ".gitignore"
         },
         {
-          "hash": "738b4f322614e42893fe218e4918bc95641348cc6950a0ae88cc38808e8eedb5",
+          "hash": "6089f40b32d70a6495d10ff6fe53ba8a62a154a626b270618fb2413f8820a29c",
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "a6ecede67dafaf961a0193b9baf656443dda17b064afdc779942de33f115ea08",
+          "hash": "d4e92525a020735ebe9c368880b54582142912654732a80cf2fb05d072c4ac3d",
           "path": "CLAUDE.md"
         },
         {
@@ -297,12 +297,16 @@
       "externals": 0,
       "files": [
         {
-          "hash": "f171bc9f6528c953d2694fbed200a80564628b880728681e89b0cf1caf29239b",
+          "hash": "4a3865fba19e3b129e169187ce16232809b1d3a073f1d5b1ed7978547f845d8b",
           "path": "scripts/check-copy.sh"
         },
         {
-          "hash": "7554385fd73226e513508093ad2e6b5882c26a6954abc8ba40bfe926766ccdbe",
+          "hash": "ad11f08efc100edc6312a295e0b16c5861f35ebacd1e9275f96219d928668d25",
           "path": "scripts/check-testnet-only.sh"
+        },
+        {
+          "hash": "24b59e4bc9f1799a2e2419c1dcfda3f371ec8d93f9bf4d856fb97552e44e601f",
+          "path": "scripts/test-guards.sh"
         }
       ],
       "globs": [
@@ -390,6 +394,14 @@
           "dir": "",
           "job": "check",
           "programs": [
+            "bash"
+          ],
+          "step": "Guard controls"
+        },
+        {
+          "dir": "",
+          "job": "check",
+          "programs": [
             "npx"
           ],
           "step": "Atlas check"
@@ -464,7 +476,7 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 2
+          "files": 3
         }
       ],
       "readers": [],
@@ -486,9 +498,14 @@
           "job": "check",
           "path": "scripts/check-testnet-only.sh",
           "runKind": "executes"
+        },
+        {
+          "job": "check",
+          "path": "scripts/test-guards.sh",
+          "runKind": "executes"
         }
       ],
-      "runsCount": 3,
+      "runsCount": 4,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -532,6 +549,7 @@
             "README.md",
             "atlas/**",
             "crates/**",
+            "docs/**",
             "rust-toolchain.toml",
             "scripts/**"
           ]
@@ -551,14 +569,36 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-    "tracked": 23
+    "commit": "b614ae9c111c25a7093dfb49d9a6bf44984006ed",
+    "tracked": 24
   },
   "landings": [
     {
       "readers": [
         {
-          "by": "scripts/check-testnet-only.sh",
+          "by": "scripts/test-guards.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "CHANGELOG.md",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/test-guards.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "CLAUDE.md",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/test-guards.sh",
           "call": "literal",
           "confidence": "text"
         }
@@ -572,6 +612,11 @@
           "by": "scripts/check-copy.sh",
           "call": "literal",
           "confidence": "text"
+        },
+        {
+          "by": "scripts/test-guards.sh",
+          "call": "literal",
+          "confidence": "text"
         }
       ],
       "target": "README.md",
@@ -580,17 +625,12 @@
     {
       "readers": [
         {
-          "by": "scripts/check-copy.sh",
-          "call": "literal",
-          "confidence": "text"
-        },
-        {
-          "by": "scripts/check-testnet-only.sh",
+          "by": "scripts/test-guards.sh",
           "call": "literal",
           "confidence": "text"
         }
       ],
-      "target": "crates",
+      "target": "SECURITY.md",
       "writers": []
     },
     {
@@ -629,7 +669,7 @@
     {
       "readers": [
         {
-          "by": "scripts/check-testnet-only.sh",
+          "by": "scripts/test-guards.sh",
           "call": "literal",
           "confidence": "text"
         }
@@ -662,12 +702,12 @@
     {
       "readers": [
         {
-          "by": "scripts/check-testnet-only.sh",
+          "by": "scripts/test-guards.sh",
           "call": "literal",
           "confidence": "text"
         }
       ],
-      "target": "scripts",
+      "target": "crates/league-tui/src/lib.rs",
       "writers": []
     }
   ],

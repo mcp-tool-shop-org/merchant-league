@@ -1,26 +1,30 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit c0d6c62 by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit b614ae9 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-9 parts, mostly Rust (5 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 6 parts.
+9 parts, mostly Rust (5 files) and shell (3). Work enters through 1 door; the busiest is CI, which reaches 6 parts.
 
-## What changed since 2026-11-14 (4c4f139)
+## What changed since 2026-11-14 (c0d6c62)
 
-- crates/league-tui/ is now read by Cargo.toml.
-- league-tui is a new part, drawn from `crates/league-tui/**`.
-- 2 files added and 7 changed content, across 4 parts.
+- CI's push trigger now also names `docs/**`.
+- CI now also runs scripts/test-guards.sh.
+- CHANGELOG.md is now read by scripts/test-guards.sh.
+- CLAUDE.md is now read by scripts/test-guards.sh.
+- Cargo.toml is now also read by scripts/test-guards.sh.
+- And 4 more new writers and readers of places.
+- 1 file added and 7 changed content, across 5 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 8 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh and crates/.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 5 more.
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh and scripts/check-testnet-only.sh in scripts and crates/ (5 parts).
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts and crates/ (5 parts).
 
 ## Who reads the results
 
