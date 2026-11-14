@@ -10,6 +10,10 @@
 
 use std::fmt;
 
+pub mod client;
+pub mod codec;
+pub mod keys;
+
 /// The Testnet's network id, as its servers report it in `server_info`
 /// (measured on 2026-11-14: rippled 3.4.1, `network_id` 1).
 pub const TESTNET_NETWORK_ID: u32 = 1;
