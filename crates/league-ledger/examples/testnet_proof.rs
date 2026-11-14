@@ -524,7 +524,7 @@ mod tests {
 
     fn someone() -> Res<Account> {
         let w = xrpl::wallet::Wallet::create(Some(xrpl::constants::CryptoAlgorithm::ED25519))
-            .map_err(|e| format!("{e:?}"))?;
+            .map_err(|e| format!("{e}"))?;
         Ok(Account::from_seed(&w.seed)?)
     }
 
@@ -539,8 +539,8 @@ mod tests {
         let (cond, fulfil) = condition(&[7u8; 32]);
         let domain = "C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901";
         fn check<T: serde::Serialize + Model>(tx: T) -> Res<()> {
-            tx.get_errors().map_err(|e| format!("{e:?}"))?;
-            xrpl::core::binarycodec::encode(&tx).map_err(|e| format!("{e:?}"))?;
+            tx.get_errors().map_err(|e| format!("{e}"))?;
+            xrpl::core::binarycodec::encode(&tx).map_err(|e| format!("{e}"))?;
             Ok(())
         }
         check(build::<AccountSet>(

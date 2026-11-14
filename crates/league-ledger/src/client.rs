@@ -120,7 +120,10 @@ impl Account {
         if !seed.starts_with("sEd") {
             return Err(LedgerError::NotEd25519);
         }
-        let wallet = Wallet::new(seed, 0).map_err(|e| LedgerError::Build(format!("{e:?}")))?;
+        // A fixed message: the library's error can carry bytes decoded from
+        // the seed (Debug of its address codec's VecResizeError prints them).
+        let wallet = Wallet::new(seed, 0)
+            .map_err(|_| LedgerError::Build("the seed could not be decoded".into()))?;
         if !wallet.public_key.to_ascii_uppercase().starts_with("ED") {
             return Err(LedgerError::NotEd25519);
         }
@@ -349,8 +352,8 @@ impl<T: Transport> Testnet<T> {
             }
         }
         xrpl::signing::sign(tx, &account.wallet, false)
-            .map_err(|e| LedgerError::Build(format!("{e:?}")))?;
-        let blob = encode(tx).map_err(|e| LedgerError::Build(format!("{e:?}")))?;
+            .map_err(|e| LedgerError::Build(format!("signing failed: {e}")))?;
+        let blob = encode(tx).map_err(|e| LedgerError::Build(format!("encoding failed: {e}")))?;
         let hash = transaction_hash(&decode_hex(&blob).map_err(LedgerError::Build)?);
 
         let submitted = self.call("submit", json!({ "tx_blob": blob }))?;
@@ -699,6 +702,14 @@ mod tests {
             Account::from_seed("sEdnotarealseed"),
             Err(LedgerError::Build(_))
         ));
+        // A seed that fails to decode says so in fixed words, whatever the
+        // library's error held.
+        for bad in ["sEdnotarealseed", "sEdSJHS4oiAdz7w2X2ni1gFiqtbJHqF"] {
+            assert_eq!(
+                Account::from_seed(bad).err(),
+                Some(LedgerError::Build("the seed could not be decoded".into()))
+            );
+        }
     }
 
     #[test]

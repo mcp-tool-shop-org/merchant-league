@@ -7,7 +7,7 @@ This folder is **xrpl-rust 1.3.0 as published on crates.io**, with three changes
 - **Base:** the published crate `xrpl-rust` 1.3.0. Its SHA-256 is `c0c758f6900c150c4b4bd9ebef6f403717bdf23d047a2c3bf0da15dd8be4aae9`, matching crates.io's checksum.
 - **Same as the tag:** its `src/` is identical (ignoring line endings) to the upstream tag `v1.3.0`, `2f2deb9f7daab682b6816458fcbece6c3bbe0fa6`, of https://github.com/XRPLF/xrpl-rust.
 - **Licence:** ISC. `LICENSE` is the repository's, copied from the tag, because the published crate doesn't include it. Its notice must stay in every copy.
-- **Files:** `Cargo.toml` (the published, normalised manifest), `Cargo.toml.orig`, `README.md` and `src/` are from the published crate. Its `Cargo.lock`, `.cargo-ok` and `.cargo_vcs_info.json` are left out.
+- **Files:** `Cargo.toml` (the published, normalised manifest), `Cargo.toml.orig`, `README.md` and `src/` are from the published crate. Its `Cargo.lock`, `.cargo-ok` and `.cargo_vcs_info.json` are left out. (The crate's `Cargo.lock` was committed by mistake at first and removed after Carbon's review on 2026-11-14. It pinned crypto-bigint 0.5.5 and atomic-polyfill 1.0.3, and Cargo never read it, since only the workspace's root lock counts.)
 
 ## Why
 
