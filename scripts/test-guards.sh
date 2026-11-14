@@ -163,7 +163,7 @@ done
 # Licence files under crates/ are skipped by exact name, and nothing else is.
 for lic in crates/league-ledger/tests/vectors/LICENSE-xrpl.js crates/league-tui/LICENSE \
   crates/league-tui/LICENSE.md crates/league-tui/LICENSE.txt crates/vendor/xrpl-rust/LICENSE \
-  crates/league-tui/LICENSE-MIT crates/league-tui/LICENSE-APACHE; do
+  crates/league-tui/LICENSE-MIT crates/league-tui/LICENSE-APACHE crates/vendor/xrpl-rust/LICENSE-rippled; do
   run_case $c pass "$lic" "Cash out now."
 done
 for other in docs/LICENSE docs/LICENSE-notes.md crates/league-tui/src/LICENSE_screen.rs \

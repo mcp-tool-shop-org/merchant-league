@@ -34,6 +34,10 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
      - the other condition types are refused, as rippled refuses them.
 
      An empty or malformed condition is refused before signing.
+
+     This decoder is a port of rippled's: XRPLF/rippled, tag 3.4.1, commit `00e640751460c137636fdb6dae6b4280de355d81`, from Condition.cpp and conditions/detail/utils.h. rippled is ISC.
+     - Its notice is in `LICENSE-rippled`: rippled's `LICENSE.md` at that tag, copied verbatim, sha256 `4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c`.
+     - The ported code carries a header naming the source.
 3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits in either case, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.

@@ -16,31 +16,38 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 15,
+      "added": 1,
+      "changed": 5,
       "moved": 0,
-      "parts": 4,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "unassigned",
+        "sentence": "vendor/xrpl-rust/LICENSE-rippled is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "vendor/xrpl-rust/LICENSE-rippled"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-14; 15 files changed content.",
+        "sentence": "1 file added and 5 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "606e9b074d331e51c5b7906de02fe42fd780fb60",
-      "generatedAt": "2026-11-14T11:03:44.710Z"
+      "commit": "4cfd3c576ad8cd199c1004fed4082d15c1cdf7db",
+      "generatedAt": "2026-11-14T11:51:57.947Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "4cfd3c576ad8cd199c1004fed4082d15c1cdf7db",
+  "commit": "ef971a49042a717ec849dee71f44727036cde398",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -220,11 +227,11 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T11:51:57.947Z",
+  "generatedAt": "2026-11-14T11:59:28.631Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
-    "359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.",
+    "360 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 357 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
   "mainDoor": ".github/workflows/ci.yml",

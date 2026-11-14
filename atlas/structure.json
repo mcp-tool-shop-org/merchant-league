@@ -572,7 +572,7 @@
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "de53c372335e6ad0b698d0f9461119fc63f03293be056d803fb6cb9b57fcb148",
+          "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
           "path": "CLAUDE.md"
         },
         {
@@ -619,7 +619,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "21188f9aa2bc09c60f222e262799ec18e9723acbb07bcecf21efb89429a12c74",
+          "hash": "b114b117f7c38c8cad1afc36b93797516971f2707ca2b24bccf28b849dc1a0a7",
           "path": "scripts/check-copy.sh"
         },
         {
@@ -627,7 +627,7 @@
           "path": "scripts/check-testnet-only.sh"
         },
         {
-          "hash": "9dec770123d2c96f13cb7eab1b1368d0ab50db38e0ce4e6a3ac11f837ec73f0f",
+          "hash": "6a68789ff44d8d3a892ef3d904b3294de01e0004f3075abd64f8f723d60ac7c2",
           "path": "scripts/test-guards.sh"
         }
       ],
@@ -1104,8 +1104,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "4cfd3c576ad8cd199c1004fed4082d15c1cdf7db",
-    "tracked": 415
+    "commit": "ef971a49042a717ec849dee71f44727036cde398",
+    "tracked": 416
   },
   "landings": [
     {
@@ -1756,11 +1756,15 @@
       "path": "vendor/xrpl-rust/LICENSE"
     },
     {
+      "hash": "4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c",
+      "path": "vendor/xrpl-rust/LICENSE-rippled"
+    },
+    {
       "hash": "e628c2d5a857454b74babada0fd031ded2b5e2e26af4bd4cfc289444c5aa73b8",
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "1cc937d68842286a448f98fd0c4d40b4090ecaf889bd479031825948fc314706",
+      "hash": "89a542dbd1ba62f7943090ec598bfb56935b532f8f8afd80c2286dfb3ef5669e",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
@@ -7371,7 +7375,7 @@
           "line": 208
         }
       ],
-      "hash": "fffb53bcb6326499cb922497a1ccd5410cb4fbb210649637ba6f35592bacc13d",
+      "hash": "4477d777242c7b25b3df9932f66c27cb233f106ae560a08e81409018c2759b8c",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",

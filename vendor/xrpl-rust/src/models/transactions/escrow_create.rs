@@ -220,6 +220,20 @@ impl<'a> EscrowCreateError for EscrowCreate<'a> {
     }
 }
 
+// The DER decoding below (`der_preamble`, `is_preimage_condition` and their
+// constants) is a port of rippled's crypto-condition decoder:
+// XRPLF/rippled, tag 3.4.1 (commit 00e640751460c137636fdb6dae6b4280de355d81),
+// - src/libxrpl/conditions/Condition.cpp (`Condition::deserialize`,
+//   `loadSimpleSha256`),
+// - include/xrpl/conditions/detail/utils.h (`parsePreamble`, `parseInteger`),
+// - include/xrpl/conditions/Condition.h and detail/PreimageSha256.h (limits).
+// rippled is under the ISC licence:
+//   Copyright (c) 2011, Arthur Britto, David Schwartz, Jed McCaleb, Vinnie
+//   Falco, Bob Way, Eric Lombrozo, Nikolaos D. Bougalis, Howard Hinnant.
+//   Copyright (c) 2012-present, the XRP Ledger developers.
+// Its full copyright and permission notice is in LICENSE-rippled at the root
+// of this crate, and must stay with this code.
+
 /// A DER preamble as rippled's `parsePreamble` reads it: the identifier's class
 /// and form bits, its tag, the content length (short or long form), and the
 /// bytes after the preamble. `None` where rippled reports an error.
