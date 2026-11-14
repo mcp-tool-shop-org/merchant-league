@@ -169,7 +169,7 @@ impl<'a> EscrowCreate<'a> {
 
 impl<'a> EscrowCreateError for EscrowCreate<'a> {
     /// The condition, if any, must be one rippled can read: a DER
-    /// PREIMAGE-SHA-256 crypto-condition (see `check_preimage_condition`).
+    /// PREIMAGE-SHA-256 crypto-condition (see `is_preimage_condition`).
     fn _get_condition_error(&self) -> XRPLModelResult<()> {
         match &self.condition {
             Some(condition) if !is_preimage_condition(condition) => {
@@ -249,21 +249,32 @@ fn der_preamble(s: &[u8]) -> Option<(u8, u8, usize, &[u8])> {
     let mut rest = &s[2..];
     if len & 0x80 != 0 {
         let count = len & 0x7F;
-        if count == 0 || count > core::mem::size_of::<usize>() || count > rest.len() {
+        // rippled's limit is `sizeof(std::size_t)`, and validators are 64-bit,
+        // so the count is held to 8 whatever this crate is built for. A
+        // `usize` limit would refuse 5- to 8-byte counts on a 32-bit or wasm
+        // target that the ledger accepts.
+        if count == 0 || count > DER_MAX_LENGTH_BYTES || count > rest.len() {
             return None;
         }
-        len = rest[..count]
+        let long = rest[..count]
             .iter()
-            .fold(0usize, |acc, b| (acc << 8) + *b as usize);
+            .fold(0u64, |acc, b| (acc << 8) | u64::from(*b));
         rest = &rest[count..];
-        if len == 0 {
+        if long == 0 {
             return None;
         }
+        // A length too large for this target's usize can't fit in the buffer
+        // either, so saturating keeps the later "longer than the buffer"
+        // refusal, as rippled's `p.length > s.size()` does.
+        len = usize::try_from(long).unwrap_or(usize::MAX);
     }
     Some((kind, tag, len, rest))
 }
 
 const DER_CONSTRUCTED: u8 = 0x20;
+/// The most bytes a long-form DER length may take: rippled's
+/// `sizeof(std::size_t)` on the 64-bit builds validators run.
+const DER_MAX_LENGTH_BYTES: usize = 8;
 const DER_CONTEXT_SPECIFIC: u8 = 0x80;
 /// rippled: `Condition::kMaxSerializedCondition` and
 /// `PreimageSha256::kMaxPreimageLength`, both 128; the fingerprint is 32 bytes.
@@ -559,6 +570,17 @@ mod tests {
         assert!(ok(&format!("A0258020{fp}810100")));
         assert!(ok(&format!("A02680 20{fp}81020080").replace(' ', "")));
         assert!(ok(&format!("A0812580 20{fp}810120").replace(' ', "")));
+        // Long-form length counts of 5 and 8 bytes, as 64-bit rippled accepts on
+        // any target this crate is built for; 9 bytes is refused.
+        assert!(ok(
+            &format!("A0850000000025 8020{fp}810120").replace(' ', "")
+        ));
+        assert!(ok(
+            &format!("A0880000000000000025 8020{fp}810120").replace(' ', "")
+        ));
+        assert!(!ok(
+            &format!("A089000000000000000025 8020{fp}810120").replace(' ', "")
+        ));
         // Refused: empty, not hex, not DER, another condition type.
         for bad in ["", "zz", "00", "A0", "A025"] {
             assert!(!ok(bad), "{bad:?}");
