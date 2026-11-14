@@ -16,33 +16,49 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 2,
+      "added": 1,
+      "changed": 3,
       "moved": 0,
       "parts": 2,
-      "removed": 0
+      "removed": 1
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs scripts/test-copy-check.sh.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "scripts/test-copy-check.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "README.md is now also read by scripts/test-copy-check.sh.",
+        "subjects": [
+          "README.md",
+          "scripts/test-copy-check.sh"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-14; 2 files changed content.",
+        "sentence": "1 file added, 1 removed and 3 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "871b5b9e8e50fe1854afbf806dc1d078a936c1f6",
-      "generatedAt": "2026-11-14T07:26:12.370Z"
+      "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3",
+      "generatedAt": "2026-11-14T08:24:54.511Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3",
+  "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (304 files), shell (2), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [],
@@ -82,12 +98,13 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 2
+          "files": 3
         }
       ],
       "runs": [
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
+        "scripts/test-copy-check.sh",
         "crates/league-core/",
         "crates/league-dice/",
         "crates/league-ledger/examples/",
@@ -96,8 +113,8 @@
         "crates/league-season/",
         "crates/league-tui/"
       ],
-      "runsCount": 9,
-      "runsMore": 7,
+      "runsCount": 10,
+      "runsMore": 8,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -163,11 +180,11 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T08:24:54.511Z",
+  "generatedAt": "2026-11-14T09:31:36.362Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "2 writes and 1 read go to a path their caller passes, not to this repository.",
-    "360 files belong to no part: vendor/xrpl-rust/Cargo.lock, vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig and 357 more.",
+    "359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
   "mainDoor": ".github/workflows/ci.yml",

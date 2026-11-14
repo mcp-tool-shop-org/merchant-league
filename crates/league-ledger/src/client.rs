@@ -14,7 +14,7 @@
 //! The HTTP layer sits behind [`Transport`], so everything above it can be
 //! tested without a network.
 
-use crate::{NotTestnet, TESTNET_FAUCET, TESTNET_JSON_RPC, require_testnet};
+use crate::{NotTestnet, TESTNET_FAUCET, TESTNET_JSON_RPC};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha512};
@@ -197,23 +197,76 @@ const EXPIRY_LEDGERS: u64 = 20;
 /// The smallest fee sent, in drops.
 const MIN_FEE_DROPS: u64 = 12;
 
+/// Proof that a server reported the Testnet's network id.
+///
+/// A [`Testnet`] client can't be built without one, and the only way to get
+/// one is [`Verified::check`], which runs [`require_testnet`]. Its field is
+/// private to this module, so no other code, in this file or outside it, can
+/// make one. A future constructor that skips the network check doesn't
+/// compile.
+mod verified {
+    use crate::{NotTestnet, require_testnet};
+
+    pub struct Verified(());
+
+    impl Verified {
+        /// The server's reported network id, checked.
+        pub fn check(reported: Option<u32>) -> Result<Verified, NotTestnet> {
+            require_testnet(reported).map(|()| Verified(()))
+        }
+    }
+}
+
 /// The XRPL Testnet, through one JSON-RPC endpoint.
+///
+/// Every constructor checks the server's network id before it returns, and
+/// each one has a test that network id 0 and a missing id are refused after
+/// that single request (CLAUDE.md: a new constructor needs the same test).
 pub struct Testnet<T: Transport = Ureq> {
     transport: T,
     rpc_url: String,
     faucet_url: String,
     poll: Duration,
     max_polls: u32,
+    _verified: verified::Verified,
 }
 
 impl Testnet<Ureq> {
     /// Connect to the public Testnet, checking the network id first.
     pub fn connect() -> Result<Self, LedgerError> {
-        Testnet::with_transport(Ureq, TESTNET_JSON_RPC, TESTNET_FAUCET)
+        Testnet::public_testnet_through(Ureq)
     }
 }
 
+/// Call a JSON-RPC method through `transport` and return its `result`.
+fn rpc<T: Transport>(
+    transport: &T,
+    url: &str,
+    method: &str,
+    params: Json,
+) -> Result<Json, LedgerError> {
+    let body = json!({ "method": method, "params": [params] });
+    let reply = transport.post(url, &body).map_err(LedgerError::Transport)?;
+    let result = reply
+        .get("result")
+        .cloned()
+        .ok_or_else(|| LedgerError::Reply(format!("{method}: no result")))?;
+    if let Some(error) = result.get("error").and_then(|e| e.as_str()) {
+        return Err(LedgerError::Rpc {
+            method: method.to_string(),
+            error: error.to_string(),
+        });
+    }
+    Ok(result)
+}
+
 impl<T: Transport> Testnet<T> {
+    /// What [`Testnet::connect`] does, through any transport, so a test can
+    /// check that path: the public Testnet's endpoints, network id checked.
+    fn public_testnet_through(transport: T) -> Result<Self, LedgerError> {
+        Testnet::with_transport(transport, TESTNET_JSON_RPC, TESTNET_FAUCET)
+    }
+
     /// Connect through a given transport. The server must report network id
     /// 1, or nothing else is ever sent.
     pub fn with_transport(
@@ -221,19 +274,19 @@ impl<T: Transport> Testnet<T> {
         rpc_url: &str,
         faucet_url: &str,
     ) -> Result<Self, LedgerError> {
-        let me = Testnet {
+        let info = rpc(&transport, rpc_url, "server_info", json!({}))?;
+        let reported = info["info"]["network_id"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok());
+        let verified = verified::Verified::check(reported).map_err(LedgerError::NotTestnet)?;
+        Ok(Testnet {
             transport,
             rpc_url: rpc_url.to_string(),
             faucet_url: faucet_url.to_string(),
             poll: Duration::from_secs(1),
             max_polls: 60,
-        };
-        let info = me.call("server_info", json!({}))?;
-        let reported = info["info"]["network_id"]
-            .as_u64()
-            .and_then(|n| u32::try_from(n).ok());
-        require_testnet(reported).map_err(LedgerError::NotTestnet)?;
-        Ok(me)
+            _verified: verified,
+        })
     }
 
     /// How often, and how many times, [`submit`](Self::submit) checks for a
@@ -246,22 +299,7 @@ impl<T: Transport> Testnet<T> {
 
     /// Call a JSON-RPC method and return its `result`.
     pub fn call(&self, method: &str, params: Json) -> Result<Json, LedgerError> {
-        let body = json!({ "method": method, "params": [params] });
-        let reply = self
-            .transport
-            .post(&self.rpc_url, &body)
-            .map_err(LedgerError::Transport)?;
-        let result = reply
-            .get("result")
-            .cloned()
-            .ok_or_else(|| LedgerError::Reply(format!("{method}: no result")))?;
-        if let Some(error) = result.get("error").and_then(|e| e.as_str()) {
-            return Err(LedgerError::Rpc {
-                method: method.to_string(),
-                error: error.to_string(),
-            });
-        }
-        Ok(result)
+        rpc(&self.transport, &self.rpc_url, method, params)
     }
 
     /// Fund a new account from the Testnet faucet: one call. The seed must
@@ -420,6 +458,7 @@ mod tests {
     struct Fake {
         replies: RefCell<Vec<(String, VecDeque<Json>)>>,
         sent: RefCell<Vec<Json>>,
+        urls: RefCell<Vec<String>>,
     }
 
     impl Fake {
@@ -427,6 +466,7 @@ mod tests {
             Fake {
                 replies: RefCell::new(Vec::new()),
                 sent: RefCell::new(Vec::new()),
+                urls: RefCell::new(Vec::new()),
             }
         }
 
@@ -445,6 +485,7 @@ mod tests {
     impl Transport for Fake {
         fn post(&self, url: &str, body: &Json) -> Result<Json, String> {
             self.sent.borrow_mut().push(body.clone());
+            self.urls.borrow_mut().push(url.to_string());
             let key = body["method"]
                 .as_str()
                 .map(str::to_string)
@@ -508,31 +549,64 @@ mod tests {
         }
     }
 
+    /// Every public way to build a ledger client. A new constructor gets a
+    /// line here, so the test below covers it (CLAUDE.md).
+    #[derive(Debug, Clone, Copy)]
+    enum Constructor {
+        /// `Testnet::with_transport`.
+        WithTransport,
+        /// `Testnet::connect`: this is its path, with `Ureq` swapped for the
+        /// fake transport. It must go to the public Testnet's endpoint.
+        Connect,
+    }
+
+    const CONSTRUCTORS: [Constructor; 2] = [Constructor::WithTransport, Constructor::Connect];
+
+    fn build(how: Constructor, fake: &Fake) -> Result<Testnet<Lent<'_>>, LedgerError> {
+        match how {
+            Constructor::WithTransport => Testnet::with_transport(Lent(fake), "rpc", "faucet"),
+            Constructor::Connect => Testnet::public_testnet_through(Lent(fake)),
+        }
+    }
+
     #[test]
-    fn a_server_that_is_not_the_testnet_is_refused_before_anything_else() {
+    fn every_constructor_refuses_a_server_that_is_not_the_testnet_after_one_request() {
         let refused = [
             (json!({ "network_id": 0 }), Some(0)),
             (json!({ "network_id": 2 }), Some(2)),
             (json!({ "network_id": u32::MAX }), Some(u32::MAX)),
             (json!({}), None),
         ];
-        for (info, reported) in refused {
-            let fake = Fake::new().on("server_info", ok(json!({ "info": info })));
-            let result = Testnet::with_transport(Lent(&fake), "rpc", "faucet");
-            assert!(matches!(
-                result,
-                Err(LedgerError::NotTestnet(NotTestnet { reported: r })) if r == reported
-            ));
-            // Only server_info was ever sent: no second request reaches a
-            // server that isn't the Testnet.
-            let sent = fake.sent.borrow();
-            assert_eq!(sent.len(), 1, "{reported:?}");
-            assert_eq!(sent[0]["method"], "server_info");
+        for how in CONSTRUCTORS {
+            for (info, reported) in refused.clone() {
+                let fake = Fake::new().on("server_info", ok(json!({ "info": info })));
+                let result = build(how, &fake);
+                assert!(
+                    matches!(
+                        result,
+                        Err(LedgerError::NotTestnet(NotTestnet { reported: r })) if r == reported
+                    ),
+                    "{how:?} {reported:?}"
+                );
+                // Only server_info was ever sent. No client exists, so no
+                // submit or faucet call can follow: no second request reaches
+                // a server that isn't the Testnet.
+                let sent = fake.sent.borrow();
+                assert_eq!(sent.len(), 1, "{how:?} {reported:?}");
+                assert_eq!(sent[0]["method"], "server_info");
+            }
+            // The Testnet itself is accepted, after the same single request.
+            let fake = Fake::new().on("server_info", testnet_info());
+            assert!(build(how, &fake).is_ok(), "{how:?}");
+            assert_eq!(fake.sent.borrow().len(), 1);
         }
-        // The Testnet itself is accepted, after the same single request.
+    }
+
+    #[test]
+    fn connect_asks_the_public_testnet_endpoint() {
         let fake = Fake::new().on("server_info", testnet_info());
-        assert!(Testnet::with_transport(Lent(&fake), "rpc", "faucet").is_ok());
-        assert_eq!(fake.sent.borrow().len(), 1);
+        assert!(build(Constructor::Connect, &fake).is_ok());
+        assert_eq!(fake.urls.borrow().as_slice(), [TESTNET_JSON_RPC]);
     }
 
     #[test]
@@ -725,8 +799,12 @@ mod tests {
             Err(LedgerError::Build(_))
         ));
         // A seed that fails to decode says so in fixed words, whatever the
-        // library's error held.
-        for bad in ["sEdnotarealseed", "sEdSJHS4oiAdz7w2X2ni1gFiqtbJHqF"] {
+        // library's error held. The second string came from 16 bytes of fresh
+        // random entropy (2026-11-14), encoded as an ed25519 seed with its last
+        // character then changed to break the checksum. The valid seed was
+        // never printed, stored or funded, so this string is one character
+        // from nothing anyone holds.
+        for bad in ["sEdnotarealseed", "sEd7meQGDHz277q9ZdC47wPhhXQ4NVQ"] {
             assert_eq!(
                 Account::from_seed(bad).err(),
                 Some(LedgerError::Build("the seed could not be decoded".into()))

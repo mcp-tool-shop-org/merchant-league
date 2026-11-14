@@ -180,7 +180,7 @@
               "line": 516
             }
           ],
-          "hash": "1e37228db197c555037be1458f0de7ed551979b614619e39fc7aca5b43417ba8",
+          "hash": "e4fa03155a5d5d763fed194fff4510cf6fbb18e80a97644ac411d3a2adddd626",
           "importsFiles": [
             "crates/league-ledger/src/client.rs"
           ],
@@ -220,60 +220,60 @@
             {
               "in": "from_seed",
               "kind": "err",
-              "line": 125
+              "line": 128
             },
             {
               "in": "decode_hex",
               "kind": "err",
-              "line": 184
+              "line": 187
             },
             {
-              "in": "call",
+              "in": "rpc",
               "kind": "err",
-              "line": 256
+              "line": 255
             },
             {
               "in": "fund_new_account",
               "kind": "err",
-              "line": 281
+              "line": 322
             },
             {
               "in": "wait_for_account",
               "kind": "match-err",
-              "line": 300
+              "line": 341
             },
             {
               "in": "wait_for_account",
               "kind": "match-err",
-              "line": 303
-            },
-            {
-              "in": "wait_for_account",
-              "kind": "err",
-              "line": 303
+              "line": 344
             },
             {
               "in": "wait_for_account",
               "kind": "err",
-              "line": 306
+              "line": 344
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "err",
+              "line": 347
             },
             {
               "in": "submit",
               "kind": "match-err",
-              "line": 379
+              "line": 420
             },
             {
               "in": "submit",
               "kind": "match-err",
-              "line": 380
+              "line": 421
             },
             {
               "in": "submit",
               "kind": "err",
-              "line": 380
+              "line": 421
             }
           ],
-          "hash": "6ff4bc5356e3cd2197dffd8eef4f8c9020c248d345a92af7ce4e7040df7fae4b",
+          "hash": "398681d2430663a759133375345ccab1d81a458c71000276c895c1b9d9db8616",
           "importsFiles": [
             "crates/league-ledger/src/lib.rs"
           ],
@@ -491,6 +491,10 @@
         {
           "hash": "7554385fd73226e513508093ad2e6b5882c26a6954abc8ba40bfe926766ccdbe",
           "path": "scripts/check-testnet-only.sh"
+        },
+        {
+          "hash": "b520d8ccc364380caf1b3b38ea8addd29dee3e7b1324971205ce4a029353c8b2",
+          "path": "scripts/test-copy-check.sh"
         }
       ],
       "globs": [
@@ -652,7 +656,7 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 2
+          "files": 3
         }
       ],
       "readers": [],
@@ -721,9 +725,14 @@
           "job": "check",
           "path": "scripts/check-testnet-only.sh",
           "runKind": "executes"
+        },
+        {
+          "job": "check",
+          "path": "scripts/test-copy-check.sh",
+          "runKind": "executes"
         }
       ],
-      "runsCount": 9,
+      "runsCount": 10,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -866,7 +875,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3",
+    "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
     "tracked": 399
   },
   "landings": [
@@ -885,6 +894,11 @@
       "readers": [
         {
           "by": "scripts/check-copy.sh",
+          "call": "literal",
+          "confidence": "text"
+        },
+        {
+          "by": "scripts/test-copy-check.sh",
           "call": "literal",
           "confidence": "text"
         }
@@ -1473,10 +1487,6 @@
   "testFiles": 18,
   "unassigned": [
     {
-      "hash": "45610a68e754add4e19a605a531561aa0f6e7a6b98777512e7e0ca1824dca37c",
-      "path": "vendor/xrpl-rust/Cargo.lock"
-    },
-    {
       "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",
       "path": "vendor/xrpl-rust/Cargo.toml"
     },
@@ -1493,7 +1503,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "24ba58af9c0a48a6a3966cb6f5329165dd012d6e95cf39963204916f778cce77",
+      "hash": "95ed399a95ecfe0a89ce32a12ac7f9732fa9f61b7a2c5cef13a9223020bfe5ec",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {

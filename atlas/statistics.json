@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-ledger",
-      "qualifyingSourceCommits": 2,
+      "qualifyingSourceCommits": 4,
       "rebaseline": null
     },
     {
@@ -153,8 +153,8 @@
     "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
     "files": [
       {
-        "commits": 3,
-        "lines": 186,
+        "commits": 4,
+        "lines": 190,
         "path": ".github/workflows/ci.yml"
       },
       {
@@ -198,8 +198,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 4,
-        "lines": 233,
+        "commits": 5,
+        "lines": 253,
         "path": "atlas/README.md"
       },
       {
@@ -208,18 +208,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 4,
-        "lines": 577,
+        "commits": 5,
+        "lines": 685,
         "path": "atlas/page.json"
       },
       {
-        "commits": 4,
-        "lines": 2742,
+        "commits": 5,
+        "lines": 2768,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 4,
-        "lines": 10125,
+        "commits": 5,
+        "lines": 10131,
         "path": "atlas/structure.json"
       },
       {
@@ -248,13 +248,13 @@
         "path": "crates/league-ledger/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 630,
+        "commits": 2,
+        "lines": 636,
         "path": "crates/league-ledger/examples/testnet_proof.rs"
       },
       {
-        "commits": 1,
-        "lines": 760,
+        "commits": 3,
+        "lines": 821,
         "path": "crates/league-ledger/src/client.rs"
       },
       {
@@ -363,8 +363,8 @@
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 2,
-        "lines": 36,
+        "commits": 3,
+        "lines": 42,
         "path": "scripts/check-copy.sh"
       },
       {
@@ -374,7 +374,12 @@
       },
       {
         "commits": 1,
-        "lines": 4362,
+        "lines": 54,
+        "path": "scripts/test-copy-check.sh"
+      },
+      {
+        "commits": 2,
+        "lines": 8724,
         "path": "vendor/xrpl-rust/Cargo.lock"
       },
       {
@@ -398,8 +403,8 @@
         "path": "vendor/xrpl-rust/README.md"
       },
       {
-        "commits": 2,
-        "lines": 56,
+        "commits": 3,
+        "lines": 58,
         "path": "vendor/xrpl-rust/VENDORED.md"
       },
       {
@@ -2178,9 +2183,9 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T08:24:54.511Z",
+  "generatedAt": "2026-11-14T09:31:36.362Z",
   "generatedFrom": {
-    "commit": "043373e4a31553825cb2bd21ba98696bc28c0dd3"
+    "commit": "eae861add2d9e2425d1f6458446141aa0a31704a"
   },
   "pairs": [],
   "parameters": {
@@ -2193,16 +2198,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T02:26:23-05:00",
+    "headDate": "2026-11-14T03:56:33-05:00",
     "inScopeFiles": 404,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 7,
+    "qualifyingCommits": 10,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T07:26:23.000Z",
+    "since": "2026-05-18T08:56:33.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

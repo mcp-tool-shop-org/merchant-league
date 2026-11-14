@@ -1,26 +1,28 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit 043373e by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit eae861a by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-9 parts, mostly Rust (304 files), shell (2), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (871b5b9)
+## What changed since 2026-11-14 (043373e)
 
-Nothing structural changed since 2026-11-14; 2 files changed content.
+- CI now also runs scripts/test-copy-check.sh.
+- README.md is now also read by scripts/test-copy-check.sh.
+- 1 file added, 1 removed and 3 changed content, across 2 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 8 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, crates/league-core/ and 7 more.
+1. **CI.** On a pull request; on a push to main touching 8 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-copy-check.sh and 8 more.
 2. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 3. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
-1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh and scripts/check-testnet-only.sh in scripts.
+1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-copy-check.sh in scripts.
 
 ## Who reads the results
 
@@ -84,7 +86,7 @@ Read those in order to follow one run of xrpl end to end. This path follows xrpl
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 2 writes and 1 read go to a path their caller passes, not to this repository.
-- 360 files belong to no part: vendor/xrpl-rust/Cargo.lock, vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig and 357 more.
+- 359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.
 - Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.
