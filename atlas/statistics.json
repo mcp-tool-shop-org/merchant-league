@@ -153,8 +153,8 @@
     "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
     "files": [
       {
-        "commits": 2,
-        "lines": 95,
+        "commits": 4,
+        "lines": 191,
         "path": ".github/workflows/ci.yml"
       },
       {
@@ -163,23 +163,23 @@
         "path": ".gitignore"
       },
       {
-        "commits": 3,
-        "lines": 20,
+        "commits": 5,
+        "lines": 33,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 2,
-        "lines": 56,
+        "commits": 5,
+        "lines": 118,
         "path": "CLAUDE.md"
       },
       {
-        "commits": 2,
-        "lines": 1756,
+        "commits": 3,
+        "lines": 3512,
         "path": "Cargo.lock"
       },
       {
-        "commits": 2,
-        "lines": 32,
+        "commits": 3,
+        "lines": 62,
         "path": "Cargo.toml"
       },
       {
@@ -193,104 +193,109 @@
         "path": "README.md"
       },
       {
-        "commits": 1,
-        "lines": 28,
+        "commits": 2,
+        "lines": 56,
         "path": "SECURITY.md"
       },
       {
-        "commits": 1,
-        "lines": 79,
+        "commits": 3,
+        "lines": 178,
         "path": "atlas/README.md"
       },
       {
-        "commits": 1,
-        "lines": 34,
+        "commits": 3,
+        "lines": 76,
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 1,
-        "lines": 135,
+        "commits": 3,
+        "lines": 374,
         "path": "atlas/page.json"
       },
       {
-        "commits": 1,
-        "lines": 295,
+        "commits": 3,
+        "lines": 736,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 1,
-        "lines": 625,
+        "commits": 3,
+        "lines": 1382,
         "path": "atlas/structure.json"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 24,
         "path": "crates/league-core/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 38,
+        "commits": 2,
+        "lines": 76,
         "path": "crates/league-core/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 24,
         "path": "crates/league-dice/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 43,
+        "commits": 2,
+        "lines": 86,
         "path": "crates/league-dice/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 24,
         "path": "crates/league-ledger/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 101,
+        "commits": 2,
+        "lines": 202,
         "path": "crates/league-ledger/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 24,
         "path": "crates/league-season/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 140,
+        "commits": 2,
+        "lines": 280,
         "path": "crates/league-season/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 16,
+        "commits": 2,
+        "lines": 32,
         "path": "crates/league-tui/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 109,
+        "commits": 2,
+        "lines": 218,
         "path": "crates/league-tui/src/lib.rs"
       },
       {
-        "commits": 2,
-        "lines": 210,
+        "commits": 4,
+        "lines": 422,
         "path": "docs/design.md"
       },
       {
-        "commits": 2,
-        "lines": 6,
+        "commits": 3,
+        "lines": 10,
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 1,
-        "lines": 18,
+        "commits": 4,
+        "lines": 93,
         "path": "scripts/check-copy.sh"
       },
       {
-        "commits": 1,
-        "lines": 24,
+        "commits": 3,
+        "lines": 111,
         "path": "scripts/check-testnet-only.sh"
+      },
+      {
+        "commits": 2,
+        "lines": 99,
+        "path": "scripts/test-guards.sh"
       }
     ]
   },
@@ -298,13 +303,13 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T05:20:32.429Z",
+  "generatedAt": "2026-11-14T09:13:54.714Z",
   "generatedFrom": {
-    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663"
+    "commit": "b614ae9c111c25a7093dfb49d9a6bf44984006ed"
   },
   "pairs": [],
   "parameters": {
-    "appliedChangesetLimit": 7,
+    "appliedChangesetLimit": 7.25,
     "changeset": 50,
     "changesetFraction": 0.25,
     "cohesionDrop": 0.2,
@@ -313,16 +318,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T00:20:16-05:00",
-    "inScopeFiles": 28,
+    "headDate": "2026-11-14T03:47:42-05:00",
+    "inScopeFiles": 29,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 2,
+    "qualifyingCommits": 6,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T05:20:16.000Z",
+    "since": "2026-05-18T08:47:42.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

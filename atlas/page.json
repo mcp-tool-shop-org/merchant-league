@@ -7,37 +7,66 @@
   "breaks": [],
   "changes": {
     "fileCounts": {
-      "added": 2,
+      "added": 1,
       "changed": 7,
       "moved": 0,
-      "parts": 4,
+      "parts": 5,
       "removed": 0
     },
     "items": [
       {
-        "kind": "landing",
-        "sentence": "crates/league-tui/ is now read by Cargo.toml.",
+        "kind": "door",
+        "sentence": "CI's push trigger now also names `docs/**`.",
         "subjects": [
-          "crates/league-tui/",
-          "Cargo.toml"
+          ".github/workflows/ci.yml"
         ]
       },
       {
-        "kind": "part",
-        "sentence": "league-tui is a new part, drawn from `crates/league-tui/**`.",
+        "kind": "door",
+        "sentence": "CI now also runs scripts/test-guards.sh.",
         "subjects": [
-          "league-tui"
+          ".github/workflows/ci.yml",
+          "scripts/test-guards.sh"
         ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "CHANGELOG.md is now read by scripts/test-guards.sh.",
+        "subjects": [
+          "CHANGELOG.md",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "CLAUDE.md is now read by scripts/test-guards.sh.",
+        "subjects": [
+          "CLAUDE.md",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "Cargo.toml is now also read by scripts/test-guards.sh.",
+        "subjects": [
+          "Cargo.toml",
+          "scripts/test-guards.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 4 more new writers and readers of places.",
+        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "2 files added and 7 changed content, across 4 parts.",
+        "sentence": "1 file added and 7 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "4c4f13937d7db36d630406ef5e158e4860ee5dc4",
-      "generatedAt": "2026-11-14T05:16:09.027Z"
+      "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
+      "generatedAt": "2026-11-14T05:20:32.429Z"
     },
     "unchanged": false
   },
@@ -46,9 +75,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-  "defaultBranch": "scaffold/workspace",
-  "derived": "9 parts, mostly Rust (5 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 6 parts.",
+  "commit": "b614ae9c111c25a7093dfb49d9a6bf44984006ed",
+  "defaultBranch": "main",
+  "derived": "9 parts, mostly Rust (5 files) and shell (3). Work enters through 1 door; the busiest is CI, which reaches 6 parts.",
   "doors": [
     {
       "checks": [],
@@ -88,21 +117,22 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 2
+          "files": 3
         }
       ],
       "runs": [
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
+        "scripts/test-guards.sh",
         "crates/"
       ],
-      "runsCount": 3,
-      "runsMore": 0,
+      "runsCount": 4,
+      "runsMore": 5,
       "sends": [],
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 8 paths",
+        "on a push to main touching 9 paths",
         "or by hand"
       ]
     }
@@ -113,7 +143,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T05:20:32.429Z",
+  "generatedAt": "2026-11-14T09:13:54.714Z",
   "limits": [
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
