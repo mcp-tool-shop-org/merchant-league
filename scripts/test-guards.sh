@@ -79,6 +79,15 @@ for phrase in "Choose which goods to buy in town." "You cannot buy in Varn today
   run_case $c pass crates/league-tui/src/planted.rs "// $phrase"
 done
 run_case $c pass docs/planted.md "A copy check bans cash out and payout. <!-- copy-check: allow -->"
+# Licence files are skipped by name, and only by name: the exclusion must not widen.
+for lic in crates/league-ledger/tests/vectors/LICENSE-xrpl.js crates/league-tui/LICENSE \
+  crates/league-tui/LICENSE.md crates/vendor/xrpl-rust/LICENSE docs/LICENSE; do
+  run_case $c pass "$lic" "Cash out now."
+done
+for other in crates/league-ledger/tests/vectors/notes.md crates/league-tui/src/licence_cash.rs \
+  crates/league-tui/license.txt crates/league-tui/LICENSES/notes.md; do
+  run_case $c fail "$other" "Cash out now."
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "[test-guards] FAIL: $failures case(s) wrong."

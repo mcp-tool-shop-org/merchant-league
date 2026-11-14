@@ -11,6 +11,11 @@
 # marker "copy-check: allow". scripts/test-guards.sh plants every pattern
 # below and proves this script fails on each.
 #
+# Files named LICENSE* are skipped: they are third-party licence text, which
+# must stay verbatim (ISC asks that its notice appear unchanged in every
+# copy), and they are not player-facing. Only the file name is matched, so
+# a banned phrase in any other file still fails (test-guards.sh).
+#
 # "pay out" is caught even in "pay out of your purse": game copy says "pay
 # from". Known limit: grep reads line by line, so a phrase split across two lines is
 # not caught.
@@ -37,7 +42,7 @@ pattern=$(IFS='|'; echo "${banned[*]}")
 # The one disclaimer that may name real money: saying there is none.
 disclaimer='\b(no|not|never)[ -]real[ -]money\b'
 
-hits=$(grep -rnIiE "$pattern" "${scope[@]}" 2>/dev/null \
+hits=$(grep -rnIiE --exclude='LICENSE*' "$pattern" "${scope[@]}" 2>/dev/null \
   | grep -v 'copy-check: allow' \
   | while IFS= read -r line; do
       # Drop the disclaimer, then see whether anything banned is left.
