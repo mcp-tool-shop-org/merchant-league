@@ -12,6 +12,15 @@ Merchant League is a slow-turn trading game for 4 or 5 players, played on the XR
 - **Rolls:** each day's drand round is named by its **number**, computed from the close time.
 - **A new constraint:** clawback can't reach tokens in escrow. So perishables are never escrowed, and the steward reads a balance before any clawback.
 
+**Answered by the Director, 2026-11-14** (four of the five open questions):
+
+- **Delivery:** two payments with bonds, no Batch.
+- **The referee:** a trusted steward whose every decision can be replayed.
+- **Guilds:** six. One or two sit out each table.
+- **Gifts:** left to the paper test.
+
+Who plays the paper table is still open. The steward's bond rule is now written out in full ("The steward's bond rule").
+
 | Draft said | Now | Why |
 |---|---|---|
 | Every merchant has the same caravan and the same coin | **Asymmetric guilds.** Each has a converter that needs other guilds' goods. | Identical merchants have nothing to trade for. At 3 players a merchant is alone in a town about two turns in three (the review's own occupancy model). |
@@ -46,17 +55,25 @@ A table seats **4 or 5 guilds** across **five towns** joined by roads. A table r
 
 ### Guilds
 
-Each guild holds a charter: one **converter** (a craft), a home town and a starting purse of table coin. A converter turns goods the guild doesn't make into a good only it makes. Converters interlock, so every guild needs at least two others:
+There are **six guilds**. Each guild holds a charter: one **converter** (a craft), a home town and a starting purse of table coin. A converter turns goods the guild doesn't make into a good only it makes, and the converters interlock:
 
 | Guild | Home | Converter | Needs from others |
 |---|---|---|---|
 | Saltworks | Varn (the salt flats) | 2 brine → 1 salt | brine comes from Ostra's fishers (town market) and **timber** for the pans |
 | Weavers | Ostra (the port) | 2 wool + 1 dye → 1 cloth | **dye** from the Dyers and wool from the town market |
-| Smiths | Kell (the hills) | 1 ore + 1 charcoal → 1 tools | **charcoal** from the Foresters |
+| Smiths | Kell (the hills) | 1 ore + 1 charcoal → 1 tools | **charcoal** from the Foresters, and **leather** for bellows (a converter upgrade) |
 | Foresters | Hath (the woods) | 1 timber → 1 charcoal, or timber as is | **tools** to cut faster (a converter upgrade) |
 | Dyers | Mire (the marsh) | 1 madder + 1 salt → 1 dye | **salt** from the Saltworks |
+| Tanners | Hath (the woods, shared with the Foresters) | 1 hide + 1 salt → 1 leather | **salt** from the Saltworks, the same salt the Dyers need; hides from Kell's town market |
 
-At a 4-guild table, the generator picks four of the five and adjusts the town markets so no needed good is missing. Converting takes one market day, in the guild's home town or at a works site the charter names.
+**Six guilds, 4 or 5 players.** Six guilds don't change the player range. A table seats 4 or 5 of the six, so one or two guilds sit out each table.
+
+- The generator chooses who sits out, as part of the setup it proves.
+- It adjusts the town markets so every seated guild's needs are still met: a sitting-out guild's good appears on a town ladder, at a worse price than a guild would charge.
+- Across a chapter, each guild seats in at least two of every three tables (see "Generated tables").
+- A six-player table, with no guild sitting out, isn't in v0.1.
+
+Converting takes one market day, in the guild's home town or at a works site the charter names.
 
 ### A market day
 
@@ -113,17 +130,60 @@ A contract is a promise across days: "Deliver 3 salt at Varn by day 6 for 20 coi
 2. **Bond.** Each side creates a **token escrow** of its bond to the other side.
    - The bond is the contract value, or half that at standing ≥ 3. Bonds are always table coin, never perishable goods (see "Spoiling and escrow" below).
    - The escrow carries a **condition**: the SHA-256 of a referee secret the steward holds for that bond.
-   - The escrow's `CancelAfter` falls two days after the deadline, **by choice**: it's when each side can take its bond back.
+   - The escrow's `CancelAfter` falls **four days after the deadline**, by choice: two days for a force-majeure extension, then two days for the wronged side to claim. After that, each side can take its own bond back.
    - The ledger requires every escrow, XRP or token, to have `FinishAfter` or `CancelAfter`, and a condition when it has no `FinishAfter` (rippled's `EscrowCreate` rules, checked live). A bond has both a condition and `CancelAfter`.
-3. **Deliver.** Two plain payments before the deadline: the seller pays the goods, then the buyer pays the price. The seller's caravan must be in the named town that day.
-4. **Settle.** The steward reads the replay at the deadline.
-   - **Kept:** it releases nothing, and each side cancels its own bond after `CancelAfter`.
-   - **Willful breach:** it publishes that bond's referee secret, and the wronged side finishes the breaching side's bond to itself.
-   - **Force majeure:** the deadline moves 2 days, by rule.
+3. **Deliver.** Two plain payments by the deadline: the seller pays the goods, and the buyer pays the price (the Director chose this over Batch). The seller's caravan must be in the named town on the day it pays.
+4. **Settle.** The steward applies the bond rule below at the deadline:
+   - **Kept:** it releases nothing, and each side cancels its own bond after `CancelAfter`;
+   - **Breach:** it publishes the breaching side's referee secret, and the wronged side finishes that bond to itself;
+   - **Force majeure:** the deadline moves 2 days, once.
 
 Every steward decision is a pure function of the replay and the public rules. The decision log carries each input's transaction hash, so anyone can recompute it.
 
-**Why a referee and not a self-settling escrow.** An escrow can be finished only by its condition or by time, and the ledger can't see "the caravan was in Varn". So a third party must decide, and the steward is already trusted: it issues every token and can claw back. Escrow adds what Checks lacked, a **locked** bond. Batch could make the delivery step atomic; that is an open question below.
+**Why a referee and not a self-settling escrow.** An escrow can be finished only by its condition or by time, and the ledger can't see "the caravan was in Varn". So a third party must decide, and the steward is already trusted: it issues every token and can claw back. Escrow adds what Checks lacked, a **locked** bond. The Director accepted this referee on 2026-11-14, and chose two payments over Batch for v0.1.
+
+### The steward's bond rule
+
+The rule is a pure function. The same inputs always give the same outcome, and anyone holding the archivist's export can recompute it.
+
+**Inputs.** All of them come from the table's replay, up to the first validated ledger that closes after the evaluation day:
+
+1. **The terms:** the memo both guilds agreed. It names the contract id (that memo's transaction hash), the seller, the buyer, the good, the quantity, the town, the price, the deadline day, and both bond escrows (owner and sequence).
+2. **Where each caravan was, each day:** from the revealed travel orders and that day's road events.
+3. **The road events:** from each day's drand round (named by number) and the road tables in `tables/`. They are fixed by the round, so they're the same for everyone.
+4. **The payments:** the seller's payments of that good to the buyer, and the buyer's payments of table coin to the seller, each with the day of the ledger that holds it.
+5. **The rules version:** the tables' hash, so a later rule change can't reach back.
+
+**Definitions.**
+
+- **Delivered:** the seller's payments of the good to the buyer add up to at least the quantity, counting only payments made on days when the seller's caravan was in the named town, by the deadline day. A partial delivery isn't a delivery.
+- **Paid:** the buyer's coin payments to the seller add up to at least the price by the deadline day. Either side may pay first; paying first is that side's own risk.
+- **Held:** on some day between the agreement and the deadline, a road event marked *holds* in the tables stopped the seller's caravan on a road it was travelling.
+
+**The rule, at the close of the deadline day:**
+
+| Delivered | Paid | Held | Outcome |
+|---|---|---|---|
+| yes | yes | (any) | **Kept.** No secret is published; each side cancels its own bond after `CancelAfter`; the seller gains standing if the contract bore road risk (see "The score"). |
+| yes | no | (any) | **Buyer's breach.** The steward publishes the buyer's bond secret; the seller finishes the buyer's bond. Buyer's standing −3. |
+| no | (any) | no | **Seller's breach.** The steward publishes the seller's bond secret; the buyer finishes the seller's bond. Seller's standing −3. A buyer who didn't pay a seller who didn't deliver is not in breach. |
+| no | (any) | yes, first time | **Force majeure.** The deadline moves 2 days, once, and the rule runs again at the new deadline. On that second run *Held* doesn't count. The delay costs no standing. |
+
+**What the steward writes.** One decision-log entry per contract:
+
+- the contract id and the rules version;
+- the evaluation ledger index;
+- every input transaction's hash;
+- the three values (Delivered, Paid, Held) and the outcome;
+- on a breach, the referee secret.
+
+The secret is also sent as a memo, so it's on the ledger before the wronged side finishes the bond.
+
+**What keeps the steward honest, and what doesn't.**
+
+- **Fixed at bond time:** each bond's condition is the SHA-256 of a fresh 32-byte secret. It's fixed when the bond is created, so the steward can't swap the secret later.
+- **A bad decision shows:** a wrong decision is visible to anyone who recomputes it. It's reversed by rule: the steward compensates the wronged side in table coin, and the log records both entries.
+- **A leak can't be prevented:** the rule can't stop the steward leaking a secret early. A leaked secret shows up when a bond is finished with no breach in the log, and that is a studio fault, to be made good the same way.
 
 ### The closing bell
 
@@ -203,7 +263,7 @@ This takes **the method of role-set's puzzle generator, not its code**: a seeded
      - *last-day breach:* breaks every contract due after day 9.
 3. **Prove.** Accept the setup only if every lazy strategy scores clearly below the baseline: below the baseline's 25th percentile, a config value. The kingmaker is the exception: there, the leader's gain from the gifts must be smaller than a fair trade would give. A setup where a shortcut wins is refused, like a puzzle whose lazy reading gives the key.
 4. **Grade** each mandate by the fewest days and transactions the simulator needs to complete it. Its points follow its grade, and the receipt keeps the grade. Mandates outside the table's difficulty band are refused.
-5. **Dedupe.** A setup's skeleton is its converter graph, its works' needs, its edict kinds and its ladder spreads. No two tables in a chapter share a skeleton. Floors per chapter: each guild seats at least once in every three tables, and no edict kind appears in more than half the tables.
+5. **Dedupe.** A setup's skeleton is its converter graph, its works' needs, its edict kinds and its ladder spreads. No two tables in a chapter share a skeleton. Floors per chapter: each of the six guilds seats in at least two of every three tables, and no edict kind appears in more than half the tables.
 6. **Receipt.** The seed, generator version, content-pack hashes, each strategy's score distribution, each mandate's grade and the skeleton hash. It's published with the table, so anyone can rebuild the setup.
 
 The same generator builds the paper tables for the playtest. The paper test then checks the simulator against people (see "The paper playtest").
@@ -327,7 +387,7 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 | Clawback | Spoiling, the referee's reach | Yes (M2) | Enabled 2024-02-08 |
 | Memos | Sealed orders, contract terms | Yes | Yes |
 | Checks | **No longer used** | | |
-| Batch | Open question (atomic delivery) | Not tested | BatchV1_1: status to check |
+| Batch | Not used (the Director chose two payments with bonds, 2026-11-14) | | |
 
 **Measured on the live Testnet, 2026-11-14:**
 - A ledger closes about every 3.3 seconds (rippled 3.4.1, network id 1).
@@ -335,17 +395,13 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 - The base fee is 10 drops (0.00001 XRP); the client never sends less than 12.
 - A transaction's memos are limited to 1 KB in total.
 
-## Open questions for the Director
+## Questions for the Director
 
-1. **Batch for delivery.** Should delivery become one atomic Batch (goods and price together) instead of two payments with bonds behind them?
-   - Batch removes the small risk between the two payments.
-   - But BatchV1_1's Mainnet status and its result codes are unchecked, and xrpl-rust has no Batch type, so using it means a third patch.
-   - Recommendation: no for v0.1. Bonds cover the gap.
-2. **The steward as referee.** Is a referee that's trusted but publicly checkable acceptable? The alternative is settling only what the ledger can see: no location rules on deliveries.
-   - Recommendation: yes. The steward is trusted already, and every decision is replayable.
+1. **Batch for delivery.** *Answered 2026-11-14:* two payments with bonds for v0.1, no Batch.
+2. **The steward as referee.** *Answered 2026-11-14:* a trusted steward whose every decision can be replayed is acceptable. The rule is in "The steward's bond rule".
 3. **Who plays the paper table:** people the Director invites, or the studio crew? Recommendation: people. The test is whether humans find the shortcuts.
-4. **Five guilds or six.** Five is enough for 4–5 players. A sixth guild would let a chapter rotate more.
-5. **Gifts.** Forbid gifts with no consideration, or let the paper test decide? Recommendation: let it decide.
+4. **Five guilds or six.** *Answered 2026-11-14:* six. The player range stays 4–5, and one or two guilds sit out each table (see "Guilds").
+5. **Gifts.** *Answered 2026-11-14:* left to the paper test.
 
 ## Check before building
 
@@ -355,7 +411,7 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
   - AMMs can't fill domain offers (xrpl.org);
   - the escrow expiry rule, live.
 - **Still open:** verifying a quicknet BLS signature locally.
-- BatchV1_1 and permission delegation: Mainnet status.
+- Permission delegation: Mainnet status, for absent players. (Batch is no longer needed.)
 
 ## Risks
 
