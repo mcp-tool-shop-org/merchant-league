@@ -1,0 +1,4 @@
+date_utc: 2026-11-14T10:44:38Z
+branch: ledger/follow-ups
+head: 0cd56ce17f3b0fddeb55f9775dc184097b801eac (plus the uncommitted probe example)
+rustc 1.100.0 (0ef1bc386 2026-11-09)

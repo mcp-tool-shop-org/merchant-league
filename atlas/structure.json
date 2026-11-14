@@ -36,6 +36,37 @@
           "path": "docs/design.md"
         },
         {
+          "hash": "48df9f28025461aeb6daee9e2d116d2894bcf8ab137ac9a971bfa9314bb4459f",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/README.md"
+        },
+        {
+          "hash": "93cd3a83e5334bd7f92389ea91c8920e972154066908e67750a988b95dda0a36",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.err"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.exit"
+        },
+        {
+          "hash": "0b15dc2a079fec8edfb76760b7cc8e78dc0571d3665c0f5e8326f3c52442fc7f",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/01_probe.out"
+        },
+        {
+          "hash": "3b532460c0d92d0f85991b5d730494f9762566e2d1d1710786b489b51b81deee",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/02_hash_check.json"
+        },
+        {
+          "exports": [
+            "call"
+          ],
+          "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
+          "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
+        },
+        {
           "hash": "7fc82b43fbd668240fabc2501761e21546239d8b110e4d015b1bc5e34b5cfae5",
           "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/README.md"
         },
@@ -75,15 +106,15 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 1,
+          "reads": 2,
           "where": [
             "caller"
           ],
-          "writes": 2
+          "writes": 4
         }
       ],
-      "outsideReads": 1,
-      "outsideWrites": 2,
+      "outsideReads": 2,
+      "outsideWrites": 4,
       "role": "docs",
       "testedBy": 0,
       "unresolvedSites": 0
@@ -191,6 +222,42 @@
               "calls": [
                 {
                   "line": 171,
+                  "name": "connect",
+                  "receiver": "Testnet",
+                  "target": {
+                    "file": "crates/league-ledger/src/client.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": true,
+              "isDefaultExport": false,
+              "name": "main"
+            }
+          ],
+          "testsInside": true
+        },
+        {
+          "entry": "main",
+          "entryRule": 1,
+          "failurePaths": [
+            {
+              "in": "main",
+              "kind": "err",
+              "line": 315
+            }
+          ],
+          "hash": "c83c09b05152ac490f2c9ab7c492cc4f089585a11880ba57a554950aa1f73837",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs"
+          ],
+          "library": "crates/league-ledger/src/lib.rs",
+          "path": "crates/league-ledger/examples/testnet_requireauth.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 107,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
@@ -343,7 +410,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 4,
+      "testedBy": 5,
       "unresolvedSites": 0
     },
     {
@@ -434,7 +501,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "7ad523940ecc2c24d478eaf4da43a2b88f038eab8fc96c0853d8fec08455510d",
+          "hash": "2b08c438f7e54fcbef10fed535b798be6ab9ceba7e994d702fc9d00bd656ef13",
           "path": "CHANGELOG.md"
         },
         {
@@ -649,7 +716,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 5
         },
         {
           "boundary": "league-season",
@@ -755,14 +822,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 8,
+          "files": 9,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 8,
+          "files": 9,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -847,6 +914,49 @@
       "checksCount": 0,
       "commands": [],
       "elsewhere": [],
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "kind": "command",
+      "landings": [],
+      "mentions": [],
+      "name": "testnet_requireauth",
+      "permissions": [],
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "readers": [],
+      "runs": [
+        {
+          "path": "crates/league-ledger/examples/testnet_requireauth.rs",
+          "runKind": "executes"
+        }
+      ],
+      "runsCount": 1,
+      "secrets": [],
+      "sends": {
+        "deploysPages": false,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [],
+      "uses": [],
+      "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
+      "commands": [],
+      "elsewhere": [],
       "file": "vendor/xrpl-rust/Cargo.toml",
       "kind": "command",
       "landings": [],
@@ -884,8 +994,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
-    "tracked": 399
+    "commit": "0cd56ce17f3b0fddeb55f9775dc184097b801eac",
+    "tracked": 407
   },
   "landings": [
     {
@@ -1521,7 +1631,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 18,
+  "testFiles": 19,
   "unassigned": [
     {
       "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",

@@ -6,7 +6,7 @@
   ],
   "breaks": [
     {
-      "doors": 2,
+      "doors": 3,
       "importedBy": [],
       "importedByTests": [],
       "kind": "part",
@@ -16,74 +16,30 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 7,
+      "added": 8,
+      "changed": 1,
       "moved": 0,
-      "parts": 5,
-      "removed": 1
+      "parts": 3,
+      "removed": 0
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "CI's push trigger now also names `docs/**`.",
+        "sentence": "testnet_requireauth (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_requireauth.rs.",
         "subjects": [
-          ".github/workflows/ci.yml"
+          "crates/league-ledger/Cargo.toml",
+          "crates/league-ledger/examples/testnet_requireauth.rs"
         ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also runs scripts/test-guards.sh.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI no longer runs scripts/test-copy-check.sh.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "scripts/test-copy-check.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "CHANGELOG.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "CHANGELOG.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "CLAUDE.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "CLAUDE.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "Cargo.toml is now also read by scripts/test-guards.sh.",
-        "subjects": [
-          "Cargo.toml",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 5 more new writers and readers of places.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "1 file added, 1 removed and 7 changed content, across 5 parts.",
+        "sentence": "8 files added and 1 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "eae861add2d9e2425d1f6458446141aa0a31704a",
-      "generatedAt": "2026-11-14T09:31:36.362Z"
+      "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
+      "generatedAt": "2026-11-14T10:22:50.681Z"
     },
     "unchanged": false
   },
@@ -92,9 +48,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "d40880cde0e913f802d8c00494367a083a83cfa4",
+  "commit": "0cd56ce17f3b0fddeb55f9775dc184097b801eac",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "9 parts, mostly Rust (305 files), shell (3), Python (2) and JavaScript (1). Work enters through 4 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [],
@@ -119,7 +75,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 5
         },
         {
           "boundary": "league-season",
@@ -150,7 +106,7 @@
         "crates/league-tui/"
       ],
       "runsCount": 10,
-      "runsMore": 8,
+      "runsMore": 9,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -188,6 +144,34 @@
       "triggers": []
     },
     {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "id": "crates/league-ledger/Cargo.toml#testnet_requireauth",
+      "kind": "command",
+      "landings": [],
+      "name": "testnet_requireauth",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 3
+        }
+      ],
+      "runWith": "cargo run --example testnet_requireauth",
+      "runs": [
+        "crates/league-ledger/examples/testnet_requireauth.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
+    },
+    {
       "builtFrom": "vendor/xrpl-rust",
       "checks": [],
       "checksCount": 0,
@@ -216,10 +200,10 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T10:22:50.681Z",
+  "generatedAt": "2026-11-14T10:48:20.069Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "2 writes and 1 read go to a path their caller passes, not to this repository.",
+    "4 writes and 2 reads go to a path their caller passes, not to this repository.",
     "359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
@@ -252,11 +236,11 @@
   "startReason": "This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 18,
+  "testFiles": 19,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
-    "league-ledger": 4,
+    "league-ledger": 5,
     "league-season": 1,
     "league-tui": 1
   },
