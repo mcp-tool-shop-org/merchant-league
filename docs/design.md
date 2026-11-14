@@ -6,13 +6,19 @@ Merchant League is a slow-turn trading game for 4 or 5 players, played on the XR
 
 ## What changed from the draft
 
+**Corrected 2026-11-14 after Testnet checks** (PR #6 comments; receipts in PR #7):
+
+- **Escrow expiry:** a token escrow doesn't need `CancelAfter`. Any escrow needs `FinishAfter` or `CancelAfter`, and a condition when it has no `FinishAfter`. Bonds keep `CancelAfter` by choice.
+- **Rolls:** each day's drand round is named by its **number**, computed from the close time.
+- **A new constraint:** clawback can't reach tokens in escrow. So perishables are never escrowed, and the steward reads a balance before any clawback.
+
 | Draft said | Now | Why |
 |---|---|---|
 | Every merchant has the same caravan and the same coin | **Asymmetric guilds.** Each has a converter that needs other guilds' goods. | Identical merchants have nothing to trade for. At 3 players a merchant is alone in a town about two turns in three (the review's own occupancy model). |
 | "The richest reputation wins"; no formula | **A written score:** points come only from town works and sealed mandates. Standing gates bonds and tolls but never scores. | An unwritten score was solvable two ways: a wash-contract cartel or a promise-nothing hermit. |
 | Contracts are Checks the seller cashes on delivery | **Escrow bonds.** Each side locks a bond in a token escrow. The steward releases a bond only on a breach, by a public rule. | A Check sets no funds aside, and the payee can cash it at any time. Token escrow locks the bond, proved live on the Testnet. |
 | One order book for the season, shared by all tables | **Separate markets per table:** per-table goods on authorized trust lines, and a permissioned domain as the table's market | One issuer's tokens trade network-wide, so table A's offers crossed table B's. Live proof: a domain refuses outsiders and keeps open-book offers from crossing its book. |
-| Three barriers a day: commit, move, reveal | **One transaction a day.** It reveals yesterday's sealed travel order and commits today's. Roads roll straight from a drand round named in advance. | Each barrier multiplies the chance that somebody misses: 77–97% table-wide at a 2–5% daily miss, by the review's arithmetic. The dice escrows added risk with no gain in fairness. |
+| Three barriers a day: commit, move, reveal | **One transaction a day.** It reveals yesterday's sealed travel order and commits today's. Roads roll straight from a drand round whose number is set by the close time. | Each barrier multiplies the chance that somebody misses: 77–97% table-wide at a 2–5% daily miss, by the review's arithmetic. The dice escrows added risk with no gain in fairness. |
 | A fixed 12-day table | **A random closing bell** between days 10 and 13, and edicts in the middle of the table | A known last day invites last-day betrayal and endgame arithmetic. |
 | A season runs from one Testnet reset to the next | **Six-week studio chapters, nested in Testnet eras.** A reset is a rare era finale with a 24-hour jubilee. | The published resets were 55.8, 4.0 and 27.2 months apart, so the clock has to be the studio's own. |
 | "Our own node, eventually"; no server decides | **Two named studio services from table 1:** the steward (the issuer service) and the archivist (the archive node and indexer) | Public Testnet nodes prune history, so a week-long table can't be replayed from them. The issuer must be live to mint, run town markets and spoil goods. |
@@ -31,7 +37,7 @@ Merchant League is a slow-turn trading game for 4 or 5 players, played on the XR
 | Ledger library | xrpl-rust 1.3.0, vendored with upstream's security fix, plus TokenEscrow and DomainID (#5) | Ruled 2026-11-14. `cargo audit` is clean with no ignores. |
 | Who runs the issuer | The steward, a studio service, one issuer account per chapter | It must be live to mint, run town markets, spoil goods, act as the bond referee and issue table credentials |
 | Where history lives | The archivist: a studio archive node and indexer, from the first table | Public nodes prune. Every standing, score and bond decision has to be replayable. |
-| Where rolls come from | A drand round named in advance, read directly | No player and not the studio can steer it, and the ledger needs no dice escrows |
+| Where rolls come from | A drand round named by number in advance (from the close time), read directly | No player and not the studio can steer it, and the ledger needs no dice escrows |
 | Where table setups come from | A seeded generator that proves each setup against named lazy strategies | Role-set's method: build, reduce, prove the shortcut loses, dedupe, keep a receipt |
 
 ## The game
@@ -62,10 +68,10 @@ Each guild sends **one transaction a day**. It carries:
 Trading happens all day as **ordinary offers** in the table's market: guild to guild, and with the town makers. Offers are public by nature; only travel is sealed. A merchant can't see where the others are going before committing.
 
 **At the day's close** (a fixed ledger-close time named at the table's start):
-1. The day's **drand round** is the first published after the close. Its value is the day's roll.
+1. The day's **drand round** is the quicknet round whose number the close time sets (see "Fair dice"). Its value is the day's roll.
 2. **Road events** take their numbers from the roll by a fixed index per road: bandits, tolls, floods, fairs. Each road's odds come from a table in `tables/` (see "Tables with roll").
 3. Caravans move by the revealed orders. A missing reveal means the caravan stays in town and pays the toll, and the day goes ahead (see "Fair dice").
-4. **Perishables spoil.** The steward claws back goods past their days.
+4. **Perishables spoil.** The steward claws back goods past their days. It reads each balance first, because a clawback for more than a line holds takes what is there and still reports success.
 5. **Contracts check their deadlines** (see "Contracts").
 
 A day takes about two minutes when everyone is online. Given a set ledger window (about a day of real time), a table can run across a week.
@@ -105,9 +111,10 @@ A contract is a promise across days: "Deliver 3 salt at Varn by day 6 for 20 coi
 
 1. **Agree.** The two guilds agree off-ledger, in the table's whisper channel. Either side then sends the terms in a memo. The steward's indexer records them.
 2. **Bond.** Each side creates a **token escrow** of its bond to the other side.
-   - The bond is the contract value, or half that at standing ≥ 3.
+   - The bond is the contract value, or half that at standing ≥ 3. Bonds are always table coin, never perishable goods (see "Spoiling and escrow" below).
    - The escrow carries a **condition**: the SHA-256 of a referee secret the steward holds for that bond.
-   - The escrow's `CancelAfter` falls two days after the deadline. The ledger refuses a token escrow without `CancelAfter` (`temBAD_EXPIRATION`, live proof).
+   - The escrow's `CancelAfter` falls two days after the deadline, **by choice**: it's when each side can take its bond back.
+   - The ledger requires every escrow, XRP or token, to have `FinishAfter` or `CancelAfter`, and a condition when it has no `FinishAfter` (rippled's `EscrowCreate` rules, checked live). A bond has both a condition and `CancelAfter`.
 3. **Deliver.** Two plain payments before the deadline: the seller pays the goods, then the buyer pays the price. The seller's caravan must be in the named town that day.
 4. **Settle.** The steward reads the replay at the deadline.
    - **Kept:** it releases nothing, and each side cancels its own bond after `CancelAfter`.
@@ -128,7 +135,15 @@ From the close of day 10, each day's roll also decides whether the bell rings: 1
 
 Each town's market is the steward's **price ladder**: offers at stepped prices, posted in the table's domain. The ladder buys and sells a few goods at a spread wide enough that trading guild to guild pays better. Ladders refill each day from the setup's schedule. They are the table's sources (raw goods) and part of its sinks (the spread).
 
-**Not AMM pools.** Whether an AMM's liquidity takes part in a permissioned domain's book is unchecked. Ladders are plain domain offers, which the live proof covered.
+**Not AMM pools.** xrpl.org says permissioned offers and payments can't be filled by AMMs, so a pool couldn't serve a domain's book. Ladders are plain domain offers, which the live proof covered.
+
+### Spoiling and escrow
+
+**Clawback can't reach tokens locked in an escrow** (Testnet check, 2026-11-14). With 20 tokens escrowed, a clawback took only what was on the line, and the escrow then finished.
+
+- **Perishable goods are never locked in an escrow.** They would escape spoiling until it settled.
+- **The steward reads a line's balance before any clawback,** and records what it actually took.
+- **A bond in escrow settles only by its escrow rules.** The steward's reach is the referee secret, not clawback.
 
 ## Separate markets per table
 
@@ -144,7 +159,17 @@ Each table gets:
 
 ## Fair dice
 
-A day's roll is the **drand round named in advance**: the first round published after the day's close, at drand's published period. Nobody, including the studio, knows it before the close. Nobody can choose it: it's a threshold signature fixed for its round. That claim comes from drand's design, and it's checked at drand's documentation before any build (see "Check before building").
+A day's roll is a **drand round named by its number**. The number comes from the day's close time on drand's quicknet chain, which publishes a round every 3 seconds:
+
+- **round = floor((close − 1692803367) / 3) + 1**, where 1692803367 is quicknet's genesis, in Unix seconds.
+- The rules give the formula, so a table's every round number is known before it starts.
+- Nobody, including the studio, knows a round's value before it's published.
+
+**Nobody can choose the value.**
+
+- Each quicknet round is a BLS signature over its round number. BLS signatures are deterministic, so the value is fixed.
+- A party holding drand's threshold could see a round first, or withhold it. That only delays the close; it can't change the value.
+- Checked 2026-11-14: the period, genesis and formula came from drand's API, the formula matched a live round, and the randomness was the SHA-256 of its signature. A BLS signature has not yet been verified locally.
 
 - **Road events, the bell and edicts** take their numbers from the roll by a fixed index, through the table engine (`league-dice` → roll 3.0's Rust core; see "Tables with roll").
 - **Sealed travel orders** are the one thing hidden.
@@ -209,7 +234,7 @@ An unannounced reset is caught by the "ledger went backwards" check (1,000-ledge
 
 | Service | Does | If it's down |
 |---|---|---|
-| **Steward** (issuer service) | Holds the chapter issuer's key; issues table goods and coin on authorized trust lines; posts town ladders; spoils perishables (clawback); issues table credentials and the domain; referees bonds; signs records | The day's close waits; deadlines move with it. Nothing settles without it. |
+| **Steward** (issuer service) | Holds the chapter issuer's key; issues table goods and coin on authorized trust lines; posts town ladders; spoils perishables (clawback, after reading the balance); issues table credentials and the domain; referees bonds; signs records | The day's close waits; deadlines move with it. Nothing settles without it. |
 | **Archivist** (archive node and indexer) | A studio Testnet node with full history for the era, plus an index of every table event; serves replays, receipts and the decision log; flags rule breaches (XRP pairs, missing reveals) | Clients keep playing from public nodes; replays and settlements wait for it |
 | **Relay** (whisper channel) | Carries private messages between a table's guilds, end-to-end encrypted, never on the ledger; counts messages per player per day for the press metric, never their content | Guilds can still trade; talk waits |
 
@@ -295,10 +320,10 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 
 | Feature | Used for | Proved on Testnet | Mainnet status (xrpl.org known amendments, read 2026-11-14 by R&D) |
 |---|---|---|---|
-| Issued tokens, authorized trust lines | Goods, coin, marks | Tokens and trust lines: yes (M2, M2c). RequireAuth: not yet. | Yes |
+| Issued tokens, authorized trust lines | Goods, coin, marks | Tokens and trust lines: yes (M2, M2c). RequireAuth with clawback and token escrow: yes (design check); an unauthorized line can't receive. | Yes |
 | Offers and order books | Trading | Yes | Yes |
 | Permissioned Domains, Credentials, Permissioned DEX | The table's market | Yes (M2c): domain set, credentials, member offers cross, outsider refused, open book kept apart | Enabled 2026-02-04 and 2026-02-18 |
-| Token escrow with a condition | Bonds | Yes (M2c): refused until the lock flag; `CancelAfter` required; created and finished | Enabled 2026-02-12 |
+| Token escrow with a condition | Bonds | Yes (M2c): refused until the lock flag; created and finished. The expiry rule and clawback's limit are checked (design checks). | Enabled 2026-02-12 |
 | Clawback | Spoiling, the referee's reach | Yes (M2) | Enabled 2024-02-08 |
 | Memos | Sealed orders, contract terms | Yes | Yes |
 | Checks | **No longer used** | | |
@@ -324,9 +349,12 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 
 ## Check before building
 
-- drand: the period, the round-number formula, and that a round's value can't be chosen, all at drand's documentation.
-- RequireAuth together with clawback and token escrow on one trust line, on the Testnet.
-- Whether AMM liquidity takes part in a permissioned domain's book (not used either way).
+- **Done 2026-11-14:**
+  - drand: the period, the formula and the value rule (see "Fair dice");
+  - RequireAuth with clawback and token escrow, live;
+  - AMMs can't fill domain offers (xrpl.org);
+  - the escrow expiry rule, live.
+- **Still open:** verifying a quicknet BLS signature locally.
 - BatchV1_1 and permission delegation: Mainnet status.
 
 ## Risks
@@ -349,7 +377,8 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 | Finding | Source | Checked | What it changes |
 |---|---|---|---|
 | Checks set no funds aside, and the payee can cash at any time | xrpl.org, Checks | Read (R&D, 2026-11-14) | Contracts use escrow bonds |
-| Token escrow needs the issuer's lock flag and `CancelAfter` | Live Testnet, M2c receipt | Measured (2026-11-14) | The bond steps and the steward's flag order |
+| Token escrow needs the issuer's lock flag; any escrow needs `FinishAfter` or `CancelAfter`, and a condition without `FinishAfter` | Live Testnet (M2c receipt, escrow-expiry check); rippled 3.4.1 `EscrowCreate` | Measured, and read at source (2026-11-14) | The bond steps and the steward's flag order |
+| Clawback can't reach escrowed tokens; an unauthorized line can't receive | Live Testnet, RequireAuth design check | Measured (2026-11-14) | Perishables never escrowed; a balance read before clawback; per-table tokens isolate |
 | A domain refuses outsiders and keeps the open book apart; it doesn't stop members using the open book | Live Testnet, M2c receipt | Measured | Per-table tokens isolate; the domain is the market |
 | Thin books and symmetric players give no trade | Seed 25 review (Gemini Deep Research, 2026-11-14), its occupancy model | The review's own arithmetic | Asymmetric guilds; 4–5 players |
 | Converters make trade necessary | Sidereal Confluence, cited by the review | Not checked at source | The converter graph |
