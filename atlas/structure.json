@@ -98,6 +98,70 @@
           "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
         },
         {
+          "hash": "4ddb2fc96afd1ef352b866a06c1cac87283c07d425c8e74e831f9227f62f2f28",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/README.md"
+        },
+        {
+          "hash": "f378a66e2028af31d6b6c0cc5ff7730cd25468d8a1b479ee1ef68748b349f5fc",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.exit"
+        },
+        {
+          "hash": "db8bf309d45c42253cddd828cfe0d49622c664ac34c6572a47655abe4760f16a",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.out"
+        },
+        {
+          "hash": "f66c27fa02940914937083044a04d3c372220d64ba0a9111e7f71c388a0a24e2",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/02_merchant_account_tx.json"
+        },
+        {
+          "hash": "1c0cea892b446b8180b70e9d0a334cce5029de60201abb5880a1b95e88ad3831",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/03_cargo_audit_with_xrpl_rust.txt"
+        },
+        {
+          "hash": "640c56407de274e84035f1a76976885ddc38eb6197607a9302965d7f796e1ad6",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/testnet_spike.rs.txt"
+        },
+        {
+          "hash": "ab19d533e09e6cd15c28668012e3d31f0e049f3e44933764863b00e05eeeddf5",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/README.md"
+        },
+        {
+          "hash": "27ef3cc223d6fc3f3b87fc55fbd074094439f93d0398d72f6322d0a9c8052a7e",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.exit"
+        },
+        {
+          "hash": "da430028fa5409e95d527c8b53a5ec7d1cfda6815d8ee919a519415b495974a0",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.out"
+        },
+        {
+          "hash": "59f519a339e950b5dba169e1540b46d8f3810fc7de1b15dd972746562c0d5837",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/02_hash_check.json"
+        },
+        {
+          "hash": "efd6c89db224f710db549d91d393ce64542ce3f234d4642ab3be10286d94b305",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_snapshot.txt"
+        },
+        {
+          "hash": "b9feb1f29b452c6e5a879ffa5f29481e99e7f97bf2558ab6b97d23ffaf077129",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.err"
+        },
+        {
+          "hash": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.exit"
+        },
+        {
+          "hash": "a0c0ff20eca054a38d1db04c8a602742b2c249d59d9a2c3c81d1d8dca77f6281",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.out"
+        },
+        {
           "hash": "885a8deaa251d4bbd513645d6e442fcdaf62aa4418e643231ae884ce0727d0a0",
           "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/README.md"
         },
@@ -1104,8 +1168,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "ef971a49042a717ec849dee71f44727036cde398",
-    "tracked": 416
+    "commit": "ddc80b8ce40e7642d2ee031fc9c1978ab71adb43",
+    "tracked": 432
   },
   "landings": [
     {

@@ -168,8 +168,8 @@
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 10,
-        "lines": 156,
+        "commits": 12,
+        "lines": 160,
         "path": "CLAUDE.md"
       },
       {
@@ -198,8 +198,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 14,
-        "lines": 465,
+        "commits": 16,
+        "lines": 486,
         "path": "atlas/README.md"
       },
       {
@@ -208,18 +208,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 14,
-        "lines": 1384,
+        "commits": 16,
+        "lines": 1438,
         "path": "atlas/page.json"
       },
       {
-        "commits": 14,
-        "lines": 8709,
+        "commits": 16,
+        "lines": 9021,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 14,
-        "lines": 19866,
+        "commits": 16,
+        "lines": 19962,
         "path": "atlas/structure.json"
       },
       {
@@ -248,13 +248,13 @@
         "path": "crates/league-ledger/Cargo.toml"
       },
       {
-        "commits": 3,
-        "lines": 486,
+        "commits": 4,
+        "lines": 494,
         "path": "crates/league-ledger/examples/testnet_escrow_expiry.rs"
       },
       {
-        "commits": 4,
-        "lines": 1271,
+        "commits": 5,
+        "lines": 1276,
         "path": "crates/league-ledger/examples/testnet_proof.rs"
       },
       {
@@ -273,8 +273,8 @@
         "path": "crates/league-ledger/src/lib.rs"
       },
       {
-        "commits": 5,
-        "lines": 436,
+        "commits": 6,
+        "lines": 444,
         "path": "crates/league-ledger/tests/vectors.rs"
       },
       {
@@ -333,8 +333,8 @@
         "path": "docs/design.md"
       },
       {
-        "commits": 3,
-        "lines": 108,
+        "commits": 4,
+        "lines": 118,
         "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/README.md"
       },
       {
@@ -363,13 +363,13 @@
         "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/02_hash_check.json"
       },
       {
-        "commits": 3,
-        "lines": 238,
+        "commits": 4,
+        "lines": 290,
         "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/hash_check.py"
       },
       {
-        "commits": 3,
-        "lines": 124,
+        "commits": 4,
+        "lines": 126,
         "path": "docs/receipts/design-check-requireauth-2026-11-14/README.md"
       },
       {
@@ -398,8 +398,8 @@
         "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/02_hash_check.json"
       },
       {
-        "commits": 3,
-        "lines": 238,
+        "commits": 4,
+        "lines": 290,
         "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
       },
       {
@@ -443,8 +443,8 @@
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 13,
-        "lines": 425,
+        "commits": 15,
+        "lines": 441,
         "path": "scripts/check-copy.sh"
       },
       {
@@ -458,8 +458,8 @@
         "path": "scripts/test-copy-check.sh"
       },
       {
-        "commits": 10,
-        "lines": 673,
+        "commits": 12,
+        "lines": 679,
         "path": "scripts/test-guards.sh"
       },
       {
@@ -484,12 +484,17 @@
       },
       {
         "commits": 2,
+        "lines": 32,
+        "path": "vendor/xrpl-rust/LICENSE-rippled"
+      },
+      {
+        "commits": 2,
         "lines": 1670,
         "path": "vendor/xrpl-rust/README.md"
       },
       {
-        "commits": 7,
-        "lines": 163,
+        "commits": 9,
+        "lines": 184,
         "path": "vendor/xrpl-rust/VENDORED.md"
       },
       {
@@ -1778,8 +1783,8 @@
         "path": "vendor/xrpl-rust/src/models/transactions/escrow_cancel.rs"
       },
       {
-        "commits": 5,
-        "lines": 1132,
+        "commits": 7,
+        "lines": 1330,
         "path": "vendor/xrpl-rust/src/models/transactions/escrow_create.rs"
       },
       {
@@ -1853,8 +1858,8 @@
         "path": "vendor/xrpl-rust/src/models/transactions/offer_cancel.rs"
       },
       {
-        "commits": 5,
-        "lines": 1091,
+        "commits": 6,
+        "lines": 1102,
         "path": "vendor/xrpl-rust/src/models/transactions/offer_create.rs"
       },
       {
@@ -1868,8 +1873,8 @@
         "path": "vendor/xrpl-rust/src/models/transactions/oracle_set.rs"
       },
       {
-        "commits": 5,
-        "lines": 1469,
+        "commits": 6,
+        "lines": 1480,
         "path": "vendor/xrpl-rust/src/models/transactions/payment.rs"
       },
       {
@@ -1893,8 +1898,8 @@
         "path": "vendor/xrpl-rust/src/models/transactions/permissioned_domain_delete.rs"
       },
       {
-        "commits": 3,
-        "lines": 1625,
+        "commits": 4,
+        "lines": 1630,
         "path": "vendor/xrpl-rust/src/models/transactions/permissioned_domain_set.rs"
       },
       {
@@ -2268,66 +2273,66 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T11:59:28.631Z",
+  "generatedAt": "2026-11-14T12:25:44.031Z",
   "generatedFrom": {
-    "commit": "ef971a49042a717ec849dee71f44727036cde398"
+    "commit": "ddc80b8ce40e7642d2ee031fc9c1978ab71adb43"
   },
   "pairs": [
     {
-      "a": "CHANGELOG.md",
-      "b": "CLAUDE.md",
-      "either": 10,
-      "shared": 5,
+      "a": "CLAUDE.md",
+      "b": "scripts/check-copy.sh",
+      "either": 12,
+      "shared": 6,
       "strength": 0.5
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 9,
-      "shared": 9,
+      "either": 10,
+      "shared": 10,
       "strength": 1
     },
     {
       "a": "scripts/check-copy.sh",
       "b": "scripts/test-guards.sh",
-      "either": 9,
-      "shared": 7,
-      "strength": 0.777778
+      "either": 10,
+      "shared": 8,
+      "strength": 0.8
     }
   ],
   "parameters": {
@@ -2340,16 +2345,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T06:52:01-05:00",
-    "inScopeFiles": 421,
+    "headDate": "2026-11-14T07:17:05-05:00",
+    "inScopeFiles": 437,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 20,
+    "qualifyingCommits": 21,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T11:52:01.000Z",
+    "since": "2026-05-18T12:17:05.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

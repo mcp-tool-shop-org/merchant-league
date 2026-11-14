@@ -16,38 +16,31 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 5,
+      "added": 16,
+      "changed": 0,
       "moved": 0,
-      "parts": 2,
+      "parts": 1,
       "removed": 0
     },
     "items": [
       {
-        "kind": "unassigned",
-        "sentence": "vendor/xrpl-rust/LICENSE-rippled is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "vendor/xrpl-rust/LICENSE-rippled"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "1 file added and 5 changed content, across 2 parts.",
+        "sentence": "Nothing structural changed since 2026-11-14; 16 files added.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "4cfd3c576ad8cd199c1004fed4082d15c1cdf7db",
-      "generatedAt": "2026-11-14T11:51:57.947Z"
+      "commit": "ef971a49042a717ec849dee71f44727036cde398",
+      "generatedAt": "2026-11-14T11:59:28.631Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "ef971a49042a717ec849dee71f44727036cde398",
+  "commit": "ddc80b8ce40e7642d2ee031fc9c1978ab71adb43",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -227,7 +220,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T11:59:28.631Z",
+  "generatedAt": "2026-11-14T12:25:44.031Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
