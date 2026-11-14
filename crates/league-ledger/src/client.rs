@@ -498,19 +498,41 @@ mod tests {
         )
     }
 
+    /// Lends a `Fake` to a client, so the test can read what was sent after
+    /// the client is gone.
+    struct Lent<'a>(&'a Fake);
+
+    impl Transport for Lent<'_> {
+        fn post(&self, url: &str, body: &Json) -> Result<Json, String> {
+            self.0.post(url, body)
+        }
+    }
+
     #[test]
     fn a_server_that_is_not_the_testnet_is_refused_before_anything_else() {
-        // testnet-check: allow (a refused network id, on purpose)
-        let fake = Fake::new().on("server_info", ok(json!({ "info": { "network_id": 0 } }))); // testnet-check: allow
-        assert!(matches!(
-            Testnet::with_transport(fake, "rpc", "faucet"),
-            Err(LedgerError::NotTestnet(_))
-        ));
-        let fake = Fake::new().on("server_info", ok(json!({ "info": {} })));
-        assert!(matches!(
-            Testnet::with_transport(fake, "rpc", "faucet"),
-            Err(LedgerError::NotTestnet(NotTestnet { reported: None }))
-        ));
+        let refused = [
+            (json!({ "network_id": 0 }), Some(0)),
+            (json!({ "network_id": 2 }), Some(2)),
+            (json!({ "network_id": u32::MAX }), Some(u32::MAX)),
+            (json!({}), None),
+        ];
+        for (info, reported) in refused {
+            let fake = Fake::new().on("server_info", ok(json!({ "info": info })));
+            let result = Testnet::with_transport(Lent(&fake), "rpc", "faucet");
+            assert!(matches!(
+                result,
+                Err(LedgerError::NotTestnet(NotTestnet { reported: r })) if r == reported
+            ));
+            // Only server_info was ever sent: no second request reaches a
+            // server that isn't the Testnet.
+            let sent = fake.sent.borrow();
+            assert_eq!(sent.len(), 1, "{reported:?}");
+            assert_eq!(sent[0]["method"], "server_info");
+        }
+        // The Testnet itself is accepted, after the same single request.
+        let fake = Fake::new().on("server_info", testnet_info());
+        assert!(Testnet::with_transport(Lent(&fake), "rpc", "faucet").is_ok());
+        assert_eq!(fake.sent.borrow().len(), 1);
     }
 
     #[test]
