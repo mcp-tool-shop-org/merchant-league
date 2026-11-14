@@ -128,6 +128,9 @@ pub struct Receipt {
     pub ledger_index: Option<u64>,
     /// The result the server gave on submission (not final).
     pub preliminary: String,
+    /// The account sequence the transaction used. An escrow or offer is
+    /// later named by it (`OfferSequence`).
+    pub sequence: u32,
 }
 
 /// How long a transaction may wait to be included, in ledgers.
@@ -304,6 +307,7 @@ impl<T: Transport> Testnet<T> {
                         validated: true,
                         ledger_index: found["ledger_index"].as_u64(),
                         preliminary,
+                        sequence,
                     });
                 }
                 Ok(_) => {}
@@ -324,6 +328,7 @@ impl<T: Transport> Testnet<T> {
             validated: false,
             ledger_index: None,
             preliminary,
+            sequence,
         })
     }
 }
@@ -460,6 +465,7 @@ mod tests {
         assert!(receipt.validated);
         assert_eq!(receipt.result, "tesSUCCESS");
         assert_eq!(receipt.ledger_index, Some(101));
+        assert_eq!(receipt.sequence, 7);
         assert_eq!(receipt.hash.len(), 64);
         // The hash submitted and the hash looked up are the same one.
         let sent = net.transport.sent.borrow();

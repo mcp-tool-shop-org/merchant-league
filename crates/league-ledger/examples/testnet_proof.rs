@@ -192,11 +192,7 @@ fn main() -> Res<()> {
         )?,
     )?;
     report("merchant_escrow_create", &create);
-    let found = net.call("tx", json!({"transaction": create.hash}))?;
-    let escrow_seq = found["tx_json"]["Sequence"]
-        .as_u64()
-        .and_then(|n| u32::try_from(n).ok())
-        .ok_or("no escrow sequence")?;
+    let escrow_seq = create.sequence;
     let fee = Value::Amount(Amount::Drops(finish_fee_drops(32) + 150));
     let finish = |secret: &Secret| -> Res<Transaction> {
         tx(
