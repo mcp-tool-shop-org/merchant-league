@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit d40880c by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit c97439a by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,16 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (304 files), shell (3), JavaScript (1) and Python (1). Work enters through 3 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (eae861a)
+## What changed since 2026-11-14 (d40880c)
 
-- CI's push trigger now also names `docs/**`.
-- CI now also runs scripts/test-guards.sh.
-- CI no longer runs scripts/test-copy-check.sh.
-- CHANGELOG.md is now read by scripts/test-guards.sh.
-- CLAUDE.md is now read by scripts/test-guards.sh.
-- Cargo.toml is now also read by scripts/test-guards.sh.
-- And 5 more new writers and readers of places.
-- 1 file added, 1 removed and 7 changed content, across 5 parts.
+Nothing structural changed since 2026-11-14; 1 file added and 2 changed content.
 
 ## What comes in
 

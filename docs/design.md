@@ -19,7 +19,9 @@ Merchant League is a slow-turn trading game for 4 or 5 players, played on the XR
 - **Guilds:** six. One or two sit out each table.
 - **Gifts:** left to the paper test.
 
-Who plays the paper table is still open. The steward's bond rule is now written out in full ("The steward's bond rule").
+**Then the fifth (2026-11-14):** the Director doesn't play the paper test. The AI crew plays it, over several games; the plan is `docs/paper-test.md`. The design goes back to him with its results.
+
+The steward's bond rule is now written out in full ("The steward's bond rule").
 
 | Draft said | Now | Why |
 |---|---|---|
@@ -184,6 +186,8 @@ The secret is also sent as a memo, so it's on the ledger before the wronged side
 - **Fixed at bond time:** each bond's condition is the SHA-256 of a fresh 32-byte secret. It's fixed when the bond is created, so the steward can't swap the secret later.
 - **A bad decision shows:** a wrong decision is visible to anyone who recomputes it. It's reversed by rule: the steward compensates the wronged side in table coin, and the log records both entries.
 - **A leak can't be prevented:** the rule can't stop the steward leaking a secret early. A leaked secret shows up when a bond is finished with no breach in the log, and that is a studio fault, to be made good the same way.
+- **An outage can cost a claim, and is made good the same way.** A bond's `CancelAfter` is fixed on the ledger when the bond is created, but a steward outage moves deadlines with the close. If the steward is down past a bond's `CancelAfter`, the breaching side can cancel its own bond and walk away, and the wronged side can no longer finish it. Such a bond is made good by the same rule as a wrong decision: the steward compensates the wronged side in table coin, and the log records both entries.
+- **Behind, no new bonds:** to keep that rare, the steward refuses new bonds once it is a day or more behind the table's close.
 
 ### The closing bell
 
@@ -317,14 +321,12 @@ The steward is trusted: it can mint and claw back. The fence is publicity. Every
 
 ## The paper playtest
 
-**Who.** One table of **4 or 5 players**, seated from a generated setup and its receipt, with a human acting as the steward. The players are people the Director picks (see "Open questions").
+**The full plan is `docs/paper-test.md`.** In short:
 
-**How.**
-- 10 to 13 days, played live in about two hours. Each day gets a 10-minute window.
-- Travel orders are sealed in envelopes, and the rolls come from a printed list of drand round values fetched in advance.
-- Contracts and bonds are tracked on a ledger sheet that the steward settles by the written rules.
-
-**Before the people.** The setup runs through the simulator, and its lazy-strategy scores are written down. The paper test then shows whether people find a shortcut the simulator didn't.
+- **Who plays:** the AI crew, not people (Director, 2026-11-14). That's six games of 4 or 5 seats, from different model families: Gemini (AI Studio, the Gemini app, one Antigravity card), Claude subagents, and optionally a local model.
+- **The referee:** a Claude session that doesn't play. It runs the steward's written procedure by hand, and writes a log anyone can replay.
+- **The setups:** six, built by hand to the generator's recipe. The generator isn't built yet, so the games test what its proof would.
+- **The stop rule:** if a shortcut wins two tables, stop and fix the rules on paper first.
 
 **What it measures.** These are the review's seven metrics with its hypothesised bands, which are design guesses, not data:
 
@@ -338,9 +340,15 @@ The steward is trusted: it can mint and claw back. The fence is publicity. Every
 | Missed reveals | under 3% | over 8% |
 | Contenders at day 10 | 3 or more within 15% of the leader | winner clear by day 7–8 |
 
-**Also recorded:** each lazy strategy seen at the table, and whether it paid; each mandate's real difficulty against its grade; and the time a day took.
+**Also recorded:**
 
-**After it.** Rules change on paper first. A Testnet build starts only once a paper table lands in the healthy bands. Then come the review's four Testnet tables: two 60-minute live blitzes and two 5-day async tables.
+- which named lazy strategy a seat found unprompted, and whether it paid;
+- each mandate's real difficulty against its grade;
+- every rule gap.
+
+On paper, order timing can't be measured, because replies are simultaneous.
+
+**After it.** Rules change on paper first. The design goes back to the Director with the paper test's summary. A Testnet build starts only after his approval, once the paper tables land in the healthy bands. Then come the review's four Testnet tables: two 60-minute live blitzes and two 5-day async tables.
 
 ## Hard constraints
 
@@ -399,7 +407,7 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 
 1. **Batch for delivery.** *Answered 2026-11-14:* two payments with bonds for v0.1, no Batch.
 2. **The steward as referee.** *Answered 2026-11-14:* a trusted steward whose every decision can be replayed is acceptable. The rule is in "The steward's bond rule".
-3. **Who plays the paper table:** people the Director invites, or the studio crew? Recommendation: people. The test is whether humans find the shortcuts.
+3. **Who plays the paper table.** *Answered 2026-11-14:* the AI crew, over several games; he doesn't play. The plan is `docs/paper-test.md`.
 4. **Five guilds or six.** *Answered 2026-11-14:* six. The player range stays 4–5, and one or two guilds sit out each table (see "Guilds").
 5. **Gifts.** *Answered 2026-11-14:* left to the paper test.
 
@@ -420,7 +428,7 @@ The game uses only XRPL features enabled on Mainnet as well as Testnet. After th
 | The game is not fun | Nobody plays a second table | The paper table first; change rules on paper before any build |
 | The towns are too good | Guilds trade only with ladders: solitaire | The generator's hermit strategy must lose; widen spreads; the guild-to-guild share metric |
 | A shortcut the simulator missed | One strategy wins every table | The paper test records it; it becomes a named lazy strategy in the generator |
-| The steward goes down | Days can't close | Deadlines move with the close; the steward's state is on the ledger and in the log |
+| The steward goes down | Days can't close; a bond's claim window can pass | Deadlines move with the close; the steward's state is on the ledger and in the log. A bond whose `CancelAfter` passes during the outage is made good in table coin by the steward, both entries logged. A steward a day or more behind takes no new bonds. |
 | The steward errs | A bond goes the wrong way | Every decision replays from public inputs; a wrong one is reversed by rule and logged |
 | drand is unreachable | Closes wait | Waiting is safe; never fall back to a steerable source |
 | A reset with no notice | The chapter ends early | "Ledger went backwards" closes it from the archivist's last state |
