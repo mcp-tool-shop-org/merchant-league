@@ -124,7 +124,7 @@ for phrase in "Pay the buy-in" "buy_in" "buy-ins" "Pay a 50 XRP buy in to join t
   "real money prizes" "play for real money" "real-money prizes" "real_money" \
   "win prize money" "earn money" "earns money" "made money" "making money" "make real money" \
   "win money" "won money" "win real money" "make_money" "earn real rewards" "Win real prizes!" \
-  "Each mark is worth \$5." "worth 5 USD" "sell marks for dollars" "10 euros a table" "10 €"; do
+  "Each mark is worth \$5." "worth 5 USD" "sell marks for dollars" "10 euros a table" "10 €" "£5 a seat" "USD 5 a table"; do
   run_case $c fail "$tui" "// $phrase"
 done
 run_case $c fail "$tui" "// real	money"
@@ -149,7 +149,8 @@ for phrase in "Choose which goods to buy in town." "You cannot buy in Varn today
   "Earn real renown in the league." "Win the table." "Make your mark." \
   "No real money." "There is no real money in this game." "This is not real money." \
   "It is never real money." "Played without real money." "This game is not for real money." \
-  "Pay 5 marks."; do
+  "Pay 5 marks." '{ "currency": "USD", "value": "10" }' "An IOU in USD on the Testnet." \
+  "A hash, cut short: 40D45E1EE03B8EA1…" "Salt — and only salt — sells in Varn." "ISO 4217 codes"; do
   run_case $c pass "$tui" "// $phrase"
 done
 # Licence files under crates/ are skipped by exact name, and nothing else is.

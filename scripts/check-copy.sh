@@ -48,10 +48,16 @@ banned=(
   "\b(earn|earns|earned|earning|make|makes|made|making|win|wins|won|winning)${sep}+(real${sep}+)?money\b"
   "\b(earn|earns|earned|earning|make|makes|made|making|win|wins|won|winning)${sep}+real${sep}+${money}\b"
   "\\\$${sep}*[0-9]"                                                   # \$5
-  "\b(usd|eur|gbp)\b"
+  # A currency code only next to an amount: XRPL test data uses USD as an
+  # ordinary ledger currency code ("currency": "USD"), which isn't a price.
+  "\b[0-9]+${sep}*(usd|eur|gbp)\b"                                     # 5 USD
+  "\b(usd|eur|gbp)${sep}*[0-9]"                                        # USD 5
   "[0-9]${sep}*(dollars?|euros?)\b"                                    # 5 dollars
   "\b(for|into|to)${sep}+(dollars|euros)\b"                            # sell marks for dollars
-  "[€£]"
+  # Alternation, not a bracket: where grep reads bytes, a bracket of
+  # multi-byte symbols would match any of their bytes, such as the first
+  # byte of an ellipsis.
+  "(€|£)"
 )
 pattern=$(IFS='|'; echo "${banned[*]}")
 
