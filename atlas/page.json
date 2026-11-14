@@ -4,40 +4,102 @@
     "docs/",
     "root"
   ],
-  "breaks": [],
+  "breaks": [
+    {
+      "doors": 2,
+      "importedBy": [
+        "league-ledger"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-dice",
+      "partLabel": "league-dice"
+    },
+    {
+      "doors": 2,
+      "importedBy": [],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-ledger",
+      "partLabel": "league-ledger"
+    }
+  ],
   "changes": {
     "fileCounts": {
-      "added": 2,
-      "changed": 7,
+      "added": 22,
+      "changed": 8,
       "moved": 0,
       "parts": 4,
       "removed": 0
     },
     "items": [
       {
-        "kind": "landing",
-        "sentence": "crates/league-tui/ is now read by Cargo.toml.",
+        "kind": "import-added",
+        "sentence": "league-ledger now imports league-dice.",
         "subjects": [
-          "crates/league-tui/",
-          "Cargo.toml"
+          "league-ledger",
+          "league-dice"
         ]
       },
       {
-        "kind": "part",
-        "sentence": "league-tui is a new part, drawn from `crates/league-tui/**`.",
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-core/, crates/league-dice/, crates/league-ledger/src/ and 3 more.",
         "subjects": [
-          "league-tui"
+          ".github/workflows/ci.yml",
+          "crates/league-core/",
+          "crates/league-dice/",
+          "crates/league-ledger/src/",
+          "crates/league-ledger/tests/",
+          "crates/league-season/",
+          "crates/league-tui/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-ledger/examples/testnet_proof.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-ledger/examples/testnet_proof.rs"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI no longer runs crates/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "And 1 more change to a door.",
+        "subjects": []
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-dice/ is now also read by crates/league-ledger/Cargo.toml.",
+        "subjects": [
+          "crates/league-dice/",
+          "crates/league-ledger/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json is now read by crates/league-ledger/tests/testnet_vectors.rs.",
+        "subjects": [
+          "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json",
+          "crates/league-ledger/tests/testnet_vectors.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "2 files added and 7 changed content, across 4 parts.",
+        "sentence": "22 files added and 8 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "4c4f13937d7db36d630406ef5e158e4860ee5dc4",
-      "generatedAt": "2026-11-14T05:16:09.027Z"
+      "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
+      "generatedAt": "2026-11-14T05:20:32.429Z"
     },
     "unchanged": false
   },
@@ -46,13 +108,15 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-  "defaultBranch": "scaffold/workspace",
-  "derived": "9 parts, mostly Rust (5 files) and shell (2). Work enters through 1 door; the busiest is CI, which reaches 6 parts.",
+  "commit": "6364f25abd6d46a8f5298a3abb6cbf51aae3ef4e",
+  "defaultBranch": "main",
+  "derived": "9 parts, mostly Rust (10 files) and shell (2). Work enters through 2 doors; the busiest is CI, which reaches 6 parts.",
   "doors": [
     {
-      "checks": [],
-      "checksCount": 0,
+      "checks": [
+        "crates/league-ledger/examples/testnet_proof.rs"
+      ],
+      "checksCount": 1,
       "checksMore": 0,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
@@ -73,7 +137,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 1
+          "files": 6
         },
         {
           "boundary": "league-season",
@@ -94,10 +158,15 @@
       "runs": [
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
-        "crates/"
+        "crates/league-core/",
+        "crates/league-dice/",
+        "crates/league-ledger/src/",
+        "crates/league-ledger/tests/",
+        "crates/league-season/",
+        "crates/league-tui/"
       ],
-      "runsCount": 3,
-      "runsMore": 0,
+      "runsCount": 8,
+      "runsMore": 8,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -105,15 +174,54 @@
         "on a push to main touching 8 paths",
         "or by hand"
       ]
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "id": "crates/league-ledger/Cargo.toml#testnet_proof",
+      "kind": "command",
+      "landings": [],
+      "name": "testnet_proof",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 5
+        },
+        {
+          "boundary": "league-dice",
+          "depth": 1,
+          "files": 1
+        }
+      ],
+      "runWith": "cargo run --example testnet_proof",
+      "runs": [
+        "crates/league-ledger/examples/testnet_proof.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
     }
   ],
   "duplicates": [],
   "duplicatesLead": null,
   "duplicatesNote": [],
-  "edges": [],
+  "edges": [
+    {
+      "from": "league-ledger",
+      "fromTests": false,
+      "to": "league-dice"
+    }
+  ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T05:20:32.429Z",
+  "generatedAt": "2026-11-14T05:53:06.313Z",
   "limits": [
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
@@ -136,15 +244,18 @@
   "startDoor": ".github/workflows/ci.yml",
   "startHere": [
     ".github/workflows/ci.yml",
-    "crates/league-core/src/lib.rs"
+    "crates/league-ledger/tests/testnet_vectors.rs",
+    "crates/league-ledger/src/codec.rs",
+    "crates/league-ledger/src/keys.rs"
   ],
+  "startReason": "This path starts at crates/league-ledger/tests/testnet_vectors.rs, the test CI runs that reaches the most parts, since CI runs only tests.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 5,
+  "testFiles": 10,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
-    "league-ledger": 1,
+    "league-ledger": 5,
     "league-season": 1,
     "league-tui": 1
   },
@@ -152,7 +263,6 @@
   "testedInside": [
     "league-core",
     "league-dice",
-    "league-ledger",
     "league-season",
     "league-tui"
   ],
@@ -168,7 +278,6 @@
   "untestedNote": [
     "league-core is tested only by the unit tests in its own files.",
     "league-dice is tested only by the unit tests in its own files.",
-    "league-ledger is tested only by the unit tests in its own files.",
     "league-season is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files.",
     "scripts holds only shell files, which this map does not read, so whether a test touches it cannot be seen."

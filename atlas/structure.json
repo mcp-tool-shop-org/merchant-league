@@ -34,6 +34,70 @@
         {
           "hash": "351eb23e7e04ebf14d47e90426c480565fb858ee459fa36a43976b5243b5a4df",
           "path": "docs/design.md"
+        },
+        {
+          "hash": "4ddb2fc96afd1ef352b866a06c1cac87283c07d425c8e74e831f9227f62f2f28",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/README.md"
+        },
+        {
+          "hash": "f378a66e2028af31d6b6c0cc5ff7730cd25468d8a1b479ee1ef68748b349f5fc",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.exit"
+        },
+        {
+          "hash": "db8bf309d45c42253cddd828cfe0d49622c664ac34c6572a47655abe4760f16a",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.out"
+        },
+        {
+          "hash": "f66c27fa02940914937083044a04d3c372220d64ba0a9111e7f71c388a0a24e2",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/02_merchant_account_tx.json"
+        },
+        {
+          "hash": "1c0cea892b446b8180b70e9d0a334cce5029de60201abb5880a1b95e88ad3831",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/03_cargo_audit_with_xrpl_rust.txt"
+        },
+        {
+          "hash": "640c56407de274e84035f1a76976885ddc38eb6197607a9302965d7f796e1ad6",
+          "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/testnet_spike.rs.txt"
+        },
+        {
+          "hash": "ab19d533e09e6cd15c28668012e3d31f0e049f3e44933764863b00e05eeeddf5",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/README.md"
+        },
+        {
+          "hash": "27ef3cc223d6fc3f3b87fc55fbd074094439f93d0398d72f6322d0a9c8052a7e",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/00_snapshot.txt"
+        },
+        {
+          "hash": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.exit"
+        },
+        {
+          "hash": "da430028fa5409e95d527c8b53a5ec7d1cfda6815d8ee919a519415b495974a0",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.out"
+        },
+        {
+          "hash": "59f519a339e950b5dba169e1540b46d8f3810fc7de1b15dd972746562c0d5837",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/02_hash_check.json"
+        },
+        {
+          "hash": "efd6c89db224f710db549d91d393ce64542ce3f234d4642ab3be10286d94b305",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_snapshot.txt"
+        },
+        {
+          "hash": "b9feb1f29b452c6e5a879ffa5f29481e99e7f97bf2558ab6b97d23ffaf077129",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.err"
+        },
+        {
+          "hash": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.exit"
+        },
+        {
+          "hash": "a0c0ff20eca054a38d1db04c8a602742b2c249d59d9a2c3c81d1d8dca77f6281",
+          "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.out"
         }
       ],
       "globs": [
@@ -91,11 +155,18 @@
       "externals": 0,
       "files": [
         {
-          "hash": "9ae9f637fbfceb7f0b665a93bc53c36450ec6d1128b35ac83b466778fa99cf1c",
+          "hash": "24256ffd74b55ee77be5954726bb585d06a3a3d89d88da4efafa81fc549ccb7d",
           "path": "crates/league-dice/Cargo.toml"
         },
         {
-          "hash": "2dd68ac308b37c453a9c49c5c544ff6b4ca5d7159b5664b4df3ff40e93c7d435",
+          "exports": [
+            "condition_hex",
+            "condition_hex_for",
+            "finish_fee_drops",
+            "fulfillment_hex",
+            "fulfillment_hex_for"
+          ],
+          "hash": "cc0678a34215de1b9660da3583e3e395e93232d1d7bcda93b3797e2c99fc32de",
           "path": "crates/league-dice/src/lib.rs",
           "testsInside": true
         }
@@ -125,8 +196,464 @@
       "externals": 0,
       "files": [
         {
-          "hash": "5c7f8eb2aa04aae70b25ca02bbb5e795452fcb435d0cf72674a193b5bca80578",
+          "hash": "ed82c8fbe8c77c502b7aa07bc602d4dabc553fd54a340059ab97a1ba846b357e",
           "path": "crates/league-ledger/Cargo.toml"
+        },
+        {
+          "entry": "main",
+          "entryRule": 1,
+          "hash": "f04b9af782f25d31da65de8377ab25bbfca38ea29569b95b46dc98795a145687",
+          "importsFiles": [
+            "crates/league-dice/src/lib.rs",
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/codec.rs"
+          ],
+          "library": "crates/league-ledger/src/lib.rs",
+          "path": "crates/league-ledger/examples/testnet_proof.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 30,
+                  "name": "parse",
+                  "receiver": "Currency",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "mrk"
+            },
+            {
+              "calls": [
+                {
+                  "line": 50,
+                  "name": "new",
+                  "receiver": "Transaction",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "tx"
+            },
+            {
+              "calls": [
+                {
+                  "line": 58,
+                  "name": "connect",
+                  "receiver": "Testnet",
+                  "target": {
+                    "file": "crates/league-ledger/src/client.rs"
+                  }
+                },
+                {
+                  "line": 81,
+                  "name": "U32",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 50,
+                  "name": "new",
+                  "receiver": "Transaction",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  },
+                  "via": "tx"
+                },
+                {
+                  "line": 89,
+                  "name": "U32",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 30,
+                  "name": "parse",
+                  "receiver": "Currency",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  },
+                  "via": "mrk"
+                },
+                {
+                  "line": 98,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 108,
+                  "name": "Account",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 119,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 120,
+                  "name": "Drops",
+                  "receiver": "Amount",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 120,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 135,
+                  "name": "U32",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 144,
+                  "name": "Account",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 145,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 154,
+                  "name": "decode_hex",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 166,
+                  "name": "Hash256",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 167,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 178,
+                  "name": "Secret",
+                  "target": {
+                    "file": "crates/league-dice/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 179,
+                  "name": "condition_hex",
+                  "target": {
+                    "file": "crates/league-dice/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 179,
+                  "name": "decode_hex",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 187,
+                  "name": "Drops",
+                  "receiver": "Amount",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 187,
+                  "name": "Amount",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 188,
+                  "name": "Account",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 189,
+                  "name": "U32",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                },
+                {
+                  "line": 190,
+                  "name": "Blob",
+                  "receiver": "Value",
+                  "target": {
+                    "file": "crates/league-ledger/src/codec.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": true,
+              "isDefaultExport": false,
+              "name": "main",
+              "truncated": true
+            }
+          ]
+        },
+        {
+          "failurePaths": [
+            {
+              "in": "call",
+              "kind": "err",
+              "line": 200
+            },
+            {
+              "in": "fund_new_account",
+              "kind": "err",
+              "line": 225
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "match-err",
+              "line": 245
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "match-err",
+              "line": 248
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "err",
+              "line": 248
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "err",
+              "line": 251
+            },
+            {
+              "in": "submit",
+              "kind": "match-err",
+              "line": 314
+            },
+            {
+              "in": "submit",
+              "kind": "match-err",
+              "line": 315
+            },
+            {
+              "in": "submit",
+              "kind": "err",
+              "line": 315
+            }
+          ],
+          "hash": "e87c6772551173d3111c77a4dde737d915266c127dbd8cacad3864713a89ba4d",
+          "importsFiles": [
+            "crates/league-ledger/src/codec.rs",
+            "crates/league-ledger/src/keys.rs",
+            "crates/league-ledger/src/lib.rs"
+          ],
+          "path": "crates/league-ledger/src/client.rs",
+          "testsInside": true
+        },
+        {
+          "entry": "from_json",
+          "entryRule": 4,
+          "exports": [
+            "account_text",
+            "decode_hex",
+            "encode_hex",
+            "field",
+            "from_json",
+            "issued_value_bits",
+            "sha512_half",
+            "transaction_hash",
+            "transaction_type_code"
+          ],
+          "failurePaths": [
+            {
+              "in": "parse",
+              "kind": "err",
+              "line": 175
+            },
+            {
+              "in": "set",
+              "kind": "err",
+              "line": 242
+            },
+            {
+              "in": "write_length",
+              "kind": "err",
+              "line": 335
+            },
+            {
+              "in": "write_amount",
+              "kind": "err",
+              "line": 368
+            },
+            {
+              "in": "issued_value_bits",
+              "kind": "err",
+              "line": 413
+            },
+            {
+              "in": "issued_value_bits",
+              "kind": "err",
+              "line": 420
+            },
+            {
+              "in": "issued_value_bits",
+              "kind": "err",
+              "line": 431
+            },
+            {
+              "in": "issued_value_bits",
+              "kind": "err",
+              "line": 439
+            },
+            {
+              "in": "issued_value_bits",
+              "kind": "err",
+              "line": 442
+            },
+            {
+              "in": "decode_hex",
+              "kind": "err",
+              "line": 456
+            }
+          ],
+          "hash": "332d9979ad8ba6637ce1ea994947111970eee901f6924ad193ad1ac0cf432578",
+          "importsFiles": [
+            "crates/league-ledger/src/keys.rs"
+          ],
+          "path": "crates/league-ledger/src/codec.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 542,
+                  "name": "decode_address",
+                  "target": {
+                    "file": "crates/league-ledger/src/keys.rs"
+                  },
+                  "via": "json_amount"
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "from_json"
+            },
+            {
+              "calls": [
+                {
+                  "line": 542,
+                  "name": "decode_address",
+                  "target": {
+                    "file": "crates/league-ledger/src/keys.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "json_amount"
+            },
+            {
+              "calls": [
+                {
+                  "line": 548,
+                  "name": "encode_address",
+                  "target": {
+                    "file": "crates/league-ledger/src/keys.rs"
+                  }
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "account_text"
+            }
+          ],
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "account_id_from_public",
+            "decode_address",
+            "encode_address",
+            "encode_seed"
+          ],
+          "failurePaths": [
+            {
+              "in": "from_seed",
+              "kind": "err",
+              "line": 78
+            },
+            {
+              "in": "decode_address",
+              "kind": "err",
+              "line": 136
+            },
+            {
+              "in": "decode_check",
+              "kind": "err",
+              "line": 170
+            },
+            {
+              "in": "decode_check",
+              "kind": "err",
+              "line": 174
+            }
+          ],
+          "hash": "504df2b7b90e068801692213cd0fdc1cf89a0ce8ffc24c7cc6dd4f40f0f95323",
+          "path": "crates/league-ledger/src/keys.rs",
+          "testsInside": true
         },
         {
           "exports": [
@@ -136,12 +663,31 @@
             {
               "in": "require_testnet",
               "kind": "err",
-              "line": 57
+              "line": 61
             }
           ],
-          "hash": "19d278fd3acec5732463d1a1e6f651b097439b550fab51ee66491b3071f30bd8",
+          "hash": "881c0086e16c1e8cdeb3c83ce63796c3c45932506b7f0342a22f80ee3f917878",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/codec.rs",
+            "crates/league-ledger/src/keys.rs"
+          ],
           "path": "crates/league-ledger/src/lib.rs",
           "testsInside": true
+        },
+        {
+          "hash": "e466a13b92dc9370a136e69bb3169569ff1de0c61b6ef43968ff37433c5a2084",
+          "importsFiles": [
+            "crates/league-ledger/src/codec.rs",
+            "crates/league-ledger/src/keys.rs"
+          ],
+          "library": "crates/league-ledger/src/lib.rs",
+          "path": "crates/league-ledger/tests/testnet_vectors.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "ad06b782a31998f86766dfdb6ebab119d24008c31a196a3e62ee7d68b7666962",
+          "path": "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json"
         }
       ],
       "globs": [
@@ -154,8 +700,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 1,
-      "testedInside": true,
+      "testedBy": 5,
       "unresolvedSites": 0
     },
     {
@@ -246,19 +791,19 @@
           "path": ".gitignore"
         },
         {
-          "hash": "738b4f322614e42893fe218e4918bc95641348cc6950a0ae88cc38808e8eedb5",
+          "hash": "7e25932392558c9ba47498e1ad344150e17a5e10bba501083a6623fbd62461e2",
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "a6ecede67dafaf961a0193b9baf656443dda17b064afdc779942de33f115ea08",
+          "hash": "c4dc57e2dfd513925fae6c88d172eb354c9f88ecbb3c9a1a4514634f382d9523",
           "path": "CLAUDE.md"
         },
         {
-          "hash": "89431402fb2626972ffc4e0998c2c8f871234d70bcf8e920969da9d8ee8a1451",
+          "hash": "c5209893137889bf38aaecf40b0b3622936227bf2e8ab3654647d405f8b64616",
           "path": "Cargo.lock"
         },
         {
-          "hash": "057cd839edc222e5dc43c9f5f7561d4b1cd27e166eb35c621b942e1e3f8bfff0",
+          "hash": "ea605034eb7ca5fd0c6175c89523f00c98894c8692b188ca8d1c646349fad22c",
           "path": "Cargo.toml"
         },
         {
@@ -318,7 +863,7 @@
   ],
   "doors": [
     {
-      "checksCount": 0,
+      "checksCount": 1,
       "commands": [
         {
           "dir": "",
@@ -449,7 +994,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 1
+          "files": 6
         },
         {
           "boundary": "league-season",
@@ -473,7 +1018,54 @@
           "directory": true,
           "job": "check",
           "matched": true,
-          "path": "crates/",
+          "path": "crates/league-core/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-dice/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-ledger/examples/testnet_proof.rs",
+          "runKind": "checks",
+          "via": "cargo clippy"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-ledger/src/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-ledger/tests/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-season/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-tui/",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -488,7 +1080,7 @@
           "runKind": "executes"
         }
       ],
-      "runsCount": 3,
+      "runsCount": 9,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -503,14 +1095,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 5,
+          "files": 9,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 5,
+          "files": 9,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -546,13 +1138,71 @@
         "actions/setup-node"
       ],
       "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
+      "commands": [],
+      "elsewhere": [],
+      "example": true,
+      "file": "crates/league-ledger/Cargo.toml",
+      "kind": "command",
+      "landings": [],
+      "mentions": [],
+      "name": "testnet_proof",
+      "permissions": [],
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-ledger",
+          "depth": 0,
+          "files": 5
+        },
+        {
+          "boundary": "league-dice",
+          "depth": 1,
+          "enters": {
+            "file": "crates/league-dice/src/lib.rs",
+            "from": "crates/league-ledger/examples/testnet_proof.rs"
+          },
+          "files": 1
+        }
+      ],
+      "readers": [],
+      "runs": [
+        {
+          "path": "crates/league-ledger/examples/testnet_proof.rs",
+          "runKind": "executes"
+        }
+      ],
+      "runsCount": 1,
+      "secrets": [],
+      "sends": {
+        "deploysPages": false,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [],
+      "uses": [],
+      "usesWorkflowToken": false
     }
   ],
-  "edges": [],
+  "edges": [
+    {
+      "from": "league-ledger",
+      "kind": "file",
+      "to": "league-dice"
+    }
+  ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663",
-    "tracked": 23
+    "commit": "6364f25abd6d46a8f5298a3abb6cbf51aae3ef4e",
+    "tracked": 45
   },
   "landings": [
     {
@@ -610,6 +1260,11 @@
           "by": "Cargo.toml",
           "call": "configuration",
           "confidence": "config"
+        },
+        {
+          "by": "crates/league-ledger/Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
         }
       ],
       "target": "crates/league-dice",
@@ -635,6 +1290,18 @@
         }
       ],
       "target": "crates/league-ledger/src/lib.rs",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "crates/league-ledger/tests/testnet_vectors.rs",
+          "call": "include_str",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json",
       "writers": []
     },
     {
@@ -674,6 +1341,6 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 5,
+  "testFiles": 10,
   "unassigned": []
 }

@@ -58,14 +58,16 @@
         "collapsed": false,
         "confidence": "low",
         "importsAndCoChanges": [],
-        "importsOnly": []
+        "importsOnly": [
+          "league-ledger"
+        ]
       },
       "cohesion": null,
       "cohesionDropped": false,
       "confidence": "low",
       "highWater": null,
       "name": "league-dice",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -81,7 +83,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-ledger",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -113,7 +115,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-tui",
-      "qualifyingSourceCommits": 0,
+      "qualifyingSourceCommits": 1,
       "rebaseline": null
     },
     {
@@ -163,23 +165,23 @@
         "path": ".gitignore"
       },
       {
-        "commits": 3,
-        "lines": 20,
+        "commits": 4,
+        "lines": 24,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 2,
-        "lines": 56,
+        "commits": 3,
+        "lines": 67,
         "path": "CLAUDE.md"
       },
       {
-        "commits": 2,
-        "lines": 1756,
+        "commits": 4,
+        "lines": 2575,
         "path": "Cargo.lock"
       },
       {
-        "commits": 2,
-        "lines": 32,
+        "commits": 4,
+        "lines": 39,
         "path": "Cargo.toml"
       },
       {
@@ -198,28 +200,28 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 1,
-        "lines": 79,
+        "commits": 2,
+        "lines": 95,
         "path": "atlas/README.md"
       },
       {
-        "commits": 1,
-        "lines": 34,
+        "commits": 2,
+        "lines": 38,
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 1,
-        "lines": 135,
+        "commits": 2,
+        "lines": 197,
         "path": "atlas/page.json"
       },
       {
-        "commits": 1,
-        "lines": 295,
+        "commits": 2,
+        "lines": 390,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 1,
-        "lines": 625,
+        "commits": 2,
+        "lines": 703,
         "path": "atlas/structure.json"
       },
       {
@@ -233,24 +235,54 @@
         "path": "crates/league-core/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 15,
         "path": "crates/league-dice/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 43,
+        "commits": 2,
+        "lines": 190,
         "path": "crates/league-dice/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 12,
+        "commits": 2,
+        "lines": 24,
         "path": "crates/league-ledger/Cargo.toml"
       },
       {
+        "commits": 2,
+        "lines": 259,
+        "path": "crates/league-ledger/examples/testnet_proof.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 642,
+        "path": "crates/league-ledger/src/client.rs"
+      },
+      {
         "commits": 1,
-        "lines": 101,
+        "lines": 692,
+        "path": "crates/league-ledger/src/codec.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 256,
+        "path": "crates/league-ledger/src/keys.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 105,
         "path": "crates/league-ledger/src/lib.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 135,
+        "path": "crates/league-ledger/tests/testnet_vectors.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 264,
+        "path": "crates/league-ledger/tests/vectors/testnet-spike-2026-11-14.json"
       },
       {
         "commits": 1,
@@ -278,6 +310,86 @@
         "path": "docs/design.md"
       },
       {
+        "commits": 1,
+        "lines": 75,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/00_snapshot.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.exit"
+      },
+      {
+        "commits": 1,
+        "lines": 18,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/01_spike.out"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/02_merchant_account_tx.json"
+      },
+      {
+        "commits": 1,
+        "lines": 22,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/03_cargo_audit_with_xrpl_rust.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 487,
+        "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/testnet_spike.rs.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 61,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/00_snapshot.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.exit"
+      },
+      {
+        "commits": 1,
+        "lines": 15,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/01_proof.out"
+      },
+      {
+        "commits": 1,
+        "lines": 174,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/02_hash_check.json"
+      },
+      {
+        "commits": 1,
+        "lines": 2,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_snapshot.txt"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.err"
+      },
+      {
+        "commits": 1,
+        "lines": 1,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.exit"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "docs/receipts/m2b-own-layer-proof-2026-11-14/raw/90_run1_stopped.out"
+      },
+      {
         "commits": 2,
         "lines": 6,
         "path": "rust-toolchain.toml"
@@ -298,13 +410,13 @@
     "level": "low",
     "reason": "fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions"
   },
-  "generatedAt": "2026-11-14T05:20:32.429Z",
+  "generatedAt": "2026-11-14T05:53:06.313Z",
   "generatedFrom": {
-    "commit": "c0d6c6296555ea85ff495df54ec9bda51a480663"
+    "commit": "6364f25abd6d46a8f5298a3abb6cbf51aae3ef4e"
   },
   "pairs": [],
   "parameters": {
-    "appliedChangesetLimit": 7,
+    "appliedChangesetLimit": 12.5,
     "changeset": 50,
     "changesetFraction": 0.25,
     "cohesionDrop": 0.2,
@@ -313,16 +425,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "both",
-    "headDate": "2026-11-14T00:20:16-05:00",
-    "inScopeFiles": 28,
+    "headDate": "2026-11-14T00:52:50-05:00",
+    "inScopeFiles": 50,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 2,
+    "qualifyingCommits": 8,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-18T05:20:16.000Z",
+    "since": "2026-05-18T05:52:50.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
