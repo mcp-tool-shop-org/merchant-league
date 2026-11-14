@@ -1,0 +1,91 @@
+name: CI
+
+# push is paths-gated (CI minutes are finite). pull_request carries no paths
+# filter, because this workflow emits the required check: a docs-only PR must
+# still report it (org rule, amended 2026-09-30).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/**"
+      - "scripts/**"
+      - "atlas/**"
+      - "README.md"
+      - ".github/workflows/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # The runner's rustup reads rust-toolchain.toml and installs the pinned
+      # toolchain with its components; no third-party action needed.
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # Registry, git sources and the two pinned tools. Not target/: a cache
+      # of build output across toolchain changes has hung CI elsewhere.
+      - name: Cache Cargo downloads and tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-llvm-cov
+            ~/.cargo/bin/cargo-audit
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-llvmcov0.9.1-audit0.22.2
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --workspace --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      # Coverage floor 90, the org bar: the scaffold measured 100% (173 of
+      # 173 lines) on 2026-11-14, so the bar is adopted from the start.
+      # Never lowered to make a build green.
+      - name: Coverage
+        run: |
+          command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked --version "0.9.1"
+          cargo llvm-cov --workspace --locked --fail-under-lines 90
+
+      # Advisories are fixed by upgrading, never ignored.
+      - name: Security audit
+        run: |
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked --version "0.22.2"
+          cargo audit --deny warnings
+
+      - name: Testnet only
+        run: bash scripts/check-testnet-only.sh
+
+      - name: No real-money language
+        run: bash scripts/check-copy.sh
+
+      - name: Set up Node for Atlas
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Atlas check
+        run: npx --yes @dogfood-lab/atlas@1.26.0 check

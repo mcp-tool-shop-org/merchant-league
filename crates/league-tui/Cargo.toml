@@ -1,0 +1,16 @@
+[package]
+name = "league-tui"
+description = "Merchant League terminal client (ratatui and crossterm): a stub until the rules exist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+
+[lints]
+workspace = true
