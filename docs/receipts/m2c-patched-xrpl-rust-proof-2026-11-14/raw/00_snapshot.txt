@@ -1,0 +1,8 @@
+date_utc: 2026-11-14T07:15:29Z
+branch: m2c/xrpl-rust-patched
+head: 796be8e47c79f3d945242421b93ed4959d9b53dd (plus the uncommitted client, vectors and proof in this change)
+rustc 1.100.0 (0ef1bc386 2026-11-09)
+cargo 1.100.0 (3acc79c0c 2026-11-05)
+cargo tree -i crypto-bigint:
+error: package ID specification `crypto-bigint` did not match any packages
+features: std core utils models wallet (json-rpc and cli off)

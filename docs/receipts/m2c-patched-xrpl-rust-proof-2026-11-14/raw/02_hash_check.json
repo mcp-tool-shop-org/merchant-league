@@ -1,0 +1,298 @@
+{
+  "server": {
+    "network_id": 1,
+    "build": "3.4.1"
+  },
+  "checks": [
+    {
+      "step": "issuer_allow_clawback",
+      "hash": "40D45E1EE03B8EA1E919B4728ABCB2F8F98EC303761847CC81AC739AE019738E",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313205,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "issuer_default_ripple",
+      "hash": "D0739EB7733622DFB84EE3EDBB9A165EB96AA4351D06FDBAA280C6F4E9EB53C2",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313207,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "merchant_trust_set",
+      "hash": "E7A7BBF32DF3F5B5B301FBD2DCC8FBAB1D0105804379CCA3E7221B9DDA419B7F",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313209,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "trader_trust_set",
+      "hash": "A51D76A1A636148ED641F0A2AA4344EFADA9A337806EA21546C10B1F59AF411E",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313211,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "outsider_trust_set",
+      "hash": "1E433AB43677AC0356217EE3208F28E5D2D2E0DB6D7316AF8CCE8C6D94C269DF",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313213,
+      "matches_proof": true,
+      "type": "TrustSet"
+    },
+    {
+      "step": "issuer_pays_merchant_100",
+      "hash": "D82F6FB14222752B7EF7E2731F8CDC918097E420E30E34BE43BEDA715C5F9294",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313215,
+      "matches_proof": true,
+      "type": "Payment"
+    },
+    {
+      "step": "merchant_offer_create",
+      "hash": "78CA6D60B43C85E0F5FB58616DBE710B3F00A8046CD8B3651C983270F5B6E039",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313217,
+      "matches_proof": true,
+      "type": "OfferCreate"
+    },
+    {
+      "step": "merchant_offer_cancel",
+      "hash": "306BF85B3BDACE7B63F67DBED4AE944671021F1B52C459C8DB81C450E500B445",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313219,
+      "matches_proof": true,
+      "type": "OfferCancel"
+    },
+    {
+      "step": "issuer_check_create",
+      "hash": "615C3BF66647CEAD57041BD7EAD90B1B06D3285AA162F1F959BB8D3321A32356",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313221,
+      "matches_proof": true,
+      "type": "CheckCreate"
+    },
+    {
+      "step": "merchant_check_cash",
+      "hash": "85C6ACD4AD920F60BDF8FC3645201BB4136FDE356E8CB8154E70CD5ACD83A425",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313223,
+      "matches_proof": true,
+      "type": "CheckCash"
+    },
+    {
+      "step": "merchant_escrow_create",
+      "hash": "D9366D4A64AD1A7980F7725AEE78A60D2FECB919484185341ADD344BD310FA59",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313225,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "merchant_escrow_finish_wrong_secret",
+      "hash": "44E62D1FC64D4D64EA3F867207480A51AFCF04A31BF9BF90C8623B15D3A24CC1",
+      "found": true,
+      "validated": true,
+      "result": "tecCRYPTOCONDITION_ERROR",
+      "ledger_index": 22313227,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    },
+    {
+      "step": "merchant_escrow_finish",
+      "hash": "0ACA9DAE00320739AF479BBA153B18730EDC6AFF498F4870C8DC63231A83FA6C",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313229,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    },
+    {
+      "step": "issuer_clawback_3",
+      "hash": "E7A58A3FD65BE7C30292DDCA4843670B83B1F026E858AFC6B5D6B4D176EB8D9C",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313231,
+      "matches_proof": true,
+      "type": "Clawback"
+    },
+    {
+      "step": "token_escrow_without_locking_flag",
+      "hash": "3A27453E69DA1BF5739C81F937CBCF6629E689CE6375976BA132BA5976A3BF5A",
+      "found": true,
+      "validated": true,
+      "result": "tecNO_PERMISSION",
+      "ledger_index": 22313233,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "issuer_allow_trustline_locking",
+      "hash": "80E73BC54155303B4FA43A06D919492F6D3BEBF3C26108B7940F9184576D23C1",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313235,
+      "matches_proof": true,
+      "type": "AccountSet"
+    },
+    {
+      "step": "token_escrow_probe_no_cancel_after",
+      "hash": "C1340FC25A25C9D5EC4720B747BC3C45F66C3F276349C04259CA73100F70BFEA",
+      "found": true,
+      "validated": false,
+      "result": null,
+      "ledger_index": null,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "token_escrow_create",
+      "hash": "ED5D309D29AE7716C86074A2B0975C19705FC69E3CC80C76349D13E17AC98059",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313259,
+      "matches_proof": true,
+      "type": "EscrowCreate"
+    },
+    {
+      "step": "token_escrow_finish_by_trader",
+      "hash": "EE2D0EC9813C4727379B7DEE016FFD60C89466128D52A8B3603B4203225D7E7B",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313261,
+      "matches_proof": true,
+      "type": "EscrowFinish"
+    },
+    {
+      "step": "issuer_credential_for_merchant",
+      "hash": "76430FF1FF5E60419C8E2D8EE4A61A1647F256F4271B76E0E421B6020A1F6D49",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313263,
+      "matches_proof": true,
+      "type": "CredentialCreate"
+    },
+    {
+      "step": "issuer_credential_for_trader",
+      "hash": "DD479BE5603D81E4653B69014ABE07F121B774F68128B9527DDC66A959B2C15D",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313265,
+      "matches_proof": true,
+      "type": "CredentialCreate"
+    },
+    {
+      "step": "merchant_credential_accept",
+      "hash": "E1490D3E0749CB487859BD4B1ABED944BF2047A6E222F532BD560570AD66BC6D",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313267,
+      "matches_proof": true,
+      "type": "CredentialAccept"
+    },
+    {
+      "step": "trader_credential_accept",
+      "hash": "92B1D85BABA44716F70F1755AA4C2994CF6B773986F9132CA9AD466B2A0D307F",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313269,
+      "matches_proof": true,
+      "type": "CredentialAccept"
+    },
+    {
+      "step": "issuer_domain_set",
+      "hash": "5B4C323604ED777A125F92A241597F4D2D7760A673458EC8757B00F104C0BD39",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313271,
+      "matches_proof": true,
+      "type": "PermissionedDomainSet"
+    },
+    {
+      "step": "merchant_domain_offer_sell_1",
+      "hash": "73276A1AD97311C17136E502E7907CE74118D1C662CBA270AD60CFB41EA440A8",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313273,
+      "matches_proof": true,
+      "type": "OfferCreate"
+    },
+    {
+      "step": "outsider_open_offer_buy_1",
+      "hash": "F29195AD40107D3399349244F3AF38E098AA8EC05492C149C9D8271C3E4138D2",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313275,
+      "matches_proof": true,
+      "type": "OfferCreate"
+    },
+    {
+      "step": "outsider_domain_offer_refused",
+      "hash": "9B05722D1841D0E7D969C723D71C07A3E9C3CBD46ACD7D3F57DEA9182A094D4E",
+      "found": true,
+      "validated": true,
+      "result": "tecNO_PERMISSION",
+      "ledger_index": 22313277,
+      "matches_proof": true,
+      "type": "OfferCreate"
+    },
+    {
+      "step": "trader_domain_offer_buy_1",
+      "hash": "7741BA8662AFDB83A8799FF24B2AC145641AFEEBCA76CBCB3A77D2279997AD60",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313279,
+      "matches_proof": true,
+      "type": "OfferCreate"
+    },
+    {
+      "step": "merchant_domain_payment_to_trader",
+      "hash": "1C2BE6FF7719D31FBE07FB416045381FED254A18B1D7E7F46C829E4A3F96B7B2",
+      "found": true,
+      "validated": true,
+      "result": "tesSUCCESS",
+      "ledger_index": 22313281,
+      "matches_proof": true,
+      "type": "Payment"
+    }
+  ]
+}

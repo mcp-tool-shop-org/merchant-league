@@ -37,6 +37,20 @@ Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the Domain
 - `cargo audit --deny warnings`: clean, with no ignores.
 - The vendored crate's own tests: 1,279 pass with these features, including the new ones.
 
+## Live proof
+
+Both new features were proved on the XRPL Testnet on 2026-11-14 (`docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/`):
+
+- **Token escrow.** It was refused (`tecNO_PERMISSION`) until the issuer set Allow Trust Line Locking, then created and finished.
+- **No `CancelAfter`.** A token escrow without it is refused with `temBAD_EXPIRATION`. xrpl.org's reference doesn't state this rule, so the model doesn't enforce it yet.
+- **DomainID.** Domain offers were accepted for credentialed accounts and refused for an outsider. An open-book offer did not cross a domain offer.
+
+The validated transactions are test vectors in `crates/league-ledger/tests/vectors/`.
+
+## Known, not patched
+
+- `Credential` (used by `PermissionedDomainSet`) deserialises only from borrowed text, not from a `serde_json::Value`. The league builds that transaction with its constructor. This is a candidate for the upstream offer.
+
 ## Updating
 
 When an xrpl-rust release carries the fix and these two features, drop this folder and the `[patch.crates-io]` entry, and pin that release. Until then, any change here is reviewed like the league's own code.
