@@ -36,7 +36,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "3f53abd96033d337b5635e02b5aa185f2ede93711fffec2e3c2ec772fedfa057",
+          "hash": "c7b0b73e220456c01bf8c768b94ad1f86ff156eca505923b331243a13cd6f0be",
           "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/README.md"
         },
         {
@@ -63,11 +63,11 @@
           "exports": [
             "call"
           ],
-          "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
+          "hash": "7026ba0a6270c16513688f40ba38eab611b4228ab1d11d2bc0dcd60f092afd5b",
           "path": "docs/receipts/design-check-escrow-expiry-2026-11-14/raw/hash_check.py"
         },
         {
-          "hash": "48df9f28025461aeb6daee9e2d116d2894bcf8ab137ac9a971bfa9314bb4459f",
+          "hash": "74887b5079aebc5e10da20ac7b44cc7e6aebbc1436293d5e429e6f0027f4bcad",
           "path": "docs/receipts/design-check-requireauth-2026-11-14/README.md"
         },
         {
@@ -94,7 +94,7 @@
           "exports": [
             "call"
           ],
-          "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
+          "hash": "7026ba0a6270c16513688f40ba38eab611b4228ab1d11d2bc0dcd60f092afd5b",
           "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
         },
         {
@@ -141,11 +141,11 @@
           "where": [
             "caller"
           ],
-          "writes": 6
+          "writes": 4
         }
       ],
       "outsideReads": 3,
-      "outsideWrites": 6,
+      "outsideWrites": 4,
       "role": "docs",
       "testedBy": 0,
       "unresolvedSites": 0
@@ -239,10 +239,10 @@
             {
               "in": "main",
               "kind": "err",
-              "line": 207
+              "line": 215
             }
           ],
-          "hash": "96ada71a220a3b14ffdb0bc523209984db91570153490182028fa5c0974bee5f",
+          "hash": "9d85b63ec7e905a88d5d5465172c6ee62a5f75ba08aec83e6ca1dfbe51145ba2",
           "importsFiles": [
             "crates/league-ledger/src/client.rs"
           ],
@@ -252,7 +252,7 @@
             {
               "calls": [
                 {
-                  "line": 88,
+                  "line": 96,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
@@ -275,10 +275,10 @@
             {
               "in": "main",
               "kind": "err",
-              "line": 516
+              "line": 519
             }
           ],
-          "hash": "e4fa03155a5d5d763fed194fff4510cf6fbb18e80a97644ac411d3a2adddd626",
+          "hash": "dd63a65739a4f8f9aa7a8d5a318669decc36a653187ed8e531b86c37fa10ab93",
           "importsFiles": [
             "crates/league-ledger/src/client.rs"
           ],
@@ -433,7 +433,7 @@
           "testsInside": true
         },
         {
-          "hash": "a6acd146acd1ff9c550b3790c40396cdc93db1e68854244358928a828d5d7796",
+          "hash": "d6f43f4d24e417b05965623395f04ec4b12222589416a44ebfee16bb48ad22ba",
           "importsFiles": [
             "crates/league-ledger/src/client.rs"
           ],
@@ -572,7 +572,7 @@
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "898efa9d4e427cc199a7e2533b7f5aaee2a5be7ff111416341ea0c4aea57dad7",
+          "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
           "path": "CLAUDE.md"
         },
         {
@@ -619,7 +619,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "6da94f142e2ec3a2e7ca01a98343c8d71fc5fe7366f49cb14b6da5b570afa9c8",
+          "hash": "b114b117f7c38c8cad1afc36b93797516971f2707ca2b24bccf28b849dc1a0a7",
           "path": "scripts/check-copy.sh"
         },
         {
@@ -627,7 +627,7 @@
           "path": "scripts/check-testnet-only.sh"
         },
         {
-          "hash": "cb3eed722c978cfaf9896b3f8139c3980d1008484603c541da3e0ee4c5692b00",
+          "hash": "6a68789ff44d8d3a892ef3d904b3294de01e0004f3075abd64f8f723d60ac7c2",
           "path": "scripts/test-guards.sh"
         }
       ],
@@ -1104,8 +1104,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "606e9b074d331e51c5b7906de02fe42fd780fb60",
-    "tracked": 415
+    "commit": "ef971a49042a717ec849dee71f44727036cde398",
+    "tracked": 416
   },
   "landings": [
     {
@@ -1756,11 +1756,15 @@
       "path": "vendor/xrpl-rust/LICENSE"
     },
     {
+      "hash": "4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c",
+      "path": "vendor/xrpl-rust/LICENSE-rippled"
+    },
+    {
       "hash": "e628c2d5a857454b74babada0fd031ded2b5e2e26af4bd4cfc289444c5aa73b8",
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "37c34994b1912eb2306fb03976f821f584578f79faf45329a1d63751ec65507a",
+      "hash": "89a542dbd1ba62f7943090ec598bfb56935b532f8f8afd80c2286dfb3ef5669e",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
@@ -7346,30 +7350,40 @@
       "testsInside": true
     },
     {
+      "exports": [
+        "is_preimage_condition"
+      ],
       "failurePaths": [
         {
-          "in": "_get_expiry_error",
+          "in": "_get_condition_error",
           "kind": "err",
           "line": 176
         },
         {
           "in": "_get_expiry_error",
           "kind": "err",
-          "line": 181
+          "line": 192
+        },
+        {
+          "in": "_get_expiry_error",
+          "kind": "err",
+          "line": 197
         },
         {
           "in": "_get_finish_after_error",
           "kind": "err",
-          "line": 192
+          "line": 208
         }
       ],
-      "hash": "cf6a2536ef6e0c033a9cc4ddf706b3764e77d4b0ca33dac8621e1640116f353e",
+      "hash": "4477d777242c7b25b3df9932f66c27cb233f106ae560a08e81409018c2759b8c",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
-        "vendor/xrpl-rust/src/models/mod.rs"
+        "vendor/xrpl-rust/src/models/mod.rs",
+        "vendor/xrpl-rust/src/core/binarycodec/mod.rs"
       ],
       "importsFiles": [
+        "vendor/xrpl-rust/src/core/binarycodec/mod.rs",
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs"
@@ -8068,7 +8082,7 @@
       "testsInside": true
     },
     {
-      "hash": "1c2d239ce61ddaead6e850c3e5f7b5b0c904694d74c2bd266fc7533c9a164997",
+      "hash": "b35a36dbd8ec3c3ff6fc9d22871a7fdee4f1a2dfd70532d23172f66faa47fbb8",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
@@ -8179,7 +8193,7 @@
           "line": 214
         }
       ],
-      "hash": "df46aec47cfb935ade7e40775f5c973a388ee0e919bd305373ec7f8fb04a78d5",
+      "hash": "991f344f850bedc4920ab11936e34a001f100bde0569a510613d23c0574c451c",
       "importOrder": [
         "vendor/xrpl-rust/src/models/amount/mod.rs",
         "vendor/xrpl-rust/src/models/transactions/mod.rs",
@@ -8292,35 +8306,35 @@
         {
           "in": "validate_domain_id",
           "kind": "err",
-          "line": 114
+          "line": 115
         },
         {
           "in": "validate_credential",
           "kind": "err",
-          "line": 129
+          "line": 130
         },
         {
           "in": "validate_credential",
           "kind": "err",
-          "line": 132
+          "line": 133
         },
         {
           "in": "validate_credential",
           "kind": "err",
-          "line": 140
+          "line": 141
         },
         {
           "in": "validate_credential",
           "kind": "err",
-          "line": 145
+          "line": 146
         },
         {
           "in": "validate_credential",
           "kind": "err",
-          "line": 152
+          "line": 153
         }
       ],
-      "hash": "26d56144a3e931c36987b127dd67871bc203dcf5a0aa69631f827bd7d3b0c2c2",
+      "hash": "a850cc7a1a4351b8642d901c141b7429b630b162adfc01fc39f51bddcd42c5ee",
       "importOrder": [
         "vendor/xrpl-rust/src/core/addresscodec/mod.rs",
         "vendor/xrpl-rust/src/models/amount/mod.rs",

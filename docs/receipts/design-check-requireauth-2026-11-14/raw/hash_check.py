@@ -1,10 +1,12 @@
-"""Look up every hash from the proof on the Testnet, independently of the Rust client.
+"""Look up every hash from a probe on the Testnet, independently of the Rust client.
 
-Usage: python -I -X utf8 hash_check.py <01_proof.out> <02_hash_check.json> <vectors-out.json>
+Usage: python -I -X utf8 hash_check.py <01_probe.out> <02_hash_check.json>
 
-Writes a per-step check (validated, result matches, ledger index matches) and
-a vector file of the validated TokenEscrow and DomainID transactions
-(tx_json as the server returns it, plus tx_blob from a binary lookup).
+For each step with a hash, it records whether the server knows the
+transaction, whether it is in a validated ledger, its result and its ledger
+index. It then records whether that matches what the probe printed: a
+validated step must have the same result and ledger index, and a step that
+never validated (a tem result) must not be in any validated ledger.
 """
 
 import json
@@ -24,20 +26,8 @@ def call(method, params):
 info = call("server_info", {})
 assert info["info"]["network_id"] == 1, info["info"].get("network_id")
 
-steps = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8")]
+steps = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
 checks = []
-vectors = []
-KEEP = {
-    "token_escrow_without_locking_flag",
-    "token_escrow_create",
-    "token_escrow_finish_by_trader",
-    "issuer_domain_set",
-    "merchant_domain_offer_sell_1",
-    "outsider_domain_offer_refused",
-    "trader_domain_offer_buy_1",
-    "merchant_domain_payment_to_trader",
-    "issuer_allow_trustline_locking",
-}
 for s in steps:
     if "hash" not in s:
         continue
@@ -59,35 +49,11 @@ for s in steps:
     if found:
         row["type"] = tx.get("tx_json", tx).get("TransactionType")
     checks.append(row)
-    if s["step"] in KEEP and found and tx.get("validated"):
-        binary = call("tx", {"transaction": s["hash"], "binary": True, "api_version": 2})
-        tx_json = tx.get("tx_json", {})
-        vectors.append(
-            {
-                "step": s["step"],
-                "hash": s["hash"],
-                "ledger_index": tx.get("ledger_index"),
-                "validated": True,
-                "result": tx["meta"]["TransactionResult"],
-                "tx_json": tx_json,
-                "tx_blob": binary.get("tx_blob"),
-            }
-        )
 
 json.dump(
     {"server": {"network_id": 1, "build": info["info"]["build_version"]}, "checks": checks},
     open(sys.argv[2], "w", encoding="utf-8"),
     indent=2,
 )
-json.dump(
-    {
-        "source": "Validated on the XRPL Testnet on 2026-11-14 by the league's M2c proof "
-        "(docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14); tx_json and tx_blob as the server returned them.",
-        "network_id": 1,
-        "transactions": vectors,
-    },
-    open(sys.argv[3], "w", encoding="utf-8"),
-    indent=2,
-)
 bad = [c["step"] for c in checks if not c["matches_proof"]]
-print(f"{len(checks)} hashes checked; {len(vectors)} vectors; mismatches: {bad}")
+print(f"{len(checks)} hashes checked; mismatches: {bad}")

@@ -27,7 +27,18 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
      - `CancelAfter` must be after `FinishAfter` (already checked by upstream).
 
      Measured on the Testnet in `docs/receipts/design-check-escrow-expiry-2026-11-14/`.
-3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
+   - **The condition, as rippled decodes it** (`Condition::deserialize`, rippled 3.4.1):
+     - a DER PREIMAGE-SHA-256 condition, at most 128 bytes, with nothing after it;
+     - a 32-byte fingerprint;
+     - a cost of 1 to 5 bytes, at most 128;
+     - the other condition types are refused, as rippled refuses them.
+
+     An empty or malformed condition is refused before signing.
+
+     This decoder is a port of rippled's: XRPLF/rippled, tag 3.4.1, commit `00e640751460c137636fdb6dae6b4280de355d81`, from Condition.cpp and conditions/detail/utils.h. rippled is ISC.
+     - Its notice is in `LICENSE-rippled`: rippled's `LICENSE.md` at that tag, copied verbatim, sha256 `4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c`.
+     - The ported code carries a header naming the source.
+3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits in either case, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.
 
@@ -37,11 +48,13 @@ Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the Domain
 
 **Mainnet:** the library's only Mainnet hosts (`DEFAULT_MAINNET_URL` and `DEFAULT_WEBSOCKET_URL`, both xrplcluster.com) are in `src/cli/`. That module is compiled only with the `cli` feature (`src/lib.rs:40`), which the league leaves off, so they're not in the game's build. The league's guard still refuses any server that doesn't report the Testnet's network id.
 
+**Formatting:** `escrow_create.rs`, `offer_create.rs` and `payment.rs` are formatted with rustfmt (edition 2021, no config), as upstream's own files are. The pass touched only layout, and it reformatted the TokenEscrow and DomainID lines added before it.
+
 ## Checks at vendoring
 
 - `cargo tree -i crypto-bigint`: no such package in the lock.
 - `cargo audit --deny warnings`: clean, with no ignores.
-- The vendored crate's own tests: 1,281 pass with these features, including the new ones.
+- The vendored crate's own tests: 1,283 pass with these features, including the new ones.
 
 ## Live proof
 

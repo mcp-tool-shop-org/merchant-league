@@ -58,4 +58,4 @@ Seeds were never printed.
 
 - `raw/00_snapshot.txt`: time, branch, toolchain.
 - `raw/01_probe.out`: one JSON line per step, with full hashes. Also `raw/01_probe.err` (empty) and `raw/01_probe.exit` (0).
-- `raw/02_hash_check.json` and `raw/hash_check.py`: the independent lookup.
+- `raw/02_hash_check.json` and `raw/hash_check.py`: the independent lookup. `hash_check.py` was trimmed after the run, in the follow-up PR to #7: the M2c vector-writing code was removed, and `02_hash_check.json` is the record from the run. Re-running the trimmed script gives the same checks.

@@ -42,8 +42,16 @@ This probe checks those rules on the ledger.
 4. **For the design, the bonds keep `CancelAfter` by choice, not because the ledger demands it.** The bonds have a condition (the referee secret) and need a time after which each side can take its bond back.
 5. **For the vendored model,** the validation mirrors rippled's preflight for every escrow, XRP or token. It does not say "tokens need `CancelAfter`". See `vendor/xrpl-rust/VENDORED.md`.
 
+## Re-running it
+
+Since merchant-league #7, the vendored model checks rippled's escrow rules before signing:
+- the expiry rules;
+- since the follow-up PR, the condition's encoding as well.
+
+A re-run of this probe stops at its first refusal step with a model error, before the server sees it. Those steps were sent to get the server's answer, and the table above records it. No way around the local check exists in the library, by design.
+
 ## Files
 
 - `raw/00_snapshot.txt`: time, branch, toolchain, and the rippled source read.
 - `raw/01_probe.out`: one JSON line per step, with full hashes. Also `raw/01_probe.err` (empty) and `raw/01_probe.exit` (0).
-- `raw/02_hash_check.json` and `raw/hash_check.py`: the independent lookup.
+- `raw/02_hash_check.json` and `raw/hash_check.py`: the independent lookup. `hash_check.py` was trimmed after the run, in the follow-up PR to #7: the M2c vector-writing code was removed, and `02_hash_check.json` is the record from the run. Re-running it gives the same verdicts. The only change is that the server no longer caches the three refused transactions, so they now read "not found" instead of "found, not validated". Either way they never reached a ledger.

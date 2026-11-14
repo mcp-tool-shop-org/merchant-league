@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit 606e9b0 by Atlas 1.26.0.
+Mapped at 2026-11-14 from commit ef971a4 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,10 +8,10 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (0cd56ce)
+## What changed since 2026-11-14 (4cfd3c5)
 
-- testnet_escrow_expiry (crates/league-ledger/Cargo.toml) is a new command. It runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
-- 8 files added and 10 changed content, across 4 parts.
+- vendor/xrpl-rust/LICENSE-rippled is new and belongs to no part, so atlas check fails on it against the previous map.
+- 1 file added and 5 changed content, across 2 parts.
 
 ## What comes in
 
@@ -90,8 +90,8 @@ Read those in order to follow one run of xrpl end to end. This path follows xrpl
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 6 writes and 3 reads go to a path their caller passes, not to this repository.
-- 359 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 356 more.
+- 4 writes and 3 reads go to a path their caller passes, not to this repository.
+- 360 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 357 more.
 - Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

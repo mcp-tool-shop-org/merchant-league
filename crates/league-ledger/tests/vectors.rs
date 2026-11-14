@@ -165,8 +165,14 @@ fn every_validated_transaction_round_trips_through_its_typed_model() {
         permissioned_domain_set::PermissionedDomainSet, trust_set::TrustSet,
     };
 
-    fn typed<'a, T: serde::Deserialize<'a> + serde::Serialize>(text: &'a str) -> String {
+    fn typed<'a, T: serde::Deserialize<'a> + serde::Serialize + xrpl::models::Model>(
+        text: &'a str,
+    ) -> String {
         let model: T = serde_json::from_str(text).unwrap_or_else(|e| panic!("{e}: {text}"));
+        // Each was a validated transaction, so the model's own checks pass too.
+        model
+            .validate()
+            .unwrap_or_else(|e| panic!("validate: {e}: {text}"));
         encode(&model).unwrap_or_default()
     }
 
