@@ -270,7 +270,7 @@ This takes **the method of role-set's puzzle generator, not its code**: a seeded
 5. **Dedupe.** A setup's skeleton is its converter graph, its works' needs, its edict kinds and its ladder spreads. No two tables in a chapter share a skeleton. Floors per chapter: each of the six guilds seats in at least two of every three tables, and no edict kind appears in more than half the tables.
 6. **Receipt.** The seed, generator version, content-pack hashes, each strategy's score distribution, each mandate's grade and the skeleton hash. It's published with the table, so anyone can rebuild the setup.
 
-The same generator builds the paper tables for the playtest. The paper test then checks the simulator against people (see "The paper playtest").
+The paper test's six setups are built by hand to this recipe, before the generator exists. Its games then check the recipe against AI players who haven't been told the shortcuts (see "The paper playtest").
 
 ## Seasons: chapters inside eras
 
