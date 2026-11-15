@@ -5,11 +5,14 @@
 
 use crate::error::RelayError;
 use crate::relay::{Round, TurnConfig, TurnSummary, run_turn, validate_day};
-use crate::seats::{SeatBackend, SeatFile};
+use crate::seats::SeatFile;
 use crate::secret::{ApiKey, LiveGate, redact_secrets};
-use crate::transport::{MockDirTransport, Transport, UreqTransport};
+use crate::transport::{
+    MockDirTransport, RawHttpResponse, Transport, TransportError, UreqTransport,
+};
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Usage text printed for `--help`.
 pub const USAGE_TEXT: &str = "\
@@ -140,16 +143,15 @@ where
             }
             "--cap-credits" => {
                 let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
-                let parsed: f64 = val.parse().map_err(|_| {
-                    RelayError::InvalidCap(
-                        "--cap-credits must be a finite non-negative number".to_owned(),
-                    )
-                })?;
-                if !parsed.is_finite() || parsed < 0.0 {
-                    return Err(RelayError::InvalidCap(
-                        "--cap-credits must be a finite non-negative number".to_owned(),
-                    ));
-                }
+                let parsed: f64 = val
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+                    .ok_or_else(|| {
+                        RelayError::InvalidCap(
+                            "--cap-credits must be a finite non-negative number".to_owned(),
+                        )
+                    })?;
                 cap_credits = Some(parsed);
                 idx += step;
             }
@@ -159,8 +161,10 @@ where
                 idx += step;
             }
             other => {
-                let safe_flag = sanitize_flag_name(other);
-                return Err(RelayError::Usage(format!("unknown option '{safe_flag}'")));
+                return Err(RelayError::Usage(format!(
+                    "unknown option '{}'",
+                    sanitize_flag_name(other)
+                )));
             }
         }
     }
@@ -171,19 +175,14 @@ where
         ));
     }
 
-    let game_dir = game_dir
-        .ok_or_else(|| RelayError::Usage("missing required --game-dir <dir>".to_owned()))?;
-    let day = day.ok_or_else(|| RelayError::Usage("missing required --day <DD>".to_owned()))?;
-    let round =
-        round.ok_or_else(|| RelayError::Usage("missing required --round <talk|act>".to_owned()))?;
-    let seats_path = seats_path
-        .ok_or_else(|| RelayError::Usage("missing required --seats <file>".to_owned()))?;
-
     Ok(CliCommand::Turn(TurnArgs {
-        game_dir,
-        day,
-        round,
-        seats_path,
+        game_dir: game_dir
+            .ok_or_else(|| RelayError::Usage("missing required --game-dir <dir>".to_owned()))?,
+        day: day.ok_or_else(|| RelayError::Usage("missing required --day <DD>".to_owned()))?,
+        round: round
+            .ok_or_else(|| RelayError::Usage("missing required --round <talk|act>".to_owned()))?,
+        seats_path: seats_path
+            .ok_or_else(|| RelayError::Usage("missing required --seats <file>".to_owned()))?,
         wrapper_path,
         live,
         cap_credits,
@@ -197,31 +196,21 @@ fn take_flag_value<'a>(
     tokens: &'a [String],
     idx: usize,
 ) -> Result<(&'a str, usize), RelayError> {
-    if let Some(v) = inline {
-        if v.is_empty() {
-            return Err(RelayError::Usage(format!(
-                "option '{flag}' requires a non-empty value"
-            )));
-        }
-        return Ok((v, 1));
-    }
-    let Some(next) = tokens.get(idx + 1) else {
-        return Err(RelayError::Usage(format!(
-            "option '{flag}' requires a value"
-        )));
+    let (candidate, step) = match inline {
+        Some(v) => (Some(v), 1),
+        None => (tokens.get(idx + 1).map(String::as_str), 2),
     };
-    if next.is_empty() {
-        return Err(RelayError::Usage(format!(
+    match candidate {
+        Some(v) if !v.is_empty() => Ok((v, step)),
+        _ => Err(RelayError::Usage(format!(
             "option '{flag}' requires a non-empty value"
-        )));
+        ))),
     }
-    Ok((next.as_str(), 2))
 }
 
 fn is_forbidden_key_flag(flag: &str) -> bool {
-    let lower = flag.to_ascii_lowercase();
     matches!(
-        lower.as_str(),
+        flag.to_ascii_lowercase().as_str(),
         "-k" | "--key"
             | "--api-key"
             | "--apikey"
@@ -235,21 +224,20 @@ fn is_forbidden_key_flag(flag: &str) -> bool {
 
 fn sanitize_flag_name(raw: &str) -> String {
     let head = raw.split('=').next().unwrap_or(raw);
-    let scrubbed = redact_secrets(head, None);
-    scrubbed.chars().take(48).collect()
+    redact_secrets(head, None).chars().take(48).collect()
 }
 
 /// Transport used when every seat in the file uses the `file` backend.
-struct NoopManualTransport;
+pub struct NoopManualTransport;
 
 impl Transport for NoopManualTransport {
     fn post_chat_completions(
         &self,
         _url: &str,
         _body: &str,
-        _timeout: std::time::Duration,
-    ) -> Result<crate::transport::RawHttpResponse, crate::transport::TransportError> {
-        Err(crate::transport::TransportError::Network(
+        _timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        Err(TransportError::Network(
             "manual-only transport cannot send network requests".to_owned(),
         ))
     }
@@ -257,8 +245,7 @@ impl Transport for NoopManualTransport {
 
 /// Run CLI command with an injected environment lookup and output streams.
 ///
-/// Returns process exit code: `0` on success, `2` if one or more seats failed
-/// to deliver a reply (`NO_REPLY`, `CAP_REACHED`, `COST_UNKNOWN`, or seat error),
+/// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
 /// or `1` on invalid CLI/configuration/gate refusal.
 pub fn execute_cli<I, S, E>(
     args: I,
@@ -271,75 +258,47 @@ where
     S: AsRef<str>,
     E: FnOnce(&str) -> Option<String>,
 {
-    let env_key_opt = ApiKey::from_env_reader(env_reader);
-    let redaction_ref = env_key_opt.as_ref().ok();
+    let env_key = ApiKey::from_env_reader(env_reader);
+    let redact_ref = env_key.as_ref().ok();
 
-    let cmd = match parse_args(args) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = redact_secrets(&e.to_string(), redaction_ref);
-            let _ = writeln!(stderr, "error: {msg}");
-            return 1;
+    match run_cli_inner(args, &env_key, stdout) {
+        Ok(Some(summary)) => {
+            let _ = write!(stdout, "{}", summary.format_paths_and_hashes());
+            if summary.all_clean() { 0 } else { 2 }
         }
-    };
+        Ok(None) => 0,
+        Err(e) => {
+            let _ = writeln!(
+                stderr,
+                "error: {}",
+                redact_secrets(&e.to_string(), redact_ref)
+            );
+            1
+        }
+    }
+}
 
-    let turn_args = match cmd {
+fn run_cli_inner<I, S>(
+    args: I,
+    env_key: &Result<ApiKey, RelayError>,
+    stdout: &mut dyn Write,
+) -> Result<Option<TurnSummary>, RelayError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let redact_ref = env_key.as_ref().ok();
+    let turn_args = match parse_args(args)? {
         CliCommand::Help => {
             let _ = write!(stdout, "{USAGE_TEXT}");
-            return 0;
+            return Ok(None);
         }
         CliCommand::Turn(t) => t,
     };
 
-    let seats = match SeatFile::load(&turn_args.seats_path, redaction_ref) {
-        Ok(s) => s,
-        Err(e) => {
-            let msg = redact_secrets(&e.to_string(), redaction_ref);
-            let _ = writeln!(stderr, "error: {msg}");
-            return 1;
-        }
-    };
-
-    let summary_res: Result<TurnSummary, RelayError> = if let Some(mock_dir) = &turn_args.mock_dir {
-        match MockDirTransport::load(mock_dir) {
-            Ok(mock_transport) => {
-                let cfg = TurnConfig::new(
-                    turn_args.game_dir,
-                    turn_args.day,
-                    turn_args.round,
-                    seats,
-                    turn_args.wrapper_path,
-                    false,
-                    turn_args.cap_credits,
-                );
-                run_turn(&cfg, &mock_transport, redaction_ref)
-            }
-            Err(e) => Err(e),
-        }
-    } else if turn_args.live || seats.has_openrouter_seat() {
-        match LiveGate::acquire(turn_args.live, turn_args.cap_credits, env_key_opt.clone()) {
-            Ok(gate) => {
-                let cfg = TurnConfig::new(
-                    turn_args.game_dir,
-                    turn_args.day,
-                    turn_args.round,
-                    seats,
-                    turn_args.wrapper_path,
-                    true,
-                    Some(gate.cap_credits()),
-                );
-                let live_transport = UreqTransport::new(gate);
-                run_turn(&cfg, &live_transport, env_key_opt.as_ref().ok())
-            }
-            Err(e) => Err(e),
-        }
-    } else {
-        debug_assert!(
-            seats
-                .seats
-                .iter()
-                .all(|s| matches!(s.backend, SeatBackend::File { .. }))
-        );
+    let seats = SeatFile::load(&turn_args.seats_path, redact_ref)?;
+    let summary = if let Some(mock_dir) = &turn_args.mock_dir {
+        let mock_transport = MockDirTransport::load(mock_dir)?;
         let cfg = TurnConfig::new(
             turn_args.game_dir,
             turn_args.day,
@@ -349,18 +308,31 @@ where
             false,
             turn_args.cap_credits,
         );
-        run_turn(&cfg, &NoopManualTransport, redaction_ref)
+        run_turn(&cfg, &mock_transport, redact_ref)?
+    } else if turn_args.live || seats.has_openrouter_seat() {
+        let gate = LiveGate::acquire(turn_args.live, turn_args.cap_credits, env_key.clone())?;
+        let cfg = TurnConfig::new(
+            turn_args.game_dir,
+            turn_args.day,
+            turn_args.round,
+            seats,
+            turn_args.wrapper_path,
+            true,
+            Some(gate.cap_credits()),
+        );
+        let live_transport = UreqTransport::new(gate);
+        run_turn(&cfg, &live_transport, redact_ref)?
+    } else {
+        let cfg = TurnConfig::new(
+            turn_args.game_dir,
+            turn_args.day,
+            turn_args.round,
+            seats,
+            turn_args.wrapper_path,
+            false,
+            turn_args.cap_credits,
+        );
+        run_turn(&cfg, &NoopManualTransport, redact_ref)?
     };
-
-    match summary_res {
-        Ok(summary) => {
-            let _ = write!(stdout, "{}", summary.format_paths_and_hashes());
-            if summary.all_clean() { 0 } else { 2 }
-        }
-        Err(e) => {
-            let msg = redact_secrets(&e.to_string(), env_key_opt.as_ref().ok());
-            let _ = writeln!(stderr, "error: {msg}");
-            1
-        }
-    }
+    Ok(Some(summary))
 }

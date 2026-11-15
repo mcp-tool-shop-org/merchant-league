@@ -37,6 +37,8 @@ enum ScriptStep {
     Fail(TransportError),
     SleepThenTimeout(Duration),
     PanicWith(String),
+    PanicStatic,
+    PanicCode,
 }
 
 impl ScriptedTransport {
@@ -87,6 +89,8 @@ impl Transport for ScriptedTransport {
                 Err(TransportError::Timeout)
             }
             Some(ScriptStep::PanicWith(msg)) => panic!("{msg}"),
+            Some(ScriptStep::PanicStatic) => panic!("static transport panic"),
+            Some(ScriptStep::PanicCode) => std::panic::panic_any(7_i32),
             None => Err(TransportError::Network("script exhausted".to_owned())),
         }
     }
@@ -1504,6 +1508,451 @@ fn cli_validation_corrupt_logs_and_all_display_branches() -> TestResult {
 
     // MockDirTransport missing file error.
     assert!(MockDirTransport::load(&tmp.path().join("missing_mock_dir")).is_err());
+
+    Ok(())
+}
+
+#[test]
+fn additional_branch_and_cli_runner_coverage() -> TestResult {
+    use league_relay::MockDirTransport;
+    use league_relay::cli::NoopManualTransport;
+    use league_relay::transport::map_ureq_error;
+
+    // 1. ApiKey::from_env wrapper, LiveGate::cap_credits, and unplanted token redaction.
+    let _ = ApiKey::from_env();
+    let gate = LiveGate::acquire(
+        true,
+        Some(1.75),
+        ApiKey::from_env_reader(|_| Some(PLANTED_KEY.to_owned())),
+    )?;
+    assert!((gate.cap_credits() - 1.75).abs() < f64::EPSILON);
+
+    let unplanted = redact_secrets(
+        "Bearer plain_secret_tok and sk-or-v1-unplanted_secret_99 and Bearer   ",
+        None,
+    );
+    assert!(!unplanted.contains("plain_secret_tok"));
+    assert!(!unplanted.contains("unplanted_secret_99"));
+    assert!(unplanted.contains("<REDACTED_API_KEY>"));
+
+    // 2. map_ureq_error and NoopManualTransport.
+    assert_eq!(
+        map_ureq_error(ureq::Error::Timeout(ureq::Timeout::Global), gate.api_key()),
+        TransportError::Timeout
+    );
+    let mapped_io = map_ureq_error(
+        ureq::Error::Io(std::io::Error::other(format!(
+            "socket broken for Bearer {PLANTED_KEY}"
+        ))),
+        gate.api_key(),
+    );
+    assert!(matches!(mapped_io, TransportError::Network(_)));
+    assert!(!mapped_io.to_string().contains(PLANTED_KEY));
+
+    assert!(
+        NoopManualTransport
+            .post_chat_completions(
+                "https://openrouter.ai/api/v1/chat/completions",
+                "{}",
+                Duration::from_secs(1),
+            )
+            .is_err()
+    );
+
+    // 3. SeatFile::load missing file, malformed JSON/shapes, and missing numeric fields.
+    let tmp = TempDir::new()?;
+    assert!(SeatFile::load(&tmp.path().join("does_not_exist.json"), None).is_err());
+    for bad_raw in [
+        "{not-json",
+        "[123]",
+        r#"{"unknown_top_level":[]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":64}]}"#,
+    ] {
+        assert!(SeatFile::from_json_str(bad_raw, None).is_err());
+    }
+
+    // 4. MockDirTransport invalid JSON, default status=200, and unmatched rule.
+    let bad_mock_dir = tmp.path().join("bad_mock");
+    fs::create_dir_all(&bad_mock_dir)?;
+    fs::write(bad_mock_dir.join("responses.json"), "{bad")?;
+    assert!(MockDirTransport::load(&bad_mock_dir).is_err());
+
+    let mock_dir = tmp.path().join("ok_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "MATCH_ME",
+                "response": {
+                    "id": "gen-default-status",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"message": {"content": "TRAVEL: stay"}}],
+                    "usage": {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16, "cost": 0.0005}
+                }
+            }]
+        }))?,
+    )?;
+    let loaded_mock = MockDirTransport::load(&mock_dir)?;
+    let matched =
+        loaded_mock.post_chat_completions("http://mock", "MATCH_ME", Duration::from_secs(1))?;
+    assert_eq!(matched.status, 200);
+    assert!(
+        loaded_mock
+            .post_chat_completions("http://mock", "NO_SUCH_RULE", Duration::from_secs(1))
+            .is_err()
+    );
+
+    // 5. parse_args missing required flags and in-process execute_cli exit codes 0, 1, 2.
+    assert!(parse_args(["turn"]).is_err());
+    assert!(parse_args(["turn", "--game-dir=g"]).is_err());
+    assert!(parse_args(["turn", "--game-dir=g", "--day=01"]).is_err());
+    assert!(parse_args(["turn", "--game-dir=g", "--day=01", "--round=talk"]).is_err());
+
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER\r\n\r\n")?;
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"google/gemini-2.5-pro-06-05","temperature":0.4,"max_output_tokens":128,"timeout_secs":2.0}]}"#,
+    )?;
+
+    let cli_game_ok = tmp.path().join("cli_game_ok");
+    write_to_seat(&cli_game_ok, "01", "talk", "Saltworks", "MATCH_ME")?;
+    let mut out_ok = Vec::new();
+    let mut err_ok = Vec::new();
+    let code_ok = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game_ok.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+        ],
+        |_| None,
+        &mut out_ok,
+        &mut err_ok,
+    );
+    assert_eq!(code_ok, 0);
+    assert!(String::from_utf8(out_ok)?.contains("outcome=OK"));
+
+    // Unmatched rule causes NO_REPLY -> exit code 2.
+    let cli_game_fail = tmp.path().join("cli_game_fail");
+    write_to_seat(
+        &cli_game_fail,
+        "01",
+        "talk",
+        "Saltworks",
+        "UNMATCHED_PROMPT",
+    )?;
+    let mut out_fail = Vec::new();
+    let mut err_fail = Vec::new();
+    let code_fail = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game_fail.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+        ],
+        |_| None,
+        &mut out_fail,
+        &mut err_fail,
+    );
+    assert_eq!(code_fail, 2);
+    assert!(String::from_utf8(out_fail)?.contains("outcome=NO_REPLY"));
+
+    // Refusal without --live on openrouter seat -> exit code 1.
+    let mut out_ref = Vec::new();
+    let mut err_ref = Vec::new();
+    let code_ref = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game_ok.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+        ],
+        |_| Some(PLANTED_KEY.to_owned()),
+        &mut out_ref,
+        &mut err_ref,
+    );
+    assert_eq!(code_ref, 1);
+
+    // 6. run_turn validation, CallLedger pre-existing unknown/negative cost, JSON non-200,
+    //    static/non-string panics, corrupt/unpaired transcripts, and format_paths_and_hashes arms.
+    let seats = SeatFile::load(&seats_path, None)?;
+    let dummy_tx = ScriptedTransport::new(vec![]);
+    assert!(matches!(
+        run_turn(
+            &TurnConfig::new(
+                tmp.path().join("g1"),
+                "01".to_owned(),
+                Round::Talk,
+                seats.clone(),
+                Some(wrapper.clone()),
+                true,
+                None,
+            ),
+            &dummy_tx,
+            None,
+        ),
+        Err(RelayError::InvalidCap(_))
+    ));
+    assert!(matches!(
+        run_turn(
+            &TurnConfig::new(
+                tmp.path().join("g2"),
+                "01".to_owned(),
+                Round::Talk,
+                seats.clone(),
+                Some(wrapper.clone()),
+                false,
+                Some(-0.1),
+            ),
+            &dummy_tx,
+            None,
+        ),
+        Err(RelayError::InvalidCap(_))
+    ));
+    assert!(matches!(
+        run_turn(
+            &TurnConfig::new(
+                tmp.path().join("g3"),
+                "01".to_owned(),
+                Round::Talk,
+                seats.clone(),
+                Some(tmp.path().join("missing_wrapper.md")),
+                false,
+                None,
+            ),
+            &dummy_tx,
+            None,
+        ),
+        Err(RelayError::Io(_))
+    ));
+
+    // Pre-existing costless call on same (day, round) + blank line -> COST_UNKNOWN formatted output.
+    let unknown_game = tmp.path().join("unknown_existing");
+    write_to_seat(&unknown_game, "01", "talk", "Saltworks", "PROMPT")?;
+    fs::create_dir_all(unknown_game.join("relay"))?;
+    let prior_unknown = CallLogEntry {
+        time_utc: "2026-11-15T00:00:00.000Z".to_owned(),
+        day: "01".to_owned(),
+        round: Round::Talk,
+        guild: "Weavers".to_owned(),
+        attempt: 1,
+        trigger: "turn".to_owned(),
+        model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
+        model_returned: Some("google/gemini-2.5-pro-06-05".to_owned()),
+        request_body_sha256: "00".repeat(32),
+        reply_sha256: Some("11".repeat(32)),
+        prompt_tokens: Some(10),
+        completion_tokens: Some(5),
+        total_tokens: Some(15),
+        cost: None,
+        latency_ms: 12,
+        outcome: "OK".to_owned(),
+        error: None,
+    };
+    fs::write(
+        unknown_game.join("relay").join("calls.jsonl"),
+        format!("\n{}\n", serde_json::to_string(&prior_unknown)?),
+    )?;
+    let unk_summary = run_turn(
+        &TurnConfig::new(
+            unknown_game,
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(2.0),
+        ),
+        &dummy_tx,
+        None,
+    )?;
+    assert!(
+        unk_summary
+            .format_paths_and_hashes()
+            .contains("outcome=COST_UNKNOWN")
+    );
+
+    // Pre-existing call reaching cap -> CAP_REACHED formatted output.
+    let cap_game = tmp.path().join("cap_existing");
+    write_to_seat(&cap_game, "01", "talk", "Saltworks", "PROMPT")?;
+    fs::create_dir_all(cap_game.join("relay"))?;
+    let mut prior_capped = prior_unknown.clone();
+    prior_capped.cost = Some(2.0);
+    fs::write(
+        cap_game.join("relay").join("calls.jsonl"),
+        format!("{}\n", serde_json::to_string(&prior_capped)?),
+    )?;
+    let cap_summary = run_turn(
+        &TurnConfig::new(
+            cap_game,
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(2.0),
+        ),
+        &dummy_tx,
+        None,
+    )?;
+    assert!(
+        cap_summary
+            .format_paths_and_hashes()
+            .contains("outcome=CAP_REACHED")
+    );
+
+    // Negative cost in calls.jsonl -> SeatError.
+    let neg_game = tmp.path().join("neg_cost_game");
+    write_to_seat(&neg_game, "01", "talk", "Saltworks", "PROMPT")?;
+    fs::create_dir_all(neg_game.join("relay"))?;
+    let mut neg_entry = prior_unknown;
+    neg_entry.day = "01".to_owned();
+    neg_entry.round = Round::Act;
+    neg_entry.cost = Some(-0.5);
+    fs::write(
+        neg_game.join("relay").join("calls.jsonl"),
+        format!("{}\n", serde_json::to_string(&neg_entry)?),
+    )?;
+    let neg_summary = run_turn(
+        &TurnConfig::new(
+            neg_game,
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(2.0),
+        ),
+        &dummy_tx,
+        None,
+    )?;
+    assert!(matches!(
+        neg_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+
+    // HTTP 429 with JSON body + static/&str and non-string panics.
+    let panic_game = tmp.path().join("panic_variants");
+    write_to_seat(&panic_game, "01", "talk", "Saltworks", "P1")?;
+    let panic_tx_1 = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 429,
+            body: r#"{"model":"google/gemini-2.5-pro-06-05","usage":{"prompt_tokens":8,"total_tokens":8}}"#.to_owned(),
+        }),
+        ScriptStep::PanicStatic,
+    ]);
+    let p1_summary = run_turn(
+        &TurnConfig::new(
+            panic_game,
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        ),
+        &panic_tx_1,
+        None,
+    )?;
+    assert!(matches!(
+        p1_summary.reports[0].outcome,
+        SeatOutcome::NoReply { .. }
+    ));
+
+    let panic_game_2 = tmp.path().join("panic_code");
+    write_to_seat(&panic_game_2, "01", "talk", "Saltworks", "P2")?;
+    let panic_tx_2 = ScriptedTransport::new(vec![ScriptStep::PanicCode, ScriptStep::PanicCode]);
+    let p2_summary = run_turn(
+        &TurnConfig::new(
+            panic_game_2,
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        ),
+        &panic_tx_2,
+        None,
+    )?;
+    assert!(matches!(
+        p2_summary.reports[0].outcome,
+        SeatOutcome::NoReply { .. }
+    ));
+
+    // Transcript with invalid JSON and transcript ending on unpaired user turn.
+    let invalid_tx_game = tmp.path().join("invalid_tx_json");
+    fs::create_dir_all(invalid_tx_game.join("relay"))?;
+    fs::write(
+        invalid_tx_game.join("relay").join("Saltworks.jsonl"),
+        "\n{not-json}\n",
+    )?;
+    assert!(
+        run_turn(
+            &TurnConfig::new(
+                invalid_tx_game,
+                "01".to_owned(),
+                Round::Act,
+                seats.clone(),
+                Some(wrapper.clone()),
+                false,
+                None,
+            ),
+            &dummy_tx,
+            None,
+        )
+        .is_err()
+    );
+
+    let unpaired_tx_game = tmp.path().join("unpaired_tx");
+    fs::create_dir_all(unpaired_tx_game.join("relay"))?;
+    fs::write(
+        unpaired_tx_game.join("relay").join("Saltworks.jsonl"),
+        r#"{"day":"01","round":"talk","role":"user","content":"lonely"}"#,
+    )?;
+    assert!(
+        run_turn(
+            &TurnConfig::new(
+                unpaired_tx_game,
+                "01".to_owned(),
+                Round::Act,
+                seats,
+                Some(wrapper),
+                false,
+                None,
+            ),
+            &dummy_tx,
+            None,
+        )
+        .is_err()
+    );
 
     Ok(())
 }

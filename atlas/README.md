@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 82cde68 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 648b3e3 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,18 +8,13 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (ddc80b8)
+## What changed since 2026-11-15 (82cde68)
 
-- CI now also runs crates/league-relay/tests/.
-- CI now also checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
-- league-relay (crates/league-relay/Cargo.toml) is a new command. It runs crates/league-relay/src/main.rs.
-- crates/league-relay/ is now read by Cargo.toml.
-- crates/league-relay/src/main.rs is now read by crates/league-relay/Cargo.toml.
-- crates/league-relay/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.
-- crates/league-relay/src/cli.rs is new and belongs to no part, so atlas check fails on it against the previous map.
-- crates/league-relay/src/error.rs is new and belongs to no part, so atlas check fails on it against the previous map.
-- And 7 more new files that belong to no part.
-- 11 files added and 5 changed content, across 2 parts.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `Usage`, before `Usage`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `Usage`, after `Usage`.
+- In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `Usage`.
+- And 1 more change to the order of work.
+- 6 files changed content.
 
 ## What comes in
 

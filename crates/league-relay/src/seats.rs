@@ -85,25 +85,26 @@ pub struct SeatFile {
     pub seats: Vec<SeatSpec>,
 }
 
+fn seat_err(msg: impl AsRef<str>, key: Option<&ApiKey>) -> RelayError {
+    RelayError::SeatConfig(redact_secrets(msg.as_ref(), key))
+}
+
 impl SeatFile {
     /// Read and validate a JSON seat file from `path`.
     pub fn load(path: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
         let raw = fs::read_to_string(path).map_err(|e| {
-            RelayError::SeatConfig(redact_secrets(
-                &format!("could not read {}: {e}", path.display()),
+            seat_err(
+                format!("could not read {}: {e}", path.display()),
                 redaction_key,
-            ))
+            )
         })?;
         Self::from_json_str(&raw, redaction_key)
     }
 
     /// Parse and validate a JSON seat file from `raw`.
     pub fn from_json_str(raw: &str, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
-        // Reject any embedded key field explicitly before full deserialization so
-        // the caller gets a clear secret-placement error with values scrubbed.
-        let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
-            RelayError::SeatConfig(redact_secrets(&format!("invalid JSON: {e}"), redaction_key))
-        })?;
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|e| seat_err(format!("invalid JSON: {e}"), redaction_key))?;
         if contains_forbidden_key_field(&value) {
             return Err(RelayError::SecretInForbiddenPlace(
                 "seat file must not contain an API key; set OPENROUTER_API_KEY in the environment"
@@ -112,14 +113,11 @@ impl SeatFile {
         }
 
         let entries: Vec<SeatEntryWire> = if value.is_array() {
-            serde_json::from_value(value).map_err(|e| {
-                RelayError::SeatConfig(redact_secrets(&e.to_string(), redaction_key))
-            })?
+            serde_json::from_value(value).map_err(|e| seat_err(e.to_string(), redaction_key))?
         } else {
-            let wrapped: SeatFileWrappedWire = serde_json::from_value(value).map_err(|e| {
-                RelayError::SeatConfig(redact_secrets(&e.to_string(), redaction_key))
-            })?;
-            wrapped.seats
+            serde_json::from_value::<SeatFileWrappedWire>(value)
+                .map_err(|e| seat_err(e.to_string(), redaction_key))?
+                .seats
         };
 
         if entries.is_empty() {
@@ -144,51 +142,35 @@ impl SeatFile {
                 BackendKind::File => SeatBackend::File { model: entry.model },
                 BackendKind::Openrouter => {
                     let model = entry.model.ok_or_else(|| {
-                        RelayError::SeatConfig(format!(
-                            "seat '{}' (openrouter) is missing 'model'",
-                            entry.guild
-                        ))
+                        RelayError::SeatConfig(format!("seat '{}' missing 'model'", entry.guild))
                     })?;
                     validate_pinned_openrouter_slug(&entry.guild, &model)?;
 
-                    let temperature = entry.temperature.ok_or_else(|| {
-                        RelayError::SeatConfig(format!(
-                            "seat '{}' (openrouter) is missing 'temperature'",
-                            entry.guild
-                        ))
-                    })?;
-                    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+                    let Some(temperature) = entry
+                        .temperature
+                        .filter(|t| t.is_finite() && (0.0..=2.0).contains(t))
+                    else {
                         return Err(RelayError::SeatConfig(format!(
-                            "seat '{}' temperature must be finite and in 0.0..=2.0",
+                            "seat '{}' requires finite 'temperature' in 0.0..=2.0",
                             entry.guild
                         )));
-                    }
+                    };
 
-                    let max_output_tokens = entry.max_output_tokens.ok_or_else(|| {
-                        RelayError::SeatConfig(format!(
-                            "seat '{}' (openrouter) is missing 'max_output_tokens'",
-                            entry.guild
-                        ))
-                    })?;
-                    if max_output_tokens == 0 {
+                    let Some(max_output_tokens) = entry.max_output_tokens.filter(|&m| m > 0) else {
                         return Err(RelayError::SeatConfig(format!(
-                            "seat '{}' max_output_tokens must be greater than 0",
+                            "seat '{}' requires positive 'max_output_tokens'",
                             entry.guild
                         )));
-                    }
+                    };
 
-                    let timeout_secs = entry.timeout_secs.ok_or_else(|| {
-                        RelayError::SeatConfig(format!(
-                            "seat '{}' (openrouter) is missing 'timeout_secs'",
-                            entry.guild
-                        ))
-                    })?;
-                    if !timeout_secs.is_finite() || timeout_secs <= 0.0 {
+                    let Some(timeout_secs) =
+                        entry.timeout_secs.filter(|t| t.is_finite() && *t > 0.0)
+                    else {
                         return Err(RelayError::SeatConfig(format!(
-                            "seat '{}' timeout_secs must be a finite positive number",
+                            "seat '{}' requires finite positive 'timeout_secs'",
                             entry.guild
                         )));
-                    }
+                    };
 
                     SeatBackend::Openrouter(OpenRouterSeat {
                         model,
@@ -219,9 +201,8 @@ impl SeatFile {
 fn contains_forbidden_key_field(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => map.iter().any(|(k, v)| {
-            let kl = k.to_ascii_lowercase();
             matches!(
-                kl.as_str(),
+                k.to_ascii_lowercase().as_str(),
                 "api_key" | "apikey" | "openrouter_api_key" | "secret" | "token" | "authorization"
             ) || contains_forbidden_key_field(v)
         }),
@@ -243,32 +224,30 @@ fn validate_guild_name(guild: &str) -> Result<(), RelayError> {
     Ok(())
 }
 
+fn is_slug_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
+}
+
 /// Validate that `model` is a pinned `provider/slug` identifier and not a floating alias.
 pub fn validate_pinned_openrouter_slug(guild: &str, model: &str) -> Result<(), RelayError> {
-    if model.is_empty() || model.trim() != model || model.chars().any(char::is_whitespace) {
-        return Err(RelayError::SeatConfig(format!(
-            "seat '{guild}' model slug must be non-empty without whitespace"
-        )));
-    }
     let Some((provider, name)) = model.split_once('/') else {
         return Err(RelayError::SeatConfig(format!(
             "seat '{guild}' model '{model}' must be a pinned OpenRouter 'provider/model' slug"
         )));
     };
-    if provider.is_empty() || name.is_empty() || name.contains('/') {
+    if provider.is_empty()
+        || name.is_empty()
+        || name.contains('/')
+        || name.contains(':')
+        || !provider.chars().all(is_slug_char)
+        || !name.chars().all(is_slug_char)
+    {
         return Err(RelayError::SeatConfig(format!(
-            "seat '{guild}' model '{model}' must have exact 'provider/model' form"
+            "seat '{guild}' model '{model}' must be an exact 'provider/model' slug without ':' variants"
         )));
     }
-    if name.contains(':') {
-        return Err(RelayError::SeatConfig(format!(
-            "seat '{guild}' model '{model}' uses a ':' routing variant; pin an exact model slug"
-        )));
-    }
-    let lower_full = model.to_ascii_lowercase();
     let lower_name = name.to_ascii_lowercase();
-    if lower_full == "openrouter/auto"
-        || lower_name == "auto"
+    if lower_name == "auto"
         || lower_name == "latest"
         || lower_name.ends_with("-latest")
         || lower_name.ends_with("_latest")
@@ -276,17 +255,6 @@ pub fn validate_pinned_openrouter_slug(guild: &str, model: &str) -> Result<(), R
     {
         return Err(RelayError::SeatConfig(format!(
             "seat '{guild}' model '{model}' is a floating alias; pin an exact model slug"
-        )));
-    }
-    if !provider
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    {
-        return Err(RelayError::SeatConfig(format!(
-            "seat '{guild}' model '{model}' contains unsupported characters"
         )));
     }
     Ok(())

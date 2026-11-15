@@ -5,7 +5,7 @@
 //! only be constructed from a [`LiveGate`].
 
 use crate::error::RelayError;
-use crate::secret::{LiveGate, redact_secrets};
+use crate::secret::{ApiKey, LiveGate, redact_secrets};
 use serde::Deserialize;
 use std::fmt;
 use std::fs;
@@ -43,6 +43,8 @@ impl fmt::Display for TransportError {
     }
 }
 
+impl std::error::Error for TransportError {}
+
 /// Synchronous HTTP transport for chat-completions POST calls.
 pub trait Transport: Send + Sync {
     /// Send `body` (JSON) to `url` bounded by wall timeout `timeout`.
@@ -52,6 +54,14 @@ pub trait Transport: Send + Sync {
         body: &str,
         timeout: Duration,
     ) -> Result<RawHttpResponse, TransportError>;
+}
+
+/// Map a `ureq::Error` into a redacted [`TransportError`].
+pub fn map_ureq_error(err: ureq::Error, key: &ApiKey) -> TransportError {
+    match err {
+        ureq::Error::Timeout(_) => TransportError::Timeout,
+        other => TransportError::Network(redact_secrets(&other.to_string(), Some(key))),
+    }
 }
 
 /// Live HTTPS transport backed by `ureq`.
@@ -89,50 +99,28 @@ impl Transport for UreqTransport {
             .http_status_as_error(false)
             .build()
             .into();
-
-        let auth_value = format!("Bearer {}", self.gate.api_key().secret_str());
-        let response = agent
+        let auth = format!("Bearer {}", self.gate.api_key().secret_str());
+        let resp = agent
             .post(url)
-            .header("Authorization", &auth_value)
+            .header("Authorization", &auth)
             .header("Content-Type", "application/json")
             .send(body)
-            .map_err(|err| match err {
-                ureq::Error::Timeout(_) => TransportError::Timeout,
-                other => TransportError::Network(redact_secrets(
-                    &other.to_string(),
-                    Some(self.gate.api_key()),
-                )),
-            })?;
-
-        let status = response.status().as_u16();
-        let resp_body = response
+            .map_err(|e| map_ureq_error(e, self.gate.api_key()))?;
+        let status = resp.status().as_u16();
+        let text = resp
             .into_body()
             .read_to_string()
-            .map_err(|err| match err {
-                ureq::Error::Timeout(_) => TransportError::Timeout,
-                other => TransportError::Network(redact_secrets(
-                    &other.to_string(),
-                    Some(self.gate.api_key()),
-                )),
-            })?;
-
-        Ok(RawHttpResponse {
-            status,
-            body: resp_body,
-        })
+            .map_err(|e| map_ureq_error(e, self.gate.api_key()))?;
+        Ok(RawHttpResponse { status, body: text })
     }
 }
 
-/// Canned rule for [`MockDirTransport`] loaded from `<mock-dir>/responses.json`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MockRuleWire {
-    /// Substring matched against the serialized request JSON body.
     when_contains: String,
-    /// HTTP status code to return (defaults to `200`).
     #[serde(default = "default_ok_status")]
     status: u16,
-    /// JSON value serialized as the HTTP response body.
     response: serde_json::Value,
 }
 
@@ -147,9 +135,6 @@ struct MockFileWire {
 }
 
 /// Offline file-backed mock transport for `league-relay turn --mock-dir <dir>`.
-///
-/// Reads `<mock-dir>/responses.json` once on construction and matches each
-/// request against `when_contains` in order. Never touches the network or environment.
 #[derive(Debug, Clone)]
 pub struct MockDirTransport {
     rules: Vec<(String, u16, String)>,
@@ -159,17 +144,15 @@ impl MockDirTransport {
     /// Load canned mock responses from `<dir>/responses.json`.
     pub fn load(dir: &Path) -> Result<Self, RelayError> {
         let path = dir.join("responses.json");
-        let raw = fs::read_to_string(&path).map_err(|e| {
-            RelayError::Io(format!("could not read mock file {}: {e}", path.display()))
-        })?;
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| RelayError::Io(format!("could not read {}: {e}", path.display())))?;
         let parsed: MockFileWire = serde_json::from_str(&raw)
             .map_err(|e| RelayError::Io(format!("invalid mock JSON in {}: {e}", path.display())))?;
-        let mut rules = Vec::with_capacity(parsed.rules.len());
-        for rule in parsed.rules {
-            let body = serde_json::to_string(&rule.response)
-                .map_err(|e| RelayError::Io(format!("could not encode mock response: {e}")))?;
-            rules.push((rule.when_contains, rule.status, body));
-        }
+        let rules = parsed
+            .rules
+            .into_iter()
+            .map(|r| (r.when_contains, r.status, r.response.to_string()))
+            .collect();
         Ok(Self { rules })
     }
 }

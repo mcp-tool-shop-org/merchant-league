@@ -246,12 +246,10 @@ impl TurnSummary {
     pub fn format_paths_and_hashes(&self) -> String {
         let mut out = String::new();
         for report in &self.reports {
+            let g = &report.guild;
             let line = match &report.outcome {
                 SeatOutcome::RelayedByHand => {
-                    format!(
-                        "seat={} outcome=FILE_MANUAL note=relayed_by_hand",
-                        report.guild
-                    )
+                    format!("seat={g} outcome=FILE_MANUAL note=relayed_by_hand")
                 }
                 SeatOutcome::Delivered {
                     attempts,
@@ -261,44 +259,34 @@ impl TurnSummary {
                     request_body_sha256,
                     reply_sha256,
                 } => format!(
-                    "seat={} outcome=OK attempts={} from_seat={} transcript={} calls={} request_sha256={} reply_sha256={}",
-                    report.guild,
-                    attempts,
+                    "seat={g} outcome=OK attempts={attempts} from_seat={} transcript={} calls={} request_sha256={request_body_sha256} reply_sha256={reply_sha256}",
                     from_seat_path.display(),
                     transcript_path.display(),
                     calls_path.display(),
-                    request_body_sha256,
-                    reply_sha256,
                 ),
                 SeatOutcome::NoReply {
                     calls_path,
                     request_body_sha256,
                 } => format!(
-                    "seat={} outcome=NO_REPLY calls={} request_sha256={}",
-                    report.guild,
-                    calls_path.display(),
-                    request_body_sha256,
+                    "seat={g} outcome=NO_REPLY calls={} request_sha256={request_body_sha256}",
+                    calls_path.display()
                 ),
                 SeatOutcome::CapReached {
                     calls_path,
                     request_body_sha256,
                 } => format!(
-                    "seat={} outcome=CAP_REACHED calls={} request_sha256={}",
-                    report.guild,
-                    calls_path.display(),
-                    request_body_sha256,
+                    "seat={g} outcome=CAP_REACHED calls={} request_sha256={request_body_sha256}",
+                    calls_path.display()
                 ),
                 SeatOutcome::CostUnknownRefused {
                     calls_path,
                     request_body_sha256,
                 } => format!(
-                    "seat={} outcome=COST_UNKNOWN calls={} request_sha256={}",
-                    report.guild,
-                    calls_path.display(),
-                    request_body_sha256,
+                    "seat={g} outcome=COST_UNKNOWN calls={} request_sha256={request_body_sha256}",
+                    calls_path.display()
                 ),
                 SeatOutcome::SeatError { detail } => {
-                    format!("seat={} outcome=ERROR detail={detail}", report.guild)
+                    format!("seat={g} outcome=ERROR detail={detail}")
                 }
             };
             out.push_str(&line);
@@ -358,6 +346,24 @@ struct UsageWire {
     cost: Option<f64>,
 }
 
+fn io_err(path: &Path, err: impl fmt::Display, key: Option<&ApiKey>) -> RelayError {
+    RelayError::Io(redact_secrets(&format!("{}: {err}", path.display()), key))
+}
+
+fn append_text(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), RelayError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| io_err(path, e, key))?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.flush())
+        .map_err(|e| io_err(path, e, key))
+}
+
 struct CallLedger {
     calls_path: PathBuf,
     cap_credits: Option<f64>,
@@ -380,8 +386,7 @@ impl CallLedger {
     ) -> Result<Self, RelayError> {
         let mut cost_unknown_in_turn = false;
         if calls_path.exists() {
-            let entries = read_calls_file(&calls_path, redaction_key)?;
-            for entry in &entries {
+            for entry in read_calls_file(&calls_path, redaction_key)? {
                 if entry.day == day
                     && entry.round == round
                     && (entry.outcome == "OK"
@@ -411,8 +416,7 @@ impl CallLedger {
             return Ok(PreCallDecision::CostUnknown);
         }
         let recorded_sum = if self.calls_path.exists() {
-            let entries = read_calls_file(&self.calls_path, redaction_key)?;
-            sum_recorded_costs(&entries)?
+            sum_recorded_costs(&read_calls_file(&self.calls_path, redaction_key)?)?
         } else {
             0.0
         };
@@ -431,43 +435,10 @@ impl CallLedger {
         if mark_cost_unknown {
             self.cost_unknown_in_turn = true;
         }
-        if let Some(parent) = self.calls_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                RelayError::Io(redact_secrets(
-                    &format!("could not create {}: {e}", parent.display()),
-                    redaction_key,
-                ))
-            })?;
-        }
-        let mut line = serde_json::to_string(entry).map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not serialize call log: {e}"),
-                redaction_key,
-            ))
-        })?;
+        let mut line =
+            serde_json::to_string(entry).map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
         line.push('\n');
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.calls_path)
-            .map_err(|e| {
-                RelayError::Io(redact_secrets(
-                    &format!("could not open {}: {e}", self.calls_path.display()),
-                    redaction_key,
-                ))
-            })?;
-        file.write_all(line.as_bytes()).map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not append {}: {e}", self.calls_path.display()),
-                redaction_key,
-            ))
-        })?;
-        file.flush().map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not flush {}: {e}", self.calls_path.display()),
-                redaction_key,
-            ))
-        })
+        append_text(&self.calls_path, &line, redaction_key)
     }
 }
 
@@ -475,12 +446,7 @@ fn read_calls_file(
     calls_path: &Path,
     redaction_key: Option<&ApiKey>,
 ) -> Result<Vec<CallLogEntry>, RelayError> {
-    let raw = fs::read_to_string(calls_path).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not read {}: {e}", calls_path.display()),
-            redaction_key,
-        ))
-    })?;
+    let raw = fs::read_to_string(calls_path).map_err(|e| io_err(calls_path, e, redaction_key))?;
     let mut entries = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         if line.trim().is_empty() {
@@ -488,11 +454,7 @@ fn read_calls_file(
         }
         let parsed: CallLogEntry = serde_json::from_str(line).map_err(|e| {
             RelayError::CorruptLog(redact_secrets(
-                &format!(
-                    "{} line {} is malformed: {e}",
-                    calls_path.display(),
-                    idx + 1
-                ),
+                &format!("{} line {}: {e}", calls_path.display(), idx + 1),
                 redaction_key,
             ))
         })?;
@@ -562,24 +524,14 @@ pub fn run_turn(
     }
 
     let wrapper_text = match &config.wrapper_path {
-        Some(path) => {
-            let text = fs::read_to_string(path).map_err(|e| {
-                RelayError::Io(redact_secrets(
-                    &format!("could not read wrapper {}: {e}", path.display()),
-                    redaction_key,
-                ))
-            })?;
-            Some(text)
-        }
+        Some(path) => Some(fs::read_to_string(path).map_err(|e| io_err(path, e, redaction_key))?),
         None => None,
     };
 
-    // Preflight: ensure any first-turn openrouter seat has a wrapper before calls start.
     for seat in &config.seats.seats {
         if matches!(seat.backend, SeatBackend::Openrouter(_)) {
             let transcript_path = transcript_file_path(&config.game_dir, &seat.guild);
-            let is_first_turn = !transcript_has_entries(&transcript_path, redaction_key)?;
-            if is_first_turn && wrapper_text.is_none() {
+            if !transcript_has_entries(&transcript_path, redaction_key)? && wrapper_text.is_none() {
                 return Err(RelayError::MissingWrapper {
                     guild: seat.guild.clone(),
                 });
@@ -596,72 +548,49 @@ pub fn run_turn(
         redaction_key,
     )?);
 
-    let seat_count = config.seats.seats.len();
-    let mut indexed_results: Vec<Option<SeatReport>> = (0..seat_count).map(|_| None).collect();
-
-    std::thread::scope(|scope| {
+    let reports: Vec<SeatReport> = std::thread::scope(|scope| {
+        let mut slots: Vec<(usize, SeatReport)> = Vec::with_capacity(config.seats.seats.len());
         let mut handles = Vec::new();
+
         for (idx, seat) in config.seats.seats.iter().enumerate() {
             match &seat.backend {
-                SeatBackend::File { .. } => {
-                    indexed_results[idx] = Some(SeatReport {
+                SeatBackend::File { .. } => slots.push((
+                    idx,
+                    SeatReport {
                         guild: seat.guild.clone(),
                         outcome: SeatOutcome::RelayedByHand,
-                    });
-                }
+                    },
+                )),
                 SeatBackend::Openrouter(or_seat) => {
                     let guild = seat.guild.clone();
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
-                    let calls_path_clone = calls_path.clone();
-                    let handle = scope.spawn(move || {
-                        let outcome = match catch_unwind(AssertUnwindSafe(|| {
-                            run_single_openrouter_seat(
-                                config,
-                                &guild,
-                                or_seat,
-                                wrapper_ref,
-                                transport,
-                                ledger_ref,
-                                &calls_path_clone,
-                                redaction_key,
-                            )
-                        })) {
-                            Ok(o) => o,
-                            Err(payload) => SeatOutcome::SeatError {
-                                detail: redact_secrets(
-                                    &format!("seat worker panicked: {}", panic_message(&*payload)),
-                                    redaction_key,
-                                ),
-                            },
-                        };
+                    let calls_ref = &calls_path;
+                    handles.push(scope.spawn(move || {
+                        let outcome = run_single_openrouter_seat(
+                            config,
+                            &guild,
+                            or_seat,
+                            wrapper_ref,
+                            transport,
+                            ledger_ref,
+                            calls_ref,
+                            redaction_key,
+                        );
                         (idx, SeatReport { guild, outcome })
-                    });
-                    handles.push(handle);
+                    }));
                 }
             }
         }
 
         for handle in handles {
-            if let Ok((idx, report)) = handle.join() {
-                indexed_results[idx] = Some(report);
+            if let Ok(pair) = handle.join() {
+                slots.push(pair);
             }
         }
+        slots.sort_by_key(|(idx, _)| *idx);
+        slots.into_iter().map(|(_, r)| r).collect()
     });
-
-    let mut reports = Vec::with_capacity(seat_count);
-    for (idx, slot) in indexed_results.into_iter().enumerate() {
-        if let Some(r) = slot {
-            reports.push(r);
-        } else {
-            reports.push(SeatReport {
-                guild: config.seats.seats[idx].guild.clone(),
-                outcome: SeatOutcome::SeatError {
-                    detail: "seat worker failed to join".to_owned(),
-                },
-            });
-        }
-    }
 
     Ok(TurnSummary { reports })
 }
@@ -695,10 +624,7 @@ fn run_single_openrouter_seat(
         Ok(text) => text,
         Err(e) => {
             return SeatOutcome::SeatError {
-                detail: redact_secrets(
-                    &format!("could not read {}: {e}", to_seat_path.display()),
-                    redaction_key,
-                ),
+                detail: io_err(&to_seat_path, e, redaction_key).to_string(),
             };
         }
     };
@@ -707,29 +633,23 @@ fn run_single_openrouter_seat(
         Ok(h) => h,
         Err(e) => {
             return SeatOutcome::SeatError {
-                detail: redact_secrets(&e.to_string(), redaction_key),
+                detail: e.to_string(),
             };
         }
     };
 
-    let user_content = if history.is_empty() {
-        let Some(w) = wrapper_text else {
-            return SeatOutcome::SeatError {
-                detail: format!("missing first-turn wrapper for '{guild}'"),
-            };
-        };
-        prepend_wrapper(w, &raw_block)
-    } else {
-        raw_block
+    let user_content = match (history.is_empty(), wrapper_text) {
+        (true, Some(w)) => prepend_wrapper(w, &raw_block),
+        _ => raw_block,
     };
 
-    let mut messages = Vec::with_capacity(history.len() + 1);
-    for entry in &history {
-        messages.push(ChatMessageWire {
+    let mut messages: Vec<ChatMessageWire<'_>> = history
+        .iter()
+        .map(|entry| ChatMessageWire {
             role: &entry.role,
             content: &entry.content,
-        });
-    }
+        })
+        .collect();
     messages.push(ChatMessageWire {
         role: "user",
         content: &user_content,
@@ -741,50 +661,31 @@ fn run_single_openrouter_seat(
         temperature: seat.temperature,
         max_tokens: seat.max_output_tokens,
     };
-
-    let request_body = match serde_json::to_string(&request_wire) {
-        Ok(s) => s,
-        Err(e) => {
-            return SeatOutcome::SeatError {
-                detail: redact_secrets(&format!("request encode error: {e}"), redaction_key),
-            };
-        }
+    let Ok(request_body) = serde_json::to_string(&request_wire) else {
+        return SeatOutcome::SeatError {
+            detail: "failed to encode chat-completion request".to_owned(),
+        };
     };
     let request_body_sha256 = sha256_hex(request_body.as_bytes());
 
     for attempt in [1_u8, 2_u8] {
         let trigger = if attempt == 1 { "turn" } else { "harness" };
 
-        // Pre-call spend-cap and unknown-cost check under lock.
         {
-            let mut guard = match ledger.lock() {
-                Ok(g) => g,
-                Err(poisoned) => poisoned.into_inner(),
-            };
+            let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
             match guard.pre_call_check(redaction_key) {
                 Ok(PreCallDecision::Allow) => {}
                 Ok(PreCallDecision::CapReached { recorded_sum, cap }) => {
-                    let entry = CallLogEntry {
-                        time_utc: now_utc_rfc3339(),
-                        day: config.day.clone(),
-                        round: config.round,
-                        guild: guild.to_owned(),
+                    let entry = refused_call_entry(
+                        config,
+                        guild,
                         attempt,
-                        trigger: trigger.to_owned(),
-                        model_requested: seat.model.clone(),
-                        model_returned: None,
-                        request_body_sha256: request_body_sha256.clone(),
-                        reply_sha256: None,
-                        prompt_tokens: None,
-                        completion_tokens: None,
-                        total_tokens: None,
-                        cost: None,
-                        latency_ms: 0,
-                        outcome: "CAP_REACHED".to_owned(),
-                        error: Some(format!(
-                            "recorded cost {recorded_sum:.6} reached cap {cap:.6}"
-                        )),
-                    };
+                        trigger,
+                        &seat.model,
+                        &request_body_sha256,
+                        "CAP_REACHED",
+                        format!("recorded cost {recorded_sum:.6} reached cap {cap:.6}"),
+                    );
                     if let Err(e) = guard.record_call(&entry, false, redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
@@ -796,27 +697,16 @@ fn run_single_openrouter_seat(
                     };
                 }
                 Ok(PreCallDecision::CostUnknown) => {
-                    let entry = CallLogEntry {
-                        time_utc: now_utc_rfc3339(),
-                        day: config.day.clone(),
-                        round: config.round,
-                        guild: guild.to_owned(),
+                    let entry = refused_call_entry(
+                        config,
+                        guild,
                         attempt,
-                        trigger: trigger.to_owned(),
-                        model_requested: seat.model.clone(),
-                        model_returned: None,
-                        request_body_sha256: request_body_sha256.clone(),
-                        reply_sha256: None,
-                        prompt_tokens: None,
-                        completion_tokens: None,
-                        total_tokens: None,
-                        cost: None,
-                        latency_ms: 0,
-                        outcome: "COST_UNKNOWN".to_owned(),
-                        error: Some(
-                            "prior call in turn carried no cost; failing closed".to_owned(),
-                        ),
-                    };
+                        trigger,
+                        &seat.model,
+                        &request_body_sha256,
+                        "COST_UNKNOWN",
+                        "prior call in turn carried no cost; failing closed".to_owned(),
+                    );
                     if let Err(e) = guard.record_call(&entry, true, redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
@@ -843,15 +733,13 @@ fn run_single_openrouter_seat(
             redaction_key,
         );
 
-        let evaluated = evaluate_response(call_result, redaction_key);
-        match evaluated {
+        match evaluate_response(call_result, redaction_key) {
             EvaluatedCall::Success {
                 reply_content,
                 model_returned,
                 usage,
             } => {
                 let valid_cost = sanitize_cost(usage.cost);
-                let mark_cost_unknown = valid_cost.is_none();
                 let reply_sha256 = sha256_hex(reply_content.as_bytes());
                 let entry = CallLogEntry {
                     time_utc: now_utc_rfc3339(),
@@ -873,18 +761,13 @@ fn run_single_openrouter_seat(
                     error: None,
                 };
                 {
-                    let mut guard = match ledger.lock() {
-                        Ok(g) => g,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    if let Err(e) = guard.record_call(&entry, mark_cost_unknown, redaction_key) {
+                    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Err(e) = guard.record_call(&entry, valid_cost.is_none(), redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
                     }
                 }
-
-                // Verbatim byte-identical write: neither adds nor strips trailing newlines.
                 if let Err(e) = write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
                 {
                     return SeatOutcome::SeatError {
@@ -903,7 +786,6 @@ fn run_single_openrouter_seat(
                         detail: e.to_string(),
                     };
                 }
-
                 return SeatOutcome::Delivered {
                     attempts: attempt,
                     from_seat_path,
@@ -920,7 +802,7 @@ fn run_single_openrouter_seat(
                 had_http_200_usage_without_cost,
             } => {
                 let valid_cost = sanitize_cost(usage.cost);
-                let mark_cost_unknown = had_http_200_usage_without_cost && valid_cost.is_none();
+                let mark_unknown = had_http_200_usage_without_cost && valid_cost.is_none();
                 let outcome_label = if attempt == 1 { "harness" } else { "NO_REPLY" };
                 let entry = CallLogEntry {
                     time_utc: now_utc_rfc3339(),
@@ -942,11 +824,8 @@ fn run_single_openrouter_seat(
                     error: Some(reason),
                 };
                 {
-                    let mut guard = match ledger.lock() {
-                        Ok(g) => g,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    if let Err(e) = guard.record_call(&entry, mark_cost_unknown, redaction_key) {
+                    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Err(e) = guard.record_call(&entry, mark_unknown, redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
@@ -962,9 +841,38 @@ fn run_single_openrouter_seat(
         }
     }
 
-    SeatOutcome::NoReply {
-        calls_path: calls_path.to_path_buf(),
-        request_body_sha256,
+    unreachable!("two-attempt loop always returns on attempt 2")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refused_call_entry(
+    config: &TurnConfig,
+    guild: &str,
+    attempt: u8,
+    trigger: &str,
+    model: &str,
+    request_body_sha256: &str,
+    outcome: &str,
+    reason: String,
+) -> CallLogEntry {
+    CallLogEntry {
+        time_utc: now_utc_rfc3339(),
+        day: config.day.clone(),
+        round: config.round,
+        guild: guild.to_owned(),
+        attempt,
+        trigger: trigger.to_owned(),
+        model_requested: model.to_owned(),
+        model_returned: None,
+        request_body_sha256: request_body_sha256.to_owned(),
+        reply_sha256: None,
+        prompt_tokens: None,
+        completion_tokens: None,
+        total_tokens: None,
+        cost: None,
+        latency_ms: 0,
+        outcome: outcome.to_owned(),
+        error: Some(reason),
     }
 }
 
@@ -1106,25 +1014,12 @@ fn call_with_wall_timeout(
             let _ = tx.send(res);
         });
 
-        match rx.recv_timeout(timeout) {
-            Ok(res) => {
-                let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                (res, elapsed)
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                (Err(TransportError::Timeout), elapsed)
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                (
-                    Err(TransportError::Network(
-                        "transport worker disconnected".to_owned(),
-                    )),
-                    elapsed,
-                )
-            }
-        }
+        let outcome = match rx.recv_timeout(timeout) {
+            Ok(res) => res,
+            Err(_) => Err(TransportError::Timeout),
+        };
+        let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        (outcome, elapsed)
     })
 }
 
@@ -1134,7 +1029,7 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
-        "non-string panic payload".to_owned()
+        "panic".to_owned()
     }
 }
 
@@ -1149,8 +1044,7 @@ fn transcript_has_entries(
     if !transcript_path.exists() {
         return Ok(false);
     }
-    let entries = load_transcript(transcript_path, redaction_key)?;
-    Ok(!entries.is_empty())
+    Ok(!load_transcript(transcript_path, redaction_key)?.is_empty())
 }
 
 fn load_transcript(
@@ -1160,12 +1054,8 @@ fn load_transcript(
     if !transcript_path.exists() {
         return Ok(Vec::new());
     }
-    let raw = fs::read_to_string(transcript_path).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not read {}: {e}", transcript_path.display()),
-            redaction_key,
-        ))
-    })?;
+    let raw = fs::read_to_string(transcript_path)
+        .map_err(|e| io_err(transcript_path, e, redaction_key))?;
     let mut entries = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         if line.trim().is_empty() {
@@ -1173,11 +1063,7 @@ fn load_transcript(
         }
         let parsed: TranscriptEntry = serde_json::from_str(line).map_err(|e| {
             RelayError::CorruptLog(redact_secrets(
-                &format!(
-                    "{} line {} is malformed: {e}",
-                    transcript_path.display(),
-                    idx + 1
-                ),
+                &format!("{} line {}: {e}", transcript_path.display(), idx + 1),
                 redaction_key,
             ))
         })?;
@@ -1211,19 +1097,10 @@ fn write_verbatim_reply(
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
     if let Some(parent) = from_seat_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not create {}: {e}", parent.display()),
-                redaction_key,
-            ))
-        })?;
+        fs::create_dir_all(parent).map_err(|e| io_err(parent, e, redaction_key))?;
     }
-    fs::write(from_seat_path, reply_content.as_bytes()).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not write {}: {e}", from_seat_path.display()),
-            redaction_key,
-        ))
-    })
+    fs::write(from_seat_path, reply_content.as_bytes())
+        .map_err(|e| io_err(from_seat_path, e, redaction_key))
 }
 
 fn append_transcript_pair(
@@ -1234,14 +1111,6 @@ fn append_transcript_pair(
     assistant_content: &str,
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
-    if let Some(parent) = transcript_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not create {}: {e}", parent.display()),
-                redaction_key,
-            ))
-        })?;
-    }
     let user_entry = TranscriptEntry {
         day: day.to_owned(),
         round,
@@ -1254,44 +1123,12 @@ fn append_transcript_pair(
         role: "assistant".to_owned(),
         content: assistant_content.to_owned(),
     };
-    let mut payload = serde_json::to_string(&user_entry).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not encode user transcript: {e}"),
-            redaction_key,
-        ))
-    })?;
-    payload.push('\n');
-    let assistant_json = serde_json::to_string(&assistant_entry).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not encode assistant transcript: {e}"),
-            redaction_key,
-        ))
-    })?;
-    payload.push_str(&assistant_json);
-    payload.push('\n');
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(transcript_path)
-        .map_err(|e| {
-            RelayError::Io(redact_secrets(
-                &format!("could not open {}: {e}", transcript_path.display()),
-                redaction_key,
-            ))
-        })?;
-    file.write_all(payload.as_bytes()).map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not append {}: {e}", transcript_path.display()),
-            redaction_key,
-        ))
-    })?;
-    file.flush().map_err(|e| {
-        RelayError::Io(redact_secrets(
-            &format!("could not flush {}: {e}", transcript_path.display()),
-            redaction_key,
-        ))
-    })
+    let u_json = serde_json::to_string(&user_entry)
+        .map_err(|e| io_err(transcript_path, e, redaction_key))?;
+    let a_json = serde_json::to_string(&assistant_entry)
+        .map_err(|e| io_err(transcript_path, e, redaction_key))?;
+    let payload = format!("{u_json}\n{a_json}\n");
+    append_text(transcript_path, &payload, redaction_key)
 }
 
 fn now_utc_rfc3339() -> String {

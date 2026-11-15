@@ -67,19 +67,14 @@ impl LiveGate {
         if !live_flag {
             return Err(RelayError::LiveFlagRequired);
         }
-        let Some(cap) = cap_credits else {
+        let Some(cap) = cap_credits.filter(|c| c.is_finite() && *c >= 0.0) else {
             return Err(RelayError::InvalidCap(
-                "--cap-credits <n> is required when --live is passed".to_owned(),
+                "--cap-credits <n> (finite, non-negative) is required when --live is passed"
+                    .to_owned(),
             ));
         };
-        if !cap.is_finite() || cap < 0.0 {
-            return Err(RelayError::InvalidCap(
-                "--cap-credits must be a finite non-negative number".to_owned(),
-            ));
-        }
-        let api_key = api_key?;
         Ok(Self {
-            api_key,
+            api_key: api_key?,
             cap_credits: cap,
         })
     }
@@ -106,78 +101,54 @@ impl fmt::Debug for LiveGate {
 
 /// Scrub any occurrence of `key`, `Bearer <token>`, or `sk-or-...` tokens from `input`.
 pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
-    let mut scrubbed = if let Some(k) = key {
-        let raw = k.secret_str();
-        if raw.is_empty() {
-            input.to_owned()
-        } else {
-            input.replace(raw, REDACTED_MARKER)
-        }
-    } else {
-        input.to_owned()
+    let scrubbed = match key {
+        Some(k) => input.replace(k.secret_str(), REDACTED_MARKER),
+        None => input.to_owned(),
     };
-
-    scrubbed = redact_bearer_tokens(&scrubbed);
-    scrubbed = redact_openrouter_prefixed_tokens(&scrubbed);
-    scrubbed
+    let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
+    redact_prefixed_token(&scrubbed, "sk-or-", false)
 }
 
 fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
 }
 
-fn redact_bearer_tokens(input: &str) -> String {
+fn redact_prefixed_token(input: &str, prefix_lower: &str, keep_prefix: bool) -> String {
+    let plen = prefix_lower.len();
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
-    while let Some(idx) = find_ascii_case_insensitive(rest, "bearer ") {
-        let prefix_end = idx + "bearer ".len();
-        out.push_str(&rest[..prefix_end]);
-        let after = &rest[prefix_end..];
-        let trimmed = after.trim_start_matches(' ');
-        if trimmed.starts_with(REDACTED_MARKER) {
-            let marker_end = REDACTED_MARKER.len();
-            out.push_str(&trimmed[..marker_end]);
-            rest = &trimmed[marker_end..];
+    while rest.len() >= plen {
+        let Some(idx) = rest
+            .as_bytes()
+            .windows(plen)
+            .position(|w| w.eq_ignore_ascii_case(prefix_lower.as_bytes()))
+        else {
+            break;
+        };
+        out.push_str(&rest[..idx]);
+        let matched_prefix = &rest[idx..idx + plen];
+        let after = rest[idx + plen..].trim_start_matches(' ');
+        if let Some(stripped) = after.strip_prefix(REDACTED_MARKER) {
+            if keep_prefix {
+                out.push_str(matched_prefix);
+            }
+            out.push_str(REDACTED_MARKER);
+            rest = stripped;
             continue;
         }
-        let tok_len = trimmed.chars().take_while(|&c| is_token_char(c)).count();
-        if tok_len > 0 {
-            let byte_len: usize = trimmed.chars().take(tok_len).map(char::len_utf8).sum();
-            out.push_str(REDACTED_MARKER);
-            rest = &trimmed[byte_len..];
-        } else {
-            rest = after;
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-fn redact_openrouter_prefixed_tokens(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut rest = input;
-    while let Some(idx) = find_ascii_case_insensitive(rest, "sk-or-") {
-        out.push_str(&rest[..idx]);
-        let after = &rest[idx..];
         let byte_len: usize = after
             .chars()
             .take_while(|&c| is_token_char(c))
             .map(char::len_utf8)
             .sum();
-        out.push_str(REDACTED_MARKER);
+        if keep_prefix {
+            out.push_str(matched_prefix);
+        }
+        if byte_len > 0 || !keep_prefix {
+            out.push_str(REDACTED_MARKER);
+        }
         rest = &after[byte_len..];
     }
     out.push_str(rest);
     out
-}
-
-fn find_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> Option<usize> {
-    let nlen = needle_lower.len();
-    if haystack.len() < nlen {
-        return None;
-    }
-    haystack
-        .as_bytes()
-        .windows(nlen)
-        .position(|w| w.eq_ignore_ascii_case(needle_lower.as_bytes()))
 }
