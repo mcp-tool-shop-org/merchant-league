@@ -9,8 +9,17 @@ Built by hand to the generator's recipe (`docs/design.md`, "Generated tables"), 
 | Saltworks | Gemini | AI Studio | R&D records it at seating, before day 1 |
 | Smiths | Claude | subagent | claude-sonnet-5-5 |
 | Foresters | Gemini | Gemini app | R&D records it at seating, before day 1 |
-| Dyers | Gemini | AI Studio (a second conversation) | R&D records it at seating, before day 1 |
+| Dyers | GPT-OSS | Antigravity card, clean project | gpt-oss-120b |
 | Tanners | Claude | subagent | claude-sonnet-5-5 |
+
+**Fallback seating,** if this game can't start and finish by the end of 17 November 2026 ET (GPT-OSS 120B leaves Antigravity on the 18th), or if the GPT-OSS seat can't be opened:
+
+- the Dyers: Gemini, AI Studio (a second conversation), R&D records it at seating, before day 1.
+
+**The GPT-OSS seat** (Publisher, 2026-11-14; one Antigravity conversation open at a time):
+- it opens in a clean Antigravity project whose tree holds no other seat's setup, brief, mandate or order;
+- its card says to read no files and play only from the conversation (every card does);
+- each turn, the referee checks that it still remembers its live contracts. A lost contract is logged in `metrics.md` as a harness fault, not a play choice.
 
 **Sitting out:** Weavers.
 
@@ -65,7 +74,7 @@ Each seat's card (its mandates) and the bell day are sealed; the referee holds t
 | the Foresters' card | `cc54b4de75c9648f7a2f64c804c46c2ceaabe6c4c3d083b7f407f2818b1972a2` |
 | the Dyers' card | `fb8594878a58e4d58c08ad07866ca3854856dc9baffd74c88713912a08f8dfb9` |
 | the Tanners' card | `56f9da73d47e28d175f6da32d66b2de5ab29d77e260dd138af81464f1c700bbc` |
-| the bell | committed once its round is published |
+| the bell: SHA-256(`<day>:<salt>`) | `391e1657af4b4de4876845c0b90084a8de9500ffc52f76591ffa9a0696591d35` |
 
 ## Rounds
 
@@ -73,19 +82,19 @@ drand quicknet, read as in `../board.md`. Day *k* uses round 33966560 + 5·(*k* 
 
 | Day | Round | Randomness |
 |---|---|---|
-| 1 | 33966560 | not yet published |
-| 2 | 33966565 | not yet published |
-| 3 | 33966570 | not yet published |
-| 4 | 33966575 | not yet published |
-| 5 | 33966580 | not yet published |
-| 6 | 33966585 | not yet published |
-| 7 | 33966590 | not yet published |
-| 8 | 33966595 | not yet published |
-| 9 | 33966600 | not yet published |
-| 10 | 33966605 | not yet published |
-| 11 | 33966610 | not yet published |
-| 12 | 33966615 | not yet published |
-| 13 | 33966620 | not yet published |
+| 1 | 33966560 | `22f9de975c29f12891642d4cebbb9ccd85e3971eaa48aa984b03b3d1f3119a22` |
+| 2 | 33966565 | `5829aad88fbe6d8b8762013eb13a6379d6a58245bb72f284cc1c08cd13a2b6e2` |
+| 3 | 33966570 | `0fc1420c6be27f7d5a729e223001df02918e776915f507a916f179649900c11b` |
+| 4 | 33966575 | `5989018805d4ba422295ced7c329f4c48d109370cc2b4e8c7fe597cf3ad0f1b6` |
+| 5 | 33966580 | `24b80ae964963eb8b8416808a2a61099c184ab6a8b8d4477947355c6a5b1f642` |
+| 6 | 33966585 | `4e9df11070f179c0eac7501da1dea3724ca433adc01964faba625cf9c7762cf0` |
+| 7 | 33966590 | `4f75c095dc5df867b5c4d7cb1c0ca1fd5406d84f8f10f296d8ff421f90626dbb` |
+| 8 | 33966595 | `568402790d21ca8df65c052ed3c098f28039ffadae32c1ed6cbc135d8e7f3462` |
+| 9 | 33966600 | `7e9f7240e144f7e04b90dcaae35974f5d88c41e546181c1c4f139d473f0ddbb7` |
+| 10 | 33966605 | `738cbcb14057cd84cf129eee99d5f85620ff160fda468b6b94c0bb8e02b37294` |
+| 11 | 33966610 | `a95d40d546b1afe32dec8049c6ddc67ee44a984a09b38d4ad67ced0d9a869fb4` |
+| 12 | 33966615 | `5c5f229590c9b800e171cb97b690a7fb6487c134e116ce3737f577582113558a` |
+| 13 | 33966620 | `7e873ac7ff13ec908159e91cbaed5f2f2662c7a39b4ddd5a50d03e1c5544726d` |
 
 ## Pins
 

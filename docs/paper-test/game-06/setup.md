@@ -6,11 +6,20 @@ Built by hand to the generator's recipe (`docs/design.md`, "Generated tables"), 
 
 | Guild | Family | Surface | Model |
 |---|---|---|---|
-| Saltworks | Gemini | AI Studio | R&D records it at seating, before day 1 |
+| Saltworks | GPT-OSS | Antigravity card, clean project | gpt-oss-120b |
 | Weavers | Claude | subagent | claude-sonnet-5-5 |
 | Smiths | Gemini | Gemini app | R&D records it at seating, before day 1 |
 | Foresters | Claude | subagent | claude-sonnet-5-5 |
-| Tanners | Gemini | Gemini app (a second conversation) | R&D records it at seating, before day 1 |
+| Tanners | Gemini | AI Studio | R&D records it at seating, before day 1 |
+
+**Fallback seating,** if this game can't start and finish by the end of 17 November 2026 ET (GPT-OSS 120B leaves Antigravity on the 18th), or if the GPT-OSS seat can't be opened:
+
+- the Saltworks: Gemini, AI Studio (a second conversation), R&D records it at seating, before day 1.
+
+**The GPT-OSS seat** (Publisher, 2026-11-14; one Antigravity conversation open at a time):
+- it opens in a clean Antigravity project whose tree holds no other seat's setup, brief, mandate or order;
+- its card says to read no files and play only from the conversation (every card does);
+- each turn, the referee checks that it still remembers its live contracts. A lost contract is logged in `metrics.md` as a harness fault, not a play choice.
 
 **Sitting out:** Dyers.
 
@@ -65,7 +74,7 @@ Each seat's card (its mandates) and the bell day are sealed; the referee holds t
 | the Smiths' card | `fae5bf6b7e78f420b6c0a5f6f139cd87f650a04329e0ba4cba5d30be79c755f5` |
 | the Foresters' card | `cedbaed0e80320c69c8f1cd816a6e4b6c843fb3c817fecea88a1e647e6da3dff` |
 | the Tanners' card | `fcbb9352b769c164b0e66d9d884bfd885bc7d5ee4ec788cd01dfc1d877251f21` |
-| the bell | committed once its round is published |
+| the bell: SHA-256(`<day>:<salt>`) | `90d8043369d7f89f73043d2aa146b6ae98087137d7495c49233b60df41c4c6e7` |
 
 ## Rounds
 
@@ -73,19 +82,19 @@ drand quicknet, read as in `../board.md`. Day *k* uses round 33966760 + 5·(*k* 
 
 | Day | Round | Randomness |
 |---|---|---|
-| 1 | 33966760 | not yet published |
-| 2 | 33966765 | not yet published |
-| 3 | 33966770 | not yet published |
-| 4 | 33966775 | not yet published |
-| 5 | 33966780 | not yet published |
-| 6 | 33966785 | not yet published |
-| 7 | 33966790 | not yet published |
-| 8 | 33966795 | not yet published |
-| 9 | 33966800 | not yet published |
-| 10 | 33966805 | not yet published |
-| 11 | 33966810 | not yet published |
-| 12 | 33966815 | not yet published |
-| 13 | 33966820 | not yet published |
+| 1 | 33966760 | `740de7c3c3ff352aa7f1ef25d5f6fe113bdef2212c08ea5ff8b67dbcb9a5cc8c` |
+| 2 | 33966765 | `7e2e9e67abd9a8dbb91c306bcc5230d06fe410e40b81336617e4d52a962be052` |
+| 3 | 33966770 | `894ef6fdc2fc3b205c156de4b105513661397e6ee45185a43f70257a914aceb7` |
+| 4 | 33966775 | `f0a3d8a043de8affe732480c73307821c44a73e41a3b0bd5b500d3cb391c5eb8` |
+| 5 | 33966780 | `0d49810418b4b0147e00cfed038f40caecfcf5c69c6fa33eee8eaba1d3cc48f7` |
+| 6 | 33966785 | `03c035258a0e0523fbf84486d12e724c3adb41645ff4594a63e80a539256507d` |
+| 7 | 33966790 | `675d13010215eda0280e609e212431fdd3b5f44fdbc4476ff89ecc296bbd2ebb` |
+| 8 | 33966795 | `5486b5026b68e30737912087bd4c3c11264c67784e4e01977b72623ad07ecd5e` |
+| 9 | 33966800 | `4d568dd9fb01f7d77fe04ad72267ac7b217023788671e594c332a007006a297a` |
+| 10 | 33966805 | `e54c0753d441c3590c09348ec4c7b7272bcb37d0cb3a4632d1ace9520c6d838b` |
+| 11 | 33966810 | `3a5bf8847a439ce5fdc30f4ceaeeba3912d7b2835a57b65e63ecaaa59c800439` |
+| 12 | 33966815 | `50d9e83ac23cb1ce75f8513435c48241d010884ec3b5c40b4270609c47208034` |
+| 13 | 33966820 | `a477afeddb68adb70d02754fb45daed9e129770cee17928a484a1cf6db7e8426` |
 
 ## Pins
 
