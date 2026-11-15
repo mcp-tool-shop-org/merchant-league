@@ -30,6 +30,15 @@ pub enum RelayError {
     Io(String),
     /// Existing `calls.jsonl` or transcript JSONL was malformed.
     CorruptLog(String),
+    /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call.
+    UnrecordedCharge {
+        /// Total unrecorded credits held in memory for this run.
+        charged_credits: String,
+        /// Redacted per-call summary (`seat`, `day`, `round`, `attempt`, `charged_credits`).
+        entries_summary: String,
+        /// Redacted underlying ledger and side-file I/O error details.
+        detail: String,
+    },
 }
 
 impl fmt::Display for RelayError {
@@ -51,6 +60,14 @@ impl fmt::Display for RelayError {
             RelayError::SeatConfig(msg) => write!(f, "invalid seat file: {msg}"),
             RelayError::Io(msg) => write!(f, "file error: {msg}"),
             RelayError::CorruptLog(msg) => write!(f, "corrupt relay log: {msg}"),
+            RelayError::UnrecordedCharge {
+                charged_credits,
+                entries_summary,
+                detail,
+            } => write!(
+                f,
+                "unrecorded charge {charged_credits} credits could not be persisted to ledger or pending side file ({entries_summary}); do not re-run blind: {detail}"
+            ),
         }
     }
 }

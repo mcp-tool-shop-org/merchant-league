@@ -370,6 +370,12 @@ fn io_err(path: &Path, err: impl fmt::Display, key: Option<&ApiKey>) -> RelayErr
     RelayError::Io(redact_secrets(&format!("{}: {err}", path.display()), key))
 }
 
+const PENDING_CALLS_FILENAME: &str = "calls.pending.jsonl";
+
+fn pending_calls_path(calls_path: &Path) -> PathBuf {
+    calls_path.with_file_name(PENDING_CALLS_FILENAME)
+}
+
 fn append_text(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), RelayError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
@@ -384,8 +390,87 @@ fn append_text(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), Rela
         .map_err(|e| io_err(path, e, key))
 }
 
+fn append_text_synced(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), RelayError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| io_err(path, e, key))?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.flush())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| io_err(path, e, key))
+}
+
+fn filter_unmigrated_entries(
+    ledger_entries: &[CallLogEntry],
+    pending_entries: &[CallLogEntry],
+) -> Vec<CallLogEntry> {
+    let mut matched = vec![false; ledger_entries.len()];
+    let mut out = Vec::new();
+    for p in pending_entries {
+        if let Some(pos) = ledger_entries
+            .iter()
+            .enumerate()
+            .position(|(i, l)| !matched[i] && l == p)
+        {
+            matched[pos] = true;
+        } else {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
+fn write_pending_side_file(
+    pending_path: &Path,
+    new_entries: &[CallLogEntry],
+    key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    if let Some(parent) = pending_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
+    }
+    let mut combined = if pending_path.is_file() {
+        read_calls_file(pending_path, key)?
+    } else {
+        Vec::new()
+    };
+    let extras = filter_unmigrated_entries(&combined, new_entries);
+    combined.extend(extras);
+
+    let mut blob = String::new();
+    for entry in &combined {
+        let line = serde_json::to_string(entry).map_err(|e| io_err(pending_path, e, key))?;
+        blob.push_str(&line);
+        blob.push('\n');
+    }
+
+    let mut file = if pending_path.exists() {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(pending_path)
+            .map_err(|e| io_err(pending_path, e, key))?
+    } else {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(pending_path)
+            .map_err(|e| io_err(pending_path, e, key))?
+    };
+    file.write_all(blob.as_bytes())
+        .and_then(|()| file.flush())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| io_err(pending_path, e, key))
+}
+
 struct CallLedger {
     calls_path: PathBuf,
+    pending_path: PathBuf,
     cap_credits: Option<f64>,
     reserved_in_flight: f64,
     unrecorded_charged_in_memory: f64,
@@ -416,23 +501,48 @@ impl CallLedger {
         cap_credits: Option<f64>,
         redaction_key: Option<&ApiKey>,
     ) -> Result<Self, RelayError> {
+        let pending_path = pending_calls_path(&calls_path);
+        let mut effective_entries = if calls_path.exists() {
+            read_calls_file(&calls_path, redaction_key)?
+        } else {
+            Vec::new()
+        };
+
+        if pending_path.exists() {
+            let pending_entries = read_calls_file(&pending_path, redaction_key)?;
+            let unmigrated = filter_unmigrated_entries(&effective_entries, &pending_entries);
+            if unmigrated.is_empty() {
+                let _ = fs::remove_file(&pending_path);
+            } else {
+                let mut migrated_blob = String::new();
+                for entry in &unmigrated {
+                    let line = serde_json::to_string(entry)
+                        .map_err(|e| io_err(&calls_path, e, redaction_key))?;
+                    migrated_blob.push_str(&line);
+                    migrated_blob.push('\n');
+                }
+                if append_text_synced(&calls_path, &migrated_blob, redaction_key).is_ok() {
+                    let _ = fs::remove_file(&pending_path);
+                }
+                effective_entries.extend(unmigrated);
+            }
+        }
+
         let mut cost_unknown_in_turn = false;
         let mut cost_over_estimate_in_turn = false;
-        if calls_path.exists() {
-            let entries = read_calls_file(&calls_path, redaction_key)?;
-            for entry in &entries {
-                if entry.day == day && entry.round == round {
-                    if entry_marks_cost_unknown(entry) {
-                        cost_unknown_in_turn = true;
-                    }
-                    if entry.outcome == "COST_OVER_ESTIMATE" {
-                        cost_over_estimate_in_turn = true;
-                    }
+        for entry in &effective_entries {
+            if entry.day == day && entry.round == round {
+                if entry_marks_cost_unknown(entry) {
+                    cost_unknown_in_turn = true;
+                }
+                if entry.outcome == "COST_OVER_ESTIMATE" {
+                    cost_over_estimate_in_turn = true;
                 }
             }
         }
         Ok(Self {
             calls_path,
+            pending_path,
             cap_credits,
             reserved_in_flight: 0.0,
             unrecorded_charged_in_memory: 0.0,
@@ -441,6 +551,23 @@ impl CallLedger {
             cost_unknown_in_turn,
             cost_over_estimate_in_turn,
         })
+    }
+
+    fn read_persisted_entries(
+        &self,
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<Vec<CallLogEntry>, RelayError> {
+        let mut entries = if self.calls_path.exists() {
+            read_calls_file(&self.calls_path, redaction_key)?
+        } else {
+            Vec::new()
+        };
+        if self.pending_path.exists() {
+            let pending = read_calls_file(&self.pending_path, redaction_key)?;
+            let unmigrated = filter_unmigrated_entries(&entries, &pending);
+            entries.extend(unmigrated);
+        }
+        Ok(entries)
     }
 
     fn try_reserve(
@@ -458,11 +585,7 @@ impl CallLedger {
             self.reserved_in_flight += seat_max_cost;
             return Ok(PreCallDecision::Reserved);
         };
-        let recorded_sum = if self.calls_path.exists() {
-            sum_charged_credits(&read_calls_file(&self.calls_path, redaction_key)?)?
-        } else {
-            0.0
-        };
+        let recorded_sum = sum_charged_credits(&self.read_persisted_entries(redaction_key)?)?;
         let charged_sum = recorded_sum + self.unrecorded_charged_in_memory;
         if charged_sum + self.reserved_in_flight + seat_max_cost > cap + CAP_EPSILON {
             return Ok(PreCallDecision::CapReached {
@@ -492,7 +615,13 @@ impl CallLedger {
         if over_estimate || entry.outcome == "COST_OVER_ESTIMATE" {
             self.cost_over_estimate_in_turn = true;
         }
-        match self.flush_pending_and_append(entry, redaction_key) {
+        let append_res = serde_json::to_string(entry)
+            .map_err(|e| io_err(&self.calls_path, e, redaction_key))
+            .and_then(|mut line| {
+                line.push('\n');
+                append_text(&self.calls_path, &line, redaction_key)
+            });
+        match append_res {
             Ok(()) => {
                 self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
                 Ok(())
@@ -519,27 +648,85 @@ impl CallLedger {
         if entry.outcome == "COST_OVER_ESTIMATE" {
             self.cost_over_estimate_in_turn = true;
         }
-        self.flush_pending_and_append(entry, redaction_key)
-    }
-
-    fn flush_pending_and_append(
-        &mut self,
-        entry: &CallLogEntry,
-        redaction_key: Option<&ApiKey>,
-    ) -> Result<(), RelayError> {
-        while let Some((held_charge, pending_entry)) = self.pending_unwritten.first().cloned() {
-            let mut pending_line = serde_json::to_string(&pending_entry)
-                .map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
-            pending_line.push('\n');
-            append_text(&self.calls_path, &pending_line, redaction_key)?;
-            self.pending_unwritten.remove(0);
-            self.unrecorded_charged_in_memory =
-                (self.unrecorded_charged_in_memory - held_charge).max(0.0);
-        }
         let mut line =
             serde_json::to_string(entry).map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
         line.push('\n');
         append_text(&self.calls_path, &line, redaction_key)
+    }
+
+    fn finalize_turn(&mut self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        if self.pending_unwritten.is_empty() {
+            return Ok(());
+        }
+
+        let mut last_ledger_err: Option<RelayError> = None;
+        while let Some((held_charge, pending_entry)) = self.pending_unwritten.first().cloned() {
+            let mut line = match serde_json::to_string(&pending_entry) {
+                Ok(s) => s,
+                Err(e) => {
+                    last_ledger_err = Some(io_err(&self.calls_path, e, redaction_key));
+                    break;
+                }
+            };
+            line.push('\n');
+            match append_text_synced(&self.calls_path, &line, redaction_key) {
+                Ok(()) => {
+                    self.pending_unwritten.remove(0);
+                    self.unrecorded_charged_in_memory =
+                        (self.unrecorded_charged_in_memory - held_charge).max(0.0);
+                }
+                Err(e) => {
+                    last_ledger_err = Some(e);
+                    break;
+                }
+            }
+        }
+
+        if self.pending_unwritten.is_empty() {
+            return Ok(());
+        }
+
+        let remaining: Vec<CallLogEntry> = self
+            .pending_unwritten
+            .iter()
+            .map(|(_, entry)| entry.clone())
+            .collect();
+        match write_pending_side_file(&self.pending_path, &remaining, redaction_key) {
+            Ok(()) => {
+                self.pending_unwritten.clear();
+                self.unrecorded_charged_in_memory = 0.0;
+                Ok(())
+            }
+            Err(side_err) => {
+                let total_unrecorded: f64 = self.pending_unwritten.iter().map(|(h, _)| *h).sum();
+                let entries_summary = self
+                    .pending_unwritten
+                    .iter()
+                    .map(|(held, e)| {
+                        redact_secrets(
+                            &format!(
+                                "seat={} day={} round={} attempt={} charged_credits={held:.6}",
+                                e.guild, e.day, e.round, e.attempt
+                            ),
+                            redaction_key,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ledger_detail = last_ledger_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "ledger append failed".to_owned());
+                let detail = redact_secrets(
+                    &format!("ledger ({ledger_detail}); side file ({side_err})"),
+                    redaction_key,
+                );
+                Err(RelayError::UnrecordedCharge {
+                    charged_credits: format!("{total_unrecorded:.6}"),
+                    entries_summary,
+                    detail,
+                })
+            }
+        }
     }
 }
 
@@ -715,6 +902,11 @@ pub fn run_turn(
         slots.sort_by_key(|(idx, _)| *idx);
         slots.into_iter().map(|(_, r)| r).collect()
     });
+
+    {
+        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+        guard.finalize_turn(redaction_key)?;
+    }
 
     Ok(TurnSummary { reports })
 }
