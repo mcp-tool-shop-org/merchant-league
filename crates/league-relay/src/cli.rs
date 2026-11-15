@@ -11,7 +11,7 @@ use crate::seats::{SeatFile, validate_vm_host_allowance};
 use crate::secret::{
     ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
     MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, redact_secrets,
-    redact_secrets_with_limit, truncate_after_redaction,
+    redact_secrets_multi_with_limit, truncate_after_redaction,
 };
 use crate::transport::{
     LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
@@ -105,10 +105,16 @@ where
         return Ok(CliCommand::Help);
     }
     if tokens[0] != "turn" {
-        let sub_name = sanitize_flag_name(&tokens[0], redaction_key);
-        return Err(RelayError::Usage(format!(
-            "unknown subcommand '{sub_name}' (expected 'turn')"
-        )));
+        let first_flag = tokens[0].split('=').next().unwrap_or(&tokens[0]);
+        if is_forbidden_key_flag(first_flag) || looks_like_cli_secret(&tokens[0]) {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
+                    .to_owned(),
+            ));
+        }
+        return Err(RelayError::Usage(
+            "unknown subcommand (expected 'turn' or '--help')".to_owned(),
+        ));
     }
 
     let mut game_dir: Option<PathBuf> = None;
@@ -136,7 +142,7 @@ where
             None => (raw_arg.as_str(), None),
         };
 
-        if is_forbidden_key_flag(flag) {
+        if is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_arg) {
             return Err(RelayError::SecretInForbiddenPlace(
                 "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
                     .to_owned(),
@@ -229,6 +235,12 @@ where
                 idx += step;
             }
             other => {
+                if !other.starts_with('-') {
+                    return Err(RelayError::Usage(
+                        "unexpected positional argument (all options require a '--flag')"
+                            .to_owned(),
+                    ));
+                }
                 return Err(RelayError::Usage(format!(
                     "unknown option '{}'",
                     sanitize_flag_name(other, redaction_key)
@@ -303,6 +315,14 @@ fn is_forbidden_key_flag(flag: &str) -> bool {
     ) || lower.ends_with("-api-key")
 }
 
+fn looks_like_cli_secret(raw: &str) -> bool {
+    let lower = raw.trim().to_ascii_lowercase();
+    lower.starts_with("sk-")
+        || lower.contains("sk-or-")
+        || lower.contains("sk-proj-")
+        || lower.starts_with("bearer ")
+}
+
 fn sanitize_flag_name(raw: &str, redaction_key: Option<&ApiKey>) -> String {
     let scrubbed_raw = redact_secrets(raw, redaction_key);
     let head = scrubbed_raw.split('=').next().unwrap_or(&scrubbed_raw);
@@ -345,7 +365,10 @@ where
     E: FnMut(&str) -> Option<String>,
 {
     let env_key = ApiKey::from_env_reader(|k| env_reader(k));
-    let mut extra_key_for_redaction: Option<ApiKey> = None;
+    let mut redaction_keys: Vec<ApiKey> = Vec::new();
+    if let Ok(ref primary) = env_key {
+        redaction_keys.push(primary.clone());
+    }
     let mut any_forbidden_local_key = env_key.is_ok();
     for env_name in FORBIDDEN_LOCAL_KEY_ENVS {
         if *env_name == OPENROUTER_API_KEY_ENV {
@@ -355,18 +378,18 @@ where
             && !val.trim().is_empty()
         {
             any_forbidden_local_key = true;
-            if extra_key_for_redaction.is_none() {
-                extra_key_for_redaction = ApiKey::from_env_reader(|_| Some(val)).ok();
+            if let Ok(extra) = ApiKey::from_env_reader(|_| Some(val)) {
+                redaction_keys.push(extra);
             }
         }
     }
-    let redact_ref = env_key.as_ref().ok().or(extra_key_for_redaction.as_ref());
+    let redact_ref = redaction_keys.first();
 
     match run_cli_inner(args, &env_key, any_forbidden_local_key, redact_ref, stdout) {
         Ok(Some(summary)) => {
-            let rendered = redact_secrets_with_limit(
+            let rendered = redact_secrets_multi_with_limit(
                 &summary.format_paths_and_hashes(),
-                redact_ref,
+                &redaction_keys,
                 MAX_UNRECORDED_CHARGE_SCAN_BYTES,
             );
             let _ = write!(stdout, "{rendered}");
@@ -382,7 +405,7 @@ where
             let _ = writeln!(
                 stderr,
                 "error: {}",
-                redact_secrets_with_limit(&e.to_string(), redact_ref, scan_limit)
+                redact_secrets_multi_with_limit(&e.to_string(), &redaction_keys, scan_limit)
             );
             exit_code
         }

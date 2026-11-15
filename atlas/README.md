@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit da74d10 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 1c4ea4c by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,13 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 10 parts, mostly Rust (324 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (ce1bf80)
+## What changed since 2026-11-15 (da74d10)
 
-Nothing structural changed since 2026-11-15; 1 file changed content.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `SecretInForbiddenPlace`, before `Usage`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `InvalidCap`, after `parse`.
+- In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `redact_secrets`.
+- And 1 more change to the order of work.
+- 10 files changed content, across 2 parts.
 
 ## What comes in
 
@@ -49,15 +53,15 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 9 of 9 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 9 of 10 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 8 of 9 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 8 of 9 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 7 of 8 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 8 of 10 commits.
 - **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 9 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 1 source file reaches 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 

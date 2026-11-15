@@ -15,9 +15,10 @@ use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
 use crate::wording::{
-    ACTIVE_WORDING_ARM, EMC_VERBATIM_TURN_WINDOW, cap_scratchpad_tokens, extract_scratchpad_update,
-    format_negotiation_block, format_scratchpad_section, json_escape_untrusted_str,
-    load_negotiation_inputs_if_present, strip_thinking_tags, wording_slot,
+    ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
+    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_negotiation_block,
+    format_scratchpad_section, json_escape_untrusted_str, load_negotiation_inputs_if_present,
+    strip_thinking_tags, wording_slot,
 };
 use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
@@ -202,7 +203,7 @@ impl ResponseFormatConfig {
                 };
                 (n, strict_opt, obj["schema"].clone())
             } else {
-                ("seat_turn_response".to_owned(), None, val)
+                (wording_slot("default_schema_name").to_owned(), None, val)
             };
 
         if name.is_empty()
@@ -225,6 +226,11 @@ impl ResponseFormatConfig {
             schema,
         })
     }
+
+    /// Canonical SHA-256 digest of this validated `response_format` configuration (`B-9`).
+    pub fn canonical_sha256(&self) -> String {
+        sha256_hex(&serde_json::to_vec(self).unwrap_or_default())
+    }
 }
 
 /// Per-seat summary persisted inside [`GameSetupRecord`].
@@ -242,7 +248,7 @@ pub struct SetupSeatRecord {
     pub reasoning: Option<SeatReasoningConfig>,
 }
 
-/// Per-game relay setup record persisted at `<game-dir>/relay/setup.json` (`B4.1` / `C5`).
+/// Per-game relay setup record persisted at `<game-dir>/relay/setup.json` (`B4.1` / `C5` / `B-9`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameSetupRecord {
     /// Prompt memory delivery mode used by this game (`"snapshot"`, `"emc"`, or `"full"`).
@@ -255,6 +261,9 @@ pub struct GameSetupRecord {
     /// Optional structured output schema name if `--response-schema` was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_name: Option<String>,
+    /// Optional canonical SHA-256 digest of `--response-schema` (`B-9`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_schema_sha256: Option<String>,
     /// Roster snapshot recorded for this game.
     #[serde(default)]
     pub seats: Vec<SetupSeatRecord>,
@@ -1070,6 +1079,10 @@ fn build_setup_record(config: &TurnConfig) -> GameSetupRecord {
         cost_unit: config.seats.cost_unit(),
         wording_arm: ACTIVE_WORDING_ARM.to_owned(),
         response_schema_name: config.response_format.as_ref().map(|r| r.name.clone()),
+        response_schema_sha256: config
+            .response_format
+            .as_ref()
+            .map(ResponseFormatConfig::canonical_sha256),
         seats,
     }
 }
@@ -1118,6 +1131,34 @@ fn ensure_game_setup(
                 setup_path.display(),
                 desired.wording_arm
             )));
+        }
+        if existing.response_schema_name != desired.response_schema_name
+            || existing.response_schema_sha256 != desired.response_schema_sha256
+        {
+            return Err(RelayError::Usage(format!(
+                "game setup recorded response_schema {:?} (sha256 {:?}) in {}, refusing mid-game change to {:?} (sha256 {:?})",
+                existing.response_schema_name,
+                existing.response_schema_sha256,
+                setup_path.display(),
+                desired.response_schema_name,
+                desired.response_schema_sha256
+            )));
+        }
+        for desired_seat in &desired.seats {
+            if let Some(existing_seat) = existing
+                .seats
+                .iter()
+                .find(|s| s.guild.eq_ignore_ascii_case(&desired_seat.guild))
+                && existing_seat.reasoning != desired_seat.reasoning
+            {
+                return Err(RelayError::SeatConfig(format!(
+                    "game setup recorded reasoning pin {:?} for seat '{}' in {}, refusing mid-game change to {:?}",
+                    existing_seat.reasoning,
+                    desired_seat.guild,
+                    setup_path.display(),
+                    desired_seat.reasoning
+                )));
+            }
         }
         // Skip rewriting when invariants already match so read-only `relay/` re-runs succeed.
         if existing.cost_unit.is_some() || desired.cost_unit.is_none() {
@@ -2169,6 +2210,7 @@ pub fn prepend_wrapper(wrapper: &str, block: &str) -> String {
 struct AutomatedSeatView<'a> {
     backend_kind: BackendKind,
     endpoint_url: &'a str,
+    tokenize_url: Option<&'a str>,
     model: &'a str,
     temperature: f64,
     max_output_tokens: u32,
@@ -2228,9 +2270,22 @@ pub fn run_turn(
         }
         let normalized_allowed =
             crate::seats::normalize_allowed_vm_hosts(&config.allowed_vm_hosts)?;
+        let mut seen_local_hosts = HashSet::new();
         for seat in &config.seats.seats {
             if let SeatBackend::Local(local_seat) = &seat.backend {
-                validate_local_base_url(&seat.guild, &local_seat.base_url, &normalized_allowed)?;
+                let (_, host) = validate_local_base_url(
+                    &seat.guild,
+                    &local_seat.base_url,
+                    &normalized_allowed,
+                )?;
+                seen_local_hosts.insert(host);
+            }
+        }
+        for allowed_host in &normalized_allowed {
+            if !seen_local_hosts.contains(allowed_host) {
+                return Err(RelayError::SeatConfig(format!(
+                    "--allow-vm-host '{allowed_host}' is not referenced by any 'local' seat in the seat file"
+                )));
             }
         }
     } else if config.seats.has_openrouter_seat() && config.cap_gpu_secs.is_some() {
@@ -2369,6 +2424,7 @@ fn view_openrouter_seat<'a>(
     AutomatedSeatView {
         backend_kind: BackendKind::Openrouter,
         endpoint_url,
+        tokenize_url: None,
         model: &seat.model,
         temperature: seat.temperature,
         max_output_tokens: seat.max_output_tokens,
@@ -2383,6 +2439,7 @@ fn view_local_seat(seat: &LocalSeat) -> AutomatedSeatView<'_> {
     AutomatedSeatView {
         backend_kind: BackendKind::Local,
         endpoint_url: &seat.endpoint_url,
+        tokenize_url: Some(&seat.tokenize_url),
         model: &seat.model,
         temperature: seat.temperature,
         max_output_tokens: seat.max_output_tokens,
@@ -2396,8 +2453,7 @@ fn view_local_seat(seat: &LocalSeat) -> AutomatedSeatView<'_> {
 fn build_system_message(raw_wrapper: &str, mode: MemoryMode) -> String {
     match mode {
         MemoryMode::Snapshot => prepend_wrapper(raw_wrapper, wording_slot("system_snapshot_note")),
-        MemoryMode::Emc => prepend_wrapper(raw_wrapper, wording_slot("system_emc_note")),
-        MemoryMode::Full => raw_wrapper.to_owned(),
+        MemoryMode::Emc | MemoryMode::Full => raw_wrapper.to_owned(),
     }
 }
 
@@ -2406,20 +2462,27 @@ fn format_emc_compacted_older_turns(
     older_turns: &[(TranscriptEntry, TranscriptEntry)],
     redaction_key: Option<&ApiKey>,
 ) -> String {
+    let k_day = wording_slot("emc_key_day");
+    let k_round = wording_slot("emc_key_round");
+    let k_excerpt = wording_slot("emc_key_reply_excerpt");
     let mut lines = Vec::with_capacity(older_turns.len());
     for (u, a) in older_turns {
-        let excerpt_capped = cap_scratchpad_tokens(&a.content);
-        let excerpt_short: String = excerpt_capped.chars().take(160).collect();
+        let excerpt_short: String = a
+            .content
+            .trim()
+            .chars()
+            .take(EMC_OLDER_REPLY_EXCERPT_CHARS)
+            .collect();
         let escaped = json_escape_untrusted_str(&excerpt_short);
         lines.push(format!(
-            "{{\"day\":\"{}\",\"round\":\"{}\",\"reply_excerpt\":{escaped}}}",
+            "{{\"{k_day}\":\"{}\",\"{k_round}\":\"{}\",\"{k_excerpt}\":{escaped}}}",
             u.day, u.round
         ));
     }
-    let body = cap_scratchpad_tokens(&lines.join("\n"));
+    let body = lines.join("\n");
     let _ =
         fs::write(emc_path, format!("{body}\n")).map_err(|e| io_err(emc_path, e, redaction_key));
-    format!("{}\n{body}", wording_slot("emc_summary_header"))
+    format!("{}\n{body}", wording_slot("emc_older_replies_header"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2495,29 +2558,37 @@ fn run_single_automated_seat(
 
     let system_wire = build_system_message(base_wrapper, config.memory_mode);
 
-    let mut composed_sections: Vec<String> = Vec::new();
-    if config.memory_mode == MemoryMode::Emc && loaded.turns.len() > EMC_VERBATIM_TURN_WINDOW {
-        let older = &loaded.turns[..loaded.turns.len() - EMC_VERBATIM_TURN_WINDOW];
-        composed_sections.push(format_emc_compacted_older_turns(
-            &emc_path,
-            older,
-            redaction_key,
-        ));
-    }
-    composed_sections.push(raw_block);
+    let older_replies_sec =
+        if config.memory_mode == MemoryMode::Emc && loaded.turns.len() > EMC_VERBATIM_TURN_WINDOW {
+            let older = &loaded.turns[..loaded.turns.len() - EMC_VERBATIM_TURN_WINDOW];
+            Some(format_emc_compacted_older_turns(
+                &emc_path,
+                older,
+                redaction_key,
+            ))
+        } else {
+            None
+        };
 
-    if let Some(neg) = &negotiation_opt {
-        match format_negotiation_block(neg) {
-            Ok(neg_block) => composed_sections.push(neg_block),
+    let seated_guilds: Vec<&str> = config
+        .seats
+        .seats
+        .iter()
+        .map(|s| s.guild.as_str())
+        .collect();
+    let negotiation_sec = match &negotiation_opt {
+        Some(neg) => match format_negotiation_block(neg, &seated_guilds) {
+            Ok(neg_block) => Some(neg_block),
             Err(e) => {
                 return SeatOutcome::SeatError {
                     detail: redact_secrets(&e.to_string(), redaction_key),
                 };
             }
-        }
-    }
+        },
+        None => None,
+    };
 
-    if config.memory_mode == MemoryMode::Snapshot {
+    let scratchpad_sec = if config.memory_mode == MemoryMode::Snapshot {
         let saved_pad = if scratchpad_path.exists() {
             match fs::read_to_string(&scratchpad_path) {
                 Ok(s) => Some(s),
@@ -2530,7 +2601,66 @@ fn run_single_automated_seat(
         } else {
             None
         };
-        composed_sections.push(format_scratchpad_section(saved_pad.as_deref()));
+        if let Some(trimmed_saved) = saved_pad.as_deref().map(str::trim)
+            && !trimmed_saved.is_empty()
+        {
+            let Some(tokenize_url) = seat.tokenize_url else {
+                return SeatOutcome::SeatError {
+                    detail:
+                        "snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
+                            .to_owned(),
+                };
+            };
+            match transport.count_tokens(tokenize_url, seat.model, trimmed_saved, seat.timeout) {
+                Ok(token_count) if token_count > MAX_SCRATCHPAD_TOKENS => {
+                    return SeatOutcome::SeatError {
+                        detail: format!(
+                            "saved scratchpad for '{guild}' has {token_count} tokens, exceeding the {MAX_SCRATCHPAD_TOKENS}-token cap"
+                        ),
+                    };
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    return SeatOutcome::SeatError {
+                        detail: redact_secrets(
+                            &format!(
+                                "cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
+                            ),
+                            redaction_key,
+                        ),
+                    };
+                }
+            }
+        }
+        Some(format_scratchpad_section(saved_pad.as_deref()))
+    } else {
+        None
+    };
+
+    let mut composed_sections: Vec<String> = Vec::new();
+    for section_key in wording_slot("user_section_order").split(',') {
+        match section_key {
+            "older_replies" => {
+                if let Some(ref s) = older_replies_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            "turn_prompt" => composed_sections.push(raw_block.clone()),
+            "no_new_deals" => {
+                if let Some(ref s) = negotiation_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            "other_seats_messages" => {
+                // Emitted immediately after `no_new_deals` inside `format_negotiation_block`.
+            }
+            "scratchpad" => {
+                if let Some(ref s) = scratchpad_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            _ => {}
+        }
     }
 
     let user_content = composed_sections.join("\n\n");
@@ -2768,32 +2898,146 @@ fn run_single_automated_seat(
         let wall_secs = elapsed.as_secs_f64();
         let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
 
-        match evaluate_call_result(
+        let raw_evaluated = evaluate_call_result(
             call_result,
             exclude_thinking,
             config.response_format.as_ref(),
             redaction_key,
-        ) {
+        );
+
+        let mut validated_scratchpad_update: Option<String> = None;
+        let evaluated = match raw_evaluated {
+            EvaluatedCall::Success {
+                reply_content,
+                persisted_reasoning,
+                model_returned,
+                usage,
+            } if config.memory_mode == MemoryMode::Snapshot => {
+                match extract_scratchpad_update(&reply_content) {
+                    None => EvaluatedCall::Success {
+                        reply_content,
+                        persisted_reasoning,
+                        model_returned,
+                        usage,
+                    },
+                    Some(candidate_pad) if candidate_pad.is_empty() => {
+                        validated_scratchpad_update = Some(String::new());
+                        EvaluatedCall::Success {
+                            reply_content,
+                            persisted_reasoning,
+                            model_returned,
+                            usage,
+                        }
+                    }
+                    Some(candidate_pad) => {
+                        let tokenize_res = match seat.tokenize_url {
+                            Some(tok_url) => transport.count_tokens(
+                                tok_url,
+                                seat.model,
+                                &candidate_pad,
+                                seat.timeout,
+                            ),
+                            None => Err(TransportError::Network(
+                                "backend has no /tokenize endpoint".to_owned(),
+                            )),
+                        };
+                        match tokenize_res {
+                            Ok(pad_tokens) if pad_tokens <= MAX_SCRATCHPAD_TOKENS => {
+                                validated_scratchpad_update = Some(candidate_pad);
+                                EvaluatedCall::Success {
+                                    reply_content,
+                                    persisted_reasoning,
+                                    model_returned,
+                                    usage,
+                                }
+                            }
+                            Ok(pad_tokens) => EvaluatedCall::DeliveryFailure {
+                                reason: format!(
+                                    "scratchpad has {pad_tokens} tokens, exceeding {MAX_SCRATCHPAD_TOKENS}-token cap"
+                                ),
+                                model_returned,
+                                usage,
+                                is_late_reply: false,
+                            },
+                            Err(tok_err) => {
+                                let detail = redact_secrets(
+                                    &format!(
+                                        "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
+                                    ),
+                                    redaction_key,
+                                );
+                                let (valid_cost, charged_credits, over_estimate, _) =
+                                    compute_call_accounting(
+                                        seat.cost_unit,
+                                        usage.cost,
+                                        wall_secs,
+                                        seat.max_per_call_spend,
+                                    );
+                                let entry = CallLogEntry {
+                                    time_utc: now_utc_rfc3339(),
+                                    day: config.day.clone(),
+                                    round: config.round,
+                                    guild: guild.to_owned(),
+                                    attempt,
+                                    trigger: trigger.to_owned(),
+                                    model_requested: seat.model.to_owned(),
+                                    model_returned,
+                                    request_body_sha256: request_body_sha256.clone(),
+                                    reply_sha256: None,
+                                    prompt_tokens: usage.prompt_tokens,
+                                    completion_tokens: usage.completion_tokens,
+                                    total_tokens: usage.total_tokens,
+                                    reasoning_tokens: usage.effective_reasoning_tokens(),
+                                    cost_unit: seat.cost_unit,
+                                    wall_secs: Some(wall_secs),
+                                    cost: valid_cost,
+                                    charged_credits,
+                                    latency_ms,
+                                    outcome: if over_estimate {
+                                        "COST_OVER_ESTIMATE".to_owned()
+                                    } else {
+                                        "TOKENIZE_UNAVAILABLE".to_owned()
+                                    },
+                                    error: Some(detail.clone()),
+                                    reservation_id: Some(reservation_id.clone()),
+                                };
+                                let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                                if let Err(e) = guard.finish_call_and_record(
+                                    &reservation_id,
+                                    seat.max_per_call_spend,
+                                    &entry,
+                                    over_estimate,
+                                    redaction_key,
+                                ) {
+                                    return SeatOutcome::SeatError {
+                                        detail: e.to_string(),
+                                    };
+                                }
+                                return SeatOutcome::SeatError { detail };
+                            }
+                        }
+                    }
+                }
+            }
+            other => other,
+        };
+
+        match evaluated {
             EvaluatedCall::Success {
                 reply_content,
                 persisted_reasoning,
                 model_returned,
                 usage,
             } => {
-                let (valid_cost, charged_credits) = match seat.cost_unit {
-                    CostUnit::Credits => {
-                        let vc = sanitize_cost(usage.cost);
-                        (vc, vc.unwrap_or(seat.max_per_call_spend))
-                    }
-                    CostUnit::GpuSeconds => {
-                        let vc = sanitize_cost(Some(wall_secs));
-                        (vc, vc.unwrap_or(seat.max_per_call_spend))
-                    }
-                };
-                let over_estimate =
-                    valid_cost.is_some_and(|c| c > seat.max_per_call_spend + CAP_EPSILON);
+                let (valid_cost, charged_credits, over_estimate, observed_cost) =
+                    compute_call_accounting(
+                        seat.cost_unit,
+                        usage.cost,
+                        wall_secs,
+                        seat.max_per_call_spend,
+                    );
                 let reply_sha256 = sha256_hex(reply_content.as_bytes());
-                let (outcome_str, err_opt) = match (over_estimate, valid_cost) {
+                let (outcome_str, err_opt) = match (over_estimate, observed_cost) {
                     (true, Some(c)) => (
                         "COST_OVER_ESTIMATE".to_owned(),
                         Some(format!(
@@ -2852,9 +3096,7 @@ fn run_single_automated_seat(
                         detail: e.to_string(),
                     };
                 }
-                if config.memory_mode == MemoryMode::Snapshot
-                    && let Some(updated_pad) = extract_scratchpad_update(&reply_content)
-                {
+                if let Some(updated_pad) = validated_scratchpad_update {
                     if let Some(parent) = scratchpad_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
@@ -2899,18 +3141,12 @@ fn run_single_automated_seat(
                 usage,
                 is_late_reply,
             } => {
-                let (valid_cost, charged_credits) = match seat.cost_unit {
-                    CostUnit::Credits => {
-                        let vc = sanitize_cost(usage.cost);
-                        (vc, vc.unwrap_or(seat.max_per_call_spend))
-                    }
-                    CostUnit::GpuSeconds => {
-                        let vc = sanitize_cost(Some(wall_secs));
-                        (vc, vc.unwrap_or(seat.max_per_call_spend))
-                    }
-                };
-                let over_estimate =
-                    valid_cost.is_some_and(|c| c > seat.max_per_call_spend + CAP_EPSILON);
+                let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
+                    seat.cost_unit,
+                    usage.cost,
+                    wall_secs,
+                    seat.max_per_call_spend,
+                );
                 let outcome_label = if is_late_reply {
                     "LATE_DISCARDED"
                 } else if over_estimate {
@@ -2969,6 +3205,32 @@ fn run_single_automated_seat(
     }
 
     unreachable!("two-attempt loop always returns on attempt 2")
+}
+
+fn compute_call_accounting(
+    cost_unit: CostUnit,
+    usage_cost: Option<f64>,
+    wall_secs: f64,
+    max_per_call_spend: f64,
+) -> (Option<f64>, f64, bool, Option<f64>) {
+    match cost_unit {
+        CostUnit::Credits => {
+            let vc = sanitize_cost(usage_cost);
+            let over = vc.is_some_and(|c| c > max_per_call_spend + CAP_EPSILON);
+            (vc, vc.unwrap_or(max_per_call_spend), over, vc)
+        }
+        CostUnit::GpuSeconds => {
+            let raw_wall = sanitize_cost(Some(wall_secs));
+            let over = raw_wall.is_some_and(|w| w > max_per_call_spend + CAP_EPSILON);
+            let clamped = raw_wall.map(|w| w.min(max_per_call_spend));
+            (
+                clamped,
+                clamped.unwrap_or(max_per_call_spend),
+                over,
+                raw_wall,
+            )
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

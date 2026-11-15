@@ -15,11 +15,20 @@ use std::fmt;
 /// Name of the sole environment variable from which the OpenRouter key is read.
 pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
-/// Environment variables checked and refused whenever the local OpenAI-compatible transport runs.
-pub const FORBIDDEN_LOCAL_KEY_ENVS: &[&str] =
-    &["OPENROUTER_API_KEY", "OPENAI_API_KEY", "VLLM_API_KEY"];
+/// Environment variables checked (including common case variants, `C-6`) and refused whenever
+/// the local OpenAI-compatible transport runs.
+pub const FORBIDDEN_LOCAL_KEY_ENVS: &[&str] = &[
+    "OPENROUTER_API_KEY",
+    "openrouter_api_key",
+    "OPENAI_API_KEY",
+    "openai_api_key",
+    "VLLM_API_KEY",
+    "vllm_api_key",
+    "LOCAL_API_KEY",
+    "local_api_key",
+];
 
-/// Placeholder substituted whenever a key or bearer token is scrubbed.
+/// Placeholder substituted whenever a key or authorization credential is scrubbed.
 pub const REDACTED_MARKER: &str = "<REDACTED_API_KEY>";
 
 /// An OpenRouter API key read from `OPENROUTER_API_KEY`. Never printed.
@@ -181,16 +190,26 @@ pub fn cap_utf8_bytes(input: &str, max_bytes: usize) -> &str {
     &input[..end]
 }
 
-/// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
-/// `8+` character substring of `key`), `Bearer <token>`, or `sk-or-...` tokens.
-pub fn redact_secrets_with_limit(input: &str, key: Option<&ApiKey>, max_bytes: usize) -> String {
+/// Cap `input` at `max_bytes` and scrub any occurrence of every key in `keys`
+/// (including any `8+` character substring), `Bearer <token>`, `sk-or-...`, or `sk-proj-...` tokens (`C-7`).
+pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
     let bounded = cap_utf8_bytes(input, max_bytes);
-    let scrubbed = match key {
-        Some(k) => redact_key_substrings(bounded, k.secret_str()),
-        None => bounded.to_owned(),
-    };
+    let mut scrubbed = bounded.to_owned();
+    for k in keys {
+        scrubbed = redact_key_substrings(&scrubbed, k.secret_str());
+    }
     let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
-    redact_prefixed_token(&scrubbed, "sk-or-", false)
+    let scrubbed = redact_prefixed_token(&scrubbed, "sk-or-", false);
+    redact_prefixed_token(&scrubbed, "sk-proj-", false)
+}
+
+/// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
+/// `8+` character substring of `key`), `Bearer <token>`, `sk-or-...`, or `sk-proj-...` tokens.
+pub fn redact_secrets_with_limit(input: &str, key: Option<&ApiKey>, max_bytes: usize) -> String {
+    match key {
+        Some(k) => redact_secrets_multi_with_limit(input, std::slice::from_ref(k), max_bytes),
+        None => redact_secrets_multi_with_limit(input, &[], max_bytes),
+    }
 }
 
 /// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`) and scrub any occurrence

@@ -148,7 +148,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "5c83f6c29f8ba108197c4f6eba99f136fe7c15b9f47f4c9af00e2c2ac1b04077",
+          "hash": "7e8acfe0a19cbfba03d530d82233c69bdd44620d5b79547b7ba6bfae741f0f6c",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -1182,7 +1182,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "7a92624155674e6dd77066c4947ba8712249df2fa1cb0ced751322450fd5a722",
+          "hash": "20d77e480549624963be89e6b12bcdcb803fa25cf5aa8fdad4554b8acd555406",
           "path": "CHANGELOG.md"
         },
         {
@@ -1838,7 +1838,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "da74d108cbf1532b8bcff344298ca721cebca2e7",
+    "commit": "1c4ea4c8d86b759b98a2de3ca433f3d192918b15",
     "tracked": 482
   },
   "landings": [
@@ -2608,55 +2608,65 @@
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 109
+          "line": 110
         },
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 140
+          "line": 115
         },
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 149
+          "line": 146
         },
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 232
+          "line": 155
         },
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 241
+          "line": 239
         },
         {
           "in": "parse_args_with_key",
           "kind": "err",
-          "line": 246
+          "line": 244
+        },
+        {
+          "in": "parse_args_with_key",
+          "kind": "err",
+          "line": 253
+        },
+        {
+          "in": "parse_args_with_key",
+          "kind": "err",
+          "line": 258
         },
         {
           "in": "take_flag_value",
           "kind": "err",
-          "line": 282
+          "line": 294
         },
         {
           "in": "post_chat_completions",
           "kind": "err",
-          "line": 322
+          "line": 342
         },
         {
           "in": "execute_cli",
           "kind": "match-err",
-          "line": 376
+          "line": 399
         },
         {
           "in": "run_cli_inner",
           "kind": "err",
-          "line": 418
+          "line": 441
         }
       ],
-      "hash": "abdb64bfc1932101922196ca5f39fc04e8fa8969dc07d30c22f699d0ed91d818",
+      "hash": "3a4a2b7877bf8bb6285089f1c44502057dd36ef03ca386e9d4f10ba589082887",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/relay.rs",
@@ -2679,26 +2689,18 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 307,
-              "name": "redact_secrets",
+              "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
+              "line": 110,
+              "name": "SecretInForbiddenPlace",
+              "receiver": "RelayError",
               "target": {
-                "file": "crates/league-relay/src/secret.rs"
+                "file": "crates/league-relay/src/error.rs"
               },
-              "via": "sanitize_flag_name"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 309,
-              "name": "truncate_after_redaction",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "sanitize_flag_name"
-            },
-            {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 109,
+              "line": 115,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2707,7 +2709,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 119,
+              "line": 125,
               "name": "default",
               "receiver": "MemoryMode",
               "target": {
@@ -2716,8 +2718,8 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "is_forbidden_key_flag(flag)",
-              "line": 140,
+              "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
+              "line": 146,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -2727,7 +2729,7 @@
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 149,
+              "line": 155,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2736,7 +2738,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 282,
+              "line": 294,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2745,7 +2747,7 @@
               "via": "take_flag_value"
             },
             {
-              "line": 161,
+              "line": 167,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2753,7 +2755,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 167,
+              "line": 173,
               "name": "parse",
               "receiver": "Round",
               "target": {
@@ -2762,7 +2764,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 182,
+              "line": 188,
               "name": "parse",
               "receiver": "MemoryMode",
               "target": {
@@ -2771,7 +2773,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 197,
+              "line": 203,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
@@ -2780,7 +2782,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 220,
+              "line": 226,
               "name": "validate_vm_host_allowance",
               "target": {
                 "file": "crates/league-relay/src/seats.rs"
@@ -2788,7 +2790,33 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 232,
+              "branch": "!other.starts_with('-')",
+              "line": 239,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 327,
+              "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 329,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 244,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2798,7 +2826,7 @@
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 241,
+              "line": 253,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2808,7 +2836,7 @@
             },
             {
               "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
-              "line": 246,
+              "line": 258,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2817,7 +2845,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 253,
+              "line": 265,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2843,26 +2871,17 @@
               }
             },
             {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 307,
-              "name": "redact_secrets",
+              "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
+              "line": 110,
+              "name": "SecretInForbiddenPlace",
+              "receiver": "RelayError",
               "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "sanitize_flag_name"
+                "file": "crates/league-relay/src/error.rs"
+              }
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 309,
-              "name": "truncate_after_redaction",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "sanitize_flag_name"
-            },
-            {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 109,
+              "line": 115,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2870,7 +2889,7 @@
               }
             },
             {
-              "line": 119,
+              "line": 125,
               "name": "default",
               "receiver": "MemoryMode",
               "target": {
@@ -2878,8 +2897,8 @@
               }
             },
             {
-              "branch": "is_forbidden_key_flag(flag)",
-              "line": 140,
+              "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
+              "line": 146,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -2888,7 +2907,7 @@
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 149,
+              "line": 155,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2896,7 +2915,7 @@
               }
             },
             {
-              "line": 282,
+              "line": 294,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2905,14 +2924,14 @@
               "via": "take_flag_value"
             },
             {
-              "line": 161,
+              "line": 167,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               }
             },
             {
-              "line": 167,
+              "line": 173,
               "name": "parse",
               "receiver": "Round",
               "target": {
@@ -2920,7 +2939,7 @@
               }
             },
             {
-              "line": 182,
+              "line": 188,
               "name": "parse",
               "receiver": "MemoryMode",
               "target": {
@@ -2928,7 +2947,7 @@
               }
             },
             {
-              "line": 197,
+              "line": 203,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
@@ -2936,14 +2955,39 @@
               }
             },
             {
-              "line": 220,
+              "line": 226,
               "name": "validate_vm_host_allowance",
               "target": {
                 "file": "crates/league-relay/src/seats.rs"
               }
             },
             {
-              "line": 232,
+              "branch": "!other.starts_with('-')",
+              "line": 239,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "line": 327,
+              "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 329,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 244,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2952,7 +2996,7 @@
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 241,
+              "line": 253,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2961,7 +3005,7 @@
             },
             {
               "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
-              "line": 246,
+              "line": 258,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2969,7 +3013,7 @@
               }
             },
             {
-              "line": 253,
+              "line": 265,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2985,7 +3029,7 @@
         {
           "calls": [
             {
-              "line": 282,
+              "line": 294,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3001,14 +3045,14 @@
         {
           "calls": [
             {
-              "line": 307,
+              "line": 327,
               "name": "redact_secrets",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
               }
             },
             {
-              "line": 309,
+              "line": 329,
               "name": "truncate_after_redaction",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
@@ -3023,7 +3067,7 @@
         {
           "calls": [
             {
-              "line": 347,
+              "line": 367,
               "name": "from_env_reader",
               "receiver": "ApiKey",
               "target": {
@@ -3041,26 +3085,18 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 307,
-              "name": "redact_secrets",
+              "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
+              "line": 110,
+              "name": "SecretInForbiddenPlace",
+              "receiver": "RelayError",
               "target": {
-                "file": "crates/league-relay/src/secret.rs"
+                "file": "crates/league-relay/src/error.rs"
               },
-              "via": "sanitize_flag_name"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 309,
-              "name": "truncate_after_redaction",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "sanitize_flag_name"
-            },
-            {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 109,
+              "line": 115,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3069,7 +3105,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 119,
+              "line": 125,
               "name": "default",
               "receiver": "MemoryMode",
               "target": {
@@ -3078,8 +3114,8 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "is_forbidden_key_flag(flag)",
-              "line": 140,
+              "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
+              "line": 146,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -3089,7 +3125,7 @@
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 149,
+              "line": 155,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3098,7 +3134,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 282,
+              "line": 294,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3107,7 +3143,7 @@
               "via": "take_flag_value"
             },
             {
-              "line": 161,
+              "line": 167,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -3115,7 +3151,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 167,
+              "line": 173,
               "name": "parse",
               "receiver": "Round",
               "target": {
@@ -3124,7 +3160,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 182,
+              "line": 188,
               "name": "parse",
               "receiver": "MemoryMode",
               "target": {
@@ -3133,7 +3169,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 197,
+              "line": 203,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
@@ -3142,7 +3178,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 220,
+              "line": 226,
               "name": "validate_vm_host_allowance",
               "target": {
                 "file": "crates/league-relay/src/seats.rs"
@@ -3150,7 +3186,33 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 232,
+              "branch": "!other.starts_with('-')",
+              "line": 239,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 327,
+              "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 329,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 244,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3160,25 +3222,6 @@
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 241,
-              "name": "Usage",
-              "receiver": "RelayError",
-              "target": {
-                "file": "crates/league-relay/src/error.rs"
-              },
-              "via": "parse_args_with_key"
-            },
-            {
-              "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
-              "line": 246,
-              "name": "Usage",
-              "receiver": "RelayError",
-              "target": {
-                "file": "crates/league-relay/src/error.rs"
-              },
-              "via": "parse_args_with_key"
-            },
-            {
               "line": 253,
               "name": "Usage",
               "receiver": "RelayError",
@@ -3188,7 +3231,26 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 411,
+              "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
+              "line": 258,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 265,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 434,
               "name": "load_with_allowed_hosts",
               "receiver": "SeatFile",
               "target": {
@@ -3198,7 +3260,7 @@
             },
             {
               "branch": "seats.has_local_seat() && any_forbidden_local_key",
-              "line": 418,
+              "line": 441,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -3207,7 +3269,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 424,
+              "line": 447,
               "name": "load",
               "receiver": "ResponseFormatConfig",
               "target": {
@@ -3216,28 +3278,11 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 429,
+              "line": 452,
               "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
                 "file": "crates/league-relay/src/transport.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 430,
-              "name": "new",
-              "receiver": "TurnConfig",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 443,
-              "name": "run_turn",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
               },
               "via": "run_cli_inner"
             }
@@ -3261,26 +3306,18 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 307,
-              "name": "redact_secrets",
+              "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
+              "line": 110,
+              "name": "SecretInForbiddenPlace",
+              "receiver": "RelayError",
               "target": {
-                "file": "crates/league-relay/src/secret.rs"
+                "file": "crates/league-relay/src/error.rs"
               },
-              "via": "sanitize_flag_name"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 309,
-              "name": "truncate_after_redaction",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "sanitize_flag_name"
-            },
-            {
-              "branch": "tokens[0] != \"turn\"",
-              "line": 109,
+              "line": 115,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3289,7 +3326,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 119,
+              "line": 125,
               "name": "default",
               "receiver": "MemoryMode",
               "target": {
@@ -3298,8 +3335,8 @@
               "via": "parse_args_with_key"
             },
             {
-              "branch": "is_forbidden_key_flag(flag)",
-              "line": 140,
+              "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
+              "line": 146,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -3309,7 +3346,7 @@
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 149,
+              "line": 155,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3318,7 +3355,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 282,
+              "line": 294,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3327,7 +3364,7 @@
               "via": "take_flag_value"
             },
             {
-              "line": 161,
+              "line": 167,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -3335,7 +3372,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 167,
+              "line": 173,
               "name": "parse",
               "receiver": "Round",
               "target": {
@@ -3344,7 +3381,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 182,
+              "line": 188,
               "name": "parse",
               "receiver": "MemoryMode",
               "target": {
@@ -3353,7 +3390,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 197,
+              "line": 203,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
@@ -3362,7 +3399,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 220,
+              "line": 226,
               "name": "validate_vm_host_allowance",
               "target": {
                 "file": "crates/league-relay/src/seats.rs"
@@ -3370,7 +3407,33 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 232,
+              "branch": "!other.starts_with('-')",
+              "line": 239,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 327,
+              "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 329,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "line": 244,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -3380,25 +3443,6 @@
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 241,
-              "name": "Usage",
-              "receiver": "RelayError",
-              "target": {
-                "file": "crates/league-relay/src/error.rs"
-              },
-              "via": "parse_args_with_key"
-            },
-            {
-              "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
-              "line": 246,
-              "name": "Usage",
-              "receiver": "RelayError",
-              "target": {
-                "file": "crates/league-relay/src/error.rs"
-              },
-              "via": "parse_args_with_key"
-            },
-            {
               "line": 253,
               "name": "Usage",
               "receiver": "RelayError",
@@ -3408,7 +3452,26 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 411,
+              "branch": "cap_credits.is_some() && cap_gpu_secs.is_some()",
+              "line": 258,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 265,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "parse_args_with_key"
+            },
+            {
+              "line": 434,
               "name": "load_with_allowed_hosts",
               "receiver": "SeatFile",
               "target": {
@@ -3417,7 +3480,7 @@
             },
             {
               "branch": "seats.has_local_seat() && any_forbidden_local_key",
-              "line": 418,
+              "line": 441,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
@@ -3425,7 +3488,7 @@
               }
             },
             {
-              "line": 424,
+              "line": 447,
               "name": "load",
               "receiver": "ResponseFormatConfig",
               "target": {
@@ -3433,7 +3496,7 @@
               }
             },
             {
-              "line": 429,
+              "line": 452,
               "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
@@ -3441,26 +3504,11 @@
               }
             },
             {
-              "line": 430,
+              "line": 453,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 443,
-              "name": "run_turn",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 445,
-              "name": "acquire",
-              "receiver": "LocalGate",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
               }
             }
           ],
@@ -3477,7 +3525,7 @@
       "path": "crates/league-relay/src/error.rs"
     },
     {
-      "hash": "e341c107d5f01cfe3c37896ef526cbca668181ec829675d397870b2497dface8",
+      "hash": "16fdb933603ac35691e3ce5a97218dddfc0464fd0d8fa72ac91b69b0d303649b",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/error.rs",
@@ -3519,7 +3567,7 @@
             {
               "inner": [
                 {
-                  "line": 347,
+                  "line": 367,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3537,26 +3585,18 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "branch": "tokens[0] != \"turn\"",
-                  "line": 307,
-                  "name": "redact_secrets",
+                  "branch": "is_forbidden_key_flag(first_flag) || looks_like_cli_secret(…",
+                  "line": 110,
+                  "name": "SecretInForbiddenPlace",
+                  "receiver": "RelayError",
                   "target": {
-                    "file": "crates/league-relay/src/secret.rs"
+                    "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "sanitize_flag_name"
+                  "via": "parse_args_with_key"
                 },
                 {
                   "branch": "tokens[0] != \"turn\"",
-                  "line": 309,
-                  "name": "truncate_after_redaction",
-                  "target": {
-                    "file": "crates/league-relay/src/secret.rs"
-                  },
-                  "via": "sanitize_flag_name"
-                },
-                {
-                  "branch": "tokens[0] != \"turn\"",
-                  "line": 109,
+                  "line": 115,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -3565,7 +3605,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 119,
+                  "line": 125,
                   "name": "default",
                   "receiver": "MemoryMode",
                   "target": {
@@ -3574,8 +3614,8 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "branch": "is_forbidden_key_flag(flag)",
-                  "line": 140,
+                  "branch": "is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_ar…",
+                  "line": 146,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
@@ -3585,7 +3625,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 149,
+                  "line": 155,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -3594,7 +3634,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 282,
+                  "line": 294,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -3603,7 +3643,7 @@
                   "via": "take_flag_value"
                 },
                 {
-                  "line": 161,
+                  "line": 167,
                   "name": "validate_day",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
@@ -3611,7 +3651,7 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 167,
+                  "line": 173,
                   "name": "parse",
                   "receiver": "Round",
                   "target": {
@@ -3620,11 +3660,20 @@
                   "via": "parse_args_with_key"
                 },
                 {
-                  "line": 182,
+                  "line": 188,
                   "name": "parse",
                   "receiver": "MemoryMode",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
+                  },
+                  "via": "parse_args_with_key"
+                },
+                {
+                  "line": 203,
+                  "name": "InvalidCap",
+                  "receiver": "RelayError",
+                  "target": {
+                    "file": "crates/league-relay/src/error.rs"
                   },
                   "via": "parse_args_with_key"
                 }
@@ -3658,62 +3707,52 @@
         {
           "in": "parse",
           "kind": "err",
-          "line": 61
+          "line": 62
         },
         {
           "in": "parse",
           "kind": "err",
-          "line": 102
+          "line": 103
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 158
+          "line": 159
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 166
+          "line": 167
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 181
+          "line": 182
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 197
+          "line": 198
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 213
+          "line": 214
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 218
+          "line": 219
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 266
+          "line": 275
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 747
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 749
-        },
-        {
-          "in": "acquire",
-          "kind": "match-err",
-          "line": 757
+          "line": 756
         },
         {
           "in": "acquire",
@@ -3722,511 +3761,556 @@
         },
         {
           "in": "acquire",
+          "kind": "match-err",
+          "line": 766
+        },
+        {
+          "in": "acquire",
           "kind": "err",
-          "line": 791
+          "line": 767
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 800
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 797
+          "line": 806
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 798
+          "line": 807
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 818
+          "line": 827
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 820
+          "line": 829
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 825
+          "line": 834
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 826
+          "line": 835
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 850
+          "line": 859
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 856
+          "line": 865
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 856
+          "line": 865
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1097
+          "line": 1110
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1107
+          "line": 1120
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1115
+          "line": 1128
+        },
+        {
+          "in": "ensure_game_setup",
+          "kind": "err",
+          "line": 1138
+        },
+        {
+          "in": "ensure_game_setup",
+          "kind": "err",
+          "line": 1154
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 1146
+          "line": 1187
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1148
+          "line": 1189
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 1150
+          "line": 1191
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1152
+          "line": 1193
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 1203
+          "line": 1244
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 1204
+          "line": 1245
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 1213
+          "line": 1254
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 1282
+          "line": 1323
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 1283
+          "line": 1324
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1283
+          "line": 1324
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1294
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 1301
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 1329
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 1331
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
           "line": 1335
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1337
+          "line": 1342
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "match-err",
+          "line": 1370
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "err",
+          "line": 1372
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "match-err",
+          "line": 1376
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "err",
+          "line": 1378
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1359
+          "line": 1400
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1366
+          "line": 1407
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1402
+          "line": 1443
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 1411
+          "line": 1452
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1413
+          "line": 1454
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 1416
+          "line": 1457
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1418
+          "line": 1459
         },
         {
           "in": "open",
           "kind": "err",
-          "line": 1589
+          "line": 1630
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 1634
+          "line": 1675
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 1659
+          "line": 1700
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 1659
+          "line": 1700
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 1664
+          "line": 1705
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 1664
+          "line": 1705
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 1843
+          "line": 1884
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 1864
+          "line": 1905
         },
         {
           "in": "finish_call_and_record",
-          "kind": "err",
-          "line": 1868
-        },
-        {
-          "in": "record_refusal",
-          "kind": "err",
-          "line": 1880
-        },
-        {
-          "in": "finalize_turn",
           "kind": "err",
           "line": 1909
         },
         {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 1919
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 1940
+          "in": "record_refusal",
+          "kind": "err",
+          "line": 1921
         },
         {
           "in": "finalize_turn",
           "kind": "err",
+          "line": 1950
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 1960
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
           "line": 1981
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 1998
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 2002
+          "line": 2022
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 2057
+          "line": 2039
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 2043
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 2098
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2126
+          "line": 2167
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2134
+          "line": 2175
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2139
+          "line": 2180
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2193
+          "line": 2235
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2200
+          "line": 2242
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2207
+          "line": 2249
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2214
+          "line": 2256
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2219
+          "line": 2261
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2224
+          "line": 2266
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2237
+          "line": 2286
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2244
+          "line": 2292
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2264
+          "line": 2299
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2319
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2462
+          "line": 2525
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2471
+          "line": 2534
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2480
+          "line": 2543
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2512
+          "line": 2582
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2524
+          "line": 2595
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2681
+          "line": 2623
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2720
+          "line": 2811
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2742
+          "line": 2850
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2752
+          "line": 2872
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2832
+          "line": 2882
+        },
+        {
+          "in": "run_single_automated_seat",
+          "kind": "err",
+          "line": 2940
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2849
+          "line": 2962
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2861
+          "line": 3005
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2873
+          "line": 3076
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2949
+          "line": 3093
+        },
+        {
+          "in": "run_single_automated_seat",
+          "kind": "match-err",
+          "line": 3103
+        },
+        {
+          "in": "run_single_automated_seat",
+          "kind": "match-err",
+          "line": 3115
+        },
+        {
+          "in": "run_single_automated_seat",
+          "kind": "match-err",
+          "line": 3185
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3090
+          "line": 3352
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3096
+          "line": 3358
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3102
+          "line": 3364
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3112
+          "line": 3374
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 3143
+          "line": 3405
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 3151
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3167
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3192
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3205
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3246
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 3290
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 3290
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 3291
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 3292
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 3294
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 3294
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 3304
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 3308
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 3392
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 3401
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
           "line": 3413
         },
         {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3429
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3454
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3467
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3508
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 3552
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 3552
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 3553
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 3554
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 3556
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 3556
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 3566
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 3570
+        },
+        {
           "in": "load_transcript",
           "kind": "err",
-          "line": 3423
+          "line": 3654
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 3663
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 3675
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 3685
         }
       ],
-      "hash": "bba6aab133bc5ae15e162eca90e57ca12c5a2531cf5ea2fe009435b8619be4e3",
+      "hash": "2bd5e91ae4903c56677b3dc75aff6ae7198189096c3f6d4460fc411bce3a8b37",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -4240,6 +4324,8 @@
       "exports": [
         "normalize_allowed_vm_hosts",
         "validate_local_base_url",
+        "validate_local_endpoints",
+        "validate_local_tokenize_url",
         "validate_pinned_local_model",
         "validate_pinned_openrouter_slug",
         "validate_vm_host_allowance"
@@ -4248,47 +4334,47 @@
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 260
+          "line": 276
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 274
+          "line": 290
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 287
+          "line": 304
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 300
+          "line": 317
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 310
+          "line": 327
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 316
+          "line": 333
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 337
+          "line": 354
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 359
+          "line": 376
         },
         {
           "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 389
+          "line": 407
         },
         {
           "in": "from_json_str_with_allowed_hosts",
@@ -4296,167 +4382,202 @@
           "line": 414
         },
         {
-          "in": "validate_common_sampling",
+          "in": "from_json_str_with_allowed_hosts",
           "kind": "err",
-          "line": 462
+          "line": 441
+        },
+        {
+          "in": "from_json_str_with_allowed_hosts",
+          "kind": "err",
+          "line": 454
         },
         {
           "in": "validate_common_sampling",
           "kind": "err",
-          "line": 467
+          "line": 497
         },
         {
           "in": "validate_common_sampling",
           "kind": "err",
-          "line": 472
+          "line": 502
+        },
+        {
+          "in": "validate_common_sampling",
+          "kind": "err",
+          "line": 507
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 489
+          "line": 524
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 495
+          "line": 530
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 500
+          "line": 535
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 508
+          "line": 543
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 515
+          "line": 550
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 523
+          "line": 558
+        },
+        {
+          "in": "validate_local_seat_reasoning",
+          "kind": "err",
+          "line": 578
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 548
+          "line": 604
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 555
+          "line": 611
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 566
+          "line": 618
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 573
+          "line": 627
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 582
+          "line": 636
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 591
+          "line": 644
         },
         {
-          "in": "validate_local_base_url",
+          "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 641
+          "line": 652
         },
         {
-          "in": "validate_local_base_url",
+          "in": "validate_local_endpoints",
           "kind": "err",
-          "line": 647
+          "line": 716
         },
         {
-          "in": "validate_local_base_url",
+          "in": "validate_local_tokenize_url",
           "kind": "err",
-          "line": 658
+          "line": 754
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 663
+          "line": 773
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 670
+          "line": 779
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 688
+          "line": 790
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 695
+          "line": 795
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 714
+          "line": 802
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 720
+          "line": 820
         },
         {
-          "in": "validate_local_base_url",
+          "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 729
+          "line": 827
+        },
+        {
+          "in": "parse_and_validate_local_origin",
+          "kind": "err",
+          "line": 844
+        },
+        {
+          "in": "parse_and_validate_local_origin",
+          "kind": "err",
+          "line": 850
         },
         {
           "in": "validate_guild_name",
           "kind": "err",
-          "line": 780
+          "line": 904
         },
         {
           "in": "validate_guild_name",
           "kind": "err",
-          "line": 787
+          "line": 911
         },
         {
           "in": "validate_pinned_local_model",
           "kind": "err",
-          "line": 806
+          "line": 926
         },
         {
           "in": "validate_pinned_local_model",
           "kind": "err",
-          "line": 822
+          "line": 935
+        },
+        {
+          "in": "validate_pinned_local_model",
+          "kind": "err",
+          "line": 951
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 832
+          "line": 961
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 843
+          "line": 966
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 854
+          "line": 977
+        },
+        {
+          "in": "validate_pinned_openrouter_slug",
+          "kind": "err",
+          "line": 988
         }
       ],
-      "hash": "4e821e6bb3f7a2718633f5f23a8e43b57a8c1f495cbd7466b76af39467b10344",
+      "hash": "134d890bd14f0a5294e686b150bf02339fbe811eeacb14e430e2cbcf525aab47",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/secret.rs"
@@ -4469,6 +4590,7 @@
         "install_redacting_panic_hook",
         "redact_and_truncate",
         "redact_secrets",
+        "redact_secrets_multi_with_limit",
         "redact_secrets_with_limit",
         "truncate_after_redaction"
       ],
@@ -4476,35 +4598,35 @@
         {
           "in": "from_env_reader",
           "kind": "err",
-          "line": 42
+          "line": 51
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 74
+          "line": 83
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 77
+          "line": 86
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 128
+          "line": 137
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 133
+          "line": 142
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 138
+          "line": 147
         }
       ],
-      "hash": "ef3f69b0957e36c1dd2e450e1e7720497dcc7ccb9a2ed82e1c7ee0810f3241f9",
+      "hash": "f38be2a4d411c14b52c18ea8b144e70139c7ff9a17cb75cba46bcefae1dd6569",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs"
@@ -4518,12 +4640,27 @@
       ],
       "failurePaths": [
         {
+          "in": "count_tokens",
+          "kind": "err",
+          "line": 76
+        },
+        {
+          "in": "count_tokens",
+          "kind": "err",
+          "line": 236
+        },
+        {
+          "in": "count_tokens",
+          "kind": "err",
+          "line": 244
+        },
+        {
           "in": "post_chat_completions",
           "kind": "err",
-          "line": 286
+          "line": 358
         }
       ],
-      "hash": "6a5cdefe2c2a63fefb6815135f826e96fb08fea304126742eff4c49b532b70b1",
+      "hash": "966a54ce021285cf9f09d6c759f9a76d97ba32713e0008177680d0f06881267e",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -4533,7 +4670,6 @@
     },
     {
       "exports": [
-        "cap_scratchpad_tokens",
         "cap_words_and_chars",
         "extract_scratchpad_update",
         "format_negotiation_block",
@@ -4541,6 +4677,7 @@
         "json_escape_untrusted_str",
         "load_negotiation_inputs_if_present",
         "render_json_escaped_whisper_line",
+        "sanitize_scratchpad_for_prompt",
         "sanitize_whisper",
         "strip_thinking_tags",
         "wording_slot"
@@ -4549,20 +4686,25 @@
         {
           "in": "format_negotiation_block",
           "kind": "err",
-          "line": 204
+          "line": 397
         },
         {
           "in": "format_negotiation_block",
           "kind": "err",
-          "line": 218
+          "line": 412
+        },
+        {
+          "in": "format_negotiation_block",
+          "kind": "err",
+          "line": 417
         },
         {
           "in": "load_negotiation_inputs_if_present",
           "kind": "err",
-          "line": 245
+          "line": 445
         }
       ],
-      "hash": "24adac2e7f6d8b0db98b242597c25c8717b6c7f90a19921bea7a8d7848144479",
+      "hash": "2846f8277eb834b49ab631a844cd4826f864e2a39fa1f1368f80e04f226a18b2",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/secret.rs"
@@ -4570,7 +4712,7 @@
       "path": "crates/league-relay/src/wording.rs"
     },
     {
-      "hash": "01c1d591dd9f7baf477457bace63216425d2da2adc33d8acb5c3b17292bb525d",
+      "hash": "0862fa42dea1307e5ac56c894de9413d1759190c49815fe6ba5c6476d64c8492",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",
