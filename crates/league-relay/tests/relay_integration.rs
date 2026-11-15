@@ -3885,7 +3885,9 @@ fn b5_held_charge_persists_across_runs_flushes_migrates_and_reports_unwritable()
     let stderr_str = String::from_utf8(cli_err)?;
     let stdout_str = String::from_utf8(cli_out)?;
     assert!(
-        stderr_str.contains("unrecorded charge 0.010000")
+        stderr_str.contains("post-call charge 0.010000")
+            && stderr_str.contains("held as a reservation in relay/calls.reserved.jsonl")
+            && stderr_str.contains("do not enter it into relay/calls.jsonl by hand")
             && stderr_str.contains("seat=Saltworks")
             && stderr_str.contains("day=01")
             && stderr_str.contains("round=talk"),
@@ -4837,7 +4839,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     );
     let stderr_str = String::from_utf8(cli_err)?;
     assert!(
-        stderr_str.starts_with("error: unrecorded charge 0.030000 credits"),
+        stderr_str.starts_with("error: post-call charge 0.030000 credits"),
         "expected total 0.030000 (old 0.01 + new 0.02) first, got: {stderr_str}"
     );
     assert!(
@@ -4883,7 +4885,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     assert_eq!(fs::read(&pending_path)?, old_bytes);
     let ro_stderr = String::from_utf8(ro_err)?;
     assert!(
-        ro_stderr.starts_with("error: unrecorded charge 0.050000 credits"),
+        ro_stderr.starts_with("error: post-call charge 0.050000 credits"),
         "expected total 0.050000 (old 0.01 + Sub-case 1 exit-3 0.02 + Sub-case 2 0.02), got: {ro_stderr}"
     );
     assert!(
@@ -5210,7 +5212,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
         n2_stderr.len()
     );
     assert!(
-        n2_stderr.starts_with("error: unrecorded charge 0.660000 credits"),
+        n2_stderr.starts_with("error: post-call charge 0.660000 credits"),
         "expected total 0.660000 first, got head: {}",
         &n2_stderr[..n2_stderr.len().min(80)]
     );
@@ -8119,7 +8121,9 @@ fn b2_fix7_pz_exit3_preserves_reservation_for_subsequent_run() -> TestResult {
             String::from_utf8_lossy(&proc_a.stderr)
         );
         let a_stderr = String::from_utf8_lossy(&proc_a.stderr);
-        assert!(a_stderr.contains("unrecorded charge 0.010000"));
+        assert!(a_stderr.contains("post-call charge 0.010000"));
+        assert!(a_stderr.contains("held as a reservation in relay/calls.reserved.jsonl"));
+        assert!(a_stderr.contains("do not enter it into relay/calls.jsonl by hand"));
         assert_no_8char_key_piece(&a_stderr, FIX7_B2_KEY, "pz_ exit-3 stderr");
 
         assert!(
@@ -8204,6 +8208,577 @@ fn b2_fix7_pz_exit3_preserves_reservation_for_subsequent_run() -> TestResult {
         let sum: f64 = entries.iter().map(|e| e.charged_credits).sum();
         assert!((sum - 0.01).abs() < 1e-9);
     }
+
+    Ok(())
+}
+
+#[test]
+fn b1_fix8_final_line_synced_before_reservation_release() -> TestResult {
+    use league_relay::{
+        DurabilityEvent, take_durability_events_for_test, watch_durability_events_for_test,
+    };
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+
+    let one_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 64,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+    let two_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.3,
+                    "max_output_tokens": 64,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-oss-120b",
+                    "temperature": 0.3,
+                    "max_output_tokens": 64,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // 1. DurabilityEvent trace on single-seat remove (`1 -> 0`), two-seat rename + remove
+    //    (`2 -> 1 -> 0`), and pre-call refusal (`record_refusal`):
+    let game = tmp.path().join("b1_fix8_trace_game");
+    write_to_seat(&game, "01", "talk", "Saltworks", "B1_TRACE_TALK")?;
+    write_to_seat(&game, "01", "act", "Saltworks", "B1_TRACE_ACT_S")?;
+    write_to_seat(&game, "01", "act", "Weavers", "B1_TRACE_ACT_W")?;
+    write_to_seat(&game, "02", "talk", "Saltworks", "B1_TRACE_REFUSED")?;
+    let relay_dir = game.join("relay");
+
+    watch_durability_events_for_test(&relay_dir);
+    let tx1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Saltworks synced before release",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let sum1 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.03),
+        ),
+        &tx1,
+        None,
+    )?;
+    assert!(sum1.all_clean());
+    let events1 = take_durability_events_for_test(&relay_dir);
+    assert_eq!(
+        events1,
+        vec![
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines: 1,
+                calls_lines: 0,
+            },
+            DurabilityEvent::LedgerSynced {
+                file_name: "calls.jsonl".to_owned(),
+                calls_lines: 1,
+                reserved_lines: 1,
+            },
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines: 0,
+                calls_lines: 1,
+            },
+        ],
+        "final line must complete sync_all on calls.jsonl while calls.reserved.jsonl still holds 1 line, strictly before calls.reserved.jsonl is removed"
+    );
+
+    // Two concurrent seats (`act`): exercises both non-empty `fs::rename` release (`2 -> 1`)
+    // and empty `fs::remove_file` release (`1 -> 0`) on `calls.reserved.jsonl`.
+    struct BarrierTwoSeatTransport {
+        entered: AtomicUsize,
+    }
+    impl Transport for BarrierTwoSeatTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            let wait = Instant::now();
+            while self.entered.load(Ordering::SeqCst) < 2
+                && wait.elapsed() < Duration::from_millis(500)
+            {
+                thread::sleep(Duration::from_millis(2));
+            }
+            if body.contains("B1_TRACE_ACT_S") {
+                Ok(ok_completion_json(
+                    "Saltworks act",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                ))
+            } else {
+                thread::sleep(Duration::from_millis(20));
+                Ok(ok_completion_json(
+                    "Weavers act",
+                    "openai/gpt-oss-120b",
+                    Some(0.01),
+                ))
+            }
+        }
+    }
+
+    watch_durability_events_for_test(&relay_dir);
+    let tx2 = BarrierTwoSeatTransport {
+        entered: AtomicUsize::new(0),
+    };
+    let sum2 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            two_seats,
+            Some(wrapper.clone()),
+            true,
+            Some(0.03),
+        ),
+        &tx2,
+        None,
+    )?;
+    assert!(sum2.all_clean());
+    let events2 = take_durability_events_for_test(&relay_dir);
+    let mut prev_resv = 0usize;
+    let mut synced_calls_seen = 1usize;
+    let mut release_steps = 0usize;
+    for (idx, ev) in events2.iter().enumerate() {
+        match ev {
+            DurabilityEvent::LedgerSynced {
+                file_name,
+                calls_lines,
+                reserved_lines,
+            } => {
+                assert_eq!(file_name, "calls.jsonl");
+                assert!(
+                    *calls_lines > synced_calls_seen,
+                    "event {idx}: expected calls_lines to grow on sync, got {events2:?}"
+                );
+                assert_eq!(
+                    *reserved_lines, prev_resv,
+                    "event {idx}: reservation must still be intact on disk when calls.jsonl finishes sync_all, got {events2:?}"
+                );
+                synced_calls_seen = *calls_lines;
+            }
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines,
+                calls_lines,
+            } => {
+                if *target_reserved_lines < prev_resv {
+                    release_steps += 1;
+                    assert!(
+                        idx > 0 && matches!(events2[idx - 1], DurabilityEvent::LedgerSynced { .. }),
+                        "event {idx}: every reservation release must be immediately preceded by LedgerSynced, got {events2:?}"
+                    );
+                    assert_eq!(*calls_lines, synced_calls_seen);
+                }
+                prev_resv = *target_reserved_lines;
+            }
+        }
+    }
+    assert_eq!(
+        release_steps, 2,
+        "expected two reservation release mutations, got {events2:?}"
+    );
+    assert_eq!(prev_resv, 0);
+
+    // Pre-call refusal (`record_refusal`) also uses `append_text_synced`:
+    watch_durability_events_for_test(&relay_dir);
+    let tx3 = ScriptedTransport::new(vec![]);
+    let sum3 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.03),
+        ),
+        &tx3,
+        None,
+    )?;
+    assert!(matches!(
+        sum3.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let events3 = take_durability_events_for_test(&relay_dir);
+    assert_eq!(
+        events3,
+        vec![DurabilityEvent::LedgerSynced {
+            file_name: "calls.jsonl".to_owned(),
+            calls_lines: 4,
+            reserved_lines: 0,
+        }]
+    );
+
+    // 2. Hook-free live filesystem observation via `relay/calls.side.lock`:
+    //    Holding `calls.side.lock` right as transport returns pauses `finish_call_and_record`
+    //    AFTER `append_text_synced(&self.calls_path, ...)` and BEFORE `release_reservations_unlocked`,
+    //    proving from outside that `calls.jsonl` already holds the final line carrying `reservation_id`
+    //    while `calls.reserved.jsonl` is still byte-for-byte unchanged on disk.
+    let live_game = tmp.path().join("b1_fix8_hook_free_game");
+    write_to_seat(&live_game, "01", "talk", "Saltworks", "B1_HOOK_FREE")?;
+    let live_calls_path = live_game.join("relay").join("calls.jsonl");
+    let live_resv_path = live_game.join("relay").join("calls.reserved.jsonl");
+    let live_side_lock_path = live_game.join("relay").join("calls.side.lock");
+
+    struct SideLockObserverTransport {
+        calls_path: PathBuf,
+        resv_path: PathBuf,
+        side_lock_path: PathBuf,
+        observed_ok: Arc<AtomicBool>,
+    }
+    impl Transport for SideLockObserverTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let pre_resv_bytes = fs::read(&self.resv_path)
+                .map_err(|e| TransportError::Network(format!("missing pre-call resv: {e}")))?;
+            assert!(!pre_resv_bytes.is_empty());
+            assert!(!self.calls_path.exists());
+
+            let side_file = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&self.side_lock_path)
+                .map_err(|e| TransportError::Network(format!("open side lock: {e}")))?;
+            side_file
+                .try_lock()
+                .map_err(|e| TransportError::Network(format!("lock side lock: {e:?}")))?;
+
+            let calls_clone = self.calls_path.clone();
+            let resv_clone = self.resv_path.clone();
+            let observed_clone = Arc::clone(&self.observed_ok);
+            thread::spawn(move || {
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(2) {
+                    if let Ok(raw_calls) = fs::read_to_string(&calls_clone)
+                        && let Some(first_line) = raw_calls.lines().find(|l| !l.trim().is_empty())
+                        && let Ok(final_entry) = serde_json::from_str::<CallLogEntry>(first_line)
+                    {
+                        if let Ok(still_resv_bytes) = fs::read(&resv_clone)
+                            && still_resv_bytes == pre_resv_bytes
+                            && final_entry.outcome == "OK"
+                            && final_entry.reservation_id.is_some()
+                        {
+                            observed_clone.store(true, Ordering::SeqCst);
+                        }
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
+                let _ = side_file.unlock();
+            });
+
+            Ok(ok_completion_json(
+                "Observed on disk before release",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let observed_ok = Arc::new(AtomicBool::new(false));
+    let obs_tx = SideLockObserverTransport {
+        calls_path: live_calls_path.clone(),
+        resv_path: live_resv_path.clone(),
+        side_lock_path: live_side_lock_path,
+        observed_ok: Arc::clone(&observed_ok),
+    };
+    let live_sum = run_turn(
+        &TurnConfig::new(
+            live_game,
+            "01".to_owned(),
+            Round::Talk,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(0.05),
+        ),
+        &obs_tx,
+        None,
+    )?;
+    assert!(live_sum.all_clean());
+    assert!(
+        observed_ok.load(Ordering::SeqCst),
+        "observer holding calls.side.lock must see synced final line in calls.jsonl while calls.reserved.jsonl is still byte-for-byte intact"
+    );
+    assert!(
+        !live_resv_path.exists(),
+        "calls.reserved.jsonl must be removed once calls.side.lock is released"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn b2_c1_fix8_exit3_wording_warns_against_hand_entry_and_empty_ids_never_collapse() -> TestResult {
+    const FIX8_KEY: &str = "PlainFix8SecretKey_NoHandEntry98765";
+
+    // 1. B-2: RelayError::UnrecordedCharge Display + CLI exit-3 stderr state the charge is held
+    //    as a reservation in `relay/calls.reserved.jsonl` that the next run counts at
+    //    `max_cost_per_call` and must NOT be entered into `relay/calls.jsonl` by hand:
+    let unit_err = RelayError::UnrecordedCharge {
+        charged_credits: "0.010000".to_owned(),
+        entries_summary: "seat=Saltworks day=01 round=talk attempt=1 charged_credits=0.010000"
+            .to_owned(),
+        detail: "ledger read-only; pending side file read-only".to_owned(),
+    };
+    let rendered = unit_err.to_string();
+    assert!(rendered.starts_with("post-call charge 0.010000 credits"));
+    assert!(rendered.contains("held as a reservation in relay/calls.reserved.jsonl"));
+    assert!(rendered.contains("next run counts at max_cost_per_call"));
+    assert!(
+        rendered
+            .contains("do not enter it into relay/calls.jsonl by hand or it will be counted twice")
+    );
+    assert!(!rendered.contains("unrecorded charge"));
+    assert!(!rendered.contains("re-run blind"));
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let seats_str = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-pro-06-05",
+            "temperature": 0.3,
+            "max_output_tokens": 64,
+            "timeout_secs": 5.0,
+            "max_cost_per_call": 0.01
+        }]
+    })
+    .to_string();
+    let one_seat = SeatFile::from_json_str(&seats_str, None)?;
+    let seats_path = tmp.path().join("fix8_seats.json");
+    fs::write(&seats_path, &seats_str)?;
+
+    let mock_dir = tmp.path().join("fix8_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [{
+                "when_contains": "FIX8_EXIT3_PROMPT",
+                "status": 200,
+                "response": {
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"message": {"content": "ok"}}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let exit3_game = tmp.path().join(format!("fix8_exit3_{FIX8_KEY}"));
+    write_to_seat(&exit3_game, "01", "talk", "Saltworks", "FIX8_EXIT3_PROMPT")?;
+    fs::create_dir_all(exit3_game.join("relay"))?;
+    let exit3_calls = exit3_game.join("relay").join("calls.jsonl");
+    let exit3_pending = exit3_game.join("relay").join("calls.pending.jsonl");
+    fs::write(&exit3_calls, "")?;
+    set_file_readonly(&exit3_calls)?;
+    let prior_refusal = json!({
+        "time_utc": "2026-11-15T00:00:00.000Z",
+        "day": "01",
+        "round": "talk",
+        "guild": "Weavers",
+        "attempt": 1,
+        "trigger": "turn",
+        "model_requested": "google/gemini-2.5-pro-06-05",
+        "model_returned": null,
+        "request_body_sha256": "11".repeat(32),
+        "reply_sha256": null,
+        "prompt_tokens": null,
+        "completion_tokens": null,
+        "total_tokens": null,
+        "cost": null,
+        "charged_credits": 0.0,
+        "latency_ms": 0,
+        "outcome": "CAP_REACHED",
+        "error": "prior refusal"
+    })
+    .to_string();
+    fs::write(&exit3_pending, format!("{prior_refusal}\n"))?;
+    set_file_readonly(&exit3_pending)?;
+
+    let proc_exit3 = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            exit3_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.05",
+        ])
+        .env("OPENROUTER_API_KEY", FIX8_KEY)
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(proc_exit3.status.code(), Some(3));
+    let exit3_stderr = String::from_utf8_lossy(&proc_exit3.stderr);
+    assert!(exit3_stderr.starts_with("error: post-call charge 0.010000 credits"));
+    assert!(exit3_stderr.contains("held as a reservation in relay/calls.reserved.jsonl"));
+    assert!(exit3_stderr.contains("next run counts at max_cost_per_call"));
+    assert!(
+        exit3_stderr
+            .contains("do not enter it into relay/calls.jsonl by hand or it will be counted twice")
+    );
+    assert!(!exit3_stderr.contains("unrecorded charge"));
+    assert!(!exit3_stderr.contains("re-run blind"));
+    assert_no_8char_key_piece(&exit3_stderr, FIX8_KEY, "fix8 exit-3 stderr");
+    set_file_writable(&exit3_calls)?;
+    set_file_writable(&exit3_pending)?;
+
+    // 2. C-1 / C-4 (`pe_empty_ids`): two dead reservations that both carry `reservation_id: ""`
+    //    must NEVER collapse to 1 (neither in `read_state_unlocked` when read-only nor in
+    //    `CallLedger::open` migration when writable):
+    let pe_game = tmp.path().join("fix8_pe_empty_ids");
+    write_to_seat(&pe_game, "01", "act", "Saltworks", "PE_ACT_BLOCKED")?;
+    fs::create_dir_all(pe_game.join("relay"))?;
+    let pe_calls = pe_game.join("relay").join("calls.jsonl");
+    let pe_resv = pe_game.join("relay").join("calls.reserved.jsonl");
+    fs::write(&pe_calls, "")?;
+    set_file_readonly(&pe_calls)?;
+
+    let make_empty_id_orphan = |guild: &str, run_id: &str| {
+        json!({
+            "reservation_id": "",
+            "run_id": run_id,
+            "entry": {
+                "time_utc": "2026-11-15T00:00:00.000Z",
+                "day": "01",
+                "round": "talk",
+                "guild": guild,
+                "attempt": 1,
+                "trigger": "turn",
+                "model_requested": "google/gemini-2.5-pro-06-05",
+                "model_returned": null,
+                "request_body_sha256": "22".repeat(32),
+                "reply_sha256": null,
+                "prompt_tokens": null,
+                "completion_tokens": null,
+                "total_tokens": null,
+                "cost": null,
+                "charged_credits": 0.01,
+                "latency_ms": 0,
+                "outcome": "RESERVED",
+                "error": "orphaned pre-call reservation from interrupted run"
+            }
+        })
+        .to_string()
+    };
+    fs::write(
+        &pe_resv,
+        format!(
+            "{}\n{}\n",
+            make_empty_id_orphan("Saltworks", "999991-0-1"),
+            make_empty_id_orphan("Weavers", "999992-0-1")
+        ),
+    )?;
+
+    // (a) Read-only `calls.jsonl`: `read_state_unlocked` counts BOTH 0.01 empty-id orphans (0.02),
+    //     so a 0.01 call at cap 0.025 (0.02 + 0.01 = 0.03 > 0.025) is refused with 0 transport calls!
+    let pe_ro_tx = ScriptedTransport::new(vec![]);
+    let pe_ro_res = run_turn(
+        &TurnConfig::new(
+            pe_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.025),
+        ),
+        &pe_ro_tx,
+        None,
+    )?;
+    assert_eq!(pe_ro_tx.call_count(), 0);
+    assert!(matches!(
+        pe_ro_res.reports[0].outcome,
+        SeatOutcome::SeatError { .. } | SeatOutcome::CapReached { .. }
+    ));
+
+    // (b) Writable `calls.jsonl`: `CallLedger::open` migrates BOTH empty-id `RESERVED` lines (2 lines,
+    //     0.02 total) and refuses the 0.01 call at cap 0.025 with `CapReached`!
+    set_file_writable(&pe_calls)?;
+    let pe_rw_tx = ScriptedTransport::new(vec![]);
+    let pe_rw_sum = run_turn(
+        &TurnConfig::new(
+            pe_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(0.025),
+        ),
+        &pe_rw_tx,
+        None,
+    )?;
+    assert_eq!(pe_rw_tx.call_count(), 0);
+    assert!(matches!(
+        pe_rw_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let pe_entries = read_calls_log(&pe_game)?;
+    let pe_resv_count = pe_entries
+        .iter()
+        .filter(|e| e.outcome == "RESERVED")
+        .count();
+    let pe_charged_sum: f64 = pe_entries.iter().map(|e| e.charged_credits).sum();
+    assert_eq!(
+        pe_resv_count, 2,
+        "both empty-id dead reservations must be migrated without collapsing"
+    );
+    assert!((pe_charged_sum - 0.02).abs() < 1e-9);
 
     Ok(())
 }

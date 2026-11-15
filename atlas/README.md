@@ -1,22 +1,20 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 5de53a5 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit ea16219 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-10 parts, mostly Rust (330 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
 ## What changed since 2026-11-15 (31abdf8)
 
-- CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 1 more.
-- CI no longer runs crates/league-core/.
-- 7 files added and 4 changed content, across 2 parts.
+Nothing structural changed since 2026-11-15; 7 files changed content.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 21 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 18 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
@@ -25,7 +23,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, 4 files in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 3 files in 3 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 3 files in 3 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -62,6 +60,8 @@ Window: 180 days; a pair counts from 3 shared commits, since 0 source files reac
 ## What no test touches
 
 Every code part this map reads is touched by at least one test.
+
+league-core is tested only by the unit tests in its own files.
 
 league-dice is tested only by the unit tests in its own files.
 

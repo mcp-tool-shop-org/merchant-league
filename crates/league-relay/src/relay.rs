@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::any::Any;
 #[cfg(any(test, feature = "test-hooks"))]
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, OpenOptions, TryLockError};
@@ -604,6 +605,100 @@ fn should_fail_pending_temp_write_for_test(pending_path: &Path) -> bool {
         .contains(pending_path)
 }
 
+/// Test-only durability-ordering event recorded for a watched `<game-dir>/relay` directory.
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DurabilityEvent {
+    /// `append_text_synced` completed `write_all` + `flush` + `sync_all` on `file_name`;
+    /// `calls_lines` and `reserved_lines` capture the on-disk non-empty line counts of
+    /// `calls.jsonl` and `calls.reserved.jsonl` at that instant.
+    LedgerSynced {
+        /// File name synced (e.g. `"calls.jsonl"`).
+        file_name: String,
+        /// Non-empty lines present on disk in `calls.jsonl` immediately after `sync_all`.
+        calls_lines: usize,
+        /// Non-empty lines still present on disk in `calls.reserved.jsonl` immediately after `sync_all`.
+        reserved_lines: usize,
+    },
+    /// `write_reserved_entries_unlocked` is about to replace or remove `calls.reserved.jsonl`
+    /// to hold `target_reserved_lines` entries while `calls.jsonl` holds `calls_lines` lines on disk.
+    ReservedMutating {
+        /// Number of active reservation entries that `calls.reserved.jsonl` is changing to (`0` on removal).
+        target_reserved_lines: usize,
+        /// Non-empty lines already present on disk in `calls.jsonl` right before `calls.reserved.jsonl` changes.
+        calls_lines: usize,
+    },
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn durability_event_map() -> &'static Mutex<HashMap<PathBuf, Vec<DurabilityEvent>>> {
+    static EVENTS: OnceLock<Mutex<HashMap<PathBuf, Vec<DurabilityEvent>>>> = OnceLock::new();
+    EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Test-only hook: start recording [`DurabilityEvent`]s for `<game-dir>/relay`.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn watch_durability_events_for_test(relay_dir: &Path) {
+    durability_event_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(relay_dir.to_path_buf(), Vec::new());
+}
+
+/// Test-only hook: stop watching `relay_dir` and return all recorded [`DurabilityEvent`]s in order.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn take_durability_events_for_test(relay_dir: &Path) -> Vec<DurabilityEvent> {
+    durability_event_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(relay_dir)
+        .unwrap_or_default()
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn count_nonempty_lines_on_disk(path: &Path) -> usize {
+    fs::read_to_string(path).map_or(0, |s| s.lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn record_ledger_synced_for_test(path: &Path) {
+    let Some(relay_dir) = path.parent() else {
+        return;
+    };
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let mut map = durability_event_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(log) = map.get_mut(relay_dir) {
+        let calls_lines = count_nonempty_lines_on_disk(&relay_dir.join("calls.jsonl"));
+        let reserved_lines = count_nonempty_lines_on_disk(&relay_dir.join(RESERVED_CALLS_FILENAME));
+        log.push(DurabilityEvent::LedgerSynced {
+            file_name: file_name.to_owned(),
+            calls_lines,
+            reserved_lines,
+        });
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn record_reserved_mutating_for_test(reserved_path: &Path, target_reserved_lines: usize) {
+    let Some(relay_dir) = reserved_path.parent() else {
+        return;
+    };
+    let mut map = durability_event_map()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(log) = map.get_mut(relay_dir) {
+        let calls_lines = count_nonempty_lines_on_disk(&relay_dir.join("calls.jsonl"));
+        log.push(DurabilityEvent::ReservedMutating {
+            target_reserved_lines,
+            calls_lines,
+        });
+    }
+}
+
 fn append_text(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), RelayError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
@@ -622,6 +717,8 @@ fn append_text_synced(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
     }
+    #[cfg(unix)]
+    let created_new = !path.exists();
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -630,7 +727,17 @@ fn append_text_synced(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(
     file.write_all(text.as_bytes())
         .and_then(|()| file.flush())
         .and_then(|()| file.sync_all())
-        .map_err(|e| io_err(path, e, key))
+        .map_err(|e| io_err(path, e, key))?;
+    #[cfg(unix)]
+    if created_new
+        && let Some(parent) = path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    #[cfg(any(test, feature = "test-hooks"))]
+    record_ledger_synced_for_test(path);
+    Ok(())
 }
 
 fn filter_unmigrated_entries(
@@ -663,11 +770,12 @@ struct ActiveReservation {
 const RUN_RESV_LOCK_PREFIX: &str = "calls.resv-";
 const RUN_RESV_LOCK_SUFFIX: &str = ".lock";
 
-fn has_entry_with_reservation_id(entries: &[CallLogEntry], reservation_id: &str) -> bool {
-    !reservation_id.is_empty()
-        && entries
-            .iter()
-            .any(|e| e.reservation_id.as_deref() == Some(reservation_id))
+fn recorded_reservation_ids(entries: &[CallLogEntry]) -> HashSet<&str> {
+    entries
+        .iter()
+        .filter_map(|e| e.reservation_id.as_deref())
+        .filter(|id| !id.is_empty())
+        .collect()
 }
 
 fn is_run_reservation_lock_live(resv_lock_path: &Path) -> bool {
@@ -746,8 +854,17 @@ fn write_reserved_entries_unlocked(
 ) -> Result<(), RelayError> {
     if entries.is_empty() {
         if reserved_path.exists() {
+            #[cfg(any(test, feature = "test-hooks"))]
+            record_reserved_mutating_for_test(reserved_path, 0);
             match fs::remove_file(reserved_path) {
-                Ok(()) => {}
+                Ok(()) => {
+                    #[cfg(unix)]
+                    if let Some(parent) = reserved_path.parent()
+                        && let Ok(dir) = fs::File::open(parent)
+                    {
+                        let _ = dir.sync_all();
+                    }
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(io_err(reserved_path, e, key)),
             }
@@ -799,6 +916,8 @@ fn write_reserved_entries_unlocked(
         let _ = fs::remove_file(&tmp_path);
         return Err(io_err(&tmp_path, e, key));
     }
+    #[cfg(any(test, feature = "test-hooks"))]
+    record_reserved_mutating_for_test(reserved_path, entries.len());
     if let Err(e) = fs::rename(&tmp_path, reserved_path) {
         let _ = fs::remove_file(&tmp_path);
         return Err(io_err(reserved_path, e, key));
@@ -991,11 +1110,13 @@ impl<'a> CallLedger<'a> {
         if reserved_path.exists() {
             let original_reserved = read_reserved_file(&reserved_path, redaction_key)?;
             let base_recorded_entries = effective_entries.clone();
+            let recorded_ids = recorded_reservation_ids(&base_recorded_entries);
+            let mut queued_orphan_ids: HashSet<String> = HashSet::new();
             let mut orphans_to_migrate: Vec<(ActiveReservation, CallLogEntry)> = Vec::new();
 
             for r in &original_reserved {
-                let already_recorded =
-                    has_entry_with_reservation_id(&base_recorded_entries, &r.reservation_id);
+                let already_recorded = !r.reservation_id.is_empty()
+                    && recorded_ids.contains(r.reservation_id.as_str());
                 let lock_path = run_reservation_lock_path(&calls_path, &r.run_id);
                 if is_run_reservation_lock_live(&lock_path) {
                     remaining_reserved.push(r.clone());
@@ -1003,9 +1124,8 @@ impl<'a> CallLedger<'a> {
                         effective_entries.push(r.entry.clone());
                     }
                 } else if !already_recorded
-                    && !orphans_to_migrate
-                        .iter()
-                        .any(|(prev, _)| prev.reservation_id == r.reservation_id)
+                    && (r.reservation_id.is_empty()
+                        || queued_orphan_ids.insert(r.reservation_id.clone()))
                 {
                     turn_lock.verify_identity(redaction_key)?;
                     let mut orphan_entry = r.entry.clone();
@@ -1153,20 +1273,24 @@ impl<'a> CallLedger<'a> {
             Vec::new()
         };
         let mut persisted_for_sum = base_entries.clone();
-        let mut counted_orphan_ids: Vec<String> = Vec::new();
-        for r in &active_resvs {
-            if r.run_id == self.run_id {
-                continue;
-            }
-            if has_entry_with_reservation_id(&base_entries, &r.reservation_id) {
-                continue;
-            }
-            let lock_path = run_reservation_lock_path(&self.calls_path, &r.run_id);
-            if is_run_reservation_lock_live(&lock_path) {
-                persisted_for_sum.push(r.entry.clone());
-            } else if !counted_orphan_ids.iter().any(|id| id == &r.reservation_id) {
-                counted_orphan_ids.push(r.reservation_id.clone());
-                persisted_for_sum.push(r.entry.clone());
+        if !active_resvs.is_empty() {
+            let recorded_ids = recorded_reservation_ids(&base_entries);
+            let mut counted_orphan_ids: HashSet<&str> = HashSet::new();
+            for r in &active_resvs {
+                if r.run_id == self.run_id {
+                    continue;
+                }
+                if !r.reservation_id.is_empty() && recorded_ids.contains(r.reservation_id.as_str())
+                {
+                    continue;
+                }
+                let lock_path = run_reservation_lock_path(&self.calls_path, &r.run_id);
+                if is_run_reservation_lock_live(&lock_path)
+                    || r.reservation_id.is_empty()
+                    || counted_orphan_ids.insert(r.reservation_id.as_str())
+                {
+                    persisted_for_sum.push(r.entry.clone());
+                }
             }
         }
         Ok(LoadedLedgerState {
@@ -1275,7 +1399,7 @@ impl<'a> CallLedger<'a> {
             .map_err(|e| io_err(&self.calls_path, e, redaction_key))
             .and_then(|mut line| {
                 line.push('\n');
-                append_text(&self.calls_path, &line, redaction_key)
+                append_text_synced(&self.calls_path, &line, redaction_key)
             });
         let single_id = [reservation_id.to_owned()];
         match append_res {
@@ -1335,7 +1459,7 @@ impl<'a> CallLedger<'a> {
         let mut line =
             serde_json::to_string(entry).map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
         line.push('\n');
-        append_text(&self.calls_path, &line, redaction_key)
+        append_text_synced(&self.calls_path, &line, redaction_key)
     }
 
     fn clear_unreleased_reservations(&mut self, redaction_key: Option<&ApiKey>) {
