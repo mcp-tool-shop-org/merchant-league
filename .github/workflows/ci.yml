@@ -94,3 +94,11 @@ jobs:
 
       - name: Atlas check
         run: npx --yes @dogfood-lab/atlas@1.26.0 check
+
+      - name: Stand-alone xrpld harness
+        env:
+          LEAGUE_XRPLD_LIVE: full
+          DOCKER_BUILDKIT: "0"
+        run: |
+          timeout 300 cargo test -p league-standalone --test standalone_live --locked -- --nocapture --test-threads=1
+          test -z "$(docker ps -aq --filter label=merchant-league.harness=standalone)"

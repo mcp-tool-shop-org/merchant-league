@@ -1,20 +1,25 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 425de10 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 1908c46 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+11 parts, mostly Rust (328 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (5f7c94b)
+## What changed since 2026-11-15 (425de10)
 
-Nothing structural changed since 2026-11-15; 8 files changed content.
+- league-standalone now imports league-ledger.
+- CI now also runs crates/league-standalone/.
+- crates/league-ledger/ is now also read by crates/league-standalone/Cargo.toml.
+- crates/league-standalone/ is now read by Cargo.toml.
+- league-standalone is a new part, drawn from `crates/league-standalone/**`.
+- 7 files added and 4 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 18 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 23 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
@@ -23,7 +28,7 @@ Nothing structural changed since 2026-11-15; 8 files changed content.
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 3 files in 3 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 8 files in 4 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -43,13 +48,15 @@ CI writes nothing in the files this map could read; 1 file could not be.
 
 ## What breaks what
 
-- **league-ledger** is imported by no other part and sits on the path of 4 doors.
+- **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 
 scripts holds only shell files, which this map does not read, so what uses it cannot be seen.
 
 ## What tends to change together
 
-No two source files changed together often enough to name.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 5 of 5 commits.
+
+Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
 Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do.
 

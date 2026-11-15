@@ -7,7 +7,9 @@
   "breaks": [
     {
       "doors": 4,
-      "importedBy": [],
+      "importedBy": [
+        "league-standalone"
+      ],
       "importedByTests": [],
       "kind": "part",
       "name": "league-ledger",
@@ -16,33 +18,89 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 8,
+      "added": 7,
+      "changed": 4,
       "moved": 0,
-      "parts": 2,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
+        "kind": "import-added",
+        "sentence": "league-standalone now imports league-ledger.",
+        "subjects": [
+          "league-standalone",
+          "league-ledger"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-standalone/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-standalone/"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-ledger/ is now also read by crates/league-standalone/Cargo.toml.",
+        "subjects": [
+          "crates/league-ledger/",
+          "crates/league-standalone/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-standalone/ is now read by Cargo.toml.",
+        "subjects": [
+          "crates/league-standalone/",
+          "Cargo.toml"
+        ]
+      },
+      {
+        "kind": "part",
+        "sentence": "league-standalone is a new part, drawn from `crates/league-standalone/**`.",
+        "subjects": [
+          "league-standalone"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 8 files changed content.",
+        "sentence": "7 files added and 4 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "5f7c94b33780fdf4400838fcdf46837d1de9eb69",
-      "generatedAt": "2026-11-15T11:12:18.280Z"
+      "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd",
+      "generatedAt": "2026-11-15T11:14:54.867Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
-  "changesTogether": [],
+  "changesTogether": [
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 5,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 5
+    }
+  ],
   "changesTogetherNote": [
+    "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd",
+  "commit": "1908c466db878e3ee0ec9c04913018090cabe2af",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (328 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -84,6 +142,11 @@
           "files": 1
         },
         {
+          "boundary": "league-standalone",
+          "depth": 0,
+          "files": 5
+        },
+        {
           "boundary": "league-tui",
           "depth": 0,
           "files": 1
@@ -112,10 +175,11 @@
         "crates/league-ledger/tests/vectors.rs",
         "crates/league-relay/tests/",
         "crates/league-season/",
+        "crates/league-standalone/",
         "crates/league-tui/"
       ],
-      "runsCount": 18,
-      "runsMore": 18,
+      "runsCount": 19,
+      "runsMore": 23,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -257,7 +321,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T11:14:54.867Z",
+  "generatedAt": "2026-11-15T12:21:52.957Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
@@ -273,11 +337,12 @@
     "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-season": "league-season",
+    "league-standalone": "league-standalone",
     "league-tui": "league-tui",
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 10,
+  "parts": 11,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -302,16 +367,17 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 28,
+  "testFiles": 33,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
     "league-gen": 7,
-    "league-ledger": 6,
+    "league-ledger": 7,
     "league-season": 1,
+    "league-standalone": 5,
     "league-tui": 1
   },
-  "testedCodeParts": 6,
+  "testedCodeParts": 7,
   "testedInside": [
     "league-core",
     "league-dice",

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Stand-alone `xrpld` harness (`league-standalone`, `docs/standalone-xrpld.md`) and Seed-27 Section B item B3 conformance tests:
+  - Enforces the `docs/design-v2.md` section 9 Conflict 11 guard: verifies loopback HTTP endpoints (`127.0.0.1` / `localhost` only), checks `server_info` on every constructor for `network_id == 21337` (refusing `network_id == 0`, `None`, and any other id), `validation_quorum == 0`, `peers == 0`, and non-empty `server_state`, and verifies Mainnet-matched amendment parity (confirming required v2 features are enabled and refusing forbidden `ConfidentialTransfer`, `MPTokensV2`, and `DynamicMPT`).
+  - Manages one pinned stand-alone container (`docker.io/xrplf/xrpld:3.4.1@sha256:457f095d1948a354119187df962b60504a4791521f8225a28ba2345c34a6b0ce`) under strict limits (`--cpus=2`, `--memory=2g`, `--memory-swap=2g`, `512m` tmpfs below the `5 GB` cap, `-p 127.0.0.1::5005`), funding accounts from genesis and advancing ledgers with `ledger_accept`, with guaranteed `docker rm -f` teardown in `Drop` and explicit `.teardown()`.
+  - Compares `league-core` (`ab06dd39`) rules against live `xrpld` on offer upfront-lock vs spend-down, partial-fill `Quality` + `TransferRate` rounding vs `ceil_bps_fee`, and 32-byte `PREIMAGE-SHA-256` escrow fees and `FinishAfter`/`CancelAfter` close-time bounds (smoke locally, full harness in CI).
 - Chiral converter-ring table generator, linear-programming feasibility and shadow-price/Shapley equity filter, fixed `CRED` numeraire with ISO/crypto ticker deny-list, Prioritized Level Replay sampler, and random-vs-ring lock-in and static HHI benchmark (`league-gen`, pure-Rust crate with no ledger).
 - Paper-test seat relay (`league-relay`, library and binary), for games 3 onward.
   - Reads JSON seat files (`openrouter` with case-insensitively unique `[A-Za-z][A-Za-z0-9_-]*` guild names, pinned `provider/model` slugs, temperature, `max_output_tokens`, per-seat wall timeout, and `max_cost_per_call`; `file` seats report manual relay and make no call).
