@@ -5051,6 +5051,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
             "rules": [
                 {
                     "when_contains": "N1_FAST_SALT",
+                    "sleep_ms": 150,
                     "status": 200,
                     "response": {
                         "model": "google/gemini-2.5-pro-06-05",

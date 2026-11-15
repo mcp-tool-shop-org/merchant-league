@@ -28,22 +28,22 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 7,
+      "added": 0,
+      "changed": 1,
       "moved": 0,
-      "parts": 2,
+      "parts": 0,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 1 file added and 7 changed content.",
+        "sentence": "Nothing structural changed since 2026-11-15; 1 file changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "812f4f48a3e93056ea16c16f5eb5a2cb0a5ce966",
-      "generatedAt": "2026-11-15T21:15:23.691Z"
+      "commit": "74be0bec8ba2b7cf72ccc33d99fe37e9dabea47d",
+      "generatedAt": "2026-11-15T22:15:46.501Z"
     },
     "unchanged": true
   },
@@ -51,7 +51,7 @@
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 8,
+      "either": 9,
       "partLabels": [
         null,
         null
@@ -61,37 +61,7 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 8
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 8,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 8,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
+      "shared": 9
     },
     {
       "a": "crates/league-relay/src/cli.rs",
@@ -109,9 +79,39 @@
       "shared": 6
     },
     {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 9,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 7
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 9,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 7
+    },
+    {
       "a": "crates/league-relay/src/error.rs",
       "b": "crates/league-relay/src/relay.rs",
-      "either": 8,
+      "either": 9,
       "partLabels": [
         null,
         null
@@ -129,7 +129,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "74be0bec8ba2b7cf72ccc33d99fe37e9dabea47d",
+  "commit": "c87420e72d3866c6634415741943434c436a184e",
   "defaultBranch": "main",
   "derived": "11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -355,7 +355,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T22:15:46.501Z",
+  "generatedAt": "2026-11-15T22:27:45.156Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

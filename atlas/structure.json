@@ -3098,7 +3098,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "74be0bec8ba2b7cf72ccc33d99fe37e9dabea47d",
+    "commit": "c87420e72d3866c6634415741943434c436a184e",
     "tracked": 497
   },
   "landings": [
@@ -6424,7 +6424,7 @@
       "path": "crates/league-relay/src/wording.rs"
     },
     {
-      "hash": "6448fae07560a51bcf729d4494444c4567a9ed30836b119932a7579c4cc766cf",
+      "hash": "68db8f0be9ee4dc677653d97a0fa0f5d3cda7a36a648d0e5134dc078a086a2dc",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",
