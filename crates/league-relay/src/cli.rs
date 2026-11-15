@@ -6,7 +6,7 @@
 use crate::error::RelayError;
 use crate::relay::{Round, TurnConfig, TurnSummary, run_turn, validate_day};
 use crate::seats::SeatFile;
-use crate::secret::{ApiKey, LiveGate, redact_secrets};
+use crate::secret::{ApiKey, LiveGate, redact_secrets, truncate_after_redaction};
 use crate::transport::{
     MockDirTransport, RawHttpResponse, Transport, TransportError, UreqTransport,
 };
@@ -63,6 +63,18 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    parse_args_with_key(args, None)
+}
+
+/// Parse CLI arguments with an optional [`ApiKey`] so any shortened flag name is redacted before truncation.
+pub fn parse_args_with_key<I, S>(
+    args: I,
+    redaction_key: Option<&ApiKey>,
+) -> Result<CliCommand, RelayError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let tokens: Vec<String> = args.into_iter().map(|s| s.as_ref().to_owned()).collect();
     if tokens.is_empty() {
         return Err(RelayError::Usage(
@@ -73,7 +85,7 @@ where
         return Ok(CliCommand::Help);
     }
     if tokens[0] != "turn" {
-        let sub_name = sanitize_flag_name(&tokens[0]);
+        let sub_name = sanitize_flag_name(&tokens[0], redaction_key);
         return Err(RelayError::Usage(format!(
             "unknown subcommand '{sub_name}' (expected 'turn')"
         )));
@@ -163,7 +175,7 @@ where
             other => {
                 return Err(RelayError::Usage(format!(
                     "unknown option '{}'",
-                    sanitize_flag_name(other)
+                    sanitize_flag_name(other, redaction_key)
                 )));
             }
         }
@@ -222,9 +234,10 @@ fn is_forbidden_key_flag(flag: &str) -> bool {
     )
 }
 
-fn sanitize_flag_name(raw: &str) -> String {
-    let head = raw.split('=').next().unwrap_or(raw);
-    redact_secrets(head, None).chars().take(48).collect()
+fn sanitize_flag_name(raw: &str, redaction_key: Option<&ApiKey>) -> String {
+    let scrubbed_raw = redact_secrets(raw, redaction_key);
+    let head = scrubbed_raw.split('=').next().unwrap_or(&scrubbed_raw);
+    truncate_after_redaction(head, 48)
 }
 
 /// Transport used when every seat in the file uses the `file` backend.
@@ -288,7 +301,7 @@ where
     S: AsRef<str>,
 {
     let redact_ref = env_key.as_ref().ok();
-    let turn_args = match parse_args(args)? {
+    let turn_args = match parse_args_with_key(args, redact_ref)? {
         CliCommand::Help => {
             let _ = write!(stdout, "{USAGE_TEXT}");
             return Ok(None);
@@ -298,7 +311,7 @@ where
 
     let seats = SeatFile::load(&turn_args.seats_path, redact_ref)?;
     let summary = if let Some(mock_dir) = &turn_args.mock_dir {
-        let mock_transport = MockDirTransport::load(mock_dir)?;
+        let mock_transport = MockDirTransport::load_with_key(mock_dir, redact_ref)?;
         let cfg = TurnConfig::new(
             turn_args.game_dir,
             turn_args.day,

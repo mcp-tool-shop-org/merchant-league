@@ -17,29 +17,29 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 6,
+      "changed": 10,
       "moved": 0,
-      "parts": 0,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
         "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `Usage`, before `Usage`.",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `from_env`, before `install_redacting_panic_hook`.",
         "subjects": [
-          "crates/league-relay/src/cli.rs"
+          "crates/league-relay/src/main.rs"
         ]
       },
       {
         "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `Usage`, after `Usage`.",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook`, before `execute_cli`.",
         "subjects": [
-          "crates/league-relay/src/cli.rs"
+          "crates/league-relay/src/main.rs"
         ]
       },
       {
         "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `Usage`.",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `truncate_after_redaction`, before `Usage`.",
         "subjects": [
           "crates/league-relay/src/cli.rs"
         ]
@@ -51,13 +51,13 @@
       },
       {
         "kind": "counts",
-        "sentence": "6 files changed content.",
+        "sentence": "10 files changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "82cde681d3d25f5e230d5404bafe54f548199eed",
-      "generatedAt": "2026-11-15T06:48:58.330Z"
+      "commit": "648b3e3837bdbfbc6fe8fa8ec9d90fa9d91ce7cc",
+      "generatedAt": "2026-11-15T07:03:21.980Z"
     },
     "unchanged": false
   },
@@ -66,7 +66,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "648b3e3837bdbfbc6fe8fa8ec9d90fa9d91ce7cc",
+  "commit": "2d34292808b9a2afa344d83bddee0e985a32a4aa",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -270,7 +270,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T07:03:21.980Z",
+  "generatedAt": "2026-11-15T07:46:56.816Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

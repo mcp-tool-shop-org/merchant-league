@@ -19,7 +19,10 @@ pub use relay::{
     prepend_wrapper, run_turn, sha256_hex, validate_day,
 };
 pub use seats::{BackendKind, OpenRouterSeat, SeatBackend, SeatFile, SeatSpec};
-pub use secret::{ApiKey, LiveGate, OPENROUTER_API_KEY_ENV, REDACTED_MARKER, redact_secrets};
+pub use secret::{
+    ApiKey, LiveGate, OPENROUTER_API_KEY_ENV, REDACTED_MARKER, install_redacting_panic_hook,
+    redact_secrets, truncate_after_redaction,
+};
 pub use transport::{
     MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
     UreqTransport,

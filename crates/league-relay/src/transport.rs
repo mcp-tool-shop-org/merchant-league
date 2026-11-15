@@ -121,7 +121,10 @@ struct MockRuleWire {
     when_contains: String,
     #[serde(default = "default_ok_status")]
     status: u16,
+    #[serde(default)]
     response: serde_json::Value,
+    #[serde(default)]
+    panic_message: Option<String>,
 }
 
 fn default_ok_status() -> u16 {
@@ -134,24 +137,50 @@ struct MockFileWire {
     rules: Vec<MockRuleWire>,
 }
 
+#[derive(Debug, Clone)]
+struct MockRule {
+    needle: String,
+    status: u16,
+    resp_body: String,
+    panic_message: Option<String>,
+}
+
 /// Offline file-backed mock transport for `league-relay turn --mock-dir <dir>`.
 #[derive(Debug, Clone)]
 pub struct MockDirTransport {
-    rules: Vec<(String, u16, String)>,
+    rules: Vec<MockRule>,
 }
 
 impl MockDirTransport {
     /// Load canned mock responses from `<dir>/responses.json`.
     pub fn load(dir: &Path) -> Result<Self, RelayError> {
+        Self::load_with_key(dir, None)
+    }
+
+    /// Load canned mock responses from `<dir>/responses.json`, redacting any error details.
+    pub fn load_with_key(dir: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
         let path = dir.join("responses.json");
-        let raw = fs::read_to_string(&path)
-            .map_err(|e| RelayError::Io(format!("could not read {}: {e}", path.display())))?;
-        let parsed: MockFileWire = serde_json::from_str(&raw)
-            .map_err(|e| RelayError::Io(format!("invalid mock JSON in {}: {e}", path.display())))?;
+        let raw = fs::read_to_string(&path).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not read {}: {e}", path.display()),
+                redaction_key,
+            ))
+        })?;
+        let parsed: MockFileWire = serde_json::from_str(&raw).map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("invalid mock JSON in {}: {e}", path.display()),
+                redaction_key,
+            ))
+        })?;
         let rules = parsed
             .rules
             .into_iter()
-            .map(|r| (r.when_contains, r.status, r.response.to_string()))
+            .map(|r| MockRule {
+                needle: r.when_contains,
+                status: r.status,
+                resp_body: r.response.to_string(),
+                panic_message: r.panic_message,
+            })
             .collect();
         Ok(Self { rules })
     }
@@ -164,11 +193,14 @@ impl Transport for MockDirTransport {
         body: &str,
         _timeout: Duration,
     ) -> Result<RawHttpResponse, TransportError> {
-        for (needle, status, resp_body) in &self.rules {
-            if body.contains(needle) {
+        for rule in &self.rules {
+            if body.contains(&rule.needle) {
+                if let Some(panic_msg) = &rule.panic_message {
+                    panic!("{panic_msg}");
+                }
                 return Ok(RawHttpResponse {
-                    status: *status,
-                    body: resp_body.clone(),
+                    status: rule.status,
+                    body: rule.resp_body.clone(),
                 });
             }
         }

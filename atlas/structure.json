@@ -36,7 +36,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "b3e9ee40274d01d2ccc674bcc58390d19ef6101e5b6092dddbec1735f5aeb78a",
+          "hash": "ee1211c292a1fc87aee6b06fd09d3be8cf282f8a00dfd79f5e25f6d951a12d8d",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -636,7 +636,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "0793c0d3244db1150d771ccfa34d36aad1b1c7bdbfd55708ffd0ad57a91e770f",
+          "hash": "98644dd66a52ad627c4baadbd5895afc8f51b895fea66e2fff0e586199d3dfa6",
           "path": "CHANGELOG.md"
         },
         {
@@ -1230,7 +1230,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "648b3e3837bdbfbc6fe8fa8ec9d90fa9d91ce7cc",
+    "commit": "2d34292808b9a2afa344d83bddee0e985a32a4aa",
     "tracked": 443
   },
   "landings": [
@@ -1900,56 +1900,57 @@
       "entryRule": 4,
       "exports": [
         "execute_cli",
-        "parse_args"
+        "parse_args",
+        "parse_args_with_key"
       ],
       "failurePaths": [
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 68
+          "line": 80
         },
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 77
+          "line": 89
         },
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 104
+          "line": 116
         },
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 113
+          "line": 125
         },
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 164
+          "line": 176
         },
         {
-          "in": "parse_args",
+          "in": "parse_args_with_key",
           "kind": "err",
-          "line": 173
+          "line": 185
         },
         {
           "in": "take_flag_value",
           "kind": "err",
-          "line": 205
+          "line": 217
         },
         {
           "in": "post_chat_completions",
           "kind": "err",
-          "line": 240
+          "line": 253
         },
         {
           "in": "execute_cli",
           "kind": "match-err",
-          "line": 270
+          "line": 283
         }
       ],
-      "hash": "dca7063dcfcedc44c1d7ffd38b9b223e6881dfbbf466135d65116466461d8943",
+      "hash": "d7c54cc03e03c2c7e26cdd1062cc035dd8b154de67469c739633764a0728db6c",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/relay.rs",
@@ -1963,16 +1964,17 @@
           "calls": [
             {
               "branch": "tokens.is_empty()",
-              "line": 68,
+              "line": 80,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 227,
+              "line": 238,
               "name": "redact_secrets",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
@@ -1981,33 +1983,45 @@
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 77,
+              "line": 240,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 89,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
               "branch": "is_forbidden_key_flag(flag)",
-              "line": 104,
+              "line": 116,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 113,
+              "line": 125,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
-              "line": 205,
+              "line": 217,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2016,52 +2030,58 @@
               "via": "take_flag_value"
             },
             {
-              "line": 125,
+              "line": 137,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
-              "line": 131,
+              "line": 143,
               "name": "parse",
               "receiver": "Round",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
-              "line": 151,
+              "line": 163,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
-              "line": 164,
+              "line": 176,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 173,
+              "line": 185,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             },
             {
-              "line": 180,
+              "line": 192,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
-              }
+              },
+              "via": "parse_args_with_key"
             }
           ],
           "exported": true,
@@ -2072,7 +2092,126 @@
         {
           "calls": [
             {
-              "line": 205,
+              "branch": "tokens.is_empty()",
+              "line": 80,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 238,
+              "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 240,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 89,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "branch": "is_forbidden_key_flag(flag)",
+              "line": 116,
+              "name": "SecretInForbiddenPlace",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "branch": "inline_val.is_some()",
+              "line": 125,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "line": 217,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              },
+              "via": "take_flag_value"
+            },
+            {
+              "line": 137,
+              "name": "validate_day",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              }
+            },
+            {
+              "line": 143,
+              "name": "parse",
+              "receiver": "Round",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              }
+            },
+            {
+              "line": 163,
+              "name": "InvalidCap",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "line": 176,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "branch": "live && mock_dir.is_some()",
+              "line": 185,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            },
+            {
+              "line": 192,
+              "name": "Usage",
+              "receiver": "RelayError",
+              "target": {
+                "file": "crates/league-relay/src/error.rs"
+              }
+            }
+          ],
+          "exported": true,
+          "invokedAtTopLevel": false,
+          "isDefaultExport": false,
+          "name": "parse_args_with_key"
+        },
+        {
+          "calls": [
+            {
+              "line": 217,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2088,8 +2227,15 @@
         {
           "calls": [
             {
-              "line": 227,
+              "line": 238,
               "name": "redact_secrets",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              }
+            },
+            {
+              "line": 240,
+              "name": "truncate_after_redaction",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
               }
@@ -2103,7 +2249,7 @@
         {
           "calls": [
             {
-              "line": 261,
+              "line": 274,
               "name": "from_env_reader",
               "receiver": "ApiKey",
               "target": {
@@ -2112,17 +2258,17 @@
             },
             {
               "branch": "tokens.is_empty()",
-              "line": 68,
+              "line": 80,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 227,
+              "line": 238,
               "name": "redact_secrets",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
@@ -2131,36 +2277,45 @@
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 77,
+              "line": 240,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 89,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "is_forbidden_key_flag(flag)",
-              "line": 104,
+              "line": 116,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 113,
+              "line": 125,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 205,
+              "line": 217,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2169,61 +2324,61 @@
               "via": "take_flag_value"
             },
             {
-              "line": 125,
+              "line": 137,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 131,
+              "line": 143,
               "name": "parse",
               "receiver": "Round",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 151,
+              "line": 163,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 164,
+              "line": 176,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 173,
+              "line": 185,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 180,
+              "line": 192,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 299,
+              "line": 312,
               "name": "load",
               "receiver": "SeatFile",
               "target": {
@@ -2232,8 +2387,8 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 301,
-              "name": "load",
+              "line": 314,
+              "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
                 "file": "crates/league-relay/src/transport.rs"
@@ -2241,46 +2396,11 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 302,
+              "line": 315,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 311,
-              "name": "run_turn",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 313,
-              "name": "acquire",
-              "receiver": "LiveGate",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 314,
-              "name": "new",
-              "receiver": "TurnConfig",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 323,
-              "name": "new",
-              "receiver": "UreqTransport",
-              "target": {
-                "file": "crates/league-relay/src/transport.rs"
               },
               "via": "run_cli_inner"
             },
@@ -2294,6 +2414,15 @@
             },
             {
               "line": 326,
+              "name": "acquire",
+              "receiver": "LiveGate",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "run_cli_inner"
+            },
+            {
+              "line": 327,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
@@ -2302,7 +2431,16 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 335,
+              "line": 336,
+              "name": "new",
+              "receiver": "UreqTransport",
+              "target": {
+                "file": "crates/league-relay/src/transport.rs"
+              },
+              "via": "run_cli_inner"
+            },
+            {
+              "line": 337,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2310,33 +2448,44 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 274,
-              "name": "redact_secrets",
+              "line": 339,
+              "name": "new",
+              "receiver": "TurnConfig",
               "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              }
+                "file": "crates/league-relay/src/relay.rs"
+              },
+              "via": "run_cli_inner"
+            },
+            {
+              "line": 348,
+              "name": "run_turn",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              },
+              "via": "run_cli_inner"
             }
           ],
           "exported": true,
           "invokedAtTopLevel": false,
           "isDefaultExport": false,
-          "name": "execute_cli"
+          "name": "execute_cli",
+          "truncated": true
         },
         {
           "calls": [
             {
               "branch": "tokens.is_empty()",
-              "line": 68,
+              "line": 80,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 227,
+              "line": 238,
               "name": "redact_secrets",
               "target": {
                 "file": "crates/league-relay/src/secret.rs"
@@ -2345,36 +2494,45 @@
             },
             {
               "branch": "tokens[0] != \"turn\"",
-              "line": 77,
+              "line": 240,
+              "name": "truncate_after_redaction",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              },
+              "via": "sanitize_flag_name"
+            },
+            {
+              "branch": "tokens[0] != \"turn\"",
+              "line": 89,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "is_forbidden_key_flag(flag)",
-              "line": 104,
+              "line": 116,
               "name": "SecretInForbiddenPlace",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "inline_val.is_some()",
-              "line": 113,
+              "line": 125,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 205,
+              "line": 217,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
@@ -2383,61 +2541,61 @@
               "via": "take_flag_value"
             },
             {
-              "line": 125,
+              "line": 137,
               "name": "validate_day",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 131,
+              "line": 143,
               "name": "parse",
               "receiver": "Round",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 151,
+              "line": 163,
               "name": "InvalidCap",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 164,
+              "line": 176,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
               "branch": "live && mock_dir.is_some()",
-              "line": 173,
+              "line": 185,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 180,
+              "line": 192,
               "name": "Usage",
               "receiver": "RelayError",
               "target": {
                 "file": "crates/league-relay/src/error.rs"
               },
-              "via": "parse_args"
+              "via": "parse_args_with_key"
             },
             {
-              "line": 299,
+              "line": 312,
               "name": "load",
               "receiver": "SeatFile",
               "target": {
@@ -2445,50 +2603,19 @@
               }
             },
             {
-              "line": 301,
-              "name": "load",
+              "line": 314,
+              "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
                 "file": "crates/league-relay/src/transport.rs"
               }
             },
             {
-              "line": 302,
+              "line": 315,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 311,
-              "name": "run_turn",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 313,
-              "name": "acquire",
-              "receiver": "LiveGate",
-              "target": {
-                "file": "crates/league-relay/src/secret.rs"
-              }
-            },
-            {
-              "line": 314,
-              "name": "new",
-              "receiver": "TurnConfig",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 323,
-              "name": "new",
-              "receiver": "UreqTransport",
-              "target": {
-                "file": "crates/league-relay/src/transport.rs"
               }
             },
             {
@@ -2500,6 +2627,14 @@
             },
             {
               "line": 326,
+              "name": "acquire",
+              "receiver": "LiveGate",
+              "target": {
+                "file": "crates/league-relay/src/secret.rs"
+              }
+            },
+            {
+              "line": 327,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
@@ -2507,7 +2642,30 @@
               }
             },
             {
-              "line": 335,
+              "line": 336,
+              "name": "new",
+              "receiver": "UreqTransport",
+              "target": {
+                "file": "crates/league-relay/src/transport.rs"
+              }
+            },
+            {
+              "line": 337,
+              "name": "run_turn",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              }
+            },
+            {
+              "line": 339,
+              "name": "new",
+              "receiver": "TurnConfig",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              }
+            },
+            {
+              "line": 348,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2526,7 +2684,7 @@
       "path": "crates/league-relay/src/error.rs"
     },
     {
-      "hash": "885bd71dad3babfbab4ed21df0cdec8d9736dd89d8952cd9b5b823e2c92b9f4d",
+      "hash": "5d1114f9cc1f7cabaae85bad50d2935b99b0a09fbd2308f6e14366c6229effaa",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/error.rs",
@@ -2540,9 +2698,10 @@
     {
       "entry": "main",
       "entryRule": 1,
-      "hash": "8de7216f0a86e2eb1b7db1c42148001b19d25b4ab450fcc2516c67a126823974",
+      "hash": "611bf2f4de14592096bb192ff1ed8c0f3dd65e0a6521ba0e93a1e8bd76ddbbd9",
       "importsFiles": [
-        "crates/league-relay/src/cli.rs"
+        "crates/league-relay/src/cli.rs",
+        "crates/league-relay/src/lib.rs"
       ],
       "library": "crates/league-relay/src/lib.rs",
       "path": "crates/league-relay/src/main.rs",
@@ -2550,9 +2709,23 @@
         {
           "calls": [
             {
+              "line": 7,
+              "name": "from_env",
+              "target": {
+                "file": "crates/league-relay/src/lib.rs"
+              }
+            },
+            {
+              "line": 7,
+              "name": "install_redacting_panic_hook",
+              "target": {
+                "file": "crates/league-relay/src/lib.rs"
+              }
+            },
+            {
               "inner": [
                 {
-                  "line": 261,
+                  "line": 274,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -2561,17 +2734,17 @@
                 },
                 {
                   "branch": "tokens.is_empty()",
-                  "line": 68,
+                  "line": 80,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
                   "branch": "tokens[0] != \"turn\"",
-                  "line": 227,
+                  "line": 238,
                   "name": "redact_secrets",
                   "target": {
                     "file": "crates/league-relay/src/secret.rs"
@@ -2580,36 +2753,45 @@
                 },
                 {
                   "branch": "tokens[0] != \"turn\"",
-                  "line": 77,
+                  "line": 240,
+                  "name": "truncate_after_redaction",
+                  "target": {
+                    "file": "crates/league-relay/src/secret.rs"
+                  },
+                  "via": "sanitize_flag_name"
+                },
+                {
+                  "branch": "tokens[0] != \"turn\"",
+                  "line": 89,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
                   "branch": "is_forbidden_key_flag(flag)",
-                  "line": 104,
+                  "line": 116,
                   "name": "SecretInForbiddenPlace",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 113,
+                  "line": 125,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
-                  "line": 205,
+                  "line": 217,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
@@ -2618,53 +2800,43 @@
                   "via": "take_flag_value"
                 },
                 {
-                  "line": 125,
+                  "line": 137,
                   "name": "validate_day",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
-                  "line": 131,
+                  "line": 143,
                   "name": "parse",
                   "receiver": "Round",
                   "target": {
                     "file": "crates/league-relay/src/relay.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
-                  "line": 151,
+                  "line": 163,
                   "name": "InvalidCap",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 },
                 {
-                  "line": 164,
+                  "line": 176,
                   "name": "Usage",
                   "receiver": "RelayError",
                   "target": {
                     "file": "crates/league-relay/src/error.rs"
                   },
-                  "via": "parse_args"
-                },
-                {
-                  "branch": "live && mock_dir.is_some()",
-                  "line": 173,
-                  "name": "Usage",
-                  "receiver": "RelayError",
-                  "target": {
-                    "file": "crates/league-relay/src/error.rs"
-                  },
-                  "via": "parse_args"
+                  "via": "parse_args_with_key"
                 }
               ],
               "innerTruncated": true,
-              "line": 9,
+              "line": 10,
               "name": "execute_cli",
               "target": {
                 "file": "crates/league-relay/src/cli.rs"
@@ -2699,140 +2871,150 @@
         {
           "in": "sum_recorded_costs",
           "kind": "err",
-          "line": 471
+          "line": 533
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 514
+          "line": 576
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 521
+          "line": 583
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 535
+          "line": 597
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 625
+          "line": 690
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 634
+          "line": 699
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 689
+          "line": 761
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 710
+          "line": 782
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 720
+          "line": 803
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 765
+          "line": 813
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 771
+          "line": 870
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 777
+          "line": 882
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 828
+          "line": 888
         },
         {
-          "in": "evaluate_response",
+          "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 899
+          "line": 950
         },
         {
-          "in": "evaluate_response",
+          "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 907
+          "line": 1034
         },
         {
-          "in": "evaluate_response",
+          "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 922
+          "line": 1043
         },
         {
-          "in": "evaluate_response",
+          "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 938
+          "line": 1067
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 1088
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 1103
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1005
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 1005
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 1006
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 1007
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 1009
+          "line": 1173
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 1009
+          "line": 1173
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1019
+          "line": 1174
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 1019
+          "line": 1175
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 1177
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 1177
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 1187
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 1191
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 1076
+          "line": 1251
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 1086
+          "line": 1264
         }
       ],
-      "hash": "9a6be349e65a5b10d1b29c080046b37d09d3b5bf8f6b55f15223fe9df56a4dbc",
+      "hash": "4169ba72b88250d80800b6fe7b5d9f95bb21cce65da8b0361a18d887d5b07a47",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -2849,55 +3031,65 @@
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 109
+          "line": 113
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 124
+          "line": 128
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 135
+          "line": 139
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 153
+          "line": 157
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 160
+          "line": 164
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 169
+          "line": 173
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 183
         },
         {
           "in": "validate_guild_name",
           "kind": "err",
-          "line": 220
+          "line": 232
+        },
+        {
+          "in": "validate_guild_name",
+          "kind": "err",
+          "line": 239
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 234
+          "line": 253
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 245
+          "line": 264
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 256
+          "line": 275
         }
       ],
-      "hash": "ac2c19e59bff97e6e556fb7790a259911353f4a6fca11a3a1ccde8ce427e5167",
+      "hash": "4fb19c70e916223216674fa871e4674a3521af2f14791e945e6fb264731d5b52",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/secret.rs"
@@ -2906,7 +3098,9 @@
     },
     {
       "exports": [
-        "redact_secrets"
+        "install_redacting_panic_hook",
+        "redact_secrets",
+        "truncate_after_redaction"
       ],
       "failurePaths": [
         {
@@ -2925,7 +3119,7 @@
           "line": 71
         }
       ],
-      "hash": "3e79901c4712dbc54269c103857efc2ce0ad8595ac1c4068977c767ab8af33f9",
+      "hash": "4b9b421202752b19e339b7d2ca7ae90807a9829e1c754e4013151206280be8d9",
       "importsFiles": [
         "crates/league-relay/src/error.rs"
       ],
@@ -2939,10 +3133,10 @@
         {
           "in": "post_chat_completions",
           "kind": "err",
-          "line": 175
+          "line": 207
         }
       ],
-      "hash": "5e9327057cd2b435a5993ca56aff5ade530203bc6402826754edc6b80faf64f0",
+      "hash": "90007de4a3043311568eed3045fe67cc44a2329973c32514c58465dc67bca402",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/secret.rs"
@@ -2950,7 +3144,7 @@
       "path": "crates/league-relay/src/transport.rs"
     },
     {
-      "hash": "a495515725b048656d9759d61413e683aa579912d8749f230d4a622cfd47a037",
+      "hash": "1934644868e2090944221faa6b8ec541196118adb38e14714f56bec629230bf3",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",

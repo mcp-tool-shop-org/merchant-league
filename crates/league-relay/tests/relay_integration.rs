@@ -4,11 +4,11 @@
 //! `--mock-dir` fixtures in temporary directories. No network socket is opened
 //! and no real API key is used.
 
-use league_relay::cli::{CliCommand, execute_cli, parse_args};
+use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
     ApiKey, CallLogEntry, LiveGate, RawHttpResponse, RelayError, Round, SeatFile, SeatOutcome,
-    TranscriptEntry, Transport, TransportError, TurnConfig, UreqTransport, redact_secrets,
-    run_turn, sha256_hex,
+    TranscriptEntry, Transport, TransportError, TurnConfig, UreqTransport,
+    install_redacting_panic_hook, redact_secrets, run_turn, sha256_hex, truncate_after_redaction,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -36,6 +36,7 @@ enum ScriptStep {
     Respond(RawHttpResponse),
     Fail(TransportError),
     SleepThenTimeout(Duration),
+    SleepThenRespond(Duration, RawHttpResponse),
     PanicWith(String),
     PanicStatic,
     PanicCode,
@@ -88,6 +89,10 @@ impl Transport for ScriptedTransport {
                 thread::sleep(dur);
                 Err(TransportError::Timeout)
             }
+            Some(ScriptStep::SleepThenRespond(dur, resp)) => {
+                thread::sleep(dur);
+                Ok(resp)
+            }
             Some(ScriptStep::PanicWith(msg)) => panic!("{msg}"),
             Some(ScriptStep::PanicStatic) => panic!("static transport panic"),
             Some(ScriptStep::PanicCode) => std::panic::panic_any(7_i32),
@@ -137,7 +142,8 @@ fn single_openrouter_seats(guild: &str, timeout_secs: f64) -> Result<SeatFile, B
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.4,
                 "max_output_tokens": 512,
-                "timeout_secs": timeout_secs
+                "timeout_secs": timeout_secs,
+                "max_cost_per_call": 0.05
             }
         ]
     })
@@ -173,7 +179,12 @@ fn read_transcript_log(
     game_dir: &Path,
     guild: &str,
 ) -> Result<Vec<TranscriptEntry>, Box<dyn Error>> {
-    let raw = fs::read_to_string(game_dir.join("relay").join(format!("{guild}.jsonl")))?;
+    let raw = fs::read_to_string(
+        game_dir
+            .join("relay")
+            .join("seats")
+            .join(format!("{guild}.jsonl")),
+    )?;
     let mut out = Vec::new();
     for line in raw.lines() {
         if !line.trim().is_empty() {
@@ -193,7 +204,8 @@ fn seat_file_validates_pinned_slugs_and_manual_file_seats() -> TestResult {
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.7,
                 "max_output_tokens": 1024,
-                "timeout_secs": 90
+                "timeout_secs": 90,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Smiths",
@@ -239,7 +251,8 @@ fn seat_file_validates_pinned_slugs_and_manual_file_seats() -> TestResult {
                 "model": bad_slug,
                 "temperature": 0.5,
                 "max_output_tokens": 256,
-                "timeout_secs": 30
+                "timeout_secs": 30,
+                "max_cost_per_call": 0.05
             }]
         })
         .to_string();
@@ -527,7 +540,13 @@ fn delivery_failures_resend_once_identically_as_harness_then_no_reply() -> TestR
             .join("day-01-act-Saltworks.md")
             .exists()
     );
-    assert!(!game_fail.join("relay").join("Saltworks.jsonl").exists());
+    assert!(
+        !game_fail
+            .join("relay")
+            .join("seats")
+            .join("Saltworks.jsonl")
+            .exists()
+    );
 
     let fail_calls = read_calls_log(&game_fail)?;
     assert_eq!(fail_calls.len(), 2);
@@ -685,7 +704,8 @@ fn seats_run_concurrently_and_one_seat_failure_never_stops_others() -> TestResul
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.3,
                 "max_output_tokens": 256,
-                "timeout_secs": 3.0
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Weavers",
@@ -693,7 +713,8 @@ fn seats_run_concurrently_and_one_seat_failure_never_stops_others() -> TestResul
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.3,
                 "max_output_tokens": 256,
-                "timeout_secs": 3.0
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Dyers",
@@ -701,7 +722,8 @@ fn seats_run_concurrently_and_one_seat_failure_never_stops_others() -> TestResul
                 "model": "openai/gpt-oss-120b",
                 "temperature": 0.3,
                 "max_output_tokens": 256,
-                "timeout_secs": 3.0
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Smiths",
@@ -772,12 +794,12 @@ fn spend_cap_sums_calls_jsonl_and_refuses_with_cap_reached() -> TestResult {
     fs::write(&wrapper, "WRAPPER")?;
     let seats = single_openrouter_seats("Saltworks", 5.0)?;
 
-    // Turn 1 costs 0.09, Turn 2 costs 0.01 -> cumulative sum 0.10 == cap 0.10.
+    // Turn 1 costs 0.05, Turn 2 costs 0.05 -> cumulative sum 0.10 == cap 0.10.
     write_to_seat(&game_dir, "01", "talk", "Saltworks", "T1")?;
     let t1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
         "Msg 1",
         "google/gemini-2.5-pro-06-05",
-        Some(0.09),
+        Some(0.05),
     ))]);
     run_turn(
         &TurnConfig::new(
@@ -797,7 +819,7 @@ fn spend_cap_sums_calls_jsonl_and_refuses_with_cap_reached() -> TestResult {
     let t2 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
         "TRAVEL: stay",
         "google/gemini-2.5-pro-06-05",
-        Some(0.01),
+        Some(0.05),
     ))]);
     run_turn(
         &TurnConfig::new(
@@ -922,7 +944,8 @@ fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> Test
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.2,
                 "max_output_tokens": 256,
-                "timeout_secs": 5.0
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Weavers",
@@ -930,7 +953,8 @@ fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> Test
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.2,
                 "max_output_tokens": 256,
-                "timeout_secs": 5.0
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.05
             }
         ]
     })
@@ -1009,6 +1033,7 @@ fn live_gate_refuses_network_without_live_flag_key_and_cap() -> TestResult {
 #[test]
 fn planted_key_is_redacted_across_debug_errors_panics_cli_and_logs() -> TestResult {
     let key = ApiKey::from_env_reader(|_| Some(PLANTED_KEY.to_owned()))?;
+    install_redacting_panic_hook(Some(key.clone()));
     assert!(!format!("{key:?}").contains(PLANTED_KEY));
 
     let gate = LiveGate::acquire(true, Some(2.5), Ok(key.clone()))?;
@@ -1078,7 +1103,8 @@ fn planted_key_is_redacted_across_debug_errors_panics_cli_and_logs() -> TestResu
                 "model": "google/gemini-2.5-pro-06-05",
                 "temperature": 0.1,
                 "max_output_tokens": 128,
-                "timeout_secs": 3.0
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.05
             },
             {
                 "guild": "Weavers",
@@ -1086,7 +1112,8 @@ fn planted_key_is_redacted_across_debug_errors_panics_cli_and_logs() -> TestResu
                 "model": "openai/gpt-oss-120b",
                 "temperature": 0.1,
                 "max_output_tokens": 128,
-                "timeout_secs": 3.0
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.05
             }
         ]
     })
@@ -1152,7 +1179,8 @@ fn cli_binary_mock_turn_and_live_refusal_end_to_end() -> TestResult {
                     "model": "google/gemini-2.5-pro-06-05",
                     "temperature": 0.6,
                     "max_output_tokens": 512,
-                    "timeout_secs": 30.0
+                    "timeout_secs": 30.0,
+                    "max_cost_per_call": 0.05
                 },
                 {
                     "guild": "Smiths",
@@ -1391,10 +1419,12 @@ fn cli_validation_corrupt_logs_and_all_display_branches() -> TestResult {
         r#"{"seats":[]}"#,
         r#"{"seats":[{"guild":"Saltworks","backend":"openrouter"}]}"#,
         r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b"}]}"#,
-        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":3.0,"max_output_tokens":10,"timeout_secs":5}]}"#,
-        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":0,"timeout_secs":5}]}"#,
-        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":10,"timeout_secs":0}]}"#,
-        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b!c","temperature":0.5,"max_output_tokens":10,"timeout_secs":5}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":3.0,"max_output_tokens":10,"timeout_secs":5,"max_cost_per_call":0.05}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":0,"timeout_secs":5,"max_cost_per_call":0.05}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":10,"timeout_secs":0,"max_cost_per_call":0.05}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":10,"timeout_secs":5}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b","temperature":0.5,"max_output_tokens":10,"timeout_secs":5,"max_cost_per_call":0}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"a/b!c","temperature":0.5,"max_output_tokens":10,"timeout_secs":5,"max_cost_per_call":0.05}]}"#,
     ] {
         assert!(SeatFile::from_json_str(bad_seat_json, None).is_err());
     }
@@ -1460,9 +1490,12 @@ fn cli_validation_corrupt_logs_and_all_display_branches() -> TestResult {
 
     // Corrupt transcript system role rejected.
     let bad_tx_game = tmp.path().join("bad_tx");
-    fs::create_dir_all(bad_tx_game.join("relay"))?;
+    fs::create_dir_all(bad_tx_game.join("relay").join("seats"))?;
     fs::write(
-        bad_tx_game.join("relay").join("Saltworks.jsonl"),
+        bad_tx_game
+            .join("relay")
+            .join("seats")
+            .join("Saltworks.jsonl"),
         r#"{"day":"01","round":"talk","role":"system","content":"nope"}"#,
     )?;
     assert!(
@@ -1615,7 +1648,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
     let seats_path = tmp.path().join("seats.json");
     fs::write(
         &seats_path,
-        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"google/gemini-2.5-pro-06-05","temperature":0.4,"max_output_tokens":128,"timeout_secs":2.0}]}"#,
+        r#"{"seats":[{"guild":"Saltworks","backend":"openrouter","model":"google/gemini-2.5-pro-06-05","temperature":0.4,"max_output_tokens":128,"timeout_secs":2.0,"max_cost_per_call":0.05}]}"#,
     )?;
 
     let cli_game_ok = tmp.path().join("cli_game_ok");
@@ -1859,6 +1892,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
     ));
 
     // HTTP 429 with JSON body + static/&str and non-string panics.
+    install_redacting_panic_hook(Some(gate.api_key().clone()));
     let panic_game = tmp.path().join("panic_variants");
     write_to_seat(&panic_game, "01", "talk", "Saltworks", "P1")?;
     let panic_tx_1 = ScriptedTransport::new(vec![
@@ -1909,9 +1943,12 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
 
     // Transcript with invalid JSON and transcript ending on unpaired user turn.
     let invalid_tx_game = tmp.path().join("invalid_tx_json");
-    fs::create_dir_all(invalid_tx_game.join("relay"))?;
+    fs::create_dir_all(invalid_tx_game.join("relay").join("seats"))?;
     fs::write(
-        invalid_tx_game.join("relay").join("Saltworks.jsonl"),
+        invalid_tx_game
+            .join("relay")
+            .join("seats")
+            .join("Saltworks.jsonl"),
         "\n{not-json}\n",
     )?;
     assert!(
@@ -1932,9 +1969,12 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
     );
 
     let unpaired_tx_game = tmp.path().join("unpaired_tx");
-    fs::create_dir_all(unpaired_tx_game.join("relay"))?;
+    fs::create_dir_all(unpaired_tx_game.join("relay").join("seats"))?;
     fs::write(
-        unpaired_tx_game.join("relay").join("Saltworks.jsonl"),
+        unpaired_tx_game
+            .join("relay")
+            .join("seats")
+            .join("Saltworks.jsonl"),
         r#"{"day":"01","round":"talk","role":"user","content":"lonely"}"#,
     )?;
     assert!(
@@ -1953,6 +1993,878 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
         )
         .is_err()
     );
+
+    Ok(())
+}
+
+struct SlowPricedTransport {
+    calls: AtomicUsize,
+    pause: Duration,
+    cost_per_call: f64,
+}
+
+impl SlowPricedTransport {
+    fn new(pause: Duration, cost_per_call: f64) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            pause,
+            cost_per_call,
+        }
+    }
+
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Transport for SlowPricedTransport {
+    fn post_chat_completions(
+        &self,
+        _url: &str,
+        _body: &str,
+        _timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        thread::sleep(self.pause);
+        Ok(ok_completion_json(
+            "TRAVEL: stay",
+            "google/gemini-2.5-pro-06-05",
+            Some(self.cost_per_call),
+        ))
+    }
+}
+
+struct OverEstimateSequencedTransport {
+    calls: AtomicUsize,
+    seat_a_returned: (Mutex<bool>, Condvar),
+}
+
+impl OverEstimateSequencedTransport {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            seat_a_returned: (Mutex::new(false), Condvar::new()),
+        }
+    }
+}
+
+impl Transport for OverEstimateSequencedTransport {
+    fn post_chat_completions(
+        &self,
+        _url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if body.contains("SEAT_A_OVER_ESTIMATE") {
+            let resp = ok_completion_json(
+                "Saltworks reply",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.025),
+            );
+            let (lock, cvar) = &self.seat_a_returned;
+            if let Ok(mut done) = lock.lock() {
+                *done = true;
+                cvar.notify_all();
+            }
+            return Ok(resp);
+        }
+        let (lock, cvar) = &self.seat_a_returned;
+        if let Ok(mut done) = lock.lock() {
+            while !*done {
+                let (next_guard, timeout_res) = cvar
+                    .wait_timeout(done, Duration::from_secs(2))
+                    .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
+                done = next_guard;
+                if timeout_res.timed_out() {
+                    break;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(15));
+        Err(TransportError::Network(
+            "transient drop before over-estimate check".to_owned(),
+        ))
+    }
+}
+
+#[test]
+fn m1_cap_reservation_blocks_concurrent_overshoot_resends_and_cost_over_estimate() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    // Part A: 4-seat reproducer from review (cap = 0.01, max_cost_per_call = 0.01, each call 0.01).
+    // At most floor(0.01 / 0.01) = 1 call may start; recorded sum must be 0.01, not 0.04.
+    let four_seats_raw = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            },
+            {
+                "guild": "Weavers",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            },
+            {
+                "guild": "Dyers",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            },
+            {
+                "guild": "Tanners",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            }
+        ]
+    })
+    .to_string();
+    let four_seats = SeatFile::from_json_str(&four_seats_raw, None)?;
+
+    let game_cap_01 = tmp.path().join("four_seat_cap_01");
+    for g in ["Saltworks", "Weavers", "Dyers", "Tanners"] {
+        write_to_seat(&game_cap_01, "01", "act", g, "PROMPT")?;
+    }
+    let tx_01 = SlowPricedTransport::new(Duration::from_millis(45), 0.01);
+    let summary_01 = run_turn(
+        &TurnConfig::new(
+            game_cap_01.clone(),
+            "01".to_owned(),
+            Round::Act,
+            four_seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &tx_01,
+        None,
+    )?;
+    assert_eq!(tx_01.call_count(), 1);
+    let delivered_01 = summary_01
+        .reports
+        .iter()
+        .filter(|r| matches!(r.outcome, SeatOutcome::Delivered { .. }))
+        .count();
+    let capped_01 = summary_01
+        .reports
+        .iter()
+        .filter(|r| matches!(r.outcome, SeatOutcome::CapReached { .. }))
+        .count();
+    assert_eq!(delivered_01, 1);
+    assert_eq!(capped_01, 3);
+    let calls_01 = read_calls_log(&game_cap_01)?;
+    let sum_01: f64 = calls_01.iter().filter_map(|c| c.cost).sum();
+    assert!((sum_01 - 0.01).abs() < 1e-9);
+    assert_eq!(
+        calls_01
+            .iter()
+            .filter(|c| c.outcome == "CAP_REACHED")
+            .count(),
+        3
+    );
+
+    // Same 4 seats with cap = 0.025 -> floor(0.025 / 0.01) = 2 calls allowed.
+    let game_cap_025 = tmp.path().join("four_seat_cap_025");
+    for g in ["Saltworks", "Weavers", "Dyers", "Tanners"] {
+        write_to_seat(&game_cap_025, "01", "act", g, "PROMPT")?;
+    }
+    let tx_025 = SlowPricedTransport::new(Duration::from_millis(45), 0.01);
+    let summary_025 = run_turn(
+        &TurnConfig::new(
+            game_cap_025.clone(),
+            "01".to_owned(),
+            Round::Act,
+            four_seats,
+            Some(wrapper.clone()),
+            true,
+            Some(0.025),
+        ),
+        &tx_025,
+        None,
+    )?;
+    assert_eq!(tx_025.call_count(), 2);
+    assert_eq!(
+        summary_025
+            .reports
+            .iter()
+            .filter(|r| matches!(r.outcome, SeatOutcome::Delivered { .. }))
+            .count(),
+        2
+    );
+
+    // Part B: A harness re-send also reserves max_cost_per_call before calling.
+    let one_seat_01 = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+    let resend_game = tmp.path().join("resend_reserve_game");
+    write_to_seat(&resend_game, "01", "talk", "Saltworks", "RESEND_PROMPT")?;
+    let resend_tx = ScriptedTransport::new(vec![
+        ScriptStep::Respond(ok_completion_json(
+            "   ",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.008),
+        )),
+        ScriptStep::Respond(ok_completion_json(
+            "Should not be sent",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.008),
+        )),
+    ]);
+    let resend_summary = run_turn(
+        &TurnConfig::new(
+            resend_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat_01.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.015),
+        ),
+        &resend_tx,
+        None,
+    )?;
+    assert_eq!(resend_tx.call_count(), 1);
+    assert!(matches!(
+        resend_summary.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let resend_calls = read_calls_log(&resend_game)?;
+    assert_eq!(resend_calls.len(), 2);
+    assert_eq!(resend_calls[0].outcome, "harness");
+    assert_eq!(resend_calls[1].attempt, 2);
+    assert_eq!(resend_calls[1].trigger, "harness");
+    assert_eq!(resend_calls[1].outcome, "CAP_REACHED");
+
+    // Part C: Returned cost exceeding max_cost_per_call logs COST_OVER_ESTIMATE and fails closed.
+    let over_game = tmp.path().join("over_estimate_game");
+    write_to_seat(
+        &over_game,
+        "01",
+        "talk",
+        "Saltworks",
+        "SEAT_A_OVER_ESTIMATE",
+    )?;
+    write_to_seat(&over_game, "01", "talk", "Weavers", "SEAT_B_AFTER_OVER")?;
+    let two_seats_01 = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let over_tx = OverEstimateSequencedTransport::new();
+    let over_summary = run_turn(
+        &TurnConfig::new(
+            over_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            two_seats_01,
+            Some(wrapper.clone()),
+            true,
+            Some(1.0),
+        ),
+        &over_tx,
+        None,
+    )?;
+    assert!(matches!(
+        over_summary.reports[0].outcome,
+        SeatOutcome::Delivered { .. }
+    ));
+    assert!(matches!(
+        over_summary.reports[1].outcome,
+        SeatOutcome::CostOverEstimateRefused { .. }
+    ));
+    assert!(
+        over_summary
+            .format_paths_and_hashes()
+            .contains("seat=Weavers outcome=COST_OVER_ESTIMATE")
+    );
+    let over_calls = read_calls_log(&over_game)?;
+    let salt_over = over_calls
+        .iter()
+        .find(|c| c.guild == "Saltworks")
+        .ok_or("missing Saltworks over-estimate entry")?;
+    assert_eq!(salt_over.cost, Some(0.025));
+    assert_eq!(salt_over.outcome, "COST_OVER_ESTIMATE");
+
+    // Re-opening CallLedger on the same (day, round) also sees COST_OVER_ESTIMATE and refuses pre-call.
+    write_to_seat(&over_game, "01", "talk", "Dyers", "LATER_SEAT")?;
+    let dyers_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Dyers",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+    let unused_tx = ScriptedTransport::new(vec![]);
+    let reopened = run_turn(
+        &TurnConfig::new(
+            over_game,
+            "01".to_owned(),
+            Round::Talk,
+            dyers_seat,
+            Some(wrapper),
+            true,
+            Some(1.0),
+        ),
+        &unused_tx,
+        None,
+    )?;
+    assert_eq!(unused_tx.call_count(), 0);
+    assert!(matches!(
+        reopened.reports[0].outcome,
+        SeatOutcome::CostOverEstimateRefused { .. }
+    ));
+
+    Ok(())
+}
+
+fn assert_no_8char_key_piece(haystack: &str, secret: &str, surface: &str) {
+    let chars: Vec<char> = secret.chars().collect();
+    for window in chars.windows(8) {
+        let piece: String = window.iter().collect();
+        assert!(
+            !haystack.contains(&piece),
+            "{surface} leaked 8-char key substring '{piece}': {haystack}"
+        );
+    }
+}
+
+#[test]
+fn m2_redacts_before_truncation_and_scrubs_8_char_key_substrings() -> TestResult {
+    // Non-sk-or key so prefix token matching cannot hide truncation or substring bugs.
+    const STRADDLE_KEY: &str = "OrKey9876AlphaBravoCharlieDeltaEcho4321";
+    let key = ApiKey::from_env_reader(|_| Some(STRADDLE_KEY.to_owned()))?;
+
+    // Short (<8 char) key branch and truncate_after_redaction short-input branch.
+    let short_key = ApiKey::from_env_reader(|_| Some("Short77".to_owned()))?;
+    assert_eq!(
+        redact_secrets("token=Short77!", Some(&short_key)),
+        "token=<REDACTED_API_KEY>!"
+    );
+    assert_eq!(truncate_after_redaction("short", 20), "short");
+
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("m2_game");
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "M2_PROMPT_FAIL")?;
+    write_to_seat(&game_dir, "01", "talk", "Weavers", "M2_PROMPT_OK")?;
+
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                }
+            ]
+        })
+        .to_string(),
+        Some(&key),
+    )?;
+
+    // Attempt 1 plants the full key starting at char 194, straddling the 200-char HTTP error cut.
+    // Attempt 2 plants only a 10-char interior slice of the key at char 195, also straddling char 200.
+    let body_full_straddle = format!("{}{STRADDLE_KEY} trailing_detail", "a".repeat(194));
+    let partial_slice = &STRADDLE_KEY[9..19]; // "AlphaBravo" (10 chars)
+    let body_partial_straddle = format!("{}{partial_slice} trailing_detail", "b".repeat(195));
+
+    struct M2Transport {
+        body_1: String,
+        body_2: String,
+        salt_calls: AtomicUsize,
+    }
+
+    impl Transport for M2Transport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            if body.contains("M2_PROMPT_OK") {
+                return Ok(ok_completion_json(
+                    "To Saltworks: greetings.",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.001),
+                ));
+            }
+            let n = self.salt_calls.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                Ok(RawHttpResponse {
+                    status: 500,
+                    body: self.body_1.clone(),
+                })
+            } else {
+                Ok(RawHttpResponse {
+                    status: 502,
+                    body: self.body_2.clone(),
+                })
+            }
+        }
+    }
+
+    let m2_tx = M2Transport {
+        body_1: body_full_straddle,
+        body_2: body_partial_straddle,
+        salt_calls: AtomicUsize::new(0),
+    };
+    let summary = run_turn(
+        &TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats,
+            Some(wrapper),
+            false,
+            Some(1.0),
+        ),
+        &m2_tx,
+        Some(&key),
+    )?;
+
+    let calls_raw = fs::read_to_string(game_dir.join("relay").join("calls.jsonl"))?;
+    let weavers_tx_raw =
+        fs::read_to_string(game_dir.join("relay").join("seats").join("Weavers.jsonl"))?;
+    let summary_both = format!("{}\n{summary:?}", summary.format_paths_and_hashes());
+
+    assert_no_8char_key_piece(&calls_raw, STRADDLE_KEY, "calls.jsonl");
+    assert_no_8char_key_piece(&weavers_tx_raw, STRADDLE_KEY, "Weavers transcript");
+    assert_no_8char_key_piece(&summary_both, STRADDLE_KEY, "TurnSummary Display/Debug");
+
+    let calls_parsed = read_calls_log(&game_dir)?;
+    for salt_entry in calls_parsed.iter().filter(|c| c.guild == "Saltworks") {
+        let err_msg = salt_entry.error.as_deref().unwrap_or("");
+        assert!(
+            err_msg.contains("<REDACTED_API_KEY>"),
+            "expected intact redaction marker in '{err_msg}'"
+        );
+    }
+
+    // CLI shortened unknown flag straddling char 48 and key containing '=' straddling '='.
+    let cli_straddle_flag = format!("--{}{}", "z".repeat(42), &STRADDLE_KEY[4..16]);
+    let cli_err = parse_args_with_key(["turn", &cli_straddle_flag], Some(&key))
+        .err()
+        .ok_or("expected CLI error")?;
+    assert_no_8char_key_piece(
+        &format!("{cli_err}\n{cli_err:?}"),
+        STRADDLE_KEY,
+        "CLI RelayError Display/Debug",
+    );
+
+    let eq_secret = "KeyHead=Tail987654";
+    let eq_key = ApiKey::from_env_reader(|_| Some(eq_secret.to_owned()))?;
+    let eq_err = parse_args_with_key(["turn", &format!("--{eq_secret}")], Some(&eq_key))
+        .err()
+        .ok_or("expected CLI error")?;
+    assert_no_8char_key_piece(
+        &format!("{eq_err}\n{eq_err:?}"),
+        eq_secret,
+        "CLI '=' key RelayError Display/Debug",
+    );
+
+    // SeatFile and MockDirTransport error Display/Debug with partial key substring.
+    let seat_bad = SeatFile::from_json_str(
+        &format!(r#"{{"{}": []}}"#, &STRADDLE_KEY[15..27]),
+        Some(&key),
+    )
+    .err()
+    .ok_or("expected seat error")?;
+    assert_no_8char_key_piece(
+        &format!("{seat_bad}\n{seat_bad:?}"),
+        STRADDLE_KEY,
+        "SeatFile RelayError Display/Debug",
+    );
+
+    Ok(())
+}
+
+#[test]
+fn s1_late_reply_after_timeout_logs_late_discarded_and_counts_against_cap() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let fast_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 0.03,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // Case 1: cap = 0.01. Attempt 1 replies after timeout with cost 0.01 -> logged as
+    // LATE_DISCARDED with cost and tokens, and counted against cap so the harness re-send
+    // is refused pre-call with CAP_REACHED.
+    let game_capped = tmp.path().join("late_capped");
+    write_to_seat(&game_capped, "01", "talk", "Saltworks", "LATE_PROMPT_1")?;
+    let tx_capped = ScriptedTransport::new(vec![
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(95),
+            ok_completion_json("Late reply 1", "google/gemini-2.5-pro-06-05", Some(0.01)),
+        ),
+        ScriptStep::Respond(ok_completion_json(
+            "Should never be sent",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let summary_capped = run_turn(
+        &TurnConfig::new(
+            game_capped.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            fast_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &tx_capped,
+        None,
+    )?;
+    assert_eq!(tx_capped.call_count(), 1);
+    assert!(matches!(
+        summary_capped.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    assert!(
+        !game_capped
+            .join("from-seat")
+            .join("day-01-talk-Saltworks.md")
+            .exists()
+    );
+    let calls_capped = read_calls_log(&game_capped)?;
+    assert_eq!(calls_capped.len(), 2);
+    assert_eq!(calls_capped[0].outcome, "LATE_DISCARDED");
+    assert_eq!(calls_capped[0].cost, Some(0.01));
+    assert_eq!(calls_capped[0].prompt_tokens, Some(110));
+    assert_eq!(calls_capped[0].completion_tokens, Some(25));
+    assert_eq!(calls_capped[0].total_tokens, Some(135));
+    assert_eq!(calls_capped[0].reply_sha256, None);
+    assert_eq!(calls_capped[1].attempt, 2);
+    assert_eq!(calls_capped[1].trigger, "harness");
+    assert_eq!(calls_capped[1].outcome, "CAP_REACHED");
+
+    // Case 2: cap = 0.02. Attempt 1 replies late (LATE_DISCARDED, 0.01), Attempt 2 replies on time (OK, 0.01).
+    let game_retry_ok = tmp.path().join("late_then_ok");
+    write_to_seat(&game_retry_ok, "01", "talk", "Saltworks", "LATE_PROMPT_2")?;
+    let tx_retry_ok = ScriptedTransport::new(vec![
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(95),
+            ok_completion_json("Late reply", "google/gemini-2.5-pro-06-05", Some(0.01)),
+        ),
+        ScriptStep::Respond(ok_completion_json(
+            "TRAVEL: stay",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let summary_ok = run_turn(
+        &TurnConfig::new(
+            game_retry_ok.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            fast_seat,
+            Some(wrapper),
+            true,
+            Some(0.02),
+        ),
+        &tx_retry_ok,
+        None,
+    )?;
+    assert!(summary_ok.all_clean());
+    assert_eq!(tx_retry_ok.call_count(), 2);
+    let calls_ok = read_calls_log(&game_retry_ok)?;
+    assert_eq!(calls_ok.len(), 2);
+    assert_eq!(calls_ok[0].outcome, "LATE_DISCARDED");
+    assert_eq!(calls_ok[1].outcome, "OK");
+    assert_eq!(
+        fs::read_to_string(
+            game_retry_ok
+                .join("from-seat")
+                .join("day-01-talk-Saltworks.md")
+        )?,
+        "TRAVEL: stay"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn s2_binary_panic_hook_redacts_planted_key_on_stderr() -> TestResult {
+    const PANIC_SECRET: &str = "PlainPanicSecretKey_ABCDEFGH_987654321";
+
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("panic_bin_game");
+    let mock_dir = tmp.path().join("panic_mock");
+    fs::create_dir_all(&mock_dir)?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        serde_json::to_string(&json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.4,
+                "max_output_tokens": 256,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.05
+            }]
+        }))?,
+    )?;
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "TRIGGER_PANIC_MOCK")?;
+
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "TRIGGER_PANIC_MOCK",
+                "panic_message": format!("mock transport boom with Bearer {PLANTED_KEY} and {PANIC_SECRET}")
+            }]
+        }))?,
+    )?;
+
+    let bin = env!("CARGO_BIN_EXE_league-relay");
+    let output = Command::new(bin)
+        .args([
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ])
+        .env("OPENROUTER_API_KEY", PANIC_SECRET)
+        .output()?;
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr_text = String::from_utf8(output.stderr)?;
+    let stdout_text = String::from_utf8(output.stdout)?;
+    let calls_raw = fs::read_to_string(game_dir.join("relay").join("calls.jsonl"))?;
+
+    assert!(
+        stderr_text.contains("panic at") && stderr_text.contains("<REDACTED_API_KEY>"),
+        "expected redacted panic hook output on stderr, got: {stderr_text}"
+    );
+    assert!(!stderr_text.contains(PLANTED_KEY));
+    assert_no_8char_key_piece(&stderr_text, PANIC_SECRET, "binary panic stderr");
+    assert_no_8char_key_piece(&stdout_text, PANIC_SECRET, "binary panic stdout");
+    assert_no_8char_key_piece(&calls_raw, PANIC_SECRET, "binary panic calls.jsonl");
+
+    Ok(())
+}
+
+#[test]
+fn s3_guild_named_calls_uses_relay_seats_subdir_without_collision() -> TestResult {
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("calls_guild_game");
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let seats = single_openrouter_seats("calls", 5.0)?;
+
+    write_to_seat(&game_dir, "01", "talk", "calls", "DAY 01 TALK FOR CALLS")?;
+    let t1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "To Smiths: hello from calls guild.",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.002),
+    ))]);
+    let s1 = run_turn(
+        &TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper),
+            false,
+            Some(1.0),
+        ),
+        &t1,
+        None,
+    )?;
+    assert!(s1.all_clean());
+
+    write_to_seat(&game_dir, "01", "act", "calls", "DAY 01 ACT FOR CALLS")?;
+    let t2 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "TRAVEL: stay",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.002),
+    ))]);
+    let s2 = run_turn(
+        &TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            None,
+            false,
+            Some(1.0),
+        ),
+        &t2,
+        None,
+    )?;
+    assert!(s2.all_clean());
+
+    let seat_transcript = read_transcript_log(&game_dir, "calls")?;
+    assert_eq!(seat_transcript.len(), 4);
+    assert_eq!(seat_transcript[0].role, "user");
+    assert_eq!(seat_transcript[1].role, "assistant");
+    assert_eq!(seat_transcript[2].role, "user");
+    assert_eq!(seat_transcript[3].role, "assistant");
+
+    let call_ledger = read_calls_log(&game_dir)?;
+    assert_eq!(call_ledger.len(), 2);
+    assert!(
+        call_ledger
+            .iter()
+            .all(|c| c.guild == "calls" && c.outcome == "OK")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn s4_guild_names_enforce_ascii_letter_prefix_and_case_insensitive_uniqueness() -> TestResult {
+    // Case-insensitive duplicates are rejected on NTFS and everywhere else.
+    for (g1, g2) in [("Saltworks", "saltworks"), ("Weavers", "WEAVERS")] {
+        let dup_case = json!({
+            "seats": [
+                {"guild": g1, "backend": "file"},
+                {"guild": g2, "backend": "file"}
+            ]
+        })
+        .to_string();
+        assert!(
+            SeatFile::from_json_str(&dup_case, None).is_err(),
+            "expected case-colliding guilds '{g1}' and '{g2}' to be rejected"
+        );
+    }
+
+    // Names not matching [A-Za-z][A-Za-z0-9_-]* are rejected.
+    for invalid_guild in [
+        "",
+        "1Saltworks",
+        "-Saltworks",
+        "_Saltworks",
+        "Salt.works",
+        "Salt/works",
+        "Salt works",
+    ] {
+        let bad = json!({
+            "seats": [{"guild": invalid_guild, "backend": "file"}]
+        })
+        .to_string();
+        assert!(
+            SeatFile::from_json_str(&bad, None).is_err(),
+            "expected guild '{invalid_guild}' to be rejected"
+        );
+    }
+
+    // Valid [A-Za-z][A-Za-z0-9_-]* names are accepted.
+    let valid = json!({
+        "seats": [
+            {"guild": "Saltworks", "backend": "file"},
+            {"guild": "calls", "backend": "file"},
+            {"guild": "Guild_2-alpha", "backend": "file"},
+            {"guild": "A", "backend": "file"}
+        ]
+    })
+    .to_string();
+    let parsed = SeatFile::from_json_str(&valid, None)?;
+    assert_eq!(parsed.seats.len(), 4);
 
     Ok(())
 }

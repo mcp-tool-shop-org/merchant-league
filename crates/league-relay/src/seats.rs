@@ -3,7 +3,7 @@
 //! A seat file is JSON (either `{"seats": [...]}` or a top-level `[...]`),
 //! listing each seated guild, its backend (`openrouter` or `file`), and for
 //! `openrouter` seats its pinned OpenRouter model slug, temperature, maximum
-//! output tokens, and per-seat wall timeout.
+//! output tokens, per-seat wall timeout, and `max_cost_per_call` estimate.
 
 use crate::error::RelayError;
 use crate::secret::{ApiKey, redact_secrets};
@@ -42,6 +42,8 @@ struct SeatEntryWire {
     max_output_tokens: Option<u32>,
     #[serde(default)]
     timeout_secs: Option<f64>,
+    #[serde(default)]
+    max_cost_per_call: Option<f64>,
 }
 
 /// Validated parameters for an `openrouter` seat.
@@ -55,6 +57,8 @@ pub struct OpenRouterSeat {
     pub max_output_tokens: u32,
     /// Per-call wall-clock timeout for this seat.
     pub timeout: Duration,
+    /// Worst-case single-call cost estimate reserved against `--cap-credits` before calling.
+    pub max_cost_per_call: f64,
 }
 
 /// Validated backend configuration for one seat.
@@ -72,7 +76,7 @@ pub enum SeatBackend {
 /// One validated seat entry from the seat file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeatSpec {
-    /// Guild identifier used in `to-seat/`, `from-seat/`, and `relay/<Guild>.jsonl`.
+    /// Guild identifier used in `to-seat/`, `from-seat/`, and `relay/seats/<Guild>.jsonl`.
     pub guild: String,
     /// Backend configuration.
     pub backend: SeatBackend,
@@ -131,9 +135,9 @@ impl SeatFile {
 
         for entry in entries {
             validate_guild_name(&entry.guild)?;
-            if !seen_guilds.insert(entry.guild.clone()) {
+            if !seen_guilds.insert(entry.guild.to_ascii_lowercase()) {
                 return Err(RelayError::SeatConfig(format!(
-                    "duplicate guild '{}' in seat file",
+                    "duplicate guild '{}' (case-insensitive) in seat file",
                     entry.guild
                 )));
             }
@@ -172,11 +176,22 @@ impl SeatFile {
                         )));
                     };
 
+                    let Some(max_cost_per_call) = entry
+                        .max_cost_per_call
+                        .filter(|c| c.is_finite() && *c > 0.0)
+                    else {
+                        return Err(RelayError::SeatConfig(format!(
+                            "seat '{}' requires finite positive 'max_cost_per_call'",
+                            entry.guild
+                        )));
+                    };
+
                     SeatBackend::Openrouter(OpenRouterSeat {
                         model,
                         temperature,
                         max_output_tokens,
                         timeout: Duration::from_secs_f64(timeout_secs),
+                        max_cost_per_call,
                     })
                 }
             };
@@ -212,13 +227,17 @@ fn contains_forbidden_key_field(value: &serde_json::Value) -> bool {
 }
 
 fn validate_guild_name(guild: &str) -> Result<(), RelayError> {
-    if guild.is_empty()
-        || !guild
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    let mut chars = guild.chars();
+    let Some(first) = chars.next() else {
+        return Err(RelayError::SeatConfig(
+            "guild name must match [A-Za-z][A-Za-z0-9_-]*".to_owned(),
+        ));
+    };
+    if !first.is_ascii_alphabetic()
+        || !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         return Err(RelayError::SeatConfig(
-            "guild name must be non-empty ASCII alphanumeric, '-' or '_'".to_owned(),
+            "guild name must match [A-Za-z][A-Za-z0-9_-]*".to_owned(),
         ));
     }
     Ok(())

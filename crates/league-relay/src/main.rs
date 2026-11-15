@@ -4,6 +4,7 @@ use std::io;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    league_relay::install_redacting_panic_hook(league_relay::ApiKey::from_env().ok());
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
     let code = league_relay::cli::execute_cli(

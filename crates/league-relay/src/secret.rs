@@ -99,14 +99,122 @@ impl fmt::Debug for LiveGate {
     }
 }
 
-/// Scrub any occurrence of `key`, `Bearer <token>`, or `sk-or-...` tokens from `input`.
+const MIN_KEY_SUBSTRING_CHARS: usize = 8;
+
+/// Scrub any occurrence of `key` (including any `8+` character substring of `key`),
+/// `Bearer <token>`, or `sk-or-...` tokens from `input`.
 pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
     let scrubbed = match key {
-        Some(k) => input.replace(k.secret_str(), REDACTED_MARKER),
+        Some(k) => redact_key_substrings(input, k.secret_str()),
         None => input.to_owned(),
     };
     let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
     redact_prefixed_token(&scrubbed, "sk-or-", false)
+}
+
+/// Redact `input` first and then shorten to at most `max_chars` characters without
+/// splitting [`REDACTED_MARKER`].
+pub fn truncate_after_redaction(scrubbed: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = scrubbed.chars().collect();
+    if chars.len() <= max_chars {
+        return scrubbed.to_owned();
+    }
+    let marker: Vec<char> = REDACTED_MARKER.chars().collect();
+    let mlen = marker.len();
+    let mut end = max_chars;
+    let earliest_start = max_chars.saturating_sub(mlen - 1);
+    for start in earliest_start..max_chars {
+        if start + mlen <= chars.len() && chars[start..start + mlen] == marker[..] {
+            end = start + mlen;
+            break;
+        }
+    }
+    chars[..end].iter().collect()
+}
+
+/// Install a process-wide panic hook that scrubs `OPENROUTER_API_KEY`,
+/// `Bearer ...`, and `sk-or-...` tokens before writing to `stderr`.
+pub fn install_redacting_panic_hook(key: Option<ApiKey>) {
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "panic"
+        };
+        let active_key = key.clone().or_else(|| ApiKey::from_env().ok());
+        let scrubbed_msg = redact_secrets(payload, active_key.as_ref());
+        let loc_text = match info.location() {
+            Some(loc) => redact_secrets(
+                &format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
+                active_key.as_ref(),
+            ),
+            None => "unknown".to_owned(),
+        };
+        let _ = std::io::Write::write_fmt(
+            &mut std::io::stderr(),
+            format_args!("panic at {loc_text}: {scrubbed_msg}\n"),
+        );
+    }));
+}
+
+fn redact_key_substrings(input: &str, secret: &str) -> String {
+    if secret.is_empty() || input.is_empty() {
+        return input.to_owned();
+    }
+    let secret_chars: Vec<char> = secret.chars().collect();
+    if secret_chars.len() < MIN_KEY_SUBSTRING_CHARS {
+        return input.replace(secret, REDACTED_MARKER);
+    }
+    let in_chars: Vec<char> = input.chars().collect();
+    let marker_chars: Vec<char> = REDACTED_MARKER.chars().collect();
+    let mlen = marker_chars.len();
+
+    let mut redacted = vec![false; in_chars.len()];
+    let mut idx = 0;
+    while idx < in_chars.len() {
+        if idx + mlen <= in_chars.len() && in_chars[idx..idx + mlen] == marker_chars[..] {
+            idx += mlen;
+            continue;
+        }
+        if idx + MIN_KEY_SUBSTRING_CHARS <= in_chars.len() {
+            let mut best = 0;
+            for s in 0..=secret_chars.len() - MIN_KEY_SUBSTRING_CHARS {
+                if secret_chars[s] == in_chars[idx] {
+                    let common = in_chars[idx..]
+                        .iter()
+                        .zip(&secret_chars[s..])
+                        .take_while(|(a, b)| a == b)
+                        .count();
+                    if common > best {
+                        best = common;
+                    }
+                }
+            }
+            if best >= MIN_KEY_SUBSTRING_CHARS {
+                for flag in &mut redacted[idx..idx + best] {
+                    *flag = true;
+                }
+            }
+        }
+        idx += 1;
+    }
+
+    let mut out = String::with_capacity(input.len());
+    let mut pos = 0;
+    while pos < in_chars.len() {
+        if redacted[pos] {
+            out.push_str(REDACTED_MARKER);
+            while pos < in_chars.len() && redacted[pos] {
+                pos += 1;
+            }
+        } else {
+            out.push(in_chars[pos]);
+            pos += 1;
+        }
+    }
+    out
 }
 
 fn is_token_char(c: char) -> bool {

@@ -4,7 +4,7 @@
 
 use crate::error::RelayError;
 use crate::seats::{OpenRouterSeat, SeatBackend, SeatFile};
-use crate::secret::{ApiKey, redact_secrets};
+use crate::secret::{ApiKey, redact_secrets, truncate_after_redaction};
 use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
@@ -114,7 +114,7 @@ impl TurnConfig {
     }
 }
 
-/// One line in `<game-dir>/relay/<Guild>.jsonl`.
+/// One line in `<game-dir>/relay/seats/<Guild>.jsonl`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscriptEntry {
     /// Day when this turn was recorded (`"01"`..=`"99"`).
@@ -160,7 +160,8 @@ pub struct CallLogEntry {
     pub cost: Option<f64>,
     /// Wall-clock call duration in milliseconds (`0` when refused pre-call).
     pub latency_ms: u64,
-    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"CAP_REACHED"`, or `"COST_UNKNOWN"`.
+    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"CAP_REACHED"`,
+    /// `"COST_UNKNOWN"`, or `"COST_OVER_ESTIMATE"`.
     pub outcome: String,
     /// Redacted failure or refusal reason when `outcome != "OK"`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,7 +179,7 @@ pub enum SeatOutcome {
         attempts: u8,
         /// Path written under `<game-dir>/from-seat/`.
         from_seat_path: PathBuf,
-        /// Path appended under `<game-dir>/relay/<Guild>.jsonl`.
+        /// Path appended under `<game-dir>/relay/seats/<Guild>.jsonl`.
         transcript_path: PathBuf,
         /// Path appended under `<game-dir>/relay/calls.jsonl`.
         calls_path: PathBuf,
@@ -203,6 +204,13 @@ pub enum SeatOutcome {
     },
     /// Refused fail-closed because a prior response in this turn carried no cost.
     CostUnknownRefused {
+        /// Path to `<game-dir>/relay/calls.jsonl`.
+        calls_path: PathBuf,
+        /// Hex SHA-256 of the serialized request body.
+        request_body_sha256: String,
+    },
+    /// Refused fail-closed because a prior response in this turn exceeded `max_cost_per_call`.
+    CostOverEstimateRefused {
         /// Path to `<game-dir>/relay/calls.jsonl`.
         calls_path: PathBuf,
         /// Hex SHA-256 of the serialized request body.
@@ -283,6 +291,13 @@ impl TurnSummary {
                     request_body_sha256,
                 } => format!(
                     "seat={g} outcome=COST_UNKNOWN calls={} request_sha256={request_body_sha256}",
+                    calls_path.display()
+                ),
+                SeatOutcome::CostOverEstimateRefused {
+                    calls_path,
+                    request_body_sha256,
+                } => format!(
+                    "seat={g} outcome=COST_OVER_ESTIMATE calls={} request_sha256={request_body_sha256}",
                     calls_path.display()
                 ),
                 SeatOutcome::SeatError { detail } => {
@@ -367,13 +382,21 @@ fn append_text(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(), Rela
 struct CallLedger {
     calls_path: PathBuf,
     cap_credits: Option<f64>,
+    reserved_in_flight: f64,
     cost_unknown_in_turn: bool,
+    cost_over_estimate_in_turn: bool,
 }
 
 enum PreCallDecision {
-    Allow,
-    CapReached { recorded_sum: f64, cap: f64 },
+    Reserved,
+    CapReached {
+        recorded_sum: f64,
+        reserved_in_flight: f64,
+        requested: f64,
+        cap: f64,
+    },
     CostUnknown,
+    CostOverEstimate,
 }
 
 impl CallLedger {
@@ -385,32 +408,44 @@ impl CallLedger {
         redaction_key: Option<&ApiKey>,
     ) -> Result<Self, RelayError> {
         let mut cost_unknown_in_turn = false;
+        let mut cost_over_estimate_in_turn = false;
         if calls_path.exists() {
             for entry in read_calls_file(&calls_path, redaction_key)? {
-                if entry.day == day
-                    && entry.round == round
-                    && (entry.outcome == "OK"
+                if entry.day == day && entry.round == round {
+                    if (entry.outcome == "OK"
+                        || entry.outcome == "LATE_DISCARDED"
                         || entry.prompt_tokens.is_some()
                         || entry.total_tokens.is_some())
-                    && entry.cost.is_none()
-                {
-                    cost_unknown_in_turn = true;
+                        && entry.cost.is_none()
+                    {
+                        cost_unknown_in_turn = true;
+                    }
+                    if entry.outcome == "COST_OVER_ESTIMATE" {
+                        cost_over_estimate_in_turn = true;
+                    }
                 }
             }
         }
         Ok(Self {
             calls_path,
             cap_credits,
+            reserved_in_flight: 0.0,
             cost_unknown_in_turn,
+            cost_over_estimate_in_turn,
         })
     }
 
-    fn pre_call_check(
-        &self,
+    fn try_reserve(
+        &mut self,
+        seat_max_cost: f64,
         redaction_key: Option<&ApiKey>,
     ) -> Result<PreCallDecision, RelayError> {
+        if self.cost_over_estimate_in_turn {
+            return Ok(PreCallDecision::CostOverEstimate);
+        }
         let Some(cap) = self.cap_credits else {
-            return Ok(PreCallDecision::Allow);
+            self.reserved_in_flight += seat_max_cost;
+            return Ok(PreCallDecision::Reserved);
         };
         if self.cost_unknown_in_turn {
             return Ok(PreCallDecision::CostUnknown);
@@ -420,20 +455,47 @@ impl CallLedger {
         } else {
             0.0
         };
-        if recorded_sum + CAP_EPSILON >= cap {
-            return Ok(PreCallDecision::CapReached { recorded_sum, cap });
+        if recorded_sum + self.reserved_in_flight + seat_max_cost > cap + CAP_EPSILON {
+            return Ok(PreCallDecision::CapReached {
+                recorded_sum,
+                reserved_in_flight: self.reserved_in_flight,
+                requested: seat_max_cost,
+                cap,
+            });
         }
-        Ok(PreCallDecision::Allow)
+        self.reserved_in_flight += seat_max_cost;
+        Ok(PreCallDecision::Reserved)
+    }
+
+    fn finish_call_and_record(
+        &mut self,
+        reserved_amount: f64,
+        entry: &CallLogEntry,
+        mark_cost_unknown: bool,
+        mark_cost_over_estimate: bool,
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<(), RelayError> {
+        self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
+        self.record_call(
+            entry,
+            mark_cost_unknown,
+            mark_cost_over_estimate,
+            redaction_key,
+        )
     }
 
     fn record_call(
         &mut self,
         entry: &CallLogEntry,
         mark_cost_unknown: bool,
+        mark_cost_over_estimate: bool,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
         if mark_cost_unknown {
             self.cost_unknown_in_turn = true;
+        }
+        if mark_cost_over_estimate {
+            self.cost_over_estimate_in_turn = true;
         }
         let mut line =
             serde_json::to_string(entry).map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
@@ -613,9 +675,12 @@ fn run_single_openrouter_seat(
 
     if from_seat_path.exists() {
         return SeatOutcome::SeatError {
-            detail: format!(
-                "from-seat file already exists: {}",
-                from_seat_path.display()
+            detail: redact_secrets(
+                &format!(
+                    "from-seat file already exists: {}",
+                    from_seat_path.display()
+                ),
+                redaction_key,
             ),
         };
     }
@@ -673,9 +738,14 @@ fn run_single_openrouter_seat(
 
         {
             let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-            match guard.pre_call_check(redaction_key) {
-                Ok(PreCallDecision::Allow) => {}
-                Ok(PreCallDecision::CapReached { recorded_sum, cap }) => {
+            match guard.try_reserve(seat.max_cost_per_call, redaction_key) {
+                Ok(PreCallDecision::Reserved) => {}
+                Ok(PreCallDecision::CapReached {
+                    recorded_sum,
+                    reserved_in_flight,
+                    requested,
+                    cap,
+                }) => {
                     let entry = refused_call_entry(
                         config,
                         guild,
@@ -684,9 +754,11 @@ fn run_single_openrouter_seat(
                         &seat.model,
                         &request_body_sha256,
                         "CAP_REACHED",
-                        format!("recorded cost {recorded_sum:.6} reached cap {cap:.6}"),
+                        format!(
+                            "recorded {recorded_sum:.6} + reserved {reserved_in_flight:.6} + max_cost_per_call {requested:.6} exceeds cap {cap:.6}"
+                        ),
                     );
-                    if let Err(e) = guard.record_call(&entry, false, redaction_key) {
+                    if let Err(e) = guard.record_call(&entry, false, false, redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
@@ -707,12 +779,33 @@ fn run_single_openrouter_seat(
                         "COST_UNKNOWN",
                         "prior call in turn carried no cost; failing closed".to_owned(),
                     );
-                    if let Err(e) = guard.record_call(&entry, true, redaction_key) {
+                    if let Err(e) = guard.record_call(&entry, true, false, redaction_key) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
                     }
                     return SeatOutcome::CostUnknownRefused {
+                        calls_path: calls_path.to_path_buf(),
+                        request_body_sha256,
+                    };
+                }
+                Ok(PreCallDecision::CostOverEstimate) => {
+                    let entry = refused_call_entry(
+                        config,
+                        guild,
+                        attempt,
+                        trigger,
+                        &seat.model,
+                        &request_body_sha256,
+                        "COST_OVER_ESTIMATE",
+                        "prior call in turn exceeded max_cost_per_call; failing closed".to_owned(),
+                    );
+                    if let Err(e) = guard.record_call(&entry, false, true, redaction_key) {
+                        return SeatOutcome::SeatError {
+                            detail: e.to_string(),
+                        };
+                    }
+                    return SeatOutcome::CostOverEstimateRefused {
                         calls_path: calls_path.to_path_buf(),
                         request_body_sha256,
                     };
@@ -733,14 +826,26 @@ fn run_single_openrouter_seat(
             redaction_key,
         );
 
-        match evaluate_response(call_result, redaction_key) {
+        match evaluate_call_result(call_result, redaction_key) {
             EvaluatedCall::Success {
                 reply_content,
                 model_returned,
                 usage,
             } => {
                 let valid_cost = sanitize_cost(usage.cost);
+                let over_estimate =
+                    valid_cost.is_some_and(|c| c > seat.max_cost_per_call + CAP_EPSILON);
                 let reply_sha256 = sha256_hex(reply_content.as_bytes());
+                let (outcome_str, err_opt) = match (over_estimate, valid_cost) {
+                    (true, Some(c)) => (
+                        "COST_OVER_ESTIMATE".to_owned(),
+                        Some(format!(
+                            "returned cost {c:.6} exceeded max_cost_per_call {:.6}",
+                            seat.max_cost_per_call
+                        )),
+                    ),
+                    _ => ("OK".to_owned(), None),
+                };
                 let entry = CallLogEntry {
                     time_utc: now_utc_rfc3339(),
                     day: config.day.clone(),
@@ -757,12 +862,18 @@ fn run_single_openrouter_seat(
                     total_tokens: usage.total_tokens,
                     cost: valid_cost,
                     latency_ms,
-                    outcome: "OK".to_owned(),
-                    error: None,
+                    outcome: outcome_str,
+                    error: err_opt,
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Err(e) = guard.record_call(&entry, valid_cost.is_none(), redaction_key) {
+                    if let Err(e) = guard.finish_call_and_record(
+                        seat.max_cost_per_call,
+                        &entry,
+                        valid_cost.is_none(),
+                        over_estimate,
+                        redaction_key,
+                    ) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
@@ -800,10 +911,21 @@ fn run_single_openrouter_seat(
                 model_returned,
                 usage,
                 had_http_200_usage_without_cost,
+                is_late_reply,
             } => {
                 let valid_cost = sanitize_cost(usage.cost);
+                let over_estimate =
+                    valid_cost.is_some_and(|c| c > seat.max_cost_per_call + CAP_EPSILON);
                 let mark_unknown = had_http_200_usage_without_cost && valid_cost.is_none();
-                let outcome_label = if attempt == 1 { "harness" } else { "NO_REPLY" };
+                let outcome_label = if is_late_reply {
+                    "LATE_DISCARDED"
+                } else if over_estimate {
+                    "COST_OVER_ESTIMATE"
+                } else if attempt == 1 {
+                    "harness"
+                } else {
+                    "NO_REPLY"
+                };
                 let entry = CallLogEntry {
                     time_utc: now_utc_rfc3339(),
                     day: config.day.clone(),
@@ -825,7 +947,13 @@ fn run_single_openrouter_seat(
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Err(e) = guard.record_call(&entry, mark_unknown, redaction_key) {
+                    if let Err(e) = guard.finish_call_and_record(
+                        seat.max_cost_per_call,
+                        &entry,
+                        mark_unknown,
+                        over_estimate,
+                        redaction_key,
+                    ) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
                         };
@@ -876,6 +1004,12 @@ fn refused_call_entry(
     }
 }
 
+enum CallTransportResult {
+    OnTime(Result<RawHttpResponse, TransportError>),
+    TimedOut,
+    Late(RawHttpResponse),
+}
+
 enum EvaluatedCall {
     Success {
         reply_content: String,
@@ -887,49 +1021,80 @@ enum EvaluatedCall {
         model_returned: Option<String>,
         usage: UsageWire,
         had_http_200_usage_without_cost: bool,
+        is_late_reply: bool,
     },
 }
 
-fn evaluate_response(
-    result: Result<RawHttpResponse, TransportError>,
+fn evaluate_call_result(
+    call_result: CallTransportResult,
     redaction_key: Option<&ApiKey>,
 ) -> EvaluatedCall {
-    let raw = match result {
-        Ok(r) => r,
-        Err(TransportError::Timeout) => {
+    let raw = match call_result {
+        CallTransportResult::TimedOut
+        | CallTransportResult::OnTime(Err(TransportError::Timeout)) => {
             return EvaluatedCall::DeliveryFailure {
                 reason: "timeout".to_owned(),
                 model_returned: None,
                 usage: UsageWire::default(),
                 had_http_200_usage_without_cost: false,
+                is_late_reply: false,
             };
         }
-        Err(TransportError::Network(msg)) => {
+        CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
             return EvaluatedCall::DeliveryFailure {
                 reason: redact_secrets(&format!("transport: {msg}"), redaction_key),
                 model_returned: None,
                 usage: UsageWire::default(),
                 had_http_200_usage_without_cost: false,
+                is_late_reply: false,
             };
         }
+        CallTransportResult::Late(late_raw) => {
+            let parsed_opt: Result<ChatCompletionResponseWire, _> =
+                serde_json::from_str(&late_raw.body);
+            let (model_returned, usage, had_tokens) = match parsed_opt {
+                Ok(p) => {
+                    let had = p
+                        .usage
+                        .as_ref()
+                        .is_some_and(|u| u.prompt_tokens.is_some() || u.total_tokens.is_some());
+                    (
+                        p.model.map(|m| redact_secrets(&m, redaction_key)),
+                        p.usage.unwrap_or_default(),
+                        had,
+                    )
+                }
+                Err(_) => (None, UsageWire::default(), false),
+            };
+            return EvaluatedCall::DeliveryFailure {
+                reason: "late reply after timeout discarded".to_owned(),
+                model_returned,
+                usage,
+                had_http_200_usage_without_cost: late_raw.status == 200 && had_tokens,
+                is_late_reply: true,
+            };
+        }
+        CallTransportResult::OnTime(Ok(r)) => r,
     };
 
     let parsed_opt: Result<ChatCompletionResponseWire, _> = serde_json::from_str(&raw.body);
 
     if raw.status != 200 {
         let (model_returned, usage) = match parsed_opt {
-            Ok(p) => (p.model, p.usage.unwrap_or_default()),
+            Ok(p) => (
+                p.model.map(|m| redact_secrets(&m, redaction_key)),
+                p.usage.unwrap_or_default(),
+            ),
             Err(_) => (None, UsageWire::default()),
         };
-        let snippet: String = raw.body.chars().take(200).collect();
+        let scrubbed_body = redact_secrets(raw.body.trim(), redaction_key);
+        let snippet = truncate_after_redaction(&scrubbed_body, 200);
         return EvaluatedCall::DeliveryFailure {
-            reason: redact_secrets(
-                &format!("http {}: {}", raw.status, snippet.trim()),
-                redaction_key,
-            ),
+            reason: format!("http {}: {snippet}", raw.status),
             model_returned,
             usage,
             had_http_200_usage_without_cost: false,
+            is_late_reply: false,
         };
     }
 
@@ -941,6 +1106,7 @@ fn evaluate_response(
                 model_returned: None,
                 usage: UsageWire::default(),
                 had_http_200_usage_without_cost: false,
+                is_late_reply: false,
             };
         }
     };
@@ -950,7 +1116,7 @@ fn evaluate_response(
         .as_ref()
         .is_some_and(|u| u.prompt_tokens.is_some() || u.total_tokens.is_some());
     let usage = parsed.usage.unwrap_or_default();
-    let model_returned = parsed.model;
+    let model_returned = parsed.model.map(|m| redact_secrets(&m, redaction_key));
 
     if let Some(err_val) = parsed.error {
         return EvaluatedCall::DeliveryFailure {
@@ -958,6 +1124,7 @@ fn evaluate_response(
             model_returned,
             usage,
             had_http_200_usage_without_cost: had_usage_tokens,
+            is_late_reply: false,
         };
     }
 
@@ -979,6 +1146,7 @@ fn evaluate_response(
             model_returned,
             usage,
             had_http_200_usage_without_cost: had_usage_tokens,
+            is_late_reply: false,
         },
     }
 }
@@ -993,7 +1161,7 @@ fn call_with_wall_timeout(
     body: &str,
     timeout: Duration,
     redaction_key: Option<&ApiKey>,
-) -> (Result<RawHttpResponse, TransportError>, u64) {
+) -> (CallTransportResult, u64) {
     let start = Instant::now();
     let (tx, rx) = mpsc::channel();
     std::thread::scope(|scope| {
@@ -1015,8 +1183,12 @@ fn call_with_wall_timeout(
         });
 
         let outcome = match rx.recv_timeout(timeout) {
-            Ok(res) => res,
-            Err(_) => Err(TransportError::Timeout),
+            Ok(res) => CallTransportResult::OnTime(res),
+            Err(mpsc::RecvTimeoutError::Timeout) => match rx.recv() {
+                Ok(Ok(late_resp)) => CallTransportResult::Late(late_resp),
+                _ => CallTransportResult::TimedOut,
+            },
+            Err(mpsc::RecvTimeoutError::Disconnected) => CallTransportResult::TimedOut,
         };
         let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         (outcome, elapsed)
@@ -1034,7 +1206,10 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 fn transcript_file_path(game_dir: &Path, guild: &str) -> PathBuf {
-    game_dir.join("relay").join(format!("{guild}.jsonl"))
+    game_dir
+        .join("relay")
+        .join("seats")
+        .join(format!("{guild}.jsonl"))
 }
 
 fn transcript_has_entries(
@@ -1073,19 +1248,25 @@ fn load_transcript(
             "assistant"
         };
         if parsed.role != expected_role {
-            return Err(RelayError::CorruptLog(format!(
-                "{} line {} has role '{}', expected '{expected_role}'",
-                transcript_path.display(),
-                idx + 1,
-                parsed.role
+            return Err(RelayError::CorruptLog(redact_secrets(
+                &format!(
+                    "{} line {} has role '{}', expected '{expected_role}'",
+                    transcript_path.display(),
+                    idx + 1,
+                    parsed.role
+                ),
+                redaction_key,
             )));
         }
         entries.push(parsed);
     }
     if entries.len() % 2 != 0 {
-        return Err(RelayError::CorruptLog(format!(
-            "{} ends on an unpaired user turn",
-            transcript_path.display()
+        return Err(RelayError::CorruptLog(redact_secrets(
+            &format!(
+                "{} ends on an unpaired user turn",
+                transcript_path.display()
+            ),
+            redaction_key,
         )));
     }
     Ok(entries)
