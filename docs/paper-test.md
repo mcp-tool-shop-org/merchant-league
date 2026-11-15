@@ -148,7 +148,19 @@ TRAVEL:    <stay | go to TOWN>   (sealed: only the referee sees it until resolut
 7. It runs the bond rule at contract deadlines.
 8. It refills the ladders.
 
-**A missed or invalid reply counts as a missed reveal.** The caravan stays and pays the toll. The referee doesn't ask again.
+**A missed or invalid reply counts as a missed reveal.** The caravan stays and pays the toll. The referee doesn't ask again, with one exception.
+
+**The exception: a delivery failure.** Amended by the Publisher for games 2 to 6, after game 1. It's needed because silence a seat chose and silence the pipe caused aren't the same thing. The test is of the rules, not the transport.
+- **What counts as one.** Any of these:
+  - the seat's surface shows it finished (a DONE line, for example), but no reply file was written;
+  - the surface shows a platform error;
+  - the seat gives no reply for 15 minutes after the prompt was delivered.
+- **What happens.** The seat gets **one** re-send of the same instruction: neutral, with no new content, no hint and no comment on the delay. The log marks it as harness.
+- **What doesn't count.** Anything after that one re-send, or a reply in the wrong form, is a missed reveal under the board's rule 2, as before.
+- **How it's counted.** In `metrics.md`, harness-caused misses are counted apart from missed reveals in metric 6.
+- **Game 1** keeps its two day-9 re-prompts as missed reveals, marked harness-caused in its `metrics.md`.
+
+The re-send is a procedure for whoever relays the seats, so the pinned `board.md` and the seat brief are unchanged.
 
 ## What it measures
 
@@ -161,7 +173,7 @@ The review's seven metrics, with their hypothesised bands, plus one more:
 | 3 | Contracts per player, and bond spread | 1.5 or more; bonds from 0% to 100%+ | under 0.5 | counted |
 | 4 | Willful breaches vs force-majeure delays | 1–2 breaches, nobody quits | a seat quits over a delay | from the bond rule's outcomes |
 | 5 | Order timing in the window | spread | over 60% in the last 5% | **not measurable**: replies are simultaneous on paper. Recorded as n/a. |
-| 6 | Missed reveals | under 3% | over 8% | missed or invalid replies |
+| 6 | Missed reveals | under 3% | over 8% | missed or invalid replies; harness-caused misses counted apart |
 | 7 | Contenders at day 10 | 3 or more within 15% of the leader | winner clear by day 7–8 | from the day-10 scores |
 | 8 | **A named lazy strategy found unprompted** | none wins | one wins a table | see below |
 
