@@ -282,7 +282,12 @@ where
 
     match run_cli_inner(args, &env_key, stdout) {
         Ok(Some(summary)) => {
-            let _ = write!(stdout, "{}", summary.format_paths_and_hashes());
+            let rendered = redact_secrets_with_limit(
+                &summary.format_paths_and_hashes(),
+                redact_ref,
+                MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+            );
+            let _ = write!(stdout, "{rendered}");
             if summary.all_clean() { 0 } else { 2 }
         }
         Ok(None) => 0,

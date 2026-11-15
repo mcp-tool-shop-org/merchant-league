@@ -16,31 +16,115 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 8,
+      "added": 9,
+      "changed": 3,
       "moved": 0,
       "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-gen/src/empirical.rs, crates/league-gen/src/feasibility.rs, crates/league-gen/src/generator.rs and 4 more.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-gen/src/empirical.rs",
+          "crates/league-gen/src/feasibility.rs",
+          "crates/league-gen/src/generator.rs",
+          "crates/league-gen/src/lp.rs",
+          "crates/league-gen/src/rng.rs",
+          "crates/league-gen/src/schema.rs",
+          "crates/league-gen/tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-gen/src/lib.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-gen/src/lib.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-gen/ is now read by Cargo.toml.",
+        "subjects": [
+          "crates/league-gen/",
+          "Cargo.toml"
+        ]
+      },
+      {
+        "kind": "part",
+        "sentence": "league-gen is a new part, drawn from `crates/league-gen/**`.",
+        "subjects": [
+          "league-gen"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 8 files changed content.",
+        "sentence": "9 files added and 3 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "5f7c94b33780fdf4400838fcdf46837d1de9eb69",
-      "generatedAt": "2026-11-15T11:12:18.280Z"
+      "commit": "7eddcfbfcee81f8502c485c786e5f9cdb2106d05",
+      "generatedAt": "2026-11-15T12:06:03.696Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
-  "changesTogether": [],
+  "changesTogether": [
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 7,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 7
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 7,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 5
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 7,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 5
+    }
+  ],
   "changesTogetherNote": [
+    "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd",
+  "commit": "31abdf8cd745c59cb7a2c54e25f0c49c0ffb5ce0",
   "defaultBranch": "main",
   "derived": "10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -257,7 +341,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T11:14:54.867Z",
+  "generatedAt": "2026-11-15T12:14:13.893Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

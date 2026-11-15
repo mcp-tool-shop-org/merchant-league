@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-gen",
-      "qualifyingSourceCommits": 2,
+      "qualifyingSourceCommits": 0,
       "rebaseline": null
     },
     {
@@ -179,8 +179,8 @@
         "path": ".gitignore"
       },
       {
-        "commits": 21,
-        "lines": 144,
+        "commits": 20,
+        "lines": 143,
         "path": "CHANGELOG.md"
       },
       {
@@ -190,12 +190,12 @@
       },
       {
         "commits": 9,
-        "lines": 8396,
+        "lines": 8277,
         "path": "Cargo.lock"
       },
       {
-        "commits": 7,
-        "lines": 80,
+        "commits": 6,
+        "lines": 79,
         "path": "Cargo.toml"
       },
       {
@@ -214,28 +214,28 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 28,
-        "lines": 649,
+        "commits": 26,
+        "lines": 595,
         "path": "atlas/README.md"
       },
       {
-        "commits": 4,
-        "lines": 80,
+        "commits": 3,
+        "lines": 76,
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 28,
-        "lines": 2121,
+        "commits": 26,
+        "lines": 1841,
         "path": "atlas/page.json"
       },
       {
-        "commits": 28,
-        "lines": 11013,
+        "commits": 26,
+        "lines": 10276,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 28,
-        "lines": 25315,
+        "commits": 26,
+        "lines": 22950,
         "path": "atlas/structure.json"
       },
       {
@@ -257,51 +257,6 @@
         "commits": 2,
         "lines": 86,
         "path": "crates/league-dice/src/lib.rs"
-      },
-      {
-        "commits": 1,
-        "lines": 20,
-        "path": "crates/league-gen/Cargo.toml"
-      },
-      {
-        "commits": 2,
-        "lines": 761,
-        "path": "crates/league-gen/src/empirical.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 1633,
-        "path": "crates/league-gen/src/feasibility.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 1114,
-        "path": "crates/league-gen/src/generator.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 72,
-        "path": "crates/league-gen/src/lib.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 502,
-        "path": "crates/league-gen/src/lp.rs"
-      },
-      {
-        "commits": 1,
-        "lines": 152,
-        "path": "crates/league-gen/src/rng.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 588,
-        "path": "crates/league-gen/src/schema.rs"
-      },
-      {
-        "commits": 2,
-        "lines": 493,
-        "path": "crates/league-gen/tests/properties.rs"
       },
       {
         "commits": 5,
@@ -369,23 +324,23 @@
         "path": "crates/league-ledger/tests/vectors/xrpljs-keypairs-api.json"
       },
       {
-        "commits": 2,
-        "lines": 32,
+        "commits": 3,
+        "lines": 33,
         "path": "crates/league-relay/Cargo.toml"
       },
       {
         "commits": 5,
-        "lines": 399,
+        "lines": 387,
         "path": "crates/league-relay/src/cli.rs"
       },
       {
-        "commits": 5,
-        "lines": 126,
+        "commits": 4,
+        "lines": 103,
         "path": "crates/league-relay/src/error.rs"
       },
       {
-        "commits": 4,
-        "lines": 50,
+        "commits": 3,
+        "lines": 42,
         "path": "crates/league-relay/src/lib.rs"
       },
       {
@@ -394,8 +349,8 @@
         "path": "crates/league-relay/src/main.rs"
       },
       {
-        "commits": 6,
-        "lines": 2604,
+        "commits": 7,
+        "lines": 2988,
         "path": "crates/league-relay/src/relay.rs"
       },
       {
@@ -404,18 +359,18 @@
         "path": "crates/league-relay/src/seats.rs"
       },
       {
-        "commits": 4,
-        "lines": 340,
+        "commits": 3,
+        "lines": 320,
         "path": "crates/league-relay/src/secret.rs"
       },
       {
-        "commits": 4,
-        "lines": 237,
+        "commits": 3,
+        "lines": 226,
         "path": "crates/league-relay/src/transport.rs"
       },
       {
-        "commits": 6,
-        "lines": 7158,
+        "commits": 7,
+        "lines": 8397,
         "path": "crates/league-relay/tests/relay_integration.rs"
       },
       {
@@ -449,148 +404,148 @@
         "path": "docs/design.md"
       },
       {
-        "commits": 2,
-        "lines": 530,
+        "commits": 1,
+        "lines": 265,
         "path": "docs/paper-test.md"
       },
       {
-        "commits": 2,
-        "lines": 284,
+        "commits": 1,
+        "lines": 142,
         "path": "docs/paper-test/board.md"
       },
       {
-        "commits": 2,
-        "lines": 336,
+        "commits": 1,
+        "lines": 168,
         "path": "docs/paper-test/brief.md"
       },
       {
-        "commits": 2,
-        "lines": 958,
+        "commits": 1,
+        "lines": 479,
         "path": "docs/paper-test/design-ruling-1.md"
       },
       {
-        "commits": 2,
-        "lines": 78,
+        "commits": 1,
+        "lines": 39,
         "path": "docs/paper-test/game-01/cards/Foresters.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-01/cards/Saltworks.md"
       },
       {
-        "commits": 2,
-        "lines": 78,
+        "commits": 1,
+        "lines": 39,
         "path": "docs/paper-test/game-01/cards/Smiths.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-01/cards/Weavers.md"
       },
       {
-        "commits": 2,
-        "lines": 4418,
+        "commits": 1,
+        "lines": 2209,
         "path": "docs/paper-test/game-01/log.md"
       },
       {
-        "commits": 2,
-        "lines": 244,
+        "commits": 1,
+        "lines": 122,
         "path": "docs/paper-test/game-01/metrics.md"
       },
       {
-        "commits": 2,
-        "lines": 94,
+        "commits": 1,
+        "lines": 47,
         "path": "docs/paper-test/game-01/score.md"
       },
       {
-        "commits": 2,
-        "lines": 124,
+        "commits": 1,
+        "lines": 62,
         "path": "docs/paper-test/game-01/sealed-state.json"
       },
       {
-        "commits": 2,
-        "lines": 236,
+        "commits": 1,
+        "lines": 118,
         "path": "docs/paper-test/game-01/setup.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-02/cards/Dyers.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-02/cards/Saltworks.md"
       },
       {
-        "commits": 2,
-        "lines": 78,
+        "commits": 1,
+        "lines": 39,
         "path": "docs/paper-test/game-02/cards/Smiths.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-02/cards/Tanners.md"
       },
       {
-        "commits": 2,
-        "lines": 76,
+        "commits": 1,
+        "lines": 38,
         "path": "docs/paper-test/game-02/cards/Weavers.md"
       },
       {
-        "commits": 2,
-        "lines": 4790,
+        "commits": 1,
+        "lines": 2395,
         "path": "docs/paper-test/game-02/log.md"
       },
       {
-        "commits": 2,
-        "lines": 616,
+        "commits": 1,
+        "lines": 308,
         "path": "docs/paper-test/game-02/metrics.md"
       },
       {
-        "commits": 2,
-        "lines": 134,
+        "commits": 1,
+        "lines": 67,
         "path": "docs/paper-test/game-02/score.md"
       },
       {
-        "commits": 2,
-        "lines": 132,
+        "commits": 1,
+        "lines": 66,
         "path": "docs/paper-test/game-02/sealed-state.json"
       },
       {
-        "commits": 2,
-        "lines": 242,
+        "commits": 1,
+        "lines": 121,
         "path": "docs/paper-test/game-02/setup.md"
       },
       {
-        "commits": 2,
-        "lines": 210,
+        "commits": 1,
+        "lines": 105,
         "path": "docs/paper-test/game-03/setup.md"
       },
       {
-        "commits": 2,
-        "lines": 216,
+        "commits": 1,
+        "lines": 108,
         "path": "docs/paper-test/game-04/setup.md"
       },
       {
-        "commits": 2,
-        "lines": 212,
+        "commits": 1,
+        "lines": 106,
         "path": "docs/paper-test/game-05/setup.md"
       },
       {
-        "commits": 2,
-        "lines": 216,
+        "commits": 1,
+        "lines": 108,
         "path": "docs/paper-test/game-06/setup.md"
       },
       {
-        "commits": 6,
-        "lines": 203,
+        "commits": 7,
+        "lines": 208,
         "path": "docs/paper-test/relay.md"
       },
       {
-        "commits": 2,
-        "lines": 232,
+        "commits": 1,
+        "lines": 116,
         "path": "docs/paper-test/results.md"
       },
       {
@@ -784,8 +739,8 @@
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 17,
-        "lines": 483,
+        "commits": 16,
+        "lines": 462,
         "path": "scripts/check-copy.sh"
       },
       {
@@ -799,8 +754,8 @@
         "path": "scripts/test-copy-check.sh"
       },
       {
-        "commits": 14,
-        "lines": 711,
+        "commits": 13,
+        "lines": 695,
         "path": "scripts/test-guards.sh"
       },
       {
@@ -2614,9 +2569,9 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-15T11:14:54.867Z",
+  "generatedAt": "2026-11-15T12:14:13.893Z",
   "generatedFrom": {
-    "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd"
+    "commit": "31abdf8cd745c59cb7a2c54e25f0c49c0ffb5ce0"
   },
   "pairs": [
     {
@@ -2662,6 +2617,48 @@
       "strength": 1
     },
     {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
+    },
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 7,
+      "shared": 7,
+      "strength": 1
+    },
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 7,
+      "shared": 7,
+      "strength": 1
+    },
+    {
+      "a": "crates/league-relay/tests/relay_integration.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 7,
+      "shared": 7,
+      "strength": 1
+    },
+    {
       "a": "scripts/check-copy.sh",
       "b": "scripts/test-guards.sh",
       "either": 11,
@@ -2679,16 +2676,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-15T06:12:49-05:00",
-    "inScopeFiles": 494,
+    "headDate": "2026-11-15T07:07:22-05:00",
+    "inScopeFiles": 486,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 33,
+    "qualifyingCommits": 32,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-19T11:12:49.000Z",
+    "since": "2026-05-19T12:07:22.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
