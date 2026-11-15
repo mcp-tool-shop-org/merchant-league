@@ -99,20 +99,48 @@ impl fmt::Debug for LiveGate {
     }
 }
 
+/// Upper bound in bytes scanned by [`redact_secrets`] and [`redact_and_truncate`].
+///
+/// Any tail beyond 4 KiB is discarded before scanning so large upstream HTML
+/// error bodies cannot trigger quadratic work while preserving redact-before-truncate.
+pub const MAX_REDACTION_SCAN_BYTES: usize = 4096;
+
 const MIN_KEY_SUBSTRING_CHARS: usize = 8;
 
-/// Scrub any occurrence of `key` (including any `8+` character substring of `key`),
-/// `Bearer <token>`, or `sk-or-...` tokens from `input`.
+/// Return the longest UTF-8 prefix of `input` whose byte length is at most `max_bytes`.
+pub fn cap_utf8_bytes(input: &str, max_bytes: usize) -> &str {
+    if input.len() <= max_bytes {
+        return input;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
+}
+
+/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`) and scrub any occurrence
+/// of `key` (including any `8+` character substring of `key`), `Bearer <token>`,
+/// or `sk-or-...` tokens.
 pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
+    let bounded = cap_utf8_bytes(input, MAX_REDACTION_SCAN_BYTES);
     let scrubbed = match key {
-        Some(k) => redact_key_substrings(input, k.secret_str()),
-        None => input.to_owned(),
+        Some(k) => redact_key_substrings(bounded, k.secret_str()),
+        None => bounded.to_owned(),
     };
     let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
     redact_prefixed_token(&scrubbed, "sk-or-", false)
 }
 
-/// Redact `input` first and then shorten to at most `max_chars` characters without
+/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`), redact secrets first,
+/// and then shorten to at most `max_chars` characters without splitting [`REDACTED_MARKER`].
+pub fn redact_and_truncate(input: &str, key: Option<&ApiKey>, max_chars: usize) -> String {
+    let bounded = cap_utf8_bytes(input, MAX_REDACTION_SCAN_BYTES);
+    let scrubbed = redact_secrets(bounded, key);
+    truncate_after_redaction(&scrubbed, max_chars)
+}
+
+/// Shorten an already-redacted string to at most `max_chars` characters without
 /// splitting [`REDACTED_MARKER`].
 pub fn truncate_after_redaction(scrubbed: &str, max_chars: usize) -> String {
     let chars: Vec<char> = scrubbed.chars().collect();

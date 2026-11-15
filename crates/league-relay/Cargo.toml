@@ -12,6 +12,10 @@ publish.workspace = true
 name = "league-relay"
 path = "src/main.rs"
 
+[features]
+# Internal hook used only by integration tests to exercise the binary's panic handler.
+test-hooks = []
+
 [dependencies]
 chrono = "0.4.45"
 hex = "0.4.3"
@@ -21,6 +25,7 @@ sha2 = "0.10.9"
 ureq = { version = "3.5", features = ["json"] }
 
 [dev-dependencies]
+league-relay = { path = ".", features = ["test-hooks"] }
 tempfile = "3.27.0"
 
 [lints]

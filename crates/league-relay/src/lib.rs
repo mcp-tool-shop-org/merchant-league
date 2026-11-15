@@ -20,8 +20,9 @@ pub use relay::{
 };
 pub use seats::{BackendKind, OpenRouterSeat, SeatBackend, SeatFile, SeatSpec};
 pub use secret::{
-    ApiKey, LiveGate, OPENROUTER_API_KEY_ENV, REDACTED_MARKER, install_redacting_panic_hook,
-    redact_secrets, truncate_after_redaction,
+    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, OPENROUTER_API_KEY_ENV, REDACTED_MARKER,
+    cap_utf8_bytes, install_redacting_panic_hook, redact_and_truncate, redact_secrets,
+    truncate_after_redaction,
 };
 pub use transport::{
     MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
