@@ -1518,10 +1518,21 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 [[package]]
 name = "league-core"
 version = "0.0.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "league-dice"
 version = "0.0.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "sha2",
+]
 
 [[package]]
 name = "league-gen"
