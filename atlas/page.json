@@ -16,62 +16,52 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 28,
-      "changed": 11,
+      "added": 7,
+      "changed": 4,
       "moved": 0,
-      "parts": 3,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
-        "kind": "landing",
-        "sentence": "docs/paper-test.md is now read by scripts/test-guards.sh.",
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 1 more.",
         "subjects": [
-          "docs/paper-test.md",
-          "scripts/test-guards.sh"
+          ".github/workflows/ci.yml",
+          "crates/league-core/src/engine.rs",
+          "crates/league-core/src/lib.rs",
+          "crates/league-core/src/replay.rs",
+          "crates/league-core/tests/"
         ]
       },
       {
-        "kind": "landing",
-        "sentence": "docs/paper-test/game-01/log.md is now read by scripts/test-guards.sh.",
+        "kind": "door",
+        "sentence": "CI no longer runs crates/league-core/.",
         "subjects": [
-          "docs/paper-test/game-01/log.md",
-          "scripts/test-guards.sh"
+          ".github/workflows/ci.yml",
+          "crates/league-core/"
         ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "docs/paper-test/game-02/cards/Tanners.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "docs/paper-test/game-02/cards/Tanners.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 4 more new writers and readers of places.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "28 files added and 11 changed content, across 3 parts.",
+        "sentence": "7 files added and 4 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "2a432619d3720d414fdda21e54661880dd03cf63",
-      "generatedAt": "2026-11-15T09:02:44.565Z"
+      "commit": "17caa043a205305583ab30179ffbdccca19d6f90",
+      "generatedAt": "2026-11-15T09:57:51.260Z"
     },
     "unchanged": false
   },
   "changesTogether": [],
   "changesTogetherNote": [
-    "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
+    "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "17caa043a205305583ab30179ffbdccca19d6f90",
+  "commit": "08e31c501eb8b918f88b814037544c2db863a06f",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "9 parts, mostly Rust (322 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -89,7 +79,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 1
+          "files": 8
         },
         {
           "boundary": "league-dice",
@@ -121,7 +111,10 @@
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
         "scripts/test-guards.sh",
-        "crates/league-core/",
+        "crates/league-core/src/engine.rs",
+        "crates/league-core/src/lib.rs",
+        "crates/league-core/src/replay.rs",
+        "crates/league-core/tests/",
         "crates/league-dice/",
         "crates/league-ledger/examples/",
         "crates/league-ledger/src/",
@@ -130,8 +123,8 @@
         "crates/league-season/",
         "crates/league-tui/"
       ],
-      "runsCount": 11,
-      "runsMore": 11,
+      "runsCount": 14,
+      "runsMore": 14,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -273,12 +266,12 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T09:57:51.260Z",
+  "generatedAt": "2026-11-15T10:35:21.853Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
     "370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.",
-    "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
+    "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
   "partLabels": {
@@ -317,9 +310,9 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 21,
+  "testFiles": 24,
   "testedBy": {
-    "league-core": 1,
+    "league-core": 4,
     "league-dice": 1,
     "league-ledger": 6,
     "league-season": 1,
@@ -327,7 +320,6 @@
   },
   "testedCodeParts": 5,
   "testedInside": [
-    "league-core",
     "league-dice",
     "league-season",
     "league-tui"
@@ -342,7 +334,6 @@
   "unreadNote": [],
   "untested": [],
   "untestedNote": [
-    "league-core is tested only by the unit tests in its own files.",
     "league-dice is tested only by the unit tests in its own files.",
     "league-season is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files.",
