@@ -43,9 +43,11 @@ pub use empirical::{
     verify_rollout_grading,
 };
 pub use feasibility::{
-    ConverterMarginDiag, FeasibilityReport, check_feasibility, coalition_upkeep_coverage,
-    compute_converter_clearing_margins, compute_shadow_price_allocation,
-    compute_shadow_price_seat_evs, compute_shapley_seat_evs, pair_has_structural_autarky,
+    ConverterMarginDiag, FeasibilityReport, ShadowPriceDetails, TableTradeOrderings,
+    TradeOptionLabel, TradeOptionRole, check_feasibility, coalition_upkeep_coverage,
+    compute_converter_clearing_margins, compute_seat_trade_orderings,
+    compute_shadow_price_allocation, compute_shadow_price_seat_evs, compute_shapley_seat_evs,
+    pair_has_structural_autarky, solve_shadow_price_details,
 };
 pub use generator::{PlrChoice, PlrEntry, PlrSampler, generate_ring_table};
 pub use lp::{LpError, LpSolution, LpStatus, solve_lp};

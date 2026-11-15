@@ -16,11 +16,49 @@ const SEASON_TURN_WINDOW: (u8, u8) = (24, 28);
 
 /// Base per-turn raw extraction yield range (provisional, calibrate in playtest 1).
 const BASE_YIELD_RANGE: (f64, f64) = (9.0, 12.0);
-/// Base primary converter input `R_{i+1}` stoichiometry range (provisional, calibrate in playtest 1;
-/// offset from `R_{i+2}` keeps even-`N` chiral input matrices well-conditioned under shadow pricing).
-const BASE_IN_A_RANGE: (f64, f64) = (1.25, 1.55);
-/// Base primary converter input `R_{i+2}` stoichiometry range (provisional, calibrate in playtest 1).
-const BASE_IN_B_RANGE: (f64, f64) = (2.45, 2.75);
+/// Base total raw input stoichiometry sum per unscaled primary batch `in_a + in_b` (provisional,
+/// calibrate in playtest 1; replaces the former shared `BASE_IN_A_RANGE`/`BASE_IN_B_RANGE` draw
+/// alongside per-seat recipe splits and batch scales).
+const BASE_STOICH_SUM_RANGE: (f64, f64) = (3.70, 4.30);
+/// Per-seat primary input `R_{i+1}` share `w_prim = in_a / (in_a + in_b)` for `4`-seat rings
+/// (`2` workshops per seat), drawn from overlapping stratified per-seat ranges and shuffled across
+/// seats so all `5` live shadow-LP trade options compete smoothly around top-3 rankings (Route b +
+/// G1 item 2; calibrated, provisional pending playtest 1).
+const PRIMARY_INPUT_SHARE_RANGE_4P: (f64, f64) = (0.27, 0.73);
+/// Per-seat symmetric clearing secondary input share for `4`-seat rings (`w in (0.24, 0.40)` keeps
+/// even-`N` `det(A_sec)` well-conditioned for `ShadowPrice` attempt-0 acceptance without `0.20`
+/// extreme stranding in `Shapley` coalitions; calibrated, provisional pending playtest 1).
+const SECONDARY_INPUT_SHARE_RANGE_4P: (f64, f64) = (0.24, 0.40);
+/// Per-seat primary and intermediate secondary input share range for `5`-seat rings (`3` workshops
+/// per seat -> `8` distinct live options per seat), calibrated alongside `(0.38, 0.37)` binding
+/// caps for both D1 variety and Shapley coalition balance (Route b + G1 item 2; provisional
+/// pending playtest 1).
+const MULTI_WORKSHOP_SHARE_RANGE_5P: (f64, f64) = (0.398, 0.602);
+/// Per-seat asymmetric clearing `S2` input share for `5`-seat rings (`(0.36, 0.445)` aligns
+/// 3-/4-seat coalition raw demand on `N=5` for high ShadowPrice/Shapley agreement; calibrated,
+/// provisional pending playtest 1).
+const SECONDARY_CLEARING_SHARE_RANGE_5P: (f64, f64) = (0.36, 0.445);
+/// Per-seat primary and intermediate secondary input share range for `6`-seat rings (`3` workshops
+/// per seat -> `8` distinct live options per seat; calibrated alongside `S1(1, 3)` and `S2(2, 4)`
+/// for both D1 variety and ShadowPrice/Shapley agreement, provisional pending playtest 1).
+const MULTI_WORKSHOP_SHARE_RANGE_6P: (f64, f64) = (0.362, 0.638);
+/// Per-seat clearing `S2` input share for `6`-seat rings (`S2(2, 4)` has ring step difference `2`,
+/// which is non-singular even at `w = 0.50` on `N=6`, letting all `6` supply options compete
+/// symmetrically around `0.50`; calibrated, provisional pending playtest 1).
+const SECONDARY_CLEARING_SHARE_RANGE_6P: (f64, f64) = (0.362, 0.638);
+/// Per-seat primary input `R_{i+1}` share used only when secondary converters are explicitly
+/// disabled, keeping `in_a < in_b` so single-converter even-`N` chiral input matrices remain
+/// well-conditioned under shadow pricing (provisional, calibrate in playtest 1).
+const SINGLE_CONVERTER_INPUT_SHARE_RANGE: (f64, f64) = (0.25, 0.44);
+/// Per-seat base recipe batch-scale band multiplying `(inputs, output)` jointly (and inversely
+/// scaling binding primary/secondary run capacity) so each seat's base recipe differs structurally
+/// in input mix, batch size, and capacity while preserving shadow-LP and coalition equity balance
+/// (calibrated, provisional pending playtest 1).
+const RECIPE_BATCH_SCALE_RANGE: (f64, f64) = (0.985, 1.015);
+/// Overlap fraction applied when stratifying per-seat base recipe ranges across `N` seats (so
+/// per-seat ranges overlap cleanly without filtering low-variety tables; provisional, calibrate in
+/// playtest 1).
+const PER_SEAT_STRATA_OVERLAP_FRAC: f64 = 0.25;
 /// Base primary converter output `M_i` batch range (provisional, calibrate in playtest 1).
 const BASE_OUT_RANGE: (f64, f64) = (3.1, 3.9);
 /// Base mandatory upkeep quantity range (provisional, calibrate in playtest 1).
@@ -28,7 +66,12 @@ const BASE_UPKEEP_RANGE: (f64, f64) = (1.6, 2.2);
 /// Base Syndicate Project fundamental valuation range for `M_i` (provisional, calibrate in playtest 1).
 const BASE_PROJECT_VAL_RANGE: (f64, f64) = (1.6, 2.8);
 
-/// Stationary G1 per-seat stoichiometry and yield relative jitter span (`±0.875%` from attempt 0,
+/// Fine per-converter efficiency jitter span (`±0.25%`) layered on top of per-seat recipe input
+/// splits and batch scales (`RECIPE_BATCH_SCALE_RANGE`) so multi-tier shadow-LP and Shapley EV
+/// checks stay well within attempt budgets while keeping per-seat yields at [`STOICH_JITTER_SPAN`]
+/// (calibrated, provisional pending playtest 1).
+const CONVERTER_RECIPE_JITTER_SPAN: f64 = 0.0025;
+/// Stationary G1 per-seat raw extraction yield relative jitter span (`±0.875%` from attempt 0,
 /// zero annealing; calibrated to the G1 variety floor: `yield intra_cv >= 0.0038` and `tariff
 /// intra_cv >= 0.20` at every `N = 4, 5, 6` with across-`N` spread `(max - min) / min <= 10%`;
 /// provisional pending playtest 1).
@@ -59,20 +102,52 @@ const DECAY_JITTER_HALF_FRAC: f64 = 0.50;
 /// playtest 1).
 const fn tariff_jitter_seat_scale(seat_count: SeatCount) -> f64 {
     match seat_count {
-        SeatCount::Four => 1.10,
-        SeatCount::Five => 1.00,
-        SeatCount::Six => 0.88,
+        SeatCount::Four => 1.08,
+        SeatCount::Five => 0.86,
+        SeatCount::Six => 0.91,
     }
 }
 
-/// Primary converter capacity cap per turn (`4.0` batch runs; provisional, calibrate in playtest 1).
-const PRIMARY_MAX_RUNS_PER_TURN: f64 = 4.0;
-/// Secondary cross-converter input intensity multiplier (`1.12x`; provisional, calibrate in playtest 1).
-const SECONDARY_INPUT_MULT: f64 = 1.12;
-/// Secondary cross-converter output yield multiplier (`0.94x`; provisional, calibrate in playtest 1).
-const SECONDARY_OUTPUT_MULT: f64 = 0.94;
-/// Secondary cross-converter capacity cap per turn (`2.0` batch runs; provisional, calibrate in playtest 1).
-const SECONDARY_MAX_RUNS_PER_TURN: f64 = 2.0;
+/// Uncapacitated primary converter capacity cap per turn used when secondary converters are
+/// disabled (`4.0` batch runs; provisional, calibrate in playtest 1).
+const PRIMARY_UNCAPACITATED_MAX_RUNS_PER_TURN: f64 = 4.0;
+/// Target share of baseline raw extraction processed by each `4`-seat binding primary workshop at
+/// nominal `1.10x` export tariff (`0.54`, leaving `~0.46` for the clearing secondary cross-converter
+/// `(R_{i+2}, R_{i+3})`; Route b, provisional pending playtest 1).
+const PRIMARY_BINDING_YIELD_FRAC_4P: f64 = 0.54;
+/// Target share of baseline raw extraction processed by each `5`-seat binding primary workshop
+/// (`0.38`, Tier 1 of the 3-workshop guild ladder; Route b, provisional pending playtest 1).
+const PRIMARY_BINDING_YIELD_FRAC_5P: f64 = 0.38;
+/// Target share of baseline raw extraction processed by each `5`-seat binding intermediate
+/// secondary workshop (`0.37`, leaving `~0.25` residual for asymmetric `S2`; Route b, provisional
+/// pending playtest 1).
+const SECONDARY_TIER1_BINDING_YIELD_FRAC_5P: f64 = 0.37;
+/// Target share of baseline raw extraction processed by each `6`-seat binding primary workshop
+/// (`0.35`, Tier 1 of the 3-workshop guild ladder; Route b, provisional pending playtest 1).
+const PRIMARY_BINDING_YIELD_FRAC_6P: f64 = 0.35;
+/// Target share of baseline raw extraction processed by each `6`-seat binding intermediate
+/// secondary workshop (`0.33`, leaving `~0.32` residual for symmetric `S2(2, 4)` so all `6` supply
+/// options compete cleanly near `~0.16..0.175`; Route b, provisional pending playtest 1).
+const SECONDARY_TIER1_BINDING_YIELD_FRAC_6P: f64 = 0.33;
+/// Nominal raw tariff multiplier used to size binding workshop run caps relative to table yield
+/// (`1.10`; provisional, calibrate in playtest 1).
+const NOMINAL_TARIFF_MULT: f64 = 1.10;
+/// Input/output stoichiometry multipliers `(in_mult, out_mult)` for `4`-seat clearing secondary
+/// cross-converters (`1.17x` in / `0.84x` out so primary capacity rent `OwnP` competes directly at
+/// the median of `4p` supply options; calibrated, provisional pending playtest 1).
+const SECONDARY_4P_MULTS: (f64, f64) = (1.17, 0.84);
+/// Input/output stoichiometry multipliers `(in_mult, out_mult)` for `5`-/`6`-seat binding
+/// intermediate secondary workshops (`1.02x` in / `0.98x` out; calibrated, provisional pending
+/// playtest 1).
+const SECONDARY_TIER1_MULTS: (f64, f64) = (1.02, 0.98);
+/// Input/output stoichiometry multipliers for `5`-/`6`-seat clearing secondary cross-converters
+/// (`1.045x` in / `0.955x` out so `P` and `S1` capacity duals remain strictly positive well above
+/// recipe jitter while keeping ShadowPrice and Shapley valuations tightly aligned; calibrated,
+/// provisional pending playtest 1).
+const SECONDARY_TIER2_MULTS: (f64, f64) = (1.045, 0.955);
+/// Secondary clearing converter capacity cap per turn (`4.5` batch runs so residual raw supply
+/// clears cleanly without artificial salvage; provisional pending playtest 1).
+const SECONDARY_CLEARING_MAX_RUNS_PER_TURN: f64 = 4.5;
 
 /// Starting turns of the 4 non-overlapping 3-stage `OracleSet` shock windows across turns `2..=22`
 /// (provisional schedule spacing within the `docs/design-v2.md` §6.1–§6.2 season).
@@ -166,6 +241,128 @@ fn validate_generator_config(config: &GeneratorConfig) -> Result<(), GenError> {
     Ok(())
 }
 
+struct WorkshopTierPlan {
+    offsets: (usize, usize),
+    is_secondary: bool,
+    in_mult: f64,
+    out_mult: f64,
+    binding_yield_frac: Option<f64>,
+    uncapacitated_cap: f64,
+    weights: Vec<f64>,
+    scales: Vec<f64>,
+}
+
+fn build_workshop_tiers(
+    stream: &mut SeedStream,
+    seat_count: SeatCount,
+    attach_secondary: bool,
+) -> Vec<WorkshopTierPlan> {
+    let n = seat_count.as_usize();
+    let mut tier = |offsets: (usize, usize),
+                    is_secondary: bool,
+                    mults: (f64, f64),
+                    binding_yield_frac: Option<f64>,
+                    uncapacitated_cap: f64,
+                    share_range: (f64, f64)| WorkshopTierPlan {
+        offsets,
+        is_secondary,
+        in_mult: mults.0,
+        out_mult: mults.1,
+        binding_yield_frac,
+        uncapacitated_cap,
+        weights: sample_per_seat_stratified(stream, n, share_range, PER_SEAT_STRATA_OVERLAP_FRAC),
+        scales: sample_per_seat_stratified(
+            stream,
+            n,
+            RECIPE_BATCH_SCALE_RANGE,
+            PER_SEAT_STRATA_OVERLAP_FRAC,
+        ),
+    };
+    if !attach_secondary {
+        return vec![tier(
+            (1, 2),
+            false,
+            (1.0, 1.0),
+            None,
+            PRIMARY_UNCAPACITATED_MAX_RUNS_PER_TURN,
+            SINGLE_CONVERTER_INPUT_SHARE_RANGE,
+        )];
+    }
+
+    match seat_count {
+        SeatCount::Four => vec![
+            tier(
+                (1, 2),
+                false,
+                (1.0, 1.0),
+                Some(PRIMARY_BINDING_YIELD_FRAC_4P),
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                PRIMARY_INPUT_SHARE_RANGE_4P,
+            ),
+            tier(
+                (2, 3),
+                true,
+                SECONDARY_4P_MULTS,
+                None,
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                SECONDARY_INPUT_SHARE_RANGE_4P,
+            ),
+        ],
+        SeatCount::Five => vec![
+            tier(
+                (1, 2),
+                false,
+                (1.0, 1.0),
+                Some(PRIMARY_BINDING_YIELD_FRAC_5P),
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                MULTI_WORKSHOP_SHARE_RANGE_5P,
+            ),
+            tier(
+                (1, 3),
+                true,
+                SECONDARY_TIER1_MULTS,
+                Some(SECONDARY_TIER1_BINDING_YIELD_FRAC_5P),
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                MULTI_WORKSHOP_SHARE_RANGE_5P,
+            ),
+            tier(
+                (2, 4),
+                true,
+                SECONDARY_TIER2_MULTS,
+                None,
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                SECONDARY_CLEARING_SHARE_RANGE_5P,
+            ),
+        ],
+        SeatCount::Six => vec![
+            tier(
+                (1, 2),
+                false,
+                (1.0, 1.0),
+                Some(PRIMARY_BINDING_YIELD_FRAC_6P),
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                MULTI_WORKSHOP_SHARE_RANGE_6P,
+            ),
+            tier(
+                (1, 3),
+                true,
+                SECONDARY_TIER1_MULTS,
+                Some(SECONDARY_TIER1_BINDING_YIELD_FRAC_6P),
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                MULTI_WORKSHOP_SHARE_RANGE_6P,
+            ),
+            tier(
+                (2, 4),
+                true,
+                SECONDARY_TIER2_MULTS,
+                None,
+                SECONDARY_CLEARING_MAX_RUNS_PER_TURN,
+                SECONDARY_CLEARING_SHARE_RANGE_6P,
+            ),
+        ],
+    }
+}
+
 fn sample_candidate(
     seed: u64,
     attempt: u32,
@@ -179,19 +376,21 @@ fn sample_candidate(
     let codes = sample_unique_codes(stream, 2 * n)?;
 
     let base_yield = stream.range_f64(BASE_YIELD_RANGE.0, BASE_YIELD_RANGE.1);
-    let base_in_a = stream.range_f64(BASE_IN_A_RANGE.0, BASE_IN_A_RANGE.1);
-    let base_in_b = stream.range_f64(BASE_IN_B_RANGE.0, BASE_IN_B_RANGE.1);
+    let base_stoich_sum = stream.range_f64(BASE_STOICH_SUM_RANGE.0, BASE_STOICH_SUM_RANGE.1);
     let base_out = stream.range_f64(BASE_OUT_RANGE.0, BASE_OUT_RANGE.1);
     let base_upkeep = stream.range_f64(BASE_UPKEEP_RANGE.0, BASE_UPKEEP_RANGE.1);
     let base_project_val = stream.range_f64(BASE_PROJECT_VAL_RANGE.0, BASE_PROJECT_VAL_RANGE.1);
     let base_tariff = stream.range_f64(0.0, config.max_tariff);
     let base_decay = stream.range_f64(config.decay_range.0, config.decay_range.1);
 
-    // 4-seat rings omit `(i+2, i+3)` secondary cross-converters because `(i + 3) % 4 == (i - 1) % 4`
-    // wraps onto the seat's own upkeep producer rather than creating an independent cross-ring chord.
-    let attach_secondary = config.enable_secondary_converters
-        && n >= 5
-        && (seat_count == SeatCount::Six || stream.next_u32_bounded(2) == 1);
+    // Under the 2026-11-15 G1 item 2 ruling (Route b), enabled tables attach cyclic tiered guild
+    // workshops with per-seat overlapping base recipe splits, batch scales, and binding caps:
+    // - 4p: binding primary `(i+1, i+2)` + clearing secondary `(i+2, i+3)` (`5` positive labels)
+    // - 5p: binding `P (i+1, i+2)`, binding `S1 (i+1, i+3)`, clearing `S2 (i+2, i+4)` (`8` labels)
+    // - 6p: binding `P (i+1, i+2)`, binding `S1 (i+1, i+3)`, clearing `S2 (i+2, i+4)` (`8` labels)
+    // Zero 1-/2-seat autarky and `<= 1/3` 3-seat upkeep hold structurally on every `N` because
+    // all inputs are foreign and never match `{i-1, i+1}`.
+    let tiers = build_workshop_tiers(stream, seat_count, config.enable_secondary_converters);
 
     let tariff_half = (config.max_tariff * TARIFF_JITTER_HALF_FRAC).min(MAX_TARIFF_JITTER_ABS)
         * tariff_jitter_seat_scale(seat_count);
@@ -205,9 +404,6 @@ fn sample_candidate(
     for i in 0..n {
         let jitter = |s: &mut SeedStream, span: f64| 1.0 + s.range_f64(-span, span);
         let raw_yield_per_turn = round3(base_yield * jitter(stream, STOICH_JITTER_SPAN));
-        let in_a = round3(base_in_a * jitter(stream, STOICH_JITTER_SPAN));
-        let in_b = round3(base_in_b * jitter(stream, STOICH_JITTER_SPAN));
-        let out_amt = round3(base_out * jitter(stream, STOICH_JITTER_SPAN));
         let upkeep_amount = round3(base_upkeep * jitter(stream, VALUE_JITTER_SPAN));
         let refined_project_value = round3(base_project_val * jitter(stream, VALUE_JITTER_SPAN));
 
@@ -215,30 +411,44 @@ fn sample_candidate(
         let refined_export_tariff = round4(stream.range_f64(t_lo, t_hi));
         let perishable_decay_rate = round4(stream.range_f64(d_lo, d_hi));
 
-        let next_1 = ((i + 1) % n) as u8;
-        let next_2 = ((i + 2) % n) as u8;
-        let next_3 = ((i + 3) % n) as u8;
-
-        let mut converters = vec![ConverterSpec {
-            owner: i as u8,
-            inputs: vec![(next_1, in_a), (next_2, in_b)],
-            output_good: i as u8,
-            output_amount: out_amt,
-            max_runs_per_turn: PRIMARY_MAX_RUNS_PER_TURN,
-            is_secondary: false,
-        }];
-
-        if attach_secondary {
+        let mut converters = Vec::with_capacity(tiers.len());
+        for tier in &tiers {
+            let scale = tier.scales[i];
+            let w = tier.weights[i];
+            let in_a = round3(
+                base_stoich_sum
+                    * scale
+                    * tier.in_mult
+                    * w
+                    * jitter(stream, CONVERTER_RECIPE_JITTER_SPAN),
+            );
+            let in_b = round3(
+                base_stoich_sum
+                    * scale
+                    * tier.in_mult
+                    * (1.0 - w)
+                    * jitter(stream, CONVERTER_RECIPE_JITTER_SPAN),
+            );
+            let output_amount = round3(
+                base_out * scale * tier.out_mult * jitter(stream, CONVERTER_RECIPE_JITTER_SPAN),
+            );
+            let max_runs_per_turn = match tier.binding_yield_frac {
+                Some(frac) => {
+                    let base_runs = (frac * base_yield)
+                        / (NOMINAL_TARIFF_MULT * base_stoich_sum * tier.in_mult);
+                    round3((base_runs / scale).max(0.25))
+                }
+                None => tier.uncapacitated_cap,
+            };
+            let g0 = ((i + tier.offsets.0) % n) as u8;
+            let g1 = ((i + tier.offsets.1) % n) as u8;
             converters.push(ConverterSpec {
                 owner: i as u8,
-                inputs: vec![
-                    (next_2, round3(in_a * SECONDARY_INPUT_MULT)),
-                    (next_3, round3(in_b * SECONDARY_INPUT_MULT)),
-                ],
+                inputs: vec![(g0, in_a), (g1, in_b)],
                 output_good: i as u8,
-                output_amount: round3(out_amt * SECONDARY_OUTPUT_MULT),
-                max_runs_per_turn: SECONDARY_MAX_RUNS_PER_TURN,
-                is_secondary: true,
+                output_amount,
+                max_runs_per_turn,
+                is_secondary: tier.is_secondary,
             });
         }
 
@@ -276,6 +486,25 @@ fn sample_candidate(
         mandate_deck,
         shocks,
     })
+}
+
+fn sample_per_seat_stratified(
+    stream: &mut SeedStream,
+    n: usize,
+    range: (f64, f64),
+    overlap_frac: f64,
+) -> Vec<f64> {
+    let span = range.1 - range.0;
+    let step = span / (n as f64);
+    let pad = step * overlap_frac;
+    let mut values = Vec::with_capacity(n);
+    for r in 0..n {
+        let sub_lo = (range.0 + (r as f64) * step - pad).max(range.0);
+        let sub_hi = (range.0 + ((r + 1) as f64) * step + pad).min(range.1);
+        values.push(stream.range_f64(sub_lo, sub_hi));
+    }
+    stream.shuffle(&mut values);
+    values
 }
 
 fn sample_unique_codes(
@@ -918,7 +1147,10 @@ mod tests {
 
         let mut sp_eval_us = 0.0_f64;
         let mut sh_eval_us = 0.0_f64;
-        for (table, report_sp) in &tables {
+        let mut sh_pass_by_n = [0usize; 3];
+        let mut gap_sum_by_n = [0.0_f64; 3];
+        for (idx, (table, report_sp)) in tables.iter().enumerate() {
+            let n_bucket = idx / 60;
             let t1 = Instant::now();
             let Ok(sp_evs) = compute_shadow_price_seat_evs(table) else {
                 panic!("ShadowPrice re-eval failed");
@@ -940,6 +1172,7 @@ mod tests {
             sh_max_rel_sum += sh_rel_dev;
             if sh_rel_dev <= 0.03 + 1e-9 {
                 sh_passes_when_sp_passes += 1;
+                sh_pass_by_n[n_bucket] += 1;
             }
 
             let per_seat_gap = sp_evs
@@ -947,6 +1180,7 @@ mod tests {
                 .zip(sh_evs.iter())
                 .map(|(&sp, &sh)| ((sp / sp_mean) - (sh / sh_mean)).abs())
                 .fold(0.0_f64, f64::max);
+            gap_sum_by_n[n_bucket] += per_seat_gap;
             max_normalized_diff = max_normalized_diff.max(per_seat_gap);
             sum_normalized_diff += per_seat_gap;
             total_tables += 1;
@@ -998,7 +1232,7 @@ mod tests {
 
         let n_f = total_tables as f64;
         println!(
-            "EV_COMPARISON n={total_tables} (N=4,5,6 x 60 seeds): sp_gen_ms={sp_elapsed_ms:.1} (avg_rej={:.2}) sh_gen_ms={sh_gen_elapsed_ms:.1} (avg_rej={:.2}) | attempt0_pass: sp={sp_attempt0_pass}/{attempt0_total} sh={sh_attempt0_pass}/{attempt0_total} | sp_eval_us={:.1} sh_eval_us={:.1} | sp_mean_max_rel={:.4} sh_mean_max_rel_on_sp={:.4} sh_pass_rate_on_sp={}/{} | mean_norm_gap={:.4} max_norm_gap={:.4} | plus20_out_rej: both={} sp_only={} sh_only={}",
+            "EV_COMPARISON n={total_tables} (N=4,5,6 x 60 seeds): sp_gen_ms={sp_elapsed_ms:.1} (avg_rej={:.2}) sh_gen_ms={sh_gen_elapsed_ms:.1} (avg_rej={:.2}) | attempt0_pass: sp={sp_attempt0_pass}/{attempt0_total} sh={sh_attempt0_pass}/{attempt0_total} | sp_eval_us={:.1} sh_eval_us={:.1} | sp_mean_max_rel={:.4} sh_mean_max_rel_on_sp={:.4} sh_pass_rate_on_sp={}/{} (by_N={sh_pass_by_n:?}) | mean_norm_gap={:.4} (by_N=[{:.4}, {:.4}, {:.4}]) max_norm_gap={:.4} | plus20_out_rej: both={} sp_only={} sh_only={}",
             (sp_attempts_sum as f64) / n_f,
             (sh_attempts_sum as f64) / n_f,
             sp_eval_us / n_f,
@@ -1008,6 +1242,9 @@ mod tests {
             sh_passes_when_sp_passes,
             total_tables,
             sum_normalized_diff / n_f,
+            gap_sum_by_n[0] / 60.0,
+            gap_sum_by_n[1] / 60.0,
+            gap_sum_by_n[2] / 60.0,
             max_normalized_diff,
             boost_both_reject,
             boost_sp_reject_only,
@@ -1267,22 +1504,129 @@ mod tests {
     }
 
     #[test]
-    fn golden_v2_2_1_table_serialization_digest_matches_pinned_seed42() {
+    fn g1_item2_distinct_best_trade_orderings_and_item3_inter_cv_floor() {
+        let stddev_mean = |vals: &[f64]| -> (f64, f64) {
+            let n = vals.len() as f64;
+            let mean = vals.iter().sum::<f64>() / n;
+            let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+            (mean, var.sqrt())
+        };
+        let main_s0_yield_cv = [0.0826_f64, 0.0793, 0.0805];
+        let main_s0_tariff_cv = [0.5752_f64, 0.5985, 0.6113];
+
+        let mut per_n_stats = Vec::with_capacity(SeatCount::ALL.len());
+        for (idx, sc) in SeatCount::ALL.iter().copied().enumerate() {
+            let cfg_a0 = GeneratorConfig {
+                seat_count: Some(sc),
+                max_attempts: 1,
+                ..GeneratorConfig::default()
+            };
+            let mut sp_a0 = 0usize;
+            for seed in 0u64..600 {
+                if generate_ring_table(seed, &cfg_a0).is_ok() {
+                    sp_a0 += 1;
+                }
+            }
+
+            let cfg_full = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            let mut d1_pass = 0usize;
+            let mut top1_pass = 0usize;
+            let mut d2_pass = 0usize;
+            let mut min_pos_opts = usize::MAX;
+            let mut max_att = 0u32;
+            let mut s0_yields = Vec::with_capacity(600);
+            let mut s0_tariffs = Vec::with_capacity(600);
+
+            for seed in 0u64..600 {
+                let Ok((t, _)) = generate_ring_table(seed, &cfg_full) else {
+                    panic!("seed {seed} failed for {sc:?}");
+                };
+                max_att = max_att.max(t.attempt);
+                s0_yields.push(t.seats[0].raw_yield_per_turn);
+                s0_tariffs.push(t.seats[0].raw_export_tariff);
+
+                let Ok(ord) = crate::feasibility::compute_seat_trade_orderings(&t) else {
+                    panic!("compute_seat_trade_orderings failed on accepted seed {seed} ({sc:?})");
+                };
+                min_pos_opts = min_pos_opts.min(ord.min_positive_options_per_seat);
+                if ord.d1_all_seats_distinct {
+                    d1_pass += 1;
+                }
+                if ord.top1_all_seats_distinct {
+                    top1_pass += 1;
+                }
+                if ord.d2_all_seats_distinct {
+                    d2_pass += 1;
+                }
+            }
+
+            let (y_m, y_sd) = stddev_mean(&s0_yields);
+            let (t_m, t_sd) = stddev_mean(&s0_tariffs);
+            let s0_yield_cv = y_sd / y_m;
+            let s0_tariff_cv = t_sd / t_m;
+            println!(
+                "G1_ITEM2 N={}: d1_pass={d1_pass}/600 ({:.1}%) top1_pass={top1_pass}/600 ({:.1}%) d2_pass={d2_pass}/600 ({:.1}%) min_pos_opts={min_pos_opts} | sp_attempt0={sp_a0}/600 ({:.1}%) max_att={max_att} | inter_cv(s0_yield={s0_yield_cv:.4} vs_main={:.4}, s0_tariff={s0_tariff_cv:.4} vs_main={:.4})",
+                sc.as_usize(),
+                100.0 * (d1_pass as f64) / 600.0,
+                100.0 * (top1_pass as f64) / 600.0,
+                100.0 * (d2_pass as f64) / 600.0,
+                100.0 * (sp_a0 as f64) / 600.0,
+                main_s0_yield_cv[idx],
+                main_s0_tariff_cv[idx],
+            );
+            per_n_stats.push((
+                idx,
+                sc.as_usize(),
+                d1_pass,
+                min_pos_opts,
+                s0_yield_cv,
+                s0_tariff_cv,
+            ));
+        }
+
+        for (idx, n_seats, d1_pass, min_pos_opts, s0_yield_cv, s0_tariff_cv) in per_n_stats {
+            assert!(
+                d1_pass >= 540,
+                "N={n_seats} D1 distinct best-trade ordering rate {d1_pass}/600 ({:.1}%) below 90% floor",
+                100.0 * (d1_pass as f64) / 600.0
+            );
+            assert!(
+                min_pos_opts >= 3,
+                "N={n_seats} min positive shadow-LP options per seat {min_pos_opts} < 3",
+            );
+            assert!(
+                s0_yield_cv >= 0.075,
+                "N={n_seats} inter-table yield CV {s0_yield_cv:.4} fell below main reference {:.4}",
+                main_s0_yield_cv[idx]
+            );
+            assert!(
+                s0_tariff_cv >= 0.55,
+                "N={n_seats} inter-table tariff CV {s0_tariff_cv:.4} fell below main reference {:.4}",
+                main_s0_tariff_cv[idx]
+            );
+        }
+    }
+
+    #[test]
+    fn golden_v2_3_0_table_serialization_digest_matches_pinned_seed42() {
         let cfg = GeneratorConfig::default();
         let Ok((table, _)) = generate_ring_table(42, &cfg) else {
             panic!("seed 42 generates cleanly");
         };
-        assert_eq!(table.generator_version, "league-gen/v2.2.1");
+        assert_eq!(table.generator_version, "league-gen/v2.3.0");
         let Ok(bytes) = serde_json::to_vec(&table) else {
             panic!("RingTable serializes deterministically");
         };
         let digest = Sha256::digest(&bytes);
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         const EXPECTED_GOLDEN_SHA256: &str =
-            "aa93b5721e6838ded787a1d6662b1a818993b31f0b4de685499185dd0a9d54b5";
+            "2df8ca890c73f69bb639e60f0cf48f3fd1515c62517ee3b85e389d100eac3bd6";
         assert_eq!(
             hex, EXPECTED_GOLDEN_SHA256,
-            "v2.2.1 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
+            "v2.3.0 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
         );
     }
 }

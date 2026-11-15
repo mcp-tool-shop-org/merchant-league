@@ -488,6 +488,59 @@ pub fn coalition_upkeep_coverage(table: &RingTable, seats: &[u8]) -> Result<f64,
     }
 }
 
+/// Detailed shadow-price LP solution for a [`RingTable`], exposing both seat EVs and the
+/// primal/dual vectors used to evaluate per-seat G1 best-trade orderings (`D1` / `D2`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowPriceDetails {
+    /// Per-seat expected value per turn (`sum == season_effective_net_surplus`).
+    pub seat_expected_values: Vec<f64>,
+    /// Exact shadow LP grand objective (`sol.objective * q_scale`).
+    pub season_effective_net_surplus: f64,
+    /// Optimal converter run counts in `flatten_converters(table)` order (`x_c * q_scale`).
+    pub converter_runs: Vec<f64>,
+    /// Shadow LP duals on converter capacity rows `0..num_conv`.
+    pub converter_cap_duals: Vec<f64>,
+    /// Shadow LP duals on raw balance rows `num_conv..num_conv + N`.
+    pub raw_shadow_prices: Vec<f64>,
+    /// Shadow LP duals on refined balance rows `num_conv + N..num_conv + 2*N`.
+    pub refined_shadow_prices: Vec<f64>,
+}
+
+/// Role of a trade option in a seat's G1 item 2 best-trade ordering (`D1`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TradeOptionRole {
+    /// Operating one of the seat's own Tier-2 converters (`x_c * y_cap[c]`).
+    Own,
+    /// Supplying raw good `R_i` into a foreign seat's active converter.
+    Supply,
+}
+
+/// Ring-relative label identifying one best-trade option for a seat under `D1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TradeOptionLabel {
+    /// Ring-relative owner offset `(owner - seat) mod N` (`0` for own converters).
+    pub owner_offset: u8,
+    /// Whether the converter is secondary (`true`) or primary (`false`).
+    pub is_secondary: bool,
+    /// Whether this option represents own capacity rent or foreign raw supply.
+    pub role: TradeOptionRole,
+}
+
+/// Summary of G1 item 2 ring-relative best-trade orderings (`D1`, top-1, and `D2`) for a [`RingTable`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableTradeOrderings {
+    /// Per-seat top-3 ring-relative labels ordered descending by shadow-LP value (`D1`).
+    pub seat_top3_d1: Vec<Vec<TradeOptionLabel>>,
+    /// Minimum count of strictly positive options (`> 1e-9 * seat_max`) across all seats.
+    pub min_positive_options_per_seat: usize,
+    /// True iff every seat has `>= 3` positive options and all `N` seats' top-3 orderings differ (`D1`).
+    pub d1_all_seats_distinct: bool,
+    /// True iff every seat has `>= 1` positive option and all `N` seats' `#1` options differ (report-only).
+    pub top1_all_seats_distinct: bool,
+    /// True iff every seat has non-empty capacity-positive own converters and all `N` orderings differ (`D2`, report-only).
+    pub d2_all_seats_distinct: bool,
+}
+
 /// Computes competitive/cooperative LP-dual shadow-price seat expected values per turn
 /// (`docs/design-v2.md` §1.5), satisfying strong duality `sum(ev_i) == season_effective_net_surplus`
 /// against the shock-amortized shadow LP objective (`#26b`).
@@ -501,6 +554,19 @@ pub fn compute_shadow_price_seat_evs(table: &RingTable) -> Result<Vec<f64>, Feas
 pub fn compute_shadow_price_allocation(
     table: &RingTable,
 ) -> Result<(Vec<f64>, f64), FeasibilityError> {
+    let details = solve_shadow_price_details(table)?;
+    Ok((
+        details.seat_expected_values,
+        details.season_effective_net_surplus,
+    ))
+}
+
+/// Solves the shock-amortized grand shadow LP and returns per-seat EVs together with the exact
+/// primal converter run counts and dual vectors (`converter_cap_duals`, `raw_shadow_prices`,
+/// `refined_shadow_prices`) selected identically to [`compute_shadow_price_allocation`].
+pub fn solve_shadow_price_details(
+    table: &RingTable,
+) -> Result<ShadowPriceDetails, FeasibilityError> {
     let n = validate_index_bounds(table)?;
     let converters = flatten_converters(table);
     let eff = effective_season_params(table);
@@ -643,7 +709,123 @@ pub fn compute_shadow_price_allocation(
         })
         .collect();
 
-    Ok((seat_evs, sol.objective * q_scale))
+    Ok(ShadowPriceDetails {
+        seat_expected_values: seat_evs,
+        season_effective_net_surplus: sol.objective * q_scale,
+        converter_runs: sol.primal[..num_conv]
+            .iter()
+            .map(|&x| x * q_scale)
+            .collect(),
+        converter_cap_duals: y[..num_conv].to_vec(),
+        raw_shadow_prices: y[raw_row_off..ref_row_off].to_vec(),
+        refined_shadow_prices: y[ref_row_off..ref_row_off + n].to_vec(),
+    })
+}
+
+/// Evaluates Opus A-2 ring-relative per-seat best-trade orderings (`D1`, top-1, and `D2`) at the
+/// shadow LP primal/dual solution from [`solve_shadow_price_details`].
+pub fn compute_seat_trade_orderings(
+    table: &RingTable,
+) -> Result<TableTradeOrderings, FeasibilityError> {
+    let n = validate_index_bounds(table)?;
+    let details = solve_shadow_price_details(table)?;
+    let converters = flatten_converters(table);
+
+    let mut seat_top3_d1 = Vec::with_capacity(n);
+    let mut seat_top1 = Vec::with_capacity(n);
+    let mut seat_d2 = Vec::with_capacity(n);
+    let mut min_positive_options_per_seat = usize::MAX;
+    let mut all_have_d2 = true;
+
+    for i in 0..n {
+        let mut options: Vec<(TradeOptionLabel, f64)> = Vec::new();
+        let mut d2_own: Vec<(bool, f64)> = Vec::new();
+        let y_raw_i = details.raw_shadow_prices[i];
+        let tariff_mult = 1.0 + table.seats[i].raw_export_tariff;
+
+        for (c_idx, conv) in converters.iter().enumerate() {
+            let x_c = details.converter_runs[c_idx];
+            if usize::from(conv.owner) == i {
+                let y_cap_c = details.converter_cap_duals[c_idx];
+                options.push((
+                    TradeOptionLabel {
+                        owner_offset: 0,
+                        is_secondary: conv.is_secondary,
+                        role: TradeOptionRole::Own,
+                    },
+                    x_c * y_cap_c,
+                ));
+                if y_cap_c > 1e-9 {
+                    d2_own.push((conv.is_secondary, y_cap_c));
+                }
+            } else {
+                let qty: f64 = conv
+                    .inputs
+                    .iter()
+                    .filter(|&&(raw_g, amt)| usize::from(raw_g) == i && amt > 0.0)
+                    .map(|&(_, amt)| amt)
+                    .sum();
+                if qty > 0.0 {
+                    let owner_offset = ((usize::from(conv.owner) + n - i) % n) as u8;
+                    options.push((
+                        TradeOptionLabel {
+                            owner_offset,
+                            is_secondary: conv.is_secondary,
+                            role: TradeOptionRole::Supply,
+                        },
+                        x_c * qty * tariff_mult * y_raw_i,
+                    ));
+                }
+            }
+        }
+
+        let seat_max = options.iter().map(|(_, v)| *v).fold(0.0_f64, f64::max);
+        let cutoff = (1e-9 * seat_max).max(1e-15);
+        let mut positive: Vec<(TradeOptionLabel, f64)> =
+            options.into_iter().filter(|&(_, v)| v > cutoff).collect();
+        positive.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        min_positive_options_per_seat = min_positive_options_per_seat.min(positive.len());
+        let top3: Vec<TradeOptionLabel> = positive.iter().take(3).map(|&(lbl, _)| lbl).collect();
+        if let Some(&first) = top3.first() {
+            seat_top1.push(first);
+        }
+        seat_top3_d1.push(top3);
+
+        if d2_own.is_empty() {
+            all_have_d2 = false;
+        } else {
+            d2_own.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            seat_d2.push(
+                d2_own
+                    .into_iter()
+                    .map(|(is_sec, _)| is_sec)
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    if min_positive_options_per_seat == usize::MAX {
+        min_positive_options_per_seat = 0;
+    }
+    let unique_d1: HashSet<&[TradeOptionLabel]> = seat_top3_d1.iter().map(Vec::as_slice).collect();
+    let d1_all_seats_distinct = min_positive_options_per_seat >= 3 && unique_d1.len() == n;
+    let unique_top1: HashSet<TradeOptionLabel> = seat_top1.iter().copied().collect();
+    let top1_all_seats_distinct = seat_top1.len() == n && unique_top1.len() == n;
+    let d2_all_seats_distinct = if all_have_d2 {
+        let unique_d2: HashSet<&[bool]> = seat_d2.iter().map(Vec::as_slice).collect();
+        unique_d2.len() == n
+    } else {
+        false
+    };
+
+    Ok(TableTradeOrderings {
+        seat_top3_d1,
+        min_positive_options_per_seat,
+        d1_all_seats_distinct,
+        top1_all_seats_distinct,
+        d2_all_seats_distinct,
+    })
 }
 
 fn is_primal_degenerate(a: &[Vec<f64>], b: &[f64], primal: &[f64]) -> bool {
