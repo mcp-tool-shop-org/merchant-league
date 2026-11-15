@@ -6,7 +6,10 @@
 use crate::error::RelayError;
 use crate::relay::{Round, TurnConfig, TurnSummary, run_turn, validate_day};
 use crate::seats::SeatFile;
-use crate::secret::{ApiKey, LiveGate, redact_secrets, truncate_after_redaction};
+use crate::secret::{
+    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, redact_secrets,
+    redact_secrets_with_limit, truncate_after_redaction,
+};
 use crate::transport::{
     MockDirTransport, RawHttpResponse, Transport, TransportError, UreqTransport,
 };
@@ -260,7 +263,7 @@ impl Transport for NoopManualTransport {
 ///
 /// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
 /// `3` if a sent call's charge could not be persisted to either `calls.jsonl`
-/// or `calls.pending.jsonl`, or `1` on invalid CLI/configuration/gate refusal.
+/// or `calls.pending.jsonl`, or `1` on invalid CLI/configuration/gate/turn-lock refusal.
 pub fn execute_cli<I, S, E>(
     args: I,
     env_reader: E,
@@ -282,14 +285,14 @@ where
         }
         Ok(None) => 0,
         Err(e) => {
-            let exit_code = match &e {
-                RelayError::UnrecordedCharge { .. } => 3,
-                _ => 1,
+            let (exit_code, scan_limit) = match &e {
+                RelayError::UnrecordedCharge { .. } => (3, MAX_UNRECORDED_CHARGE_SCAN_BYTES),
+                _ => (1, MAX_REDACTION_SCAN_BYTES),
             };
             let _ = writeln!(
                 stderr,
                 "error: {}",
-                redact_secrets(&e.to_string(), redact_ref)
+                redact_secrets_with_limit(&e.to_string(), redact_ref, scan_limit)
             );
             exit_code
         }
