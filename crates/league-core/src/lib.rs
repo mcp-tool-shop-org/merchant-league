@@ -19,7 +19,7 @@ pub use commit::{
     RevealSalt, SealedOrderBundle, beacon_roll_bps, bonus_equity_for_completion_bps,
     break_tie_with_beacon, compute_mandate_commitment, compute_order_commitment,
     compute_preimage_condition, deal_graded_mandates, default_graded_mandate_deck,
-    derive_turn_beacon, verify_mandate_reveal, verify_order_reveal,
+    derive_turn_beacon, verify_mandate_reveal, verify_order_reveal, verify_preimage_condition,
 };
 pub use contracts::{
     ActiveCharter, BondProposal, BondSpec, CartelDomain, CheckProposal, CheckStatus, CredOffer,
@@ -27,8 +27,10 @@ pub use contracts::{
     OfferSide, TokenEscrowVault, check_offer_domain_access, effective_export_tariff_bps,
 };
 pub use engine::{
-    BrokenPromiseRecord, EngineState, SeatState, ShockForecastEvent, SweepReceipt, TurnEngine,
-    TurnPhase,
+    BrokenPromiseRecord, BundlePreview, CheckOrderPreview, CheckPreviewOutcome,
+    ConverterOrderPreview, EngineState, EscrowOrderPreview, ProjectOrderPreview, SeatState,
+    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepReceipt,
+    TurnEngine, TurnPhase,
 };
 pub use replay::{LoggedTurn, ReplayBeaconMode, ReplayOutcome, SeasonReplayLog, replay_season};
 pub use scoring::{

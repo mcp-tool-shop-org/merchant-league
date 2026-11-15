@@ -1528,6 +1528,10 @@ dependencies = [
 [[package]]
 name = "league-dice"
 version = "0.0.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "sha2",
+]
 
 [[package]]
 name = "league-gen"

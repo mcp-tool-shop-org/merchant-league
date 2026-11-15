@@ -6,22 +6,24 @@
 use std::collections::BTreeMap;
 
 use league_core::{
-    ActiveCharter, AssetId, AtomicSwapProposal, BPS_SCALE, BondProposal, CharterBidOrder,
-    CharterRole, CheckProposal, CheckStatus, CommitmentHash, ConverterRecipe, ConverterRunOrder,
+    ActiveCharter, AssetId, AtomicSwapProposal, BPS_SCALE, BondProposal, BundlePreview,
+    CharterBidOrder, CharterRole, CheckOrderPreview, CheckPreviewOutcome, CheckProposal,
+    CheckStatus, CommitmentHash, ConverterOrderPreview, ConverterRecipe, ConverterRunOrder,
     CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
     DEFAULT_PBRS_GAMMA_BPS, EngineError, EngineState, EscrowFinishUnlock, EscrowProposal,
     FinalScoreboard, FundamentalParities, GradedMandateCard, IntentPledge, IntentTarget,
     LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
     MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide,
-    OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectRecipe,
-    RegentDoctrine, ReplayBeaconMode, RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat,
-    ShockKind, TableId, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
-    bonus_equity_for_completion_bps, break_tie_with_beacon, ceil_bps_fee, ceil_units_parity,
-    checked_ceil_units_parity, checked_mul_units_parity, compute_final_scoreboard,
-    compute_mandate_commitment, compute_net_asset_equity, compute_order_commitment,
-    compute_pbrs_reward, compute_potential, compute_preimage_condition, deal_graded_mandates,
-    default_graded_mandate_deck, derive_turn_beacon, floor_bps_part, half_up_bps, mul_units_parity,
-    replay_season, scale_bps_signed,
+    OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview,
+    ProjectRecipe, RegentDoctrine, ReplayBeaconMode, RevealSalt, SealedOrderBundle,
+    SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableSpec, Turn, TurnEngine,
+    TurnPhase, UNIT_SCALE, bonus_equity_for_completion_bps, break_tie_with_beacon, ceil_bps_fee,
+    ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
+    compute_final_scoreboard, compute_mandate_commitment, compute_net_asset_equity,
+    compute_order_commitment, compute_pbrs_reward, compute_potential, compute_preimage_condition,
+    deal_graded_mandates, default_graded_mandate_deck, derive_turn_beacon, floor_bps_part,
+    half_up_bps, mul_units_parity, replay_season, scale_bps_signed, verify_order_reveal,
+    verify_preimage_condition,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -172,7 +174,7 @@ fn run_scripted_full_season(
         if t == 2 {
             // Conditional TokenEscrow unlocked cleanly in Turn 2 Reveal + CheckCreate cashed in Turn 3.
             let secret = PreimageSecret([0x42; 32]);
-            let cond = compute_preimage_condition(&secret);
+            let cond = must_ok(compute_preimage_condition(&secret), "preimage t2");
             let eid = engine.state().next_escrow_id;
             let esc_act = MarketAction::CreateEscrow {
                 seat: 0,
@@ -545,7 +547,7 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
     // Seat 0 anchors Track-2 VoteForSeat pledge (Turn 4) and PreserveCartelMembership pledge (Turn 4)
     // plus RevealPreimage pledge tied to an expiring escrow (cancel_after_turn = 3).
     let pre_secret = PreimageSecret([0x19; 32]);
-    let pre_cond = compute_preimage_condition(&pre_secret);
+    let pre_cond = must_ok(compute_preimage_condition(&pre_secret), "pre_cond");
     must_ok(
         engine.apply_market_action(MarketAction::CreateEscrow {
             seat: 2,
@@ -614,7 +616,10 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
                 amount: 1_500,
                 finish_after_turn: None,
                 cancel_after_turn: 5,
-                condition_hash: Some(compute_preimage_condition(&PreimageSecret([0x22; 32]))),
+                condition_hash: Some(must_ok(
+                    compute_preimage_condition(&PreimageSecret([0x22; 32])),
+                    "bond cond",
+                )),
                 bond: Some(BondProposal {
                     good: AssetId::Raw(1),
                     required_units: 1_000,
@@ -3229,7 +3234,10 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
                 amount: 1_500,
                 finish_after_turn: None,
                 cancel_after_turn: 4,
-                condition_hash: Some(compute_preimage_condition(&PreimageSecret([0x44; 32]))),
+                condition_hash: Some(must_ok(
+                    compute_preimage_condition(&PreimageSecret([0x44; 32])),
+                    "bond t2 cond",
+                )),
                 bond: Some(BondProposal {
                     good: AssetId::Raw(1),
                     required_units: 1_000,
@@ -3325,4 +3333,620 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
         }),
         Err(EngineError::Unauthorized(_))
     ));
+}
+
+#[test]
+fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_stably() {
+    let tid = TableId(920);
+    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
+    // Give seats 1 and 2 larger yields so Seat 0 can gather inputs for 3 whole converter runs,
+    // while Seat 0 requests 6 runs (holding-clamped to 3 when cap is 5 -> k = 3 < 6).
+    spec.seats[0].converters[0].max_runs_per_turn = 5;
+    spec.seats[1].raw_yield_per_turn = 20_000;
+    spec.seats[2].raw_yield_per_turn = 20_000;
+    let mut eng = must_ok(TurnEngine::new(spec.clone()), "new");
+
+    let mut logged_turns = Vec::new();
+    // Turn 1: empty bundles so seats 1 & 2 accumulate 20_000 Raw(1) / Raw(2) and Seat 3 refines / trades.
+    let t1_bundles = vec![SealedOrderBundle::default(); 4];
+    let (c1, rev1) = commit_and_reveal_all(&mut eng, tid, 1, t1_bundles);
+    let b1 = derive_turn_beacon(3, tid, Turn(1));
+    let r1 = must_ok(eng.sweep_turn(b1), "sweep 1");
+    assert_eq!(r1.converter_orders_clamped, 0);
+    assert_eq!(r1.project_orders_clamped, 0);
+    logged_turns.push(LoggedTurn {
+        turn: 1,
+        market_actions: Vec::new(),
+        commitments: c1,
+        reveals: rev1,
+        turn_beacon: b1,
+        drand_round: None,
+    });
+
+    // Turn 2: Swap 7_000 Raw(1) & 7_000 Raw(2) into Seat 0 (800 bps tariff leaves 6_440 net;
+    // recipe uses 2_000 each -> k = 3 whole runs, 440 left before Step 6 20% spoilage -> 352),
+    // over-order runs = 6 (holding-clamped to k = 3 < 6), plus a second runs = 4 order with
+    // 0 capacity left -> 0 runs (unaffordable/cap-0, not clamped).
+    let mut t2_bundles = vec![SealedOrderBundle::default(); 4];
+    let sw1 = AtomicSwapProposal {
+        swap_id: 1,
+        maker: 1,
+        taker: 0,
+        maker_asset: AssetId::Raw(1),
+        maker_amount: 7_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 100,
+        domain_id: None,
+    };
+    let sw2 = AtomicSwapProposal {
+        swap_id: 2,
+        maker: 2,
+        taker: 0,
+        maker_asset: AssetId::Raw(2),
+        maker_amount: 7_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 100,
+        domain_id: None,
+    };
+    t2_bundles[0].atomic_swaps = vec![sw1.clone(), sw2.clone()];
+    t2_bundles[1].atomic_swaps = vec![sw1];
+    t2_bundles[2].atomic_swaps = vec![sw2];
+    t2_bundles[0].converter_runs = vec![
+        ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 6, // 6_440 net raw permits 3 whole runs at 2_000 each -> clamped (0 < 3 < 6)
+        },
+        ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 4, // 0 remaining capacity / 440 raw -> 0 runs (not clamped)
+        },
+    ];
+    let (c2, rev2) = commit_and_reveal_all(&mut eng, tid, 2, t2_bundles);
+    let b2 = derive_turn_beacon(3, tid, Turn(2));
+    let r2 = must_ok(eng.sweep_turn(b2), "sweep 2");
+    assert_eq!(r2.converter_batches_run, 3);
+    assert_eq!(r2.converter_orders_clamped, 1);
+    assert_eq!(eng.state().seats[0].refined[0], 10_500); // 3 * 3_500
+    assert_eq!(eng.state().seats[0].raw[1], 352); // 440 after 20% spoilage -> 352
+    logged_turns.push(LoggedTurn {
+        turn: 2,
+        market_actions: Vec::new(),
+        commitments: c2,
+        reveals: rev2,
+        turn_beacon: b2,
+        drand_round: None,
+    });
+
+    while eng.state().phase == TurnPhase::TalkAndMarket {
+        let turn = eng.state().turn;
+        let (c, rev) =
+            commit_and_reveal_all(&mut eng, tid, turn, vec![SealedOrderBundle::default(); 4]);
+        let beacon = derive_turn_beacon(3, tid, Turn(turn));
+        must_ok(eng.sweep_turn(beacon), "empty tail sweep");
+        logged_turns.push(LoggedTurn {
+            turn,
+            market_actions: Vec::new(),
+            commitments: c,
+            reveals: rev,
+            turn_beacon: beacon,
+            drand_round: None,
+        });
+    }
+    let outcome = must_ok(
+        replay_season(&SeasonReplayLog {
+            spec,
+            seed: 3,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
+            mandate_commits: vec![None; 4],
+            turns: logged_turns,
+            mandate_reveals: vec![None; 4],
+        }),
+        "replay clamped converters",
+    );
+    assert_eq!(outcome.state_digests[1], r2.post_state_digest);
+    assert_eq!(outcome.receipts[1], r2);
+
+    // Separate table directly verifying capacity-clamped converter (0 < k=5 < requested 7)
+    // AND holdings-clamped project delivery (0 < k=2 < requested 6), plus full replay stability.
+    let tid_p = TableId(921);
+    let mut spec_p = must_ok(TableSpec::standard_chiral_ring(tid_p, 4, 7), "spec_p");
+    spec_p.seats[0].converters[0].max_runs_per_turn = 5;
+    spec_p.seats[1].raw_yield_per_turn = 30_000;
+    spec_p.seats[2].raw_yield_per_turn = 30_000;
+    spec_p.seats[3].raw_yield_per_turn = 30_000;
+    let mut eng_clean = must_ok(TurnEngine::new(spec_p.clone()), "eng_clean");
+    let mut replay_turns = Vec::new();
+    let (pc1, prev1) = commit_and_reveal_all(
+        &mut eng_clean,
+        tid_p,
+        1,
+        vec![SealedOrderBundle::default(); 4],
+    );
+    let rb1 = derive_turn_beacon(7, tid_p, Turn(1));
+    must_ok(eng_clean.sweep_turn(rb1), "rc1");
+    replay_turns.push(LoggedTurn {
+        turn: 1,
+        market_actions: Vec::new(),
+        commitments: pc1,
+        reveals: prev1,
+        turn_beacon: rb1,
+        drand_round: None,
+    });
+
+    // Turn 2: Give Seat 0 12_000 Raw(1)&(2) (8% tariff -> 11_040 net >= 10_000 for 5 runs) & request 7 against cap=5 -> k=5!
+    // Give Seat 1 5_000 Raw(2)&(3) (4_600 net) & run 2 -> 7_000 Refined(1).
+    let mut pb2 = vec![SealedOrderBundle::default(); 4];
+    let q1 = AtomicSwapProposal {
+        swap_id: 20,
+        maker: 1,
+        taker: 0,
+        maker_asset: AssetId::Raw(1),
+        maker_amount: 12_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 50,
+        domain_id: None,
+    };
+    let q2 = AtomicSwapProposal {
+        swap_id: 21,
+        maker: 2,
+        taker: 0,
+        maker_asset: AssetId::Raw(2),
+        maker_amount: 12_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 50,
+        domain_id: None,
+    };
+    let q3 = AtomicSwapProposal {
+        swap_id: 22,
+        maker: 2,
+        taker: 1,
+        maker_asset: AssetId::Raw(2),
+        maker_amount: 5_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 50,
+        domain_id: None,
+    };
+    let q4 = AtomicSwapProposal {
+        swap_id: 23,
+        maker: 3,
+        taker: 1,
+        maker_asset: AssetId::Raw(3),
+        maker_amount: 5_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 50,
+        domain_id: None,
+    };
+    pb2[0].atomic_swaps = vec![q1.clone(), q2.clone()];
+    pb2[1].atomic_swaps = vec![q1, q3.clone(), q4.clone()];
+    pb2[2].atomic_swaps = vec![q2, q3];
+    pb2[3].atomic_swaps = vec![q4];
+    pb2[0].converter_runs = vec![ConverterRunOrder {
+        recipe_idx: 0,
+        runs: 7, // cap is 5 -> clamped k = 5 < 7
+    }];
+    pb2[1].converter_runs = vec![ConverterRunOrder {
+        recipe_idx: 0,
+        runs: 2,
+    }];
+    let (pc2, prev2) = commit_and_reveal_all(&mut eng_clean, tid_p, 2, pb2);
+    let rb2 = derive_turn_beacon(7, tid_p, Turn(2));
+    let rr2 = must_ok(eng_clean.sweep_turn(rb2), "rc2");
+    assert_eq!(rr2.converter_batches_run, 7);
+    assert_eq!(rr2.converter_orders_clamped, 1);
+    assert_eq!(eng_clean.state().seats[0].refined[0], 17_500);
+    assert_eq!(eng_clean.state().seats[1].refined[1], 7_000);
+    replay_turns.push(LoggedTurn {
+        turn: 2,
+        market_actions: Vec::new(),
+        commitments: pc2,
+        reveals: prev2,
+        turn_beacon: rb2,
+        drand_round: None,
+    });
+
+    // Turn 3: Seat 1 swaps 2_500 Refined(1) to Seat 0; Seat 0 requests 6 batches of Project 1
+    // (inputs: 1_000 Refined(0), 1_000 Refined(1)), so 2_500 Refined(1) clamps cleanly to k = 2!
+    let mut pb3 = vec![SealedOrderBundle::default(); 4];
+    let pr_sw = AtomicSwapProposal {
+        swap_id: 30,
+        maker: 1,
+        taker: 0,
+        maker_asset: AssetId::Refined(1),
+        maker_amount: 2_500,
+        taker_asset: AssetId::Cred,
+        taker_amount: 50,
+        domain_id: None,
+    };
+    pb3[0].atomic_swaps = vec![pr_sw.clone()];
+    pb3[1].atomic_swaps = vec![pr_sw];
+    pb3[0].project_deliveries = vec![ProjectDeliveryOrder {
+        project_id: 1,
+        batches: 6, // holding-clamped to k = 2 whole batches (consumes 2_000 each)
+    }];
+    let (pc3, prev3) = commit_and_reveal_all(&mut eng_clean, tid_p, 3, pb3);
+    let rb3 = derive_turn_beacon(7, tid_p, Turn(3));
+    let rr3 = must_ok(eng_clean.sweep_turn(rb3), "rc3");
+    assert_eq!(rr3.projects_completed, 2);
+    assert_eq!(rr3.project_orders_clamped, 1);
+    assert_eq!(eng_clean.state().seats[0].project_equity, 9_600); // 2 * 4_800
+    assert_eq!(eng_clean.state().seats[0].refined[1], 350); // 2_350 net after 6% tariff - 2_000 used
+    replay_turns.push(LoggedTurn {
+        turn: 3,
+        market_actions: Vec::new(),
+        commitments: pc3,
+        reveals: prev3,
+        turn_beacon: rb3,
+        drand_round: None,
+    });
+
+    while eng_clean.state().phase == TurnPhase::TalkAndMarket {
+        let turn = eng_clean.state().turn;
+        let (c, rev) = commit_and_reveal_all(
+            &mut eng_clean,
+            tid_p,
+            turn,
+            vec![SealedOrderBundle::default(); 4],
+        );
+        let beacon = derive_turn_beacon(7, tid_p, Turn(turn));
+        must_ok(eng_clean.sweep_turn(beacon), "empty tail sweep clean");
+        replay_turns.push(LoggedTurn {
+            turn,
+            market_actions: Vec::new(),
+            commitments: c,
+            reveals: rev,
+            turn_beacon: beacon,
+            drand_round: None,
+        });
+    }
+    let replayed = must_ok(
+        replay_season(&SeasonReplayLog {
+            spec: spec_p,
+            seed: 7,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
+            mandate_commits: vec![None; 4],
+            turns: replay_turns,
+            mandate_reveals: vec![None; 4],
+        }),
+        "replay b1_1",
+    );
+    assert_eq!(replayed.state_digests[1], rr2.post_state_digest);
+    assert_eq!(replayed.state_digests[2], rr3.post_state_digest);
+    assert_eq!(replayed.receipts[1], rr2);
+    assert_eq!(replayed.receipts[2], rr3);
+}
+
+#[test]
+fn b1_2_mandate_validation_enforces_seat_count_minus_two_bounds() {
+    for n in [4_u8, 5_u8, 6_u8] {
+        let max_safe = n - 2;
+        assert!(
+            MandateKind::MinRefinedVariety {
+                distinct_goods: max_safe,
+                min_each: 1_000,
+            }
+            .validate_for_seat_count(n)
+            .is_ok()
+        );
+        assert!(
+            MandateKind::MinActivePartners {
+                min_partners: max_safe,
+            }
+            .validate_for_seat_count(n)
+            .is_ok()
+        );
+        for over in [0_u8, n - 1, n] {
+            assert!(matches!(
+                MandateKind::MinRefinedVariety {
+                    distinct_goods: over,
+                    min_each: 1_000,
+                }
+                .validate_for_seat_count(n),
+                Err(EngineError::InvalidConfig(_))
+            ));
+            assert!(matches!(
+                MandateKind::MinActivePartners { min_partners: over }.validate_for_seat_count(n),
+                Err(EngineError::InvalidConfig(_))
+            ));
+        }
+
+        // TableSpec::validate and deal_graded_mandates both reject seat_count - 1 thresholds.
+        let mut spec = must_ok(
+            TableSpec::standard_chiral_ring(TableId(925 + u64::from(n)), n, 1),
+            "spec",
+        );
+        spec.mandate_deck[0].kind = MandateKind::MinRefinedVariety {
+            distinct_goods: n - 1,
+            min_each: 1_000,
+        };
+        assert!(matches!(
+            spec.validate(),
+            Err(EngineError::InvalidConfig(_))
+        ));
+        assert!(matches!(
+            deal_graded_mandates(spec.table_id, n, 1, &spec.mandate_deck),
+            Err(EngineError::InvalidConfig(_))
+        ));
+    }
+}
+
+#[test]
+fn b1_3_refuses_all_zero_salts_and_preimage_secrets_across_commit_and_escrow() {
+    let tid = TableId(930);
+    let zero_salt = RevealSalt([0u8; 32]);
+    let zero_preimage = PreimageSecret([0u8; 32]);
+    let zero_commit = CommitmentHash([0u8; 32]);
+    assert!(zero_salt.is_degenerate());
+    assert!(zero_preimage.is_degenerate());
+    assert!(zero_commit.is_degenerate());
+
+    let rev = OrderReveal {
+        bundle: SealedOrderBundle::default(),
+        salt: zero_salt.clone(),
+    };
+    assert!(matches!(
+        compute_order_commitment(tid, Turn(1), Seat(0), &rev),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        verify_order_reveal(tid, Turn(1), Seat(0), CommitmentHash([0x11; 32]), &rev),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    let good_rev = OrderReveal {
+        bundle: SealedOrderBundle::default(),
+        salt: RevealSalt([0x22; 32]),
+    };
+    assert!(matches!(
+        verify_order_reveal(tid, Turn(1), Seat(0), zero_commit, &good_rev),
+        Err(EngineError::InvalidOrder(_))
+    ));
+
+    let m_rev = MandateReveal {
+        mandate: PrivateMandate {
+            kind: MandateKind::MaintainCleanCredit {
+                min_tier: CreditTier::Aaa,
+            },
+            bonus_equity: MIN_MANDATE_BONUS_EQUITY,
+        },
+        salt: zero_salt,
+    };
+    assert!(matches!(
+        compute_mandate_commitment(tid, Seat(0), &m_rev),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        verify_preimage_condition(zero_commit, &PreimageSecret([0x33; 32])),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        compute_preimage_condition(&zero_preimage),
+        Err(EngineError::InvalidOrder(_))
+    ));
+
+    // Engine rejects zero order commitment, zero mandate commitment, and zero-preimage escrows.
+    let spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 1), "spec");
+    let mut eng = must_ok(TurnEngine::new(spec), "new");
+    assert!(matches!(
+        eng.submit_mandate_commitment(Seat(0), zero_commit),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    let forged_zero_hash = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"league-core/preimage/v2");
+        h.update([0u8; 32]);
+        CommitmentHash(h.finalize().into())
+    };
+    for bad_hash in [zero_commit, forged_zero_hash] {
+        assert!(matches!(
+            eng.apply_market_action(MarketAction::CreateEscrow {
+                seat: 0,
+                escrow: EscrowProposal {
+                    destination: 1,
+                    asset: AssetId::Cred,
+                    amount: 500,
+                    finish_after_turn: Some(1),
+                    cancel_after_turn: 3,
+                    condition_hash: Some(bad_hash),
+                    bond: None,
+                },
+            }),
+            Err(EngineError::InvalidOrder(_))
+        ));
+    }
+    must_ok(eng.advance_to_commit(), "to commit");
+    assert!(matches!(
+        eng.submit_order_commitment(Seat(0), zero_commit),
+        Err(EngineError::InvalidOrder(_))
+    ));
+}
+
+#[test]
+fn b1_4_preview_bundle_leaves_state_digest_unchanged_and_matches_real_sweep() {
+    let tid = TableId(935);
+    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 9), "spec");
+    spec.seats[0].converters[0].max_runs_per_turn = 4;
+    spec.seats[1].raw_yield_per_turn = 20_000;
+    spec.seats[2].raw_yield_per_turn = 20_000;
+    let mut eng = must_ok(TurnEngine::new(spec), "new");
+
+    // Turn 1 empty so peers mint raw goods & Seat 0 builds debt for upkeep/repay preview coverage.
+    commit_and_reveal_all(&mut eng, tid, 1, vec![SealedOrderBundle::default(); 4]);
+    must_ok(
+        eng.sweep_turn(derive_turn_beacon(9, tid, Turn(1))),
+        "sweep 1",
+    );
+
+    // Turn 2: Seat 1 posts a resting Raw(1) sell offer that Seat 0 can lift in Phase 1,
+    // leaving 10_000 Raw(1) free on Seat 1 for the co-signed atomic swap below.
+    must_ok(
+        eng.apply_market_action(MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(1),
+                amount: 6_000,
+                price_per_unit_cred: 2_000,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        }),
+        "sell offer",
+    );
+    let actions = vec![
+        MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: 2_000,
+                price_per_unit_cred: 2_000,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        },
+        // Include one refused action to confirm preview records refused_market_actions cleanly.
+        MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 99_999,
+        },
+    ];
+    let sw = AtomicSwapProposal {
+        swap_id: 77,
+        maker: 2,
+        taker: 0,
+        maker_asset: AssetId::Raw(2),
+        maker_amount: 5_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 100,
+        domain_id: None,
+    };
+    let pre_raw_buy = vec![
+        MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: 1_000,
+                price_per_unit_cred: 2_000,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        },
+        MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 99_999,
+        },
+    ];
+    // Give Seat 0 4_000 Raw(1) (+ 1_000 bought = 5_000) & 5_000 Raw(2) via co-signed swaps in
+    // `peer_bundles` (2_000 per run -> k = 2 runs < 3 requested!).
+    let sw_raw1 = AtomicSwapProposal {
+        swap_id: 76,
+        maker: 1,
+        taker: 0,
+        maker_asset: AssetId::Raw(1),
+        maker_amount: 4_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 100,
+        domain_id: None,
+    };
+    let bundle_0 = SealedOrderBundle {
+        atomic_swaps: vec![sw_raw1.clone(), sw.clone()],
+        converter_runs: vec![ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 3, // 5_000 Raw(1)&(2) at 2_000 each -> clamped to k = 2 < 3!
+        }],
+        debt_repayment_cred: 500,
+        ..SealedOrderBundle::default()
+    };
+    let mut peer_bundles = BTreeMap::new();
+    peer_bundles.insert(
+        1_u8,
+        SealedOrderBundle {
+            atomic_swaps: vec![sw_raw1],
+            ..SealedOrderBundle::default()
+        },
+    );
+    peer_bundles.insert(
+        2_u8,
+        SealedOrderBundle {
+            atomic_swaps: vec![sw],
+            ..SealedOrderBundle::default()
+        },
+    );
+
+    let digest_before = must_ok(eng.state_digest(), "digest before preview");
+    let turn_beacon = derive_turn_beacon(9, tid, Turn(2));
+
+    // 1. Standalone default preview leaves engine bit-identical.
+    let solo_preview: BundlePreview = must_ok(
+        eng.preview_bundle(Seat(0), &actions, &bundle_0),
+        "solo preview",
+    );
+    assert_eq!(solo_preview.refused_market_actions.len(), 1);
+    assert_eq!(solo_preview.refused_market_actions[0].0, 1);
+    assert_eq!(
+        must_ok(eng.state_digest(), "digest after solo preview"),
+        digest_before
+    );
+
+    // 2. Context-aware preview also leaves engine untouched and matches the real Sweep bit-for-bit.
+    let ctx_preview = must_ok(
+        eng.preview_bundle_with_context(
+            Seat(0),
+            &pre_raw_buy,
+            &bundle_0,
+            &peer_bundles,
+            turn_beacon,
+        ),
+        "ctx preview",
+    );
+    assert_eq!(
+        must_ok(eng.state_digest(), "digest after ctx preview"),
+        digest_before
+    );
+    assert_eq!(
+        ctx_preview.converter_orders,
+        vec![ConverterOrderPreview {
+            recipe_idx: 0,
+            requested_runs: 3,
+            executed_runs: 2,
+            clamped: true,
+        }]
+    );
+    assert_eq!(
+        ctx_preview
+            .swap_orders
+            .iter()
+            .map(|s| s.outcome)
+            .collect::<Vec<_>>(),
+        vec![SwapPreviewOutcome::Settled, SwapPreviewOutcome::Settled]
+    );
+    assert_eq!(ctx_preview.upkeep.debt_repaid_cred, 500);
+
+    // Now execute the real Turn 2 sequence on `eng` and assert exact prediction match.
+    for action in &pre_raw_buy {
+        let _ = eng.apply_market_action(action.clone());
+    }
+    let mut real_bundles = vec![SealedOrderBundle::default(); 4];
+    real_bundles[0] = bundle_0;
+    real_bundles[1] = peer_bundles[&1].clone();
+    real_bundles[2] = peer_bundles[&2].clone();
+    commit_and_reveal_all(&mut eng, tid, 2, real_bundles);
+    let real_receipt = must_ok(eng.sweep_turn(turn_beacon), "real sweep 2");
+
+    assert_eq!(ctx_preview.post_seat_state, eng.state().seats[0]);
+    assert_eq!(ctx_preview.seat_pbrs_delta, real_receipt.pbrs_deltas[0]);
+    assert_eq!(ctx_preview.sweep_receipt, real_receipt);
+
+    // Check-order and project-order preview structs compile and cover CheckOrderPreview variants.
+    let _check_sample = CheckOrderPreview {
+        check_id: 1,
+        outcome: CheckPreviewOutcome::NotEligibleOrIgnored,
+    };
+    let _proj_sample = ProjectOrderPreview {
+        project_id: 1,
+        requested_batches: 1,
+        executed_batches: 1,
+        clamped: false,
+    };
 }

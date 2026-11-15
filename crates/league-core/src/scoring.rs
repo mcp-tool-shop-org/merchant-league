@@ -179,6 +179,9 @@ pub fn evaluate_mandate_bonus(
     let Some(seat_state) = state.seats.get(idx) else {
         return (false, 0);
     };
+    if reveal.salt.is_degenerate() {
+        return (false, 0);
+    }
     let Some(card) =
         state.spec.mandate_deck.iter().find(|c| {
             c.kind == reveal.mandate.kind && c.bonus_equity == reveal.mandate.bonus_equity
@@ -186,6 +189,13 @@ pub fn evaluate_mandate_bonus(
     else {
         return (false, 0);
     };
+    if card
+        .kind
+        .validate_for_seat_count(state.spec.seat_count)
+        .is_err()
+    {
+        return (false, 0);
+    }
     if !(MIN_MANDATE_BONUS_EQUITY..=MAX_MANDATE_BONUS_EQUITY).contains(&card.bonus_equity) {
         return (false, 0);
     }

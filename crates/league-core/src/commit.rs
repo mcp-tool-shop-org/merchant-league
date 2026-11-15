@@ -36,6 +36,24 @@ mod hex32 {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RevealSalt(#[serde(with = "hex32")] pub [u8; 32]);
 
+impl RevealSalt {
+    /// Returns `true` when all 32 bytes are zero (degenerate salt forbidden in commits).
+    #[must_use]
+    pub fn is_degenerate(&self) -> bool {
+        self.0 == [0u8; 32]
+    }
+
+    /// Validates that the salt is not all-zero (`[0u8; 32]`).
+    pub fn validate(&self) -> Result<(), EngineError> {
+        if self.is_degenerate() {
+            return Err(EngineError::InvalidOrder(
+                "degenerate all-zero RevealSalt is forbidden".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Debug for RevealSalt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("RevealSalt(<hidden>)")
@@ -48,6 +66,24 @@ impl fmt::Debug for RevealSalt {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreimageSecret(#[serde(with = "hex32")] pub [u8; 32]);
 
+impl PreimageSecret {
+    /// Returns `true` when all 32 bytes are zero (degenerate preimage forbidden in escrows).
+    #[must_use]
+    pub fn is_degenerate(&self) -> bool {
+        self.0 == [0u8; 32]
+    }
+
+    /// Validates that the preimage is not all-zero (`[0u8; 32]`).
+    pub fn validate(&self) -> Result<(), EngineError> {
+        if self.is_degenerate() {
+            return Err(EngineError::InvalidOrder(
+                "degenerate all-zero PreimageSecret is forbidden".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Debug for PreimageSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("PreimageSecret(<hidden>)")
@@ -57,6 +93,14 @@ impl fmt::Debug for PreimageSecret {
 /// 32-byte SHA-256 commitment digest (`PREIMAGE-SHA-256` condition or order/mandate seal).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CommitmentHash(#[serde(with = "hex32")] pub [u8; 32]);
+
+impl CommitmentHash {
+    /// Returns `true` when all 32 bytes are zero.
+    #[must_use]
+    pub fn is_degenerate(&self) -> bool {
+        self.0 == [0u8; 32]
+    }
+}
 
 impl fmt::Debug for CommitmentHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -255,6 +299,47 @@ pub enum MandateKind {
     },
 }
 
+impl MandateKind {
+    /// Validates monopoly-independent bounds (`distinct_goods`, `min_partners <= seat_count - 2`)
+    /// so a single withholding seat cannot make a mandate unachievable.
+    pub fn validate_for_seat_count(&self, seat_count: u8) -> Result<(), EngineError> {
+        let max_threshold = seat_count.saturating_sub(2);
+        if max_threshold == 0 {
+            return Err(EngineError::InvalidConfig(format!(
+                "seat_count must be >= 3 to bound mandate thresholds, got {seat_count}"
+            )));
+        }
+        match *self {
+            Self::MinProjectEquity { target } => {
+                if target <= 0 {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "MinProjectEquity target must be positive, got {target}"
+                    )));
+                }
+            }
+            Self::MinRefinedVariety {
+                distinct_goods,
+                min_each,
+            } => {
+                if !(1..=max_threshold).contains(&distinct_goods) || min_each <= 0 {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "MinRefinedVariety threshold invalid for {seat_count} seats: distinct_goods={distinct_goods} (must be 1..={max_threshold}), min_each={min_each}"
+                    )));
+                }
+            }
+            Self::MaintainCleanCredit { .. } => {}
+            Self::MinActivePartners { min_partners } => {
+                if !(1..=max_threshold).contains(&min_partners) {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "MinActivePartners min_partners={min_partners} out of bounds for {seat_count} seats (must be 1..={max_threshold})"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Secret Turn-1 Charter Mandate dealt to a seat and revealed upon Season Close.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrivateMandate {
@@ -364,11 +449,22 @@ pub fn deal_graded_mandates(
     deck: &[GradedMandateCard],
 ) -> Result<(Vec<CommitmentHash>, Vec<MandateReveal>), EngineError> {
     let n = usize::from(seat_count);
-    if n == 0 || deck.len() < n {
+    if !(4..=6).contains(&seat_count) || deck.len() < n {
         return Err(EngineError::InvalidConfig(format!(
-            "mandate deck ({}) smaller than seat_count ({seat_count})",
+            "invalid mandate deal config: seat_count={seat_count}, deck_len={}",
             deck.len()
         )));
+    }
+    for card in deck {
+        if card.difficulty_completion_bps > 10_000
+            || !(MIN_MANDATE_BONUS_EQUITY..=MAX_MANDATE_BONUS_EQUITY).contains(&card.bonus_equity)
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "invalid graded mandate card {} difficulty or bonus",
+                card.card_id
+            )));
+        }
+        card.kind.validate_for_seat_count(seat_count)?;
     }
     let mut indices: Vec<usize> = (0..deck.len()).collect();
     for i in (1..indices.len()).rev() {
@@ -411,13 +507,36 @@ pub fn deal_graded_mandates(
     Ok((commits, reveals))
 }
 
-/// Computes `SHA-256("league-core/preimage/v2" || secret)` for conditional `TokenEscrow`.
 #[must_use]
-pub fn compute_preimage_condition(secret: &PreimageSecret) -> CommitmentHash {
+pub(crate) fn raw_zero_preimage_condition_hash() -> CommitmentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(b"league-core/preimage/v2");
+    hasher.update([0u8; 32]);
+    CommitmentHash(hasher.finalize().into())
+}
+
+/// Computes `SHA-256("league-core/preimage/v2" || secret)` for conditional `TokenEscrow`,
+/// rejecting all-zero degenerate [`PreimageSecret`] values.
+pub fn compute_preimage_condition(secret: &PreimageSecret) -> Result<CommitmentHash, EngineError> {
+    secret.validate()?;
     let mut hasher = Sha256::new();
     hasher.update(b"league-core/preimage/v2");
     hasher.update(secret.0);
-    CommitmentHash(hasher.finalize().into())
+    Ok(CommitmentHash(hasher.finalize().into()))
+}
+
+/// Verifies a `PREIMAGE-SHA-256` unlock preimage against `expected`, rejecting degenerate hashes
+/// and all-zero secrets.
+pub fn verify_preimage_condition(
+    expected: CommitmentHash,
+    secret: &PreimageSecret,
+) -> Result<bool, EngineError> {
+    if expected.is_degenerate() || expected == raw_zero_preimage_condition_hash() {
+        return Err(EngineError::InvalidOrder(
+            "degenerate escrow condition_hash is forbidden".to_owned(),
+        ));
+    }
+    Ok(compute_preimage_condition(secret)? == expected)
 }
 
 /// Computes canonical Phase 2 SHA-256 commitment for `table_id`, `turn`, `seat`, and `reveal`.
@@ -427,6 +546,7 @@ pub fn compute_order_commitment(
     seat: Seat,
     reveal: &OrderReveal,
 ) -> Result<CommitmentHash, EngineError> {
+    reveal.salt.validate()?;
     let encoded = serde_json::to_vec(&reveal.bundle)
         .map_err(|err| EngineError::InvalidOrder(format!("failed to serialize bundle: {err}")))?;
     let mut hasher = Sha256::new();
@@ -446,6 +566,11 @@ pub fn verify_order_reveal(
     commitment: CommitmentHash,
     reveal: &OrderReveal,
 ) -> Result<bool, EngineError> {
+    if commitment.is_degenerate() {
+        return Err(EngineError::InvalidOrder(
+            "degenerate all-zero commitment hash is forbidden".to_owned(),
+        ));
+    }
     Ok(compute_order_commitment(table_id, turn, seat, reveal)? == commitment)
 }
 
@@ -455,6 +580,7 @@ pub fn compute_mandate_commitment(
     seat: Seat,
     reveal: &MandateReveal,
 ) -> Result<CommitmentHash, EngineError> {
+    reveal.salt.validate()?;
     let encoded = serde_json::to_vec(&reveal.mandate)
         .map_err(|err| EngineError::InvalidOrder(format!("failed to serialize mandate: {err}")))?;
     let mut hasher = Sha256::new();
@@ -473,6 +599,11 @@ pub fn verify_mandate_reveal(
     commitment: CommitmentHash,
     reveal: &MandateReveal,
 ) -> Result<bool, EngineError> {
+    if commitment.is_degenerate() {
+        return Err(EngineError::InvalidOrder(
+            "degenerate all-zero commitment hash is forbidden".to_owned(),
+        ));
+    }
     Ok(compute_mandate_commitment(table_id, seat, reveal)? == commitment)
 }
 

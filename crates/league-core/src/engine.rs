@@ -8,9 +8,10 @@ use sha2::{Digest, Sha256};
 
 use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot,
-    EscrowFinishUnlock, IntentPledge, IntentTarget, MandateReveal, OrderReveal, SealedOrderBundle,
-    beacon_roll_bps, break_tie_with_beacon, compute_preimage_condition, verify_mandate_reveal,
-    verify_order_reveal,
+    EscrowFinishUnlock, IntentPledge, IntentTarget, MandateReveal, OrderReveal, RevealSalt,
+    SealedOrderBundle, beacon_roll_bps, break_tie_with_beacon, compute_order_commitment,
+    derive_turn_beacon, raw_zero_preimage_condition_hash, verify_mandate_reveal,
+    verify_order_reveal, verify_preimage_condition,
 };
 use crate::contracts::{
     ActiveCharter, BondSpec, CartelDomain, CheckStatus, CredOffer, CreditCheck, EscrowProposal,
@@ -208,6 +209,8 @@ pub struct SweepReceipt {
     pub atomic_swaps_settled: usize,
     /// Count of valid converter batches executed in Step 2.
     pub converter_batches_run: usize,
+    /// Count of converter orders clamped (`0 < executed < requested`) in Step 2.
+    pub converter_orders_clamped: usize,
     /// Check IDs cleared via `CheckCash` in Step 3.
     pub checks_cashed: Vec<u64>,
     /// Check IDs that bounced in Step 3 (triggering `HardCreditDefault` downgrades).
@@ -216,6 +219,8 @@ pub struct SweepReceipt {
     pub cartel_evictions: Vec<u8>,
     /// Count of Tier-3 Syndicate Project batches burned in Step 4.
     pub projects_completed: usize,
+    /// Count of project delivery orders clamped (`0 < executed < requested`) in Step 4.
+    pub project_orders_clamped: usize,
     /// Total `CRED` auto-debt newly issued across seats for upkeep shortfalls in Step 5.
     pub total_upkeep_shortfall_debt: Units,
     /// Total perishable raw commodity units removed via `Clawback` spoilage in Step 6.
@@ -240,6 +245,144 @@ pub struct SweepReceipt {
     pub pbrs_deltas: Vec<i64>,
     /// Canonical SHA-256 digest of post-Sweep [`EngineState`].
     pub post_state_digest: [u8; 32],
+}
+
+/// Preview breakdown of one [`ConverterRunOrder`] simulated inside [`TurnEngine::preview_bundle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConverterOrderPreview {
+    /// Converter recipe index requested.
+    pub recipe_idx: usize,
+    /// Original run count submitted in the bundle.
+    pub requested_runs: u32,
+    /// Whole runs executed after capacity and inventory clamping.
+    pub executed_runs: u32,
+    /// `true` if clamped (`0 < executed_runs < requested_runs`).
+    pub clamped: bool,
+}
+
+/// Preview breakdown of one [`ProjectDeliveryOrder`] simulated inside [`TurnEngine::preview_bundle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectOrderPreview {
+    /// Target Syndicate Project ID requested.
+    pub project_id: u16,
+    /// Original batch count submitted in the bundle.
+    pub requested_batches: u32,
+    /// Whole batches executed after refined-inventory clamping.
+    pub executed_batches: u32,
+    /// `true` if clamped (`0 < executed_batches < requested_batches`).
+    pub clamped: bool,
+}
+
+/// Outcome of an [`AtomicSwapProposal`] simulated in [`TurnEngine::preview_bundle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SwapPreviewOutcome {
+    /// Counterparty co-signed and both parties satisfied domain/balance checks.
+    Settled,
+    /// Counterparty did not co-sign, one party lacked free balance, or wash/domain checks blocked it.
+    UnmatchedOrInsufficientBalance,
+}
+
+/// Preview breakdown of one [`AtomicSwapProposal`] included in a previewed bundle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwapOrderPreview {
+    /// Swap identifier from the bundle.
+    pub swap_id: u64,
+    /// Maker seat index.
+    pub maker: u8,
+    /// Taker seat index.
+    pub taker: u8,
+    /// Predicted Step-2 settlement status.
+    pub outcome: SwapPreviewOutcome,
+}
+
+/// Outcome of a `CheckCash` request simulated in [`TurnEngine::preview_bundle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckPreviewOutcome {
+    /// Check cleared on Step 3 and credited the payee.
+    Cashed,
+    /// Drawer lacked `deliver_min`; check bounced and downgraded drawer credit tier.
+    Bounced,
+    /// Check was missing, already closed, not yet due, expired, or presented by non-payee.
+    NotEligibleOrIgnored,
+}
+
+/// Preview breakdown of one `check_id` listed in `check_cashes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckOrderPreview {
+    /// Check ID presented.
+    pub check_id: u64,
+    /// Predicted Step-3 check clearing status.
+    pub outcome: CheckPreviewOutcome,
+}
+
+/// Preview breakdown of one `EscrowFinish` unlock request in Step 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EscrowOrderPreview {
+    /// Escrow vault identifier.
+    pub escrow_id: u64,
+    /// `true` if the escrow unlocked and released funds to its destination.
+    pub unlocked: bool,
+}
+
+/// Per-seat Step-2 debt repayment and Step-5 upkeep/interest accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatUpkeepPreview {
+    /// Refined commodity index consumed as periodic upkeep.
+    pub upkeep_good: u8,
+    /// Total upkeep units due each turn.
+    pub upkeep_required: Units,
+    /// Refined units deducted toward upkeep.
+    pub paid_with_refined: Units,
+    /// Existing `cred_debt` interest accrued this turn before upkeep shortfall.
+    pub debt_interest_accrued: Units,
+    /// Newly issued shortfall debt from unpaid upkeep.
+    pub new_shortfall_debt: Units,
+    /// Voluntary debt repaid during Step 2.
+    pub debt_repaid_cred: Units,
+}
+
+/// Side-effect-free simulation result returned by [`TurnEngine::preview_bundle`] and
+/// [`TurnEngine::preview_bundle_with_context`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundlePreview {
+    /// Previewed seat index.
+    pub seat: u8,
+    /// Turn number simulated.
+    pub turn: u8,
+    /// `(action_index, error_message)` for any Phase-1 action that failed validation.
+    pub refused_market_actions: Vec<(usize, String)>,
+    /// Seat holdings and credit state before simulating `market_actions`.
+    pub pre_seat_state: SeatState,
+    /// Seat holdings after simulated `market_actions` and before Step 1–8 `Sweep`.
+    pub post_market_seat_state: SeatState,
+    /// Seat holdings and credit state immediately after `Sweep`.
+    pub post_seat_state: SeatState,
+    /// Converter execution breakdown (including clamped run counts).
+    pub converter_orders: Vec<ConverterOrderPreview>,
+    /// Project delivery execution breakdown (including clamped batch counts).
+    pub project_orders: Vec<ProjectOrderPreview>,
+    /// Atomic swap settlement outcomes for swaps listed in the previewed bundle.
+    pub swap_orders: Vec<SwapOrderPreview>,
+    /// Check clearing outcomes for `check_cashes` listed in the previewed bundle.
+    pub check_orders: Vec<CheckOrderPreview>,
+    /// Escrow unlock outcomes for `escrow_finishes` listed in the previewed bundle.
+    pub escrow_orders: Vec<EscrowOrderPreview>,
+    /// Debt, interest, and upkeep settlement summary for `seat`.
+    pub upkeep: SeatUpkeepPreview,
+    /// Perishable raw inventory + resting raw sell units removed from `seat` via Step-6 `Clawback`.
+    pub seat_spoilage_clawed_back: Units,
+    /// Predicted PBRS delta `F_i` for `seat` on this Sweep.
+    pub seat_pbrs_delta: i64,
+    /// Full post-Sweep receipt matching [`TurnEngine::sweep_turn`] for identical inputs.
+    pub sweep_receipt: SweepReceipt,
+}
+
+struct SweepSeatDetails {
+    converter_orders_by_seat: Vec<Vec<ConverterOrderPreview>>,
+    project_orders_by_seat: Vec<Vec<ProjectOrderPreview>>,
+    settled_swaps: Vec<AtomicSwapProposal>,
+    upkeep_by_seat: Vec<SeatUpkeepPreview>,
+    spoilage_by_seat: Vec<Units>,
 }
 
 /// Deterministic pure-state v2 Turn Engine.
@@ -360,6 +503,11 @@ impl TurnEngine {
         commitment: CommitmentHash,
     ) -> Result<(), EngineError> {
         self.ensure_seat(seat.0)?;
+        if commitment.is_degenerate() {
+            return Err(EngineError::InvalidOrder(
+                "degenerate all-zero mandate commitment is forbidden".to_owned(),
+            ));
+        }
         if self.state.turn != 1
             || !matches!(
                 self.state.phase,
@@ -585,6 +733,11 @@ impl TurnEngine {
             ));
         }
         self.ensure_seat(seat.0)?;
+        if commitment.is_degenerate() {
+            return Err(EngineError::InvalidOrder(
+                "degenerate all-zero order commitment is forbidden".to_owned(),
+            ));
+        }
         if self.state.turn_commits.contains_key(&seat.0) {
             return Err(EngineError::AlreadySubmitted(seat.0));
         }
@@ -638,8 +791,168 @@ impl TurnEngine {
         Ok(())
     }
 
+    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` on a cloned engine
+    /// assuming empty peer bundles and a deterministic preview beacon (`derive_turn_beacon(0, ...)`).
+    /// Never modifies `self`.
+    pub fn preview_bundle(
+        &self,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+    ) -> Result<BundlePreview, EngineError> {
+        let beacon = derive_turn_beacon(0, self.state.table_id, Turn(self.state.turn));
+        self.preview_bundle_with_context(seat, market_actions, bundle, &BTreeMap::new(), beacon)
+    }
+
+    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` given explicit
+    /// `peer_bundles` and `turn_beacon`. Leaves `self` untouched.
+    pub fn preview_bundle_with_context(
+        &self,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
+        turn_beacon: [u8; 32],
+    ) -> Result<BundlePreview, EngineError> {
+        self.ensure_seat(seat.0)?;
+        for &peer in peer_bundles.keys() {
+            self.ensure_seat(peer)?;
+        }
+        if !matches!(
+            self.state.phase,
+            TurnPhase::TalkAndMarket | TurnPhase::Commit | TurnPhase::Reveal
+        ) {
+            return Err(EngineError::InvalidPhase(
+                "preview_bundle requires an active turn phase".to_owned(),
+            ));
+        }
+        for swap in &bundle.atomic_swaps {
+            self.ensure_valid_asset(swap.maker_asset)?;
+            self.ensure_valid_asset(swap.taker_asset)?;
+        }
+        for peer_bundle in peer_bundles.values() {
+            for swap in &peer_bundle.atomic_swaps {
+                self.ensure_valid_asset(swap.maker_asset)?;
+                self.ensure_valid_asset(swap.taker_asset)?;
+            }
+        }
+
+        let turn = self.state.turn;
+        let seat_idx = usize::from(seat.0);
+        let n = self.state.seats.len();
+        let was_talk_and_market = self.state.phase == TurnPhase::TalkAndMarket;
+
+        let mut sim = self.clone();
+        let pre_seat_state = sim.state.seats[seat_idx].clone();
+        let mut refused_market_actions = Vec::new();
+        if was_talk_and_market {
+            for (idx, action) in market_actions.iter().enumerate() {
+                if let Err(err) = sim.apply_market_action(action.clone()) {
+                    refused_market_actions.push((idx, err.to_string()));
+                }
+            }
+        } else if !market_actions.is_empty() {
+            return Err(EngineError::InvalidPhase(
+                "market_actions require TalkAndMarket phase".to_owned(),
+            ));
+        }
+        let post_market_seat_state = sim.state.seats[seat_idx].clone();
+
+        let preview_salt = RevealSalt([0xA5; 32]);
+        let mut insert_preview_reveal = |s: u8, b: &SealedOrderBundle| -> Result<(), EngineError> {
+            let rev = OrderReveal {
+                bundle: b.clone(),
+                salt: preview_salt.clone(),
+            };
+            let ch = compute_order_commitment(sim.state.table_id, Turn(turn), Seat(s), &rev)?;
+            sim.state.turn_commits.insert(s, ch);
+            sim.state.turn_reveals.insert(s, rev);
+            Ok(())
+        };
+
+        insert_preview_reveal(seat.0, bundle)?;
+        for (&peer_s, peer_bundle) in peer_bundles {
+            if peer_s != seat.0 {
+                insert_preview_reveal(peer_s, peer_bundle)?;
+            }
+        }
+        if was_talk_and_market {
+            let empty = SealedOrderBundle::default();
+            for s in 0..n as u8 {
+                if s != seat.0 && !peer_bundles.contains_key(&s) {
+                    insert_preview_reveal(s, &empty)?;
+                }
+            }
+        }
+        sim.state.phase = TurnPhase::Reveal;
+
+        let (sweep_receipt, details) = sim.sweep_turn_detailed(turn_beacon)?;
+        let post_seat_state = sim.state.seats[seat_idx].clone();
+        let swap_orders = bundle
+            .atomic_swaps
+            .iter()
+            .map(|swap| SwapOrderPreview {
+                swap_id: swap.swap_id,
+                maker: swap.maker,
+                taker: swap.taker,
+                outcome: if details.settled_swaps.contains(swap) {
+                    SwapPreviewOutcome::Settled
+                } else {
+                    SwapPreviewOutcome::UnmatchedOrInsufficientBalance
+                },
+            })
+            .collect();
+        let check_orders = bundle
+            .check_cashes
+            .iter()
+            .map(|&cid| CheckOrderPreview {
+                check_id: cid,
+                outcome: if sweep_receipt.checks_cashed.contains(&cid) {
+                    CheckPreviewOutcome::Cashed
+                } else if sweep_receipt.checks_bounced.contains(&cid) {
+                    CheckPreviewOutcome::Bounced
+                } else {
+                    CheckPreviewOutcome::NotEligibleOrIgnored
+                },
+            })
+            .collect();
+        let escrow_orders = bundle
+            .escrow_finishes
+            .iter()
+            .map(|fin| EscrowOrderPreview {
+                escrow_id: fin.escrow_id,
+                unlocked: sweep_receipt.escrows_finished.contains(&fin.escrow_id),
+            })
+            .collect();
+
+        Ok(BundlePreview {
+            seat: seat.0,
+            turn,
+            refused_market_actions,
+            pre_seat_state,
+            post_market_seat_state,
+            post_seat_state,
+            converter_orders: details.converter_orders_by_seat[seat_idx].clone(),
+            project_orders: details.project_orders_by_seat[seat_idx].clone(),
+            swap_orders,
+            check_orders,
+            escrow_orders,
+            upkeep: details.upkeep_by_seat[seat_idx],
+            seat_spoilage_clawed_back: details.spoilage_by_seat[seat_idx],
+            seat_pbrs_delta: sweep_receipt.pbrs_deltas[seat_idx],
+            sweep_receipt,
+        })
+    }
+
     /// Executes the 8-step deterministic `Sweep` for the current turn using `turn_beacon`.
     pub fn sweep_turn(&mut self, turn_beacon: [u8; 32]) -> Result<SweepReceipt, EngineError> {
+        Ok(self.sweep_turn_detailed(turn_beacon)?.0)
+    }
+
+    fn sweep_turn_detailed(
+        &mut self,
+        turn_beacon: [u8; 32],
+    ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
         if self.state.phase != TurnPhase::Reveal {
             return Err(EngineError::InvalidPhase(
                 "sweep_turn requires Reveal phase".to_owned(),
@@ -656,25 +969,31 @@ impl TurnEngine {
         // voluntary auto-debt repayments, and Tier-2 converters.
         let mut broken_promises = Vec::new();
         let mut escrows_finished = self.step2a_finish_preimage_escrows(turn, &active_bundles);
-        let atomic_swaps_settled = self.step2_settle_atomic_swaps(turn, &active_bundles)?;
+        let (atomic_swaps_settled, settled_swaps) =
+            self.step2_settle_atomic_swaps(turn, &active_bundles)?;
         let (bond_finished, escrows_cancelled_or_forfeited) =
             self.step2b_evaluate_bonds_and_expired_escrows(turn, &mut broken_promises);
         escrows_finished.extend(bond_finished);
-        let cred_debt_repaid = self.step2_voluntary_debt_repayment(&active_bundles);
-        let converter_batches_run = self.step2_settle_converters(&active_bundles);
+        let (cred_debt_repaid, repaid_by_seat) =
+            self.step2_voluntary_debt_repayment(&active_bundles);
+        let (converter_batches_run, converter_orders_clamped, converter_orders_by_seat) =
+            self.step2_settle_converters(&active_bundles);
 
         // Step 3: Clear maturing Track-2 CheckCash requests & apply Check bounce downgrades.
         let (checks_cashed, checks_bounced, cartel_evictions) =
             self.step3_clear_checks(turn, &active_bundles);
 
         // Step 4: Burn Tier-3 Syndicate Projects & mint Tier-1 raw extraction yields.
-        let projects_completed = self.step4_projects_and_yields(turn, &active_bundles);
+        let (projects_completed, project_orders_clamped, project_orders_by_seat) =
+            self.step4_projects_and_yields(turn, &active_bundles);
 
         // Step 5: Accrue auto-debt interest & collect chiral upkeep (issuing shortfall auto-debt).
-        let total_upkeep_shortfall_debt = self.step5_collect_upkeep_and_debt();
+        let (total_upkeep_shortfall_debt, upkeep_by_seat) =
+            self.step5_collect_upkeep_and_debt(&repaid_by_seat);
 
         // Step 6: Apply perishable Clawback spoilage on remaining raw goods.
-        let total_spoilage_clawed_back = self.step6_apply_perishable_spoilage(turn);
+        let (total_spoilage_clawed_back, spoilage_by_seat) =
+            self.step6_apply_perishable_spoilage(turn);
 
         // Step 7: Audit vote pledges, settle 4-turn council politics, and 6-turn charters.
         let (elected_officers, charters_awarded, charter_cred_burned) = self
@@ -707,7 +1026,7 @@ impl TurnEngine {
         }
 
         let post_state_digest = self.state_digest()?;
-        Ok(SweepReceipt {
+        let receipt = SweepReceipt {
             turn,
             non_reveal_seats,
             regent_acted_seats,
@@ -716,10 +1035,12 @@ impl TurnEngine {
             escrows_cancelled_or_forfeited,
             atomic_swaps_settled,
             converter_batches_run,
+            converter_orders_clamped,
             checks_cashed,
             checks_bounced,
             cartel_evictions,
             projects_completed,
+            project_orders_clamped,
             total_upkeep_shortfall_debt,
             total_spoilage_clawed_back,
             broken_promises,
@@ -732,7 +1053,15 @@ impl TurnEngine {
             season_closed,
             pbrs_deltas,
             post_state_digest,
-        })
+        };
+        let details = SweepSeatDetails {
+            converter_orders_by_seat,
+            project_orders_by_seat,
+            settled_swaps,
+            upkeep_by_seat,
+            spoilage_by_seat,
+        };
+        Ok((receipt, details))
     }
 
     /// Reveals a seat's Turn-1 Private Charter Mandate after Season Close.
@@ -747,6 +1076,10 @@ impl TurnEngine {
             ));
         }
         self.ensure_seat(seat.0)?;
+        reveal
+            .mandate
+            .kind
+            .validate_for_seat_count(self.state.spec.seat_count)?;
         let idx = usize::from(seat.0);
         let Some(commitment) = self.state.mandate_commits[idx] else {
             return Err(EngineError::UnknownObject(format!(
@@ -1177,6 +1510,13 @@ impl TurnEngine {
                 "invalid TokenEscrow vault parameters".to_owned(),
             ));
         }
+        if let Some(cond) = proposal.condition_hash
+            && (cond.is_degenerate() || cond == raw_zero_preimage_condition_hash())
+        {
+            return Err(EngineError::InvalidOrder(
+                "degenerate escrow condition_hash is forbidden".to_owned(),
+            ));
+        }
         if let Some(fa) = proposal.finish_after_turn
             && fa >= proposal.cancel_after_turn
         {
@@ -1394,7 +1734,7 @@ impl TurnEngine {
             let cond_ok = match (&vault.condition_hash, &fin.preimage) {
                 (None, _) => true,
                 (Some(expected), Some(preimage)) => {
-                    compute_preimage_condition(preimage) == *expected
+                    verify_preimage_condition(*expected, preimage).unwrap_or(false)
                 }
                 (Some(_), None) => false,
             };
@@ -1501,7 +1841,7 @@ impl TurnEngine {
         &mut self,
         turn: u8,
         bundles: &[SealedOrderBundle],
-    ) -> Result<usize, EngineError> {
+    ) -> Result<(usize, Vec<AtomicSwapProposal>), EngineError> {
         let n = self.state.seats.len() as u8;
         let mut maker_map: BTreeMap<AtomicSwapProposal, BTreeSet<u8>> = BTreeMap::new();
         for (seat_idx, bundle) in bundles.iter().enumerate() {
@@ -1522,6 +1862,7 @@ impl TurnEngine {
         }
 
         let mut settled = 0usize;
+        let mut settled_swaps = Vec::new();
         for (swap, signers) in maker_map {
             if !signers.contains(&swap.maker) || !signers.contains(&swap.taker) {
                 continue;
@@ -1579,12 +1920,17 @@ impl TurnEngine {
             self.record_delivery(swap.maker, swap.taker, swap.maker_asset, m_net);
             self.record_delivery(swap.taker, swap.maker, swap.taker_asset, t_net);
             settled += 1;
+            settled_swaps.push(swap);
         }
-        Ok(settled)
+        Ok((settled, settled_swaps))
     }
 
-    fn step2_voluntary_debt_repayment(&mut self, bundles: &[SealedOrderBundle]) -> Units {
-        let mut total_repaid = 0;
+    fn step2_voluntary_debt_repayment(
+        &mut self,
+        bundles: &[SealedOrderBundle],
+    ) -> (Units, Vec<Units>) {
+        let mut total_repaid: Units = 0;
+        let mut repaid_by_seat = vec![0; bundles.len()];
         for (s_idx, b) in bundles.iter().enumerate() {
             if b.debt_repayment_cred <= 0 {
                 continue;
@@ -1594,18 +1940,31 @@ impl TurnEngine {
             if repay > 0 {
                 seat.cred -= repay;
                 seat.cred_debt -= repay;
-                total_repaid += repay;
+                repaid_by_seat[s_idx] = repay;
+                total_repaid = total_repaid.saturating_add(repay);
             }
         }
-        total_repaid
+        (total_repaid, repaid_by_seat)
     }
 
-    fn step2_settle_converters(&mut self, bundles: &[SealedOrderBundle]) -> usize {
+    fn step2_settle_converters(
+        &mut self,
+        bundles: &[SealedOrderBundle],
+    ) -> (usize, usize, Vec<Vec<ConverterOrderPreview>>) {
         let mut total_batches = 0usize;
+        let mut clamped_orders = 0usize;
+        let mut by_seat = Vec::with_capacity(bundles.len());
         for (s_idx, bundle) in bundles.iter().enumerate() {
             let mut runs_used: BTreeMap<usize, u32> = BTreeMap::new();
+            let mut previews = Vec::with_capacity(bundle.converter_runs.len());
             for order in &bundle.converter_runs {
                 if order.runs == 0 {
+                    previews.push(ConverterOrderPreview {
+                        recipe_idx: order.recipe_idx,
+                        requested_runs: order.runs,
+                        executed_runs: 0,
+                        clamped: false,
+                    });
                     continue;
                 }
                 let Some(recipe) = self.state.spec.seats[s_idx]
@@ -1613,32 +1972,56 @@ impl TurnEngine {
                     .get(order.recipe_idx)
                     .cloned()
                 else {
+                    previews.push(ConverterOrderPreview {
+                        recipe_idx: order.recipe_idx,
+                        requested_runs: order.runs,
+                        executed_runs: 0,
+                        clamped: false,
+                    });
                     continue;
                 };
                 let used = runs_used.get(&order.recipe_idx).copied().unwrap_or(0);
                 let remaining_cap = recipe.max_runs_per_turn.saturating_sub(used);
-                if order.runs > remaining_cap {
-                    continue;
-                }
-                let runs_i64 = i64::from(order.runs);
-                let has_all = recipe.inputs.iter().all(|&(raw_g, amt)| {
-                    amt.checked_mul(runs_i64)
-                        .is_some_and(|req| self.state.seats[s_idx].raw[usize::from(raw_g)] >= req)
+                let affordable_by_inputs = recipe
+                    .inputs
+                    .iter()
+                    .map(|&(raw_g, amt)| {
+                        if amt <= 0 {
+                            0
+                        } else {
+                            let avail = self.state.seats[s_idx].raw[usize::from(raw_g)].max(0);
+                            u32::try_from(avail / amt).unwrap_or(u32::MAX)
+                        }
+                    })
+                    .min()
+                    .unwrap_or(0);
+                let exec_runs = order.runs.min(remaining_cap).min(affordable_by_inputs);
+                let clamped = exec_runs > 0 && exec_runs < order.runs;
+                previews.push(ConverterOrderPreview {
+                    recipe_idx: order.recipe_idx,
+                    requested_runs: order.runs,
+                    executed_runs: exec_runs,
+                    clamped,
                 });
-                if !has_all {
+                if exec_runs == 0 {
                     continue;
                 }
+                if clamped {
+                    clamped_orders += 1;
+                }
+                let runs_i64 = i64::from(exec_runs);
                 for &(raw_g, amt) in &recipe.inputs {
                     self.state.seats[s_idx].raw[usize::from(raw_g)] -= amt.saturating_mul(runs_i64);
                 }
                 self.state.seats[s_idx].refined[usize::from(recipe.output_good)] =
                     self.state.seats[s_idx].refined[usize::from(recipe.output_good)]
                         .saturating_add(recipe.output_amount.saturating_mul(runs_i64));
-                *runs_used.entry(order.recipe_idx).or_insert(0) += order.runs;
-                total_batches += order.runs as usize;
+                *runs_used.entry(order.recipe_idx).or_insert(0) += exec_runs;
+                total_batches += exec_runs as usize;
             }
+            by_seat.push(previews);
         }
-        total_batches
+        (total_batches, clamped_orders, by_seat)
     }
 
     fn step3_clear_checks(
@@ -1744,8 +2127,13 @@ impl TurnEngine {
         }
     }
 
-    fn step4_projects_and_yields(&mut self, turn: u8, bundles: &[SealedOrderBundle]) -> usize {
+    fn step4_projects_and_yields(
+        &mut self,
+        turn: u8,
+        bundles: &[SealedOrderBundle],
+    ) -> (usize, usize, Vec<Vec<ProjectOrderPreview>>) {
         let mut completed = 0usize;
+        let mut clamped_orders = 0usize;
         let project_by_id: BTreeMap<u16, crate::types::ProjectRecipe> = self
             .state
             .spec
@@ -1753,24 +2141,57 @@ impl TurnEngine {
             .iter()
             .map(|p| (p.id, p.clone()))
             .collect();
+        let mut by_seat = Vec::with_capacity(bundles.len());
 
         for (s_idx, bundle) in bundles.iter().enumerate() {
+            let mut previews = Vec::with_capacity(bundle.project_deliveries.len());
             for proj_ord in &bundle.project_deliveries {
                 if proj_ord.batches == 0 {
+                    previews.push(ProjectOrderPreview {
+                        project_id: proj_ord.project_id,
+                        requested_batches: proj_ord.batches,
+                        executed_batches: 0,
+                        clamped: false,
+                    });
                     continue;
                 }
                 let Some(recipe) = project_by_id.get(&proj_ord.project_id) else {
+                    previews.push(ProjectOrderPreview {
+                        project_id: proj_ord.project_id,
+                        requested_batches: proj_ord.batches,
+                        executed_batches: 0,
+                        clamped: false,
+                    });
                     continue;
                 };
-                let b_i64 = i64::from(proj_ord.batches);
-                let has_all = recipe.inputs.iter().all(|&(ref_g, amt)| {
-                    amt.checked_mul(b_i64).is_some_and(|req| {
-                        self.state.seats[s_idx].refined[usize::from(ref_g)] >= req
+                let affordable_batches = recipe
+                    .inputs
+                    .iter()
+                    .map(|&(ref_g, amt)| {
+                        if amt <= 0 {
+                            0
+                        } else {
+                            let avail = self.state.seats[s_idx].refined[usize::from(ref_g)].max(0);
+                            u32::try_from(avail / amt).unwrap_or(u32::MAX)
+                        }
                     })
+                    .min()
+                    .unwrap_or(0);
+                let exec_batches = proj_ord.batches.min(affordable_batches);
+                let clamped = exec_batches > 0 && exec_batches < proj_ord.batches;
+                previews.push(ProjectOrderPreview {
+                    project_id: proj_ord.project_id,
+                    requested_batches: proj_ord.batches,
+                    executed_batches: exec_batches,
+                    clamped,
                 });
-                if !has_all {
+                if exec_batches == 0 {
                     continue;
                 }
+                if clamped {
+                    clamped_orders += 1;
+                }
+                let b_i64 = i64::from(exec_batches);
                 for &(ref_g, amt) in &recipe.inputs {
                     self.state.seats[s_idx].refined[usize::from(ref_g)] -=
                         amt.saturating_mul(b_i64);
@@ -1792,8 +2213,9 @@ impl TurnEngine {
                 self.state.seats[s_idx].project_equity = self.state.seats[s_idx]
                     .project_equity
                     .saturating_add(base_pts.saturating_add(bonus));
-                completed += 1;
+                completed += exec_batches as usize;
             }
+            by_seat.push(previews);
         }
 
         // Mint Turn raw extraction yields with any active SupplyFreeze reduction.
@@ -1815,11 +2237,15 @@ impl TurnEngine {
             self.state.seats[s_idx].raw[s_idx] =
                 self.state.seats[s_idx].raw[s_idx].saturating_add(actual_yield);
         }
-        completed
+        (completed, clamped_orders, by_seat)
     }
 
-    fn step5_collect_upkeep_and_debt(&mut self) -> Units {
+    fn step5_collect_upkeep_and_debt(
+        &mut self,
+        repaid_by_seat: &[Units],
+    ) -> (Units, Vec<SeatUpkeepPreview>) {
         let mut total_shortfall_debt: Units = 0;
+        let mut upkeep_by_seat = Vec::with_capacity(self.state.seats.len());
         for s_idx in 0..self.state.seats.len() {
             let rate = self.state.seats[s_idx].credit_tier.interest_bps();
             let interest = half_up_bps(self.state.seats[s_idx].cred_debt, rate);
@@ -1832,18 +2258,27 @@ impl TurnEngine {
             let paid = avail.min(cfg.upkeep_amount);
             self.state.seats[s_idx].refined[upkeep_g] -= paid;
             let shortfall = cfg.upkeep_amount - paid;
+            let mut new_debt = 0;
             if shortfall > 0 {
                 let parity = self.state.parities.refined_per_unit[upkeep_g];
-                let new_debt = ceil_units_parity(shortfall, parity);
+                new_debt = ceil_units_parity(shortfall, parity);
                 self.state.seats[s_idx].cred_debt =
                     self.state.seats[s_idx].cred_debt.saturating_add(new_debt);
                 total_shortfall_debt = total_shortfall_debt.saturating_add(new_debt);
             }
+            upkeep_by_seat.push(SeatUpkeepPreview {
+                upkeep_good: cfg.upkeep_good,
+                upkeep_required: cfg.upkeep_amount,
+                paid_with_refined: paid,
+                debt_interest_accrued: interest,
+                new_shortfall_debt: new_debt,
+                debt_repaid_cred: repaid_by_seat.get(s_idx).copied().unwrap_or(0),
+            });
         }
-        total_shortfall_debt
+        (total_shortfall_debt, upkeep_by_seat)
     }
 
-    fn step6_apply_perishable_spoilage(&mut self, turn: u8) -> Units {
+    fn step6_apply_perishable_spoilage(&mut self, turn: u8) -> (Units, Vec<Units>) {
         let n = self.state.seats.len();
         let mut rate_by_good = Vec::with_capacity(n);
         for g in 0..n {
@@ -1867,12 +2302,14 @@ impl TurnEngine {
         }
 
         let mut total_clawed: Units = 0;
-        for seat_state in self.state.seats.iter_mut().take(n) {
+        let mut by_seat: Vec<Units> = vec![0; n];
+        for (seat_idx, seat_state) in self.state.seats.iter_mut().take(n).enumerate() {
             for (g, &eff_rate) in rate_by_good.iter().enumerate() {
                 let free = seat_state.raw[g];
                 let decay = floor_bps_part(free, eff_rate);
                 seat_state.raw[g] -= decay;
                 total_clawed = total_clawed.saturating_add(decay);
+                by_seat[seat_idx] = by_seat[seat_idx].saturating_add(decay);
             }
         }
         // Raw sell offers stay in custody of the issuer's perishable trust line; shrink them
@@ -1886,6 +2323,9 @@ impl TurnEngine {
                 let decay = floor_bps_part(offer.remaining_units, eff_rate);
                 offer.remaining_units -= decay;
                 total_clawed = total_clawed.saturating_add(decay);
+                if let Some(slot) = by_seat.get_mut(usize::from(offer.maker)) {
+                    *slot = slot.saturating_add(decay);
+                }
                 if offer.remaining_units <= 0 {
                     to_remove.push(oid);
                 }
@@ -1894,7 +2334,7 @@ impl TurnEngine {
         for oid in to_remove {
             self.state.offers.remove(&oid);
         }
-        total_clawed
+        (total_clawed, by_seat)
     }
 
     fn step7_politics_and_charters(
@@ -2280,7 +2720,9 @@ mod tests {
         assert_eq!(bad, Err(EngineError::PerishableEscrowForbidden));
 
         let preimage = crate::commit::PreimageSecret([0x5A; 32]);
-        let cond = compute_preimage_condition(&preimage);
+        let Ok(cond) = crate::commit::compute_preimage_condition(&preimage) else {
+            panic!("valid non-zero preimage");
+        };
         assert!(format!("{preimage:?}").contains("<hidden>"));
         assert!(!format!("{preimage:?}").contains("5a"));
 

@@ -7,7 +7,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::commit::{
-    CommitmentHash, GradedMandateCard, MandateKind, MandateReveal, deal_graded_mandates,
+    CommitmentHash, GradedMandateCard, MandateReveal, deal_graded_mandates,
     default_graded_mandate_deck,
 };
 
@@ -460,23 +460,7 @@ impl TableSpec {
                     card.card_id
                 )));
             }
-            let kind_valid = match card.kind {
-                MandateKind::MinProjectEquity { target } => target > 0,
-                MandateKind::MinRefinedVariety {
-                    distinct_goods,
-                    min_each,
-                } => distinct_goods >= 1 && distinct_goods <= self.seat_count && min_each > 0,
-                MandateKind::MaintainCleanCredit { .. } => true,
-                MandateKind::MinActivePartners { min_partners } => {
-                    min_partners >= 1 && min_partners < self.seat_count
-                }
-            };
-            if !kind_valid {
-                return Err(EngineError::InvalidConfig(format!(
-                    "invalid mandate card {} threshold bounds",
-                    card.card_id
-                )));
-            }
+            card.kind.validate_for_seat_count(self.seat_count)?;
         }
         Ok(())
     }
