@@ -1,11 +1,15 @@
-//! HTTP transport abstraction, live `ureq` implementation, and directory mock transport.
+//! HTTP transport abstraction, OpenRouter `ureq` implementation, local
+//! OpenAI-compatible VM implementation, and directory mock transport.
 //!
 //! All relay logic runs against [`Transport`] so tests and offline mock runs
-//! exercise every code path without touching a socket. [`UreqTransport`] can
-//! only be constructed from a [`LiveGate`].
+//! exercise every code path. [`UreqTransport`] can only be constructed from a
+//! [`LiveGate`], and [`LocalOpenAiTransport`] can only be constructed from a
+//! [`LocalGate`] (which refuses any API key, enforces loopback / VM-local URLs,
+//! disables HTTP redirects, and never sends an `Authorization` header).
 
 use crate::error::RelayError;
-use crate::secret::{ApiKey, LiveGate, redact_secrets};
+use crate::seats::validate_local_base_url;
+use crate::secret::{ApiKey, LiveGate, LocalGate, redact_secrets};
 use serde::Deserialize;
 use std::fmt;
 use std::fs;
@@ -64,7 +68,15 @@ pub fn map_ureq_error(err: ureq::Error, key: &ApiKey) -> TransportError {
     }
 }
 
-/// Live HTTPS transport backed by `ureq`.
+/// Map a keyless local `ureq::Error` into a redacted [`TransportError`].
+pub fn map_local_ureq_error(err: ureq::Error) -> TransportError {
+    match err {
+        ureq::Error::Timeout(_) => TransportError::Timeout,
+        other => TransportError::Network(redact_secrets(&other.to_string(), None)),
+    }
+}
+
+/// Live OpenRouter HTTPS transport backed by `ureq`.
 ///
 /// Requires a [`LiveGate`] so it cannot be constructed unless `--live`,
 /// `--cap-credits`, and `OPENROUTER_API_KEY` were all verified.
@@ -111,6 +123,58 @@ impl Transport for UreqTransport {
             .into_body()
             .read_to_string()
             .map_err(|e| map_ureq_error(e, self.gate.api_key()))?;
+        Ok(RawHttpResponse { status, body: text })
+    }
+}
+
+/// Keyless HTTP transport for OpenAI-compatible servers (vLLM or similar) on loopback / VM.
+///
+/// Requires a [`LocalGate`], sends no `Authorization` header, disables HTTP
+/// redirects (`max_redirects(0)`), and re-validates every target URL against
+/// loopback and the gate's allowed VM-local hosts before connecting.
+#[derive(Debug, Clone)]
+pub struct LocalOpenAiTransport {
+    gate: LocalGate,
+}
+
+impl LocalOpenAiTransport {
+    /// Build a keyless local transport from a verified [`LocalGate`].
+    pub fn new(gate: LocalGate) -> Self {
+        Self { gate }
+    }
+
+    /// Underlying [`LocalGate`].
+    pub fn gate(&self) -> &LocalGate {
+        &self.gate
+    }
+}
+
+impl Transport for LocalOpenAiTransport {
+    fn post_chat_completions(
+        &self,
+        url: &str,
+        body: &str,
+        timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        let (validated_endpoint, _) =
+            validate_local_base_url("local", url, self.gate.allowed_vm_hosts())
+                .map_err(|e| TransportError::Network(e.to_string()))?;
+        let agent: Agent = Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        let resp = agent
+            .post(&validated_endpoint)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(map_local_ureq_error)?;
+        let status = resp.status().as_u16();
+        let text = resp
+            .into_body()
+            .read_to_string()
+            .map_err(map_local_ureq_error)?;
         Ok(RawHttpResponse { status, body: text })
     }
 }

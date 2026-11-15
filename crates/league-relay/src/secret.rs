@@ -1,17 +1,23 @@
-//! Secret handling, live-call capability gate, and secret redaction.
+//! Secret handling, live-call capability gates, and secret redaction.
 //!
 //! The OpenRouter key is read exclusively from the `OPENROUTER_API_KEY`
 //! environment variable. [`ApiKey`] hides its contents in [`fmt::Debug`] and
 //! does not implement [`fmt::Display`]. [`LiveGate`] is the only way to build
-//! [`UreqTransport`](crate::transport::UreqTransport), guaranteeing at the type
-//! level that no HTTP client exists unless `--live`, `--cap-credits`, and
-//! `OPENROUTER_API_KEY` are all present.
+//! [`UreqTransport`](crate::transport::UreqTransport), and [`LocalGate`] is the
+//! only way to build [`LocalOpenAiTransport`](crate::transport::LocalOpenAiTransport)
+//! (refusing if any API key is present in the environment so keys never leak
+//! into VM logs).
 
 use crate::error::RelayError;
+use crate::seats::normalize_allowed_vm_hosts;
 use std::fmt;
 
 /// Name of the sole environment variable from which the OpenRouter key is read.
 pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
+
+/// Environment variables checked and refused whenever the local OpenAI-compatible transport runs.
+pub const FORBIDDEN_LOCAL_KEY_ENVS: &[&str] =
+    &["OPENROUTER_API_KEY", "OPENAI_API_KEY", "VLLM_API_KEY"];
 
 /// Placeholder substituted whenever a key or bearer token is scrubbed.
 pub const REDACTED_MARKER: &str = "<REDACTED_API_KEY>";
@@ -48,14 +54,14 @@ impl fmt::Debug for ApiKey {
     }
 }
 
-/// Proof token required to construct the live HTTP transport.
+/// Proof token required to construct the live OpenRouter HTTP transport.
 pub struct LiveGate {
     api_key: ApiKey,
     cap_credits: f64,
 }
 
 impl LiveGate {
-    /// Acquire permission for live network calls.
+    /// Acquire permission for live OpenRouter network calls.
     ///
     /// Refuses unless `live_flag` is `true`, `cap_credits` is a finite non-negative
     /// number, and `api_key` succeeded from `OPENROUTER_API_KEY`.
@@ -96,6 +102,58 @@ impl fmt::Debug for LiveGate {
             .field("api_key", &self.api_key)
             .field("cap_credits", &self.cap_credits)
             .finish()
+    }
+}
+
+/// Proof token required to construct [`LocalOpenAiTransport`](crate::transport::LocalOpenAiTransport).
+///
+/// Guarantees at the type level that no API key was supplied in the environment,
+/// `--live` was not passed, `--cap-gpu-secs` is finite and non-negative, and every
+/// allowed host is loopback or a validated VM-local address.
+#[derive(Debug, Clone)]
+pub struct LocalGate {
+    cap_gpu_secs: f64,
+    allowed_vm_hosts: Vec<String>,
+}
+
+impl LocalGate {
+    /// Acquire permission to call a local OpenAI-compatible server on the VM.
+    pub fn acquire(
+        live_flag: bool,
+        cap_gpu_secs: Option<f64>,
+        any_env_key_present: bool,
+        allowed_vm_hosts: &[String],
+    ) -> Result<Self, RelayError> {
+        if any_env_key_present {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "local transport refuses API keys; unset OPENROUTER_API_KEY, OPENAI_API_KEY, and VLLM_API_KEY so keys never leak into VM logs".to_owned(),
+            ));
+        }
+        if live_flag {
+            return Err(RelayError::Usage(
+                "--live applies only to OpenRouter seats; omit --live for local seats".to_owned(),
+            ));
+        }
+        let Some(cap) = cap_gpu_secs.filter(|c| c.is_finite() && *c >= 0.0) else {
+            return Err(RelayError::InvalidCap(
+                "--cap-gpu-secs <n> (finite, non-negative) is required for local seats".to_owned(),
+            ));
+        };
+        let normalized_hosts = normalize_allowed_vm_hosts(allowed_vm_hosts)?;
+        Ok(Self {
+            cap_gpu_secs: cap,
+            allowed_vm_hosts: normalized_hosts,
+        })
+    }
+
+    /// Validated GPU-seconds ceiling for this local run.
+    pub fn cap_gpu_secs(&self) -> f64 {
+        self.cap_gpu_secs
+    }
+
+    /// Normalized VM-local hosts permitted alongside loopback.
+    pub fn allowed_vm_hosts(&self) -> &[String] {
+        &self.allowed_vm_hosts
     }
 }
 

@@ -11,13 +11,13 @@ use std::fmt;
 pub enum RelayError {
     /// Command-line arguments were invalid or incomplete.
     Usage(String),
-    /// A secret was passed on the command line or in a file instead of `OPENROUTER_API_KEY`.
+    /// A secret was passed on the command line, in a file, or to a local transport.
     SecretInForbiddenPlace(String),
-    /// Network calls were requested without `--live`.
+    /// Network calls to OpenRouter were requested without `--live`.
     LiveFlagRequired,
     /// `--live` was passed without `OPENROUTER_API_KEY` set in the environment.
     MissingApiKey,
-    /// `--live` was passed without a valid `--cap-credits <n>` value, or `--cap-credits` was invalid.
+    /// Required `--cap-credits <n>` / `--cap-gpu-secs <n>` was missing or invalid.
     InvalidCap(String),
     /// A seat is on its first turn and `--wrapper <path>` was not provided.
     MissingWrapper {
@@ -38,9 +38,9 @@ pub enum RelayError {
         holder: Option<String>,
     },
     /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call;
-    /// the pre-call `max_cost_per_call` reservation remains held in `relay/calls.reserved.jsonl` for the next run.
+    /// the pre-call reservation remains held in `relay/calls.reserved.jsonl` for the next run.
     UnrecordedCharge {
-        /// Total credits held across kept reservations and unmigrated side-file lines.
+        /// Total credits (or `"<n> gpu_seconds"` for local seats) held across kept reservations and side-file lines.
         charged_credits: String,
         /// Redacted per-call summary (`seat`, `day`, `round`, `attempt`, `charged_credits`).
         entries_summary: String,
@@ -60,7 +60,7 @@ impl fmt::Display for RelayError {
             RelayError::MissingApiKey => f.write_str(
                 "refusing network call: OPENROUTER_API_KEY environment variable is not set or is empty",
             ),
-            RelayError::InvalidCap(msg) => write!(f, "invalid credit cap: {msg}"),
+            RelayError::InvalidCap(msg) => write!(f, "invalid cap: {msg}"),
             RelayError::MissingWrapper { guild } => write!(
                 f,
                 "seat '{guild}' has no prior transcript; --wrapper <path> is required on a seat's first turn"
@@ -89,10 +89,23 @@ impl fmt::Display for RelayError {
                 charged_credits,
                 entries_summary,
                 detail,
-            } => write!(
-                f,
-                "post-call charge {charged_credits} credits could not be written to ledger or pending side file ({entries_summary}); the charge is held as a reservation in relay/calls.reserved.jsonl that the next run counts at max_cost_per_call — do not enter it into relay/calls.jsonl by hand or it will be counted twice: {detail}"
-            ),
+            } => {
+                let is_gpu_secs = charged_credits.ends_with(" gpu_seconds");
+                let amount_with_unit = if is_gpu_secs {
+                    charged_credits.clone()
+                } else {
+                    format!("{charged_credits} credits")
+                };
+                let estimate_field = if is_gpu_secs {
+                    "max_gpu_secs_per_call"
+                } else {
+                    "max_cost_per_call"
+                };
+                write!(
+                    f,
+                    "post-call charge {amount_with_unit} could not be written to ledger or pending side file ({entries_summary}); the charge is held as a reservation in relay/calls.reserved.jsonl that the next run counts at {estimate_field} — do not enter it into relay/calls.jsonl by hand or it will be counted twice: {detail}"
+                )
+            }
         }
     }
 }

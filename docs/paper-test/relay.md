@@ -1,26 +1,52 @@
-# Paper-test seat relay (`league-relay`)
+# Seat relay (`league-relay`)
 
-`league-relay` sends one round (`talk` or `act`) of a paper-test market day to automated OpenRouter seats, records local transcripts and call metadata, and writes each seat's reply verbatim for the referee. Manual seats (such as Claude Code subagents) use the `file` backend and are reported without making any call.
+`league-relay` sends one round (`talk` or `act`) of a market day to automated seats — either a keyless OpenAI-compatible `local` server on the VM (such as vLLM, capped in GPU-seconds via `--cap-gpu-secs`) or `openrouter` seats (gated behind `--live`, `--cap-credits`, and `OPENROUTER_API_KEY`) — records local transcripts, setup, and call metadata, and writes each seat's reply verbatim for the referee. Manual seats (such as Claude Code subagents) use the `file` backend and are reported without making any call.
 
 No game directories or prompts live in this repository. Pass `--game-dir <dir>` pointing at an external folder for each game.
 
 ## Running one turn
 
-Every live call requires three things together:
+### Local OpenAI-compatible VM transport (`backend: "local"`)
+
+Local seats talk over HTTP to `/v1/chat/completions` at a configured `base_url` that must resolve to loopback (`127.0.0.0/8`, `[::1]`, or `localhost`) or a private/VM-local address explicitly named with `--allow-vm-host <host>` (outside/public hosts and `0.0.0.0`/`::` are rejected):
+
+1. `--cap-gpu-secs <n>` sets the cumulative GPU-seconds ceiling for the game;
+2. **No API key may be passed:** `league-relay` refuses (`exit 1`) if `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `VLLM_API_KEY` is set in the environment, or if any key flag, URL credential, or seat-file key field is supplied, so keys never leak into VM logs;
+3. Omit `--live` (which applies only to OpenRouter).
+
+```sh
+cargo run -p league-relay -- turn \
+  --game-dir /path/to/colab-game-01 \
+  --day 01 \
+  --round talk \
+  --seats /path/to/colab-game-01/seats.json \
+  --wrapper /path/to/wrapper.md \
+  --cap-gpu-secs 600
+```
+
+### OpenRouter transport (`backend: "openrouter"`)
+
+Every live OpenRouter call requires three things together:
 
 1. `--live` on the command line;
 2. `--cap-credits <n>` setting the cumulative credit ceiling for the game;
 3. `OPENROUTER_API_KEY` set in the process environment (never in a file or flag).
 
-Without `--live`, `league-relay` refuses to touch the network even when `OPENROUTER_API_KEY` is set.
+Without `--live`, `league-relay` refuses to touch OpenRouter even when `OPENROUTER_API_KEY` is set. A single game directory and `seats.json` cannot mix `local` (`gpu_seconds`) and `openrouter` (`credits`) seats.
 
 `--game-dir <dir>` must point to an existing directory; if `<game-dir>` does not exist (or is not a directory), `league-relay` refuses immediately (`exit 1`) before creating `relay/` or any other path.
 
 Only **one** `league-relay turn` may run against a `<game-dir>` at a time. At the start of `run_turn` (before any ledger read, side-file migration, or cap reservation), `league-relay` acquires an exclusive OS file lock on `<game-dir>/relay/turn.lock` (recording `pid=<pid> started_utc=<ts>`), captures that open handle's OS file identity (`dev` + `ino` on Unix; volume serial number + file index on Windows), and holds it until all turn writes — including the end-of-turn ledger flush or side-file write — have finished. Before every call goes out, `league-relay` checks `relay/turn.lock` identity, writes a durable pre-call reservation with a unique `reservation_id` at `max_cost_per_call` to `<game-dir>/relay/calls.reserved.jsonl` (under a short exclusive OS lock on `<game-dir>/relay/calls.side.lock`), and checks `relay/turn.lock` identity again before dispatching the call; if `relay/turn.lock` is deleted or replaced mid-turn, `league-relay` refuses further transport calls, finishes recording what was already spent, and exits `4` (`TurnLocked`), while any new run that took a replacement `turn.lock` already sees the old run's in-flight reservations on disk in `relay/calls.reserved.jsonl`. What still remains after this protection: (1) deleting or replacing the relay's own files (`relay/calls.reserved.jsonl`, `relay/calls.side.lock`, or a live `relay/calls.resv-<run_id>.lock`) breaks its guarantees — deleting `relay/calls.reserved.jsonl` or `relay/calls.side.lock` can lose an active reservation or side-file write and under-count spend, the same as deleting the ledger (`relay/calls.jsonl` or `relay/calls.pending.jsonl`), whereas deleting a live `relay/calls.resv-<run_id>.lock` makes a live reservation appear orphaned so a later run migrates it as `RESERVED` alongside the live run's final line (over-counting rather than under-counting); (2) if `relay/turn.lock` is deleted in the microsecond gap between `try_reserve`'s post-write identity check and the transport thread sending the request, that one already-reserved call still goes out before the old run exits `4` (its `max_cost_per_call` reservation is already on disk, so `--cap-credits` still counts it); (3) `--cap-credits` can still be exceeded when an in-flight call spends more than its reserved `max_cost_per_call` (`COST_OVER_ESTIMATE`, bounded by `cost - max_cost_per_call` per in-flight seat; likewise, a reservation reconciled after a crash or exit `3` charges `max_cost_per_call` because no post-call line could be recorded); and (4) on Windows an outside opener holding `relay/turn.lock` with no share flags causes a fail-safe `TurnLocked` exit `4` after recording spend and holding a side file without delete sharing makes atomic rename fail safe, an unreadable `relay/calls.resv-<run_id>.lock` keeps its reservation counted fail-safe until readable, 64-bit file indices on ReFS volumes are not guaranteed unique by the filesystem, and `--game-dir` must reside on local disk because OS file locks on some network filesystems hold only locally. A second concurrent run on the same `<game-dir>` refuses immediately (`TurnLocked`, exit `4`) before making any transport call (note: on Windows `LockFileEx` prevents outside processes from reading `relay/turn.lock` while held — `os error 33` — so the refusal message cannot show the holder's `pid`/`started_utc` and reports that the lock is held by an active process). **Never delete `relay/turn.lock` or any file under `relay/`**: `league-relay` clears and unlocks `relay/turn.lock` on every controlled exit path (`0`, `1`, `2`, `3`, and `4`), and a leftover file after a hard kill (`SIGKILL`, `TerminateProcess`, crash, or power loss) is harmless because exclusivity is enforced by an OS kernel file lock (`File::try_lock`), which the kernel releases as soon as the dead process's file handles close so the next run takes over `relay/turn.lock` and reconciles any orphaned `relay/calls.reserved.jsonl` entries automatically without blocking.
 
-### First turn (requires `--wrapper`)
+### First turn (`--wrapper` as `role: "system"`) and `--memory-mode`
 
-On a seat's first turn (when `<game-dir>/relay/seats/<Guild>.jsonl` has no prior turns), pass `--wrapper <path>`. The relay prepends that file's text ahead of `<game-dir>/to-seat/day-DD-<round>-<Guild>.md` with one blank line between them, sends the request with no system prompt (`messages` holds only `user` and `assistant` turns), and appends both sides to `<game-dir>/relay/seats/<Guild>.jsonl`.
+On a seat's first turn (when `<game-dir>/relay/seats/<Guild>.jsonl` has no completed turns), pass `--wrapper <path>`. `league-relay` sends that wrapper as a dedicated `role: "system"` message (`messages[0]`) and persists it as the leading `"system"` line of `<game-dir>/relay/seats/<Guild>.jsonl`.
+
+Prompt memory delivery is controlled by `--memory-mode <snapshot|emc|full>` and recorded in `<game-dir>/relay/setup.json` (switching modes mid-game on the same `--game-dir` is refused):
+
+- **`snapshot` (default, ruled under C5):** every turn sends bounded `[system, user]` messages containing the current turn's state snapshot plus `<game-dir>/relay/seats/<Guild>.scratchpad.md` capped at `500` tokens (`4096` UTF-8 characters). Notes returned in a JSON `"scratchpad"` string property or `<scratchpad>...</scratchpad>` block update the saved scratchpad for the next turn.
+- **`emc` (playtest toggle):** keeps the most recent `5` completed `(user, assistant)` pairs verbatim and compacts older turns into `<game-dir>/relay/seats/<Guild>.emc.md` ahead of the current turn prompt.
+- **`full`:** replays the `"system"` wrapper followed by every stored `user` and `assistant` turn in order and the new `to-seat` block. Even if `--wrapper` is still passed on later turns, the `"system"` wrapper is recorded once on turn 1 and never duplicated.
 
 ```sh
 OPENROUTER_API_KEY=... cargo run -p league-relay -- turn \
@@ -35,7 +61,7 @@ OPENROUTER_API_KEY=... cargo run -p league-relay -- turn \
 
 ### Later turns
 
-Once `<game-dir>/relay/seats/<Guild>.jsonl` holds earlier turns, `league-relay` replays every stored `user` and `assistant` message in order followed by the new `to-seat` block. Even if `--wrapper` is still passed on the command line, the wrapper is only prepended on a seat's first turn.
+Once `<game-dir>/relay/seats/<Guild>.jsonl` holds turn 1, `--wrapper` can be omitted on later turns; `league-relay` reuses the stored `"system"` entry and applies the game's recorded `memory_mode` (`snapshot` by default):
 
 ```sh
 OPENROUTER_API_KEY=... cargo run -p league-relay -- turn \
@@ -46,6 +72,12 @@ OPENROUTER_API_KEY=... cargo run -p league-relay -- turn \
   --live \
   --cap-credits 2.50
 ```
+
+### Structured output (`--response-schema`), negotiation BATNA/whispers, and wording table
+
+- **Optional structured output (`B4.2`):** passing `--response-schema <path>` attaches `response_format: {"type": "json_schema", "json_schema": {"name": ..., "strict": ..., "schema": ...}}` per vLLM's `/v1/chat/completions` structured-outputs specification. If a returned reply is invalid JSON or violates the schema's top-level type, `required`, `enum`, or `additionalProperties: false` constraints, `league-relay` logs `outcome: "harness"` and falls back to the same single `"harness"` retry before `NO_REPLY`.
+- **Untrusted whispers and BATNA (`B4.4`):** when `<game-dir>/to-seat/day-DD-<round>-<Guild>.negotiation.json` is present (`{"batna": "...", "whispers": [{"from_guild": "...", "intent_header": ..., "body": "..."}]}`), `league-relay` requires a non-empty `batna` fallback line, places the seat's own fallback position right beside the counterparty whispers, caps each whisper at `120` words (`1800` characters), JSON-escapes quotes, control characters, and `<`/`>` (`\u003c`/`\u003e`), and frames them as untrusted opponent text.
+- **Model-facing wording table:** every label and instruction string shown to a model by `league-relay` lives in `MODEL_FACING_WORDING` (`crates/league-relay/src/wording.rs`) under `ACTIVE_WORDING_ARM` (`"v2_baseline_2026_11_15"`), pinned byte-for-byte in tests.
 
 ### Offline mock runs
 
@@ -66,10 +98,11 @@ cargo run -p league-relay -- turn \
 
 Within `<game-dir>`:
 
-- `to-seat/day-DD-<round>-<Guild>.md` — input block prepared for that seat and round.
-- `from-seat/day-DD-<round>-<Guild>.md` — assistant reply written **byte-for-byte** (`reply.as_bytes()`). Trailing newlines and line endings are neither added nor stripped, so the file's SHA-256 always equals `reply_sha256` in `relay/calls.jsonl`.
-- `relay/seats/<Guild>.jsonl` — alternating `user` and `assistant` JSON lines for that seat. Updated only when a turn delivers a non-empty reply.
-- `relay/calls.jsonl` — one JSON line per call or pre-call refusal: `time_utc`, `day`, `round`, `guild`, `attempt`, `trigger`, `model_requested`, `model_returned`, `request_body_sha256`, `reply_sha256`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `cost` (what OpenRouter reported, or `null`), `charged_credits` (the amount counted against `--cap-credits`), `latency_ms`, `outcome`, optional redacted `error`, and optional `reservation_id` (tying each sent call or reconciled `"RESERVED"` entry to its pre-call reservation).
+- `to-seat/day-DD-<round>-<Guild>.md` — input block prepared for that seat and round (with optional `to-seat/day-DD-<round>-<Guild>.negotiation.json` carrying `batna` and untrusted `whispers`).
+- `from-seat/day-DD-<round>-<Guild>.md` — assistant reply written **byte-for-byte** (`reply.as_bytes()`, after stripping `<think>...</think>` when the seat's roster pins `exclude_from_transcript: true`). Trailing newlines and line endings are neither added nor stripped, so the file's SHA-256 always equals `reply_sha256` in `relay/calls.jsonl`.
+- `relay/setup.json` — per-game configuration record (`memory_mode`, `cost_unit`, `wording_arm`, optional `response_schema_name`, and `seats`).
+- `relay/seats/<Guild>.jsonl` — leading `"system"` JSON line followed by `(user, assistant)` JSON line pairs for that seat (plus `relay/seats/<Guild>.scratchpad.md` in `snapshot` mode or `relay/seats/<Guild>.emc.md` in `emc` mode). Updated only when a turn delivers a non-empty valid reply.
+- `relay/calls.jsonl` — one JSON line per call or pre-call refusal: `time_utc`, `day`, `round`, `guild`, `attempt`, `trigger`, `model_requested`, `model_returned`, `request_body_sha256`, `reply_sha256`, `prompt_tokens`, `completion_tokens`, optional `reasoning_tokens` (reported when the server returns `usage.completion_tokens_details.reasoning_tokens` or `usage.reasoning_tokens`; omitted/`null` on non-reasoning models, on vLLM servers run without `--reasoning-parser` where `<think>` tokens stay folded into `completion_tokens`, and on HTTP errors, timeouts, or pre-call refusals), `total_tokens`, `cost_unit` (`"credits"` or `"gpu_seconds"`), `cost` (OpenRouter credits or local `wall_secs`, or `null`), `charged_credits` (the amount counted against `--cap-credits` or `--cap-gpu-secs`), optional `wall_secs` (recorded on sent `local` attempts), `latency_ms`, `outcome`, optional redacted `error`, and optional `reservation_id` (tying each sent call or reconciled `"RESERVED"` entry to its pre-call reservation).
 - `relay/turn.lock` — per-game exclusive OS lock file held for the duration of `run_turn` (`pid` and `started_utc` while active, cleared and unlocked on exit) so two turns cannot run against the same `<game-dir>` concurrently.
 - `relay/calls.reserved.jsonl` — active pre-call reservations (`outcome: "RESERVED"`, `charged_credits: max_cost_per_call`, tagged with a unique `reservation_id`) written atomically (`relay/calls.reserved.jsonl.tmp` + `sync_all` + rename under `relay/calls.side.lock`) before each transport call goes out and removed only after the call's final outcome has been `sync_all`-persisted to `relay/calls.jsonl` or `relay/calls.pending.jsonl`, so the normal path leaves only one line per call in `relay/calls.jsonl`; if a process dies between reserving and recording or exits `3` when neither ledger nor side file can be written (detected when its `relay/calls.resv-<run_id>.lock` kernel lock is no longer held and no recorded entry carries its `reservation_id`), the reservation stays on disk and a later run reconciles the orphaned `RESERVED` line idempotently by `reservation_id` into `relay/calls.jsonl` at `max_cost_per_call` (do not enter an exit-`3` charge into `relay/calls.jsonl` by hand, or it will be counted twice).
 - `relay/calls.pending.jsonl` — durable side file written atomically under `relay/calls.side.lock` (full merged lines written to `relay/calls.pending.jsonl.tmp` with `create_new`, `flush`, and `sync_all`, then renamed over `relay/calls.pending.jsonl`) whenever appending a sent call's line to `relay/calls.jsonl` fails; included in the cap sum on the next run and migrated once into `relay/calls.jsonl` (then removed) as soon as `relay/calls.jsonl` is writable again.
@@ -114,12 +147,15 @@ The seat file is JSON (`{"seats": [...]}` or a bare `[...]` array), with one obj
 Validation rules:
 
 - `guild`: case-insensitively unique across the seat file, matching `[A-Za-z][A-Za-z0-9_-]*`.
-- `backend`: `"openrouter"` or `"file"`. A `"file"` seat makes no call and prints `outcome=FILE_MANUAL`.
-- `model` (required for `"openrouter"`): exact `provider/model` OpenRouter slug. Floating aliases (`openrouter/auto`, `*/auto`, `latest`, `*-latest`) and `:` routing suffixes (`:free`, `:nitro`, `:floor`, `:online`) are rejected.
-- `temperature` (required for `"openrouter"`): finite number in `0.0..=2.0`.
-- `max_output_tokens` (required for `"openrouter"`): positive integer sent as `max_tokens`.
-- `timeout_secs` (required for `"openrouter"`): positive finite wall-clock limit per call attempt in seconds.
+- `backend`: `"local"`, `"openrouter"`, or `"file"` (`"local"` and `"openrouter"` cannot be mixed in the same seat file or game directory). A `"file"` seat makes no call and prints `outcome=FILE_MANUAL`.
+- `base_url` (required for `"local"`): `http://` or `https://` base URL on loopback (`127.0.0.0/8`, `[::1]`, `localhost`) or an explicitly permitted `--allow-vm-host <host>` VM-local address, with no URL credentials.
+- `model` (required for `"local"` and `"openrouter"`): exact pinned model identifier (`provider/model` slug without `:` routing suffixes for `"openrouter"`). Floating aliases (`auto`, `latest`, `*-latest`, `*:latest`) are rejected.
+- `temperature` (required for `"local"` and `"openrouter"`): finite number in `0.0..=2.0`.
+- `max_output_tokens` (required for `"local"` and `"openrouter"`): positive integer sent as `max_tokens`.
+- `timeout_secs` (required for `"local"` and `"openrouter"`): positive finite wall-clock limit per call attempt in seconds.
+- `max_gpu_secs_per_call` (required for `"local"`): positive finite number in GPU-seconds reserved against `--cap-gpu-secs` before each call; each sent local attempt charges measured `wall_secs` (failing closed with `COST_OVER_ESTIMATE` if `wall_secs > max_gpu_secs_per_call`, or reconciling orphaned `RESERVED` entries at `max_gpu_secs_per_call`).
 - `max_cost_per_call` (required for `"openrouter"`): positive finite number in credits reserved against `--cap-credits` before each call.
+- `reasoning` (optional for `"local"` and `"openrouter"`): `{ "effort": "none|minimal|low|medium|high|xhigh|max", "budget_tokens": <u32>, "chat_template_kwargs": { ... }, "exclude_from_transcript": <bool> }` (`exclude_from_transcript` is required whenever `reasoning` is present so transcript exclusion is explicitly pinned). Sent as top-level `reasoning_effort`, `thinking_token_budget`, `chat_template_kwargs`, and `include_reasoning` on `"local"` (vLLM) seats, and as `reasoning: { effort, max_tokens, exclude }` on `"openrouter"` seats.
 - Keys or tokens inside the seat file are rejected.
 
 ## Delivery failures and retries

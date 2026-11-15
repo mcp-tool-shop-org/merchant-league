@@ -1,16 +1,21 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit ea16219 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit ce1bf80 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+10 parts, mostly Rust (324 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (31abdf8)
+## What changed since 2026-11-15 (ea16219)
 
-Nothing structural changed since 2026-11-15; 7 files changed content.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, after `parse`.
+- In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `InvalidCap`.
+- And 1 more change to the order of work.
+- crates/league-relay/src/wording.rs is new and belongs to no part, so atlas check fails on it against the previous map.
+- 1 file added and 10 changed content, across 2 parts.
 
 ## What comes in
 
@@ -49,9 +54,11 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 6 of 6 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 5 of 6 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 5 of 6 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 6 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 6 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 5 of 6 commits.
+- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 5 of 7 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -89,17 +96,17 @@ People write .github/, docs/ and the repository root. Nothing in the files this 
 
 ## Where to start
 
-crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/error.rs
+crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/seats.rs → crates/league-relay/src/error.rs
 
 Read those in order to follow one run of league-relay end to end. This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.
 
-Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/relay.rs, crates/league-relay/src/seats.rs and crates/league-relay/src/transport.rs.
+Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/relay.rs and crates/league-relay/src/transport.rs.
 
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 4 writes and 3 reads go to a path their caller passes, not to this repository.
-- 370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.
+- 371 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 368 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

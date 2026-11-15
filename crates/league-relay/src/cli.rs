@@ -4,14 +4,18 @@
 //! path is covered by both unit and integration tests.
 
 use crate::error::RelayError;
-use crate::relay::{Round, TurnConfig, TurnSummary, run_turn, validate_day};
-use crate::seats::SeatFile;
+use crate::relay::{
+    MemoryMode, ResponseFormatConfig, Round, TurnConfig, TurnSummary, run_turn, validate_day,
+};
+use crate::seats::{SeatFile, validate_vm_host_allowance};
 use crate::secret::{
-    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, redact_secrets,
+    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
+    MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, redact_secrets,
     redact_secrets_with_limit, truncate_after_redaction,
 };
 use crate::transport::{
-    MockDirTransport, RawHttpResponse, Transport, TransportError, UreqTransport,
+    LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
+    UreqTransport,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -23,14 +27,19 @@ Usage:
   league-relay turn --game-dir <dir> --day <DD> --round <talk|act> --seats <file> [options]
 
 Options:
-  --wrapper <path>       First-turn wrapper markdown prepended on a seat's first turn
-  --live                 Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
-  --cap-credits <n>      Cumulative credit cap checked against relay/calls.jsonl before each call
-  --mock-dir <dir>       Run against canned offline responses in <dir>/responses.json
-  -h, --help             Print this help message
+  --wrapper <path>           System wrapper markdown sent as role='system' (required on turn 1)
+  --memory-mode <mode>       Prompt memory mode: snapshot (default), emc, or full
+  --response-schema <path>   Optional JSON Schema file sent in response_format (json_schema)
+  --cap-gpu-secs <n>         Cumulative GPU-seconds ceiling for local OpenAI-compatible seats
+  --allow-vm-host <host>     Additional VM-local server address permitted in local seat base_url
+  --live                     Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
+  --cap-credits <n>          Cumulative credit cap checked against relay/calls.jsonl before each call
+  --mock-dir <dir>           Run against canned offline responses in <dir>/responses.json
+  -h, --help                 Print this help message
 ";
 
 /// Parsed command-line request.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliCommand {
     /// Print help text and exit `0`.
@@ -52,10 +61,18 @@ pub struct TurnArgs {
     pub seats_path: PathBuf,
     /// `--wrapper <path>`
     pub wrapper_path: Option<PathBuf>,
+    /// `--memory-mode <snapshot|emc|full>`
+    pub memory_mode: MemoryMode,
+    /// `--response-schema <path>`
+    pub response_schema_path: Option<PathBuf>,
     /// `--live`
     pub live: bool,
     /// `--cap-credits <n>`
     pub cap_credits: Option<f64>,
+    /// `--cap-gpu-secs <n>`
+    pub cap_gpu_secs: Option<f64>,
+    /// `--allow-vm-host <host>`
+    pub allowed_vm_hosts: Vec<String>,
     /// `--mock-dir <dir>`
     pub mock_dir: Option<PathBuf>,
 }
@@ -99,8 +116,12 @@ where
     let mut round: Option<Round> = None;
     let mut seats_path: Option<PathBuf> = None;
     let mut wrapper_path: Option<PathBuf> = None;
+    let mut memory_mode = MemoryMode::default();
+    let mut response_schema_path: Option<PathBuf> = None;
     let mut live = false;
     let mut cap_credits: Option<f64> = None;
+    let mut cap_gpu_secs: Option<f64> = None;
+    let mut allowed_vm_hosts: Vec<String> = Vec::new();
     let mut mock_dir: Option<PathBuf> = None;
 
     let mut idx = 1;
@@ -156,6 +177,16 @@ where
                 wrapper_path = Some(PathBuf::from(val));
                 idx += step;
             }
+            "--memory-mode" => {
+                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                memory_mode = MemoryMode::parse(val)?;
+                idx += step;
+            }
+            "--response-schema" => {
+                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                response_schema_path = Some(PathBuf::from(val));
+                idx += step;
+            }
             "--cap-credits" => {
                 let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
                 let parsed: f64 = val
@@ -168,6 +199,28 @@ where
                         )
                     })?;
                 cap_credits = Some(parsed);
+                idx += step;
+            }
+            "--cap-gpu-secs" => {
+                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let parsed: f64 = val
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+                    .ok_or_else(|| {
+                        RelayError::InvalidCap(
+                            "--cap-gpu-secs must be a finite non-negative number".to_owned(),
+                        )
+                    })?;
+                cap_gpu_secs = Some(parsed);
+                idx += step;
+            }
+            "--allow-vm-host" => {
+                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let normalized = validate_vm_host_allowance(val)?;
+                if !allowed_vm_hosts.contains(&normalized) {
+                    allowed_vm_hosts.push(normalized);
+                }
                 idx += step;
             }
             "--mock-dir" => {
@@ -189,6 +242,11 @@ where
             "--live and --mock-dir cannot be used together".to_owned(),
         ));
     }
+    if cap_credits.is_some() && cap_gpu_secs.is_some() {
+        return Err(RelayError::Usage(
+            "--cap-credits and --cap-gpu-secs cannot be used together".to_owned(),
+        ));
+    }
 
     Ok(CliCommand::Turn(TurnArgs {
         game_dir: game_dir
@@ -199,8 +257,12 @@ where
         seats_path: seats_path
             .ok_or_else(|| RelayError::Usage("missing required --seats <file>".to_owned()))?,
         wrapper_path,
+        memory_mode,
+        response_schema_path,
         live,
         cap_credits,
+        cap_gpu_secs,
+        allowed_vm_hosts,
         mock_dir,
     }))
 }
@@ -224,17 +286,21 @@ fn take_flag_value<'a>(
 }
 
 fn is_forbidden_key_flag(flag: &str) -> bool {
+    let lower = flag.to_ascii_lowercase();
     matches!(
-        flag.to_ascii_lowercase().as_str(),
+        lower.as_str(),
         "-k" | "--key"
             | "--api-key"
             | "--apikey"
             | "--openrouter-key"
             | "--openrouter-api-key"
+            | "--openai-api-key"
+            | "--vllm-api-key"
+            | "--local-api-key"
             | "--token"
             | "--secret"
             | "--bearer"
-    )
+    ) || lower.ends_with("-api-key")
 }
 
 fn sanitize_flag_name(raw: &str, redaction_key: Option<&ApiKey>) -> String {
@@ -269,19 +335,34 @@ impl Transport for NoopManualTransport {
 /// configuration, live-gate, or file I/O refusal.
 pub fn execute_cli<I, S, E>(
     args: I,
-    env_reader: E,
+    mut env_reader: E,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
-    E: FnOnce(&str) -> Option<String>,
+    E: FnMut(&str) -> Option<String>,
 {
-    let env_key = ApiKey::from_env_reader(env_reader);
-    let redact_ref = env_key.as_ref().ok();
+    let env_key = ApiKey::from_env_reader(|k| env_reader(k));
+    let mut extra_key_for_redaction: Option<ApiKey> = None;
+    let mut any_forbidden_local_key = env_key.is_ok();
+    for env_name in FORBIDDEN_LOCAL_KEY_ENVS {
+        if *env_name == OPENROUTER_API_KEY_ENV {
+            continue;
+        }
+        if let Some(val) = env_reader(env_name)
+            && !val.trim().is_empty()
+        {
+            any_forbidden_local_key = true;
+            if extra_key_for_redaction.is_none() {
+                extra_key_for_redaction = ApiKey::from_env_reader(|_| Some(val)).ok();
+            }
+        }
+    }
+    let redact_ref = env_key.as_ref().ok().or(extra_key_for_redaction.as_ref());
 
-    match run_cli_inner(args, &env_key, stdout) {
+    match run_cli_inner(args, &env_key, any_forbidden_local_key, redact_ref, stdout) {
         Ok(Some(summary)) => {
             let rendered = redact_secrets_with_limit(
                 &summary.format_paths_and_hashes(),
@@ -311,13 +392,14 @@ where
 fn run_cli_inner<I, S>(
     args: I,
     env_key: &Result<ApiKey, RelayError>,
+    any_forbidden_local_key: bool,
+    redact_ref: Option<&ApiKey>,
     stdout: &mut dyn Write,
 ) -> Result<Option<TurnSummary>, RelayError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let redact_ref = env_key.as_ref().ok();
     let turn_args = match parse_args_with_key(args, redact_ref)? {
         CliCommand::Help => {
             let _ = write!(stdout, "{USAGE_TEXT}");
@@ -326,7 +408,23 @@ where
         CliCommand::Turn(t) => t,
     };
 
-    let seats = SeatFile::load(&turn_args.seats_path, redact_ref)?;
+    let seats = SeatFile::load_with_allowed_hosts(
+        &turn_args.seats_path,
+        redact_ref,
+        &turn_args.allowed_vm_hosts,
+    )?;
+
+    if seats.has_local_seat() && any_forbidden_local_key {
+        return Err(RelayError::SecretInForbiddenPlace(
+            "local transport refuses API keys; unset OPENROUTER_API_KEY, OPENAI_API_KEY, and VLLM_API_KEY so keys never leak into VM logs".to_owned(),
+        ));
+    }
+
+    let response_format = match &turn_args.response_schema_path {
+        Some(path) => Some(ResponseFormatConfig::load(path, redact_ref)?),
+        None => None,
+    };
+
     let summary = if let Some(mock_dir) = &turn_args.mock_dir {
         let mock_transport = MockDirTransport::load_with_key(mock_dir, redact_ref)?;
         let cfg = TurnConfig::new(
@@ -337,8 +435,34 @@ where
             turn_args.wrapper_path,
             false,
             turn_args.cap_credits,
-        );
+        )
+        .with_memory_mode(turn_args.memory_mode)
+        .with_cap_gpu_secs(turn_args.cap_gpu_secs)
+        .with_response_format(response_format)
+        .with_allowed_vm_hosts(turn_args.allowed_vm_hosts);
         run_turn(&cfg, &mock_transport, redact_ref)?
+    } else if seats.has_local_seat() {
+        let local_gate = LocalGate::acquire(
+            turn_args.live,
+            turn_args.cap_gpu_secs,
+            any_forbidden_local_key,
+            &turn_args.allowed_vm_hosts,
+        )?;
+        let cfg = TurnConfig::new(
+            turn_args.game_dir,
+            turn_args.day,
+            turn_args.round,
+            seats,
+            turn_args.wrapper_path,
+            false,
+            None,
+        )
+        .with_memory_mode(turn_args.memory_mode)
+        .with_cap_gpu_secs(Some(local_gate.cap_gpu_secs()))
+        .with_response_format(response_format)
+        .with_allowed_vm_hosts(turn_args.allowed_vm_hosts);
+        let local_transport = LocalOpenAiTransport::new(local_gate);
+        run_turn(&cfg, &local_transport, None)?
     } else if turn_args.live || seats.has_openrouter_seat() {
         let gate = LiveGate::acquire(turn_args.live, turn_args.cap_credits, env_key.clone())?;
         let cfg = TurnConfig::new(
@@ -349,7 +473,9 @@ where
             turn_args.wrapper_path,
             true,
             Some(gate.cap_credits()),
-        );
+        )
+        .with_memory_mode(turn_args.memory_mode)
+        .with_response_format(response_format);
         let live_transport = UreqTransport::new(gate);
         run_turn(&cfg, &live_transport, redact_ref)?
     } else {
@@ -361,7 +487,10 @@ where
             turn_args.wrapper_path,
             false,
             turn_args.cap_credits,
-        );
+        )
+        .with_memory_mode(turn_args.memory_mode)
+        .with_cap_gpu_secs(turn_args.cap_gpu_secs)
+        .with_response_format(response_format);
         run_turn(&cfg, &NoopManualTransport, redact_ref)?
     };
     Ok(Some(summary))

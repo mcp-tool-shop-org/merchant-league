@@ -1,10 +1,11 @@
-//! Paper-test seat relay for Merchant League.
+//! Seat relay for Merchant League (`local` OpenAI-compatible VM servers and `openrouter`).
 //!
-//! `league-relay` drives automated `openrouter` seats one round (`talk` or
-//! `act`) at a time against local `to-seat/`, `from-seat/`, and `relay/`
-//! directories while leaving `file` seats (such as Claude subagents) to manual
-//! relay. Live network calls are gated behind [`LiveGate`], which requires
-//! `--live`, `--cap-credits`, and `OPENROUTER_API_KEY`.
+//! `league-relay` drives automated `local` (OpenAI-compatible loopback / VM servers
+//! such as vLLM, capped in GPU-seconds via `--cap-gpu-secs`) and `openrouter`
+//! seats (gated behind [`LiveGate`], requiring `--live`, `--cap-credits`, and
+//! `OPENROUTER_API_KEY`) one round (`talk` or `act`) at a time against local
+//! `to-seat/`, `from-seat/`, and `relay/` directories while leaving `file` seats
+//! to manual relay.
 
 pub mod cli;
 pub mod error;
@@ -12,24 +13,39 @@ pub mod relay;
 pub mod seats;
 pub mod secret;
 pub mod transport;
+pub mod wording;
 
 pub use error::RelayError;
 pub use relay::{
-    CallLogEntry, Round, SeatOutcome, SeatReport, TranscriptEntry, TurnConfig, TurnSummary,
-    prepend_wrapper, run_turn, sha256_hex, validate_day,
+    CallLogEntry, GameSetupRecord, MemoryMode, ResponseFormatConfig, Round, SeatOutcome,
+    SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary, prepend_wrapper,
+    run_turn, sha256_hex, validate_day,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{
     DurabilityEvent, set_fail_pending_temp_write_for_test, take_durability_events_for_test,
     watch_durability_events_for_test,
 };
-pub use seats::{BackendKind, OpenRouterSeat, SeatBackend, SeatFile, SeatSpec};
+pub use seats::{
+    BackendKind, CostUnit, LocalSeat, OpenRouterSeat, ReasoningEffort, SeatBackend, SeatFile,
+    SeatReasoningConfig, SeatSpec, normalize_allowed_vm_hosts, validate_local_base_url,
+    validate_pinned_local_model, validate_pinned_openrouter_slug, validate_vm_host_allowance,
+};
 pub use secret::{
-    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES,
-    OPENROUTER_API_KEY_ENV, REDACTED_MARKER, cap_utf8_bytes, install_redacting_panic_hook,
-    redact_and_truncate, redact_secrets, redact_secrets_with_limit, truncate_after_redaction,
+    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
+    MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, REDACTED_MARKER, cap_utf8_bytes,
+    install_redacting_panic_hook, redact_and_truncate, redact_secrets, redact_secrets_with_limit,
+    truncate_after_redaction,
 };
 pub use transport::{
-    MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
-    UreqTransport,
+    LocalOpenAiTransport, MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse,
+    Transport, TransportError, UreqTransport, map_local_ureq_error, map_ureq_error,
+};
+pub use wording::{
+    ACTIVE_WORDING_ARM, EMC_VERBATIM_TURN_WINDOW, MAX_SCRATCHPAD_CHARS, MAX_SCRATCHPAD_TOKENS,
+    MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, NegotiationInputs,
+    SanitizedWhisper, UntrustedWhisper, WordingEntry, cap_scratchpad_tokens, cap_words_and_chars,
+    extract_scratchpad_update, format_negotiation_block, format_scratchpad_section,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present,
+    render_json_escaped_whisper_line, sanitize_whisper, strip_thinking_tags, wording_slot,
 };
