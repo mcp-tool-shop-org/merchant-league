@@ -263,7 +263,9 @@ impl Transport for NoopManualTransport {
 ///
 /// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
 /// `3` if a sent call's charge could not be persisted to either `calls.jsonl`
-/// or `calls.pending.jsonl`, or `1` on invalid CLI/configuration/gate/turn-lock refusal.
+/// or `calls.pending.jsonl`, `4` if `<game-dir>/relay/turn.lock` is held by
+/// another run or deleted/replaced mid-turn, or `1` on invalid CLI,
+/// configuration, live-gate, or file I/O refusal.
 pub fn execute_cli<I, S, E>(
     args: I,
     env_reader: E,
@@ -287,6 +289,7 @@ where
         Err(e) => {
             let (exit_code, scan_limit) = match &e {
                 RelayError::UnrecordedCharge { .. } => (3, MAX_UNRECORDED_CHARGE_SCAN_BYTES),
+                RelayError::TurnLocked { .. } => (4, MAX_REDACTION_SCAN_BYTES),
                 _ => (1, MAX_REDACTION_SCAN_BYTES),
             };
             let _ = writeln!(
