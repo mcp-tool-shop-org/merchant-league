@@ -24,8 +24,16 @@
 # LICENSE, LICENSE.md, LICENSE.txt, LICENSE-MIT, LICENSE-APACHE,
 # LICENSE-xrpl.js (the xrpl.js notice beside its test vectors) and
 # LICENSE-rippled (rippled's notice, for ported code). Any other
-# name, such as LICENSE-notes.md, is checked, and nothing under docs/ or the
-# README is skipped. A new licence file's exact name is added here.
+# name, such as LICENSE-notes.md, is checked. A new licence file's exact
+# name is added here.
+#
+# Recorded AI play is skipped too (the Publisher, 2026-11-15): the paper
+# test's referee logs and metrics, docs/paper-test/game-NN/log.md and
+# metrics.md. They quote what AI seats wrote, verbatim; that text is quoted,
+# not authored, and rewording it would falsify the record. Only those two
+# exact names in a two-digit game folder are skipped. The game's setup,
+# score, cards and every other file under docs/ are checked, as is the
+# README.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -68,10 +76,15 @@ pattern=$(IFS='|'; echo "${banned[*]}")
 # Saying there is no real money: no, not, never, without, not for.
 disclaimer="\b(no|not|never|without)(${sep}+for)?${sep}+real${sep}*money\b"
 
-# The files: the crates, the docs and the README, less the licence files.
+# The files: the crates, the docs and the README, less the licence files
+# and the recorded play.
 licence='^crates/(.*/)?(LICENSE|LICENSE\.md|LICENSE\.txt|LICENSE-MIT|LICENSE-APACHE|LICENSE-xrpl\.js|LICENSE-rippled)$'
+recorded='^docs/paper-test/game-[0-9]{2}/(log|metrics)\.md$'
 all=$( { find crates docs -type f 2>/dev/null; [ -f README.md ] && echo README.md; } | sort)
-skip=$(printf '%s\n' "$all" | grep -E "$licence" | grep -viE '\.rs$' || true)
+skip=$( {
+  printf '%s\n' "$all" | grep -E "$licence" | grep -viE '\.rs$' || true
+  printf '%s\n' "$all" | grep -E "$recorded" || true
+} | grep -v '^$' || true)
 files=$(printf '%s\n' "$all" | grep -vxF -e "$skip" -e '' || true)
 [ -z "$skip" ] && files=$all
 # Text files only.

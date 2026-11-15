@@ -175,6 +175,22 @@ for other in docs/LICENSE docs/LICENSE-notes.md crates/league-tui/src/LICENSE_sc
   run_case $c fail "$other" "Cash out now."
 done
 
+# Recorded AI play is skipped by exact path: a game folder's log.md and
+# metrics.md (the Publisher, 2026-11-15). Everything else stays checked,
+# including the same game's other files and look-alike paths.
+for rec in docs/paper-test/game-01/log.md docs/paper-test/game-02/metrics.md \
+  docs/paper-test/game-07/log.md; do
+  run_case $c pass "$rec" "Cash out now."
+done
+for other in docs/paper-test/game-02/score.md docs/paper-test/game-02/setup.md \
+  docs/paper-test/game-02/cards/Tanners.md docs/paper-test/game-02/log.txt \
+  docs/paper-test/game-02/log.md.bak docs/paper-test/game-02/notes/log.md \
+  docs/paper-test/game-2/log.md docs/paper-test/game-002/log.md \
+  docs/paper-test/log.md docs/paper-test/results.md docs/paper-test.md \
+  docs/game-02/log.md crates/league-tui/src/log.md; do
+  run_case $c fail "$other" "Cash out now."
+done
+
 if [ "$failures" -gt 0 ]; then
   echo "[test-guards] FAIL: $failures case(s) wrong."
   exit 1
