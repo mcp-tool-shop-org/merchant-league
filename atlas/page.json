@@ -16,40 +16,78 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 0,
+      "added": 9,
+      "changed": 3,
       "moved": 0,
-      "parts": 1,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-gen/src/empirical.rs, crates/league-gen/src/feasibility.rs, crates/league-gen/src/generator.rs and 4 more.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-gen/src/empirical.rs",
+          "crates/league-gen/src/feasibility.rs",
+          "crates/league-gen/src/generator.rs",
+          "crates/league-gen/src/lp.rs",
+          "crates/league-gen/src/rng.rs",
+          "crates/league-gen/src/schema.rs",
+          "crates/league-gen/tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-gen/src/lib.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-gen/src/lib.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-gen/ is now read by Cargo.toml.",
+        "subjects": [
+          "crates/league-gen/",
+          "Cargo.toml"
+        ]
+      },
+      {
+        "kind": "part",
+        "sentence": "league-gen is a new part, drawn from `crates/league-gen/**`.",
+        "subjects": [
+          "league-gen"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 1 file added.",
+        "sentence": "9 files added and 3 changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "b68e259dc07a411ad269b61ccff51d8cfa42550c",
-      "generatedAt": "2026-11-15T08:25:54.396Z"
+      "commit": "41d4b19e1959df059b0f3b25d981d38727287b94",
+      "generatedAt": "2026-11-15T08:42:19.668Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "41d4b19e1959df059b0f3b25d981d38727287b94",
+  "commit": "5e1b3aab2e557f6aa111e2661ec2d845f7ebaf2c",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
+        "crates/league-gen/src/lib.rs",
         "crates/league-relay/src/lib.rs",
         "crates/league-relay/src/main.rs"
       ],
-      "checksCount": 2,
+      "checksCount": 3,
       "checksMore": 0,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
@@ -66,6 +104,11 @@
           "boundary": "league-dice",
           "depth": 0,
           "files": 1
+        },
+        {
+          "boundary": "league-gen",
+          "depth": 0,
+          "files": 8
         },
         {
           "boundary": "league-ledger",
@@ -94,6 +137,13 @@
         "scripts/test-guards.sh",
         "crates/league-core/",
         "crates/league-dice/",
+        "crates/league-gen/src/empirical.rs",
+        "crates/league-gen/src/feasibility.rs",
+        "crates/league-gen/src/generator.rs",
+        "crates/league-gen/src/lp.rs",
+        "crates/league-gen/src/rng.rs",
+        "crates/league-gen/src/schema.rs",
+        "crates/league-gen/tests/",
         "crates/league-ledger/examples/",
         "crates/league-ledger/src/",
         "crates/league-ledger/tests/vectors.rs",
@@ -101,8 +151,8 @@
         "crates/league-season/",
         "crates/league-tui/"
       ],
-      "runsCount": 11,
-      "runsMore": 11,
+      "runsCount": 18,
+      "runsMore": 18,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -244,7 +294,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T08:42:19.668Z",
+  "generatedAt": "2026-11-15T09:24:47.702Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
@@ -257,13 +307,14 @@
     "docs": "docs",
     "league-core": "league-core",
     "league-dice": "league-dice",
+    "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-season": "league-season",
     "league-tui": "league-tui",
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 9,
+  "parts": 10,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -288,15 +339,16 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 21,
+  "testFiles": 28,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,
+    "league-gen": 7,
     "league-ledger": 6,
     "league-season": 1,
     "league-tui": 1
   },
-  "testedCodeParts": 5,
+  "testedCodeParts": 6,
   "testedInside": [
     "league-core",
     "league-dice",
