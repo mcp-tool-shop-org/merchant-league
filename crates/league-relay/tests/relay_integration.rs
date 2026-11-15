@@ -7,17 +7,19 @@
 
 use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
-    ACTIVE_WORDING_ARM, ApiKey, CallLogEntry, CostUnit, DurabilityEvent, EMC_VERBATIM_TURN_WINDOW,
-    FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LiveGate, LocalGate, LocalOpenAiTransport,
-    MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING,
-    MemoryMode, NegotiationInputs, RawHttpResponse, RelayError, ResponseFormatConfig, Round,
-    SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError, TurnConfig,
-    UntrustedWhisper, UreqTransport, WordingEntry, cap_scratchpad_tokens, cap_utf8_bytes,
+    ACTIVE_WORDING_ARM, ApiKey, BackendKind, CallLogEntry, CostUnit, DurabilityEvent,
+    EMC_VERBATIM_TURN_WINDOW, FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LiveGate, LocalGate,
+    LocalOpenAiTransport, MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_WORDS,
+    MODEL_FACING_WORDING, MemoryMode, NegotiationInputs, RawHttpResponse, ReasoningEffort,
+    RelayError, ResponseFormatConfig, Round, SeatFile, SeatOutcome, TranscriptEntry, Transport,
+    TransportError, TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
+    cap_scratchpad_tokens, cap_utf8_bytes, cap_words_and_chars, extract_scratchpad_update,
     format_negotiation_block, install_redacting_panic_hook, json_escape_untrusted_str,
-    normalize_allowed_vm_hosts, redact_and_truncate, redact_secrets, run_turn, sanitize_whisper,
-    set_fail_pending_temp_write_for_test, sha256_hex, strip_thinking_tags,
-    take_durability_events_for_test, truncate_after_redaction, validate_local_base_url,
-    validate_vm_host_allowance, watch_durability_events_for_test, wording_slot,
+    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, redact_and_truncate,
+    redact_secrets, run_turn, sanitize_whisper, set_fail_pending_temp_write_for_test, sha256_hex,
+    strip_thinking_tags, take_durability_events_for_test, truncate_after_redaction,
+    validate_local_base_url, validate_pinned_local_model, validate_vm_host_allowance,
+    watch_durability_events_for_test, wording_slot,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -10959,6 +10961,7 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
         None,
     )?;
     let coe_refused_tx = ScriptedTransport::new(vec![]);
+    let wrapper_path = wrapper.clone();
     let coe_refused = run_turn(
         &TurnConfig::new(
             coe_game,
@@ -10978,6 +10981,392 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
         coe_refused.reports[0].outcome,
         SeatOutcome::CostOverEstimateRefused { .. }
     ));
+
+    // --- 5. End-to-end execute_cli against LoopbackOpenAiServer + schema + key refusals ---
+    let cli_server = LoopbackOpenAiServer::start(vec![MockHttpStep::Json {
+        status: 200,
+        delay: Duration::ZERO,
+        body: local_completion_body(
+            r#"{"travel":"stay","scratchpad":"saved via json"}"#,
+            "Qwen/Qwen3-14B",
+            22,
+            14,
+            Some(5),
+            None,
+        ),
+    }])?;
+    let cli_game = tmp.path().join("cli_local_e2e_game");
+    write_to_seat(&cli_game, "01", "talk", "Saltworks", "CLI E2E PROMPT")?;
+    let cli_seats_path = tmp.path().join("cli_local_seats.json");
+    fs::write(
+        &cli_seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": &cli_server.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 2.0,
+                    "reasoning": {"effort": "low", "exclude_from_transcript": true}
+                },
+                {
+                    "guild": "Dyers",
+                    "backend": "file",
+                    "model": "claude-manual"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let cli_schema_path = tmp.path().join("cli_schema.json");
+    fs::write(
+        &cli_schema_path,
+        json!({
+            "name": "cli_turn_schema",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["travel"],
+                "properties": {
+                    "travel": {"type": "string"},
+                    "scratchpad": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+    let mut cli_out = Vec::new();
+    let mut cli_err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game.to_str().unwrap_or_default(),
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            cli_seats_path.to_str().unwrap_or_default(),
+            "--wrapper",
+            wrapper_path.to_str().unwrap_or_default(),
+            "--memory-mode",
+            "snapshot",
+            "--response-schema",
+            cli_schema_path.to_str().unwrap_or_default(),
+            "--cap-gpu-secs",
+            "10.0",
+            "--allow-vm-host",
+            "127.0.0.1",
+            "--allow-vm-host",
+            "127.0.0.1",
+        ],
+        |_| None,
+        &mut cli_out,
+        &mut cli_err,
+    );
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&cli_err));
+    assert!(
+        String::from_utf8_lossy(&cli_out).contains("seat=Saltworks outcome=OK"),
+        "stdout: {}",
+        String::from_utf8_lossy(&cli_out)
+    );
+    assert_eq!(
+        fs::read_to_string(
+            cli_game
+                .join("relay")
+                .join("seats")
+                .join("Saltworks.scratchpad.md")
+        )?,
+        "saved via json"
+    );
+
+    // Mid-game memory-mode mismatch is refused (`relay/setup.json`):
+    write_to_seat(&cli_game, "01", "act", "Saltworks", "TURN 2 MISMATCH")?;
+    let mut mm_out = Vec::new();
+    let mut mm_err = Vec::new();
+    let mm_code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game.to_str().unwrap_or_default(),
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            cli_seats_path.to_str().unwrap_or_default(),
+            "--memory-mode",
+            "emc",
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut mm_out,
+        &mut mm_err,
+    );
+    assert_eq!(mm_code, 1);
+
+    // CLI refuses OPENAI_API_KEY / VLLM_API_KEY on local seats and redacts extra keys:
+    let mut key_out = Vec::new();
+    let mut key_err = Vec::new();
+    let key_code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_game.to_str().unwrap_or_default(),
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            cli_seats_path.to_str().unwrap_or_default(),
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |k| {
+            if k == "OPENAI_API_KEY" {
+                Some("sk-proj-forbidden-local-secret-1234567890".to_owned())
+            } else {
+                None
+            }
+        },
+        &mut key_out,
+        &mut key_err,
+    );
+    assert_eq!(key_code, 1);
+    assert!(
+        String::from_utf8_lossy(&key_err).contains("local transport refuses API keys"),
+        "stderr: {}",
+        String::from_utf8_lossy(&key_err)
+    );
+    for forbidden_flag in [
+        "--vllm-api-key=secret",
+        "--local-api-key=secret",
+        "--foo-api-key=secret",
+    ] {
+        assert!(matches!(
+            parse_args(["turn", forbidden_flag]),
+            Err(RelayError::SecretInForbiddenPlace(_))
+        ));
+    }
+
+    // Manual-only seat file through execute_cli with --memory-mode:
+    let manual_seats_path = tmp.path().join("manual_only_seats.json");
+    fs::write(
+        &manual_seats_path,
+        r#"{"seats":[{"guild":"Dyers","backend":"file","model":"claude-manual"}]}"#,
+    )?;
+    let manual_game = tmp.path().join("manual_cli_game");
+    fs::create_dir_all(&manual_game)?;
+    let mut man_out = Vec::new();
+    let mut man_err = Vec::new();
+    let man_code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            manual_game.to_str().unwrap_or_default(),
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            manual_seats_path.to_str().unwrap_or_default(),
+            "--memory-mode",
+            "snapshot",
+        ],
+        |_| None,
+        &mut man_out,
+        &mut man_err,
+    );
+    assert_eq!(man_code, 0);
+
+    // --- 6. Exhaustive seats, URL, transport, wording, and schema validator branches ---
+    assert_eq!(BackendKind::Local.as_str(), "local");
+    assert_eq!(BackendKind::Openrouter.as_str(), "openrouter");
+    assert_eq!(BackendKind::File.as_str(), "file");
+    assert_eq!(CostUnit::Credits.to_string(), "credits");
+    assert_eq!(CostUnit::GpuSeconds.to_string(), "gpu_seconds");
+    for (eff, label) in [
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
+    ] {
+        assert_eq!(eff.as_str(), label);
+    }
+
+    assert_eq!(validate_vm_host_allowance("[::1]")?, "::1");
+    assert_eq!(validate_vm_host_allowance("[fd00::1]")?, "fd00::1");
+    assert_eq!(validate_vm_host_allowance("localhost")?, "localhost");
+    assert_eq!(validate_vm_host_allowance("vllm-node_1")?, "vllm-node_1");
+    assert_eq!(
+        normalize_allowed_vm_hosts(&["10.0.0.2".to_owned(), "10.0.0.2".to_owned()])?,
+        vec!["10.0.0.2".to_owned()]
+    );
+    for bad_host in [
+        "",
+        "http://10.0.0.1",
+        "0.0.0.0",
+        "::",
+        "8.8.8.8",
+        "[2001:4860:4860::8888]",
+        "vllm:8000",
+        "example.com",
+        "-badhost",
+        "bad-",
+    ] {
+        assert!(
+            validate_vm_host_allowance(bad_host).is_err(),
+            "expected error on {bad_host}"
+        );
+    }
+
+    assert_eq!(
+        validate_local_base_url("Saltworks", "https://[::1]:8443/v1/chat/completions", &[])?,
+        (
+            "https://[::1]:8443/v1/chat/completions".to_owned(),
+            "::1".to_owned()
+        )
+    );
+    assert_eq!(
+        validate_local_base_url("Saltworks", "http://[::1]", &[])?,
+        (
+            "http://[::1]/v1/chat/completions".to_owned(),
+            "::1".to_owned()
+        )
+    );
+    assert_eq!(
+        validate_local_base_url("Saltworks", "http://vllm-box/v1", &["vllm-box".to_owned()])?,
+        (
+            "http://vllm-box/v1/chat/completions".to_owned(),
+            "vllm-box".to_owned()
+        )
+    );
+    for bad_url in [
+        "ftp://127.0.0.1:8000",
+        "http://127.0.0.1:8000/v1?x=1",
+        "http://127.0.0.1:8000/v1#frag",
+        "http://user:pass@127.0.0.1:8000/v1",
+        "http:///v1",
+        "http://[::1/v1",
+        "http://[::1]:0/v1",
+        "http://[::1]extra/v1",
+        "http://::1:8000/v1",
+        "http://127.0.0.1:99999/v1",
+        "http://:8000/v1",
+        "http://127.0.0.1:8000/v2/other",
+        "http://example.com:8000/v1",
+    ] {
+        assert!(
+            validate_local_base_url("Saltworks", bad_url, &[]).is_err(),
+            "expected error on {bad_url}"
+        );
+    }
+    assert!(validate_pinned_local_model("Saltworks", "Qwen/Qwen3-14B").is_ok());
+    assert!(validate_pinned_local_model("Saltworks", " leadingspace").is_err());
+
+    // SeatFile validation edge cases (mixed units, bad reasoning combinations, missing fields):
+    for bad_seats_val in [
+        json!({"seats": [
+            {"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0},
+            {"guild": "Weavers", "backend": "openrouter", "model": "qwen/qwen3-14b", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_cost_per_call": 0.01}
+        ]}),
+        json!({"seats": [{"guild": "Dyers", "backend": "file", "base_url": "http://127.0.0.1:8000"}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "openrouter", "base_url": "http://127.0.0.1:8000", "model": "qwen/qwen3-14b", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_cost_per_call": 0.01}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "openrouter", "model": "qwen/qwen3-14b", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"exclude_from_transcript": true}}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"budget_tokens": 0, "exclude_from_transcript": true}}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"effort": "none", "budget_tokens": 64, "exclude_from_transcript": true}}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"chat_template_kwargs": {"": true}, "exclude_from_transcript": true}}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"chat_template_kwargs": {"bad": [1, 2]}, "exclude_from_transcript": true}}]}),
+        json!({"seats": [{"guild": "Saltworks", "backend": "local", "base_url": "http://127.0.0.1:8000", "model": "m", "temperature": 0.2, "max_output_tokens": 64, "timeout_secs": 5.0, "max_gpu_secs_per_call": 1.0, "reasoning": {"budget_tokens": 64, "chat_template_kwargs": {"enable_thinking": false}, "exclude_from_transcript": true}}]}),
+    ] {
+        assert!(SeatFile::from_json_str(&bad_seats_val.to_string(), None).is_err());
+    }
+
+    // LocalOpenAiTransport gate accessor, outside-URL refusal, and closed loopback port error:
+    let gate = LocalGate::acquire(false, Some(5.0), false, &[])?;
+    let local_tx = LocalOpenAiTransport::new(gate);
+    assert_eq!(local_tx.gate().cap_gpu_secs(), 5.0);
+    assert!(matches!(
+        local_tx.post_chat_completions(
+            "http://example.com/v1/chat/completions",
+            "{}",
+            Duration::from_millis(200),
+        ),
+        Err(TransportError::Network(_))
+    ));
+    let eof_listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let eof_port = eof_listener.local_addr()?.port();
+    let eof_handle = thread::spawn(move || {
+        if let Ok((stream, _)) = eof_listener.accept() {
+            drop(stream);
+        }
+    });
+    assert!(matches!(
+        local_tx.post_chat_completions(
+            &format!("http://127.0.0.1:{eof_port}/v1/chat/completions"),
+            "{}",
+            Duration::from_secs(2),
+        ),
+        Err(TransportError::Network(_))
+    ));
+    let _ = eof_handle.join();
+
+    // Wording helpers (char clipping, negotiation file errors, JSON scratchpad, unclosed <think>):
+    let (clipped_str, clipped_words, was_trunc) = cap_words_and_chars("aaaaabbbbbccccc", 10, 8);
+    assert_eq!(clipped_str, "aaaaabbb");
+    assert_eq!(clipped_words, 1);
+    assert!(was_trunc);
+    assert_eq!(
+        extract_scratchpad_update(r#"{"order":"stay","scratchpad":"  json note  "}"#),
+        Some("json note".to_owned())
+    );
+    assert_eq!(
+        strip_thinking_tags("prefix <think>unclosed tail"),
+        "prefix "
+    );
+    assert!(
+        format_negotiation_block(&NegotiationInputs {
+            batna: "stay".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "   ".to_owned(),
+                intent_header: None,
+                body: "hi".to_owned(),
+            }],
+        })
+        .is_err()
+    );
+    let bad_neg_json = tmp.path().join("bad_neg.json");
+    fs::write(&bad_neg_json, "{not valid json")?;
+    assert!(load_negotiation_inputs_if_present(&bad_neg_json).is_err());
+    let empty_batna_json = tmp.path().join("empty_batna.json");
+    fs::write(&empty_batna_json, r#"{"batna":"   ","whispers":[]}"#)?;
+    assert!(load_negotiation_inputs_if_present(&empty_batna_json).is_err());
+
+    // ResponseFormatConfig validation errors:
+    for bad_rf in [
+        "{not json",
+        r#"{"type":"json_schema","json_schema":{"strict":true,"schema":{}}}"#,
+        r#"{"type":"json_schema","json_schema":{"name":"ok","strict":"yes","schema":{}}}"#,
+        r#"{"type":"json_schema","json_schema":{"name":"ok"}}"#,
+        r#"{"name":"ok","strict":123,"schema":{"type":"object"}}"#,
+        r#"{"name":"ok","schema":"not-an-object"}"#,
+    ] {
+        assert!(ResponseFormatConfig::from_json_str(bad_rf, None).is_err());
+    }
+    assert!(ResponseFormatConfig::load(&tmp.path().join("missing_schema.json"), None).is_err());
 
     Ok(())
 }
