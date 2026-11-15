@@ -16,60 +16,31 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 28,
-      "changed": 11,
+      "added": 0,
+      "changed": 8,
       "moved": 0,
-      "parts": 3,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
-        "kind": "landing",
-        "sentence": "docs/paper-test.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "docs/paper-test.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "docs/paper-test/game-01/log.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "docs/paper-test/game-01/log.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "docs/paper-test/game-02/cards/Tanners.md is now read by scripts/test-guards.sh.",
-        "subjects": [
-          "docs/paper-test/game-02/cards/Tanners.md",
-          "scripts/test-guards.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 4 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "28 files added and 11 changed content, across 3 parts.",
+        "sentence": "Nothing structural changed since 2026-11-15; 8 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "2a432619d3720d414fdda21e54661880dd03cf63",
-      "generatedAt": "2026-11-15T09:02:44.565Z"
+      "commit": "17caa043a205305583ab30179ffbdccca19d6f90",
+      "generatedAt": "2026-11-15T09:57:51.260Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "17caa043a205305583ab30179ffbdccca19d6f90",
+  "commit": "d661143598007c7617e0499dc4fc5f984c29f565",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -273,7 +244,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T09:57:51.260Z",
+  "generatedAt": "2026-11-15T10:40:45.929Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

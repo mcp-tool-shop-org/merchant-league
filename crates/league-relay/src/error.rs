@@ -30,11 +30,11 @@ pub enum RelayError {
     Io(String),
     /// Existing `calls.jsonl` or transcript JSONL was malformed.
     CorruptLog(String),
-    /// Another `league-relay turn` already holds the exclusive lock on `<game-dir>/relay/turn.lock`.
+    /// Another `league-relay turn` already holds `<game-dir>/relay/turn.lock`, or `turn.lock` was deleted/replaced mid-turn.
     TurnLocked {
         /// Redacted path to `<game-dir>/relay/turn.lock`.
         lock_path: String,
-        /// Optional redacted holder metadata (`pid=... started_utc=...`) if readable.
+        /// Optional redacted holder metadata (`pid=... started_utc=...`) or mid-turn compromise detail.
         holder: Option<String>,
     },
     /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call.
@@ -68,6 +68,13 @@ impl fmt::Display for RelayError {
             RelayError::Io(msg) => write!(f, "file error: {msg}"),
             RelayError::CorruptLog(msg) => write!(f, "corrupt relay log: {msg}"),
             RelayError::TurnLocked { lock_path, holder } => match holder {
+                Some(h) if h.starts_with("compromised:") => {
+                    let detail = h.trim_start_matches("compromised:").trim();
+                    write!(
+                        f,
+                        "per-game turn lock {lock_path} was deleted or replaced while turn was running ({detail}); never delete relay/turn.lock"
+                    )
+                }
                 Some(h) if !h.is_empty() => write!(
                     f,
                     "another league-relay turn is already running on this game directory (lock {lock_path} held by {h}); wait for it to finish"

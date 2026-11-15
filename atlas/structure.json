@@ -148,7 +148,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "41b1fc3f938000e612b939fbc7961b4b51997fc81f1ebb4dd6658d07390adafa",
+          "hash": "45ec2683656c24d85faf43193788bd8ebabf10fcccb8a8f3cab81ac55a5e0419",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -752,7 +752,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "8cda9a53f45a28d51bb2796730ef012c2efc2899946771d8c5ab8d6c44f950b1",
+          "hash": "9f0660febc0aa3e64ddbff83fa85d5a9f384bb9e9fa0ba412d4eaafae64f5da0",
           "path": "CHANGELOG.md"
         },
         {
@@ -760,7 +760,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "219d658df2bf2214869478f97a029edbdc6b4b4f0c53a580863d990e464682cf",
+          "hash": "7bda9eea32459c5da966ce1e96827a633d68cf96db31cd887d2f0b7b1a3bec7d",
           "path": "Cargo.lock"
         },
         {
@@ -1346,7 +1346,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "17caa043a205305583ab30179ffbdccca19d6f90",
+    "commit": "d661143598007c7617e0499dc4fc5f984c29f565",
     "tracked": 472
   },
   "landings": [
@@ -2085,7 +2085,7 @@
   "testFiles": 21,
   "unassigned": [
     {
-      "hash": "1ca58cbac516e8ec9e246082a88a3dde5279336e73e6d541ac0541b313ad9e94",
+      "hash": "615bafda252cac1a61ad9198c197174bde3e92b36f16bb4b120114e36787a1a2",
       "path": "crates/league-relay/Cargo.toml"
     },
     {
@@ -2140,10 +2140,10 @@
         {
           "in": "execute_cli",
           "kind": "match-err",
-          "line": 287
+          "line": 289
         }
       ],
-      "hash": "1ceb5433b5bf627c82eea5c274da0f156c52eb088f92cf82affd303c389e2a7e",
+      "hash": "4cdd0cc709c0a32bbefa4dc20c616c79ef0fef46a2c420b95b75624c560f4b6b",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/relay.rs",
@@ -2442,7 +2442,7 @@
         {
           "calls": [
             {
-              "line": 278,
+              "line": 280,
               "name": "from_env_reader",
               "receiver": "ApiKey",
               "target": {
@@ -2571,7 +2571,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 320,
+              "line": 323,
               "name": "load",
               "receiver": "SeatFile",
               "target": {
@@ -2580,7 +2580,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 322,
+              "line": 325,
               "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
@@ -2589,7 +2589,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 323,
+              "line": 326,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
@@ -2598,7 +2598,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 332,
+              "line": 335,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2606,7 +2606,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 334,
+              "line": 337,
               "name": "acquire",
               "receiver": "LiveGate",
               "target": {
@@ -2615,26 +2615,9 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 335,
+              "line": 338,
               "name": "new",
               "receiver": "TurnConfig",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 344,
-              "name": "new",
-              "receiver": "UreqTransport",
-              "target": {
-                "file": "crates/league-relay/src/transport.rs"
-              },
-              "via": "run_cli_inner"
-            },
-            {
-              "line": 345,
-              "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               },
@@ -2643,6 +2626,23 @@
             {
               "line": 347,
               "name": "new",
+              "receiver": "UreqTransport",
+              "target": {
+                "file": "crates/league-relay/src/transport.rs"
+              },
+              "via": "run_cli_inner"
+            },
+            {
+              "line": 348,
+              "name": "run_turn",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              },
+              "via": "run_cli_inner"
+            },
+            {
+              "line": 350,
+              "name": "new",
               "receiver": "TurnConfig",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2650,7 +2650,7 @@
               "via": "run_cli_inner"
             },
             {
-              "line": 356,
+              "line": 359,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2788,7 +2788,7 @@
               "via": "parse_args_with_key"
             },
             {
-              "line": 320,
+              "line": 323,
               "name": "load",
               "receiver": "SeatFile",
               "target": {
@@ -2796,7 +2796,7 @@
               }
             },
             {
-              "line": 322,
+              "line": 325,
               "name": "load_with_key",
               "receiver": "MockDirTransport",
               "target": {
@@ -2804,7 +2804,7 @@
               }
             },
             {
-              "line": 323,
+              "line": 326,
               "name": "new",
               "receiver": "TurnConfig",
               "target": {
@@ -2812,14 +2812,14 @@
               }
             },
             {
-              "line": 332,
+              "line": 335,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               }
             },
             {
-              "line": 334,
+              "line": 337,
               "name": "acquire",
               "receiver": "LiveGate",
               "target": {
@@ -2827,24 +2827,9 @@
               }
             },
             {
-              "line": 335,
+              "line": 338,
               "name": "new",
               "receiver": "TurnConfig",
-              "target": {
-                "file": "crates/league-relay/src/relay.rs"
-              }
-            },
-            {
-              "line": 344,
-              "name": "new",
-              "receiver": "UreqTransport",
-              "target": {
-                "file": "crates/league-relay/src/transport.rs"
-              }
-            },
-            {
-              "line": 345,
-              "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               }
@@ -2852,13 +2837,28 @@
             {
               "line": 347,
               "name": "new",
+              "receiver": "UreqTransport",
+              "target": {
+                "file": "crates/league-relay/src/transport.rs"
+              }
+            },
+            {
+              "line": 348,
+              "name": "run_turn",
+              "target": {
+                "file": "crates/league-relay/src/relay.rs"
+              }
+            },
+            {
+              "line": 350,
+              "name": "new",
               "receiver": "TurnConfig",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
               }
             },
             {
-              "line": 356,
+              "line": 359,
               "name": "run_turn",
               "target": {
                 "file": "crates/league-relay/src/relay.rs"
@@ -2873,7 +2873,7 @@
       ]
     },
     {
-      "hash": "418d9575a17d45643faa152cc1db8944a7949e8d4f6e8ba396e800c23b24ec80",
+      "hash": "b59d1ce60055b95d084662984e82558e5e88c04bce02f8767509068d7ec53d1a",
       "path": "crates/league-relay/src/error.rs"
     },
     {
@@ -2918,7 +2918,7 @@
             {
               "inner": [
                 {
-                  "line": 278,
+                  "line": 280,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3055,250 +3055,305 @@
         {
           "in": "parse",
           "kind": "err",
-          "line": 45
+          "line": 46
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 69
+          "line": 70
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 410
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 416
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 417
         },
         {
           "in": "acquire",
-          "kind": "err",
-          "line": 419
-        },
-        {
-          "in": "acquire",
           "kind": "match-err",
-          "line": 424
+          "line": 437
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 425
+          "line": 439
+        },
+        {
+          "in": "acquire",
+          "kind": "match-err",
+          "line": 444
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 445
+        },
+        {
+          "in": "verify_identity",
+          "kind": "err",
+          "line": 469
+        },
+        {
+          "in": "verify_identity",
+          "kind": "match-err",
+          "line": 475
+        },
+        {
+          "in": "verify_identity",
+          "kind": "err",
+          "line": 475
         },
         {
           "in": "write_pending_side_file",
           "kind": "err",
-          "line": 538
+          "line": 586
         },
         {
           "in": "write_pending_side_file",
           "kind": "err",
-          "line": 545
+          "line": 593
         },
         {
           "in": "write_pending_side_file",
           "kind": "err",
-          "line": 581
+          "line": 629
         },
         {
           "in": "write_pending_side_file",
           "kind": "match-err",
-          "line": 590
+          "line": 638
         },
         {
           "in": "write_pending_side_file",
           "kind": "err",
-          "line": 592
+          "line": 640
         },
         {
           "in": "write_pending_side_file",
           "kind": "match-err",
-          "line": 595
+          "line": 643
         },
         {
           "in": "write_pending_side_file",
           "kind": "err",
-          "line": 597
+          "line": 645
+        },
+        {
+          "in": "check_lock_identity",
+          "kind": "match-err",
+          "line": 754
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 787
+          "line": 856
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 799
+          "line": 869
         },
         {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 830
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 840
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 886
+          "in": "record_refusal",
+          "kind": "err",
+          "line": 881
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 933
+          "line": 899
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 909
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 919
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 954
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 970
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 974
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 1021
         },
         {
           "in": "sum_charged_credits",
           "kind": "err",
-          "line": 988
+          "line": 1076
         },
         {
           "in": "sum_charged_credits",
           "kind": "err",
-          "line": 993
+          "line": 1081
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1035
+          "line": 1123
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1042
+          "line": 1130
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1058
+          "line": 1146
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1157
+          "line": 1246
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1166
+          "line": 1255
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1228
+          "line": 1322
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1265
+          "line": 1359
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1286
+          "line": 1380
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1296
+          "line": 1390
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1355
+          "line": 1449
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1366
+          "line": 1465
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1372
+          "line": 1471
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1434
+          "line": 1533
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 1517
+          "line": 1616
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 1525
+          "line": 1624
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 1541
+          "line": 1640
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 1566
+          "line": 1665
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 1579
+          "line": 1678
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1643
+          "line": 1742
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 1643
+          "line": 1742
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1644
+          "line": 1743
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 1645
+          "line": 1744
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1647
+          "line": 1746
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 1647
+          "line": 1746
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1657
+          "line": 1756
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 1661
+          "line": 1760
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 1721
+          "line": 1820
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 1734
+          "line": 1833
         }
       ],
-      "hash": "62283268a50bc8ef930d9a1e96145fcc150f2417684e77f8b5e5762ac5777701",
+      "hash": "6bdcb44a46ef477c7a9b1c9939012d55419ffffe06fcb29483588186d2c5b33d",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -3431,7 +3486,7 @@
       "path": "crates/league-relay/src/transport.rs"
     },
     {
-      "hash": "f8651615f55d40b23effb772dccb794c67186efac113ec7089c6f4625d4772bb",
+      "hash": "c903e439aa33557c6fdba099bba4ef6905e8d61328e0afb5de481bcfd8de9fd7",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",
