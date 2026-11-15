@@ -79,7 +79,8 @@ pub fn solve_lp(a: &[Vec<f64>], b: &[f64], c: &[f64]) -> Result<LpStatus, LpErro
     }
 
     if n == 0 {
-        if b.iter().any(|&rhs| rhs < -FEAS_TOL) {
+        let min_rhs = b.iter().copied().fold(0.0_f64, f64::min);
+        if min_rhs < 0.0 && b.iter().any(|&rhs| rhs < -FEAS_TOL * rhs.abs().max(1e-30)) {
             return Ok(LpStatus::Infeasible);
         }
         return Ok(LpStatus::Optimal(LpSolution {
@@ -100,6 +101,36 @@ pub fn solve_lp(a: &[Vec<f64>], b: &[f64], c: &[f64]) -> Result<LpStatus, LpErro
         }));
     }
 
+    // Scale small right-hand-side magnitudes so `PIVOT_TOL`/`FEAS_TOL` remain unit-invariant.
+    let max_abs_b = b.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    if max_abs_b > 0.0 && max_abs_b < 1e-3 {
+        let inv_scale = 1.0 / max_abs_b;
+        let b_scaled: Vec<f64> = b.iter().map(|&bi| bi * inv_scale).collect();
+        return match solve_lp_core(a, &b_scaled, c, m, n)? {
+            LpStatus::Optimal(sol) => {
+                let primal: Vec<f64> = sol.primal.into_iter().map(|xi| xi * max_abs_b).collect();
+                let primal_obj: f64 = c.iter().zip(primal.iter()).map(|(&ci, &xi)| ci * xi).sum();
+                verify_kkt_certificate(a, b, c, &primal, &sol.dual, primal_obj)?;
+                Ok(LpStatus::Optimal(LpSolution {
+                    objective: primal_obj,
+                    primal,
+                    dual: sol.dual,
+                }))
+            }
+            other => Ok(other),
+        };
+    }
+
+    solve_lp_core(a, b, c, m, n)
+}
+
+fn solve_lp_core(
+    a: &[Vec<f64>],
+    b: &[f64],
+    c: &[f64],
+    m: usize,
+    n: usize,
+) -> Result<LpStatus, LpError> {
     let min_b_idx = b
         .iter()
         .enumerate()
