@@ -13,7 +13,6 @@ use same_file::Handle as SameFileHandle;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::any::Any;
-use std::collections::HashMap;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::collections::HashSet;
 use std::fmt;
@@ -179,6 +178,11 @@ pub struct CallLogEntry {
     /// Redacted failure or refusal reason when `outcome != "OK"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Unique pre-call reservation identifier tying a sent call's final record (or reconciled
+    /// `"RESERVED"` entry) to its durable pre-send reservation (`None` on pre-call refusals or
+    /// legacy lines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<String>,
 }
 
 /// Per-seat outcome produced by [`run_turn`].
@@ -653,40 +657,17 @@ fn filter_unmigrated_entries(
 struct ActiveReservation {
     reservation_id: String,
     run_id: String,
-    prior_final_count: usize,
     entry: CallLogEntry,
 }
 
-fn is_final_sent_call_entry(entry: &CallLogEntry) -> bool {
-    match entry.outcome.as_str() {
-        "OK" | "harness" | "NO_REPLY" | "LATE_DISCARDED" => true,
-        "COST_OVER_ESTIMATE" => entry.cost.is_some() || entry.charged_credits > 0.0,
-        _ => false,
-    }
-}
+const RUN_RESV_LOCK_PREFIX: &str = "calls.resv-";
+const RUN_RESV_LOCK_SUFFIX: &str = ".lock";
 
-fn final_call_match_key(entry: &CallLogEntry) -> (String, String, String, u8, String) {
-    (
-        entry.day.clone(),
-        entry.round.as_str().to_owned(),
-        entry.guild.clone(),
-        entry.attempt,
-        entry.request_body_sha256.clone(),
-    )
-}
-
-fn matching_final_call_count(entries: &[CallLogEntry], candidate: &CallLogEntry) -> usize {
-    entries
-        .iter()
-        .filter(|e| {
-            is_final_sent_call_entry(e)
-                && e.day == candidate.day
-                && e.round == candidate.round
-                && e.guild == candidate.guild
-                && e.attempt == candidate.attempt
-                && e.request_body_sha256 == candidate.request_body_sha256
-        })
-        .count()
+fn has_entry_with_reservation_id(entries: &[CallLogEntry], reservation_id: &str) -> bool {
+    !reservation_id.is_empty()
+        && entries
+            .iter()
+            .any(|e| e.reservation_id.as_deref() == Some(reservation_id))
 }
 
 fn is_run_reservation_lock_live(resv_lock_path: &Path) -> bool {
@@ -694,6 +675,7 @@ fn is_run_reservation_lock_live(resv_lock_path: &Path) -> bool {
         .read(true)
         .write(true)
         .open(resv_lock_path)
+        .or_else(|_| OpenOptions::new().read(true).open(resv_lock_path))
     {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
@@ -707,6 +689,31 @@ fn is_run_reservation_lock_live(resv_lock_path: &Path) -> bool {
             false
         }
         Err(TryLockError::WouldBlock | TryLockError::Error(_)) => true,
+    }
+}
+
+fn sweep_stale_reservation_locks(calls_path: &Path, active_reserved: &[ActiveReservation]) {
+    let Some(relay_dir) = calls_path.parent() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(relay_dir) else {
+        return;
+    };
+    for dir_entry in entries.flatten() {
+        let file_name = dir_entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(run_id) = name
+            .strip_prefix(RUN_RESV_LOCK_PREFIX)
+            .and_then(|rest| rest.strip_suffix(RUN_RESV_LOCK_SUFFIX))
+        else {
+            continue;
+        };
+        if active_reserved.iter().any(|r| r.run_id == run_id) {
+            continue;
+        }
+        let _ = is_run_reservation_lock_live(&dir_entry.path());
     }
 }
 
@@ -896,7 +903,6 @@ fn write_pending_side_file(
 }
 
 struct LoadedLedgerState {
-    base_entries: Vec<CallLogEntry>,
     active_resvs: Vec<ActiveReservation>,
     persisted_for_sum: Vec<CallLogEntry>,
 }
@@ -981,46 +987,50 @@ impl<'a> CallLedger<'a> {
             }
         }
 
+        let mut remaining_reserved = Vec::new();
         if reserved_path.exists() {
             let original_reserved = read_reserved_file(&reserved_path, redaction_key)?;
-            let base_final_entries = effective_entries.clone();
-            let mut consumed_by_key: HashMap<(String, String, String, u8, String), usize> =
-                HashMap::new();
-            let mut remaining_reserved = Vec::new();
-            let mut orphans_to_migrate = Vec::new();
+            let base_recorded_entries = effective_entries.clone();
+            let mut orphans_to_migrate: Vec<(ActiveReservation, CallLogEntry)> = Vec::new();
 
             for r in &original_reserved {
+                let already_recorded =
+                    has_entry_with_reservation_id(&base_recorded_entries, &r.reservation_id);
                 let lock_path = run_reservation_lock_path(&calls_path, &r.run_id);
                 if is_run_reservation_lock_live(&lock_path) {
                     remaining_reserved.push(r.clone());
-                    effective_entries.push(r.entry.clone());
-                } else {
-                    let current_finals = matching_final_call_count(&base_final_entries, &r.entry);
-                    let key = final_call_match_key(&r.entry);
-                    let consumed = consumed_by_key.entry(key).or_insert(0);
-                    if current_finals > r.prior_final_count.saturating_add(*consumed) {
-                        *consumed += 1;
-                    } else {
-                        turn_lock.verify_identity(redaction_key)?;
-                        orphans_to_migrate.push(r.clone());
+                    if !already_recorded {
+                        effective_entries.push(r.entry.clone());
                     }
+                } else if !already_recorded
+                    && !orphans_to_migrate
+                        .iter()
+                        .any(|(prev, _)| prev.reservation_id == r.reservation_id)
+                {
+                    turn_lock.verify_identity(redaction_key)?;
+                    let mut orphan_entry = r.entry.clone();
+                    if orphan_entry.reservation_id.is_none() && !r.reservation_id.is_empty() {
+                        orphan_entry.reservation_id = Some(r.reservation_id.clone());
+                    }
+                    orphans_to_migrate.push((r.clone(), orphan_entry));
                 }
             }
 
             if !orphans_to_migrate.is_empty() {
                 let mut orphan_blob = String::new();
-                for r in &orphans_to_migrate {
-                    let line = serde_json::to_string(&r.entry)
+                for (_, orphan_entry) in &orphans_to_migrate {
+                    let line = serde_json::to_string(orphan_entry)
                         .map_err(|e| io_err(&calls_path, e, redaction_key))?;
                     orphan_blob.push_str(&line);
                     orphan_blob.push('\n');
                 }
                 if append_text_synced(&calls_path, &orphan_blob, redaction_key).is_ok() {
-                    effective_entries.extend(orphans_to_migrate.into_iter().map(|r| r.entry));
+                    effective_entries
+                        .extend(orphans_to_migrate.into_iter().map(|(_, entry)| entry));
                 } else {
-                    for r in orphans_to_migrate {
-                        prior_unmigrated_pending.push(r.entry.clone());
-                        effective_entries.push(r.entry.clone());
+                    for (r, orphan_entry) in orphans_to_migrate {
+                        prior_unmigrated_pending.push(orphan_entry.clone());
+                        effective_entries.push(orphan_entry);
                         remaining_reserved.push(r);
                     }
                 }
@@ -1034,6 +1044,7 @@ impl<'a> CallLedger<'a> {
                 );
             }
         }
+        sweep_stale_reservation_locks(&calls_path, &remaining_reserved);
         drop(_side_lock);
 
         let mut cost_unknown_in_turn = false;
@@ -1142,28 +1153,23 @@ impl<'a> CallLedger<'a> {
             Vec::new()
         };
         let mut persisted_for_sum = base_entries.clone();
-        let mut consumed_by_key: HashMap<(String, String, String, u8, String), usize> =
-            HashMap::new();
+        let mut counted_orphan_ids: Vec<String> = Vec::new();
         for r in &active_resvs {
             if r.run_id == self.run_id {
+                continue;
+            }
+            if has_entry_with_reservation_id(&base_entries, &r.reservation_id) {
                 continue;
             }
             let lock_path = run_reservation_lock_path(&self.calls_path, &r.run_id);
             if is_run_reservation_lock_live(&lock_path) {
                 persisted_for_sum.push(r.entry.clone());
-            } else {
-                let current_finals = matching_final_call_count(&base_entries, &r.entry);
-                let key = final_call_match_key(&r.entry);
-                let consumed = consumed_by_key.entry(key).or_insert(0);
-                if current_finals > r.prior_final_count.saturating_add(*consumed) {
-                    *consumed += 1;
-                } else {
-                    persisted_for_sum.push(r.entry.clone());
-                }
+            } else if !counted_orphan_ids.iter().any(|id| id == &r.reservation_id) {
+                counted_orphan_ids.push(r.reservation_id.clone());
+                persisted_for_sum.push(r.entry.clone());
             }
         }
         Ok(LoadedLedgerState {
-            base_entries,
             active_resvs,
             persisted_for_sum,
         })
@@ -1205,7 +1211,6 @@ impl<'a> CallLedger<'a> {
 
         let _side_lock = SideFileLockGuard::acquire(&self.calls_path, redaction_key)?;
         let LoadedLedgerState {
-            base_entries,
             mut active_resvs,
             persisted_for_sum,
         } = self.read_state_unlocked(redaction_key)?;
@@ -1227,14 +1232,14 @@ impl<'a> CallLedger<'a> {
         }
 
         self.ensure_run_resv_lock(redaction_key)?;
-        let prior_final_count = matching_final_call_count(&base_entries, reservation_template);
         let reservation_id = format!("{}-{}", self.run_id, self.next_reservation_seq);
         self.next_reservation_seq += 1;
+        let mut reserved_entry = reservation_template.clone();
+        reserved_entry.reservation_id = Some(reservation_id.clone());
         active_resvs.push(ActiveReservation {
             reservation_id: reservation_id.clone(),
             run_id: self.run_id.clone(),
-            prior_final_count,
-            entry: reservation_template.clone(),
+            entry: reserved_entry,
         });
         write_reserved_entries_unlocked(&self.reserved_path, &active_resvs, redaction_key)?;
 
@@ -1367,6 +1372,17 @@ impl<'a> CallLedger<'a> {
             match append_text_synced(&self.calls_path, &line, redaction_key) {
                 Ok(()) => {
                     self.pending_unwritten.remove(0);
+                    if let Some(ref resv_id) = pending_entry.reservation_id {
+                        self.unreleased_reservations.retain(|id| id != resv_id);
+                        if let Ok(_side_lock) =
+                            SideFileLockGuard::acquire(&self.calls_path, redaction_key)
+                        {
+                            let _ = self.release_reservations_unlocked(
+                                std::slice::from_ref(resv_id),
+                                redaction_key,
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     last_ledger_err = Some(e);
@@ -1431,7 +1447,9 @@ impl<'a> CallLedger<'a> {
                 Ok(())
             }
             Err(side_err) => {
-                self.clear_unreleased_reservations(redaction_key);
+                // Keep unreleased reservations on disk in `calls.reserved.jsonl` when neither
+                // `calls.jsonl` nor `calls.pending.jsonl` could be written (exit 3), preserving
+                // the durable pre-call record so a subsequent run still counts `max_cost_per_call`.
                 let mut all_held: Vec<(f64, CallLogEntry)> = self
                     .prior_unmigrated_pending
                     .iter()
@@ -1923,6 +1941,7 @@ fn run_single_openrouter_seat(
                     latency_ms,
                     outcome: outcome_str,
                     error: err_opt,
+                    reservation_id: Some(reservation_id.clone()),
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
@@ -2008,6 +2027,7 @@ fn run_single_openrouter_seat(
                     latency_ms,
                     outcome: outcome_label.to_owned(),
                     error: Some(reason),
+                    reservation_id: Some(reservation_id.clone()),
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
@@ -2065,6 +2085,7 @@ fn reserved_call_entry(
         latency_ms: 0,
         outcome: "RESERVED".to_owned(),
         error: Some("orphaned pre-call reservation from interrupted run".to_owned()),
+        reservation_id: None,
     }
 }
 
@@ -2098,6 +2119,7 @@ fn refused_call_entry(
         latency_ms: 0,
         outcome: outcome.to_owned(),
         error: Some(reason),
+        reservation_id: None,
     }
 }
 

@@ -148,7 +148,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "5ddf9d05a6d92cc4197c1726e3861b22f098ed4f3cbc385b2c7f61bce7d64b70",
+          "hash": "6e161ba0ff523e5abcc5a48395f4bb6831fac7389ce3aef76d9140040ff2f863",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -752,7 +752,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "dbb9f7cba8428fe45650abc4f4b94a8a78b2daa866ab666b935e8bee62ae0674",
+          "hash": "9b0d1de81afca2de38c18c589c364ee2f756a0819eff820385f50c60d12a1773",
           "path": "CHANGELOG.md"
         },
         {
@@ -1346,7 +1346,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "5ebb6b9d65e93bc0a18cc49cf544688b11d660b5",
+    "commit": "7eddcfbfcee81f8502c485c786e5f9cdb2106d05",
     "tracked": 472
   },
   "landings": [
@@ -3055,117 +3055,112 @@
         {
           "in": "parse",
           "kind": "err",
-          "line": 48
+          "line": 47
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 72
+          "line": 71
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 443
+          "line": 447
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 445
+          "line": 449
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 453
+          "line": 457
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 454
+          "line": 458
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 487
+          "line": 491
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 493
+          "line": 497
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 494
+          "line": 498
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 514
+          "line": 518
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 516
+          "line": 520
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 521
+          "line": 525
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 522
+          "line": 526
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 546
+          "line": 550
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 552
+          "line": 556
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 552
+          "line": 556
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 699
+          "line": 681
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 700
+          "line": 682
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 709
+          "line": 691
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 744
+          "line": 751
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 745
+          "line": 752
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 745
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 756
+          "line": 752
         },
         {
           "in": "write_reserved_entries_unlocked",
@@ -3174,28 +3169,28 @@
         },
         {
           "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 791
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 793
+          "line": 770
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 795
+          "line": 798
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 797
+          "line": 800
         },
         {
-          "in": "write_pending_side_file_unlocked",
+          "in": "write_reserved_entries_unlocked",
+          "kind": "match-err",
+          "line": 802
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 819
+          "line": 804
         },
         {
           "in": "write_pending_side_file_unlocked",
@@ -3205,260 +3200,265 @@
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 862
-        },
-        {
-          "in": "write_pending_side_file_unlocked",
-          "kind": "match-err",
-          "line": 871
+          "line": 833
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 873
+          "line": 869
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 876
-        },
-        {
-          "in": "write_pending_side_file_unlocked",
-          "kind": "err",
           "line": 878
+        },
+        {
+          "in": "write_pending_side_file_unlocked",
+          "kind": "err",
+          "line": 880
+        },
+        {
+          "in": "write_pending_side_file_unlocked",
+          "kind": "match-err",
+          "line": 883
+        },
+        {
+          "in": "write_pending_side_file_unlocked",
+          "kind": "err",
+          "line": 885
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 1074
+          "line": 1085
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 1099
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "err",
-          "line": 1099
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "match-err",
-          "line": 1104
+          "line": 1110
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 1104
+          "line": 1110
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "match-err",
+          "line": 1115
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "err",
+          "line": 1115
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 1285
+          "line": 1290
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 1306
+          "line": 1311
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 1310
+          "line": 1315
         },
         {
           "in": "record_refusal",
           "kind": "err",
-          "line": 1322
+          "line": 1327
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 1351
+          "line": 1356
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 1361
+          "line": 1366
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 1371
+          "line": 1387
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 1412
+          "line": 1428
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 1429
+          "line": 1445
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 1433
+          "line": 1449
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 1481
+          "line": 1499
         },
         {
           "in": "sum_charged_credits",
           "kind": "err",
-          "line": 1546
+          "line": 1564
         },
         {
           "in": "sum_charged_credits",
           "kind": "err",
-          "line": 1551
+          "line": 1569
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1593
+          "line": 1611
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1600
+          "line": 1618
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 1616
+          "line": 1634
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1717
+          "line": 1735
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1726
+          "line": 1744
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1802
+          "line": 1820
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1839
+          "line": 1857
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1860
+          "line": 1878
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1870
+          "line": 1888
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1929
+          "line": 1948
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1946
+          "line": 1965
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 1952
+          "line": 1971
         },
         {
           "in": "run_single_openrouter_seat",
           "kind": "match-err",
-          "line": 2014
+          "line": 2034
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 2130
+          "line": 2152
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 2138
+          "line": 2160
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 2154
+          "line": 2176
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 2179
+          "line": 2201
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 2192
+          "line": 2214
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 2256
+          "line": 2278
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 2256
+          "line": 2278
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 2257
+          "line": 2279
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 2258
+          "line": 2280
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 2260
+          "line": 2282
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 2260
+          "line": 2282
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 2270
+          "line": 2292
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 2274
+          "line": 2296
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 2334
+          "line": 2356
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 2347
+          "line": 2369
         }
       ],
-      "hash": "f6e9b6bd3ba5703a07345bc454e6a4f5491f92a437d06f460bea739dfbf30f9d",
+      "hash": "9029ff4ea5ed861a7e50dfc073f13597cb14aad99145fd3f2af0eb7ba2329603",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -3591,7 +3591,7 @@
       "path": "crates/league-relay/src/transport.rs"
     },
     {
-      "hash": "c50bb3e71f516a602e1d8dd3468f0ff69685eb5bc6a9c7aa79a5fe625aed4f26",
+      "hash": "f708b58d263808d6bdab02fb391a3231aee57dbc42a53752f6229a4fcd7241f5",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",
