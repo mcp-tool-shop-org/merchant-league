@@ -9,7 +9,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "33b2778be9f2e945efd48c1b1e35a9582df8d43b7e9ce5a21567831f797b8176",
+          "hash": "e8f677159e1398d827f5d3dc39a90988ce311fbb068dc96f6df6c56211920130",
           "path": ".github/workflows/ci.yml"
         }
       ],
@@ -311,6 +311,10 @@
           ],
           "hash": "3b1a26354f0ec020a2713036e23ddbd1e8ba538cf302df77cae6d89948aaf139",
           "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/hash_check.py"
+        },
+        {
+          "hash": "d492b8cf6ca9cb156e48e6a1db5d0cd034ec1951083b9dde90c8f1abea971ffd",
+          "path": "docs/standalone-xrpld.md"
         }
       ],
       "globs": [
@@ -1138,7 +1142,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 4,
+      "testedBy": 5,
       "unresolvedSites": 0
     },
     {
@@ -1876,7 +1880,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 6,
+      "testedBy": 7,
       "unresolvedSites": 0
     },
     {
@@ -1914,6 +1918,412 @@
       ],
       "testedBy": 1,
       "testedInside": true,
+      "unresolvedSites": 0
+    },
+    {
+      "dynamicReads": 0,
+      "dynamicSpawns": 0,
+      "dynamicSpawnsInTests": 0,
+      "dynamicWrites": 0,
+      "entryPoints": [
+        "crates/league-standalone/src/lib.rs"
+      ],
+      "externals": 0,
+      "files": [
+        {
+          "hash": "e82f32e503e87adc821321f015ab16847a3ced7f4ecc724e2907f2b5fbb9fdcf",
+          "path": "crates/league-standalone/Cargo.toml"
+        },
+        {
+          "failurePaths": [
+            {
+              "in": "genesis",
+              "kind": "err",
+              "line": 112
+            },
+            {
+              "in": "verify_v2_amendments",
+              "kind": "err",
+              "line": 360
+            },
+            {
+              "in": "verify_v2_amendments",
+              "kind": "err",
+              "line": 391
+            },
+            {
+              "in": "verify_v2_amendments",
+              "kind": "err",
+              "line": 401
+            },
+            {
+              "in": "account_lines",
+              "kind": "err",
+              "line": 466
+            },
+            {
+              "in": "account_offers",
+              "kind": "err",
+              "line": 506
+            },
+            {
+              "in": "submit_and_accept",
+              "kind": "match-err",
+              "line": 628
+            },
+            {
+              "in": "submit_and_accept",
+              "kind": "match-err",
+              "line": 639
+            },
+            {
+              "in": "submit_and_accept",
+              "kind": "err",
+              "line": 639
+            },
+            {
+              "in": "submit_and_accept_ok",
+              "kind": "err",
+              "line": 681
+            },
+            {
+              "in": "raw_rpc_call",
+              "kind": "err",
+              "line": 751
+            },
+            {
+              "in": "raw_rpc_call",
+              "kind": "err",
+              "line": 758
+            }
+          ],
+          "hash": "e2ee87e6eaabc763f3e3b424d246a1d15158f3a14db65d78bd033f81712d13ea",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs",
+            "crates/league-standalone/src/lib.rs"
+          ],
+          "path": "crates/league-standalone/src/client.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "bootstrap_four_seat_table",
+            "build_tx",
+            "preimage_sha256_condition_and_fulfillment",
+            "run_core_offer_spend_down",
+            "run_core_preimage_escrow",
+            "run_core_tariff_case",
+            "run_offer_spend_down_conformance",
+            "run_partial_fill_tariff_conformance",
+            "run_preimage_escrow_conformance",
+            "transfer_rate_from_bps"
+          ],
+          "failurePaths": [
+            {
+              "in": "run_core_tariff_case",
+              "kind": "err",
+              "line": 471
+            },
+            {
+              "in": "advance_past_close_time",
+              "kind": "err",
+              "line": 1326
+            }
+          ],
+          "hash": "b850a9a6fe5d1b01191d31ca9c5f88cc5ba421955473f0126eae3b2d16411f91",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-ledger/src/client.rs",
+            "crates/league-standalone/src/client.rs",
+            "crates/league-standalone/src/lib.rs"
+          ],
+          "path": "crates/league-standalone/src/conformance.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "build_run_args",
+            "build_run_args_with_expiry",
+            "parse_docker_port"
+          ],
+          "failurePaths": [
+            {
+              "in": "run",
+              "kind": "err",
+              "line": 130
+            },
+            {
+              "in": "run",
+              "kind": "match-err",
+              "line": 138
+            },
+            {
+              "in": "run",
+              "kind": "err",
+              "line": 141
+            },
+            {
+              "in": "wait_child_bounded",
+              "kind": "match-err",
+              "line": 167
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 235
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 248
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 257
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 263
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 270
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 276
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 286
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 291
+            },
+            {
+              "in": "parse_docker_port",
+              "kind": "err",
+              "line": 370
+            },
+            {
+              "in": "start_with_runner_at",
+              "kind": "match-err",
+              "line": 436
+            },
+            {
+              "in": "start_with_runner_at",
+              "kind": "err",
+              "line": 443
+            },
+            {
+              "in": "start_with_runner_at",
+              "kind": "err",
+              "line": 452
+            },
+            {
+              "in": "start_with_runner_at",
+              "kind": "match-err",
+              "line": 467
+            },
+            {
+              "in": "start_with_runner_at",
+              "kind": "err",
+              "line": 488
+            },
+            {
+              "in": "teardown",
+              "kind": "err",
+              "line": 519
+            },
+            {
+              "in": "sweep_and_check_existing_containers",
+              "kind": "err",
+              "line": 564
+            },
+            {
+              "in": "sweep_and_check_existing_containers",
+              "kind": "err",
+              "line": 591
+            },
+            {
+              "in": "sweep_and_check_existing_containers",
+              "kind": "err",
+              "line": 598
+            },
+            {
+              "in": "ensure_pinned_image",
+              "kind": "err",
+              "line": 630
+            },
+            {
+              "in": "wait_until_ready",
+              "kind": "err",
+              "line": 659
+            },
+            {
+              "in": "wait_until_ready",
+              "kind": "match-err",
+              "line": 671
+            },
+            {
+              "in": "wait_until_ready",
+              "kind": "err",
+              "line": 671
+            },
+            {
+              "in": "wait_until_ready",
+              "kind": "match-err",
+              "line": 672
+            },
+            {
+              "in": "wait_until_ready",
+              "kind": "err",
+              "line": 674
+            },
+            {
+              "in": "parse_memory_limit_mb",
+              "kind": "err",
+              "line": 697
+            }
+          ],
+          "hash": "3825ac751178f49ddab4cff78234672fe7b02cf464f1f4330a01f2265dbddc30",
+          "importsFiles": [
+            "crates/league-ledger/src/client.rs",
+            "crates/league-standalone/src/client.rs",
+            "crates/league-standalone/src/lib.rs"
+          ],
+          "path": "crates/league-standalone/src/docker.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "amendment_id_hex",
+            "encode_currency_code",
+            "require_loopback_http_url",
+            "require_standalone_info",
+            "stand_alone_xrpld_cfg"
+          ],
+          "failurePaths": [
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 118
+            },
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 123
+            },
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 129
+            },
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 134
+            },
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 139
+            },
+            {
+              "in": "require_loopback_http_url",
+              "kind": "err",
+              "line": 147
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 157
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 160
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 165
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 170
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 177
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 183
+            },
+            {
+              "in": "require_standalone_info",
+              "kind": "err",
+              "line": 190
+            },
+            {
+              "in": "stand_alone_xrpld_cfg",
+              "kind": "err",
+              "line": 210
+            },
+            {
+              "in": "encode_currency_code",
+              "kind": "err",
+              "line": 251
+            },
+            {
+              "in": "encode_currency_code",
+              "kind": "err",
+              "line": 276
+            }
+          ],
+          "hash": "68496d4396b0153f74bb3facb3df8ff6342ede1049d88bb918d88a5f39138bdf",
+          "importsFiles": [
+            "crates/league-standalone/src/client.rs",
+            "crates/league-standalone/src/conformance.rs",
+            "crates/league-standalone/src/docker.rs"
+          ],
+          "path": "crates/league-standalone/src/lib.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "09526aa81d5c1d8d2dc19270cb21f378b1994dadbbd95f4cf6820fac63dedea3",
+          "importsFiles": [
+            "crates/league-standalone/src/conformance.rs",
+            "crates/league-standalone/src/docker.rs",
+            "crates/league-standalone/src/lib.rs"
+          ],
+          "library": "crates/league-standalone/src/lib.rs",
+          "path": "crates/league-standalone/tests/standalone_live.rs",
+          "testsInside": true
+        }
+      ],
+      "globs": [
+        "crates/league-standalone/**"
+      ],
+      "importConfidence": "full",
+      "name": "league-standalone",
+      "origin": "authored",
+      "role": "code",
+      "testRunners": [
+        "cargo test"
+      ],
+      "testedBy": 5,
       "unresolvedSites": 0
     },
     {
@@ -1967,19 +2377,15 @@
           "path": ".gitignore"
         },
         {
-          "hash": "535cb886f241e1da63e699a31671596334f0cce720a3125ee3a15375eb576133",
-          "path": "CHANGELOG.md"
-        },
-        {
           "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
           "path": "CLAUDE.md"
         },
         {
-          "hash": "dc008ca6fbc4ad1fc0c2b9dd43082b23a328cc5a1beee56ec769b9f8150fa3e4",
+          "hash": "1130f7eb0f8609aa514b878852ff05aa8eb672586c7fcaa00fdafe277e86e355",
           "path": "Cargo.lock"
         },
         {
-          "hash": "dcd51fd86a17dd775e04346bf3c4848b4ca35094d75d4d8b55df1bdc7280128d",
+          "hash": "f63fa98f754248643ea715dcea59d95bd03888f03f29e8e2685f18a14f7798ed",
           "path": "Cargo.toml"
         },
         {
@@ -2126,6 +2532,16 @@
             "npx"
           ],
           "step": "Atlas check"
+        },
+        {
+          "dir": "",
+          "job": "check",
+          "programs": [
+            "docker",
+            "test",
+            "timeout"
+          ],
+          "step": "Stand-alone xrpld harness"
         }
       ],
       "elsewhere": [],
@@ -2193,6 +2609,11 @@
           "boundary": "league-season",
           "depth": 0,
           "files": 1
+        },
+        {
+          "boundary": "league-standalone",
+          "depth": 0,
+          "files": 5
         },
         {
           "boundary": "league-tui",
@@ -2358,6 +2779,14 @@
           "directory": true,
           "job": "check",
           "matched": true,
+          "path": "crates/league-standalone/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
           "path": "crates/league-tui/",
           "runKind": "executes",
           "via": "cargo test"
@@ -2378,7 +2807,7 @@
           "runKind": "executes"
         }
       ],
-      "runsCount": 24,
+      "runsCount": 25,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -2393,17 +2822,23 @@
       "stages": [],
       "tests": [
         {
-          "files": 21,
+          "files": 26,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 21,
+          "files": 26,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
+        },
+        {
+          "files": 1,
+          "job": "check",
+          "runner": "cargo test",
+          "step": "Stand-alone xrpld harness"
         }
       ],
       "triggers": [
@@ -2641,24 +3076,24 @@
       "usesWorkflowToken": false
     }
   ],
-  "edges": [],
+  "edges": [
+    {
+      "from": "league-standalone",
+      "kind": "file",
+      "to": "league-core"
+    },
+    {
+      "from": "league-standalone",
+      "kind": "file",
+      "to": "league-ledger"
+    }
+  ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "65ee24addfb6d6a124e6f18d983a666b460aa1bb",
-    "tracked": 488
+    "commit": "1ac76e7ed11bc75055a4fb805acf8fa92f40e0ce",
+    "tracked": 494
   },
   "landings": [
-    {
-      "readers": [
-        {
-          "by": "scripts/test-guards.sh",
-          "call": "literal",
-          "confidence": "text"
-        }
-      ],
-      "target": "CHANGELOG.md",
-      "writers": []
-    },
     {
       "readers": [
         {
@@ -2714,6 +3149,11 @@
           "by": "Cargo.toml",
           "call": "configuration",
           "confidence": "config"
+        },
+        {
+          "by": "crates/league-standalone/Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
         }
       ],
       "target": "crates/league-core",
@@ -2745,6 +3185,11 @@
       "readers": [
         {
           "by": "Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        },
+        {
+          "by": "crates/league-standalone/Cargo.toml",
           "call": "configuration",
           "confidence": "config"
         }
@@ -2805,6 +3250,17 @@
         }
       ],
       "target": "crates/league-season",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        }
+      ],
+      "target": "crates/league-standalone",
       "writers": []
     },
     {
@@ -3391,7 +3847,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 31,
+  "testFiles": 36,
   "unassigned": [
     {
       "hash": "615bafda252cac1a61ad9198c197174bde3e92b36f16bb4b120114e36787a1a2",

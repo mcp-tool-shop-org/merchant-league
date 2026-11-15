@@ -7,99 +7,86 @@
   "breaks": [
     {
       "doors": 4,
-      "importedBy": [],
+      "importedBy": [
+        "league-standalone"
+      ],
       "importedByTests": [],
       "kind": "part",
       "name": "league-ledger",
       "partLabel": "league-ledger"
+    },
+    {
+      "doors": 1,
+      "importedBy": [
+        "league-standalone"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-core",
+      "partLabel": "league-core"
     }
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 8,
+      "added": 7,
+      "changed": 19,
       "moved": 0,
-      "parts": 3,
-      "removed": 0
+      "parts": 5,
+      "removed": 1
     },
     "items": [
       {
+        "kind": "import-added",
+        "sentence": "league-standalone now imports league-core.",
+        "subjects": [
+          "league-standalone",
+          "league-core"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 1 more.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-core/src/engine.rs",
+          "crates/league-core/src/lib.rs",
+          "crates/league-core/src/replay.rs",
+          "crates/league-core/tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI no longer runs crates/league-core/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-core/"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/ is now also read by crates/league-standalone/Cargo.toml.",
+        "subjects": [
+          "crates/league-core/",
+          "crates/league-standalone/Cargo.toml"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 8 files changed content.",
+        "sentence": "7 files added, 1 removed and 19 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "dc929160f6cb0b9657b77d85eafbc9909bfe5967",
-      "generatedAt": "2026-11-15T14:19:09.192Z"
+      "commit": "1908c466db878e3ee0ec9c04913018090cabe2af",
+      "generatedAt": "2026-11-15T12:21:52.957Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 7,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 7,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 6
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 7,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 6
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/src/error.rs",
-      "either": 6,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-relay/src/error.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 7,
+      "either": 5,
       "partLabels": [
         null,
         null
@@ -117,9 +104,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "65ee24addfb6d6a124e6f18d983a666b460aa1bb",
+  "commit": "1ac76e7ed11bc75055a4fb805acf8fa92f40e0ce",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (330 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (335 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -161,6 +148,11 @@
           "files": 1
         },
         {
+          "boundary": "league-standalone",
+          "depth": 0,
+          "files": 5
+        },
+        {
           "boundary": "league-tui",
           "depth": 0,
           "files": 1
@@ -192,10 +184,11 @@
         "crates/league-ledger/tests/vectors.rs",
         "crates/league-relay/tests/",
         "crates/league-season/",
+        "crates/league-standalone/",
         "crates/league-tui/"
       ],
-      "runsCount": 21,
-      "runsMore": 21,
+      "runsCount": 22,
+      "runsMore": 26,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -337,7 +330,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T14:43:48.949Z",
+  "generatedAt": "2026-11-15T15:20:24.723Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
@@ -353,11 +346,12 @@
     "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-season": "league-season",
+    "league-standalone": "league-standalone",
     "league-tui": "league-tui",
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 10,
+  "parts": 11,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -382,16 +376,17 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 31,
+  "testFiles": 36,
   "testedBy": {
-    "league-core": 4,
+    "league-core": 5,
     "league-dice": 1,
     "league-gen": 7,
-    "league-ledger": 6,
+    "league-ledger": 7,
     "league-season": 1,
+    "league-standalone": 5,
     "league-tui": 1
   },
-  "testedCodeParts": 6,
+  "testedCodeParts": 7,
   "testedInside": [
     "league-dice",
     "league-season",

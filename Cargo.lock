@@ -1577,6 +1577,21 @@ name = "league-season"
 version = "0.0.0"
 
 [[package]]
+name = "league-standalone"
+version = "0.0.0"
+dependencies = [
+ "league-core",
+ "league-ledger",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strum 0.26.3",
+ "tempfile",
+ "ureq",
+ "xrpl-rust",
+]
+
+[[package]]
 name = "league-tui"
 version = "0.0.0"
 dependencies = [

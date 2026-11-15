@@ -28,6 +28,10 @@ boundaries:
     globs:
       - crates/league-season/**
     role: code
+  - name: league-standalone
+    globs:
+      - crates/league-standalone/**
+    role: code
   - name: league-tui
     globs:
       - crates/league-tui/**
