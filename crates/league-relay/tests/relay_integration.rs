@@ -1810,6 +1810,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
         latency_ms: 12,
         outcome: "OK".to_owned(),
         error: None,
+        reservation_id: None,
     };
     fs::write(
         unknown_game.join("relay").join("calls.jsonl"),
@@ -3884,7 +3885,9 @@ fn b5_held_charge_persists_across_runs_flushes_migrates_and_reports_unwritable()
     let stderr_str = String::from_utf8(cli_err)?;
     let stdout_str = String::from_utf8(cli_out)?;
     assert!(
-        stderr_str.contains("unrecorded charge 0.010000")
+        stderr_str.contains("post-call charge 0.010000")
+            && stderr_str.contains("held as a reservation in relay/calls.reserved.jsonl")
+            && stderr_str.contains("do not enter it into relay/calls.jsonl by hand")
             && stderr_str.contains("seat=Saltworks")
             && stderr_str.contains("day=01")
             && stderr_str.contains("round=talk"),
@@ -4836,7 +4839,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     );
     let stderr_str = String::from_utf8(cli_err)?;
     assert!(
-        stderr_str.starts_with("error: unrecorded charge 0.030000 credits"),
+        stderr_str.starts_with("error: post-call charge 0.030000 credits"),
         "expected total 0.030000 (old 0.01 + new 0.02) first, got: {stderr_str}"
     );
     assert!(
@@ -4850,8 +4853,9 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     assert_no_8char_key_piece(&stderr_str, F2_KEY, "F2 exit-3 stderr");
 
     // Sub-case 2 (N4 + F2): Read-only side file refuses overwrite when calls.jsonl is read-only
-    // (preserving old_bytes and reporting old + new on exit 3); once calls.jsonl is writable,
-    // migration counts old_entry once (no double count).
+    // (preserving old_bytes and reporting old 0.01 + Sub-case 1's preserved exit-3 reservation 0.02
+    // + Sub-case 2's 0.02 = 0.050000 on exit 3); once calls.jsonl is writable, migration counts
+    // old_entry (0.01) and the two exit-3 reservations (0.02 + 0.02) once each (0.05 total, no double count).
     set_file_readonly(&pending_path)?;
     let mut ro_out = Vec::new();
     let mut ro_err = Vec::new();
@@ -4880,18 +4884,21 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     assert_eq!(ro_code, 3);
     assert_eq!(fs::read(&pending_path)?, old_bytes);
     let ro_stderr = String::from_utf8(ro_err)?;
-    assert!(ro_stderr.starts_with("error: unrecorded charge 0.030000 credits"));
+    assert!(
+        ro_stderr.starts_with("error: post-call charge 0.050000 credits"),
+        "expected total 0.050000 (old 0.01 + Sub-case 1 exit-3 0.02 + Sub-case 2 0.02), got: {ro_stderr}"
+    );
     assert!(
         ro_stderr.contains("seat=Saltworks day=01 round=talk attempt=1 charged_credits=0.010000")
     );
     assert!(ro_stderr.contains("seat=Weavers day=01 round=act attempt=1 charged_credits=0.020000"));
 
     // Now make calls.jsonl writable while pending_path is still read-only (N4):
-    // Under cap = 0.02, old_entry (0.01) is counted once, allowing 1 Saltworks 0.01 call -> 0.02 total,
-    // and refusing a subsequent call with CapReached!
+    // Under cap = 0.06, old_entry (0.01) + the two preserved exit-3 reservations (0.04) = 0.05
+    // are counted once, allowing 1 Saltworks 0.01 call -> 0.06 total, and refusing a subsequent call!
     set_file_writable(&calls_path)?;
     let mig_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
-        "Saltworks delivers once under 0.02 cap",
+        "Saltworks delivers once under 0.06 cap",
         "google/gemini-2.5-pro-06-05",
         Some(0.01),
     ))]);
@@ -4903,7 +4910,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
             salt_seats.clone(),
             Some(wrapper.clone()),
             true,
-            Some(0.02),
+            Some(0.06),
         ),
         &mig_tx,
         None,
@@ -4921,7 +4928,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
             salt_seats,
             None,
             true,
-            Some(0.02),
+            Some(0.06),
         ),
         &cap_tx,
         None,
@@ -5137,6 +5144,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
             latency_ms: 12,
             outcome: "OK".to_owned(),
             error: None,
+            reservation_id: None,
         };
         seeded_pending.push_str(&serde_json::to_string(&entry)?);
         seeded_pending.push('\n');
@@ -5204,7 +5212,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
         n2_stderr.len()
     );
     assert!(
-        n2_stderr.starts_with("error: unrecorded charge 0.660000 credits"),
+        n2_stderr.starts_with("error: post-call charge 0.660000 credits"),
         "expected total 0.660000 first, got head: {}",
         &n2_stderr[..n2_stderr.len().min(80)]
     );
@@ -5397,15 +5405,17 @@ fn b1_turn_lock_identity_normal_and_p3a_delete_while_live() -> TestResult {
     assert!(sum2.all_clean());
     assert!(!is_os_lock_held(&normal_lock));
 
-    // 2. P3a reproducer (in-process deterministic):
+    // 2. P3a reproducer (in-process deterministic, cap = 0.02 headroom so Run B can deliver):
     //    Holder A is running (Attempt 1 returns HTTP 500 with cost 0.01, which would normally
     //    trigger Attempt 2 `harness` retry). While Holder A holds `relay/turn.lock`:
     //    - `fs::remove_file(relay/turn.lock)` deletes the lock file;
-    //    - Second run (Run B) starts and takes the lock on a fresh `relay/turn.lock` at cap 0.02;
+    //    - Second run (Run B) starts and takes the lock on a fresh `relay/turn.lock` at cap 0.02
+    //      (chosen to fit Holder A's persisted 0.01 reservation plus Run B's 0.01 call; tight
+    //      cap = 0.01 is tested separately in `b1_fix6_persisted_reservation_p3a_tight_cap_and_crash_reconcile`);
     //    - Holder A finishes recording Attempt 1's 0.01 spend, detects the file-identity mismatch
     //      before its next call (`try_reserve` -> `LockCompromised`), makes 0 calls after deletion,
     //      and exits with `RelayError::TurnLocked`;
-    //    - At most one run (Run B) makes transport calls after the deletion, and cap 0.02 is never passed!
+    //    - Run B makes 1 call, Holder A makes 0 calls after deletion, and total charged is 0.02.
     let p3a_game = tmp.path().join(format!("b1_p3a_retry_{B1_KEY}"));
     write_to_seat(&p3a_game, "01", "talk", "Saltworks", "P3A_HOLDER_A")?;
     write_to_seat(&p3a_game, "01", "act", "Saltworks", "P3A_RUNNER_B")?;
@@ -5604,10 +5614,12 @@ fn b1_turn_lock_identity_normal_and_p3a_delete_while_live() -> TestResult {
         SeatOutcome::CapReached { .. }
     ));
 
-    // 4. Real OS subprocess P3a reproducer:
+    // 4. Real OS subprocess P3a reproducer (at cap 0.02 so Process C has headroom to deliver
+    //    alongside Process A's 0.01 in-flight reservation; tight cap 0.01 is tested below in
+    //    `b1_fix6_persisted_reservation_p3a_tight_cap_and_crash_reconcile`):
     //    Process A holds `relay/turn.lock` -> Process B gets exit 4 -> delete `relay/turn.lock` ->
     //    Process C starts on fresh `relay/turn.lock` (exit 0) -> Process A finishes recording 0.01
-    //    spend and exits 4 (`TurnLocked`), cap 0.02 never passed!
+    //    spend and exits 4 (`TurnLocked`), total charged <= 0.02.
     let proc_game = tmp.path().join(format!("b1_proc_p3a_{B1_KEY}"));
     write_to_seat(&proc_game, "01", "talk", "Saltworks", "PROC_SLOW_A")?;
     write_to_seat(&proc_game, "01", "act", "Saltworks", "PROC_FAST_C")?;
@@ -6029,6 +6041,2744 @@ fn c4_nonexistent_or_file_game_dir_refused_before_creating_relay_dir() -> TestRe
         "C4 file game_dir",
     );
     assert_eq!(tx.call_count(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn b1_fix6_persisted_reservation_p3a_tight_cap_and_crash_reconcile() -> TestResult {
+    struct HoldCallTransport {
+        entered: (Mutex<bool>, Condvar),
+        release: (Mutex<bool>, Condvar),
+        calls: AtomicUsize,
+        status: u16,
+        body: String,
+    }
+
+    impl HoldCallTransport {
+        fn new(status: u16, body: String) -> Self {
+            Self {
+                entered: (Mutex::new(false), Condvar::new()),
+                release: (Mutex::new(false), Condvar::new()),
+                calls: AtomicUsize::new(0),
+                status,
+                body,
+            }
+        }
+
+        fn wait_entered(&self) -> Result<(), &'static str> {
+            let (lock, cvar) = &self.entered;
+            let mut started = lock.lock().map_err(|_| "entered poisoned")?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !*started {
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err("timed out waiting for HoldCallTransport entry");
+                }
+                let (next, _) = cvar
+                    .wait_timeout(started, deadline - now)
+                    .map_err(|_| "entered wait poisoned")?;
+                started = next;
+            }
+            Ok(())
+        }
+
+        fn release_now(&self) {
+            let (lock, cvar) = &self.release;
+            if let Ok(mut go) = lock.lock() {
+                *go = true;
+                cvar.notify_all();
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Transport for HoldCallTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+            if idx == 0 {
+                let (e_lock, e_cvar) = &self.entered;
+                if let Ok(mut s) = e_lock.lock() {
+                    *s = true;
+                    e_cvar.notify_all();
+                }
+                let (r_lock, r_cvar) = &self.release;
+                if let Ok(mut go) = r_lock.lock() {
+                    while !*go {
+                        match r_cvar.wait_timeout(go, Duration::from_secs(5)) {
+                            Ok((next, res)) => {
+                                go = next;
+                                if res.timed_out() {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Ok(RawHttpResponse {
+                    status: self.status,
+                    body: self.body.clone(),
+                })
+            } else {
+                Ok(ok_completion_json(
+                    "Unexpected retry after lock loss",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                ))
+            }
+        }
+    }
+
+    const FIX6_KEY: &str = "PlainFix6SecretKey_PersistResv987654";
+    let redaction_key = ApiKey::from_env_reader(|_| Some(FIX6_KEY.to_owned()))?;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let one_seat_json = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-pro-06-05",
+            "temperature": 0.2,
+            "max_output_tokens": 128,
+            "timeout_secs": 8.0,
+            "max_cost_per_call": 0.01
+        }]
+    })
+    .to_string();
+    let one_seat = SeatFile::from_json_str(&one_seat_json, None)?;
+    let seats_path = tmp.path().join("fix6_one_seat.json");
+    fs::write(&seats_path, &one_seat_json)?;
+
+    let two_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // 1. Normal path: strictly ONE line per call in relay/calls.jsonl, NO leftover RESERVED lines,
+    //    and NO leftover calls.reserved.jsonl or calls.pending.jsonl files.
+    let normal_game = tmp.path().join("fix6_normal_clean");
+    write_to_seat(&normal_game, "01", "talk", "Saltworks", "NORM_S_TALK")?;
+    write_to_seat(&normal_game, "01", "talk", "Weavers", "NORM_W_TALK")?;
+    write_to_seat(&normal_game, "01", "act", "Saltworks", "NORM_S_ACT")?;
+    write_to_seat(&normal_game, "01", "act", "Weavers", "NORM_W_ACT")?;
+
+    let norm_tx1 = ScriptedTransport::new(vec![
+        ScriptStep::Respond(ok_completion_json(
+            "Saltworks talk",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.007),
+        )),
+        ScriptStep::Respond(ok_completion_json(
+            "Weavers talk",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.008),
+        )),
+    ]);
+    let norm_sum1 = run_turn(
+        &TurnConfig::new(
+            normal_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            two_seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.05),
+        ),
+        &norm_tx1,
+        Some(&redaction_key),
+    )?;
+    assert!(norm_sum1.all_clean());
+
+    let norm_tx2 = ScriptedTransport::new(vec![
+        ScriptStep::Respond(ok_completion_json(
+            "Saltworks act",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.006),
+        )),
+        ScriptStep::Respond(ok_completion_json(
+            "Weavers act",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.009),
+        )),
+    ]);
+    let norm_sum2 = run_turn(
+        &TurnConfig::new(
+            normal_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            two_seats,
+            None,
+            true,
+            Some(0.05),
+        ),
+        &norm_tx2,
+        Some(&redaction_key),
+    )?;
+    assert!(norm_sum2.all_clean());
+
+    let norm_entries = read_calls_log(&normal_game)?;
+    assert_eq!(
+        norm_entries.len(),
+        4,
+        "normal path must record strictly 1 line per call (4 calls -> 4 lines)"
+    );
+    assert!(
+        norm_entries.iter().all(|e| e.outcome == "OK"),
+        "normal path must leave 0 RESERVED lines in calls.jsonl, got: {norm_entries:?}"
+    );
+    assert!(
+        !normal_game
+            .join("relay")
+            .join("calls.reserved.jsonl")
+            .exists(),
+        "calls.reserved.jsonl must be removed after turn finishes"
+    );
+    assert!(
+        !normal_game
+            .join("relay")
+            .join("calls.pending.jsonl")
+            .exists(),
+        "calls.pending.jsonl must not exist on normal path"
+    );
+    let normal_sum: f64 = norm_entries.iter().map(|e| e.charged_credits).sum();
+    assert!((normal_sum - 0.030).abs() < 1e-9);
+
+    // 2. Deterministic in-process P3a at tight cap = 0.01 across BOTH `delete` and `rename-over`,
+    //    and with Holder A returning BOTH HTTP 500 and HTTP 200:
+    //    Run C starts while Holder A is in flight, sees Holder A's persisted 0.01 reservation in
+    //    calls.reserved.jsonl, makes 0 transport calls (CapReached), and total charged <= 0.01!
+    let body_500 = json!({
+        "model": "google/gemini-2.5-pro-06-05",
+        "error": {"message": "upstream 500"},
+        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+    })
+    .to_string();
+    let body_200 = ok_completion_json(
+        "In-flight 200 reply",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    )
+    .body;
+
+    for (mode_idx, use_rename) in [false, true].into_iter().enumerate() {
+        for (status, body) in [(500_u16, body_500.clone()), (200_u16, body_200.clone())] {
+            let case_game = tmp
+                .path()
+                .join(format!("fix6_inproc_{mode_idx}_{status}_{FIX6_KEY}"));
+            write_to_seat(&case_game, "01", "talk", "Saltworks", "INPROC_A")?;
+            write_to_seat(&case_game, "01", "act", "Saltworks", "INPROC_C")?;
+            let lock_path = case_game.join("relay").join("turn.lock");
+            let reserved_path = case_game.join("relay").join("calls.reserved.jsonl");
+
+            let tx_a = HoldCallTransport::new(status, body);
+            let tx_c = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+                "Must never be called at tight cap 0.01",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))]);
+
+            thread::scope(|s| -> TestResult {
+                let ha = s.spawn(|| {
+                    run_turn(
+                        &TurnConfig::new(
+                            case_game.clone(),
+                            "01".to_owned(),
+                            Round::Talk,
+                            one_seat.clone(),
+                            Some(wrapper.clone()),
+                            true,
+                            Some(0.01),
+                        ),
+                        &tx_a,
+                        Some(&redaction_key),
+                    )
+                });
+                tx_a.wait_entered()?;
+                assert!(
+                    reserved_path.is_file(),
+                    "reservation must be persisted on disk BEFORE transport call returns"
+                );
+
+                if use_rename {
+                    let replacement = case_game.join("relay").join("turn.lock.replacement");
+                    fs::write(&replacement, "replaced\n")?;
+                    fs::rename(&replacement, &lock_path)?;
+                } else {
+                    fs::remove_file(&lock_path)?;
+                }
+
+                // Run C starts while Holder A is STILL inside transport at tight cap = 0.01:
+                let c_sum = run_turn(
+                    &TurnConfig::new(
+                        case_game.clone(),
+                        "01".to_owned(),
+                        Round::Act,
+                        one_seat.clone(),
+                        Some(wrapper.clone()),
+                        true,
+                        Some(0.01),
+                    ),
+                    &tx_c,
+                    Some(&redaction_key),
+                )?;
+                assert_eq!(
+                    tx_c.call_count(),
+                    0,
+                    "Run C must see Holder A's persisted 0.01 reservation and make 0 calls"
+                );
+                assert!(matches!(
+                    c_sum.reports[0].outcome,
+                    SeatOutcome::CapReached { .. }
+                ));
+
+                tx_a.release_now();
+                let a_err = ha
+                    .join()
+                    .map_err(|_| "ha panicked")?
+                    .err()
+                    .ok_or("Holder A must return TurnLocked")?;
+                assert!(matches!(a_err, RelayError::TurnLocked { .. }));
+                assert_eq!(
+                    tx_a.call_count(),
+                    1,
+                    "Holder A must make 0 calls after lock change"
+                );
+                Ok(())
+            })?;
+
+            assert!(!reserved_path.exists());
+            assert!(
+                !case_game
+                    .join("from-seat")
+                    .join("day-01-talk-Saltworks.md")
+                    .exists()
+            );
+            assert!(
+                !case_game
+                    .join("from-seat")
+                    .join("day-01-act-Saltworks.md")
+                    .exists()
+            );
+            let entries = read_calls_log(&case_game)?;
+            assert!(
+                entries.iter().all(|e| e.outcome != "RESERVED"),
+                "no leftover RESERVED lines in calls.jsonl"
+            );
+            let total_charged: f64 = entries.iter().map(|e| e.charged_credits).sum();
+            assert!(
+                total_charged <= 0.01 + 1e-12,
+                "in-process P3a (rename={use_rename}, status={status}): cap 0.01 passed ({total_charged})"
+            );
+            assert!((total_charged - 0.01).abs() < 1e-9);
+        }
+    }
+
+    // 3. Reviewer's real-process P3a at tight cap = 0.01 (BOTH `delete` and `rename-over`,
+    //    with Process A returning BOTH 500 and 200, 2 iterations each = 8 real subprocess runs):
+    //    Total charged <= 0.01 in EVERY run, Process C makes 0 calls (CAP_REACHED, exit 2),
+    //    Process B before delete exits 4, Process A exits 4 with 0 calls after change.
+    let proc_mock = tmp.path().join("fix6_proc_mock");
+    fs::create_dir_all(&proc_mock)?;
+    fs::write(
+        proc_mock.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "PROC_A_500",
+                    "sleep_ms": 550,
+                    "status": 500,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "error": {"message": "upstream 500"},
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "PROC_A_200",
+                    "sleep_ms": 550,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "Slow A 200"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "PROC_FAST_C",
+                    "sleep_ms": 0,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "Fast C should be blocked by cap"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "CRASH_HOLD_LONG",
+                    "sleep_ms": 25000,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "Never finishes before kill"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    for use_rename in [false, true] {
+        for (a_marker, status_tag) in [("PROC_A_500", 500_u16), ("PROC_A_200", 200_u16)] {
+            for iter in 0..2 {
+                let p_game = tmp.path().join(format!(
+                    "fix6_proc_p3a_ren{}_{status_tag}_{iter}_{FIX6_KEY}",
+                    u8::from(use_rename)
+                ));
+                write_to_seat(&p_game, "01", "talk", "Saltworks", a_marker)?;
+                write_to_seat(&p_game, "01", "act", "Saltworks", "PROC_FAST_C")?;
+                let p_lock = p_game.join("relay").join("turn.lock");
+                let p_resv = p_game.join("relay").join("calls.reserved.jsonl");
+
+                let mut proc_a = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+                    .args([
+                        "turn",
+                        "--game-dir",
+                        p_game.to_str().ok_or("utf8")?,
+                        "--day",
+                        "01",
+                        "--round",
+                        "talk",
+                        "--seats",
+                        seats_path.to_str().ok_or("utf8")?,
+                        "--wrapper",
+                        wrapper.to_str().ok_or("utf8")?,
+                        "--mock-dir",
+                        proc_mock.to_str().ok_or("utf8")?,
+                        "--cap-credits",
+                        "0.01",
+                    ])
+                    .env("OPENROUTER_API_KEY", FIX6_KEY)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()?;
+
+                let wait_t = Instant::now();
+                while !(is_os_lock_held(&p_lock) && p_resv.is_file()) {
+                    if wait_t.elapsed() > Duration::from_secs(5) {
+                        let _ = proc_a.kill();
+                        let _ = proc_a.wait();
+                        return Err(
+                            "timed out waiting for proc_a to lock turn.lock and persist reservation"
+                                .into(),
+                        );
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+
+                // Process B before delete/rename must exit 4 (TurnLocked).
+                let proc_b = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+                    .args([
+                        "turn",
+                        "--game-dir",
+                        p_game.to_str().ok_or("utf8")?,
+                        "--day",
+                        "01",
+                        "--round",
+                        "act",
+                        "--seats",
+                        seats_path.to_str().ok_or("utf8")?,
+                        "--wrapper",
+                        wrapper.to_str().ok_or("utf8")?,
+                        "--mock-dir",
+                        proc_mock.to_str().ok_or("utf8")?,
+                        "--cap-credits",
+                        "0.01",
+                    ])
+                    .env("OPENROUTER_API_KEY", FIX6_KEY)
+                    .stdin(Stdio::null())
+                    .output()?;
+                assert_eq!(proc_b.status.code(), Some(4));
+
+                assert!(
+                    proc_a.try_wait()?.is_none(),
+                    "proc_a must still be inside its in-flight call at the moment of lock change"
+                );
+                if use_rename {
+                    let rep = p_game.join("relay").join("turn.lock.rep");
+                    fs::write(&rep, "rep\n")?;
+                    fs::rename(&rep, &p_lock)?;
+                } else {
+                    fs::remove_file(&p_lock)?;
+                }
+
+                // Process C starts DURING Process A's in-flight call at tight cap = 0.01:
+                // Must see Process A's persisted 0.01 reservation, refuse with CAP_REACHED (exit 2),
+                // and make 0 transport calls!
+                let proc_c = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+                    .args([
+                        "turn",
+                        "--game-dir",
+                        p_game.to_str().ok_or("utf8")?,
+                        "--day",
+                        "01",
+                        "--round",
+                        "act",
+                        "--seats",
+                        seats_path.to_str().ok_or("utf8")?,
+                        "--wrapper",
+                        wrapper.to_str().ok_or("utf8")?,
+                        "--mock-dir",
+                        proc_mock.to_str().ok_or("utf8")?,
+                        "--cap-credits",
+                        "0.01",
+                    ])
+                    .env("OPENROUTER_API_KEY", FIX6_KEY)
+                    .stdin(Stdio::null())
+                    .output()?;
+                assert_eq!(
+                    proc_c.status.code(),
+                    Some(2),
+                    "proc_c must refuse with CAP_REACHED (exit 2) at cap 0.01; stdout={} stderr={}",
+                    String::from_utf8_lossy(&proc_c.stdout),
+                    String::from_utf8_lossy(&proc_c.stderr)
+                );
+                let proc_c_stdout = String::from_utf8_lossy(&proc_c.stdout);
+                assert!(
+                    proc_c_stdout.contains("outcome=CAP_REACHED"),
+                    "expected CAP_REACHED from proc_c, got: {proc_c_stdout}"
+                );
+                assert!(
+                    !p_game
+                        .join("from-seat")
+                        .join("day-01-act-Saltworks.md")
+                        .exists(),
+                    "proc_c must not deliver a reply when blocked by persisted reservation"
+                );
+
+                let proc_a_out = proc_a.wait_with_output()?;
+                assert_eq!(
+                    proc_a_out.status.code(),
+                    Some(4),
+                    "proc_a must exit 4 on compromised turn.lock; stderr={}",
+                    String::from_utf8_lossy(&proc_a_out.stderr)
+                );
+                assert!(
+                    !p_game
+                        .join("from-seat")
+                        .join("day-01-talk-Saltworks.md")
+                        .exists(),
+                    "compromised proc_a must not write from-seat reply"
+                );
+                assert!(
+                    !p_resv.exists(),
+                    "calls.reserved.jsonl must be cleaned up once proc_a records its finished call"
+                );
+
+                for surface in [
+                    String::from_utf8_lossy(&proc_b.stderr),
+                    String::from_utf8_lossy(&proc_c.stdout),
+                    String::from_utf8_lossy(&proc_c.stderr),
+                    String::from_utf8_lossy(&proc_a_out.stdout),
+                    String::from_utf8_lossy(&proc_a_out.stderr),
+                ] {
+                    assert_no_8char_key_piece(&surface, FIX6_KEY, "real-process P3a output");
+                }
+
+                let entries = read_calls_log(&p_game)?;
+                assert_eq!(
+                    entries.len(),
+                    2,
+                    "expected 1 CAP_REACHED (0.0) from C + 1 finished call (0.01) from A, got: {entries:?}"
+                );
+                assert!(entries.iter().all(|e| e.outcome != "RESERVED"));
+                let charged: f64 = entries.iter().map(|e| e.charged_credits).sum();
+                assert!(
+                    charged <= 0.01 + 1e-12,
+                    "real-process P3a (rename={use_rename}, status={status_tag}, iter={iter}): total charged {charged} passed cap 0.01"
+                );
+                assert!((charged - 0.01).abs() < 1e-9);
+            }
+        }
+    }
+
+    // 4. Hard crash (`child.kill()`) between reserve and record:
+    //    Leaves a counted reservation (`outcome: "RESERVED"`, `charged_credits = max_cost_per_call = 0.01`);
+    //    subsequent re-runs reconcile it once into `calls.jsonl` and reach the exact same charged sum!
+    let crash_game = tmp.path().join("fix6_crash_between_reserve_and_record");
+    write_to_seat(&crash_game, "01", "talk", "Saltworks", "CRASH_HOLD_LONG")?;
+    write_to_seat(&crash_game, "01", "act", "Saltworks", "AFTER_CRASH_ACT")?;
+    let crash_resv = crash_game.join("relay").join("calls.reserved.jsonl");
+    let crash_calls = crash_game.join("relay").join("calls.jsonl");
+
+    let mut crash_child = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            crash_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            proc_mock.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.02",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let poll_crash = Instant::now();
+    while !crash_resv.is_file() {
+        if poll_crash.elapsed() > Duration::from_secs(5) {
+            let _ = crash_child.kill();
+            let _ = crash_child.wait();
+            return Err("timed out waiting for crash_child to write calls.reserved.jsonl".into());
+        }
+        thread::sleep(Duration::from_millis(15));
+    }
+    assert!(
+        crash_child.try_wait()?.is_none(),
+        "crash_child must still be in flight when killed"
+    );
+    crash_child.kill()?;
+    let _ = crash_child.wait()?;
+    assert!(
+        crash_resv.is_file(),
+        "hard kill between reserve and record must leave calls.reserved.jsonl on disk"
+    );
+
+    // First check read-only reconciliation: when calls.jsonl is read-only, the orphaned reservation
+    // stays counted at 0.01 in calls.reserved.jsonl without being lost!
+    fs::write(&crash_calls, "")?;
+    set_file_readonly(&crash_calls)?;
+    let ro_check_tx = ScriptedTransport::new(vec![]);
+    let ro_err_or_sum = run_turn(
+        &TurnConfig::new(
+            crash_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &ro_check_tx,
+        None,
+    )?;
+    assert_eq!(
+        ro_check_tx.call_count(),
+        0,
+        "read-only ledger must still count crashed reservation at 0.01"
+    );
+    assert!(matches!(
+        ro_err_or_sum.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    assert!(
+        crash_resv.is_file(),
+        "calls.reserved.jsonl must stay on disk until calls.jsonl is writable"
+    );
+    set_file_writable(&crash_calls)?;
+
+    // Now calls.jsonl is writable: Run 2 at cap = 0.01 migrates the orphaned RESERVED entry (0.01)
+    // once into calls.jsonl, removes calls.reserved.jsonl, and refuses with CapReached (0 calls).
+    let rerun1_tx = ScriptedTransport::new(vec![]);
+    let rerun1_sum = run_turn(
+        &TurnConfig::new(
+            crash_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &rerun1_tx,
+        None,
+    )?;
+    assert_eq!(rerun1_tx.call_count(), 0);
+    assert!(matches!(
+        rerun1_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    assert!(
+        !crash_resv.exists(),
+        "reconciled calls.reserved.jsonl must be removed once migrated to calls.jsonl"
+    );
+    let after_rerun1 = read_calls_log(&crash_game)?;
+    assert_eq!(after_rerun1.len(), 2);
+    assert_eq!(after_rerun1[0].outcome, "RESERVED");
+    assert!((after_rerun1[0].charged_credits - 0.01).abs() < 1e-9);
+    let sum_rerun1: f64 = after_rerun1.iter().map(|e| e.charged_credits).sum();
+    assert!((sum_rerun1 - 0.01).abs() < 1e-9);
+
+    // Re-run 3 at cap = 0.01 reaches the EXACT same charged sum (0.01, no double count!).
+    let rerun2_tx = ScriptedTransport::new(vec![]);
+    let rerun2_sum = run_turn(
+        &TurnConfig::new(
+            crash_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &rerun2_tx,
+        None,
+    )?;
+    assert_eq!(rerun2_tx.call_count(), 0);
+    assert!(matches!(
+        rerun2_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let sum_rerun2: f64 = read_calls_log(&crash_game)?
+        .iter()
+        .map(|e| e.charged_credits)
+        .sum();
+    assert!(
+        (sum_rerun2 - sum_rerun1).abs() < 1e-12,
+        "re-runs must reach the exact same charged sum (got {sum_rerun2} vs {sum_rerun1})"
+    );
+
+    // Re-run 4 at cap = 0.02 allows 1 more 0.01 call (0.01 orphaned RESERVED + 0.01 OK == 0.02),
+    // and Re-run 5 at cap = 0.02 refuses (CapReached, charged sum stays 0.02)!
+    let rerun3_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Fits alongside reconciled 0.01 reservation under cap 0.02",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let rerun3_sum = run_turn(
+        &TurnConfig::new(
+            crash_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &rerun3_tx,
+        None,
+    )?;
+    assert!(rerun3_sum.all_clean());
+    assert_eq!(rerun3_tx.call_count(), 1);
+    let sum_after_ok: f64 = read_calls_log(&crash_game)?
+        .iter()
+        .map(|e| e.charged_credits)
+        .sum();
+    assert!((sum_after_ok - 0.02).abs() < 1e-9);
+
+    write_to_seat(&crash_game, "02", "talk", "Saltworks", "DAY2_CHECK")?;
+    let rerun4_tx = ScriptedTransport::new(vec![]);
+    let rerun4_sum = run_turn(
+        &TurnConfig::new(
+            crash_game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.02),
+        ),
+        &rerun4_tx,
+        None,
+    )?;
+    assert_eq!(rerun4_tx.call_count(), 0);
+    assert!(matches!(
+        rerun4_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+
+    // 5. Superseded crash case (died right AFTER appending final OK to calls.jsonl, BEFORE removing
+    //    calls.reserved.jsonl) + corrupt/unwritable calls.reserved.jsonl fail-closed checks:
+    let sup_game = tmp.path().join(format!("fix6_superseded_{FIX6_KEY}"));
+    write_to_seat(&sup_game, "01", "talk", "Saltworks", "SUP_FIRST")?;
+    write_to_seat(&sup_game, "01", "act", "Saltworks", "SUP_SECOND")?;
+    let sup_tx1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Delivered before simulated cleanup crash",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let _ = run_turn(
+        &TurnConfig::new(
+            sup_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &sup_tx1,
+        None,
+    )?;
+    let landed_ok = read_calls_log(&sup_game)?[0].clone();
+    let same_resv_id = landed_ok
+        .reservation_id
+        .clone()
+        .ok_or("expected landed_ok to carry its reservation_id")?;
+    // Plant a leftover dead ActiveReservation carrying `landed_ok`'s EXACT `reservation_id`
+    // (simulating termination right after appending `landed_ok` and before releasing `calls.reserved.jsonl`):
+    let stale_resv_line = json!({
+        "reservation_id": same_resv_id,
+        "run_id": "99999999-0-1",
+        "entry": {
+            "time_utc": landed_ok.time_utc,
+            "day": landed_ok.day,
+            "round": "talk",
+            "guild": landed_ok.guild,
+            "attempt": landed_ok.attempt,
+            "trigger": landed_ok.trigger,
+            "model_requested": landed_ok.model_requested,
+            "model_returned": null,
+            "request_body_sha256": landed_ok.request_body_sha256,
+            "reply_sha256": null,
+            "prompt_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "cost": null,
+            "charged_credits": 0.01,
+            "latency_ms": 0,
+            "outcome": "RESERVED",
+            "error": "orphaned pre-call reservation from interrupted run",
+            "reservation_id": same_resv_id
+        }
+    })
+    .to_string();
+    let sup_resv_path = sup_game.join("relay").join("calls.reserved.jsonl");
+    fs::write(&sup_resv_path, format!("{stale_resv_line}\n"))?;
+
+    // Under cap = 0.02, `landed_ok` (0.01) supersedes `stale_resv_line` (no double count!),
+    // so Saltworks act (0.01) succeeds cleanly and total charged is 0.02!
+    let sup_tx2 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Second call succeeds because superseded reservation was not double-counted",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let sup_sum2 = run_turn(
+        &TurnConfig::new(
+            sup_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.02),
+        ),
+        &sup_tx2,
+        Some(&redaction_key),
+    )?;
+    assert!(sup_sum2.all_clean());
+    assert!(!sup_resv_path.exists());
+    let sup_entries = read_calls_log(&sup_game)?;
+    assert_eq!(sup_entries.len(), 2);
+    assert!(sup_entries.iter().all(|e| e.outcome == "OK"));
+
+    // Corrupt calls.reserved.jsonl fails closed with redacted CorruptLog (0 calls):
+    write_to_seat(&sup_game, "02", "talk", "Saltworks", "CORRUPT_RESV")?;
+    fs::write(&sup_resv_path, "{bad json\n")?;
+    let corrupt_tx = ScriptedTransport::new(vec![]);
+    let corrupt_err = run_turn(
+        &TurnConfig::new(
+            sup_game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            None,
+            true,
+            Some(1.0),
+        ),
+        &corrupt_tx,
+        Some(&redaction_key),
+    )
+    .err()
+    .ok_or("corrupt calls.reserved.jsonl must fail closed")?;
+    assert!(matches!(corrupt_err, RelayError::CorruptLog(_)));
+    assert_no_8char_key_piece(
+        &format!("{corrupt_err}\n{corrupt_err:?}"),
+        FIX6_KEY,
+        "corrupt calls.reserved.jsonl error",
+    );
+    assert_eq!(corrupt_tx.call_count(), 0);
+    fs::remove_file(&sup_resv_path)?;
+
+    // Unreadable directory at calls.reserved.jsonl fails closed in CallLedger::open (0 calls):
+    fs::create_dir_all(&sup_resv_path)?;
+    let blocked_resv_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Must not be called when reservation cannot be persisted",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let dir_err = run_turn(
+        &TurnConfig::new(
+            sup_game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            None,
+            true,
+            Some(1.0),
+        ),
+        &blocked_resv_tx,
+        Some(&redaction_key),
+    )
+    .err()
+    .ok_or("directory at calls.reserved.jsonl must fail closed")?;
+    assert!(matches!(dir_err, RelayError::Io(_)));
+    assert_eq!(blocked_resv_tx.call_count(), 0);
+    assert_no_8char_key_piece(
+        &format!("{dir_err}\n{dir_err:?}"),
+        FIX6_KEY,
+        "directory calls.reserved.jsonl Io error",
+    );
+    fs::remove_dir_all(&sup_resv_path)?;
+
+    // Read-only calls.reserved.jsonl refuses inside try_reserve BEFORE sending transport call (0 calls):
+    fs::write(&sup_resv_path, "")?;
+    set_file_readonly(&sup_resv_path)?;
+    let blocked_sum = run_turn(
+        &TurnConfig::new(
+            sup_game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat,
+            None,
+            true,
+            Some(1.0),
+        ),
+        &blocked_resv_tx,
+        Some(&redaction_key),
+    )?;
+    assert_eq!(
+        blocked_resv_tx.call_count(),
+        0,
+        "must never send a call if pre-send reservation cannot be persisted"
+    );
+    assert!(matches!(
+        blocked_sum.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    assert_no_8char_key_piece(
+        &format!("{blocked_sum:?}"),
+        FIX6_KEY,
+        "blocked reservation SeatError",
+    );
+    set_file_writable(&sup_resv_path)?;
+    fs::remove_file(&sup_resv_path)?;
+
+    Ok(())
+}
+
+#[test]
+fn cd_concurrent_side_file_writers_lose_zero_lines() -> TestResult {
+    struct SyncReleaseTransport {
+        arrived: (Mutex<usize>, Condvar),
+        target_arrivals: usize,
+        release: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl SyncReleaseTransport {
+        fn new(target_arrivals: usize, release: Arc<(Mutex<bool>, Condvar)>) -> Self {
+            Self {
+                arrived: (Mutex::new(0), Condvar::new()),
+                target_arrivals,
+                release,
+            }
+        }
+
+        fn wait_all_arrived(&self) -> Result<(), &'static str> {
+            let (lock, cvar) = &self.arrived;
+            let mut count = lock.lock().map_err(|_| "arrived poisoned")?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while *count < self.target_arrivals {
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err("timed out waiting for SyncReleaseTransport arrivals");
+                }
+                let (next, _) = cvar
+                    .wait_timeout(count, deadline - now)
+                    .map_err(|_| "arrived wait poisoned")?;
+                count = next;
+            }
+            Ok(())
+        }
+    }
+
+    impl Transport for SyncReleaseTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            {
+                let (a_lock, a_cvar) = &self.arrived;
+                if let Ok(mut n) = a_lock.lock() {
+                    *n += 1;
+                    a_cvar.notify_all();
+                }
+            }
+            let (r_lock, r_cvar) = &*self.release;
+            if let Ok(mut go) = r_lock.lock() {
+                while !*go {
+                    match r_cvar.wait_timeout(go, Duration::from_secs(5)) {
+                        Ok((next, res)) => {
+                            go = next;
+                            if res.timed_out() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+            Ok(ok_completion_json(
+                "Concurrent side-file reply",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let seats_a = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let seats_b = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Smiths",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Masons",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // Across 20 iterations, put Holder A (2 seats, compromised after turn.lock delete) and
+    // Run B (2 seats, fresh turn.lock) in flight simultaneously on a read-only `calls.jsonl`,
+    // then release all 4 calls at the exact same instant so both runs rewrite `calls.pending.jsonl`
+    // concurrently. `relay/calls.side.lock` must serialize every read-merge-rename so 0 lines are lost!
+    for iter in 0..20 {
+        let game = tmp.path().join(format!("cd_race_{iter}"));
+        write_to_seat(&game, "01", "talk", "Saltworks", "CD_A_SALT")?;
+        write_to_seat(&game, "01", "talk", "Weavers", "CD_A_WEAV")?;
+        write_to_seat(&game, "01", "act", "Smiths", "CD_B_SMITHS")?;
+        write_to_seat(&game, "01", "act", "Masons", "CD_B_MASONS")?;
+        fs::create_dir_all(game.join("relay"))?;
+        let calls_path = game.join("relay").join("calls.jsonl");
+        let pending_path = game.join("relay").join("calls.pending.jsonl");
+        let lock_path = game.join("relay").join("turn.lock");
+        fs::write(&calls_path, "")?;
+        set_file_readonly(&calls_path)?;
+
+        let shared_release = Arc::new((Mutex::new(false), Condvar::new()));
+        let tx_a = SyncReleaseTransport::new(2, Arc::clone(&shared_release));
+        let tx_b = SyncReleaseTransport::new(2, Arc::clone(&shared_release));
+
+        thread::scope(|s| -> TestResult {
+            let ha = s.spawn(|| {
+                run_turn(
+                    &TurnConfig::new(
+                        game.clone(),
+                        "01".to_owned(),
+                        Round::Talk,
+                        seats_a.clone(),
+                        Some(wrapper.clone()),
+                        true,
+                        Some(1.0),
+                    ),
+                    &tx_a,
+                    None,
+                )
+            });
+            tx_a.wait_all_arrived()?;
+
+            // Delete turn.lock while Holder A's 2 seats are in flight, then start Run B's 2 seats!
+            fs::remove_file(&lock_path)?;
+
+            let hb = s.spawn(|| {
+                run_turn(
+                    &TurnConfig::new(
+                        game.clone(),
+                        "01".to_owned(),
+                        Round::Act,
+                        seats_b.clone(),
+                        Some(wrapper.clone()),
+                        true,
+                        Some(1.0),
+                    ),
+                    &tx_b,
+                    None,
+                )
+            });
+            tx_b.wait_all_arrived()?;
+
+            // Release all 4 seats across BOTH runs simultaneously to hammer calls.pending.jsonl!
+            {
+                let (r_lock, r_cvar) = &*shared_release;
+                let mut go = r_lock.lock().map_err(|_| "release poisoned")?;
+                *go = true;
+                r_cvar.notify_all();
+            }
+
+            let res_a = ha.join().map_err(|_| "ha panicked")?;
+            let res_b = hb.join().map_err(|_| "hb panicked")?;
+            assert!(
+                matches!(res_a, Err(RelayError::TurnLocked { .. })),
+                "iter {iter}: Holder A must exit TurnLocked, got: {res_a:?}"
+            );
+            let sum_b = res_b?;
+            assert_eq!(sum_b.reports.len(), 2);
+            Ok(())
+        })?;
+
+        // Note: within each 2-seat run on a read-only calls.jsonl, whichever seat finishes first
+        // records 1 line and sets `ledger_write_failed_in_turn`, and if the sibling seat was ALREADY
+        // in flight (as forced by wait_all_arrived!), BOTH in-flight seats finish and record!
+        // So Holder A writes 2 lines (Saltworks + Weavers) and Run B writes 2 lines (Smiths + Masons) = 4 lines!
+        let pending_raw = fs::read_to_string(&pending_path)?;
+        let pending_entries: Vec<CallLogEntry> = pending_raw
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            pending_entries.len(),
+            4,
+            "iter {iter}: expected all 4 concurrent side-file lines preserved (0 lost), got {}: {pending_entries:?}",
+            pending_entries.len()
+        );
+        for expected_guild in ["Saltworks", "Weavers", "Smiths", "Masons"] {
+            assert!(
+                pending_entries.iter().any(|e| e.guild == expected_guild),
+                "iter {iter}: lost {expected_guild} line in concurrent calls.pending.jsonl update"
+            );
+        }
+
+        // Restore writable calls.jsonl and verify migration moves all 4 lines once (0.04 total).
+        set_file_writable(&calls_path)?;
+        write_to_seat(&game, "02", "talk", "Saltworks", "CD_MIGRATE_CHECK")?;
+        let check_tx = ScriptedTransport::new(vec![]);
+        let check_sum = run_turn(
+            &TurnConfig::new(
+                game.clone(),
+                "02".to_owned(),
+                Round::Talk,
+                SeatFile::from_json_str(
+                    &json!({
+                        "seats": [{
+                            "guild": "Saltworks",
+                            "backend": "openrouter",
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "temperature": 0.2,
+                            "max_output_tokens": 128,
+                            "timeout_secs": 5.0,
+                            "max_cost_per_call": 0.01
+                        }]
+                    })
+                    .to_string(),
+                    None,
+                )?,
+                Some(wrapper.clone()),
+                true,
+                Some(0.04),
+            ),
+            &check_tx,
+            None,
+        )?;
+        assert_eq!(check_tx.call_count(), 0);
+        assert!(matches!(
+            check_sum.reports[0].outcome,
+            SeatOutcome::CapReached { .. }
+        ));
+        assert!(!pending_path.exists());
+        let migrated = read_calls_log(&game)?;
+        let migrated_sum: f64 = migrated.iter().map(|e| e.charged_credits).sum();
+        assert!((migrated_sum - 0.04).abs() < 1e-9);
+    }
+
+    Ok(())
+}
+
+fn count_resv_lock_files(game_dir: &Path) -> Result<usize, Box<dyn Error>> {
+    let relay_dir = game_dir.join("relay");
+    if !relay_dir.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    for item in fs::read_dir(&relay_dir)? {
+        let entry = item?;
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("calls.resv-")
+        {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[test]
+fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reservation() -> TestResult
+{
+    const FIX7_A1_KEY: &str = "PlainFix7A1SecretKey_ExactId987654";
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+
+    let seat_str = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-pro-06-05",
+            "temperature": 0.3,
+            "max_output_tokens": 64,
+            "timeout_secs": 10.0,
+            "max_cost_per_call": 0.01
+        }]
+    })
+    .to_string();
+    let one_seat = SeatFile::from_json_str(&seat_str, None)?;
+    let seats_path = tmp.path().join("fix7_a1_seats.json");
+    fs::write(&seats_path, &seat_str)?;
+
+    // 1. Legacy JSON lines without `reservation_id` still parse cleanly (`reservation_id: None`):
+    let legacy_line = json!({
+        "time_utc": "2026-11-15T00:00:00.000Z",
+        "day": "01",
+        "round": "talk",
+        "guild": "Saltworks",
+        "attempt": 1,
+        "trigger": "turn",
+        "model_requested": "google/gemini-2.5-pro-06-05",
+        "model_returned": "google/gemini-2.5-pro-06-05",
+        "request_body_sha256": "ab".repeat(32),
+        "reply_sha256": "cd".repeat(32),
+        "prompt_tokens": 5,
+        "completion_tokens": 5,
+        "total_tokens": 10,
+        "cost": 0.01,
+        "charged_credits": 0.01,
+        "latency_ms": 10,
+        "outcome": "OK"
+    })
+    .to_string();
+    let parsed_legacy: CallLogEntry = serde_json::from_str(&legacy_line)?;
+    assert_eq!(parsed_legacy.reservation_id, None);
+
+    // 2. Reviewer's `px_` sequence across 3 real-process iterations (cap = 0.02, read-only calls.jsonl):
+    //    (a) Run A starts `day 01 talk` for Saltworks and is hard-killed mid-call -> 1 reservation (0.01).
+    //    (b) Run B re-runs the SAME turn (`day 01 talk`, Saltworks, identical request body) -> counts A's 0.01
+    //        + B's 0.01 <= 0.02, sends 1 call, writes B's final OK to `calls.pending.jsonl`, leaves A's
+    //        reservation in `calls.reserved.jsonl`.
+    //    (c) Run C runs `day 01 act` at cap = 0.02 -> B's final line carries B's `reservation_id`, NOT A's,
+    //        so A's 0.01 orphan is NOT superseded! C sums 0.01 (B) + 0.01 (A) = 0.02, refuses pre-call (0 calls).
+    //    (d) Make `calls.jsonl` writable; Run D runs `day 01 act` at cap = 0.02 -> migrates B's OK (0.01) +
+    //        A's RESERVED (0.01) into `calls.jsonl`, refuses with CAP_REACHED (0 calls).
+    //        Final charged == 0.02 and true spend == 0.02 <= cap 0.02!
+    for iter in 0..3 {
+        let game = tmp.path().join(format!("px_iter_{iter}_{FIX7_A1_KEY}"));
+        write_to_seat(&game, "01", "talk", "Saltworks", "PROMPT-talk-Saltworks")?;
+        write_to_seat(&game, "01", "act", "Saltworks", "PROMPT-act-Saltworks")?;
+        fs::create_dir_all(game.join("relay"))?;
+        let calls_path = game.join("relay").join("calls.jsonl");
+        let pending_path = game.join("relay").join("calls.pending.jsonl");
+        let reserved_path = game.join("relay").join("calls.reserved.jsonl");
+        fs::write(&calls_path, "")?;
+        set_file_readonly(&calls_path)?;
+
+        let mock_dir = tmp.path().join(format!("px_mock_{iter}"));
+        fs::create_dir_all(&mock_dir)?;
+        fs::write(
+            mock_dir.join("responses.json"),
+            json!({
+                "rules": [
+                    {
+                        "when_contains": "PROMPT-talk-Saltworks",
+                        "sleep_ms": 8000,
+                        "status": 200,
+                        "response": {
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "choices": [{"message": {"content": "slow A"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                        }
+                    },
+                    {
+                        "when_contains": "PROMPT-act-Saltworks",
+                        "sleep_ms": 0,
+                        "status": 200,
+                        "response": {
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "choices": [{"message": {"content": "act reply"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        )?;
+
+        // (a) Spawn Run A and hard-kill while its call is in flight:
+        let mut proc_a = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.02",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_A1_KEY)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let wait_a = Instant::now();
+        while !reserved_path.is_file() {
+            if wait_a.elapsed() > Duration::from_secs(5) {
+                let _ = proc_a.kill();
+                let _ = proc_a.wait();
+                return Err("timed out waiting for proc_a reservation in px_ test".into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            proc_a.try_wait()?.is_none(),
+            "iter {iter}: proc_a must still be in flight when killed"
+        );
+        proc_a.kill()?;
+        let _ = proc_a.wait()?;
+        assert_eq!(
+            fs::read_to_string(&reserved_path)?
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count(),
+            1,
+            "iter {iter}: expected 1 crashed reservation in calls.reserved.jsonl"
+        );
+
+        // (b) Switch mock to fast and run B on the SAME seat & round (identical request body!):
+        fs::write(
+            mock_dir.join("responses.json"),
+            json!({
+                "rules": [
+                    {
+                        "when_contains": "PROMPT-talk-Saltworks",
+                        "sleep_ms": 0,
+                        "status": 200,
+                        "response": {
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "choices": [{"message": {"content": "fast B"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                        }
+                    },
+                    {
+                        "when_contains": "PROMPT-act-Saltworks",
+                        "sleep_ms": 0,
+                        "status": 200,
+                        "response": {
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "choices": [{"message": {"content": "act C must not run"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        )?;
+
+        let proc_b = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.02",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_A1_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(proc_b.status.code(), Some(2));
+        let pending_after_b: Vec<CallLogEntry> = fs::read_to_string(&pending_path)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            pending_after_b.len(),
+            1,
+            "iter {iter}: B must send 1 call (0.01 + A's 0.01 <= 0.02) and record to calls.pending.jsonl"
+        );
+        assert_eq!(pending_after_b[0].outcome, "OK");
+        assert!(pending_after_b[0].reservation_id.is_some());
+        assert_eq!(
+            fs::read_to_string(&reserved_path)?
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count(),
+            1,
+            "iter {iter}: A's crashed reservation must remain in calls.reserved.jsonl while ledger is read-only"
+        );
+
+        // (c) Run C (`act`, cap = 0.02) while `calls.jsonl` is still read-only:
+        //     True spend so far is A (0.01) + B (0.01) = 0.02 == cap, so C must make 0 calls!
+        let proc_c = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.02",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_A1_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(proc_c.status.code(), Some(2));
+        assert!(
+            !game
+                .join("from-seat")
+                .join("day-01-act-Saltworks.md")
+                .exists(),
+            "iter {iter}: C must NOT send or deliver when A (0.01) + B (0.01) already reached cap 0.02"
+        );
+        let pending_after_c: Vec<CallLogEntry> = fs::read_to_string(&pending_path)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            pending_after_c.len(),
+            1,
+            "iter {iter}: C must send 0 calls (calls.pending.jsonl stays at B's 1 line)"
+        );
+
+        // (d) Make `calls.jsonl` writable; Run D (`act`, cap = 0.02) migrates both B's OK (0.01)
+        //     and A's RESERVED (0.01) into `calls.jsonl` and refuses `act` with CAP_REACHED!
+        set_file_writable(&calls_path)?;
+        let proc_d = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.02",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_A1_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(proc_d.status.code(), Some(2));
+        let d_stdout = String::from_utf8_lossy(&proc_d.stdout);
+        assert!(
+            d_stdout.contains("outcome=CAP_REACHED"),
+            "iter {iter}: D must refuse with CAP_REACHED, got: {d_stdout}"
+        );
+        assert!(!pending_path.exists());
+        assert!(!reserved_path.exists());
+        assert_eq!(count_resv_lock_files(&game)?, 0);
+
+        for surface in [
+            String::from_utf8_lossy(&proc_b.stdout),
+            String::from_utf8_lossy(&proc_b.stderr),
+            String::from_utf8_lossy(&proc_c.stdout),
+            String::from_utf8_lossy(&proc_c.stderr),
+            String::from_utf8_lossy(&proc_d.stdout),
+            String::from_utf8_lossy(&proc_d.stderr),
+        ] {
+            assert_no_8char_key_piece(&surface, FIX7_A1_KEY, "px_ process output");
+        }
+
+        let final_entries = read_calls_log(&game)?;
+        let ok_count = final_entries.iter().filter(|e| e.outcome == "OK").count();
+        let reserved_count = final_entries
+            .iter()
+            .filter(|e| e.outcome == "RESERVED")
+            .count();
+        let cap_refused_count = final_entries
+            .iter()
+            .filter(|e| e.outcome == "CAP_REACHED")
+            .count();
+        assert_eq!(ok_count, 1, "iter {iter}: expected 1 OK line (B)");
+        assert_eq!(
+            reserved_count, 1,
+            "iter {iter}: expected 1 reconciled RESERVED line (crashed A)"
+        );
+        assert_eq!(
+            cap_refused_count, 1,
+            "iter {iter}: expected 1 CAP_REACHED line (D)"
+        );
+
+        let final_charged: f64 = final_entries.iter().map(|e| e.charged_credits).sum();
+        let sent_recorded = final_entries
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.outcome.as_str(),
+                    "OK" | "harness" | "NO_REPLY" | "LATE_DISCARDED"
+                )
+            })
+            .count();
+        let true_spend = 0.01 * (1 + sent_recorded) as f64;
+        assert!(
+            (final_charged - 0.02).abs() < 1e-9,
+            "iter {iter}: final ledger must count both A (0.01) and B (0.01) = 0.02, got {final_charged}"
+        );
+        assert!(
+            true_spend <= 0.02 + 1e-9 && (true_spend - 0.02).abs() < 1e-9,
+            "iter {iter}: true spend must not exceed cap 0.02, got {true_spend}"
+        );
+    }
+
+    // 3. Cross-run variant: another dead run's reservation with the SAME request_body_sha256
+    //    but a DIFFERENT `reservation_id` is NOT superseded by an existing `OK` line!
+    let cross_game = tmp.path().join("px_cross_run_different_id");
+    write_to_seat(&cross_game, "01", "talk", "Saltworks", "CROSS_SAME_BODY")?;
+    write_to_seat(&cross_game, "01", "act", "Saltworks", "CROSS_ACT")?;
+    let cross_tx1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Holder A reply",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let _ = run_turn(
+        &TurnConfig::new(
+            cross_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &cross_tx1,
+        None,
+    )?;
+    let a_ok = read_calls_log(&cross_game)?[0].clone();
+    let c_dead_resv = json!({
+        "reservation_id": "different-dead-run-c-1",
+        "run_id": "88888888-0-1",
+        "entry": {
+            "time_utc": a_ok.time_utc,
+            "day": a_ok.day,
+            "round": "talk",
+            "guild": a_ok.guild,
+            "attempt": a_ok.attempt,
+            "trigger": a_ok.trigger,
+            "model_requested": a_ok.model_requested,
+            "model_returned": null,
+            "request_body_sha256": a_ok.request_body_sha256,
+            "reply_sha256": null,
+            "prompt_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "cost": null,
+            "charged_credits": 0.01,
+            "latency_ms": 0,
+            "outcome": "RESERVED",
+            "error": "orphaned pre-call reservation from interrupted run",
+            "reservation_id": "different-dead-run-c-1"
+        }
+    })
+    .to_string();
+    fs::write(
+        cross_game.join("relay").join("calls.reserved.jsonl"),
+        format!("{c_dead_resv}\n"),
+    )?;
+    let cross_tx2 = ScriptedTransport::new(vec![]);
+    let cross_sum2 = run_turn(
+        &TurnConfig::new(
+            cross_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat,
+            None,
+            true,
+            Some(0.02),
+        ),
+        &cross_tx2,
+        None,
+    )?;
+    assert_eq!(cross_tx2.call_count(), 0);
+    assert!(matches!(
+        cross_sum2.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let cross_final: f64 = read_calls_log(&cross_game)?
+        .iter()
+        .map(|e| e.charged_credits)
+        .sum();
+    assert!((cross_final - 0.02).abs() < 1e-9);
+
+    Ok(())
+}
+
+#[test]
+fn b1_fix7_py_orphan_migration_idempotent_when_reserved_file_unwritable() -> TestResult {
+    const FIX7_B1_KEY: &str = "PlainFix7B1SecretKey_Idempotent9876";
+
+    let tmp = TempDir::new()?;
+    let game = tmp.path().join(format!("py_game_{FIX7_B1_KEY}"));
+    write_to_seat(&game, "01", "talk", "Saltworks", "PY_CRASH_TALK")?;
+    write_to_seat(&game, "01", "act", "Saltworks", "PY_ACT_REFUSED")?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+
+    let seats_path = tmp.path().join("py_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 64,
+                "timeout_secs": 10.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let mock_dir = tmp.path().join("py_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "PY_CRASH_TALK",
+                    "sleep_ms": 8000,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "slow"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "PY_ACT_REFUSED",
+                    "sleep_ms": 0,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "must not be called"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    let reserved_path = game.join("relay").join("calls.reserved.jsonl");
+    let calls_path = game.join("relay").join("calls.jsonl");
+    let relay_dir = game.join("relay");
+
+    // 1. Spawn Run A and hard-kill while in flight -> leaves 1 orphan in `calls.reserved.jsonl`
+    //    plus a stale `calls.resv-*.lock` file:
+    let mut proc_a = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ])
+        .env("OPENROUTER_API_KEY", FIX7_B1_KEY)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let wait_a = Instant::now();
+    while !reserved_path.is_file() {
+        if wait_a.elapsed() > Duration::from_secs(5) {
+            let _ = proc_a.kill();
+            let _ = proc_a.wait();
+            return Err("timed out waiting for proc_a reservation in py_ test".into());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(proc_a.try_wait()?.is_none());
+    proc_a.kill()?;
+    let _ = proc_a.wait()?;
+    assert!(reserved_path.is_file());
+    assert_eq!(count_resv_lock_files(&game)?, 1);
+    // Also plant an extra stray unreferenced `calls.resv-*.lock` file to prove C-1 sweep cleans it up:
+    fs::write(relay_dir.join("calls.resv-stray-c1-leak.lock"), "")?;
+    assert_eq!(count_resv_lock_files(&game)?, 2);
+
+    // 2. Prevent `calls.reserved.jsonl` from being removed while keeping `calls.jsonl` writable:
+    //    - Windows: hold `calls.reserved.jsonl` open with `FILE_SHARE_READ` only (`share_mode(1)`).
+    //    - Unix: pre-create `calls.jsonl` (`0644`) and set `relay/` directory to `0555`.
+    #[cfg(windows)]
+    let holder = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&reserved_path)?
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !calls_path.exists() {
+            fs::write(&calls_path, "")?;
+        }
+        fs::set_permissions(&relay_dir, fs::Permissions::from_mode(0o555))?;
+    }
+
+    // 3. Run 4 consecutive turns (at cap 0.001 and cap 0.01) while `calls.reserved.jsonl` cannot be removed:
+    //    Every run must keep RESERVED lines == 1 and charged == 0.01 (never growing to 0.02..0.04,
+    //    and never double-counting the still-present `calls.reserved.jsonl` entry in `try_reserve`)!
+    for (k, cap_arg) in ["0.001", "0.01", "0.001", "0.01"].into_iter().enumerate() {
+        let out = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                cap_arg,
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_B1_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "py_ run {k}: expected exit 2 (CAP_REACHED), stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            reserved_path.is_file(),
+            "py_ run {k}: calls.reserved.jsonl must still exist while removal is blocked"
+        );
+        let entries = read_calls_log(&game)?;
+        let resv_lines = entries.iter().filter(|e| e.outcome == "RESERVED").count();
+        let sum: f64 = entries.iter().map(|e| e.charged_credits).sum();
+        assert_eq!(
+            resv_lines, 1,
+            "py_ run {k}: orphan RESERVED entry must be migrated strictly once (got {resv_lines})"
+        );
+        assert!(
+            (sum - 0.01).abs() < 1e-9,
+            "py_ run {k}: charged sum must stay 0.01 across re-runs (got {sum})"
+        );
+        assert_no_8char_key_piece(
+            &format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+            FIX7_B1_KEY,
+            "py_ output",
+        );
+    }
+
+    // 4. Release the block and run a 5th turn: `calls.reserved.jsonl` and stray `calls.resv-*.lock`
+    //    files are now cleaned up, RESERVED lines stays 1, and charged sum stays 0.01!
+    #[cfg(windows)]
+    drop(holder);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&relay_dir, fs::Permissions::from_mode(0o755))?;
+    }
+
+    let out_after = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.01",
+        ])
+        .env("OPENROUTER_API_KEY", FIX7_B1_KEY)
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(out_after.status.code(), Some(2));
+    assert!(
+        !reserved_path.exists(),
+        "calls.reserved.jsonl must be removed once the handle/permission block is released"
+    );
+    assert_eq!(
+        count_resv_lock_files(&game)?,
+        0,
+        "all stale calls.resv-*.lock files (including unreferenced C-1 leak) must be swept"
+    );
+    let final_entries = read_calls_log(&game)?;
+    assert_eq!(
+        final_entries
+            .iter()
+            .filter(|e| e.outcome == "RESERVED")
+            .count(),
+        1
+    );
+    let final_sum: f64 = final_entries.iter().map(|e| e.charged_credits).sum();
+    assert!((final_sum - 0.01).abs() < 1e-9);
+    let _ = calls_path;
+
+    Ok(())
+}
+
+#[test]
+fn b2_fix7_pz_exit3_preserves_reservation_for_subsequent_run() -> TestResult {
+    const FIX7_B2_KEY: &str = "PlainFix7B2SecretKey_KeepExit3Resv98";
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+
+    let seats_path = tmp.path().join("pz_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 64,
+                "timeout_secs": 10.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let mock_dir = tmp.path().join("pz_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "PZ_TALK",
+                    "sleep_ms": 50,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "paid talk"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "PZ_ACT",
+                    "sleep_ms": 0,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "act must be blocked by preserved exit-3 reservation"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    #[cfg(windows)]
+    let modes = ["readonly_pending", "windows_no_delete_share"];
+    #[cfg(not(windows))]
+    let modes = ["readonly_pending"];
+
+    for mode in modes {
+        let game = tmp.path().join(format!("pz_{mode}_{FIX7_B2_KEY}"));
+        write_to_seat(&game, "01", "talk", "Saltworks", "PZ_TALK")?;
+        write_to_seat(&game, "01", "act", "Saltworks", "PZ_ACT")?;
+        fs::create_dir_all(game.join("relay"))?;
+        let calls_path = game.join("relay").join("calls.jsonl");
+        let pending_path = game.join("relay").join("calls.pending.jsonl");
+        let reserved_path = game.join("relay").join("calls.reserved.jsonl");
+
+        fs::write(&calls_path, "")?;
+        set_file_readonly(&calls_path)?;
+
+        #[cfg(windows)]
+        let mut share_holder: Option<fs::File> = None;
+        if mode == "readonly_pending" {
+            let zero_refusal = json!({
+                "time_utc": "2026-11-15T00:00:00.000Z",
+                "day": "01",
+                "round": "talk",
+                "guild": "Weavers",
+                "attempt": 1,
+                "trigger": "turn",
+                "model_requested": "google/gemini-2.5-pro-06-05",
+                "model_returned": null,
+                "request_body_sha256": "00".repeat(32),
+                "reply_sha256": null,
+                "prompt_tokens": null,
+                "completion_tokens": null,
+                "total_tokens": null,
+                "cost": null,
+                "charged_credits": 0.0,
+                "latency_ms": 0,
+                "outcome": "CAP_REACHED",
+                "error": "prior zero-charge refusal"
+            })
+            .to_string();
+            fs::write(&pending_path, format!("{zero_refusal}\n"))?;
+            set_file_readonly(&pending_path)?;
+        } else {
+            fs::write(&pending_path, "")?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                share_holder = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(1)
+                        .open(&pending_path)?,
+                );
+            }
+        }
+
+        // 1. Run A sends `talk` (0.01), cannot persist to either `calls.jsonl` or `calls.pending.jsonl`,
+        //    prints redacted unrecorded-charge warning, exits 3, AND keeps its reservation in `calls.reserved.jsonl`!
+        let proc_a = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.01",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_B2_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(
+            proc_a.status.code(),
+            Some(3),
+            "mode={mode}: expected exit 3 when both ledger and side file fail, stderr={}",
+            String::from_utf8_lossy(&proc_a.stderr)
+        );
+        let a_stderr = String::from_utf8_lossy(&proc_a.stderr);
+        assert!(a_stderr.contains("post-call charge 0.010000"));
+        assert!(a_stderr.contains("held as a reservation in relay/calls.reserved.jsonl"));
+        assert!(a_stderr.contains("do not enter it into relay/calls.jsonl by hand"));
+        assert_no_8char_key_piece(&a_stderr, FIX7_B2_KEY, "pz_ exit-3 stderr");
+
+        assert!(
+            reserved_path.is_file(),
+            "mode={mode}: exit 3 MUST keep calls.reserved.jsonl on disk"
+        );
+        assert_eq!(
+            fs::read_to_string(&reserved_path)?
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count(),
+            1,
+            "mode={mode}: expected 1 preserved reservation entry after exit 3"
+        );
+
+        // 2. Operator restores `calls.jsonl` and frees `calls.pending.jsonl` without hand-entering
+        //    the exit-3 charge; next run at cap = 0.01 reconciles the preserved 0.01 reservation
+        //    and refuses `act` with CAP_REACHED (exit 2, 0 calls sent)!
+        set_file_writable(&calls_path)?;
+        if mode == "readonly_pending" {
+            set_file_writable(&pending_path)?;
+        }
+        #[cfg(windows)]
+        drop(share_holder.take());
+
+        let proc_b = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+            .args([
+                "turn",
+                "--game-dir",
+                game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "0.01",
+            ])
+            .env("OPENROUTER_API_KEY", FIX7_B2_KEY)
+            .stdin(Stdio::null())
+            .output()?;
+        assert_eq!(
+            proc_b.status.code(),
+            Some(2),
+            "mode={mode}: expected exit 2 (CAP_REACHED) on next run at cap 0.01, stdout={} stderr={}",
+            String::from_utf8_lossy(&proc_b.stdout),
+            String::from_utf8_lossy(&proc_b.stderr)
+        );
+        let b_stdout = String::from_utf8_lossy(&proc_b.stdout);
+        assert!(
+            b_stdout.contains("outcome=CAP_REACHED"),
+            "mode={mode}: expected CAP_REACHED on next run, got: {b_stdout}"
+        );
+        assert!(
+            !game
+                .join("from-seat")
+                .join("day-01-act-Saltworks.md")
+                .exists(),
+            "mode={mode}: Run B must send 0 calls when preserved exit-3 reservation reached cap 0.01"
+        );
+        assert!(!reserved_path.exists());
+        assert_eq!(count_resv_lock_files(&game)?, 0);
+
+        let entries = read_calls_log(&game)?;
+        let resv_entries: Vec<&CallLogEntry> =
+            entries.iter().filter(|e| e.outcome == "RESERVED").collect();
+        assert_eq!(
+            resv_entries.len(),
+            1,
+            "mode={mode}: expected 1 reconciled RESERVED entry from exit-3 run, got: {entries:?}"
+        );
+        assert!((resv_entries[0].charged_credits - 0.01).abs() < 1e-9);
+        assert_eq!(
+            entries.last().map(|e| e.outcome.as_str()),
+            Some("CAP_REACHED")
+        );
+        let sum: f64 = entries.iter().map(|e| e.charged_credits).sum();
+        assert!((sum - 0.01).abs() < 1e-9);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn b1_fix8_final_line_synced_before_reservation_release() -> TestResult {
+    use league_relay::{
+        DurabilityEvent, take_durability_events_for_test, watch_durability_events_for_test,
+    };
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+
+    let one_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.3,
+                "max_output_tokens": 64,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+    let two_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.3,
+                    "max_output_tokens": 64,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-oss-120b",
+                    "temperature": 0.3,
+                    "max_output_tokens": 64,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // 1. DurabilityEvent trace on single-seat remove (`1 -> 0`), two-seat rename + remove
+    //    (`2 -> 1 -> 0`), and pre-call refusal (`record_refusal`):
+    let game = tmp.path().join("b1_fix8_trace_game");
+    write_to_seat(&game, "01", "talk", "Saltworks", "B1_TRACE_TALK")?;
+    write_to_seat(&game, "01", "act", "Saltworks", "B1_TRACE_ACT_S")?;
+    write_to_seat(&game, "01", "act", "Weavers", "B1_TRACE_ACT_W")?;
+    write_to_seat(&game, "02", "talk", "Saltworks", "B1_TRACE_REFUSED")?;
+    let relay_dir = game.join("relay");
+
+    watch_durability_events_for_test(&relay_dir);
+    let tx1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Saltworks synced before release",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let sum1 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.03),
+        ),
+        &tx1,
+        None,
+    )?;
+    assert!(sum1.all_clean());
+    let events1 = take_durability_events_for_test(&relay_dir);
+    assert_eq!(
+        events1,
+        vec![
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines: 1,
+                calls_lines: 0,
+            },
+            DurabilityEvent::LedgerSynced {
+                file_name: "calls.jsonl".to_owned(),
+                calls_lines: 1,
+                reserved_lines: 1,
+            },
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines: 0,
+                calls_lines: 1,
+            },
+        ],
+        "final line must complete sync_all on calls.jsonl while calls.reserved.jsonl still holds 1 line, strictly before calls.reserved.jsonl is removed"
+    );
+
+    // Two concurrent seats (`act`): exercises both non-empty `fs::rename` release (`2 -> 1`)
+    // and empty `fs::remove_file` release (`1 -> 0`) on `calls.reserved.jsonl`.
+    struct BarrierTwoSeatTransport {
+        entered: AtomicUsize,
+    }
+    impl Transport for BarrierTwoSeatTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            let wait = Instant::now();
+            while self.entered.load(Ordering::SeqCst) < 2
+                && wait.elapsed() < Duration::from_millis(500)
+            {
+                thread::sleep(Duration::from_millis(2));
+            }
+            if body.contains("B1_TRACE_ACT_S") {
+                Ok(ok_completion_json(
+                    "Saltworks act",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                ))
+            } else {
+                thread::sleep(Duration::from_millis(20));
+                Ok(ok_completion_json(
+                    "Weavers act",
+                    "openai/gpt-oss-120b",
+                    Some(0.01),
+                ))
+            }
+        }
+    }
+
+    watch_durability_events_for_test(&relay_dir);
+    let tx2 = BarrierTwoSeatTransport {
+        entered: AtomicUsize::new(0),
+    };
+    let sum2 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            two_seats,
+            Some(wrapper.clone()),
+            true,
+            Some(0.03),
+        ),
+        &tx2,
+        None,
+    )?;
+    assert!(sum2.all_clean());
+    let events2 = take_durability_events_for_test(&relay_dir);
+    let mut prev_resv = 0usize;
+    let mut synced_calls_seen = 1usize;
+    let mut release_steps = 0usize;
+    for (idx, ev) in events2.iter().enumerate() {
+        match ev {
+            DurabilityEvent::LedgerSynced {
+                file_name,
+                calls_lines,
+                reserved_lines,
+            } => {
+                assert_eq!(file_name, "calls.jsonl");
+                assert!(
+                    *calls_lines > synced_calls_seen,
+                    "event {idx}: expected calls_lines to grow on sync, got {events2:?}"
+                );
+                assert_eq!(
+                    *reserved_lines, prev_resv,
+                    "event {idx}: reservation must still be intact on disk when calls.jsonl finishes sync_all, got {events2:?}"
+                );
+                synced_calls_seen = *calls_lines;
+            }
+            DurabilityEvent::ReservedMutating {
+                target_reserved_lines,
+                calls_lines,
+            } => {
+                if *target_reserved_lines < prev_resv {
+                    release_steps += 1;
+                    assert!(
+                        idx > 0 && matches!(events2[idx - 1], DurabilityEvent::LedgerSynced { .. }),
+                        "event {idx}: every reservation release must be immediately preceded by LedgerSynced, got {events2:?}"
+                    );
+                    assert_eq!(*calls_lines, synced_calls_seen);
+                }
+                prev_resv = *target_reserved_lines;
+            }
+        }
+    }
+    assert_eq!(
+        release_steps, 2,
+        "expected two reservation release mutations, got {events2:?}"
+    );
+    assert_eq!(prev_resv, 0);
+
+    // Pre-call refusal (`record_refusal`) also uses `append_text_synced`:
+    watch_durability_events_for_test(&relay_dir);
+    let tx3 = ScriptedTransport::new(vec![]);
+    let sum3 = run_turn(
+        &TurnConfig::new(
+            game.clone(),
+            "02".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.03),
+        ),
+        &tx3,
+        None,
+    )?;
+    assert!(matches!(
+        sum3.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let events3 = take_durability_events_for_test(&relay_dir);
+    assert_eq!(
+        events3,
+        vec![DurabilityEvent::LedgerSynced {
+            file_name: "calls.jsonl".to_owned(),
+            calls_lines: 4,
+            reserved_lines: 0,
+        }]
+    );
+
+    // 2. Hook-free live filesystem observation via `relay/calls.side.lock`:
+    //    Holding `calls.side.lock` right as transport returns pauses `finish_call_and_record`
+    //    AFTER `append_text_synced(&self.calls_path, ...)` and BEFORE `release_reservations_unlocked`,
+    //    proving from outside that `calls.jsonl` already holds the final line carrying `reservation_id`
+    //    while `calls.reserved.jsonl` is still byte-for-byte unchanged on disk.
+    let live_game = tmp.path().join("b1_fix8_hook_free_game");
+    write_to_seat(&live_game, "01", "talk", "Saltworks", "B1_HOOK_FREE")?;
+    let live_calls_path = live_game.join("relay").join("calls.jsonl");
+    let live_resv_path = live_game.join("relay").join("calls.reserved.jsonl");
+    let live_side_lock_path = live_game.join("relay").join("calls.side.lock");
+
+    struct SideLockObserverTransport {
+        calls_path: PathBuf,
+        resv_path: PathBuf,
+        side_lock_path: PathBuf,
+        observed_ok: Arc<AtomicBool>,
+    }
+    impl Transport for SideLockObserverTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let pre_resv_bytes = fs::read(&self.resv_path)
+                .map_err(|e| TransportError::Network(format!("missing pre-call resv: {e}")))?;
+            assert!(!pre_resv_bytes.is_empty());
+            assert!(!self.calls_path.exists());
+
+            let side_file = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&self.side_lock_path)
+                .map_err(|e| TransportError::Network(format!("open side lock: {e}")))?;
+            side_file
+                .try_lock()
+                .map_err(|e| TransportError::Network(format!("lock side lock: {e:?}")))?;
+
+            let calls_clone = self.calls_path.clone();
+            let resv_clone = self.resv_path.clone();
+            let observed_clone = Arc::clone(&self.observed_ok);
+            thread::spawn(move || {
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(2) {
+                    if let Ok(raw_calls) = fs::read_to_string(&calls_clone)
+                        && let Some(first_line) = raw_calls.lines().find(|l| !l.trim().is_empty())
+                        && let Ok(final_entry) = serde_json::from_str::<CallLogEntry>(first_line)
+                    {
+                        if let Ok(still_resv_bytes) = fs::read(&resv_clone)
+                            && still_resv_bytes == pre_resv_bytes
+                            && final_entry.outcome == "OK"
+                            && final_entry.reservation_id.is_some()
+                        {
+                            observed_clone.store(true, Ordering::SeqCst);
+                        }
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
+                let _ = side_file.unlock();
+            });
+
+            Ok(ok_completion_json(
+                "Observed on disk before release",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let observed_ok = Arc::new(AtomicBool::new(false));
+    let obs_tx = SideLockObserverTransport {
+        calls_path: live_calls_path.clone(),
+        resv_path: live_resv_path.clone(),
+        side_lock_path: live_side_lock_path,
+        observed_ok: Arc::clone(&observed_ok),
+    };
+    let live_sum = run_turn(
+        &TurnConfig::new(
+            live_game,
+            "01".to_owned(),
+            Round::Talk,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(0.05),
+        ),
+        &obs_tx,
+        None,
+    )?;
+    assert!(live_sum.all_clean());
+    assert!(
+        observed_ok.load(Ordering::SeqCst),
+        "observer holding calls.side.lock must see synced final line in calls.jsonl while calls.reserved.jsonl is still byte-for-byte intact"
+    );
+    assert!(
+        !live_resv_path.exists(),
+        "calls.reserved.jsonl must be removed once calls.side.lock is released"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn b2_c1_fix8_exit3_wording_warns_against_hand_entry_and_empty_ids_never_collapse() -> TestResult {
+    const FIX8_KEY: &str = "PlainFix8SecretKey_NoHandEntry98765";
+
+    // 1. B-2: RelayError::UnrecordedCharge Display + CLI exit-3 stderr state the charge is held
+    //    as a reservation in `relay/calls.reserved.jsonl` that the next run counts at
+    //    `max_cost_per_call` and must NOT be entered into `relay/calls.jsonl` by hand:
+    let unit_err = RelayError::UnrecordedCharge {
+        charged_credits: "0.010000".to_owned(),
+        entries_summary: "seat=Saltworks day=01 round=talk attempt=1 charged_credits=0.010000"
+            .to_owned(),
+        detail: "ledger read-only; pending side file read-only".to_owned(),
+    };
+    let rendered = unit_err.to_string();
+    assert!(rendered.starts_with("post-call charge 0.010000 credits"));
+    assert!(rendered.contains("held as a reservation in relay/calls.reserved.jsonl"));
+    assert!(rendered.contains("next run counts at max_cost_per_call"));
+    assert!(
+        rendered
+            .contains("do not enter it into relay/calls.jsonl by hand or it will be counted twice")
+    );
+    assert!(!rendered.contains("unrecorded charge"));
+    assert!(!rendered.contains("re-run blind"));
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let seats_str = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-pro-06-05",
+            "temperature": 0.3,
+            "max_output_tokens": 64,
+            "timeout_secs": 5.0,
+            "max_cost_per_call": 0.01
+        }]
+    })
+    .to_string();
+    let one_seat = SeatFile::from_json_str(&seats_str, None)?;
+    let seats_path = tmp.path().join("fix8_seats.json");
+    fs::write(&seats_path, &seats_str)?;
+
+    let mock_dir = tmp.path().join("fix8_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [{
+                "when_contains": "FIX8_EXIT3_PROMPT",
+                "status": 200,
+                "response": {
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"message": {"content": "ok"}}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let exit3_game = tmp.path().join(format!("fix8_exit3_{FIX8_KEY}"));
+    write_to_seat(&exit3_game, "01", "talk", "Saltworks", "FIX8_EXIT3_PROMPT")?;
+    fs::create_dir_all(exit3_game.join("relay"))?;
+    let exit3_calls = exit3_game.join("relay").join("calls.jsonl");
+    let exit3_pending = exit3_game.join("relay").join("calls.pending.jsonl");
+    fs::write(&exit3_calls, "")?;
+    set_file_readonly(&exit3_calls)?;
+    let prior_refusal = json!({
+        "time_utc": "2026-11-15T00:00:00.000Z",
+        "day": "01",
+        "round": "talk",
+        "guild": "Weavers",
+        "attempt": 1,
+        "trigger": "turn",
+        "model_requested": "google/gemini-2.5-pro-06-05",
+        "model_returned": null,
+        "request_body_sha256": "11".repeat(32),
+        "reply_sha256": null,
+        "prompt_tokens": null,
+        "completion_tokens": null,
+        "total_tokens": null,
+        "cost": null,
+        "charged_credits": 0.0,
+        "latency_ms": 0,
+        "outcome": "CAP_REACHED",
+        "error": "prior refusal"
+    })
+    .to_string();
+    fs::write(&exit3_pending, format!("{prior_refusal}\n"))?;
+    set_file_readonly(&exit3_pending)?;
+
+    let proc_exit3 = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            exit3_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.05",
+        ])
+        .env("OPENROUTER_API_KEY", FIX8_KEY)
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(proc_exit3.status.code(), Some(3));
+    let exit3_stderr = String::from_utf8_lossy(&proc_exit3.stderr);
+    assert!(exit3_stderr.starts_with("error: post-call charge 0.010000 credits"));
+    assert!(exit3_stderr.contains("held as a reservation in relay/calls.reserved.jsonl"));
+    assert!(exit3_stderr.contains("next run counts at max_cost_per_call"));
+    assert!(
+        exit3_stderr
+            .contains("do not enter it into relay/calls.jsonl by hand or it will be counted twice")
+    );
+    assert!(!exit3_stderr.contains("unrecorded charge"));
+    assert!(!exit3_stderr.contains("re-run blind"));
+    assert_no_8char_key_piece(&exit3_stderr, FIX8_KEY, "fix8 exit-3 stderr");
+    set_file_writable(&exit3_calls)?;
+    set_file_writable(&exit3_pending)?;
+
+    // 2. C-1 / C-4 (`pe_empty_ids`): two dead reservations that both carry `reservation_id: ""`
+    //    must NEVER collapse to 1 (neither in `read_state_unlocked` when read-only nor in
+    //    `CallLedger::open` migration when writable):
+    let pe_game = tmp.path().join("fix8_pe_empty_ids");
+    write_to_seat(&pe_game, "01", "act", "Saltworks", "PE_ACT_BLOCKED")?;
+    fs::create_dir_all(pe_game.join("relay"))?;
+    let pe_calls = pe_game.join("relay").join("calls.jsonl");
+    let pe_resv = pe_game.join("relay").join("calls.reserved.jsonl");
+    fs::write(&pe_calls, "")?;
+    set_file_readonly(&pe_calls)?;
+
+    let make_empty_id_orphan = |guild: &str, run_id: &str| {
+        json!({
+            "reservation_id": "",
+            "run_id": run_id,
+            "entry": {
+                "time_utc": "2026-11-15T00:00:00.000Z",
+                "day": "01",
+                "round": "talk",
+                "guild": guild,
+                "attempt": 1,
+                "trigger": "turn",
+                "model_requested": "google/gemini-2.5-pro-06-05",
+                "model_returned": null,
+                "request_body_sha256": "22".repeat(32),
+                "reply_sha256": null,
+                "prompt_tokens": null,
+                "completion_tokens": null,
+                "total_tokens": null,
+                "cost": null,
+                "charged_credits": 0.01,
+                "latency_ms": 0,
+                "outcome": "RESERVED",
+                "error": "orphaned pre-call reservation from interrupted run"
+            }
+        })
+        .to_string()
+    };
+    fs::write(
+        &pe_resv,
+        format!(
+            "{}\n{}\n",
+            make_empty_id_orphan("Saltworks", "999991-0-1"),
+            make_empty_id_orphan("Weavers", "999992-0-1")
+        ),
+    )?;
+
+    // (a) Read-only `calls.jsonl`: `read_state_unlocked` counts BOTH 0.01 empty-id orphans (0.02),
+    //     so a 0.01 call at cap 0.025 (0.02 + 0.01 = 0.03 > 0.025) is refused with 0 transport calls!
+    let pe_ro_tx = ScriptedTransport::new(vec![]);
+    let pe_ro_res = run_turn(
+        &TurnConfig::new(
+            pe_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.025),
+        ),
+        &pe_ro_tx,
+        None,
+    )?;
+    assert_eq!(pe_ro_tx.call_count(), 0);
+    assert!(matches!(
+        pe_ro_res.reports[0].outcome,
+        SeatOutcome::SeatError { .. } | SeatOutcome::CapReached { .. }
+    ));
+
+    // (b) Writable `calls.jsonl`: `CallLedger::open` migrates BOTH empty-id `RESERVED` lines (2 lines,
+    //     0.02 total) and refuses the 0.01 call at cap 0.025 with `CapReached`!
+    set_file_writable(&pe_calls)?;
+    let pe_rw_tx = ScriptedTransport::new(vec![]);
+    let pe_rw_sum = run_turn(
+        &TurnConfig::new(
+            pe_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(0.025),
+        ),
+        &pe_rw_tx,
+        None,
+    )?;
+    assert_eq!(pe_rw_tx.call_count(), 0);
+    assert!(matches!(
+        pe_rw_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let pe_entries = read_calls_log(&pe_game)?;
+    let pe_resv_count = pe_entries
+        .iter()
+        .filter(|e| e.outcome == "RESERVED")
+        .count();
+    let pe_charged_sum: f64 = pe_entries.iter().map(|e| e.charged_credits).sum();
+    assert_eq!(
+        pe_resv_count, 2,
+        "both empty-id dead reservations must be migrated without collapsing"
+    );
+    assert!((pe_charged_sum - 0.02).abs() < 1e-9);
 
     Ok(())
 }

@@ -1,10 +1,11 @@
 //! Stand-alone `xrpld` harness and Seed-27 Section B item B3 conformance tests.
 //!
-//! Enforces the `docs/design-v2.md` section 9 Conflict 11 boundary:
-//! `league-ledger` remains strictly bound to XRPL Testnet (`network_id == 1`),
-//! while this crate talks only to a loopback `http://127.0.0.1:<port>` or
-//! `http://localhost:<port>` stand-alone `xrpld` process reporting
-//! `network_id == 21337`, `validation_quorum == 0`, and `peers == 0`.
+//! Enforces the isolation boundary described in `docs/design-v2.md` section 9
+//! (Conflict 11, open for the Director; authorized for this harness by the orchestrator
+//! card Part 4 and Publisher Docker limits): `league-ledger` remains strictly bound to
+//! XRPL Testnet (`network_id == 1`), while this crate talks only to a loopback
+//! `http://127.0.0.1:<port>` or `http://localhost:<port>` stand-alone `xrpld` process
+//! reporting `network_id == 21337`, `validation_quorum == 0`, and `peers == 0`.
 
 use std::fmt::{self, Write as _};
 
@@ -33,11 +34,14 @@ pub const OFFICIAL_XRPLD_PINNED_REF: &str = "docker.io/xrplf/xrpld:3.4.1@sha256:
 /// Container label applied to every launched container so cleanup checks can find leaks.
 pub const STANDALONE_HARNESS_LABEL: &str = "merchant-league.harness=standalone";
 
+/// Container label key storing a UNIX-epoch self-expiry timestamp for stale-run sweeps.
+pub const STANDALONE_EXPIRES_AT_LABEL_KEY: &str = "merchant-league.expires_at";
+
 /// Standard XRPL stand-alone genesis root classic address (`masterpassphrase`).
 pub const GENESIS_ACCOUNT_ADDRESS: &str = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
 
-/// Amendments enabled on Mainnet (`docs/design-v2.md` section 8) that default to `DefaultNo`
-/// in `xrpld 3.4.1` and therefore must be listed under `[amendments]` at genesis.
+/// Amendments in the v2 feature set that are enabled on Mainnet (`docs/design-v2.md` section 8)
+/// and default to `DefaultNo` in `xrpld 3.4.1`, so they must appear under `[amendments]`.
 pub const MAINNET_MATCHED_AMENDMENTS: &[&str] = &[
     "BatchV1_1",
     "TokenEscrow",
@@ -53,7 +57,7 @@ pub const MAINNET_MATCHED_AMENDMENTS: &[&str] = &[
     "fixAMMClawbackRounding",
 ];
 
-/// Forbidden or non-Mainnet `DefaultNo` amendments verified to remain `enabled == false`
+/// Forbidden or non-Mainnet v2-set `DefaultNo` amendments verified to remain `enabled == false`
 /// on a stand-alone ledger (`docs/design-v2.md` section 8).
 pub const VETOED_NON_MAINNET_AMENDMENTS: &[&str] =
     &["ConfidentialTransfer", "MPTokensV2", "DynamicMPT"];
@@ -62,7 +66,8 @@ pub const VETOED_NON_MAINNET_AMENDMENTS: &[&str] =
 /// `DefaultYes` while still `enabled=false` on Mainnet (`docs/design-v2.md` section 8).
 pub const TESTNET_ONLY_DEFAULT_YES_AMENDMENT: &str = "fixBatchV1_2";
 
-/// Error returned when an endpoint URL or `server_info` snapshot violates Conflict 11.
+/// Error returned when an endpoint URL, container state, or `server_info` snapshot violates
+/// the stand-alone isolation invariants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotStandAlone {
     /// Human-readable reason explaining why the target was refused.
@@ -144,7 +149,7 @@ pub fn require_loopback_http_url(url: &str) -> Result<String, NotStandAlone> {
     Ok(format!("http://{host}:{port}/"))
 }
 
-/// Check Conflict 11 invariants on a `server_info` response before any write call proceeds.
+/// Check Conflict 11 isolation invariants on a `server_info` response before any write proceeds.
 pub fn require_standalone_info(info: &StandAloneServerInfo) -> Result<(), NotStandAlone> {
     match info.network_id {
         Some(STANDALONE_NETWORK_ID) => {}

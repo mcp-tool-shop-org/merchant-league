@@ -262,8 +262,9 @@ impl Transport for NoopManualTransport {
 /// Run CLI command with an injected environment lookup and output streams.
 ///
 /// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
-/// `3` if a sent call's charge could not be persisted to either `calls.jsonl`
-/// or `calls.pending.jsonl`, `4` if `<game-dir>/relay/turn.lock` is held by
+/// `3` if a sent call's post-call line could not be written to either `calls.jsonl`
+/// or `calls.pending.jsonl` (its pre-call reservation stays held in `calls.reserved.jsonl`),
+/// `4` if `<game-dir>/relay/turn.lock` is held by
 /// another run or deleted/replaced mid-turn, or `1` on invalid CLI,
 /// configuration, live-gate, or file I/O refusal.
 pub fn execute_cli<I, S, E>(
@@ -282,7 +283,12 @@ where
 
     match run_cli_inner(args, &env_key, stdout) {
         Ok(Some(summary)) => {
-            let _ = write!(stdout, "{}", summary.format_paths_and_hashes());
+            let rendered = redact_secrets_with_limit(
+                &summary.format_paths_and_hashes(),
+                redact_ref,
+                MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+            );
+            let _ = write!(stdout, "{rendered}");
             if summary.all_clean() { 0 } else { 2 }
         }
         Ok(None) => 0,

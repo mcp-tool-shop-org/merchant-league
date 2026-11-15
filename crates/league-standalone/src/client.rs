@@ -202,7 +202,7 @@ impl fmt::Display for StandAloneError {
 
 impl std::error::Error for StandAloneError {}
 
-/// Verified summary of Mainnet-matched and non-Mainnet amendments in a stand-alone ledger.
+/// Verified summary of the v2 amendment feature set and full feature map on a stand-alone ledger.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AmendmentReport {
     /// Required `MAINNET_MATCHED_AMENDMENTS` observed with `enabled == true`.
@@ -211,6 +211,8 @@ pub struct AmendmentReport {
     pub rejected_non_mainnet: Vec<String>,
     /// Observed status of `fixBatchV1_2` (`DefaultYes` on `xrpld 3.4.1` and Testnet).
     pub testnet_only_default_yes_enabled: Option<bool>,
+    /// Full `feature` RPC map (`name`, or hash fallback -> `enabled`) for CI logging/diffing.
+    pub all_features: BTreeMap<String, bool>,
 }
 
 /// Trust line entry returned by `account_lines`.
@@ -365,12 +367,14 @@ impl<T: Transport> StandAlone<T> {
             if key == "status" || !entry.is_object() {
                 continue;
             }
+            let enabled = entry
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             if let Some(name) = entry.get("name").and_then(Value::as_str) {
-                let enabled = entry
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
                 by_name.insert(name.to_string(), enabled);
+            } else {
+                by_name.insert(key.clone(), enabled);
             }
         }
 
@@ -409,6 +413,7 @@ impl<T: Transport> StandAlone<T> {
             verified_enabled,
             rejected_non_mainnet,
             testnet_only_default_yes_enabled,
+            all_features: by_name,
         })
     }
 
@@ -1098,6 +1103,18 @@ mod tests {
         assert_eq!(
             report.verified_enabled.len(),
             MAINNET_MATCHED_AMENDMENTS.len()
+        );
+        assert_eq!(
+            report.all_features.len(),
+            MAINNET_MATCHED_AMENDMENTS.len() + 2
+        );
+        assert_eq!(
+            report.all_features.get("ConfidentialTransfer"),
+            Some(&false)
+        );
+        assert_eq!(
+            report.all_features.get(TESTNET_ONLY_DEFAULT_YES_AMENDMENT),
+            Some(&true)
         );
         assert_eq!(client.ledger_accept(), Ok(4));
         assert_eq!(client.validated_close_time(), Ok((4, 815_000_000)));
