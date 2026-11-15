@@ -25,9 +25,9 @@ use crate::scoring::{
 };
 use crate::types::{
     ActiveShock, AssetId, Bps, CharterRole, CreditTier, DEFAULT_PBRS_GAMMA_BPS, EngineError,
-    MAX_TARIFF_BPS, ScheduledShockSpec, Seat, SeatIdentity, ShockKind, TableId, TableSpec, Turn,
-    Units, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
-    floor_bps_part, half_up_bps,
+    MAX_TARIFF_BPS, ScheduledShockSpec, Seat, SeatIdentity, ShockKind, TableId, TableMode,
+    TableSpec, Turn, Units, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
+    checked_mul_units_parity, floor_bps_part, half_up_bps,
 };
 
 type PoliticsOutcome = (Option<(u8, u8)>, Vec<(CharterRole, u8)>, Units);
@@ -949,12 +949,32 @@ impl TurnEngine {
         })
     }
 
-    /// Executes the 8-step deterministic `Sweep` for the current turn using `turn_beacon`.
+    /// Executes the 8-step deterministic `Sweep` for the current Eval-mode turn using `turn_beacon`.
+    ///
+    /// Refuses `TableMode::Game` tables, which must sweep via [`TurnEngine::sweep_turn_with_drand`].
     pub fn sweep_turn(&mut self, turn_beacon: [u8; 32]) -> Result<SweepReceipt, EngineError> {
+        if self.state.spec.mode != TableMode::Eval {
+            return Err(EngineError::InvalidConfig(
+                "Game mode requires sweep_turn_with_drand with scheduled round and signature"
+                    .to_owned(),
+            ));
+        }
         Ok(self.sweep_turn_detailed(turn_beacon)?.0)
     }
 
-    /// Executes the 8-step deterministic `Sweep` for the current turn using an `ExternalDrand`
+    /// Executes the 8-step deterministic `Sweep` for an Eval-mode turn using a beacon derived from
+    /// the independent `beacon_seed` (`Decision 12` & `2026-11-15` addendum).
+    pub fn sweep_turn_seeded(&mut self, beacon_seed: u64) -> Result<SweepReceipt, EngineError> {
+        if self.state.spec.mode != TableMode::Eval {
+            return Err(EngineError::InvalidConfig(
+                "sweep_turn_seeded requires TableMode::Eval".to_owned(),
+            ));
+        }
+        let beacon = derive_turn_beacon(beacon_seed, self.state.table_id, Turn(self.state.turn));
+        self.sweep_turn(beacon)
+    }
+
+    /// Executes the 8-step deterministic `Sweep` for a Game-mode turn using an `ExternalDrand`
     /// `quicknet` round and 48-byte signature validated against `spec.drand_schedule` (`M2`).
     ///
     /// Derives `turn_beacon = SHA-256(drand_signature)` and requires `drand_round` to equal
@@ -965,6 +985,11 @@ impl TurnEngine {
         drand_round: u64,
         drand_signature: &[u8],
     ) -> Result<SweepReceipt, EngineError> {
+        if self.state.spec.mode != TableMode::Game {
+            return Err(EngineError::InvalidConfig(
+                "sweep_turn_with_drand requires TableMode::Game".to_owned(),
+            ));
+        }
         if self.state.phase != TurnPhase::Reveal {
             return Err(EngineError::InvalidPhase(
                 "sweep_turn_with_drand requires Reveal phase".to_owned(),
@@ -983,7 +1008,7 @@ impl TurnEngine {
             drand_signature,
             beacon,
         )?;
-        self.sweep_turn(beacon)
+        Ok(self.sweep_turn_detailed(beacon)?.0)
     }
 
     fn sweep_turn_detailed(

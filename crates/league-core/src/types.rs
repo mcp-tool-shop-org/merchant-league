@@ -353,11 +353,23 @@ pub struct SeatConfig {
     pub converters: Vec<ConverterRecipe>,
 }
 
+/// Execution mode recorded on [`TableSpec`] and [`crate::SeasonReplayLog`] (`2026-11-15` ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TableMode {
+    /// Live Game Mode: requires `drand_schedule` and drand-signature-bound beacons (`M2`).
+    Game,
+    /// Headless Evaluation Mode: uses deterministic seeded beacons (`Decision 12`), resting on
+    /// `M3`'s separation between the turn beacon seed and OS-entropy mandate deals.
+    Eval,
+}
+
 /// Full deterministic rule specification for a v2 chiral table.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableSpec {
     /// Unique table identifier.
     pub table_id: TableId,
+    /// Required execution mode (`Game` or `Eval`) binding live sweeps and replay logs.
+    pub mode: TableMode,
     /// Number of seats (`4`, `5`, or `6`).
     pub seat_count: u8,
     /// Per-seat economic definitions in ascending index order `0..seat_count`.
@@ -452,8 +464,20 @@ impl TableSpec {
                 )));
             }
         }
-        if let Some(schedule) = self.drand_schedule {
-            schedule.validate()?;
+        match self.mode {
+            TableMode::Game => {
+                let Some(schedule) = self.drand_schedule else {
+                    return Err(EngineError::InvalidConfig(
+                        "Game mode TableSpec requires drand_schedule".to_owned(),
+                    ));
+                };
+                schedule.validate()?;
+            }
+            TableMode::Eval => {
+                if let Some(schedule) = self.drand_schedule {
+                    schedule.validate()?;
+                }
+            }
         }
         if self.mandate_deck.len() < n {
             return Err(EngineError::InvalidConfig(format!(
@@ -478,10 +502,8 @@ impl TableSpec {
         Ok(())
     }
 
-    /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] plus its deterministically
-    /// dealt Turn-1 mandate reveals for `table_id`, `seat_count` (`4..=6`), and `seed`.
-    /// Constructs the deterministic canonical `TableSpec` parameterized by public layout `seed`,
-    /// dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
+    /// Constructs the deterministic Eval-mode canonical `TableSpec` parameterized by public
+    /// layout `seed`, dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
     pub fn standard_chiral_ring_with_mandates(
         table_id: TableId,
         seat_count: u8,
@@ -492,6 +514,8 @@ impl TableSpec {
             deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
         Self::build_chiral_ring_spec_with_deal(
             table_id,
+            TableMode::Eval,
+            None,
             seat_count,
             seed,
             mandate_deck,
@@ -500,8 +524,32 @@ impl TableSpec {
         )
     }
 
-    /// Constructs the canonical `TableSpec` using caller-supplied `deal_seed` and `seat_salts`
-    /// for deterministic fixture/golden tests without coupling mandates to a replay `seed: u64`.
+    /// Constructs the canonical Game-mode `TableSpec` requiring a pre-named `DrandSchedule`
+    /// (`M2`), dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
+    pub fn standard_game_chiral_ring_with_mandates(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        drand_schedule: DrandSchedule,
+    ) -> Result<(Self, SealedMandateDeal), EngineError> {
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) =
+            deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
+        Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            TableMode::Game,
+            Some(drand_schedule),
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )
+    }
+
+    /// Constructs the canonical Eval-mode `TableSpec` using caller-supplied `deal_seed` and
+    /// `seat_salts` for deterministic fixture/golden tests without coupling mandates to a replay
+    /// `seed: u64`.
     pub fn standard_chiral_ring_with_explicit_deal(
         table_id: TableId,
         seat_count: u8,
@@ -519,6 +567,8 @@ impl TableSpec {
         )?;
         Self::build_chiral_ring_spec_with_deal(
             table_id,
+            TableMode::Eval,
+            None,
             seat_count,
             seed,
             mandate_deck,
@@ -527,8 +577,11 @@ impl TableSpec {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_chiral_ring_spec_with_deal(
         table_id: TableId,
+        mode: TableMode,
+        drand_schedule: Option<DrandSchedule>,
         seat_count: u8,
         seed: u64,
         mandate_deck: Vec<GradedMandateCard>,
@@ -629,6 +682,7 @@ impl TableSpec {
 
         let spec = Self {
             table_id,
+            mode,
             seat_count,
             seats,
             projects,
@@ -636,7 +690,7 @@ impl TableSpec {
             closing_hazard_bps: DEFAULT_CLOSING_HAZARD_BPS,
             mandate_deck,
             dealt_mandate_commits,
-            drand_schedule: None,
+            drand_schedule,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))

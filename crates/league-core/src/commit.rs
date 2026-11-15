@@ -775,12 +775,14 @@ pub struct DrandSchedule {
 }
 
 impl DrandSchedule {
-    /// Validates that the schedule lies on or after drand `quicknet` genesis and has positive period.
+    /// Validates that the schedule lies on or after drand `quicknet` genesis and advances at least
+    /// one `quicknet` period per turn.
     pub fn validate(&self) -> Result<(), EngineError> {
-        if self.turn_period_secs == 0 {
-            return Err(EngineError::InvalidConfig(
-                "DrandSchedule turn_period_secs must be >= 1".to_owned(),
-            ));
+        if self.turn_period_secs < DRAND_QUICKNET_PERIOD_SECS {
+            return Err(EngineError::InvalidConfig(format!(
+                "DrandSchedule turn_period_secs must be >= {DRAND_QUICKNET_PERIOD_SECS}, got {}",
+                self.turn_period_secs
+            )));
         }
         if self.turn_1_close_unix < DRAND_QUICKNET_GENESIS_UNIX {
             return Err(EngineError::InvalidConfig(format!(

@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit dc92916 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 65ee24a by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 10 parts, mostly Rust (330 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (eb74411)
+## What changed since 2026-11-15 (dc92916)
 
-Nothing structural changed since 2026-11-15; 11 files changed content.
+Nothing structural changed since 2026-11-15; 8 files changed content.
 
 ## What comes in
 

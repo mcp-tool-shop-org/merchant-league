@@ -17,8 +17,8 @@ use league_core::{
     MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction,
     OfferProposal, OfferSide, OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder,
     ProjectOrderPreview, ProjectRecipe, RegentDoctrine, ReplayBeaconMode, RevealSalt,
-    SealedOrderBundle, SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableSpec,
-    Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, bonus_equity_for_completion_bps,
+    SealedOrderBundle, SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableMode,
+    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, bonus_equity_for_completion_bps,
     break_tie_with_beacon, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
     checked_mul_units_parity, compute_final_scoreboard, compute_mandate_commitment,
     compute_net_asset_equity, compute_order_commitment, compute_pbrs_reward, compute_potential,
@@ -365,6 +365,7 @@ fn run_scripted_full_season(
 
     let log = SeasonReplayLog {
         spec,
+        mode: TableMode::Eval,
         seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
         sealed_mandate_deal: sealed_deal,
@@ -2646,6 +2647,7 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
     let out = must_ok(
         replay_season(&SeasonReplayLog {
             spec: spec2,
+            mode: TableMode::Eval,
             seed: 2,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: dealt2,
@@ -3145,6 +3147,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
     }
     let log = SeasonReplayLog {
         spec,
+        mode: TableMode::Eval,
         seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
         sealed_mandate_deal: sealed_deal.clone(),
@@ -3169,8 +3172,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         Err(EngineError::SeasonEnded(_))
     ));
 
-    // ExternalDrand mode requires spec.drand_schedule + scheduled drand_round + drand_signature
-    // where turn_beacon == SHA-256(drand_signature) (M2).
+    // Eval mode rejects ExternalDrand beacon_mode (2026-11-15 addendum).
     assert!(matches!(
         replay_season(&SeasonReplayLog {
             beacon_mode: ReplayBeaconMode::ExternalDrand,
@@ -3184,11 +3186,10 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         turn_period_secs: 60,
     };
     let tid_drand = TableId(9130);
-    let (mut spec_drand, deal_drand) = must_ok(
-        TableSpec::standard_chiral_ring_with_mandates(tid_drand, 4, seed),
+    let (spec_drand, deal_drand) = must_ok(
+        TableSpec::standard_game_chiral_ring_with_mandates(tid_drand, 4, seed, schedule),
         "spec_drand",
     );
-    spec_drand.drand_schedule = Some(schedule);
     let mut eng_drand = must_ok(TurnEngine::new(spec_drand.clone()), "eng_drand");
     let mut drand_turns = Vec::new();
     for t in 1..=28_u8 {
@@ -3220,6 +3221,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
     }
     let drand_ok = SeasonReplayLog {
         spec: spec_drand,
+        mode: TableMode::Game,
         seed: 0,
         beacon_mode: ReplayBeaconMode::ExternalDrand,
         sealed_mandate_deal: deal_drand,
@@ -3313,7 +3315,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "d2cce72d1581236f312963272d42a398c4b858556810a29b941e18098e09de79"
+        "ae4acb1e98a623cbbf540425faebf1346331853033c3dfc325d2f63b020f777d"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -3541,6 +3543,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     let outcome = must_ok(
         replay_season(&SeasonReplayLog {
             spec,
+            mode: TableMode::Eval,
             seed: 3,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: deal_b1_1a,
@@ -3715,6 +3718,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     let replayed = must_ok(
         replay_season(&SeasonReplayLog {
             spec: spec_p,
+            mode: TableMode::Eval,
             seed: 7,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: deal_b1_1b,
@@ -4204,8 +4208,10 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
         turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 10,
     };
     let tid = TableId(941);
-    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 5), "spec");
-    spec.drand_schedule = Some(schedule);
+    let (spec, _) = must_ok(
+        TableSpec::standard_game_chiral_ring_with_mandates(tid, 4, 5, schedule),
+        "spec",
+    );
     let mut eng = must_ok(TurnEngine::new(spec), "new");
     for t in 1..=3_u8 {
         commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
@@ -4380,6 +4386,7 @@ fn m3_mandates_use_os_csprng_and_resist_seed_bruteforce_probe_p9() {
     }
     let valid_log = SeasonReplayLog {
         spec: spec_a,
+        mode: TableMode::Eval,
         seed: replay_seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
         sealed_mandate_deal: deal_a,
@@ -4499,6 +4506,7 @@ fn f1_f2_scoring_refuses_undealt_card_and_reveal_succeeds_without_turn1_echo() {
     let replayed = must_ok(
         replay_season(&SeasonReplayLog {
             spec,
+            mode: TableMode::Eval,
             seed: 9,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: sealed_deal,
@@ -4973,6 +4981,7 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
 
     let log = SeasonReplayLog {
         spec,
+        mode: TableMode::Eval,
         seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
         sealed_mandate_deal: sealed_deal,
@@ -4987,10 +4996,429 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "699f25bb8f2206bc16dd68bd4e4301621b8cac3c79c60e45aba907570727b953"
+        "0c0b0f7defa45787509e78aa3af222f6a79e9ae2cb0613b155bcefbe9fab82a2"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "286c3f19d0146eaef7e9da8bdaebbe94bf75007dc239c86a6c8e787423365a33"
+        "bf1e101e8a300169c805685d4506904a848e143cc9296b309f8c36c8cf5fb76d"
     );
+}
+
+#[test]
+fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
+    use sha2::{Digest, Sha256};
+
+    // 1. Validate DrandSchedule cadence minimum and required Game drand_schedule.
+    let bad_period = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS - 1,
+    };
+    assert!(matches!(
+        bad_period.validate(),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    let tid_eval = TableId(950);
+    let schedule = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 300,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 10,
+    };
+
+    let (mut missing_sched_spec, _) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid_eval, 4, 5),
+        "base eval spec",
+    );
+    missing_sched_spec.mode = TableMode::Game;
+    missing_sched_spec.drand_schedule = None;
+    assert!(matches!(
+        missing_sched_spec.validate(),
+        Err(EngineError::InvalidConfig(_))
+    ));
+    assert!(matches!(
+        TurnEngine::new(missing_sched_spec),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    // Helper running a 4-seat season with distinct StandForOffice platforms for seats 1 & 2 on Turn 3
+    // and a 2-2 plurality tie between seats 1 & 2 on Turn 4.
+    let run_eval_tie_season = |beacon_seed: u64| {
+        let (spec, deal) = must_ok(
+            TableSpec::standard_chiral_ring_with_mandates(tid_eval, 4, 5),
+            "eval spec",
+        );
+        assert_eq!(spec.mode, TableMode::Eval);
+        let mut eng = must_ok(TurnEngine::new(spec.clone()), "eval eng");
+        let mut turns = Vec::new();
+        let mut live_digests = Vec::new();
+        let mut t4_elected = None;
+
+        for t in 1..=28_u8 {
+            if eng.state().phase != TurnPhase::TalkAndMarket {
+                break;
+            }
+            let mut actions = Vec::new();
+            let mut bundles = vec![SealedOrderBundle::default(); 4];
+            if t == 3 {
+                actions.push(MarketAction::StandForOffice {
+                    seat: 1,
+                    platform: CouncilPlatform {
+                        proposed_tariffs_bps: vec![(0, (1_500, 1_100))],
+                        cartel_admissions: vec![(4, 1)],
+                        cartel_revocations: Vec::new(),
+                    },
+                });
+                actions.push(MarketAction::StandForOffice {
+                    seat: 2,
+                    platform: CouncilPlatform {
+                        proposed_tariffs_bps: vec![(0, (2_100, 1_700))],
+                        cartel_admissions: vec![(5, 2)],
+                        cartel_revocations: Vec::new(),
+                    },
+                });
+            }
+            if t == 4 {
+                bundles[0].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 1,
+                    cartel_chair: 1,
+                });
+                bundles[1].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 1,
+                    cartel_chair: 1,
+                });
+                bundles[2].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 2,
+                    cartel_chair: 2,
+                });
+                bundles[3].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 2,
+                    cartel_chair: 2,
+                });
+            }
+            for action in &actions {
+                must_ok(eng.apply_market_action(action.clone()), "eval action");
+            }
+            let (commitments, reveals) = commit_and_reveal_all(&mut eng, tid_eval, t, bundles);
+            if t == 1 {
+                let wrong_sig = [0x55_u8; DRAND_QUICKNET_SIGNATURE_BYTES];
+                let wrong_round = must_ok(schedule.expected_round_for_turn(Turn(1)), "r1");
+                assert!(matches!(
+                    eng.sweep_turn_with_drand(wrong_round, &wrong_sig),
+                    Err(EngineError::InvalidConfig(_))
+                ));
+            }
+            let r = must_ok(eng.sweep_turn_seeded(beacon_seed), "sweep seeded");
+            if t == 4 {
+                t4_elected = r.elected_officers;
+            }
+            live_digests.push(r.post_state_digest);
+            turns.push(LoggedTurn {
+                turn: t,
+                market_actions: actions,
+                commitments,
+                reveals,
+                turn_beacon: derive_turn_beacon(beacon_seed, tid_eval, Turn(t)),
+                drand_round: None,
+                drand_signature: None,
+            });
+            if r.season_closed {
+                break;
+            }
+        }
+        let board = must_ok(eng.finalize_season(), "finalize eval");
+        let elected_tm_tariff = eng.state().seats[0].raw_tariff_bps;
+        let domain_ids: Vec<u8> = eng.state().domains.iter().map(|d| d.domain_id).collect();
+        let log = SeasonReplayLog {
+            spec,
+            mode: TableMode::Eval,
+            seed: beacon_seed,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
+            sealed_mandate_deal: deal,
+            mandate_commits: vec![None; 4],
+            turns,
+            mandate_reveals: vec![None; 4],
+        };
+        (
+            log,
+            live_digests,
+            board,
+            t4_elected,
+            elected_tm_tariff,
+            domain_ids,
+        )
+    };
+
+    // 2. Deterministic Eval tie + independent OS mandate deal entropy + replay digest match.
+    let beacon_seed = 404_u64;
+    let (eval_log_a, eval_digests_a, eval_board_a, eval_t4_a, eval_tariff_a, eval_domains_a) =
+        run_eval_tie_season(beacon_seed);
+    let (eval_log_b, _eval_digests_b, _eval_board_b, eval_t4_b, eval_tariff_b, eval_domains_b) =
+        run_eval_tie_season(beacon_seed);
+
+    let eval_t4_beacon = derive_turn_beacon(beacon_seed, tid_eval, Turn(4));
+    let expected_eval_tm = break_tie_with_beacon(eval_t4_beacon, b"trade_minister", &[1, 2]);
+    let expected_eval_cc = break_tie_with_beacon(eval_t4_beacon, b"cartel_chair", &[1, 2]);
+    assert_eq!(eval_t4_a, Some((expected_eval_tm, expected_eval_cc)));
+    assert_eq!(eval_t4_a, eval_t4_b);
+    assert_eq!(eval_tariff_a, eval_tariff_b);
+    assert_eq!(eval_domains_a, eval_domains_b);
+    assert_ne!(
+        eval_log_a.sealed_mandate_deal.deal_seed,
+        eval_log_b.sealed_mandate_deal.deal_seed
+    );
+    assert_ne!(
+        eval_log_a.spec.dealt_mandate_commits,
+        eval_log_b.spec.dealt_mandate_commits
+    );
+
+    let replayed_eval = must_ok(replay_season(&eval_log_a), "replay eval");
+    assert_eq!(replayed_eval.state_digests, eval_digests_a);
+    assert_eq!(replayed_eval.scoreboard, eval_board_a);
+
+    // M3 independence check: deal_seed == SHA-256(beacon_seed) is refused by replay_season.
+    let coupled_deal_seed: [u8; 32] = Sha256::digest(beacon_seed.to_le_bytes()).into();
+    let explicit_salts = [
+        RevealSalt([0x11; 32]),
+        RevealSalt([0x22; 32]),
+        RevealSalt([0x33; 32]),
+        RevealSalt([0x44; 32]),
+    ];
+    let (coupled_spec, coupled_deal) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(
+            TableId(952),
+            4,
+            5,
+            coupled_deal_seed,
+            &explicit_salts,
+        ),
+        "coupled spec",
+    );
+    let mut eng_coupled = must_ok(TurnEngine::new(coupled_spec.clone()), "coupled eng");
+    let mut coupled_turns = Vec::new();
+    for t in 1..=28_u8 {
+        if eng_coupled.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) = commit_and_reveal_all(
+            &mut eng_coupled,
+            TableId(952),
+            t,
+            vec![SealedOrderBundle::default(); 4],
+        );
+        let r = must_ok(eng_coupled.sweep_turn_seeded(beacon_seed), "sweep coupled");
+        coupled_turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: derive_turn_beacon(beacon_seed, TableId(952), Turn(t)),
+            drand_round: None,
+            drand_signature: None,
+        });
+        if r.season_closed {
+            break;
+        }
+    }
+    let coupled_log = SeasonReplayLog {
+        spec: coupled_spec,
+        mode: TableMode::Eval,
+        seed: beacon_seed,
+        beacon_mode: ReplayBeaconMode::SeedDerived,
+        sealed_mandate_deal: coupled_deal,
+        mandate_commits: vec![None; 4],
+        turns: coupled_turns,
+        mandate_reveals: vec![None; 4],
+    };
+    assert!(matches!(
+        replay_season(&coupled_log),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    // Required serde field: stripping "mode" from serialized TableSpec or SeasonReplayLog must fail.
+    let mut spec_json = must_ok(serde_json::to_value(&eval_log_a.spec), "spec json");
+    if let Some(obj) = spec_json.as_object_mut() {
+        obj.remove("mode");
+    }
+    assert!(serde_json::from_value::<TableSpec>(spec_json).is_err());
+
+    let mut log_json = must_ok(serde_json::to_value(&eval_log_a), "log json");
+    if let Some(obj) = log_json.as_object_mut() {
+        obj.remove("mode");
+    }
+    assert!(serde_json::from_value::<SeasonReplayLog>(log_json).is_err());
+
+    // 3. Deterministic Game tie using drand-signature-bound beacons.
+    let tid_game = TableId(951);
+    let run_game_tie_season = || {
+        let (spec, deal) = must_ok(
+            TableSpec::standard_game_chiral_ring_with_mandates(tid_game, 4, 5, schedule),
+            "game spec",
+        );
+        assert_eq!(spec.mode, TableMode::Game);
+        let mut eng = must_ok(TurnEngine::new(spec.clone()), "game eng");
+        let mut turns = Vec::new();
+        let mut live_digests = Vec::new();
+        let mut t4_elected = None;
+        let mut t4_sig = Vec::new();
+
+        for t in 1..=28_u8 {
+            if eng.state().phase != TurnPhase::TalkAndMarket {
+                break;
+            }
+            let mut actions = Vec::new();
+            let mut bundles = vec![SealedOrderBundle::default(); 4];
+            if t == 3 {
+                actions.push(MarketAction::StandForOffice {
+                    seat: 1,
+                    platform: CouncilPlatform {
+                        proposed_tariffs_bps: vec![(0, (1_500, 1_100))],
+                        cartel_admissions: vec![(4, 1)],
+                        cartel_revocations: Vec::new(),
+                    },
+                });
+                actions.push(MarketAction::StandForOffice {
+                    seat: 2,
+                    platform: CouncilPlatform {
+                        proposed_tariffs_bps: vec![(0, (2_100, 1_700))],
+                        cartel_admissions: vec![(5, 2)],
+                        cartel_revocations: Vec::new(),
+                    },
+                });
+            }
+            if t == 4 {
+                bundles[0].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 1,
+                    cartel_chair: 1,
+                });
+                bundles[1].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 1,
+                    cartel_chair: 1,
+                });
+                bundles[2].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 2,
+                    cartel_chair: 2,
+                });
+                bundles[3].council_vote = Some(CouncilVoteBallot {
+                    trade_minister: 2,
+                    cartel_chair: 2,
+                });
+            }
+            for action in &actions {
+                must_ok(eng.apply_market_action(action.clone()), "game action");
+            }
+            let (commitments, reveals) = commit_and_reveal_all(&mut eng, tid_game, t, bundles);
+            if t == 1 {
+                assert!(matches!(
+                    eng.sweep_turn(derive_turn_beacon(beacon_seed, tid_game, Turn(1))),
+                    Err(EngineError::InvalidConfig(_))
+                ));
+                assert!(matches!(
+                    eng.sweep_turn_seeded(beacon_seed),
+                    Err(EngineError::InvalidConfig(_))
+                ));
+            }
+            let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "round");
+            let sig = vec![0x71_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+            let beacon = must_ok(derive_drand_beacon(&sig), "beacon");
+            let r = must_ok(eng.sweep_turn_with_drand(round, &sig), "sweep drand");
+            if t == 4 {
+                t4_elected = r.elected_officers;
+                t4_sig = sig.clone();
+            }
+            live_digests.push(r.post_state_digest);
+            turns.push(LoggedTurn {
+                turn: t,
+                market_actions: actions,
+                commitments,
+                reveals,
+                turn_beacon: beacon,
+                drand_round: Some(round),
+                drand_signature: Some(sig),
+            });
+            if r.season_closed {
+                break;
+            }
+        }
+        let board = must_ok(eng.finalize_season(), "finalize game");
+        let log = SeasonReplayLog {
+            spec,
+            mode: TableMode::Game,
+            seed: 0,
+            beacon_mode: ReplayBeaconMode::ExternalDrand,
+            sealed_mandate_deal: deal,
+            mandate_commits: vec![None; 4],
+            turns,
+            mandate_reveals: vec![None; 4],
+        };
+        (log, live_digests, board, t4_elected, t4_sig)
+    };
+
+    let (game_log_a, game_digests_a, game_board_a, game_t4_a, sig_4) = run_game_tie_season();
+    let (_game_log_b, _game_digests_b, _game_board_b, game_t4_b, _) = run_game_tie_season();
+    let drand_t4_beacon = must_ok(derive_drand_beacon(&sig_4), "drand t4 beacon");
+    let expected_game_tm = break_tie_with_beacon(drand_t4_beacon, b"trade_minister", &[1, 2]);
+    let expected_game_cc = break_tie_with_beacon(drand_t4_beacon, b"cartel_chair", &[1, 2]);
+    assert_eq!(game_t4_a, Some((expected_game_tm, expected_game_cc)));
+    assert_eq!(game_t4_a, game_t4_b);
+
+    let replayed_game = must_ok(replay_season(&game_log_a), "replay game");
+    assert_eq!(replayed_game.state_digests, game_digests_a);
+    assert_eq!(replayed_game.scoreboard, game_board_a);
+
+    // 4. Refuse Game-mode logs carrying seeded beacons or unbound beacons.
+    let mut game_seeded_mode = game_log_a.clone();
+    game_seeded_mode.beacon_mode = ReplayBeaconMode::SeedDerived;
+    game_seeded_mode.seed = beacon_seed;
+    game_seeded_mode.turns[0].turn_beacon = derive_turn_beacon(beacon_seed, tid_game, Turn(1));
+    assert!(matches!(
+        replay_season(&game_seeded_mode),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    let mut game_missing_sig_seeded = game_log_a.clone();
+    game_missing_sig_seeded.turns[0].drand_signature = None;
+    game_missing_sig_seeded.turns[0].turn_beacon =
+        derive_turn_beacon(beacon_seed, tid_game, Turn(1));
+    assert!(matches!(
+        replay_season(&game_missing_sig_seeded),
+        Err(EngineError::SeasonEnded(_))
+    ));
+
+    let mut game_unbound_seeded_beacon = game_log_a.clone();
+    game_unbound_seeded_beacon.turns[0].turn_beacon =
+        derive_turn_beacon(beacon_seed, tid_game, Turn(1));
+    assert!(matches!(
+        replay_season(&game_unbound_seeded_beacon),
+        Err(EngineError::InvalidOrder(_))
+    ));
+
+    // 5. Refuse mode mismatches between TableSpec and SeasonReplayLog (both directions), plus
+    // drand metadata injected into an Eval log.
+    let mut switched_to_eval = game_log_a;
+    switched_to_eval.mode = TableMode::Eval;
+    switched_to_eval.beacon_mode = ReplayBeaconMode::SeedDerived;
+    switched_to_eval.seed = beacon_seed;
+    for turn in &mut switched_to_eval.turns {
+        turn.turn_beacon = derive_turn_beacon(beacon_seed, tid_game, Turn(turn.turn));
+        turn.drand_round = None;
+        turn.drand_signature = None;
+    }
+    assert!(matches!(
+        replay_season(&switched_to_eval),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    let mut switched_to_game = eval_log_a.clone();
+    switched_to_game.mode = TableMode::Game;
+    switched_to_game.beacon_mode = ReplayBeaconMode::ExternalDrand;
+    assert!(matches!(
+        replay_season(&switched_to_game),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    let mut eval_with_drand = eval_log_a;
+    eval_with_drand.turns[0].drand_round = schedule.expected_round_for_turn(Turn(1)).ok();
+    assert!(matches!(
+        replay_season(&eval_with_drand),
+        Err(EngineError::InvalidOrder(_))
+    ));
 }

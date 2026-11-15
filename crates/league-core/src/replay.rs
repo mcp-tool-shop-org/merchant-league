@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::commit::{
     CommitmentHash, MandateReveal, OrderReveal, SealedMandateDeal, derive_turn_beacon,
@@ -12,7 +13,7 @@ use crate::commit::{
 use crate::contracts::MarketAction;
 use crate::engine::{SweepReceipt, TurnEngine, TurnPhase};
 use crate::scoring::FinalScoreboard;
-use crate::types::{EngineError, Seat, TableSpec, Turn};
+use crate::types::{EngineError, Seat, TableMode, TableSpec, Turn};
 
 /// Verification mode for per-turn beacons during [`replay_season`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,10 +57,11 @@ pub struct LoggedTurn {
 pub struct SeasonReplayLog {
     /// Immutable table specification (`4..=6` seats).
     pub spec: TableSpec,
+    /// Required execution mode matching `spec.mode` (`Game` or `Eval`; prevents mode switches).
+    pub mode: TableMode,
     /// Season replay seed associated with this log.
     pub seed: u64,
     /// Verification rule applied to each logged turn beacon.
-    #[serde(default)]
     pub beacon_mode: ReplayBeaconMode,
     /// Sealed OS-entropy Turn-1 mandate deal and per-seat salts bound to `spec.dealt_mandate_commits` (`M3`).
     pub sealed_mandate_deal: SealedMandateDeal,
@@ -85,6 +87,27 @@ pub struct ReplayOutcome {
 /// Replays an entire season deterministically from `log`, verifying every phase transition,
 /// cryptographic commitment, 8-step Sweep, closing bell roll, and final scoreboard.
 pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
+    if log.mode != log.spec.mode {
+        return Err(EngineError::InvalidConfig(format!(
+            "replay log mode {:?} does not match TableSpec mode {:?}",
+            log.mode, log.spec.mode
+        )));
+    }
+    match log.mode {
+        TableMode::Game if log.beacon_mode != ReplayBeaconMode::ExternalDrand => {
+            return Err(EngineError::InvalidConfig(
+                "Game mode replay refuses non-drand beacon_mode; ExternalDrand is required"
+                    .to_owned(),
+            ));
+        }
+        TableMode::Eval if log.beacon_mode != ReplayBeaconMode::SeedDerived => {
+            return Err(EngineError::InvalidConfig(
+                "Eval mode replay requires SeedDerived beacon_mode".to_owned(),
+            ));
+        }
+        _ => {}
+    }
+
     let mut engine = TurnEngine::new(log.spec.clone())?;
     let n = usize::from(log.spec.seat_count);
     if log.mandate_commits.len() != n || log.mandate_reveals.len() != n {
@@ -104,7 +127,18 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
                 .to_owned(),
         ));
     }
-    let drand_schedule = if log.beacon_mode == ReplayBeaconMode::ExternalDrand {
+    let mut padded_beacon_seed = [0u8; 32];
+    padded_beacon_seed[..8].copy_from_slice(&log.seed.to_le_bytes());
+    let hashed_beacon_seed: [u8; 32] = Sha256::digest(log.seed.to_le_bytes()).into();
+    if log.sealed_mandate_deal.deal_seed == padded_beacon_seed
+        || log.sealed_mandate_deal.deal_seed == hashed_beacon_seed
+    {
+        return Err(EngineError::InvalidConfig(
+            "sealed_mandate_deal deal_seed must be independent of replay beacon seed".to_owned(),
+        ));
+    }
+
+    let drand_schedule = if log.mode == TableMode::Game {
         let Some(schedule) = log.spec.drand_schedule else {
             return Err(EngineError::InvalidConfig(
                 "ExternalDrand replay requires TableSpec::drand_schedule".to_owned(),
@@ -145,8 +179,14 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
                 logged.turn
             )));
         }
-        match log.beacon_mode {
-            ReplayBeaconMode::SeedDerived => {
+        let verified_drand = match log.mode {
+            TableMode::Eval => {
+                if logged.drand_round.is_some() || logged.drand_signature.is_some() {
+                    return Err(EngineError::InvalidOrder(format!(
+                        "turn {} carries drand fields in Eval mode",
+                        logged.turn
+                    )));
+                }
                 let expected_beacon =
                     derive_turn_beacon(log.seed, log.spec.table_id, Turn(logged.turn));
                 if logged.turn_beacon != expected_beacon {
@@ -155,8 +195,9 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
                         logged.turn, log.seed, log.spec.table_id.0
                     )));
                 }
+                None
             }
-            ReplayBeaconMode::ExternalDrand => {
+            TableMode::Game => {
                 let Some(round) = logged.drand_round else {
                     return Err(EngineError::SeasonEnded(format!(
                         "turn {} missing drand_round in ExternalDrand mode",
@@ -188,8 +229,9 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
                     logged.turn_beacon,
                 )?;
                 prev_drand_round = Some(round);
+                Some((round, drand_signature.as_slice()))
             }
-        }
+        };
         for action in &logged.market_actions {
             let _ = engine.apply_market_action(action.clone());
         }
@@ -201,7 +243,10 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
         for (&seat_idx, reveal) in &logged.reveals {
             engine.submit_order_reveal(Seat(seat_idx), reveal.clone())?;
         }
-        let receipt = engine.sweep_turn(logged.turn_beacon)?;
+        let receipt = match verified_drand {
+            Some((round, sig)) => engine.sweep_turn_with_drand(round, sig)?,
+            None => engine.sweep_turn(logged.turn_beacon)?,
+        };
         state_digests.push(receipt.post_state_digest);
         receipts.push(receipt);
     }
@@ -241,6 +286,7 @@ mod tests {
         };
         let empty = SeasonReplayLog {
             spec: spec.clone(),
+            mode: TableMode::Eval,
             seed: 7,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: sealed_deal.clone(),
@@ -255,6 +301,7 @@ mod tests {
 
         let bad_len = SeasonReplayLog {
             spec: spec.clone(),
+            mode: TableMode::Eval,
             seed: 7,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: sealed_deal.clone(),
@@ -329,6 +376,7 @@ mod tests {
 
         let log = SeasonReplayLog {
             spec,
+            mode: TableMode::Eval,
             seed: 7,
             beacon_mode: ReplayBeaconMode::SeedDerived,
             sealed_mandate_deal: sealed_deal,

@@ -45,8 +45,8 @@ pub use types::{
     ActiveShock, AssetId, BPS_SCALE, Bps, CharterRole, ConverterRecipe, CreditTier,
     DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_PBRS_GAMMA_BPS, EngineError, MAX_MANDATE_BONUS_EQUITY,
     MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MarketDay, ProjectRecipe, RegentDoctrine,
-    ScheduledShockSpec, SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind, TableId, TableSpec,
-    Turn, UNIT_SCALE, Units, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
+    ScheduledShockSpec, SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind, TableId, TableMode,
+    TableSpec, Turn, UNIT_SCALE, Units, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
     checked_mul_units_parity, floor_bps_part, half_up_bps, mul_units_parity, scale_bps_signed,
 };
 
