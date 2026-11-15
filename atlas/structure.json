@@ -148,7 +148,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "15c9a8cf207104eeb4586d6f8e5c42c74c77ae42afc0a9ef2b8553840e0beb15",
+          "hash": "0d562d784e1fd3ccdd250ae79ee5d338091a4263233b41933262891d7c6ffb4e",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -2377,7 +2377,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "8dd556bdf1cc14038fe4133da014c98c5684c4976fdcd9dbf1a208af93820351",
+          "hash": "bddd7fa7be66fe3edbb0bac5498c1db71c6f232f8543019816ec57e63c90b115",
           "path": "CHANGELOG.md"
         },
         {
@@ -3094,7 +3094,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "96fe3a6404af244098b16005a34b113f0b20cb0a",
+    "commit": "812f4f48a3e93056ea16c16f5eb5a2cb0a5ce966",
     "tracked": 496
   },
   "landings": [
@@ -4931,7 +4931,7 @@
       "path": "crates/league-relay/src/error.rs"
     },
     {
-      "hash": "15e609713e6a680c2139d6c859d318c49e393643717ea4e6841e1b1217e06172",
+      "hash": "cdc74b046addae788ebd64c3cbc01f357f15de9cb5c56ca9734f7bb0dda8d533",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/error.rs",
@@ -5134,27 +5134,27 @@
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 182
+          "line": 174
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 198
+          "line": 189
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 214
+          "line": 203
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 219
+          "line": 212
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 227
+          "line": 228
         },
         {
           "in": "from_json_str",
@@ -5164,422 +5164,422 @@
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 243
+          "line": 239
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 257
+          "line": 249
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 262
+          "line": 259
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 266
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 272
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 278
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 285
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 298
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 303
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 366
+          "line": 417
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 865
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 867
-        },
-        {
-          "in": "acquire",
-          "kind": "match-err",
-          "line": 875
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 876
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 909
-        },
-        {
-          "in": "acquire",
-          "kind": "match-err",
-          "line": 915
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
           "line": 916
         },
         {
           "in": "acquire",
-          "kind": "match-err",
-          "line": 936
-        },
-        {
-          "in": "acquire",
           "kind": "err",
-          "line": 938
+          "line": 918
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 943
+          "line": 926
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 944
+          "line": 927
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 960
+        },
+        {
+          "in": "acquire",
+          "kind": "match-err",
+          "line": 966
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 967
+        },
+        {
+          "in": "acquire",
+          "kind": "match-err",
+          "line": 987
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 989
+        },
+        {
+          "in": "acquire",
+          "kind": "match-err",
+          "line": 994
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
+          "line": 995
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 968
+          "line": 1019
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 974
+          "line": 1025
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 974
+          "line": 1025
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1178
+          "line": 1229
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1191
+          "line": 1243
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1196
+          "line": 1248
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1201
+          "line": 1253
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1213
+          "line": 1264
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1219
+          "line": 1270
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1225
+          "line": 1276
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1231
+          "line": 1282
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 1310
+          "line": 1361
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1402
+          "line": 1453
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1412
+          "line": 1463
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1420
+          "line": 1471
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1430
+          "line": 1481
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1440
+          "line": 1491
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1451
+          "line": 1502
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1465
+          "line": 1516
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1477
+          "line": 1528
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 1511
+          "line": 1562
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1513
+          "line": 1564
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 1515
+          "line": 1566
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 1517
-        },
-        {
-          "in": "is_run_reservation_lock_live",
-          "kind": "match-err",
           "line": 1568
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 1569
+          "line": 1619
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 1578
+          "line": 1620
+        },
+        {
+          "in": "is_run_reservation_lock_live",
+          "kind": "match-err",
+          "line": 1629
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 1647
+          "line": 1698
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 1648
+          "line": 1699
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1648
+          "line": 1699
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1659
+          "line": 1710
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1666
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 1694
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 1696
+          "line": 1717
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 1700
+          "line": 1745
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 1702
+          "line": 1747
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "match-err",
+          "line": 1751
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "err",
+          "line": 1753
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1724
+          "line": 1775
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1731
+          "line": 1782
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1767
+          "line": 1818
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 1776
+          "line": 1827
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1778
+          "line": 1829
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 1781
+          "line": 1832
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 1783
+          "line": 1834
         },
         {
           "in": "open",
           "kind": "err",
-          "line": 1954
+          "line": 2005
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 1999
+          "line": 2050
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 2024
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "err",
-          "line": 2024
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "match-err",
-          "line": 2029
+          "line": 2075
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 2029
+          "line": 2075
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "match-err",
+          "line": 2080
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "err",
+          "line": 2080
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 2208
+          "line": 2259
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 2229
+          "line": 2280
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 2233
+          "line": 2284
         },
         {
           "in": "record_refusal",
           "kind": "err",
-          "line": 2245
+          "line": 2296
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 2274
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 2284
+          "line": 2325
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 2305
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "err",
-          "line": 2346
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "err",
-          "line": 2363
+          "line": 2335
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 2367
+          "line": 2356
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 2422
+          "line": 2397
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 2414
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
+          "line": 2418
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "err",
+          "line": 2473
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2491
+          "line": 2542
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2499
+          "line": 2550
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 2504
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2561
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2568
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2575
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2582
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2587
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 2592
+          "line": 2555
         },
         {
           "in": "run_turn",
@@ -5589,147 +5589,162 @@
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2618
+          "line": 2619
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2625
+          "line": 2626
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 2645
+          "line": 2633
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2638
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2643
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2663
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2669
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2676
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 2696
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2861
+          "line": 2912
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2870
+          "line": 2921
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2879
+          "line": 2930
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2918
+          "line": 2969
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2931
+          "line": 2982
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 2962
+          "line": 3013
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3159
+          "line": 3210
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3198
+          "line": 3249
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3220
+          "line": 3271
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3230
+          "line": 3281
         },
         {
           "in": "run_single_automated_seat",
           "kind": "err",
-          "line": 3289
+          "line": 3343
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3311
+          "line": 3365
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3354
+          "line": 3408
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3425
+          "line": 3479
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3442
+          "line": 3496
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3452
+          "line": 3506
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3464
+          "line": 3518
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 3534
+          "line": 3588
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3701
+          "line": 3755
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3707
+          "line": 3761
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3713
+          "line": 3767
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 3723
+          "line": 3777
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 3754
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3762
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3778
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 3803
+          "line": 3808
         },
         {
           "in": "evaluate_call_result",
@@ -5739,70 +5754,85 @@
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
+          "line": 3832
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
           "line": 3857
         },
         {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3870
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 3911
+        },
+        {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 3901
+          "line": 3955
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 3901
+          "line": 3955
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 3902
+          "line": 3956
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 3903
+          "line": 3957
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 3905
+          "line": 3959
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 3905
+          "line": 3959
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 3915
+          "line": 3969
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 3919
+          "line": 3973
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 4003
+          "line": 4057
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 4012
+          "line": 4066
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 4024
+          "line": 4078
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 4034
+          "line": 4088
         }
       ],
-      "hash": "f34a2fbb5e9a41fe7545e1227d4cfe890b768cc1c388ccce05948a3672a3cc86",
+      "hash": "12709fc1f3a5edf61d434b8b64b9b738a204998788c465254a96f5ca3813e73f",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -6176,36 +6206,43 @@
         "load_negotiation_inputs_if_present",
         "render_json_escaped_whisper_line",
         "render_wording_slot_with",
+        "render_wording_template_with",
         "sanitize_scratchpad_for_prompt",
         "sanitize_whisper",
         "split_negotiation_sections",
         "strip_thinking_tags",
+        "try_render_wording_template_with",
         "wording_slot",
         "wording_template"
       ],
       "failurePaths": [
         {
-          "in": "split_negotiation_sections",
+          "in": "try_render_wording_template_with",
           "kind": "err",
-          "line": 573
+          "line": 160
         },
         {
           "in": "split_negotiation_sections",
           "kind": "err",
-          "line": 586
+          "line": 608
         },
         {
           "in": "split_negotiation_sections",
           "kind": "err",
-          "line": 591
+          "line": 621
+        },
+        {
+          "in": "split_negotiation_sections",
+          "kind": "err",
+          "line": 626
         },
         {
           "in": "load_negotiation_inputs_if_present",
           "kind": "err",
-          "line": 631
+          "line": 666
         }
       ],
-      "hash": "22f56c100306b9413de95b1d65f80e296d40be33291c2f924287b20f03d5eca3",
+      "hash": "05208a340b54e7dca1bdfd6d6dbb587c178880754ea40b475c6803779ee6261b",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/secret.rs"
@@ -6213,7 +6250,7 @@
       "path": "crates/league-relay/src/wording.rs"
     },
     {
-      "hash": "71e619a4a0b6fe7f92664aca126f9d640d1b067715357859e02b9b50346f53c6",
+      "hash": "ebb2eab90c3d493511514a91f08fdf82a9123aad6d0e5abf57ed0e6a9eb940cc",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",

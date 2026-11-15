@@ -169,6 +169,13 @@ impl ResponseFormatConfig {
                             .to_owned(),
                     ));
                 };
+                for unpinned_key in ["description", "title", "examples"] {
+                    if inner.contains_key(unpinned_key) {
+                        return Err(RelayError::Usage(format!(
+                            "response_format json_schema cannot carry unpinned '{unpinned_key}'"
+                        )));
+                    }
+                }
                 let n = inner
                     .get("name")
                     .and_then(|v| v.as_str())
@@ -191,6 +198,13 @@ impl ResponseFormatConfig {
                     .ok_or_else(|| RelayError::Usage("json_schema requires 'schema'".to_owned()))?;
                 (n, strict_opt, s)
             } else if obj.contains_key("schema") && obj.get("name").is_some_and(|v| v.is_string()) {
+                for unpinned_key in ["description", "title", "examples"] {
+                    if obj.contains_key(unpinned_key) {
+                        return Err(RelayError::Usage(format!(
+                            "response_format cannot carry unpinned '{unpinned_key}'"
+                        )));
+                    }
+                }
                 let n = obj["name"].as_str().unwrap_or_default().to_owned();
                 let strict_opt = match obj.get("strict") {
                     Some(serde_json::Value::Bool(b)) => Some(*b),
@@ -220,8 +234,26 @@ impl ResponseFormatConfig {
                 "response_format 'schema' must be a JSON object".to_owned(),
             ));
         };
+        for unpinned_top_key in ["description", "title", "examples"] {
+            if schema_obj.contains_key(unpinned_top_key) {
+                return Err(RelayError::Usage(format!(
+                    "response_format top-level schema cannot carry unpinned '{unpinned_top_key}'"
+                )));
+            }
+        }
+        if let Some(req_val) = schema_obj.get("required")
+            && !req_val
+                .as_array()
+                .is_some_and(|arr| arr.iter().all(|v| v.is_string()))
+        {
+            return Err(RelayError::Usage(
+                "response_format schema 'required' must be an array of strings".to_owned(),
+            ));
+        }
+
         let pad_key = wording_slot("scratchpad_schema_key");
         let pinned_pad_desc = wording_slot("scratchpad_schema_description");
+        let mut has_pad_prop = false;
         if let Some(props_val) = schema_obj.get_mut("properties") {
             let Some(props_obj) = props_val.as_object_mut() else {
                 return Err(RelayError::Usage(
@@ -229,21 +261,30 @@ impl ResponseFormatConfig {
                 ));
             };
             if let Some(pad_prop) = props_obj.get_mut(&pad_key) {
+                has_pad_prop = true;
                 let Some(pad_obj) = pad_prop.as_object_mut() else {
                     return Err(RelayError::Usage(format!(
                         "response_format schema property '{pad_key}' must be a JSON object"
                     )));
                 };
-                if let Some(prop_type) = pad_obj.get("type") {
-                    let allows_string = prop_type.as_str() == Some("string")
-                        || prop_type
-                            .as_array()
-                            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some("string")));
-                    if !allows_string {
+                for key in pad_obj.keys() {
+                    if !matches!(key.as_str(), "type" | "description" | "maxLength") {
                         return Err(RelayError::Usage(format!(
-                            "response_format schema property '{pad_key}' must permit JSON type 'string'"
+                            "response_format schema property '{pad_key}' cannot carry unpinned keyword '{key}' (only 'type', 'description', and 'maxLength' are permitted)"
                         )));
                     }
+                }
+                if pad_obj.get("type").and_then(|v| v.as_str()) != Some("string") {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' must have JSON type 'string'"
+                    )));
+                }
+                if let Some(max_len) = pad_obj.get("maxLength")
+                    && !max_len.as_u64().is_some_and(|n| n > 0)
+                {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' 'maxLength' must be a positive integer"
+                    )));
                 }
                 match pad_obj.get("description") {
                     None | Some(serde_json::Value::Null) => {
@@ -266,6 +307,16 @@ impl ResponseFormatConfig {
                 }
             }
         }
+        if has_pad_prop {
+            let req_entry = schema_obj
+                .entry("required".to_owned())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+            if let Some(req_arr) = req_entry.as_array_mut()
+                && !req_arr.iter().any(|v| v.as_str() == Some(pad_key.as_str()))
+            {
+                req_arr.push(serde_json::Value::String(pad_key));
+            }
+        }
         Ok(Self {
             name,
             strict,
@@ -278,7 +329,7 @@ impl ResponseFormatConfig {
         sha256_hex(&serde_json::to_vec(self).unwrap_or_default())
     }
 
-    /// Whether `schema.properties` defines the pinned `"scratchpad"` property (`R2-B3`).
+    /// Whether `schema.properties` defines the pinned `"notes"` property (`R2-B3`, `R3-A1`).
     pub fn schema_has_scratchpad_property(&self) -> bool {
         let pad_key = wording_slot("scratchpad_schema_key");
         self.schema
@@ -287,8 +338,8 @@ impl ResponseFormatConfig {
             .is_some_and(|props| props.contains_key(&pad_key))
     }
 
-    /// Return a copy of this configuration with `"scratchpad"` removed from `properties` and
-    /// `required`, used for seats that keep no scratchpad (`R2-B1`, `R2-B3`).
+    /// Return a copy of this configuration with `"notes"` removed from `properties` and
+    /// `required`, used for seats that keep no notes (`R2-B1`, `R2-B3`, `R3-A1`).
     pub fn without_scratchpad_property(&self) -> Self {
         let pad_key = wording_slot("scratchpad_schema_key");
         let mut cloned = self.clone();
@@ -1181,6 +1232,7 @@ fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadP
     }
     let table_req = config.scratchpad_requested.or(config.seats.scratchpad);
     let mixed_arm = config.mixed_scratchpad_arm || config.seats.mixed_scratchpad_arm;
+    let pad_key = wording_slot("scratchpad_schema_key");
     let schema_has_pad = config
         .response_format
         .as_ref()
@@ -1198,10 +1250,9 @@ fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadP
             ));
         }
         if !schema_has_pad {
-            return Err(RelayError::Usage(
-                "scratchpad requested, but --response-schema has no 'scratchpad' property"
-                    .to_owned(),
-            ));
+            return Err(RelayError::Usage(format!(
+                "scratchpad requested, but --response-schema has no '{pad_key}' property"
+            )));
         }
     }
 
@@ -1229,7 +1280,7 @@ fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadP
             }
             if !schema_has_pad {
                 return Err(RelayError::Usage(format!(
-                    "seat '{}' requests a scratchpad, but --response-schema has no 'scratchpad' property",
+                    "seat '{}' requests a scratchpad, but --response-schema has no '{pad_key}' property",
                     seat.guild
                 )));
             }
@@ -1273,7 +1324,7 @@ fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadP
                     } else {
                         SeatScratchpadDecision {
                             keeps_scratchpad: false,
-                            status_label: "none (schema has no scratchpad field)".to_owned(),
+                            status_label: format!("none (schema has no {pad_key} field)"),
                             participates_in_mix_check: true,
                         }
                     }
@@ -3262,11 +3313,14 @@ fn run_single_automated_seat(
                 usage,
             } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
                 match extract_scratchpad_update(&reply_content) {
-                    None => EvaluatedCall::Success {
-                        reply_content,
-                        persisted_reasoning,
+                    None => EvaluatedCall::DeliveryFailure {
+                        reason: format!(
+                            "structured output missing required '{}' string property",
+                            wording_slot("scratchpad_schema_key")
+                        ),
                         model_returned,
                         usage,
+                        is_late_reply: false,
                     },
                     Some(candidate_pad) if candidate_pad.is_empty() => {
                         validated_scratchpad_update = Some(String::new());

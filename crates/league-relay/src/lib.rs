@@ -49,6 +49,7 @@ pub use wording::{
     cap_words_and_chars, extract_scratchpad_update, format_negotiation_block,
     format_sanitized_scratchpad_section, format_scratchpad_section, json_escape_untrusted_str,
     load_negotiation_inputs_if_present, render_json_escaped_whisper_line, render_wording_slot_with,
-    sanitize_scratchpad_for_prompt, sanitize_whisper, split_negotiation_sections,
-    strip_thinking_tags, wording_slot, wording_template,
+    render_wording_template_with, sanitize_scratchpad_for_prompt, sanitize_whisper,
+    split_negotiation_sections, strip_thinking_tags, try_render_wording_template_with,
+    wording_slot, wording_template,
 };

@@ -9942,10 +9942,10 @@ fn part1_b4_1_c5_system_wrapper_snapshot_scratchpad_emc_and_setup_record() -> Te
             "strict": true,
             "schema": {
                 "type": "object",
-                "required": ["orders", "scratchpad"],
+                "required": ["orders", "notes"],
                 "properties": {
                     "orders": {"type": "array"},
-                    "scratchpad": {"type": "string"}
+                    "notes": {"type": "string"}
                 },
                 "additionalProperties": false
             }
@@ -9964,7 +9964,7 @@ fn part1_b4_1_c5_system_wrapper_snapshot_scratchpad_emc_and_setup_record() -> Te
         body: local_completion_body(
             &json!({
                 "orders": ["offer 2 salt"],
-                "scratchpad": exact_limit_notes,
+                "notes": exact_limit_notes,
             })
             .to_string(),
             "Qwen/Qwen3-14B",
@@ -10016,7 +10016,7 @@ fn part1_b4_1_c5_system_wrapper_snapshot_scratchpad_emc_and_setup_record() -> Te
     let snap_tx_2 = ScriptedTransport::new(vec![ScriptStep::Respond(RawHttpResponse {
         status: 200,
         body: local_completion_body(
-            r#"{"orders":["stay"],"scratchpad":"Updated JSON scratchpad note."}"#,
+            r#"{"orders":["stay"],"notes":"Updated JSON scratchpad note."}"#,
             "Qwen/Qwen3-14B",
             90,
             24,
@@ -10166,7 +10166,7 @@ fn part1_b4_2_structured_output_response_format_and_harness_fallback() -> TestRe
             "properties": {
                 "orders": {"type": "array"},
                 "whispers": {"type": "array"},
-                "scratchpad": {"type": "string"}
+                "notes": {"type": "string"}
             },
             "additionalProperties": false
         }
@@ -10207,7 +10207,7 @@ fn part1_b4_2_structured_output_response_format_and_harness_fallback() -> TestRe
             status: 200,
             delay: Duration::from_millis(5),
             body: local_completion_body(
-                r#"{"orders":["travel Ostra"],"whispers":[],"scratchpad":"headed Ostra"}"#,
+                r#"{"orders":["travel Ostra"],"whispers":[],"notes":"headed Ostra"}"#,
                 "Qwen/Qwen3-14B",
                 45,
                 20,
@@ -10286,7 +10286,7 @@ fn part1_b4_2_structured_output_response_format_and_harness_fallback() -> TestRe
     assert_eq!(wire_req["response_format"]["json_schema"]["strict"], true);
     assert_eq!(
         wire_req["response_format"]["json_schema"]["schema"]["required"],
-        json!(["orders", "whispers"])
+        json!(["orders", "whispers", "notes"])
     );
 
     let calls_t1 = read_calls_log(&game_dir)?;
@@ -10303,7 +10303,7 @@ fn part1_b4_2_structured_output_response_format_and_harness_fallback() -> TestRe
     assert_eq!(calls_t1[1].outcome, "OK");
     assert_eq!(
         fs::read_to_string(game_dir.join("from-seat/day-01-talk-Saltworks.md"))?,
-        r#"{"orders":["travel Ostra"],"whispers":[],"scratchpad":"headed Ostra"}"#
+        r#"{"orders":["travel Ostra"],"whispers":[],"notes":"headed Ostra"}"#
     );
 
     // Turn 2: missing required field on attempt 1 + invalid JSON on attempt 2 -> NO_REPLY (exit 2):
@@ -10618,7 +10618,7 @@ fn part1_b4_3_seat_reasoning_pinning_exclusion_and_reasoning_tokens_ledger() -> 
 #[test]
 fn part1_b4_4_whisper_escaping_word_cap_batna_and_wording_table_pin() -> TestResult {
     // --- 1. Studio Rule (2026-11-15): Pin active arm, every template in MODEL_FACING_WORDING, and rendered slots ---
-    assert_eq!(ACTIVE_WORDING_ARM, "v2_neutral_2026_11_15_r3");
+    assert_eq!(ACTIVE_WORDING_ARM, "v2_neutral_2026_11_15_r4");
     let expected_table: &[WordingEntry] = &[
         WordingEntry {
             slot: "system_snapshot_note",
@@ -10626,7 +10626,7 @@ fn part1_b4_4_whisper_escaping_word_cap_batna_and_wording_table_pin() -> TestRes
         },
         WordingEntry {
             slot: "scratchpad_header",
-            shown_text: "=== YOUR SAVED SCRATCHPAD (AT MOST {MAX_SCRATCHPAD_TOKENS} TOKENS) ===",
+            shown_text: "=== YOUR NOTES FROM EARLIER TURNS (AT MOST {MAX_SCRATCHPAD_TOKENS} TOKENS) ===",
         },
         WordingEntry {
             slot: "scratchpad_empty",
@@ -10634,7 +10634,7 @@ fn part1_b4_4_whisper_escaping_word_cap_batna_and_wording_table_pin() -> TestRes
         },
         WordingEntry {
             slot: "scratchpad_schema_key",
-            shown_text: "scratchpad",
+            shown_text: "notes",
         },
         WordingEntry {
             slot: "scratchpad_schema_description",
@@ -10703,7 +10703,7 @@ fn part1_b4_4_whisper_escaping_word_cap_batna_and_wording_table_pin() -> TestRes
     );
     assert_eq!(
         wording_slot("scratchpad_header"),
-        "=== YOUR SAVED SCRATCHPAD (AT MOST 500 TOKENS) ==="
+        "=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ==="
     );
     assert_eq!(
         wording_slot("scratchpad_schema_description"),
@@ -11241,7 +11241,7 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
         status: 200,
         delay: Duration::ZERO,
         body: local_completion_body(
-            r#"{"travel":"stay","scratchpad":"saved via json"}"#,
+            r#"{"travel":"stay","notes":"saved via json"}"#,
             "Qwen/Qwen3-14B",
             22,
             14,
@@ -11287,7 +11287,7 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
                 "required": ["travel"],
                 "properties": {
                     "travel": {"type": "string"},
-                    "scratchpad": {"type": "string"}
+                    "notes": {"type": "string"}
                 }
             }
         })
@@ -11611,7 +11611,7 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
     assert_eq!(clipped_words, 1);
     assert!(was_trunc);
     assert_eq!(
-        extract_scratchpad_update(r#"{"order":"stay","scratchpad":"  json note  "}"#),
+        extract_scratchpad_update(r#"{"order":"stay","notes":"  json note  "}"#),
         Some("json note".to_owned())
     );
     assert_eq!(
@@ -11863,10 +11863,10 @@ fn fix1_a2_b10_local_transport_ignores_env_proxies_in_subprocess() -> TestResult
         &schema_path,
         serde_json::to_string(&json!({
             "type": "object",
-            "required": ["orders", "scratchpad"],
+            "required": ["orders", "notes"],
             "properties": {
                 "orders": {"type": "array"},
-                "scratchpad": {"type": "string"}
+                "notes": {"type": "string"}
             },
             "additionalProperties": false
         }))?,
@@ -11876,7 +11876,7 @@ fn fix1_a2_b10_local_transport_ignores_env_proxies_in_subprocess() -> TestResult
         status: 200,
         delay: Duration::from_millis(5),
         body: local_completion_body(
-            r#"{"orders":["stay"],"scratchpad":"direct loopback note"}"#,
+            r#"{"orders":["stay"],"notes":"direct loopback note"}"#,
             "Qwen/Qwen3-14B",
             30,
             12,
@@ -11976,10 +11976,10 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
         &a3_schema,
         serde_json::to_string(&json!({
             "type": "object",
-            "required": ["orders", "scratchpad"],
+            "required": ["orders", "notes"],
             "properties": {
                 "orders": {"type": "array"},
-                "scratchpad": {"type": "string"}
+                "notes": {"type": "string"}
             },
             "additionalProperties": false
         }))?,
@@ -12000,7 +12000,7 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
             body: local_completion_body(
                 &json!({
                     "orders": ["stay"],
-                    "scratchpad": long_words_500_tokens,
+                    "notes": long_words_500_tokens,
                 })
                 .to_string(),
                 "Qwen/Qwen3-14B",
@@ -12070,7 +12070,7 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
                 status: 200,
                 delay: Duration::from_millis(5),
                 body: local_completion_body(
-                    r#"{"orders":["stay"],"scratchpad":"tiny note"}"#,
+                    r#"{"orders":["stay"],"notes":"tiny note"}"#,
                     "Qwen/Qwen3-14B",
                     40,
                     20,
@@ -12082,7 +12082,7 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
                 status: 200,
                 delay: Duration::from_millis(5),
                 body: local_completion_body(
-                    r#"{"orders":["stay"],"scratchpad":"tiny note"}"#,
+                    r#"{"orders":["stay"],"notes":"tiny note"}"#,
                     "Qwen/Qwen3-14B",
                     40,
                     20,
@@ -12157,7 +12157,7 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
                 status: 200,
                 delay: Duration::from_millis(5),
                 body: local_completion_body(
-                    r#"{"orders":["stay"],"scratchpad":"note"}"#,
+                    r#"{"orders":["stay"],"notes":"note"}"#,
                     "Qwen/Qwen3-14B",
                     30,
                     12,
@@ -12305,10 +12305,10 @@ fn fix1_a4_a5_b5_c5_wording_checks_header_cap_spoofed_sender_and_bidi_escape() -
             "strict": true,
             "schema": {
                 "type": "object",
-                "required": ["orders", "scratchpad"],
+                "required": ["orders", "notes"],
                 "properties": {
                     "orders": {"type": "array"},
-                    "scratchpad": {
+                    "notes": {
                         "type": "string"
                     }
                 },
@@ -12344,7 +12344,7 @@ fn fix1_a4_a5_b5_c5_wording_checks_header_cap_spoofed_sender_and_bidi_escape() -
     let tx = ScriptedTransport::new(vec![ScriptStep::Respond(RawHttpResponse {
         status: 200,
         body: local_completion_body(
-            r#"{"orders":["stay"],"scratchpad":"calm note"}"#,
+            r#"{"orders":["stay"],"notes":"calm note"}"#,
             "Qwen/Qwen3-14B",
             30,
             15,
@@ -12376,7 +12376,7 @@ fn fix1_a4_a5_b5_c5_wording_checks_header_cap_spoofed_sender_and_bidi_escape() -
     assert!(!sys_text.contains("Notes for your next turn"));
     assert!(!usr_text.contains("Notes for your next turn"));
     assert_eq!(
-        wire["response_format"]["json_schema"]["schema"]["properties"]["scratchpad"]["description"],
+        wire["response_format"]["json_schema"]["schema"]["properties"]["notes"]["description"],
         wording_slot("scratchpad_schema_description")
     );
 
@@ -12859,7 +12859,7 @@ fn fix2_r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult 
     );
     assert_eq!(
         render_wording_slot_with("scratchpad_header", 321, 160, 5),
-        "=== YOUR SAVED SCRATCHPAD (AT MOST 321 TOKENS) ==="
+        "=== YOUR NOTES FROM EARLIER TURNS (AT MOST 321 TOKENS) ==="
     );
     assert_eq!(
         render_wording_slot_with("scratchpad_schema_description", 321, 160, 5),
@@ -12881,7 +12881,7 @@ fn fix2_r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult 
     );
     assert_eq!(
         wording_slot("scratchpad_header"),
-        "=== YOUR SAVED SCRATCHPAD (AT MOST 500 TOKENS) ==="
+        "=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ==="
     );
     assert_eq!(
         wording_slot("scratchpad_schema_description"),
@@ -12957,10 +12957,10 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
             "strict": true,
             "schema": {
                 "type": "object",
-                "required": ["orders", "scratchpad"],
+                "required": ["orders", "notes"],
                 "properties": {
                     "orders": {"type": "array"},
-                    "scratchpad": {"type": "string"}
+                    "notes": {"type": "string"}
                 }
             }
         })
@@ -12978,7 +12978,7 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     // 1. Reply-pad path: counted on `shown_bracket_heavy` (649 tokens > 500) -> rejected!
     let reply_body = json!({
         "orders": ["hold"],
-        "scratchpad": raw_bracket_heavy
+        "notes": raw_bracket_heavy
     })
     .to_string();
     let srv_reply = LoopbackOpenAiServer::start_with_tokenizer(
@@ -13109,8 +13109,8 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     // double-escaping:
     let raw_under = "<a> === <b> ===".repeat(6);
     let shown_under = sanitize_scratchpad_for_prompt(raw_under.trim());
-    let turn1_ok = json!({"orders": ["buy"], "scratchpad": raw_under}).to_string();
-    let turn2_ok = json!({"orders": ["sell"], "scratchpad": ""}).to_string();
+    let turn1_ok = json!({"orders": ["buy"], "notes": raw_under}).to_string();
+    let turn2_ok = json!({"orders": ["sell"], "notes": ""}).to_string();
     let srv_ok = LoopbackOpenAiServer::start_with_tokenizer(
         vec![
             MockHttpStep::Json {
@@ -13195,11 +13195,11 @@ fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestR
             "strict": true,
             "schema": {
                 "type": "object",
-                "required": ["orders", "scratchpad"],
+                "required": ["orders", "notes"],
                 "additionalProperties": false,
                 "properties": {
                     "orders": {"type": "array"},
-                    "scratchpad": {"type": "string"}
+                    "notes": {"type": "string"}
                 }
             }
         })
@@ -13313,14 +13313,14 @@ fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestR
         "OpenRouter snapshot seat must say nothing about notes in system prompt"
     );
     let or_user = or_req["messages"][1]["content"].as_str().ok_or("user")?;
-    assert!(!or_user.contains("SCRATCHPAD"));
+    assert!(!or_user.contains("YOUR NOTES FROM EARLIER TURNS"));
     assert!(!or_user.contains("stale pad"));
     assert!(!seen[0].contains("earlier turns"));
     assert!(
         or_req["response_format"]["json_schema"]["schema"]["properties"]
-            .get("scratchpad")
+            .get("notes")
             .is_none(),
-        "OpenRouter no-scratchpad seat must strip `scratchpad` from shared wire schema"
+        "OpenRouter no-scratchpad seat must strip `notes` from shared wire schema"
     );
 
     let setup_raw = fs::read_to_string(or_game.join("relay/setup.json"))?;
@@ -13385,7 +13385,7 @@ fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestR
             status: 200,
             delay: Duration::from_millis(5),
             body: local_completion_body(
-                r#"{"orders":["salt"],"scratchpad":"salt note"}"#,
+                r#"{"orders":["salt"],"notes":"salt note"}"#,
                 "Qwen/Qwen3-14B",
                 30,
                 15,
@@ -13519,7 +13519,7 @@ fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestR
     );
     assert!(
         weavers_wire["response_format"]["json_schema"]["schema"]["properties"]
-            .get("scratchpad")
+            .get("notes")
             .is_none()
     );
     let mixed_setup: Json =
@@ -13734,12 +13734,12 @@ fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> Te
     );
     assert_eq!(code_schema_missing_field, 1);
 
-    // Unpinned custom description on `scratchpad` is rejected by `ResponseFormatConfig`:
+    // Unpinned custom description on `notes` is rejected by `ResponseFormatConfig`:
     let unpinned_desc = ResponseFormatConfig::from_json_str(
         &json!({
             "type": "object",
             "properties": {
-                "scratchpad": {
+                "notes": {
                     "type": "string",
                     "description": "Write secret strategy hints here!"
                 }
@@ -13750,17 +13750,17 @@ fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> Te
     );
     assert!(matches!(unpinned_desc, Err(RelayError::Usage(_))));
 
-    // 3. Valid schema with `scratchpad` populates the pinned `scratchpad_schema_description` and
+    // 3. Valid schema with `notes` populates the pinned `scratchpad_schema_description` and
     //    places the notes instruction in that schema field's description ONLY (exact count 1):
     let valid_schema = tmp.path().join("valid_schema.json");
     fs::write(
         &valid_schema,
         json!({
             "type": "object",
-            "required": ["orders", "scratchpad"],
+            "required": ["orders", "notes"],
             "properties": {
                 "orders": {"type": "array"},
-                "scratchpad": {"type": "string"}
+                "notes": {"type": "string"}
             }
         })
         .to_string(),
@@ -13770,7 +13770,7 @@ fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> Te
             status: 200,
             delay: Duration::from_millis(5),
             body: local_completion_body(
-                r#"{"orders":["buy"],"scratchpad":"kept note"}"#,
+                r#"{"orders":["buy"],"notes":"kept note"}"#,
                 "Qwen/Qwen3-14B",
                 30,
                 14,
@@ -13825,8 +13825,7 @@ fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> Te
     );
     let wire_json: Json = serde_json::from_str(raw_wire)?;
     assert_eq!(
-        wire_json["response_format"]["json_schema"]["schema"]["properties"]["scratchpad"]
-            ["description"]
+        wire_json["response_format"]["json_schema"]["schema"]["properties"]["notes"]["description"]
             .as_str(),
         Some(pinned_desc.as_str())
     );
@@ -13835,5 +13834,695 @@ fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> Te
         "kept note"
     );
 
+    Ok(())
+}
+
+#[test]
+fn fix3_r3_a1_live_loopback_request_uses_notes_only_with_zero_scratchpad() -> TestResult {
+    // Part 1 & Part 3(c): `scratchpad_header` renders byte-for-byte with `"NOTES"` and live constant:
+    assert_eq!(
+        wording_slot("scratchpad_header").as_bytes(),
+        b"=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ==="
+    );
+    assert_eq!(
+        render_wording_slot_with("scratchpad_header", 321, 160, 5).as_bytes(),
+        b"=== YOUR NOTES FROM EARLIER TURNS (AT MOST 321 TOKENS) ==="
+    );
+
+    // Part 2 & Part 3(b): `scratchpad_schema_key` is `"notes"`:
+    assert_eq!(wording_slot("scratchpad_schema_key"), "notes");
+
+    // Part 3(a)-(c): Live loopback snapshot request with saved notes, negotiation inputs, and
+    // response schema contains zero `"scratchpad"` in any case anywhere in what the model is sent:
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "SEAT RULES BRIEF")?;
+    let schema_path = tmp.path().join("notes_schema.json");
+    fs::write(
+        &schema_path,
+        json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["orders", "notes"],
+                "additionalProperties": false,
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(5),
+            body: local_completion_body(
+                r#"{"orders":["buy 2 salt"],"notes":"updated turn note"}"#,
+                "Qwen/Qwen3-14B",
+                40,
+                16,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let game_dir = tmp.path().join("r3_a1_game");
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY 01 TALK STATE")?;
+    fs::write(
+        game_dir.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+        json!({
+            "batna": "Keep 4 salt; 0 VP.",
+            "whispers": [{
+                "from_guild": "Weavers",
+                "intent_header": {"offer": "2 wool"},
+                "body": "Swap 2 wool for 2 salt?"
+            }]
+        })
+        .to_string(),
+    )?;
+    fs::create_dir_all(game_dir.join("relay/seats"))?;
+    fs::write(
+        game_dir.join("relay/seats/Saltworks.scratchpad.md"),
+        "prior turn note",
+    )?;
+
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "file",
+                    "model": "manual-weavers"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&err_out));
+
+    let chat_reqs = srv.recorded_requests()?;
+    assert_eq!(chat_reqs.len(), 1);
+    let raw_wire = &chat_reqs[0].body;
+    assert!(
+        !raw_wire.to_ascii_lowercase().contains("scratchpad"),
+        "wire request must contain zero 'scratchpad' in any case, got: {raw_wire}"
+    );
+    let wire_json: Json = serde_json::from_str(raw_wire)?;
+    let props = wire_json["response_format"]["json_schema"]["schema"]["properties"]
+        .as_object()
+        .ok_or("schema.properties")?;
+    assert!(props.contains_key("notes"));
+    assert!(!props.contains_key("scratchpad"));
+    let user_msg = wire_json["messages"][1]["content"].as_str().ok_or("user")?;
+    assert!(
+        user_msg
+            .as_bytes()
+            .windows(
+                b"=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ===\nprior turn note"
+                    .len()
+            )
+            .any(|w| w
+                == b"=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ===\nprior turn note")
+    );
+    assert_eq!(
+        fs::read_to_string(game_dir.join("relay/seats/Saltworks.scratchpad.md"))?,
+        "updated turn note"
+    );
+
+    // Operator error texts (`relay.rs:1202`, `:1232`) name `'notes'` rather than `'scratchpad'`:
+    let schema_no_notes = tmp.path().join("schema_no_notes.json");
+    fs::write(
+        &schema_no_notes,
+        json!({
+            "type": "object",
+            "required": ["orders"],
+            "properties": {"orders": {"type": "array"}}
+        })
+        .to_string(),
+    )?;
+    let g_err = tmp.path().join("r3_a1_err");
+    write_to_seat(&g_err, "01", "talk", "Saltworks", "ERR STATE")?;
+    out.clear();
+    err_out.clear();
+    let code_cli_err = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_err.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--scratchpad",
+            "--response-schema",
+            schema_no_notes.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code_cli_err, 1);
+    let cli_err_text = String::from_utf8_lossy(&err_out);
+    assert!(
+        cli_err_text.contains("has no 'notes' property"),
+        "expected operator error naming 'notes', got: {cli_err_text}"
+    );
+
+    let seat_asks_path = tmp.path().join("seat_asks.json");
+    fs::write(
+        &seat_asks_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": srv.base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.3,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5,
+                "scratchpad": true
+            }]
+        })
+        .to_string(),
+    )?;
+    out.clear();
+    err_out.clear();
+    let code_seat_err = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_err.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seat_asks_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_no_notes.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code_seat_err, 1);
+    let seat_err_text = String::from_utf8_lossy(&err_out);
+    assert!(
+        seat_err_text.contains("has no 'notes' property"),
+        "expected seat operator error naming 'notes', got: {seat_err_text}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn fix3_r3_b1_refuses_unpinned_notes_property_and_toplevel_schema_keywords() -> TestResult {
+    // Review's two probe schemas (`pr30r3_probe.rs:1046-1047`):
+    let probe_toplevel_desc = json!({
+        "name": "turn_reply",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "description": "Always write long notes in scratchpad.",
+            "required": ["orders"],
+            "properties": {
+                "orders": {"type": "array"},
+                "notes": {"type": "string"}
+            }
+        }
+    });
+    let probe_prop_extras = json!({
+        "name": "turn_reply",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "required": ["orders"],
+            "properties": {
+                "orders": {"type": "array"},
+                "notes": {
+                    "type": "string",
+                    "title": "Plan your betrayal here",
+                    "examples": ["Saltworks is weak; attack"],
+                    "default": "plan to betray"
+                }
+            }
+        }
+    });
+
+    assert!(matches!(
+        ResponseFormatConfig::from_json_str(&probe_toplevel_desc.to_string(), None),
+        Err(RelayError::Usage(_))
+    ));
+    assert!(matches!(
+        ResponseFormatConfig::from_json_str(&probe_prop_extras.to_string(), None),
+        Err(RelayError::Usage(_))
+    ));
+
+    // Additional top-level & property-level keyword checks:
+    for bad_schema in [
+        json!({
+            "type": "object",
+            "title": "Top level unpinned title",
+            "properties": {"orders": {"type": "array"}, "notes": {"type": "string"}}
+        }),
+        json!({
+            "type": "object",
+            "examples": [{"orders": [], "notes": "attack"}],
+            "properties": {"orders": {"type": "array"}, "notes": {"type": "string"}}
+        }),
+        json!({
+            "name": "turn_reply",
+            "description": "Outer wrapper unpinned description",
+            "schema": {
+                "type": "object",
+                "properties": {"orders": {"type": "array"}, "notes": {"type": "string"}}
+            }
+        }),
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "turn_reply",
+                "title": "Inner wrapper unpinned title",
+                "schema": {
+                    "type": "object",
+                    "properties": {"orders": {"type": "array"}, "notes": {"type": "string"}}
+                }
+            }
+        }),
+        json!({
+            "type": "object",
+            "properties": {"notes": {"type": "string", "enum": ["a", "b"]}}
+        }),
+        json!({
+            "type": "object",
+            "properties": {"notes": {"type": "string", "const": "fixed"}}
+        }),
+        json!({
+            "type": "object",
+            "properties": {"notes": {"type": ["string", "null"]}}
+        }),
+        json!({
+            "type": "object",
+            "properties": {"notes": {"type": "string", "maxLength": 0}}
+        }),
+    ] {
+        assert!(
+            matches!(
+                ResponseFormatConfig::from_json_str(&bad_schema.to_string(), None),
+                Err(RelayError::Usage(_))
+            ),
+            "expected Usage refusal on schema: {bad_schema}"
+        );
+    }
+
+    // `maxLength` with a positive integer is permitted alongside `type` and `description`:
+    let valid_with_max_len = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "required": ["orders", "notes"],
+            "properties": {
+                "orders": {"type": "array"},
+                "notes": {"type": "string", "maxLength": 2000}
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    assert_eq!(
+        valid_with_max_len.schema["properties"]["notes"]["maxLength"],
+        json!(2000)
+    );
+
+    // End-to-end CLI verification on both review probe schemas: refused before any HTTP or /tokenize call:
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_path = tmp.path().join("seats.json");
+    write_local_seats_file(
+        &seats_path,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    for (idx, probe_schema) in [probe_prop_extras, probe_toplevel_desc].iter().enumerate() {
+        let g = tmp.path().join(format!("b1_cli_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "B1 STATE")?;
+        let sp = tmp.path().join(format!("probe_schema_{idx}.json"));
+        fs::write(&sp, probe_schema.to_string())?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                sp.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code, 1);
+        assert!(!err_out.is_empty());
+        assert_eq!(srv.request_count()?, 0);
+        assert_eq!(srv.tokenize_requests()?.len(), 0);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn fix3_r3_b2_notes_field_required_and_missing_field_is_delivery_failure() -> TestResult {
+    // 1. Relay adds `"notes"` to `schema.required` when `properties` defines `"notes"`,
+    //    and strips it again on no-scratchpad seats:
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["orders"],
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    assert_eq!(rf.schema["required"], json!(["orders", "notes"]));
+    let stripped = rf.without_scratchpad_property();
+    assert_eq!(stripped.schema["required"], json!(["orders"]));
+
+    let rf_no_req_key = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "properties": {
+                "orders": {"type": "array"},
+                "notes": {"type": "string"}
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    assert_eq!(rf_no_req_key.schema["required"], json!(["notes"]));
+
+    assert!(matches!(
+        ResponseFormatConfig::from_json_str(
+            &json!({
+                "type": "object",
+                "required": "orders",
+                "properties": {"orders": {"type": "array"}}
+            })
+            .to_string(),
+            None,
+        ),
+        Err(RelayError::Usage(_))
+    ));
+
+    // 2. Live loopback turn where schema file omitted `"notes"` from `required` and the assistant
+    //    reply omits `"notes"`: must be a delivery failure (`harness` -> `NO_REPLY`, exit 2),
+    //    never a silent keep delivering a turn without replacing earlier notes!
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let schema_path = tmp.path().join("b2_schema.json");
+    fs::write(
+        &schema_path,
+        json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["orders"],
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(5),
+                body: local_completion_body(
+                    r#"{"orders":["hold"]}"#,
+                    "Qwen/Qwen3-14B",
+                    30,
+                    10,
+                    None,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(5),
+                body: local_completion_body(
+                    r#"{"orders":["hold"]}"#,
+                    "Qwen/Qwen3-14B",
+                    30,
+                    10,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let game_dir = tmp.path().join("b2_missing_notes");
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "B2 STATE")?;
+    fs::create_dir_all(game_dir.join("relay/seats"))?;
+    fs::write(
+        game_dir.join("relay/seats/Saltworks.scratchpad.md"),
+        "EARLIER NOTE",
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_local_seats_file(
+        &seats_path,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(
+        code, 2,
+        "reply omitting 'notes' must fail delivery rather than silently keeping old notes"
+    );
+    assert!(!game_dir.join("from-seat/day-01-talk-Saltworks.md").exists());
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].outcome, "harness");
+    assert!(
+        calls[0]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("missing required property 'notes'"),
+        "expected missing required 'notes' error, got: {:?}",
+        calls[0].error
+    );
+    assert_eq!(calls[1].outcome, "NO_REPLY");
+
+    Ok(())
+}
+
+#[test]
+fn fix3_c1_whisper_body_quotes_charged_within_exact_1800_bound() -> TestResult {
+    // Reviewer's C-1 case (`20,000 × [[]]` + `"short"`), which rendered 1799 + 2 = 1801 > 1800 at 812f4f48:
+    let nested_pairs = Json::Array(vec![json!([[]]); 20_000]);
+    for body in ["short", "", "   ", &" ".repeat(2_500)] {
+        let whisper = UntrustedWhisper {
+            from_guild: "Weavers".to_owned(),
+            intent_header: Some(nested_pairs.clone()),
+            body: (*body).to_owned(),
+        };
+        let sanitized = sanitize_whisper(&whisper);
+        let rendered_line = render_json_escaped_whisper_line(&sanitized);
+        let parsed: Json = serde_json::from_str(&rendered_line)?;
+        assert_eq!(parsed["truncated"], json!(true));
+
+        let body_shown_len = json_escape_untrusted_str(&sanitized.capped_body)
+            .chars()
+            .count();
+        // Extract exact serialized `intent_header` substring shown on the wire:
+        let intent_prefix = "\"intent_header\":";
+        let body_sep = ",\"body\":";
+        let i_start = rendered_line
+            .find(intent_prefix)
+            .ok_or("missing intent_header")?
+            + intent_prefix.len();
+        let i_end = rendered_line.find(body_sep).ok_or("missing body")?;
+        let header_shown_len = rendered_line[i_start..i_end].chars().count();
+        let combined_shown_chars = header_shown_len + body_shown_len;
+        assert!(
+            combined_shown_chars <= MAX_WHISPER_CHARS,
+            "C-1 violated: header ({header_shown_len}) + body ({body_shown_len}) = {combined_shown_chars} > {MAX_WHISPER_CHARS}"
+        );
+        assert!(sanitized.word_count <= MAX_WHISPER_WORDS);
+    }
+
+    // Overlong whitespace-only body without header also marks `truncated = true` when > 1800 with quotes:
+    let ws_only = UntrustedWhisper {
+        from_guild: "Weavers".to_owned(),
+        intent_header: None,
+        body: " ".repeat(MAX_WHISPER_CHARS),
+    };
+    let ws_sanitized = sanitize_whisper(&ws_only);
+    assert!(ws_sanitized.truncated);
+    assert_eq!(
+        json_escape_untrusted_str(&ws_sanitized.capped_body)
+            .chars()
+            .count(),
+        2
+    );
+
+    Ok(())
+}
+
+#[test]
+fn fix3_c5_placeholder_check_runs_in_release_and_rejects_unexpanded_braces() -> TestResult {
+    let wording_src = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("wording.rs"),
+    )?;
+    assert!(
+        !wording_src.contains("debug_assert!(\n        !rendered.contains('{')")
+            && !wording_src.contains("debug_assert!(\r\n        !rendered.contains('{')"),
+        "C-5: placeholder brace check in wording.rs must not use debug_assert!"
+    );
+
+    // Real release-enabled template renderer refuses mistyped placeholders and stray `{` / `}`:
+    for bad_template in [
+        "At most {MAX_SCRATCHPAD_TOKNES} tokens.",
+        "Window {UNKNOWN_CONST}",
+        "Stray opening { brace",
+        "Stray closing } brace",
+    ] {
+        let Err(err) =
+            league_relay::try_render_wording_template_with("test_slot", bad_template, 500, 160, 5)
+        else {
+            return Err("must reject unexpanded brace in all build profiles".into());
+        };
+        assert!(matches!(err, RelayError::Usage(_)));
+        assert!(err.to_string().contains("unexpanded placeholder"));
+        assert!(
+            std::panic::catch_unwind(|| {
+                league_relay::render_wording_template_with("test_slot", bad_template, 500, 160, 5)
+            })
+            .is_err()
+        );
+    }
+
+    assert_eq!(
+        league_relay::try_render_wording_template_with(
+            "scratchpad_header",
+            wording_template("scratchpad_header"),
+            500,
+            160,
+            5,
+        )?,
+        "=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ==="
+    );
     Ok(())
 }

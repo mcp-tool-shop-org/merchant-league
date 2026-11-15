@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 
 /// Active named arm for all model-facing labels and instructions in `league-relay`.
-pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r3";
+pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r4";
 
 /// Maximum whitespace-delimited words permitted across `intent_header` + `body`
 /// in one inter-seat message (`B4.4`, `A-5`).
@@ -56,7 +56,7 @@ pub const MODEL_FACING_WORDING: &[WordingEntry] = &[
     },
     WordingEntry {
         slot: "scratchpad_header",
-        shown_text: "=== YOUR SAVED SCRATCHPAD (AT MOST {MAX_SCRATCHPAD_TOKENS} TOKENS) ===",
+        shown_text: "=== YOUR NOTES FROM EARLIER TURNS (AT MOST {MAX_SCRATCHPAD_TOKENS} TOKENS) ===",
     },
     WordingEntry {
         slot: "scratchpad_empty",
@@ -64,7 +64,7 @@ pub const MODEL_FACING_WORDING: &[WordingEntry] = &[
     },
     WordingEntry {
         slot: "scratchpad_schema_key",
-        shown_text: "scratchpad",
+        shown_text: "notes",
     },
     WordingEntry {
         slot: "scratchpad_schema_description",
@@ -134,14 +134,16 @@ pub fn wording_template(slot: &str) -> &'static str {
     unreachable!("unknown MODEL_FACING_WORDING slot: {slot}")
 }
 
-/// Render a slot from [`MODEL_FACING_WORDING`] substituting the given numeric bounds (`R2-A2`).
-pub fn render_wording_slot_with(
+/// Render an arbitrary wording template substituting the given numeric bounds and rejecting
+/// any unexpanded `{` or `}` brace in both debug and release builds (`R2-A2`, `C-5`).
+pub fn try_render_wording_template_with(
     slot: &str,
+    template: &str,
     max_scratchpad_tokens: usize,
     emc_older_reply_excerpt_chars: usize,
     emc_verbatim_turn_window: usize,
-) -> String {
-    let rendered = wording_template(slot)
+) -> Result<String, RelayError> {
+    let rendered = template
         .replace(
             "{MAX_SCRATCHPAD_TOKENS}",
             &max_scratchpad_tokens.to_string(),
@@ -154,11 +156,47 @@ pub fn render_wording_slot_with(
             "{EMC_VERBATIM_TURN_WINDOW}",
             &emc_verbatim_turn_window.to_string(),
         );
-    debug_assert!(
-        !rendered.contains('{') && !rendered.contains('}'),
-        "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {rendered}"
-    );
-    rendered
+    if rendered.contains('{') || rendered.contains('}') {
+        return Err(RelayError::Usage(format!(
+            "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {rendered}"
+        )));
+    }
+    Ok(rendered)
+}
+
+/// Render a wording template substituting the given numeric bounds and enforcing in both debug
+/// and release builds that no unexpanded `{` or `}` brace remains (`R2-A2`, `C-5`).
+pub fn render_wording_template_with(
+    slot: &str,
+    template: &str,
+    max_scratchpad_tokens: usize,
+    emc_older_reply_excerpt_chars: usize,
+    emc_verbatim_turn_window: usize,
+) -> String {
+    try_render_wording_template_with(
+        slot,
+        template,
+        max_scratchpad_tokens,
+        emc_older_reply_excerpt_chars,
+        emc_verbatim_turn_window,
+    )
+    .unwrap_or_else(|err| panic!("{err}"))
+}
+
+/// Render a slot from [`MODEL_FACING_WORDING`] substituting the given numeric bounds (`R2-A2`, `C-5`).
+pub fn render_wording_slot_with(
+    slot: &str,
+    max_scratchpad_tokens: usize,
+    emc_older_reply_excerpt_chars: usize,
+    emc_verbatim_turn_window: usize,
+) -> String {
+    render_wording_template_with(
+        slot,
+        wording_template(slot),
+        max_scratchpad_tokens,
+        emc_older_reply_excerpt_chars,
+        emc_verbatim_turn_window,
+    )
 }
 
 /// Render the exact shown string from [`MODEL_FACING_WORDING`] using the enforced constants (`R2-A2`).
@@ -485,12 +523,14 @@ fn json_escape_untrusted_value(val: &serde_json::Value) -> String {
     escape_json_encoded_prompt_hazards(&encoded)
 }
 
-/// Length-cap (`<= 120` words and `<= 1800` serialized chars combined across `intent_header` and `body`, `A-5`, `R2-A1`)
+/// Length-cap (`<= 120` words and `<= 1800` serialized chars combined across `intent_header` and `body`, `A-5`, `R2-A1`, `C-1`)
 /// one [`UntrustedWhisper`].
 pub fn sanitize_whisper(whisper: &UntrustedWhisper) -> SanitizedWhisper {
     let (from_capped, _, _) = cap_words_and_chars(&whisper.from_guild, 8, 64);
     let mut rem_words = MAX_WHISPER_WORDS;
-    let mut rem_chars = MAX_WHISPER_CHARS;
+    // Reserve 2 serialized chars up front for `body`'s JSON quotes (`""`), which are always
+    // emitted on the wire (`C-1`), so `intent_header` + `body` never exceeds `MAX_WHISPER_CHARS`.
+    let mut rem_chars = MAX_WHISPER_CHARS.saturating_sub(2);
     let mut used_words = 0usize;
     let mut truncated = false;
 
@@ -506,13 +546,9 @@ pub fn sanitize_whisper(whisper: &UntrustedWhisper) -> SanitizedWhisper {
         None => None,
     };
 
-    let (capped_body, body_words) = if whisper.body.trim().is_empty() {
-        (String::new(), 0)
-    } else if rem_words == 0 || rem_chars < 3 {
-        truncated = true;
-        (String::new(), 0)
-    } else {
-        match cap_untrusted_string_with_quote_budget(&whisper.body, rem_words, rem_chars) {
+    let body_quote_budget = rem_chars.saturating_add(2);
+    let (capped_body, body_words) =
+        match cap_untrusted_string_with_quote_budget(&whisper.body, rem_words, body_quote_budget) {
             Some((b, w, _, b_trunc)) => {
                 if b_trunc {
                     truncated = true;
@@ -523,8 +559,7 @@ pub fn sanitize_whisper(whisper: &UntrustedWhisper) -> SanitizedWhisper {
                 truncated = true;
                 (String::new(), 0)
             }
-        }
-    };
+        };
     used_words += body_words;
 
     SanitizedWhisper {
@@ -672,11 +707,11 @@ pub fn format_scratchpad_section(saved_scratchpad: Option<&str>) -> String {
     }
 }
 
-/// Extract an updated scratchpad from a structured JSON assistant reply via the pinned
-/// `"scratchpad"` property (`A-3`, `R2-B3`).
+/// Extract updated notes from a structured JSON assistant reply via the pinned
+/// `"notes"` property (`A-3`, `R2-B3`, `R3-A1`).
 ///
-/// Per `R2-B3`, every seat that keeps notes uses a response schema and only JSON `"scratchpad"`
-/// updates are accepted; free-text `<scratchpad>` tags are never harvested.
+/// Per `R2-B3` and `R3-A1`, every seat that keeps notes uses a response schema and only JSON
+/// `"notes"` updates are accepted; free-text tags are never harvested.
 pub fn extract_scratchpad_update(reply: &str) -> Option<String> {
     let key = wording_slot("scratchpad_schema_key");
     if let Ok(serde_json::Value::Object(map)) =
