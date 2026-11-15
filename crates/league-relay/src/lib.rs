@@ -17,9 +17,9 @@ pub mod wording;
 
 pub use error::RelayError;
 pub use relay::{
-    CallLogEntry, GameSetupRecord, MemoryMode, ResponseFormatConfig, Round, SeatOutcome,
-    SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary, prepend_wrapper,
-    run_turn, sha256_hex, validate_day, validate_scratchpad_setup,
+    CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
+    Round, SeatOutcome, SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary,
+    prepend_wrapper, run_turn, sha256_hex, validate_day, validate_scratchpad_setup,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{

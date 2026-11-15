@@ -134,8 +134,9 @@ pub fn wording_template(slot: &str) -> &'static str {
     unreachable!("unknown MODEL_FACING_WORDING slot: {slot}")
 }
 
-/// Render an arbitrary wording template substituting the given numeric bounds and rejecting
-/// any unexpanded `{` or `}` brace in both debug and release builds (`R2-A2`, `C-5`).
+/// Render an arbitrary wording template substituting the given numeric bounds, unescaping
+/// `{{` / `}}` into literal `{` / `}` (`C-9`), and rejecting any unexpanded or unmatched `{` or
+/// `}` brace in both debug and release builds (`R2-A2`, `C-5`, `C-9`).
 pub fn try_render_wording_template_with(
     slot: &str,
     template: &str,
@@ -143,23 +144,64 @@ pub fn try_render_wording_template_with(
     emc_older_reply_excerpt_chars: usize,
     emc_verbatim_turn_window: usize,
 ) -> Result<String, RelayError> {
-    let rendered = template
-        .replace(
-            "{MAX_SCRATCHPAD_TOKENS}",
-            &max_scratchpad_tokens.to_string(),
-        )
-        .replace(
-            "{EMC_OLDER_REPLY_EXCERPT_CHARS}",
-            &emc_older_reply_excerpt_chars.to_string(),
-        )
-        .replace(
-            "{EMC_VERBATIM_TURN_WINDOW}",
-            &emc_verbatim_turn_window.to_string(),
-        );
-    if rendered.contains('{') || rendered.contains('}') {
-        return Err(RelayError::Usage(format!(
-            "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {rendered}"
-        )));
+    let mut rendered = String::with_capacity(template.len());
+    let mut chars = template.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '{' => {
+                if chars.peek() == Some(&'{') {
+                    let _ = chars.next();
+                    rendered.push('{');
+                } else {
+                    let mut placeholder = String::new();
+                    let mut closed = false;
+                    for inner in chars.by_ref() {
+                        if inner == '}' {
+                            closed = true;
+                            break;
+                        }
+                        if inner == '{' {
+                            return Err(RelayError::Usage(format!(
+                                "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {template}"
+                            )));
+                        }
+                        placeholder.push(inner);
+                    }
+                    if !closed {
+                        return Err(RelayError::Usage(format!(
+                            "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {template}"
+                        )));
+                    }
+                    match placeholder.as_str() {
+                        "MAX_SCRATCHPAD_TOKENS" => {
+                            rendered.push_str(&max_scratchpad_tokens.to_string());
+                        }
+                        "EMC_OLDER_REPLY_EXCERPT_CHARS" => {
+                            rendered.push_str(&emc_older_reply_excerpt_chars.to_string());
+                        }
+                        "EMC_VERBATIM_TURN_WINDOW" => {
+                            rendered.push_str(&emc_verbatim_turn_window.to_string());
+                        }
+                        _ => {
+                            return Err(RelayError::Usage(format!(
+                                "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {template}"
+                            )));
+                        }
+                    }
+                }
+            }
+            '}' => {
+                if chars.peek() == Some(&'}') {
+                    let _ = chars.next();
+                    rendered.push('}');
+                } else {
+                    return Err(RelayError::Usage(format!(
+                        "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {template}"
+                    )));
+                }
+            }
+            other => rendered.push(other),
+        }
     }
     Ok(rendered)
 }
@@ -595,10 +637,12 @@ pub fn render_json_escaped_whisper_line(sanitized: &SanitizedWhisper) -> String 
     }
 }
 
-/// Validate and format the separate `no_new_deals` and `other_seats_messages` sections (`B4.4`, `B-5`, `R2-B4`).
+/// Validate and format the separate `no_new_deals` and `other_seats_messages` sections (`B4.4`, `B-5`, `R2-B4`, `C-3`).
 ///
 /// Refuses if `batna` is empty/whitespace or if any message's `from_guild` is not an exact
 /// guild name in `seated_guilds` (`B-5`, blocking spoofed senders such as `"Referee (system notice)"`).
+/// When `inputs.whispers` is empty, the second returned string (`other_seats_messages`) is empty
+/// so the messages header and notice are never shown above zero messages (`C-3`).
 pub fn split_negotiation_sections(
     inputs: &NegotiationInputs,
     seated_guilds: &[&str],
@@ -610,6 +654,9 @@ pub fn split_negotiation_sections(
         ));
     }
     let fallback_sec = format!("{}\n{batna_trimmed}", wording_slot("fallback_header"));
+    if inputs.whispers.is_empty() {
+        return Ok((fallback_sec, String::new()));
+    }
 
     let mut whispers_sec = String::new();
     whispers_sec.push_str(&wording_slot("whispers_header"));
@@ -635,16 +682,21 @@ pub fn split_negotiation_sections(
     Ok((fallback_sec, whispers_sec))
 }
 
-/// Format a seat's no-new-deals baseline beside its sanitized, JSON-escaped messages from other seats (`B4.4`, `B-5`).
+/// Format a seat's no-new-deals baseline beside its sanitized, JSON-escaped messages from other seats (`B4.4`, `B-5`, `C-3`).
 ///
 /// Refuses if `batna` is empty/whitespace or if any message's `from_guild` is not an exact
 /// guild name in `seated_guilds` (`B-5`, blocking spoofed senders such as `"Referee (system notice)"`).
+/// When `inputs.whispers` is empty, returns the `no_new_deals` section alone (`C-3`).
 pub fn format_negotiation_block(
     inputs: &NegotiationInputs,
     seated_guilds: &[&str],
 ) -> Result<String, RelayError> {
     let (fallback_sec, whispers_sec) = split_negotiation_sections(inputs, seated_guilds)?;
-    Ok(format!("{fallback_sec}\n\n{whispers_sec}"))
+    if whispers_sec.is_empty() {
+        Ok(fallback_sec)
+    } else {
+        Ok(format!("{fallback_sec}\n\n{whispers_sec}"))
+    }
 }
 
 /// Load and validate optional `day-DD-<round>-<Guild>.negotiation.json` if present.

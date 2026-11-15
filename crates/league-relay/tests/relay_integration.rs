@@ -11,19 +11,20 @@ use league_relay::{
     EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, FORBIDDEN_LOCAL_KEY_ENVS,
     GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS, LiveGate, LocalGate, LocalOpenAiTransport,
     MAX_INTENT_HEADER_DEPTH, MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS,
-    MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs, REDACTED_MARKER,
-    RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round, SeatFile,
-    SeatOutcome, TranscriptEntry, Transport, TransportError, TurnConfig, UntrustedWhisper,
-    UreqTransport, WordingEntry, cap_utf8_bytes, cap_words_and_chars, extract_scratchpad_update,
-    format_negotiation_block, install_redacting_panic_hook, json_escape_untrusted_str,
-    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, redact_and_truncate,
-    redact_secrets, redact_secrets_multi_with_limit, render_json_escaped_whisper_line,
-    render_wording_slot_with, run_turn, sanitize_scratchpad_for_prompt, sanitize_whisper,
-    set_fail_pending_temp_write_for_test, sha256_hex, split_negotiation_sections,
-    strip_thinking_tags, take_durability_events_for_test, truncate_after_redaction,
-    validate_local_base_url, validate_local_endpoints, validate_local_tokenize_url,
-    validate_pinned_local_model, validate_pinned_openrouter_slug, validate_scratchpad_setup,
-    validate_vm_host_allowance, watch_durability_events_for_test, wording_slot, wording_template,
+    MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
+    NonPinnedModelFacingString, REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError,
+    ResponseFormatConfig, Round, SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError,
+    TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry, cap_utf8_bytes, cap_words_and_chars,
+    extract_scratchpad_update, format_negotiation_block, install_redacting_panic_hook,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
+    redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
+    render_json_escaped_whisper_line, render_wording_slot_with, run_turn,
+    sanitize_scratchpad_for_prompt, sanitize_whisper, set_fail_pending_temp_write_for_test,
+    sha256_hex, split_negotiation_sections, strip_thinking_tags, take_durability_events_for_test,
+    truncate_after_redaction, validate_local_base_url, validate_local_endpoints,
+    validate_local_tokenize_url, validate_pinned_local_model, validate_pinned_openrouter_slug,
+    validate_scratchpad_setup, validate_vm_host_allowance, watch_durability_events_for_test,
+    wording_slot, wording_template,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -14189,23 +14190,22 @@ fn fix3_r3_b1_refuses_unpinned_notes_property_and_toplevel_schema_keywords() -> 
         );
     }
 
-    // `maxLength` with a positive integer is permitted alongside `type` and `description`:
-    let valid_with_max_len = ResponseFormatConfig::from_json_str(
-        &json!({
-            "type": "object",
-            "required": ["orders", "notes"],
-            "properties": {
-                "orders": {"type": "array"},
-                "notes": {"type": "string", "maxLength": 2000}
-            }
-        })
-        .to_string(),
-        None,
-    )?;
-    assert_eq!(
-        valid_with_max_len.schema["properties"]["notes"]["maxLength"],
-        json!(2000)
-    );
+    // Under R4-B2, `maxLength` on `notes` is forbidden outright even when positive:
+    assert!(matches!(
+        ResponseFormatConfig::from_json_str(
+            &json!({
+                "type": "object",
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string", "maxLength": 2000}
+                }
+            })
+            .to_string(),
+            None,
+        ),
+        Err(RelayError::Usage(_))
+    ));
 
     // End-to-end CLI verification on both review probe schemas: refused before any HTTP or /tokenize call:
     let tmp = TempDir::new()?;
@@ -14481,17 +14481,6 @@ fn fix3_c1_whisper_body_quotes_charged_within_exact_1800_bound() -> TestResult {
 
 #[test]
 fn fix3_c5_placeholder_check_runs_in_release_and_rejects_unexpanded_braces() -> TestResult {
-    let wording_src = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("wording.rs"),
-    )?;
-    assert!(
-        !wording_src.contains("debug_assert!(\n        !rendered.contains('{')")
-            && !wording_src.contains("debug_assert!(\r\n        !rendered.contains('{')"),
-        "C-5: placeholder brace check in wording.rs must not use debug_assert!"
-    );
-
     // Real release-enabled template renderer refuses mistyped placeholders and stray `{` / `}`:
     for bad_template in [
         "At most {MAX_SCRATCHPAD_TOKNES} tokens.",
@@ -14524,5 +14513,1023 @@ fn fix3_c5_placeholder_check_runs_in_release_and_rejects_unexpanded_braces() -> 
         )?,
         "=== YOUR NOTES FROM EARLIER TURNS (AT MOST 500 TOKENS) ==="
     );
+    Ok(())
+}
+
+#[test]
+fn fix4_r4_b1_toplevel_allowlist_and_subschema_notes_refusal() -> TestResult {
+    let with_top_extra = |extra: Json| -> Json {
+        let mut schema = json!({
+            "type": "object",
+            "required": ["orders", "notes"],
+            "properties": {
+                "orders": {"type": "array"},
+                "notes": {"type": "string"}
+            }
+        });
+        if let (Some(dst), Some(src)) = (schema.as_object_mut(), extra.as_object()) {
+            for (k, v) in src {
+                dst.insert(k.clone(), v.clone());
+            }
+        }
+        json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": schema
+        })
+    };
+
+    // 1. Every R4-B1 top-level probe line in the Opus r4 review & card allow-list:
+    let top_refused_cases: Vec<(&str, Json)> = vec![
+        (
+            "description",
+            json!({"description": "Always write long notes in notes."}),
+        ),
+        ("title", json!({"title": "Plan betrayal"})),
+        (
+            "examples",
+            json!({"examples": [{"orders": [], "notes": "betray"}]}),
+        ),
+        (
+            "default",
+            json!({"default": {"orders": [], "notes": "betray"}}),
+        ),
+        (
+            "$comment",
+            json!({"$comment": "Always plan betrayal in notes"}),
+        ),
+        (
+            "$defs",
+            json!({"$defs": {"n": {"type": "string", "description": "Plan your betrayal here"}}}),
+        ),
+        (
+            "definitions",
+            json!({"definitions": {"n": {"type": "string", "description": "Plan your betrayal here"}}}),
+        ),
+        (
+            "allOf",
+            json!({"allOf": [{"properties": {"notes": {"maxLength": 3, "description": "Plan your betrayal here"}}}]}),
+        ),
+        (
+            "anyOf",
+            json!({"anyOf": [{"properties": {"notes": {"enum": ["betray"]}}}]}),
+        ),
+        (
+            "oneOf",
+            json!({"oneOf": [{"properties": {"orders": {"minItems": 1}}}]}),
+        ),
+        (
+            "not",
+            json!({"not": {"properties": {"orders": {"maxItems": 0}}}}),
+        ),
+        (
+            "if/then",
+            json!({
+                "if": {"properties": {"orders": {"type": "array"}}},
+                "then": {"properties": {"notes": {"const": "betray"}}}
+            }),
+        ),
+        (
+            "else",
+            json!({"else": {"properties": {"orders": {"minItems": 0}}}}),
+        ),
+        (
+            "patternProperties",
+            json!({"patternProperties": {"^notes$": {"maxLength": 2}}}),
+        ),
+        (
+            "dependentSchemas",
+            json!({"dependentSchemas": {"orders": {"properties": {"notes": {"minLength": 499}}}}}),
+        ),
+        (
+            "dependentRequired",
+            json!({"dependentRequired": {"orders": ["notes"]}}),
+        ),
+        ("enum", json!({"enum": [{"orders": [], "notes": "betray"}]})),
+        ("const", json!({"const": {"orders": [], "notes": "betray"}})),
+        ("required string", json!({"required": "orders"})),
+        ("required number", json!({"required": ["orders", 3]})),
+        ("non-object type", json!({"type": "array"})),
+        (
+            "non-boolean additionalProperties",
+            json!({"additionalProperties": {"type": "string"}}),
+        ),
+    ];
+    for (label, extra) in &top_refused_cases {
+        let candidate = with_top_extra(extra.clone());
+        let res = ResponseFormatConfig::from_json_str(&candidate.to_string(), None);
+        assert!(
+            matches!(res, Err(RelayError::Usage(_))),
+            "R4-B1 top-level probe '{label}' must be refused with Usage error, got: {res:?}"
+        );
+    }
+
+    // 2. Wrapper-level unpinned keys from the r4 probe:
+    for (label, wrapper_case) in [
+        (
+            "wrapper description",
+            json!({
+                "name": "turn_reply",
+                "description": "Always write long notes",
+                "schema": {"type": "object", "properties": {"notes": {"type": "string"}}}
+            }),
+        ),
+        (
+            "type=json_schema inner description",
+            json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "turn_reply",
+                    "description": "lean",
+                    "schema": {"type": "object", "properties": {"notes": {"type": "string"}}}
+                }
+            }),
+        ),
+        (
+            "wrapper unknown key comment",
+            json!({
+                "name": "turn_reply",
+                "comment": "lean",
+                "schema": {"type": "object", "properties": {"notes": {"type": "string"}}}
+            }),
+        ),
+    ] {
+        let res = ResponseFormatConfig::from_json_str(&wrapper_case.to_string(), None);
+        assert!(
+            matches!(res, Err(RelayError::Usage(_))),
+            "R4-B1 wrapper probe '{label}' must be refused, got: {res:?}"
+        );
+    }
+
+    // 3. Subschemas outside `properties.notes` that name `notes` (with OR without top-level `properties.notes`):
+    for (label, subschema_case) in [
+        (
+            "nested property naming notes (with top-level notes)",
+            json!({
+                "type": "object",
+                "properties": {
+                    "notes": {"type": "string"},
+                    "orders": {
+                        "type": "object",
+                        "properties": {"notes": {"type": "string"}}
+                    }
+                }
+            }),
+        ),
+        (
+            "nested property naming notes (without top-level notes)",
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {
+                        "type": "object",
+                        "properties": {"notes": {"type": "string"}}
+                    }
+                }
+            }),
+        ),
+        (
+            "nested required naming notes",
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {
+                        "type": "object",
+                        "required": ["notes"],
+                        "properties": {"action": {"type": "string"}}
+                    }
+                }
+            }),
+        ),
+        (
+            "top-level required naming notes without properties.notes",
+            json!({
+                "type": "object",
+                "required": ["orders", "notes"],
+                "properties": {"orders": {"type": "array"}}
+            }),
+        ),
+        (
+            "allOf naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "allOf": [{"properties": {"notes": {"type": "string"}}}]
+            }),
+        ),
+        (
+            "anyOf naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "anyOf": [{"properties": {"notes": {"enum": ["betray"]}}}]
+            }),
+        ),
+        (
+            "oneOf naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "oneOf": [{"properties": {"notes": {"type": "string"}}}]
+            }),
+        ),
+        (
+            "not naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "not": {"required": ["notes"]}
+            }),
+        ),
+        (
+            "if/then naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "if": {"properties": {"orders": {"minItems": 1}}},
+                "then": {"properties": {"notes": {"const": "betray"}}}
+            }),
+        ),
+        (
+            "patternProperties ^notes$ without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "patternProperties": {"^notes$": {"type": "string"}}
+            }),
+        ),
+        (
+            "dependentSchemas naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "dependentSchemas": {"orders": {"properties": {"notes": {"type": "string"}}}}
+            }),
+        ),
+        (
+            "dependentRequired naming notes without top-level notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "dependentRequired": {"orders": ["notes"]}
+            }),
+        ),
+        (
+            "$defs key naming notes",
+            json!({
+                "type": "object",
+                "properties": {"orders": {"type": "array"}},
+                "$defs": {"notes": {"type": "string"}}
+            }),
+        ),
+        (
+            "propertyNames const naming notes",
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {
+                        "type": "object",
+                        "propertyNames": {"const": "notes"}
+                    }
+                }
+            }),
+        ),
+        (
+            "default literal object naming notes",
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {
+                        "type": "object",
+                        "default": {"notes": "betray"}
+                    }
+                }
+            }),
+        ),
+    ] {
+        let res = ResponseFormatConfig::from_json_str(&subschema_case.to_string(), None);
+        assert!(
+            matches!(res, Err(RelayError::Usage(_))),
+            "subschema probe '{label}' must be refused, got: {res:?}"
+        );
+    }
+
+    // 4. Clean schema (including `additionalProperties: false` and `description: null` on `notes`) is accepted:
+    let clean = ResponseFormatConfig::from_json_str(
+        &json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": {"type": "array", "items": {"type": "string"}},
+                    "notes": {"type": "string", "description": null}
+                }
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    assert_eq!(
+        clean.schema["properties"]["notes"]["description"],
+        json!(wording_slot("scratchpad_schema_description"))
+    );
+
+    // 5. CLI check: top-level unpinned keywords ($comment, $defs, allOf) exit 1 before any HTTP or /tokenize hit:
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_path = tmp.path().join("seats.json");
+    write_local_seats_file(
+        &seats_path,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    for (idx, (_, extra)) in top_refused_cases.iter().take(8).enumerate() {
+        let g = tmp.path().join(format!("r4_b1_cli_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "STATE")?;
+        let sp = tmp.path().join(format!("r4_b1_schema_{idx}.json"));
+        fs::write(&sp, with_top_extra(extra.clone()).to_string())?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                sp.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code, 1);
+        assert_eq!(srv.request_count()?, 0);
+        assert_eq!(srv.tokenize_requests()?.len(), 0);
+        assert!(!g.join("relay/calls.jsonl").exists());
+    }
+
+    Ok(())
+}
+
+#[test]
+fn fix4_r4_b2_forbids_max_length_on_notes_completely() -> TestResult {
+    // Every `maxLength` probe value from R4-B2 is refused outright:
+    for bad_max_len in [
+        json!(1),
+        json!(40),
+        json!(500),
+        json!(2000),
+        json!(u64::MAX),
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!(10.0),
+        json!("10"),
+        json!(null),
+    ] {
+        let candidate = json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string", "maxLength": bad_max_len}
+                }
+            }
+        });
+        let res = ResponseFormatConfig::from_json_str(&candidate.to_string(), None);
+        assert!(
+            matches!(res, Err(RelayError::Usage(_))),
+            "R4-B2: maxLength={bad_max_len} on notes must be refused, got: {res:?}"
+        );
+    }
+
+    // Live loopback wire verification: no second limit appears on `properties.notes`:
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "NEUTRAL RULES")?;
+    let schema_path = tmp.path().join("clean_notes_schema.json");
+    fs::write(
+        &schema_path,
+        json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": {"type": "array"},
+                    "notes": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(5),
+            body: local_completion_body(
+                r#"{"orders":[],"notes":"keep 2 salt"}"#,
+                "Qwen/Qwen3-14B",
+                20,
+                10,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_local_seats_file(
+        &seats_path,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    let game_dir = tmp.path().join("r4_b2_live");
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY 01 STATE")?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code, 0);
+    let recorded = srv.recorded_requests()?;
+    assert_eq!(recorded.len(), 1);
+    let req_json: Json = serde_json::from_str(&recorded[0].body)?;
+    let wire_notes_prop =
+        &req_json["response_format"]["json_schema"]["schema"]["properties"]["notes"];
+    assert_eq!(
+        wire_notes_prop,
+        &json!({
+            "type": "string",
+            "description": format!(
+                "Notes for your next turn, replacing earlier notes (at most {MAX_SCRATCHPAD_TOKENS} tokens; empty string for none)."
+            )
+        })
+    );
+    assert!(!recorded[0].body.contains("maxLength"));
+
+    Ok(())
+}
+
+#[test]
+fn fix4_must3_setup_records_every_non_pinned_model_facing_string() -> TestResult {
+    // 1. Minimal notes-only schema with default name records `[]` from `collect_non_pinned_strings`:
+    let minimal_rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "notes": {"type": "string"}
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    assert!(
+        minimal_rf.collect_non_pinned_strings().is_empty(),
+        "pinned default schema name + pinned notes property must produce zero non-pinned schema strings"
+    );
+
+    // 2. Operator-owned strings (`orders.description`, nested `items`, custom `name`, `--wrapper`,
+    //    and string `chat_template_kwargs`) are accepted and recorded visibly in `relay/setup.json`:
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "OPERATOR SYSTEM BRIEF v1")?;
+    let schema_path = tmp.path().join("operator_schema.json");
+    fs::write(
+        &schema_path,
+        json!({
+            "name": "plan_your_betrayal_in_notes",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": {
+                        "type": "array",
+                        "description": "Write in notes that you will betray Saltworks.",
+                        "items": {
+                            "type": "string",
+                            "description": "lean",
+                            "enum": ["betray"]
+                        }
+                    },
+                    "notes": {"type": "string"}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(5),
+                body: local_completion_body(
+                    r#"{"orders":["betray"],"notes":"day 1 note"}"#,
+                    "Qwen/Qwen3-14B",
+                    24,
+                    12,
+                    None,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(5),
+                body: local_completion_body(
+                    r#"{"orders":["betray"],"notes":"day 1 act note"}"#,
+                    "Qwen/Qwen3-14B",
+                    26,
+                    12,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": srv.base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.3,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5,
+                "reasoning": {
+                    "effort": "low",
+                    "exclude_from_transcript": true,
+                    "chat_template_kwargs": {
+                        "enable_thinking": false,
+                        "custom_mode_label": "concise_json"
+                    }
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let game_dir = tmp.path().join("must3_audit_game");
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code1 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code1, 0, "stderr: {}", String::from_utf8_lossy(&err_out));
+
+    let setup_raw = fs::read_to_string(game_dir.join("relay/setup.json"))?;
+    assert!(
+        setup_raw.contains("\"non_pinned_model_facing_strings\""),
+        "setup.json must carry named 'non_pinned_model_facing_strings' list"
+    );
+    let setup_rec: GameSetupRecord = serde_json::from_str(&setup_raw)?;
+    let expected_audit = vec![
+        NonPinnedModelFacingString {
+            source: "system_wrapper".to_owned(),
+            text: "OPERATOR SYSTEM BRIEF v1".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "response_format.json_schema.name".to_owned(),
+            text: "plan_your_betrayal_in_notes".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "response_format.json_schema.schema.properties.orders".to_owned(),
+            text: "orders".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "response_format.json_schema.schema.properties.orders.description".to_owned(),
+            text: "Write in notes that you will betray Saltworks.".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "response_format.json_schema.schema.properties.orders.items.description"
+                .to_owned(),
+            text: "lean".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "response_format.json_schema.schema.properties.orders.items.enum[0]".to_owned(),
+            text: "betray".to_owned(),
+        },
+        NonPinnedModelFacingString {
+            source: "seats.Saltworks.reasoning.chat_template_kwargs.custom_mode_label".to_owned(),
+            text: "concise_json".to_owned(),
+        },
+    ];
+    assert_eq!(setup_rec.non_pinned_model_facing_strings, expected_audit);
+
+    // 3. Turn 2 omitting `--wrapper` reuses the persisted wrapper and matches `setup.json`:
+    write_to_seat(&game_dir, "01", "act", "Saltworks", "DAY 01 ACT")?;
+    out.clear();
+    err_out.clear();
+    let code2 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code2, 0, "stderr: {}", String::from_utf8_lossy(&err_out));
+
+    // 4. Passing a mutated `--wrapper` mid-game is refused before any HTTP call:
+    let wrapper_v2 = tmp.path().join("wrapper_v2.md");
+    fs::write(&wrapper_v2, "MUTATED SYSTEM BRIEF v2")?;
+    write_to_seat(&game_dir, "02", "talk", "Saltworks", "DAY 02 TALK")?;
+    let before_hits = srv.request_count()?;
+    out.clear();
+    err_out.clear();
+    let code3 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "02",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper_v2.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema_path.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code3, 1);
+    assert_eq!(srv.request_count()?, before_hits);
+
+    Ok(())
+}
+
+#[test]
+fn fix4_nits_c7_c8_c9_c3_c4_c6_regressions() -> TestResult {
+    // --- C-7: Legacy `scratchpad` property/required and case-variants (`Notes`, `NOTES`) refused with hint ---
+    for (label, bad_alias_schema) in [
+        (
+            "legacy property scratchpad",
+            json!({
+                "name": "turn_reply",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "required": ["orders", "scratchpad"],
+                    "properties": {
+                        "orders": {"type": "array"},
+                        "scratchpad": {"type": "string"}
+                    }
+                }
+            }),
+        ),
+        (
+            "property Notes case-variant",
+            json!({
+                "name": "turn_reply",
+                "schema": {
+                    "type": "object",
+                    "properties": {"Notes": {"type": "string"}}
+                }
+            }),
+        ),
+        (
+            "property NOTES uppercase",
+            json!({
+                "type": "object",
+                "properties": {"NOTES": {"type": "string"}}
+            }),
+        ),
+        (
+            "nested property scratchpad",
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {
+                        "type": "object",
+                        "properties": {"scratchpad": {"type": "string"}}
+                    }
+                }
+            }),
+        ),
+    ] {
+        let Err(err) = ResponseFormatConfig::from_json_str(&bad_alias_schema.to_string(), None)
+        else {
+            return Err(format!("C-7 case '{label}' must be refused").into());
+        };
+        assert!(matches!(err, RelayError::Usage(_)));
+        assert!(
+            err.to_string().contains("'notes'"),
+            "C-7 error for '{label}' must hint to rename to 'notes', got: {err}"
+        );
+    }
+
+    // --- C-8: Duplicate entries in `required` refused ---
+    for dup_req_schema in [
+        json!({
+            "type": "object",
+            "required": ["notes", "notes"],
+            "properties": {"notes": {"type": "string"}}
+        }),
+        json!({
+            "type": "object",
+            "required": ["orders", "orders"],
+            "properties": {"orders": {"type": "array"}, "notes": {"type": "string"}}
+        }),
+        json!({
+            "type": "object",
+            "properties": {
+                "orders": {
+                    "type": "object",
+                    "required": ["item", "item"],
+                    "properties": {"item": {"type": "string"}}
+                }
+            }
+        }),
+    ] {
+        let res = ResponseFormatConfig::from_json_str(&dup_req_schema.to_string(), None);
+        assert!(
+            matches!(res, Err(RelayError::Usage(_))),
+            "C-8 duplicate required must be refused, got: {res:?}"
+        );
+    }
+
+    // --- C-9: `{{` and `}}` literal brace escapes work while unescaped braces still fail ---
+    let rendered_escaped = league_relay::try_render_wording_template_with(
+        "json_example_slot",
+        "Reply like {{\"orders\": [], \"notes\": \"...\"}} (at most {MAX_SCRATCHPAD_TOKENS} tokens, window {EMC_VERBATIM_TURN_WINDOW}, excerpt {EMC_OLDER_REPLY_EXCERPT_CHARS}).",
+        500,
+        160,
+        5,
+    )?;
+    assert_eq!(
+        rendered_escaped,
+        "Reply like {\"orders\": [], \"notes\": \"...\"} (at most 500 tokens, window 5, excerpt 160)."
+    );
+    assert!(
+        league_relay::try_render_wording_template_with(
+            "unescaped_json_slot",
+            "Reply like {\"orders\": []}",
+            500,
+            160,
+            5,
+        )
+        .is_err()
+    );
+
+    // --- C-3: Empty `whispers: []` omits `=== MESSAGES FROM OTHER SEATS ===` and `whispers_notice` ---
+    let empty_neg = NegotiationInputs {
+        batna: "Keep 6 salt at Varn; 0 new contracts.".to_owned(),
+        whispers: Vec::new(),
+    };
+    let (deals_only, msgs_empty) = split_negotiation_sections(&empty_neg, &["Weavers"])?;
+    assert!(msgs_empty.is_empty());
+    assert_eq!(
+        format_negotiation_block(&empty_neg, &["Weavers"])?,
+        deals_only
+    );
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "CLEAN BRIEF")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(5),
+            body: local_completion_body("HOLD", "Qwen/Qwen3-14B", 20, 5, None, None),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_json = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": srv.base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.3,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5
+            },
+            {
+                "guild": "Weavers",
+                "backend": "file",
+                "model": "manual-weavers"
+            }
+        ]
+    });
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(&seats_path, seats_json.to_string())?;
+
+    let g_c3 = tmp.path().join("c3_zero_whispers");
+    write_to_seat(&g_c3, "01", "talk", "Saltworks", "PUBLIC BOARD")?;
+    fs::write(
+        g_c3.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+        serde_json::to_string(&empty_neg)?,
+    )?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code_c3 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_c3.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code_c3, 0);
+    let c3_recorded = srv.recorded_requests()?;
+    assert_eq!(c3_recorded.len(), 1);
+    let c3_req: Json = serde_json::from_str(&c3_recorded[0].body)?;
+    let c3_user = c3_req["messages"][1]["content"]
+        .as_str()
+        .ok_or("missing user content")?;
+    assert!(c3_user.contains(&wording_slot("fallback_header")));
+    assert!(!c3_user.contains(&wording_slot("whispers_header")));
+    assert!(!c3_user.contains(&wording_slot("whispers_notice")));
+
+    // --- C-4: Self-sender (`from_guild` matching receiving seat) is refused with 0 HTTP hits ---
+    for self_sender in ["Saltworks", "saltworks"] {
+        let g_c4 = tmp.path().join(format!("c4_self_{self_sender}"));
+        write_to_seat(&g_c4, "01", "talk", "Saltworks", "PUBLIC BOARD")?;
+        fs::write(
+            g_c4.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+            serde_json::to_string(&NegotiationInputs {
+                batna: "Keep 6 salt.".to_owned(),
+                whispers: vec![UntrustedWhisper {
+                    from_guild: self_sender.to_owned(),
+                    intent_header: None,
+                    body: "Message to myself.".to_owned(),
+                }],
+            })?,
+        )?;
+        let hits_before = srv.request_count()?;
+        out.clear();
+        err_out.clear();
+        let code_c4 = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_c4.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code_c4, 2);
+        assert_eq!(srv.request_count()?, hits_before);
+    }
+
+    // --- C-6: Moving a `local` seat to a manual `file` seat mid-game is refused via `setup.json` ---
+    let seats_moved_to_file = tmp.path().join("seats_moved.json");
+    fs::write(
+        &seats_moved_to_file,
+        json!({
+            "seats": [
+                {"guild": "Saltworks", "backend": "file", "model": "manual-saltworks"},
+                {"guild": "Weavers", "backend": "file", "model": "manual-weavers"}
+            ]
+        })
+        .to_string(),
+    )?;
+    write_to_seat(&g_c3, "01", "act", "Saltworks", "ACT BOARD")?;
+    out.clear();
+    err_out.clear();
+    let code_c6 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_c3.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_moved_to_file.to_str().ok_or("utf8")?,
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(
+        code_c6, 1,
+        "C-6: moving local seat to file mid-game must fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&err_out).contains("refusing mid-game change"),
+        "stderr: {}",
+        String::from_utf8_lossy(&err_out)
+    );
+
     Ok(())
 }
