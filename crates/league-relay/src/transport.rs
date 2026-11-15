@@ -126,6 +126,9 @@ struct MockRuleWire {
     #[cfg(any(test, feature = "test-hooks"))]
     #[serde(default)]
     panic_message: Option<String>,
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[serde(default)]
+    sleep_ms: Option<u64>,
 }
 
 fn default_ok_status() -> u16 {
@@ -145,6 +148,8 @@ struct MockRule {
     resp_body: String,
     #[cfg(any(test, feature = "test-hooks"))]
     panic_message: Option<String>,
+    #[cfg(any(test, feature = "test-hooks"))]
+    sleep_ms: Option<u64>,
 }
 
 /// Offline file-backed mock transport for `league-relay turn --mock-dir <dir>`.
@@ -183,6 +188,8 @@ impl MockDirTransport {
                 resp_body: r.response.to_string(),
                 #[cfg(any(test, feature = "test-hooks"))]
                 panic_message: r.panic_message,
+                #[cfg(any(test, feature = "test-hooks"))]
+                sleep_ms: r.sleep_ms,
             })
             .collect();
         Ok(Self { rules })
@@ -198,6 +205,10 @@ impl Transport for MockDirTransport {
     ) -> Result<RawHttpResponse, TransportError> {
         for rule in &self.rules {
             if body.contains(&rule.needle) {
+                #[cfg(any(test, feature = "test-hooks"))]
+                if let Some(ms) = rule.sleep_ms {
+                    std::thread::sleep(Duration::from_millis(ms));
+                }
                 #[cfg(any(test, feature = "test-hooks"))]
                 if let Some(panic_msg) = &rule.panic_message {
                     panic!("{panic_msg}");

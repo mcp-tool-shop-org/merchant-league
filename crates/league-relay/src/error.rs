@@ -30,6 +30,13 @@ pub enum RelayError {
     Io(String),
     /// Existing `calls.jsonl` or transcript JSONL was malformed.
     CorruptLog(String),
+    /// Another `league-relay turn` already holds the exclusive lock on `<game-dir>/relay/turn.lock`.
+    TurnLocked {
+        /// Redacted path to `<game-dir>/relay/turn.lock`.
+        lock_path: String,
+        /// Optional redacted holder metadata (`pid=... started_utc=...`) if readable.
+        holder: Option<String>,
+    },
     /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call.
     UnrecordedCharge {
         /// Total unrecorded credits held in memory for this run.
@@ -60,6 +67,16 @@ impl fmt::Display for RelayError {
             RelayError::SeatConfig(msg) => write!(f, "invalid seat file: {msg}"),
             RelayError::Io(msg) => write!(f, "file error: {msg}"),
             RelayError::CorruptLog(msg) => write!(f, "corrupt relay log: {msg}"),
+            RelayError::TurnLocked { lock_path, holder } => match holder {
+                Some(h) if !h.is_empty() => write!(
+                    f,
+                    "another league-relay turn is already running on this game directory (lock {lock_path} held by {h}); wait for it to finish"
+                ),
+                _ => write!(
+                    f,
+                    "another league-relay turn is already running on this game directory (lock {lock_path} is held by an active process); wait for it to finish"
+                ),
+            },
             RelayError::UnrecordedCharge {
                 charged_credits,
                 entries_summary,
