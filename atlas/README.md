@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 5f7c94b by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 425de10 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 10 parts, mostly Rust (323 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (17caa04)
+## What changed since 2026-11-15 (5f7c94b)
 
-- CI now also runs crates/league-gen/src/empirical.rs, crates/league-gen/src/feasibility.rs, crates/league-gen/src/generator.rs and 4 more.
-- CI now also checks crates/league-gen/src/lib.rs.
-- crates/league-gen/ is now read by Cargo.toml.
-- league-gen is a new part, drawn from `crates/league-gen/**`.
-- 9 files added and 3 changed content, across 2 parts.
+Nothing structural changed since 2026-11-15; 8 files changed content.
 
 ## What comes in
 

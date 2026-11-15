@@ -4221,7 +4221,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         .to_string();
         assert!(holder_none.contains("held by an active process"));
 
-        // CLI invocation also refuses immediately with exit code 1 and redacted stderr.
+        // CLI invocation also refuses immediately with exit code 4 and redacted stderr.
         let mut cli_out = Vec::new();
         let mut cli_err = Vec::new();
         let cli_code = execute_cli(
@@ -4246,7 +4246,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
             &mut cli_out,
             &mut cli_err,
         );
-        assert_eq!(cli_code, 1);
+        assert_eq!(cli_code, 4);
         let cli_stderr = String::from_utf8(cli_err)?;
         assert!(
             cli_stderr.contains("another league-relay turn is already running"),
@@ -4271,7 +4271,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
     assert_eq!(fs::read_to_string(&thread_lock_path)?, "");
 
     // 2. Two real OS processes + hard-kill stale-lock recovery:
-    //    Spawn child 1 holding relay/turn.lock -> child 2 refuses immediately (exit 1, 0 calls);
+    //    Spawn child 1 holding relay/turn.lock -> child 2 refuses immediately (exit 4, 0 calls);
     //    hard-kill child 1 leaving stale pid=... started_utc=... on disk -> next run takes over cleanly!
     let proc_game = tmp.path().join("f1_proc_game");
     write_to_seat(&proc_game, "01", "talk", "Saltworks", "F1_PROC_HOLD")?;
@@ -4332,7 +4332,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         ])
         .stdin(Stdio::null())
         .output()?;
-    assert_eq!(child2_out.status.code(), Some(1));
+    assert_eq!(child2_out.status.code(), Some(4));
     let child2_stderr = String::from_utf8_lossy(&child2_out.stderr);
     assert!(
         child2_stderr.contains("another league-relay turn is already running"),
@@ -4418,8 +4418,9 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
     assert!(stale_sum.all_clean());
 
     // 3. Reviewer's concurrent-overshoot probes (40 iterations each):
-    //    (a) Writable ledger, cap = 0.01, max_cost_per_call = 0.01 -> NEVER passes cap (0/40 overshoot, 1 call billed).
-    //    (b) Read-only ledger, cap = 1.0, max_cost_per_call = 0.01 -> 1 proceeds, 1 TurnLocked, 0 side-file lines lost.
+    //    (a) Writable ledger, cap = 0.01, max_cost_per_call = 0.01 -> NEVER passes cap (billed <= 1, 0/40 overshoot).
+    //    (b) Read-only ledger, cap = 1.0, max_cost_per_call = 0.01 -> side-file lines == billed (0 lost charges),
+    //        regardless of whether OS scheduler overlaps the two threads or runs them sequentially.
     for iter in 0..40 {
         let cap_game = tmp.path().join(format!("f1_cap_probe_{iter}"));
         write_to_seat(&cap_game, "01", "talk", "Saltworks", "RACE_TALK")?;
@@ -4464,16 +4465,30 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         });
         let ra = ra.map_err(|_| "thread a panicked")?;
         let rb = rb.map_err(|_| "thread b panicked")?;
+        assert!(
+            matches!(ra, Ok(_) | Err(RelayError::TurnLocked { .. })),
+            "iteration {iter}: unexpected result ra={ra:?}"
+        );
+        assert!(
+            matches!(rb, Ok(_) | Err(RelayError::TurnLocked { .. })),
+            "iteration {iter}: unexpected result rb={rb:?}"
+        );
+        assert!(
+            ra.is_ok() || rb.is_ok(),
+            "iteration {iter}: at least one run must proceed"
+        );
         let billed = tx_a.call_count() + tx_b.call_count();
-        assert_eq!(
-            billed, 1,
+        assert!(
+            billed <= 1,
             "iteration {iter}: concurrent runs must never pass cap 0.01 (got billed={billed})"
         );
-        let ok_count = usize::from(ra.is_ok()) + usize::from(rb.is_ok());
-        let lock_err_count = usize::from(matches!(ra, Err(RelayError::TurnLocked { .. })))
-            + usize::from(matches!(rb, Err(RelayError::TurnLocked { .. })));
-        assert_eq!(ok_count, 1);
-        assert_eq!(lock_err_count, 1);
+        assert_eq!(billed, 1);
+        let cap_entries = read_calls_log(&cap_game)?;
+        let cap_charged: f64 = cap_entries.iter().map(|e| e.charged_credits).sum();
+        assert!(
+            cap_charged <= 0.01 + 1e-12,
+            "iteration {iter}: recorded charged_credits {cap_charged} exceeded cap 0.01"
+        );
 
         let ro_game = tmp.path().join(format!("f1_ro_probe_{iter}"));
         write_to_seat(&ro_game, "01", "talk", "Saltworks", "RO_TALK")?;
@@ -4522,13 +4537,22 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         });
         let r1 = r1.map_err(|_| "ro thread 1 panicked")?;
         let r2 = r2.map_err(|_| "ro thread 2 panicked")?;
+        assert!(
+            matches!(r1, Ok(_) | Err(RelayError::TurnLocked { .. })),
+            "iteration {iter}: unexpected RO result r1={r1:?}"
+        );
+        assert!(
+            matches!(r2, Ok(_) | Err(RelayError::TurnLocked { .. })),
+            "iteration {iter}: unexpected RO result r2={r2:?}"
+        );
+        assert!(
+            r1.is_ok() || r2.is_ok(),
+            "iteration {iter}: at least one RO run must proceed"
+        );
         let ro_billed = ro_tx_a.call_count() + ro_tx_b.call_count();
-        assert_eq!(ro_billed, 1);
-        assert_eq!(usize::from(r1.is_ok()) + usize::from(r2.is_ok()), 1);
-        assert_eq!(
-            usize::from(matches!(r1, Err(RelayError::TurnLocked { .. })))
-                + usize::from(matches!(r2, Err(RelayError::TurnLocked { .. }))),
-            1
+        assert!(
+            (1..=2).contains(&ro_billed),
+            "iteration {iter}: expected 1 or 2 billed calls, got {ro_billed}"
         );
         let pending_lines = fs::read_to_string(ro_game.join("relay").join("calls.pending.jsonl"))?
             .lines()
@@ -4536,7 +4560,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
             .count();
         assert_eq!(
             pending_lines, ro_billed,
-            "iteration {iter}: expected 0 lost side-file charges"
+            "iteration {iter}: expected 0 lost side-file charges (pending_lines={pending_lines}, ro_billed={ro_billed})"
         );
         set_file_writable(&ro_calls)?;
     }
@@ -5203,6 +5227,808 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
 
     set_file_writable(&n2_calls)?;
     set_file_writable(&n2_pending)?;
+
+    Ok(())
+}
+
+#[test]
+fn b1_turn_lock_identity_normal_and_p3a_delete_while_live() -> TestResult {
+    struct BarrierStepTransport {
+        entered: (Mutex<bool>, Condvar),
+        release: (Mutex<bool>, Condvar),
+        calls: AtomicUsize,
+        first_status: u16,
+        first_body: String,
+    }
+
+    impl BarrierStepTransport {
+        fn new(first_status: u16, first_body: String) -> Self {
+            Self {
+                entered: (Mutex::new(false), Condvar::new()),
+                release: (Mutex::new(false), Condvar::new()),
+                calls: AtomicUsize::new(0),
+                first_status,
+                first_body,
+            }
+        }
+
+        fn wait_entered(&self) -> Result<(), &'static str> {
+            let (lock, cvar) = &self.entered;
+            let mut started = lock.lock().map_err(|_| "entered mutex poisoned")?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !*started {
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err("timed out waiting for BarrierStepTransport entry");
+                }
+                let (next, _) = cvar
+                    .wait_timeout(started, deadline - now)
+                    .map_err(|_| "entered wait poisoned")?;
+                started = next;
+            }
+            Ok(())
+        }
+
+        fn release_now(&self) {
+            let (lock, cvar) = &self.release;
+            if let Ok(mut go) = lock.lock() {
+                *go = true;
+                cvar.notify_all();
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Transport for BarrierStepTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+            if idx == 0 {
+                let (e_lock, e_cvar) = &self.entered;
+                if let Ok(mut s) = e_lock.lock() {
+                    *s = true;
+                    e_cvar.notify_all();
+                }
+                let (r_lock, r_cvar) = &self.release;
+                if let Ok(mut go) = r_lock.lock() {
+                    while !*go {
+                        match r_cvar.wait_timeout(go, Duration::from_secs(5)) {
+                            Ok((next, res)) => {
+                                go = next;
+                                if res.timed_out() {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Ok(RawHttpResponse {
+                    status: self.first_status,
+                    body: self.first_body.clone(),
+                })
+            } else {
+                Ok(ok_completion_json(
+                    "Unexpected second call after lock loss",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                ))
+            }
+        }
+    }
+
+    const B1_KEY: &str = "PlainB1SecretKey_LockIdentityCheck654321";
+    let redaction_key = ApiKey::from_env_reader(|_| Some(B1_KEY.to_owned()))?;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let one_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // 1. Normal case: turn.lock identity check passes cleanly across acquire, open,
+    //    try_reserve, finish_call_and_record, finalize_turn, and Drop across multiple turns.
+    let normal_game = tmp.path().join("b1_normal_identity");
+    write_to_seat(&normal_game, "01", "talk", "Saltworks", "NORMAL_TALK")?;
+    write_to_seat(&normal_game, "01", "act", "Saltworks", "NORMAL_ACT")?;
+    let normal_tx1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Normal talk ok",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let sum1 = run_turn(
+        &TurnConfig::new(
+            normal_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.05),
+        ),
+        &normal_tx1,
+        Some(&redaction_key),
+    )?;
+    assert!(sum1.all_clean());
+    let normal_lock = normal_game.join("relay").join("turn.lock");
+    assert!(normal_lock.is_file());
+    assert!(!is_os_lock_held(&normal_lock));
+    assert_eq!(fs::read_to_string(&normal_lock)?, "");
+
+    let normal_tx2 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Normal act ok",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let sum2 = run_turn(
+        &TurnConfig::new(
+            normal_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.05),
+        ),
+        &normal_tx2,
+        Some(&redaction_key),
+    )?;
+    assert!(sum2.all_clean());
+    assert!(!is_os_lock_held(&normal_lock));
+
+    // 2. P3a reproducer (in-process deterministic):
+    //    Holder A is running (Attempt 1 returns HTTP 500 with cost 0.01, which would normally
+    //    trigger Attempt 2 `harness` retry). While Holder A holds `relay/turn.lock`:
+    //    - `fs::remove_file(relay/turn.lock)` deletes the lock file;
+    //    - Second run (Run B) starts and takes the lock on a fresh `relay/turn.lock` at cap 0.02;
+    //    - Holder A finishes recording Attempt 1's 0.01 spend, detects the file-identity mismatch
+    //      before its next call (`try_reserve` -> `LockCompromised`), makes 0 calls after deletion,
+    //      and exits with `RelayError::TurnLocked`;
+    //    - At most one run (Run B) makes transport calls after the deletion, and cap 0.02 is never passed!
+    let p3a_game = tmp.path().join(format!("b1_p3a_retry_{B1_KEY}"));
+    write_to_seat(&p3a_game, "01", "talk", "Saltworks", "P3A_HOLDER_A")?;
+    write_to_seat(&p3a_game, "01", "act", "Saltworks", "P3A_RUNNER_B")?;
+    let p3a_lock = p3a_game.join("relay").join("turn.lock");
+
+    let fail_500_with_cost = json!({
+        "model": "google/gemini-2.5-pro-06-05",
+        "error": {"message": "temporary upstream 500"},
+        "usage": {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10, "cost": 0.01}
+    })
+    .to_string();
+    let holder_a_tx = BarrierStepTransport::new(500, fail_500_with_cost);
+    let runner_b_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Run B fresh lock reply",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+
+    thread::scope(|s| -> TestResult {
+        let ha = s.spawn(|| {
+            run_turn(
+                &TurnConfig::new(
+                    p3a_game.clone(),
+                    "01".to_owned(),
+                    Round::Talk,
+                    one_seat.clone(),
+                    Some(wrapper.clone()),
+                    true,
+                    Some(0.02),
+                ),
+                &holder_a_tx,
+                Some(&redaction_key),
+            )
+        });
+        holder_a_tx.wait_entered()?;
+        assert_eq!(holder_a_tx.call_count(), 1);
+
+        // Before deletion, a second run is refused immediately with TurnLocked (0 calls).
+        let refused_tx = ScriptedTransport::new(vec![]);
+        let pre_del = run_turn(
+            &TurnConfig::new(
+                p3a_game.clone(),
+                "01".to_owned(),
+                Round::Act,
+                one_seat.clone(),
+                Some(wrapper.clone()),
+                true,
+                Some(0.02),
+            ),
+            &refused_tx,
+            Some(&redaction_key),
+        );
+        assert!(matches!(pre_del, Err(RelayError::TurnLocked { .. })));
+        assert_eq!(refused_tx.call_count(), 0);
+
+        // Delete relay/turn.lock while Holder A is live, then start Run B on a fresh turn.lock.
+        fs::remove_file(&p3a_lock)?;
+        let run_b_sum = run_turn(
+            &TurnConfig::new(
+                p3a_game.clone(),
+                "01".to_owned(),
+                Round::Act,
+                one_seat.clone(),
+                Some(wrapper.clone()),
+                true,
+                Some(0.02),
+            ),
+            &runner_b_tx,
+            Some(&redaction_key),
+        )?;
+        assert!(run_b_sum.all_clean());
+        assert_eq!(
+            runner_b_tx.call_count(),
+            1,
+            "Run B holds the fresh turn.lock and makes 1 call"
+        );
+
+        // Now let Holder A finish Attempt 1: it must record Attempt 1's 0.01 spend, detect the
+        // mismatched file identity at relay/turn.lock before Attempt 2, make 0 calls after deletion,
+        // and return Err(RelayError::TurnLocked).
+        holder_a_tx.release_now();
+        let holder_a_res = ha.join().map_err(|_| "holder A panicked")?;
+        let holder_a_err = holder_a_res
+            .err()
+            .ok_or("Holder A must exit with TurnLocked")?;
+        assert!(
+            matches!(holder_a_err, RelayError::TurnLocked { .. }),
+            "expected TurnLocked on compromised lock, got: {holder_a_err:?}"
+        );
+        let err_msg = format!("{holder_a_err}\n{holder_a_err:?}");
+        assert!(
+            err_msg.contains("was deleted or replaced while turn was running"),
+            "expected compromised lock diagnostic, got: {err_msg}"
+        );
+        assert_no_8char_key_piece(&err_msg, B1_KEY, "compromised TurnLocked error");
+        assert_eq!(
+            holder_a_tx.call_count(),
+            1,
+            "Holder A must make 0 calls after turn.lock deletion (no harness retry)"
+        );
+        Ok(())
+    })?;
+
+    let p3a_entries = read_calls_log(&p3a_game)?;
+    assert_eq!(p3a_entries.len(), 2);
+    let p3a_total: f64 = p3a_entries.iter().map(|e| e.charged_credits).sum();
+    assert!(
+        p3a_total <= 0.02 + 1e-12,
+        "cap 0.02 must never be passed (got {p3a_total})"
+    );
+
+    // 3. Same check when Holder A's in-flight call returned HTTP 200 OK AND `turn.lock` was deleted
+    //    without any replacement (missing path) while `calls.jsonl` is read-only:
+    //    Holder A records spend to `calls.pending.jsonl`, skips `from-seat/` + transcript writes,
+    //    and exits with `TurnLocked`; subsequent Run B at cap 0.01 sees `calls.pending.jsonl`
+    //    and refuses (`CAP_REACHED`, 0 calls -> cap 0.01 never passed!).
+    let missing_lock_game = tmp.path().join("b1_missing_lock_ro_ledger");
+    write_to_seat(
+        &missing_lock_game,
+        "01",
+        "talk",
+        "Saltworks",
+        "MISSING_TALK",
+    )?;
+    write_to_seat(&missing_lock_game, "01", "act", "Saltworks", "MISSING_ACT")?;
+    fs::create_dir_all(missing_lock_game.join("relay"))?;
+    let ml_calls = missing_lock_game.join("relay").join("calls.jsonl");
+    fs::write(&ml_calls, "")?;
+    set_file_readonly(&ml_calls)?;
+    let ml_lock = missing_lock_game.join("relay").join("turn.lock");
+
+    let ok_200_body = ok_completion_json(
+        "Reply before lock vanished",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    )
+    .body;
+    let ml_tx = BarrierStepTransport::new(200, ok_200_body);
+    thread::scope(|s| -> TestResult {
+        let hm = s.spawn(|| {
+            run_turn(
+                &TurnConfig::new(
+                    missing_lock_game.clone(),
+                    "01".to_owned(),
+                    Round::Talk,
+                    one_seat.clone(),
+                    Some(wrapper.clone()),
+                    true,
+                    Some(0.01),
+                ),
+                &ml_tx,
+                None,
+            )
+        });
+        ml_tx.wait_entered()?;
+        fs::remove_file(&ml_lock)?;
+        ml_tx.release_now();
+        let res = hm.join().map_err(|_| "hm panicked")?;
+        assert!(matches!(res, Err(RelayError::TurnLocked { .. })));
+        Ok(())
+    })?;
+    assert!(
+        !missing_lock_game
+            .join("from-seat")
+            .join("day-01-talk-Saltworks.md")
+            .exists(),
+        "compromised turn must not write from-seat reply after losing turn.lock"
+    );
+    assert!(
+        missing_lock_game
+            .join("relay")
+            .join("calls.pending.jsonl")
+            .is_file(),
+        "already-spent charge must still be persisted to calls.pending.jsonl"
+    );
+    set_file_writable(&ml_calls)?;
+
+    // Run B starts at cap 0.01 -> migrates 0.01 from calls.pending.jsonl and refuses with CAP_REACHED (0 calls)!
+    let cap_check_tx = ScriptedTransport::new(vec![]);
+    let cap_check_sum = run_turn(
+        &TurnConfig::new(
+            missing_lock_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &cap_check_tx,
+        None,
+    )?;
+    assert_eq!(cap_check_tx.call_count(), 0);
+    assert!(matches!(
+        cap_check_sum.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+
+    // 4. Real OS subprocess P3a reproducer:
+    //    Process A holds `relay/turn.lock` -> Process B gets exit 4 -> delete `relay/turn.lock` ->
+    //    Process C starts on fresh `relay/turn.lock` (exit 0) -> Process A finishes recording 0.01
+    //    spend and exits 4 (`TurnLocked`), cap 0.02 never passed!
+    let proc_game = tmp.path().join(format!("b1_proc_p3a_{B1_KEY}"));
+    write_to_seat(&proc_game, "01", "talk", "Saltworks", "PROC_SLOW_A")?;
+    write_to_seat(&proc_game, "01", "act", "Saltworks", "PROC_FAST_C")?;
+    let seats_path = tmp.path().join("b1_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp.path().join("b1_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "PROC_SLOW_A",
+                    "sleep_ms": 600,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "Slow A"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                },
+                {
+                    "when_contains": "PROC_FAST_C",
+                    "sleep_ms": 0,
+                    "status": 200,
+                    "response": {
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{"message": {"content": "Fast C"}}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10, "cost": 0.01}
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    let proc_lock = proc_game.join("relay").join("turn.lock");
+    let mut proc_a = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            proc_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.02",
+        ])
+        .env("OPENROUTER_API_KEY", B1_KEY)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let wait_t = Instant::now();
+    while !is_os_lock_held(&proc_lock) {
+        if wait_t.elapsed() > Duration::from_secs(5) {
+            let _ = proc_a.kill();
+            let _ = proc_a.wait();
+            return Err("timed out waiting for proc_a to lock turn.lock".into());
+        }
+        thread::sleep(Duration::from_millis(15));
+    }
+
+    let proc_b = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            proc_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.02",
+        ])
+        .env("OPENROUTER_API_KEY", B1_KEY)
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(proc_b.status.code(), Some(4));
+
+    fs::remove_file(&proc_lock)?;
+    let proc_c = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--game-dir",
+            proc_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.02",
+        ])
+        .env("OPENROUTER_API_KEY", B1_KEY)
+        .stdin(Stdio::null())
+        .output()?;
+    assert_eq!(
+        proc_c.status.code(),
+        Some(0),
+        "proc_c stderr={}",
+        String::from_utf8_lossy(&proc_c.stderr)
+    );
+
+    let proc_a_out = proc_a.wait_with_output()?;
+    assert_eq!(
+        proc_a_out.status.code(),
+        Some(4),
+        "Holder proc_a must exit 4 on compromised turn.lock; stderr={}",
+        String::from_utf8_lossy(&proc_a_out.stderr)
+    );
+    let proc_a_stderr = String::from_utf8_lossy(&proc_a_out.stderr);
+    assert!(proc_a_stderr.contains("was deleted or replaced while turn was running"));
+    assert_no_8char_key_piece(&proc_a_stderr, B1_KEY, "proc_a compromised stderr");
+
+    let proc_entries = read_calls_log(&proc_game)?;
+    let proc_charged: f64 = proc_entries.iter().map(|e| e.charged_credits).sum();
+    assert!(
+        proc_charged <= 0.02 + 1e-12,
+        "subprocess P3a must never pass cap 0.02 (got {proc_charged})"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn c2_turn_locked_exits_4_distinct_from_1_2_and_3() -> TestResult {
+    const C2_KEY: &str = "PlainC2SecretKey_ExitCodeFour987654";
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+    let seats_path = tmp.path().join("c2_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp.path().join("c2_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [{
+                "when_contains": "C2_OK",
+                "status": 200,
+                "response": {
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"message": {"content": "Delivered"}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 4, "total_tokens": 8, "cost": 0.01}
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let game_dir = tmp.path().join(format!("c2_game_{C2_KEY}"));
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "C2_OK")?;
+    fs::create_dir_all(game_dir.join("relay"))?;
+    let lock_path = game_dir.join("relay").join("turn.lock");
+
+    // Exit 1: invalid CLI / missing wrapper when no lock is held.
+    let mut out1 = Vec::new();
+    let mut err1 = Vec::new();
+    let code1 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ],
+        |_| Some(C2_KEY.to_owned()),
+        &mut out1,
+        &mut err1,
+    );
+    assert_eq!(code1, 1, "config/missing-wrapper error must stay exit 1");
+
+    // Exit 4: active OS lock on relay/turn.lock.
+    let lock_file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock_file.try_lock()?;
+
+    let mut out4 = Vec::new();
+    let mut err4 = Vec::new();
+    let code4 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ],
+        |_| Some(C2_KEY.to_owned()),
+        &mut out4,
+        &mut err4,
+    );
+    assert_eq!(code4, 4, "TurnLocked must return distinct exit code 4");
+    let stderr4 = String::from_utf8(err4)?;
+    assert!(stderr4.contains("another league-relay turn is already running"));
+    assert_no_8char_key_piece(&stderr4, C2_KEY, "C2 exit 4 stderr");
+
+    lock_file.unlock()?;
+    drop(lock_file);
+
+    // Exit 0 once lock is released.
+    let mut out0 = Vec::new();
+    let mut err0 = Vec::new();
+    let code0 = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ],
+        |_| Some(C2_KEY.to_owned()),
+        &mut out0,
+        &mut err0,
+    );
+    assert_eq!(code0, 0);
+
+    Ok(())
+}
+
+#[test]
+fn c4_nonexistent_or_file_game_dir_refused_before_creating_relay_dir() -> TestResult {
+    const C4_KEY: &str = "PlainC4SecretKey_MissingGameDir543210";
+    let redaction_key = ApiKey::from_env_reader(|_| Some(C4_KEY.to_owned()))?;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+    let seats_path = tmp.path().join("c4_seats.json");
+    let seats_json = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "google/gemini-2.5-pro-06-05",
+            "temperature": 0.2,
+            "max_output_tokens": 128,
+            "timeout_secs": 3.0,
+            "max_cost_per_call": 0.01
+        }]
+    })
+    .to_string();
+    fs::write(&seats_path, &seats_json)?;
+    let one_seat = SeatFile::from_json_str(&seats_json, None)?;
+    let mock_dir = tmp.path().join("c4_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(mock_dir.join("responses.json"), r#"{"rules":[]}"#)?;
+
+    // 1. Library `run_turn` with non-existent `--game-dir`: refuses before creating `<game-dir>` or `<game-dir>/relay`.
+    let missing_game = tmp.path().join(format!("typo-no-such-game-{C4_KEY}"));
+    let tx = ScriptedTransport::new(vec![]);
+    let err = run_turn(
+        &TurnConfig::new(
+            missing_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(1.0),
+        ),
+        &tx,
+        Some(&redaction_key),
+    )
+    .err()
+    .ok_or("non-existent game_dir must fail")?;
+    assert!(
+        matches!(err, RelayError::Io(_)),
+        "expected Io error, got: {err:?}"
+    );
+    assert!(
+        err.to_string().contains("game directory does not exist"),
+        "expected clear missing-directory message, got: {err}"
+    );
+    assert_no_8char_key_piece(
+        &format!("{err}\n{err:?}"),
+        C4_KEY,
+        "C4 missing game_dir error",
+    );
+    assert_eq!(tx.call_count(), 0);
+    assert!(
+        !missing_game.exists() && !missing_game.join("relay").exists(),
+        "must not create <game-dir> or <game-dir>/relay on misspelt path"
+    );
+
+    // 2. CLI `execute_cli` with non-existent `--game-dir`: exits 1 and creates nothing.
+    let mut cli_out = Vec::new();
+    let mut cli_err = Vec::new();
+    let cli_code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            missing_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ],
+        |_| Some(C4_KEY.to_owned()),
+        &mut cli_out,
+        &mut cli_err,
+    );
+    assert_eq!(cli_code, 1);
+    let cli_stderr = String::from_utf8(cli_err)?;
+    assert!(cli_stderr.contains("game directory does not exist"));
+    assert_no_8char_key_piece(&cli_stderr, C4_KEY, "C4 CLI stderr");
+    assert!(!missing_game.exists() && !missing_game.join("relay").exists());
+
+    // 3. `--game-dir` pointing to an existing regular file (not a directory): refuses with exit 1, creates nothing.
+    let file_as_game = tmp.path().join(format!("regular-file-{C4_KEY}.txt"));
+    fs::write(&file_as_game, "not a directory")?;
+    let file_err = run_turn(
+        &TurnConfig::new(
+            file_as_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(1.0),
+        ),
+        &tx,
+        Some(&redaction_key),
+    )
+    .err()
+    .ok_or("file path as game_dir must fail")?;
+    assert!(matches!(file_err, RelayError::Io(_)));
+    assert!(file_err.to_string().contains("is not a directory"));
+    assert_no_8char_key_piece(
+        &format!("{file_err}\n{file_err:?}"),
+        C4_KEY,
+        "C4 file game_dir",
+    );
+    assert_eq!(tx.call_count(), 0);
 
     Ok(())
 }

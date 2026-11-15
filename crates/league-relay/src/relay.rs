@@ -9,13 +9,14 @@ use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
 use chrono::{SecondsFormat, Utc};
+use same_file::Handle as SameFileHandle;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::any::Any;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, OpenOptions, TryLockError};
 use std::io::{Seek, SeekFrom, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -397,15 +398,34 @@ fn read_lock_holder(lock_path: &Path, key: Option<&ApiKey>) -> Option<String> {
 }
 
 struct TurnLock {
-    file: File,
+    lock_path: PathBuf,
+    handle: SameFileHandle,
 }
 
 impl TurnLock {
     fn acquire(game_dir: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
+        match fs::metadata(game_dir) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(io_err(
+                    game_dir,
+                    "game directory path is not a directory",
+                    redaction_key,
+                ));
+            }
+            Err(e) => {
+                return Err(io_err(
+                    game_dir,
+                    format!("game directory does not exist ({e})"),
+                    redaction_key,
+                ));
+            }
+        }
+
         let relay_dir = game_dir.join("relay");
         fs::create_dir_all(&relay_dir).map_err(|e| io_err(&relay_dir, e, redaction_key))?;
         let lock_path = relay_dir.join(TURN_LOCK_FILENAME);
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -425,24 +445,52 @@ impl TurnLock {
                 return Err(io_err(&lock_path, e, redaction_key));
             }
         }
+        let handle =
+            SameFileHandle::from_file(file).map_err(|e| io_err(&lock_path, e, redaction_key))?;
+        let mut lock = Self { lock_path, handle };
+        lock.verify_identity(redaction_key)?;
+
         let holder_line = format!(
             "pid={} started_utc={}\n",
             std::process::id(),
             now_utc_rfc3339()
         );
-        let _ = file.set_len(0);
-        let _ = file.seek(SeekFrom::Start(0));
-        let _ = file.write_all(holder_line.as_bytes());
-        let _ = file.flush();
-        Ok(Self { file })
+        let locked_file = lock.handle.as_file_mut();
+        let _ = locked_file.set_len(0);
+        let _ = locked_file.seek(SeekFrom::Start(0));
+        let _ = locked_file.write_all(holder_line.as_bytes());
+        let _ = locked_file.flush();
+        Ok(lock)
+    }
+
+    fn verify_identity(&self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        match SameFileHandle::from_path(&self.lock_path) {
+            Ok(path_handle) if path_handle == self.handle => Ok(()),
+            Ok(_) => Err(RelayError::TurnLocked {
+                lock_path: redact_secrets(&self.lock_path.display().to_string(), redaction_key),
+                holder: Some(
+                    "compromised: lock file at path refers to a different file".to_owned(),
+                ),
+            }),
+            Err(e) => Err(RelayError::TurnLocked {
+                lock_path: redact_secrets(&self.lock_path.display().to_string(), redaction_key),
+                holder: Some(redact_secrets(
+                    &format!("compromised: lock file missing or unreadable ({e})"),
+                    redaction_key,
+                )),
+            }),
+        }
     }
 }
 
 impl Drop for TurnLock {
     fn drop(&mut self) {
-        let _ = self.file.set_len(0);
-        let _ = self.file.flush();
-        let _ = self.file.unlock();
+        if self.verify_identity(None).is_ok() {
+            let locked_file = self.handle.as_file_mut();
+            let _ = locked_file.set_len(0);
+            let _ = locked_file.flush();
+        }
+        let _ = self.handle.as_file().unlock();
     }
 }
 
@@ -598,20 +646,22 @@ fn write_pending_side_file(
     }
     #[cfg(unix)]
     if let Some(parent) = pending_path.parent()
-        && let Ok(dir) = File::open(parent)
+        && let Ok(dir) = fs::File::open(parent)
     {
         let _ = dir.sync_all();
     }
     Ok(())
 }
 
-struct CallLedger {
+struct CallLedger<'a> {
+    turn_lock: &'a TurnLock,
     calls_path: PathBuf,
     pending_path: PathBuf,
     cap_credits: Option<f64>,
     reserved_in_flight: f64,
     prior_unmigrated_pending: Vec<CallLogEntry>,
     pending_unwritten: Vec<(f64, CallLogEntry)>,
+    lock_compromised: Option<RelayError>,
     ledger_write_failed_in_turn: bool,
     cost_unknown_in_turn: bool,
     cost_over_estimate_in_turn: bool,
@@ -619,6 +669,7 @@ struct CallLedger {
 
 enum PreCallDecision {
     Reserved,
+    LockCompromised(RelayError),
     CapReached {
         charged_sum: f64,
         reserved_in_flight: f64,
@@ -630,14 +681,16 @@ enum PreCallDecision {
     CostOverEstimate,
 }
 
-impl CallLedger {
+impl<'a> CallLedger<'a> {
     fn open(
+        turn_lock: &'a TurnLock,
         calls_path: PathBuf,
         day: &str,
         round: Round,
         cap_credits: Option<f64>,
         redaction_key: Option<&ApiKey>,
     ) -> Result<Self, RelayError> {
+        turn_lock.verify_identity(redaction_key)?;
         let pending_path = pending_calls_path(&calls_path);
         let mut effective_entries = if calls_path.exists() {
             read_calls_file(&calls_path, redaction_key)?
@@ -649,6 +702,7 @@ impl CallLedger {
         if pending_path.exists() {
             let pending_entries = read_calls_file(&pending_path, redaction_key)?;
             let unmigrated = filter_unmigrated_entries(&effective_entries, &pending_entries);
+            turn_lock.verify_identity(redaction_key)?;
             if unmigrated.is_empty() {
                 let _ = fs::remove_file(&pending_path);
             } else {
@@ -681,16 +735,26 @@ impl CallLedger {
             }
         }
         Ok(Self {
+            turn_lock,
             calls_path,
             pending_path,
             cap_credits,
             reserved_in_flight: 0.0,
             prior_unmigrated_pending,
             pending_unwritten: Vec::new(),
+            lock_compromised: None,
             ledger_write_failed_in_turn: false,
             cost_unknown_in_turn,
             cost_over_estimate_in_turn,
         })
+    }
+
+    fn check_lock_identity(&mut self, redaction_key: Option<&ApiKey>) {
+        if self.lock_compromised.is_none()
+            && let Err(lock_err) = self.turn_lock.verify_identity(redaction_key)
+        {
+            self.lock_compromised = Some(lock_err);
+        }
     }
 
     fn read_persisted_entries(
@@ -732,6 +796,10 @@ impl CallLedger {
         seat_max_cost: f64,
         redaction_key: Option<&ApiKey>,
     ) -> Result<PreCallDecision, RelayError> {
+        self.check_lock_identity(redaction_key);
+        if let Some(lock_err) = &self.lock_compromised {
+            return Ok(PreCallDecision::LockCompromised(lock_err.clone()));
+        }
         if self.ledger_write_failed_in_turn {
             return Ok(PreCallDecision::LedgerWriteFailed);
         }
@@ -767,6 +835,7 @@ impl CallLedger {
         over_estimate: bool,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
         if entry_marks_cost_unknown(entry) {
             self.cost_unknown_in_turn = true;
         }
@@ -789,6 +858,7 @@ impl CallLedger {
                 let held_charge = entry.charged_credits.max(reserved_amount);
                 self.pending_unwritten.push((held_charge, entry.clone()));
                 self.ledger_write_failed_in_turn = true;
+                self.check_lock_identity(redaction_key);
                 let pending_snapshot: Vec<CallLogEntry> = self
                     .pending_unwritten
                     .iter()
@@ -806,6 +876,10 @@ impl CallLedger {
         entry: &CallLogEntry,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
+        if let Some(lock_err) = &self.lock_compromised {
+            return Err(lock_err.clone());
+        }
         if entry_marks_cost_unknown(entry) {
             self.cost_unknown_in_turn = true;
         }
@@ -819,12 +893,17 @@ impl CallLedger {
     }
 
     fn finalize_turn(&mut self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
         if self.pending_unwritten.is_empty() {
+            if let Some(lock_err) = self.lock_compromised.take() {
+                return Err(lock_err);
+            }
             return Ok(());
         }
 
         let mut last_ledger_err: Option<RelayError> = None;
         while let Some((_, pending_entry)) = self.pending_unwritten.first().cloned() {
+            self.check_lock_identity(redaction_key);
             let mut line = match serde_json::to_string(&pending_entry) {
                 Ok(s) => s,
                 Err(e) => {
@@ -845,7 +924,7 @@ impl CallLedger {
         }
 
         if self.pending_unwritten.is_empty() {
-            if self.pending_path.is_file() {
+            if self.lock_compromised.is_none() && self.pending_path.is_file() {
                 let calls_entries = if self.calls_path.exists() {
                     read_calls_file(&self.calls_path, redaction_key)?
                 } else {
@@ -870,9 +949,14 @@ impl CallLedger {
                     }
                 }
             }
+            self.check_lock_identity(redaction_key);
+            if let Some(lock_err) = self.lock_compromised.take() {
+                return Err(lock_err);
+            }
             return Ok(());
         }
 
+        self.check_lock_identity(redaction_key);
         let remaining: Vec<CallLogEntry> = self
             .pending_unwritten
             .iter()
@@ -881,6 +965,10 @@ impl CallLedger {
         match write_pending_side_file(&self.pending_path, &remaining, redaction_key) {
             Ok(()) => {
                 self.pending_unwritten.clear();
+                self.check_lock_identity(redaction_key);
+                if let Some(lock_err) = self.lock_compromised.take() {
+                    return Err(lock_err);
+                }
                 Ok(())
             }
             Err(side_err) => {
@@ -1064,6 +1152,7 @@ pub fn run_turn(
 
     let calls_path = config.game_dir.join("relay").join("calls.jsonl");
     let ledger = Mutex::new(CallLedger::open(
+        &turn_lock,
         calls_path.clone(),
         &config.day,
         config.round,
@@ -1131,7 +1220,7 @@ fn run_single_openrouter_seat(
     seat: &OpenRouterSeat,
     wrapper_text: Option<&str>,
     transport: &dyn Transport,
-    ledger: &Mutex<CallLedger>,
+    ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
     redaction_key: Option<&ApiKey>,
 ) -> SeatOutcome {
@@ -1207,6 +1296,11 @@ fn run_single_openrouter_seat(
             let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
             match guard.try_reserve(seat.max_cost_per_call, redaction_key) {
                 Ok(PreCallDecision::Reserved) => {}
+                Ok(PreCallDecision::LockCompromised(lock_err)) => {
+                    return SeatOutcome::SeatError {
+                        detail: lock_err.to_string(),
+                    };
+                }
                 Ok(PreCallDecision::CapReached {
                     charged_sum,
                     reserved_in_flight,
@@ -1360,6 +1454,11 @@ fn run_single_openrouter_seat(
                     ) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
+                        };
+                    }
+                    if let Some(lock_err) = &guard.lock_compromised {
+                        return SeatOutcome::SeatError {
+                            detail: lock_err.to_string(),
                         };
                     }
                 }

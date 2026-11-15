@@ -81,7 +81,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-gen",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -179,8 +179,8 @@
         "path": ".gitignore"
       },
       {
-        "commits": 20,
-        "lines": 142,
+        "commits": 21,
+        "lines": 144,
         "path": "CHANGELOG.md"
       },
       {
@@ -214,8 +214,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 27,
-        "lines": 625,
+        "commits": 28,
+        "lines": 649,
         "path": "atlas/README.md"
       },
       {
@@ -224,18 +224,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 27,
-        "lines": 2036,
+        "commits": 28,
+        "lines": 2121,
         "path": "atlas/page.json"
       },
       {
-        "commits": 27,
-        "lines": 10728,
+        "commits": 28,
+        "lines": 11013,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 27,
-        "lines": 24792,
+        "commits": 28,
+        "lines": 25315,
         "path": "atlas/structure.json"
       },
       {
@@ -264,28 +264,28 @@
         "path": "crates/league-gen/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 599,
+        "commits": 2,
+        "lines": 761,
         "path": "crates/league-gen/src/empirical.rs"
       },
       {
-        "commits": 1,
-        "lines": 844,
+        "commits": 2,
+        "lines": 1633,
         "path": "crates/league-gen/src/feasibility.rs"
       },
       {
-        "commits": 1,
-        "lines": 549,
+        "commits": 2,
+        "lines": 1114,
         "path": "crates/league-gen/src/generator.rs"
       },
       {
-        "commits": 1,
-        "lines": 37,
+        "commits": 2,
+        "lines": 72,
         "path": "crates/league-gen/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 469,
+        "commits": 2,
+        "lines": 502,
         "path": "crates/league-gen/src/lp.rs"
       },
       {
@@ -294,13 +294,13 @@
         "path": "crates/league-gen/src/rng.rs"
       },
       {
-        "commits": 1,
-        "lines": 419,
+        "commits": 2,
+        "lines": 588,
         "path": "crates/league-gen/src/schema.rs"
       },
       {
-        "commits": 1,
-        "lines": 173,
+        "commits": 2,
+        "lines": 493,
         "path": "crates/league-gen/tests/properties.rs"
       },
       {
@@ -2614,51 +2614,51 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-15T11:12:18.280Z",
+  "generatedAt": "2026-11-15T11:14:54.867Z",
   "generatedFrom": {
-    "commit": "5f7c94b33780fdf4400838fcdf46837d1de9eb69"
+    "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd"
   },
   "pairs": [
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 18,
-      "shared": 18,
+      "either": 19,
+      "shared": 19,
       "strength": 1
     },
     {
@@ -2679,16 +2679,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-15T05:54:18-05:00",
-    "inScopeFiles": 486,
+    "headDate": "2026-11-15T06:12:49-05:00",
+    "inScopeFiles": 494,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 32,
+    "qualifyingCommits": 33,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-19T10:54:18.000Z",
+    "since": "2026-05-19T11:12:49.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
