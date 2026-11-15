@@ -17,56 +17,30 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 10,
+      "changed": 9,
       "moved": 0,
       "parts": 2,
       "removed": 0
     },
     "items": [
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `from_env`, before `install_redacting_panic_hook`.",
-        "subjects": [
-          "crates/league-relay/src/main.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook`, before `execute_cli`.",
-        "subjects": [
-          "crates/league-relay/src/main.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `truncate_after_redaction`, before `Usage`.",
-        "subjects": [
-          "crates/league-relay/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "And 1 more change to the order of work.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "10 files changed content, across 2 parts.",
+        "sentence": "Nothing structural changed since 2026-11-15; 9 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "648b3e3837bdbfbc6fe8fa8ec9d90fa9d91ce7cc",
-      "generatedAt": "2026-11-15T07:03:21.980Z"
+      "commit": "2d34292808b9a2afa344d83bddee0e985a32a4aa",
+      "generatedAt": "2026-11-15T07:46:56.816Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "2d34292808b9a2afa344d83bddee0e985a32a4aa",
+  "commit": "b68e259dc07a411ad269b61ccff51d8cfa42550c",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -270,7 +244,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T07:46:56.816Z",
+  "generatedAt": "2026-11-15T08:25:54.396Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

@@ -6,9 +6,10 @@
 
 use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
-    ApiKey, CallLogEntry, LiveGate, RawHttpResponse, RelayError, Round, SeatFile, SeatOutcome,
-    TranscriptEntry, Transport, TransportError, TurnConfig, UreqTransport,
-    install_redacting_panic_hook, redact_secrets, run_turn, sha256_hex, truncate_after_redaction,
+    ApiKey, CallLogEntry, LiveGate, MAX_REDACTION_SCAN_BYTES, RawHttpResponse, RelayError, Round,
+    SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError, TurnConfig, UreqTransport,
+    cap_utf8_bytes, install_redacting_panic_hook, redact_and_truncate, redact_secrets, run_turn,
+    sha256_hex, truncate_after_redaction,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -1805,6 +1806,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
         completion_tokens: Some(5),
         total_tokens: Some(15),
         cost: None,
+        charged_credits: 0.05,
         latency_ms: 12,
         outcome: "OK".to_owned(),
         error: None,
@@ -1838,6 +1840,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
     fs::create_dir_all(cap_game.join("relay"))?;
     let mut prior_capped = prior_unknown.clone();
     prior_capped.cost = Some(2.0);
+    prior_capped.charged_credits = 2.0;
     fs::write(
         cap_game.join("relay").join("calls.jsonl"),
         format!("{}\n", serde_json::to_string(&prior_capped)?),
@@ -2865,6 +2868,613 @@ fn s4_guild_names_enforce_ascii_letter_prefix_and_case_insensitive_uniqueness() 
     .to_string();
     let parsed = SeatFile::from_json_str(&valid, None)?;
     assert_eq!(parsed.seats.len(), 4);
+
+    Ok(())
+}
+
+#[test]
+fn b1_ledger_write_failure_keeps_charge_and_stops_turn() -> TestResult {
+    struct M1gTransientDirBlockTransport {
+        calls_path: std::path::PathBuf,
+        billed_calls: AtomicUsize,
+        arrivals: (Mutex<usize>, Condvar),
+        seat_a_returned: (Mutex<bool>, Condvar),
+    }
+
+    impl Transport for M1gTransientDirBlockTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            // Wait until both seats have reserved against cap = 0.02.
+            let (arr_lock, arr_cvar) = &self.arrivals;
+            if let Ok(mut n) = arr_lock.lock() {
+                *n += 1;
+                if *n >= 2 {
+                    arr_cvar.notify_all();
+                } else {
+                    while *n < 2 {
+                        let (next, res) = arr_cvar
+                            .wait_timeout(n, Duration::from_secs(2))
+                            .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
+                        n = next;
+                        if res.timed_out() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            self.billed_calls.fetch_add(1, Ordering::SeqCst);
+
+            if body.contains("B1_SEAT_A") {
+                // Block calls.jsonl creation/append by placing a directory at calls.jsonl.
+                let _ = fs::create_dir_all(&self.calls_path);
+                let resp = ok_completion_json(
+                    "Saltworks reply",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                );
+                let (done_lock, done_cvar) = &self.seat_a_returned;
+                if let Ok(mut done) = done_lock.lock() {
+                    *done = true;
+                    done_cvar.notify_all();
+                }
+                return Ok(resp);
+            }
+
+            // Seat B waits for Seat A to return and hit the failing ledger append,
+            // then clears the directory block and returns a paid empty reply (0.01).
+            let (done_lock, done_cvar) = &self.seat_a_returned;
+            if let Ok(mut done) = done_lock.lock() {
+                while !*done {
+                    let (next, res) = done_cvar
+                        .wait_timeout(done, Duration::from_secs(2))
+                        .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
+                    done = next;
+                    if res.timed_out() {
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(30));
+            let _ = fs::remove_dir(&self.calls_path);
+            Ok(ok_completion_json(
+                "   ",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let two_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // Sub-case 1: Reviewer's M1g probe — cap = 0.02, two seats, max_cost_per_call = 0.01.
+    // Seat A's append fails; Seat B clears the block and returns a paid empty reply.
+    // Seat B's harness re-send MUST be refused fail-closed: <= 2 billed calls, and
+    // recorded/charged sum >= real spend (0.02).
+    let m1g_game = tmp.path().join("b1_m1g_game");
+    write_to_seat(&m1g_game, "01", "talk", "Saltworks", "B1_SEAT_A")?;
+    write_to_seat(&m1g_game, "01", "talk", "Weavers", "B1_SEAT_B")?;
+    let calls_path = m1g_game.join("relay").join("calls.jsonl");
+    let m1g_tx = M1gTransientDirBlockTransport {
+        calls_path: calls_path.clone(),
+        billed_calls: AtomicUsize::new(0),
+        arrivals: (Mutex::new(0), Condvar::new()),
+        seat_a_returned: (Mutex::new(false), Condvar::new()),
+    };
+
+    let m1g_summary = run_turn(
+        &TurnConfig::new(
+            m1g_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            two_seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &m1g_tx,
+        None,
+    )?;
+
+    let billed = m1g_tx.billed_calls.load(Ordering::SeqCst);
+    assert_eq!(billed, 2, "expected at most 2 billed calls, got {billed}");
+    assert!(matches!(
+        m1g_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    assert!(matches!(
+        m1g_summary.reports[1].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    let m1g_entries = read_calls_log(&m1g_game)?;
+    let charged_total: f64 = m1g_entries.iter().map(|e| e.charged_credits).sum();
+    let recorded_cost_total: f64 = m1g_entries.iter().filter_map(|e| e.cost).sum();
+    assert!(
+        charged_total + 1e-9 >= 0.02 && recorded_cost_total + 1e-9 >= 0.02,
+        "charged={charged_total}, recorded={recorded_cost_total} must be >= real spend 0.02"
+    );
+    assert!(m1g_entries.iter().any(|e| e.outcome == "LEDGER_ERROR"));
+
+    // Sub-case 2: Permanent ledger write failure stops any subsequent call in the turn even when cap = 1.0.
+    struct PermanentBlockTransport {
+        calls_path: std::path::PathBuf,
+        calls: AtomicUsize,
+    }
+    impl Transport for PermanentBlockTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let _ = fs::create_dir_all(&self.calls_path);
+            Ok(ok_completion_json(
+                "   ",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let perm_game = tmp.path().join("b1_perm_game");
+    let one_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+    write_to_seat(&perm_game, "01", "talk", "Saltworks", "B1_PERM")?;
+    let perm_tx = PermanentBlockTransport {
+        calls_path: perm_game.join("relay").join("calls.jsonl"),
+        calls: AtomicUsize::new(0),
+    };
+    let perm_summary = run_turn(
+        &TurnConfig::new(
+            perm_game,
+            "01".to_owned(),
+            Round::Talk,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(1.0),
+        ),
+        &perm_tx,
+        None,
+    )?;
+    assert_eq!(perm_tx.calls.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        perm_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn b2_sent_calls_without_cost_charge_max_and_rerun_agrees() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 0.03,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // Path (a): Late HTTP 200 with NO usage block (LATE_DISCARDED, cost: null) charges max_cost_per_call (0.01).
+    let game_a = tmp.path().join("b2_path_a_late_no_usage");
+    write_to_seat(&game_a, "01", "talk", "Saltworks", "B2_A")?;
+    let tx_a = ScriptedTransport::new(vec![
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(95),
+            RawHttpResponse {
+                status: 200,
+                body: r#"{"id":"gen-a","choices":[{"message":{"role":"assistant","content":"Late no usage"}}]}"#
+                    .to_owned(),
+            },
+        ),
+        ScriptStep::Respond(ok_completion_json(
+            "Should be blocked by cap",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let sum_a = run_turn(
+        &TurnConfig::new(
+            game_a.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &tx_a,
+        None,
+    )?;
+    assert_eq!(tx_a.call_count(), 1);
+    assert!(matches!(
+        sum_a.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let calls_a = read_calls_log(&game_a)?;
+    assert_eq!(calls_a.len(), 2);
+    assert_eq!(calls_a[0].outcome, "LATE_DISCARDED");
+    assert_eq!(calls_a[0].cost, None);
+    assert!((calls_a[0].charged_credits - 0.01).abs() < 1e-9);
+    assert_eq!(calls_a[1].outcome, "CAP_REACHED");
+    assert!((calls_a[1].charged_credits - 0.0).abs() < 1e-9);
+
+    // Re-run of the same turn from calls.jsonl sees charged_sum = 0.01 (CAP_REACHED at cap 0.01,
+    // and allowed 1 call at cap 0.02 — agreeing with live that tokenless LATE_DISCARDED is NOT COST_UNKNOWN).
+    let rerun_a_capped_tx = ScriptedTransport::new(vec![]);
+    let rerun_a_capped = run_turn(
+        &TurnConfig::new(
+            game_a.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &rerun_a_capped_tx,
+        None,
+    )?;
+    assert_eq!(rerun_a_capped_tx.call_count(), 0);
+    assert!(matches!(
+        rerun_a_capped.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+
+    let rerun_a_02_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Delivered on rerun",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let rerun_a_02 = run_turn(
+        &TurnConfig::new(
+            game_a.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &rerun_a_02_tx,
+        None,
+    )?;
+    assert!(rerun_a_02.all_clean());
+    assert_eq!(rerun_a_02_tx.call_count(), 1);
+
+    // Path (b): On-time empty HTTP 200 with NO usage block charges max_cost_per_call (0.01).
+    let game_b = tmp.path().join("b2_path_b_empty_no_usage");
+    write_to_seat(&game_b, "01", "talk", "Saltworks", "B2_B")?;
+    let tx_b = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: r#"{"id":"gen-b","choices":[{"message":{"role":"assistant","content":"   "}}]}"#
+                .to_owned(),
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "Should be blocked by cap",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let sum_b = run_turn(
+        &TurnConfig::new(
+            game_b.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &tx_b,
+        None,
+    )?;
+    assert_eq!(tx_b.call_count(), 1);
+    assert!(matches!(
+        sum_b.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let calls_b = read_calls_log(&game_b)?;
+    assert_eq!(calls_b[0].outcome, "harness");
+    assert_eq!(calls_b[0].cost, None);
+    assert!((calls_b[0].charged_credits - 0.01).abs() < 1e-9);
+    assert_eq!(calls_b[1].outcome, "CAP_REACHED");
+
+    let rerun_b_tx = ScriptedTransport::new(vec![]);
+    let rerun_b = run_turn(
+        &TurnConfig::new(
+            game_b,
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &rerun_b_tx,
+        None,
+    )?;
+    assert_eq!(rerun_b_tx.call_count(), 0);
+    assert!(matches!(
+        rerun_b.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+
+    // Path (c): Client timeout before re-send charges max_cost_per_call (0.01), then cap binds.
+    let game_c = tmp.path().join("b2_path_c_timeout");
+    write_to_seat(&game_c, "01", "talk", "Saltworks", "B2_C")?;
+    let tx_c = ScriptedTransport::new(vec![
+        ScriptStep::Fail(TransportError::Timeout),
+        ScriptStep::Respond(ok_completion_json(
+            "Should be blocked by cap",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let sum_c = run_turn(
+        &TurnConfig::new(
+            game_c.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &tx_c,
+        None,
+    )?;
+    assert_eq!(tx_c.call_count(), 1);
+    assert!(matches!(
+        sum_c.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let calls_c = read_calls_log(&game_c)?;
+    assert_eq!(calls_c[0].outcome, "harness");
+    assert_eq!(calls_c[0].error.as_deref(), Some("timeout"));
+    assert_eq!(calls_c[0].cost, None);
+    assert!((calls_c[0].charged_credits - 0.01).abs() < 1e-9);
+    assert_eq!(calls_c[1].outcome, "CAP_REACHED");
+
+    let rerun_c_tx = ScriptedTransport::new(vec![]);
+    let rerun_c = run_turn(
+        &TurnConfig::new(
+            game_c.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &rerun_c_tx,
+        None,
+    )?;
+    assert_eq!(rerun_c_tx.call_count(), 0);
+    assert!(matches!(
+        rerun_c.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    let calls_c_after = read_calls_log(&game_c)?;
+    assert!(
+        calls_c_after[2]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("charged 0.010000")
+    );
+
+    // Corrupt negative charged_credits and re-opening on existing COST_UNKNOWN refusal entry.
+    let bad_charged_game = tmp.path().join("b2_neg_charged");
+    write_to_seat(&bad_charged_game, "01", "talk", "Saltworks", "NEG")?;
+    fs::create_dir_all(bad_charged_game.join("relay"))?;
+    let mut bad_entry = calls_c[0].clone();
+    bad_entry.charged_credits = -0.01;
+    fs::write(
+        bad_charged_game.join("relay").join("calls.jsonl"),
+        format!("{}\n", serde_json::to_string(&bad_entry)?),
+    )?;
+    let bad_summary = run_turn(
+        &TurnConfig::new(
+            bad_charged_game,
+            "01".to_owned(),
+            Round::Talk,
+            seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(1.0),
+        ),
+        &rerun_c_tx,
+        None,
+    )?;
+    assert!(matches!(
+        bad_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+
+    let prior_cu_game = tmp.path().join("b2_prior_cu");
+    write_to_seat(&prior_cu_game, "01", "talk", "Saltworks", "CU")?;
+    fs::create_dir_all(prior_cu_game.join("relay"))?;
+    let mut cu_refusal = calls_c[1].clone();
+    cu_refusal.outcome = "COST_UNKNOWN".to_owned();
+    fs::write(
+        prior_cu_game.join("relay").join("calls.jsonl"),
+        format!("{}\n", serde_json::to_string(&cu_refusal)?),
+    )?;
+    let cu_summary = run_turn(
+        &TurnConfig::new(
+            prior_cu_game,
+            "01".to_owned(),
+            Round::Talk,
+            seat,
+            Some(wrapper),
+            true,
+            Some(1.0),
+        ),
+        &rerun_c_tx,
+        None,
+    )?;
+    assert!(matches!(
+        cu_summary.reports[0].outcome,
+        SeatOutcome::CostUnknownRefused { .. }
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn c4_caps_error_body_at_4kib_before_redaction_and_truncation() -> TestResult {
+    const BOUNDARY_KEY: &str = "Plain4KiBKey_AlphaBravoCharlieDelta9876";
+    let key = ApiKey::from_env_reader(|_| Some(BOUNDARY_KEY.to_owned()))?;
+    assert_eq!(MAX_REDACTION_SCAN_BYTES, 4096);
+
+    // Multi-byte UTF-8 char straddling byte 4096 is cleanly backed up to a char boundary.
+    let multibyte = format!("{}🦀tail", "x".repeat(4094));
+    let capped_mb = cap_utf8_bytes(&multibyte, MAX_REDACTION_SCAN_BYTES);
+    assert_eq!(capped_mb.len(), 4094);
+
+    // 1. Key placed just inside the 4 KiB cut (ending right at byte 4096) -> scrubbed.
+    let inside_prefix_len = MAX_REDACTION_SCAN_BYTES - BOUNDARY_KEY.len();
+    let body_just_inside = format!(
+        "{}{BOUNDARY_KEY}{}",
+        "a".repeat(inside_prefix_len),
+        "z".repeat(4096)
+    );
+    let scrubbed_inside = redact_secrets(&body_just_inside, Some(&key));
+    assert!(scrubbed_inside.ends_with("<REDACTED_API_KEY>"));
+    assert_no_8char_key_piece(&scrubbed_inside, BOUNDARY_KEY, "just-inside 4KiB redact");
+
+    // 2. Key straddling the 4 KiB cut (12 chars inside 4096, rest outside) -> 12-char prefix (>=8) scrubbed, tail dropped before scan.
+    let straddle_4k_prefix_len = MAX_REDACTION_SCAN_BYTES - 12;
+    let body_straddle_4k = format!(
+        "{}{BOUNDARY_KEY}{}",
+        "b".repeat(straddle_4k_prefix_len),
+        "z".repeat(4096)
+    );
+    let scrubbed_straddle_4k = redact_secrets(&body_straddle_4k, Some(&key));
+    assert!(scrubbed_straddle_4k.ends_with("<REDACTED_API_KEY>"));
+    assert_no_8char_key_piece(
+        &scrubbed_straddle_4k,
+        BOUNDARY_KEY,
+        "straddling 4KiB redact",
+    );
+
+    // 3. Key placed just outside the 4 KiB cut (starting at byte 4096, and also with 4 chars inside < 8) -> dropped by 4 KiB cap, zero 8+ char piece present.
+    let body_just_outside = format!(
+        "{}{BOUNDARY_KEY}{}",
+        "c".repeat(MAX_REDACTION_SCAN_BYTES),
+        "z".repeat(8192)
+    );
+    let scrubbed_outside = redact_secrets(&body_just_outside, Some(&key));
+    assert_eq!(scrubbed_outside.len(), MAX_REDACTION_SCAN_BYTES);
+    assert_no_8char_key_piece(&scrubbed_outside, BOUNDARY_KEY, "just-outside 4KiB redact");
+    let shortened_outside = redact_and_truncate(&body_just_outside, Some(&key), 200);
+    assert_eq!(shortened_outside.chars().count(), 200);
+    assert_no_8char_key_piece(&shortened_outside, BOUNDARY_KEY, "just-outside truncate");
+
+    let body_4chars_inside = format!(
+        "{}{BOUNDARY_KEY}{}",
+        "d".repeat(MAX_REDACTION_SCAN_BYTES - 4),
+        "z".repeat(4096)
+    );
+    let scrubbed_4chars = redact_secrets(&body_4chars_inside, Some(&key));
+    assert_no_8char_key_piece(&scrubbed_4chars, BOUNDARY_KEY, "4-chars-inside 4KiB redact");
+
+    // 4. End-to-end HTTP error turn with large (>12 KiB) bodies placing key just inside (Attempt 1) and just outside (Attempt 2) 4 KiB.
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("c4_game");
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "C4_PROMPT")?;
+    let seat = single_openrouter_seats("Saltworks", 3.0)?;
+    let tx = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 500,
+            body: body_just_inside,
+        }),
+        ScriptStep::Respond(RawHttpResponse {
+            status: 502,
+            body: body_just_outside,
+        }),
+    ]);
+    let summary = run_turn(
+        &TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seat,
+            Some(wrapper),
+            false,
+            Some(1.0),
+        ),
+        &tx,
+        Some(&key),
+    )?;
+    let calls_raw = fs::read_to_string(game_dir.join("relay").join("calls.jsonl"))?;
+    let summary_text = format!("{}\n{summary:?}", summary.format_paths_and_hashes());
+    assert_no_8char_key_piece(&calls_raw, BOUNDARY_KEY, "C4 calls.jsonl");
+    assert_no_8char_key_piece(&summary_text, BOUNDARY_KEY, "C4 TurnSummary");
 
     Ok(())
 }

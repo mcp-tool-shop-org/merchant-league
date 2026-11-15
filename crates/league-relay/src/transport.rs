@@ -123,6 +123,7 @@ struct MockRuleWire {
     status: u16,
     #[serde(default)]
     response: serde_json::Value,
+    #[cfg(any(test, feature = "test-hooks"))]
     #[serde(default)]
     panic_message: Option<String>,
 }
@@ -142,6 +143,7 @@ struct MockRule {
     needle: String,
     status: u16,
     resp_body: String,
+    #[cfg(any(test, feature = "test-hooks"))]
     panic_message: Option<String>,
 }
 
@@ -179,6 +181,7 @@ impl MockDirTransport {
                 needle: r.when_contains,
                 status: r.status,
                 resp_body: r.response.to_string(),
+                #[cfg(any(test, feature = "test-hooks"))]
                 panic_message: r.panic_message,
             })
             .collect();
@@ -195,6 +198,7 @@ impl Transport for MockDirTransport {
     ) -> Result<RawHttpResponse, TransportError> {
         for rule in &self.rules {
             if body.contains(&rule.needle) {
+                #[cfg(any(test, feature = "test-hooks"))]
                 if let Some(panic_msg) = &rule.panic_message {
                     panic!("{panic_msg}");
                 }
