@@ -14,11 +14,14 @@ pub mod secret;
 pub mod transport;
 
 pub use error::RelayError;
-#[cfg(any(test, feature = "test-hooks"))]
-pub use relay::set_fail_pending_temp_write_for_test;
 pub use relay::{
     CallLogEntry, Round, SeatOutcome, SeatReport, TranscriptEntry, TurnConfig, TurnSummary,
     prepend_wrapper, run_turn, sha256_hex, validate_day,
+};
+#[cfg(any(test, feature = "test-hooks"))]
+pub use relay::{
+    DurabilityEvent, set_fail_pending_temp_write_for_test, take_durability_events_for_test,
+    watch_durability_events_for_test,
 };
 pub use seats::{BackendKind, OpenRouterSeat, SeatBackend, SeatFile, SeatSpec};
 pub use secret::{
