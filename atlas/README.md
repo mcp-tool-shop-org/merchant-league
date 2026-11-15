@@ -1,28 +1,38 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit ddc80b8 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 82cde68 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (ef971a4)
+## What changed since 2026-11-14 (ddc80b8)
 
-Nothing structural changed since 2026-11-14; 16 files added.
+- CI now also runs crates/league-relay/tests/.
+- CI now also checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+- league-relay (crates/league-relay/Cargo.toml) is a new command. It runs crates/league-relay/src/main.rs.
+- crates/league-relay/ is now read by Cargo.toml.
+- crates/league-relay/src/main.rs is now read by crates/league-relay/Cargo.toml.
+- crates/league-relay/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.
+- crates/league-relay/src/cli.rs is new and belongs to no part, so atlas check fails on it against the previous map.
+- crates/league-relay/src/error.rs is new and belongs to no part, so atlas check fails on it against the previous map.
+- And 7 more new files that belong to no part.
+- 11 files added and 5 changed content, across 2 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 10 more.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 11 more; checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
-5. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
+5. **league-relay** (a command people run). Runs crates/league-relay/src/main.rs.
+6. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
-1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 2 files in 2 more places; it checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -35,6 +45,8 @@ CI writes nothing in the files this map could read; 1 file could not be.
 **testnet_proof** (a command people run with `cargo run --example testnet_proof`) runs crates/league-ledger/examples/testnet_proof.rs.
 
 **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`) runs crates/league-ledger/examples/testnet_requireauth.rs.
+
+**league-relay** (a command people run) runs crates/league-relay/src/main.rs.
 
 **xrpl** (a command built from vendor/xrpl-rust, which nothing ships) runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
@@ -82,15 +94,17 @@ People write .github/, docs/ and the repository root. Nothing in the files this 
 
 ## Where to start
 
-vendor/xrpl-rust/src/bin/xrpl.rs → vendor/xrpl-rust/src/lib.rs → vendor/xrpl-rust/src/account/mod.rs → vendor/xrpl-rust/src/asynch/account/mod.rs → vendor/xrpl-rust/src/core/addresscodec/mod.rs → vendor/xrpl-rust/src/core/addresscodec/utils.rs → vendor/xrpl-rust/src/core/addresscodec/exceptions.rs
+crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/error.rs
 
-Read those in order to follow one run of xrpl end to end. This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.
+Read those in order to follow one run of league-relay end to end. This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.
+
+Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/relay.rs, crates/league-relay/src/seats.rs and crates/league-relay/src/transport.rs.
 
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 4 writes and 3 reads go to a path their caller passes, not to this repository.
-- 360 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 357 more.
+- 370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.
 - Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

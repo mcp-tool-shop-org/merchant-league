@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Paper-test seat relay (`league-relay`, library and binary), for games 3 onward.
+  - Reads JSON seat files (`openrouter` with pinned `provider/model` slugs, temperature, `max_output_tokens`, and per-seat wall timeout; `file` seats report manual relay and make no call).
+  - `league-relay turn` prepends `--wrapper` on a seat's first turn, replays `relay/<Guild>.jsonl` (`user` and `assistant` turns only, no system prompt), dispatches seats concurrently with isolated failures, writes replies byte-identically to `from-seat/day-DD-<round>-<Guild>.md`, and logs every attempt to `relay/calls.jsonl`.
+  - Delivery failures (transport error, HTTP error, empty reply, or wall timeout) re-send the identical request body once (`harness`), then log `NO_REPLY` with no `from-seat` file; wrong-form non-empty replies are not retried.
+  - Live calls require `--live`, `--cap-credits <n>`, and `OPENROUTER_API_KEY` through `LiveGate`. Pre-call checks sum `calls.jsonl` and refuse at the cap (`CAP_REACHED`), and responses without a cost field fail closed (`COST_UNKNOWN`) for further calls in that turn.
+  - `OPENROUTER_API_KEY` is read from the environment only and redacted across `Debug`, errors, panics, CLI rejections, and call logs. See `docs/paper-test/relay.md`.
 - Repository created (design stage).
 - Scaffold: a Cargo workspace (Rust 1.100.0, the current stable, edition 2024) with five crates.
   - `league-core`: identifier types only. The game rules wait for the outside design review.
