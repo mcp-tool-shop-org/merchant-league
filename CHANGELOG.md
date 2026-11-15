@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Chiral converter-ring table generator, linear-programming feasibility and Shapley equity filter, Prioritized Level Replay sampler, and random-vs-ring lock-in and HHI empirical benchmark (`league-gen`, pure-Rust crate with no ledger).
 - Paper-test seat relay (`league-relay`, library and binary), for games 3 onward.
   - Reads JSON seat files (`openrouter` with case-insensitively unique `[A-Za-z][A-Za-z0-9_-]*` guild names, pinned `provider/model` slugs, temperature, `max_output_tokens`, per-seat wall timeout, and `max_cost_per_call`; `file` seats report manual relay and make no call).
   - `league-relay turn` prepends `--wrapper` on a seat's first turn, replays `relay/seats/<Guild>.jsonl` (`user` and `assistant` turns only, no system prompt), dispatches seats concurrently with isolated failures, writes replies byte-identically to `from-seat/day-DD-<round>-<Guild>.md`, and logs every attempt to `relay/calls.jsonl`.
