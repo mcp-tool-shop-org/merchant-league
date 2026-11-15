@@ -57,7 +57,7 @@ pub struct ConverterMarginDiag {
     pub owner: u8,
     /// Converter index within `table.seats[owner].converters`.
     pub converter_index: usize,
-    /// Whether this recipe is a secondary cross-converter (`1.12x` in / `0.94x` out).
+    /// Whether this recipe is a secondary cross-converter (`false` = primary `(R_{i+1}, R_{i+2})` workshop).
     pub is_secondary: bool,
     /// Net value added per batch at Turn-1 baseline LP objective/salvage coefficients.
     pub baseline_clearing_margin: f64,

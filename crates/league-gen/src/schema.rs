@@ -744,9 +744,8 @@ pub struct GeneratorConfig {
     pub min_surplus_ratio: f64,
     /// Whether 4-, 5-, and 6-seat tables attach binding primary workshops paired with cyclic
     /// secondary cross-converters (`(R_{i+2}, R_{i+3}) -> M_i` on 4p; binding `(R_{i+1}, R_{i+3})`
-    /// plus clearing `(R_{i+2}, R_{i+4})` on 5p; binding `(R_{i+2}, R_{i+3})` plus clearing
-    /// `(R_{i+4}, R_{i+5})` on 6p; `true` per `docs/design-v2.md` §1.3 & §1.5 and the
-    /// 2026-11-15 G1 item 2 ruling; provisional calibration, calibrate in playtest 1).
+    /// plus clearing `(R_{i+2}, R_{i+4})` on 5p and 6p; `true` per `docs/design-v2.md` §1.3 & §1.5
+    /// and the 2026-11-15 G1 item 2 ruling; provisional calibration, calibrate in playtest 1).
     pub enable_secondary_converters: bool,
     /// Upper bound on initial baseline export `TransferRate` tariffs (`0.20` = 20% from
     /// `docs/design-v2.md` §1.5 item 3 "0%–20% initial baseline", under the §5.1 35% cap).
