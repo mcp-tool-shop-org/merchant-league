@@ -259,7 +259,8 @@ impl Transport for NoopManualTransport {
 /// Run CLI command with an injected environment lookup and output streams.
 ///
 /// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
-/// or `1` on invalid CLI/configuration/gate refusal.
+/// `3` if a sent call's charge could not be persisted to either `calls.jsonl`
+/// or `calls.pending.jsonl`, or `1` on invalid CLI/configuration/gate refusal.
 pub fn execute_cli<I, S, E>(
     args: I,
     env_reader: E,
@@ -281,12 +282,16 @@ where
         }
         Ok(None) => 0,
         Err(e) => {
+            let exit_code = match &e {
+                RelayError::UnrecordedCharge { .. } => 3,
+                _ => 1,
+            };
             let _ = writeln!(
                 stderr,
                 "error: {}",
                 redact_secrets(&e.to_string(), redact_ref)
             );
-            1
+            exit_code
         }
     }
 }
