@@ -32,6 +32,10 @@
       "externals": 0,
       "files": [
         {
+          "hash": "927aa7c834b73fafe616391880f6f7920f923f1737f898be5d5bc7aa05615a11",
+          "path": "docs/design-v2.md"
+        },
+        {
           "hash": "cbd10211dde8696632f2819d8e1d14be26b543ee44f81dc66d304f26dc06c870",
           "path": "docs/design.md"
         },
@@ -1230,8 +1234,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "b68e259dc07a411ad269b61ccff51d8cfa42550c",
-    "tracked": 443
+    "commit": "41d4b19e1959df059b0f3b25d981d38727287b94",
+    "tracked": 444
   },
   "landings": [
     {
