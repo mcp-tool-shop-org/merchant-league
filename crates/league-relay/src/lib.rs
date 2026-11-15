@@ -19,7 +19,7 @@ pub use error::RelayError;
 pub use relay::{
     CallLogEntry, GameSetupRecord, MemoryMode, ResponseFormatConfig, Round, SeatOutcome,
     SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary, prepend_wrapper,
-    run_turn, sha256_hex, validate_day,
+    run_turn, sha256_hex, validate_day, validate_scratchpad_setup,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{
@@ -44,10 +44,11 @@ pub use transport::{
 };
 pub use wording::{
     ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING,
-    NegotiationInputs, SanitizedWhisper, UntrustedWhisper, WordingEntry, cap_words_and_chars,
-    extract_scratchpad_update, format_negotiation_block, format_scratchpad_section,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present,
-    render_json_escaped_whisper_line, sanitize_scratchpad_for_prompt, sanitize_whisper,
-    strip_thinking_tags, wording_slot,
+    MAX_INTENT_HEADER_DEPTH, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS,
+    MODEL_FACING_WORDING, NegotiationInputs, SanitizedWhisper, UntrustedWhisper, WordingEntry,
+    cap_words_and_chars, extract_scratchpad_update, format_negotiation_block,
+    format_sanitized_scratchpad_section, format_scratchpad_section, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, render_json_escaped_whisper_line, render_wording_slot_with,
+    sanitize_scratchpad_for_prompt, sanitize_whisper, split_negotiation_sections,
+    strip_thinking_tags, wording_slot, wording_template,
 };

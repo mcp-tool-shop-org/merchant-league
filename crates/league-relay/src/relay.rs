@@ -16,9 +16,9 @@ use crate::transport::{
 };
 use crate::wording::{
     ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_negotiation_block,
-    format_scratchpad_section, json_escape_untrusted_str, load_negotiation_inputs_if_present,
-    strip_thinking_tags, wording_slot,
+    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_sanitized_scratchpad_section,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt,
+    split_negotiation_sections, strip_thinking_tags, wording_slot,
 };
 use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
@@ -161,7 +161,7 @@ impl ResponseFormatConfig {
             ));
         };
 
-        let (name, strict, schema) =
+        let (name, strict, mut schema) =
             if obj.get("type").and_then(|v| v.as_str()) == Some("json_schema") {
                 let Some(inner) = obj.get("json_schema").and_then(|v| v.as_object()) else {
                     return Err(RelayError::Usage(
@@ -203,7 +203,7 @@ impl ResponseFormatConfig {
                 };
                 (n, strict_opt, obj["schema"].clone())
             } else {
-                (wording_slot("default_schema_name").to_owned(), None, val)
+                (wording_slot("default_schema_name"), None, val)
             };
 
         if name.is_empty()
@@ -215,10 +215,56 @@ impl ResponseFormatConfig {
                 "response_format schema 'name' must match [A-Za-z0-9_-]+".to_owned(),
             ));
         }
-        if !schema.is_object() {
+        let Some(schema_obj) = schema.as_object_mut() else {
             return Err(RelayError::Usage(
                 "response_format 'schema' must be a JSON object".to_owned(),
             ));
+        };
+        let pad_key = wording_slot("scratchpad_schema_key");
+        let pinned_pad_desc = wording_slot("scratchpad_schema_description");
+        if let Some(props_val) = schema_obj.get_mut("properties") {
+            let Some(props_obj) = props_val.as_object_mut() else {
+                return Err(RelayError::Usage(
+                    "response_format schema 'properties' must be a JSON object".to_owned(),
+                ));
+            };
+            if let Some(pad_prop) = props_obj.get_mut(&pad_key) {
+                let Some(pad_obj) = pad_prop.as_object_mut() else {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' must be a JSON object"
+                    )));
+                };
+                if let Some(prop_type) = pad_obj.get("type") {
+                    let allows_string = prop_type.as_str() == Some("string")
+                        || prop_type
+                            .as_array()
+                            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some("string")));
+                    if !allows_string {
+                        return Err(RelayError::Usage(format!(
+                            "response_format schema property '{pad_key}' must permit JSON type 'string'"
+                        )));
+                    }
+                }
+                match pad_obj.get("description") {
+                    None | Some(serde_json::Value::Null) => {
+                        pad_obj.insert(
+                            "description".to_owned(),
+                            serde_json::Value::String(pinned_pad_desc),
+                        );
+                    }
+                    Some(serde_json::Value::String(existing)) if existing == &pinned_pad_desc => {}
+                    Some(serde_json::Value::String(_)) => {
+                        return Err(RelayError::Usage(format!(
+                            "response_format '{pad_key}' description must omit 'description' (populated from MODEL_FACING_WORDING) or match the pinned wording slot 'scratchpad_schema_description'"
+                        )));
+                    }
+                    Some(_) => {
+                        return Err(RelayError::Usage(format!(
+                            "response_format '{pad_key}' description must be a string"
+                        )));
+                    }
+                }
+            }
         }
         Ok(Self {
             name,
@@ -231,6 +277,41 @@ impl ResponseFormatConfig {
     pub fn canonical_sha256(&self) -> String {
         sha256_hex(&serde_json::to_vec(self).unwrap_or_default())
     }
+
+    /// Whether `schema.properties` defines the pinned `"scratchpad"` property (`R2-B3`).
+    pub fn schema_has_scratchpad_property(&self) -> bool {
+        let pad_key = wording_slot("scratchpad_schema_key");
+        self.schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .is_some_and(|props| props.contains_key(&pad_key))
+    }
+
+    /// Return a copy of this configuration with `"scratchpad"` removed from `properties` and
+    /// `required`, used for seats that keep no scratchpad (`R2-B1`, `R2-B3`).
+    pub fn without_scratchpad_property(&self) -> Self {
+        let pad_key = wording_slot("scratchpad_schema_key");
+        let mut cloned = self.clone();
+        if let Some(schema_obj) = cloned.schema.as_object_mut() {
+            if let Some(props) = schema_obj
+                .get_mut("properties")
+                .and_then(|v| v.as_object_mut())
+            {
+                props.remove(&pad_key);
+            }
+            if let Some(req) = schema_obj
+                .get_mut("required")
+                .and_then(|v| v.as_array_mut())
+            {
+                req.retain(|v| v.as_str() != Some(pad_key.as_str()));
+            }
+        }
+        cloned
+    }
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// Per-seat summary persisted inside [`GameSetupRecord`].
@@ -246,13 +327,23 @@ pub struct SetupSeatRecord {
     /// Pinned reasoning configuration if present (`B4.3`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<SeatReasoningConfig>,
+    /// Per-seat scratchpad policy recorded for this game (`R2-B1`, `R2-B3`).
+    #[serde(default)]
+    pub scratchpad: String,
 }
 
-/// Per-game relay setup record persisted at `<game-dir>/relay/setup.json` (`B4.1` / `C5` / `B-9`).
+/// Per-game relay setup record persisted at `<game-dir>/relay/setup.json` (`B4.1` / `C5` / `B-9` / `R2-B1` / `R2-B3`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameSetupRecord {
     /// Prompt memory delivery mode used by this game (`"snapshot"`, `"emc"`, or `"full"`).
     pub memory_mode: MemoryMode,
+    /// Table-level scratchpad policy (for example `"none (no tokenizer)"`, `"none (no response schema)"`,
+    /// `"tokenized (at most 500 tokens)"`, or `"mixed (deliberate arm)"`).
+    #[serde(default)]
+    pub scratchpad: String,
+    /// `true` when this setup explicitly opted into a deliberate mixed scratchpad/no-scratchpad arm (`R2-B1`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mixed_scratchpad_arm: bool,
     /// Ledger cost unit (`"gpu_seconds"` or `"credits"`, or `None` when manual-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_unit: Option<CostUnit>,
@@ -302,6 +393,10 @@ pub struct TurnConfig {
     pub memory_mode: MemoryMode,
     /// Optional structured output JSON Schema (`B4.2`).
     pub response_format: Option<ResponseFormatConfig>,
+    /// Optional explicit scratchpad request (`--scratchpad` / `--no-scratchpad`, `R2-B3`).
+    pub scratchpad_requested: Option<bool>,
+    /// `true` when a deliberate arm mixing scratchpad and no-scratchpad seats is permitted (`R2-B1`).
+    pub mixed_scratchpad_arm: bool,
     /// Additional validated VM-local hosts allowed in `local` seat `base_url`s.
     pub allowed_vm_hosts: Vec<String>,
     /// Target chat-completions URL for `openrouter` seats.
@@ -330,6 +425,8 @@ impl TurnConfig {
             cap_gpu_secs: None,
             memory_mode: MemoryMode::default(),
             response_format: None,
+            scratchpad_requested: None,
+            mixed_scratchpad_arm: false,
             allowed_vm_hosts: Vec::new(),
             endpoint_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
         }
@@ -350,6 +447,18 @@ impl TurnConfig {
     /// Configure structured output (`response_format` JSON schema).
     pub fn with_response_format(mut self, response_format: Option<ResponseFormatConfig>) -> Self {
         self.response_format = response_format;
+        self
+    }
+
+    /// Explicitly request or disable persistent scratchpad notes (`R2-B3`).
+    pub fn with_scratchpad(mut self, scratchpad: Option<bool>) -> Self {
+        self.scratchpad_requested = scratchpad;
+        self
+    }
+
+    /// Permit a deliberate arm mixing scratchpad and no-scratchpad seats (`R2-B1`).
+    pub fn with_mixed_scratchpad_arm(mut self, mixed_arm: bool) -> Self {
+        self.mixed_scratchpad_arm = mixed_arm;
         self
     }
 
@@ -1048,34 +1157,216 @@ fn append_text_synced(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(
     Ok(())
 }
 
-fn build_setup_record(config: &TurnConfig) -> GameSetupRecord {
+#[derive(Debug, Clone)]
+struct SeatScratchpadDecision {
+    keeps_scratchpad: bool,
+    status_label: String,
+    participates_in_mix_check: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TableScratchpadPlan {
+    table_status: String,
+    mixed_scratchpad_arm: bool,
+    per_seat: Vec<SeatScratchpadDecision>,
+}
+
+fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadPlan, RelayError> {
+    if let (Some(cli_req), Some(file_req)) = (config.scratchpad_requested, config.seats.scratchpad)
+        && cli_req != file_req
+    {
+        return Err(RelayError::Usage(
+            "conflicting scratchpad settings between CLI flags and seat file".to_owned(),
+        ));
+    }
+    let table_req = config.scratchpad_requested.or(config.seats.scratchpad);
+    let mixed_arm = config.mixed_scratchpad_arm || config.seats.mixed_scratchpad_arm;
+    let schema_has_pad = config
+        .response_format
+        .as_ref()
+        .is_some_and(ResponseFormatConfig::schema_has_scratchpad_property);
+
+    if table_req == Some(true) {
+        if config.memory_mode != MemoryMode::Snapshot {
+            return Err(RelayError::Usage(
+                "scratchpad requires --memory-mode snapshot".to_owned(),
+            ));
+        }
+        if config.response_format.is_none() {
+            return Err(RelayError::Usage(
+                "scratchpad requires --response-schema; every seat that keeps notes must have a response schema".to_owned(),
+            ));
+        }
+        if !schema_has_pad {
+            return Err(RelayError::Usage(
+                "scratchpad requested, but --response-schema has no 'scratchpad' property"
+                    .to_owned(),
+            ));
+        }
+    }
+
+    let mut per_seat = Vec::with_capacity(config.seats.seats.len());
+    for seat in &config.seats.seats {
+        let seat_req = seat.scratchpad.or(table_req);
+        if seat_req == Some(true) {
+            if config.memory_mode != MemoryMode::Snapshot {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad, which requires --memory-mode snapshot",
+                    seat.guild
+                )));
+            }
+            if matches!(seat.backend, SeatBackend::Openrouter(_)) {
+                return Err(RelayError::SeatConfig(format!(
+                    "openrouter seat '{}' cannot keep a scratchpad (no /tokenize endpoint)",
+                    seat.guild
+                )));
+            }
+            if config.response_format.is_none() {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad without --response-schema; every seat that keeps notes must have a response schema",
+                    seat.guild
+                )));
+            }
+            if !schema_has_pad {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad, but --response-schema has no 'scratchpad' property",
+                    seat.guild
+                )));
+            }
+        }
+
+        let decision = if config.memory_mode != MemoryMode::Snapshot {
+            SeatScratchpadDecision {
+                keeps_scratchpad: false,
+                status_label: format!("none ({})", config.memory_mode),
+                participates_in_mix_check: !matches!(seat.backend, SeatBackend::File { .. })
+                    || seat.scratchpad.is_some(),
+            }
+        } else {
+            match &seat.backend {
+                SeatBackend::Openrouter(_) => SeatScratchpadDecision {
+                    keeps_scratchpad: false,
+                    status_label: "none (no tokenizer)".to_owned(),
+                    participates_in_mix_check: true,
+                },
+                SeatBackend::Local(_) => {
+                    if seat_req == Some(false) {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: "none (disabled)".to_owned(),
+                            participates_in_mix_check: true,
+                        }
+                    } else if config.response_format.is_none() {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: "none (no response schema)".to_owned(),
+                            participates_in_mix_check: true,
+                        }
+                    } else if schema_has_pad {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: true,
+                            status_label: format!(
+                                "tokenized (at most {MAX_SCRATCHPAD_TOKENS} tokens)"
+                            ),
+                            participates_in_mix_check: true,
+                        }
+                    } else {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: "none (schema has no scratchpad field)".to_owned(),
+                            participates_in_mix_check: true,
+                        }
+                    }
+                }
+                SeatBackend::File { .. } => match seat.scratchpad {
+                    Some(true) => SeatScratchpadDecision {
+                        keeps_scratchpad: true,
+                        status_label: "manual (scratchpad)".to_owned(),
+                        participates_in_mix_check: true,
+                    },
+                    Some(false) => SeatScratchpadDecision {
+                        keeps_scratchpad: false,
+                        status_label: "none (disabled)".to_owned(),
+                        participates_in_mix_check: true,
+                    },
+                    None => SeatScratchpadDecision {
+                        keeps_scratchpad: false,
+                        status_label: "none (manual file seat)".to_owned(),
+                        participates_in_mix_check: false,
+                    },
+                },
+            }
+        };
+        per_seat.push(decision);
+    }
+
+    let has_with_pad = per_seat
+        .iter()
+        .any(|d| d.participates_in_mix_check && d.keeps_scratchpad);
+    let has_without_pad = per_seat
+        .iter()
+        .any(|d| d.participates_in_mix_check && !d.keeps_scratchpad);
+    if has_with_pad && has_without_pad && !mixed_arm {
+        return Err(RelayError::SeatConfig(
+            "table mixes scratchpad and no-scratchpad seats; mark mixed_scratchpad_arm=true (--mixed-scratchpad-arm) only when running a deliberate mixed arm".to_owned(),
+        ));
+    }
+
+    let table_status = if has_with_pad && has_without_pad {
+        "mixed (deliberate arm)".to_owned()
+    } else if let Some(first_participating) = per_seat.iter().find(|d| d.participates_in_mix_check)
+    {
+        first_participating.status_label.clone()
+    } else {
+        "none (manual file seat)".to_owned()
+    };
+
+    Ok(TableScratchpadPlan {
+        table_status,
+        mixed_scratchpad_arm: mixed_arm,
+        per_seat,
+    })
+}
+
+/// Validate per-seat and table-level scratchpad, schema, and mixed-arm rules (`R2-B1`, `R2-B3`).
+pub fn validate_scratchpad_setup(config: &TurnConfig) -> Result<(), RelayError> {
+    resolve_table_scratchpad_plan(config).map(|_| ())
+}
+
+fn build_setup_record(config: &TurnConfig, plan: &TableScratchpadPlan) -> GameSetupRecord {
     let seats = config
         .seats
         .seats
         .iter()
-        .map(|s| match &s.backend {
+        .zip(plan.per_seat.iter())
+        .map(|(s, pad_plan)| match &s.backend {
             SeatBackend::Local(l) => SetupSeatRecord {
                 guild: s.guild.clone(),
                 backend: BackendKind::Local,
                 model: Some(l.model.clone()),
                 reasoning: l.reasoning.clone(),
+                scratchpad: pad_plan.status_label.clone(),
             },
             SeatBackend::Openrouter(o) => SetupSeatRecord {
                 guild: s.guild.clone(),
                 backend: BackendKind::Openrouter,
                 model: Some(o.model.clone()),
                 reasoning: o.reasoning.clone(),
+                scratchpad: pad_plan.status_label.clone(),
             },
             SeatBackend::File { model } => SetupSeatRecord {
                 guild: s.guild.clone(),
                 backend: BackendKind::File,
                 model: model.clone(),
                 reasoning: None,
+                scratchpad: pad_plan.status_label.clone(),
             },
         })
         .collect();
     GameSetupRecord {
         memory_mode: config.memory_mode,
+        scratchpad: plan.table_status.clone(),
+        mixed_scratchpad_arm: plan.mixed_scratchpad_arm,
         cost_unit: config.seats.cost_unit(),
         wording_arm: ACTIVE_WORDING_ARM.to_owned(),
         response_schema_name: config.response_format.as_ref().map(|r| r.name.clone()),
@@ -1090,12 +1381,13 @@ fn build_setup_record(config: &TurnConfig) -> GameSetupRecord {
 fn ensure_game_setup(
     turn_lock: &TurnLock,
     config: &TurnConfig,
+    plan: &TableScratchpadPlan,
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
     turn_lock.verify_identity(redaction_key)?;
     let relay_dir = config.game_dir.join("relay");
     let setup_path = relay_dir.join(SETUP_FILENAME);
-    let desired = build_setup_record(config);
+    let desired = build_setup_record(config, plan);
 
     if setup_path.exists() {
         let raw =
@@ -1144,20 +1436,52 @@ fn ensure_game_setup(
                 desired.response_schema_sha256
             )));
         }
+        if existing.mixed_scratchpad_arm != desired.mixed_scratchpad_arm {
+            return Err(RelayError::SeatConfig(format!(
+                "game setup recorded mixed_scratchpad_arm={} in {}, refusing mid-game change to {}",
+                existing.mixed_scratchpad_arm,
+                setup_path.display(),
+                desired.mixed_scratchpad_arm
+            )));
+        }
+        if existing.cost_unit == desired.cost_unit
+            && !existing.scratchpad.is_empty()
+            && existing.scratchpad != desired.scratchpad
+        {
+            return Err(RelayError::SeatConfig(format!(
+                "game setup recorded scratchpad '{}' in {}, refusing mid-game change to '{}'",
+                existing.scratchpad,
+                setup_path.display(),
+                desired.scratchpad
+            )));
+        }
         for desired_seat in &desired.seats {
             if let Some(existing_seat) = existing
                 .seats
                 .iter()
                 .find(|s| s.guild.eq_ignore_ascii_case(&desired_seat.guild))
-                && existing_seat.reasoning != desired_seat.reasoning
             {
-                return Err(RelayError::SeatConfig(format!(
-                    "game setup recorded reasoning pin {:?} for seat '{}' in {}, refusing mid-game change to {:?}",
-                    existing_seat.reasoning,
-                    desired_seat.guild,
-                    setup_path.display(),
-                    desired_seat.reasoning
-                )));
+                if existing_seat.reasoning != desired_seat.reasoning {
+                    return Err(RelayError::SeatConfig(format!(
+                        "game setup recorded reasoning pin {:?} for seat '{}' in {}, refusing mid-game change to {:?}",
+                        existing_seat.reasoning,
+                        desired_seat.guild,
+                        setup_path.display(),
+                        desired_seat.reasoning
+                    )));
+                }
+                if existing_seat.backend == desired_seat.backend
+                    && !existing_seat.scratchpad.is_empty()
+                    && existing_seat.scratchpad != desired_seat.scratchpad
+                {
+                    return Err(RelayError::SeatConfig(format!(
+                        "game setup recorded scratchpad '{}' for seat '{}' in {}, refusing mid-game change to '{}'",
+                        existing_seat.scratchpad,
+                        desired_seat.guild,
+                        setup_path.display(),
+                        desired_seat.scratchpad
+                    )));
+                }
             }
         }
         // Skip rewriting when invariants already match so read-only `relay/` re-runs succeed.
@@ -2211,6 +2535,7 @@ struct AutomatedSeatView<'a> {
     backend_kind: BackendKind,
     endpoint_url: &'a str,
     tokenize_url: Option<&'a str>,
+    keeps_scratchpad: bool,
     model: &'a str,
     temperature: f64,
     max_output_tokens: u32,
@@ -2230,6 +2555,7 @@ pub fn run_turn(
     redaction_key: Option<&ApiKey>,
 ) -> Result<TurnSummary, RelayError> {
     validate_day(&config.day)?;
+    let scratchpad_plan = resolve_table_scratchpad_plan(config)?;
 
     if config.cap_credits.is_some() && config.cap_gpu_secs.is_some() {
         return Err(RelayError::Usage(
@@ -2323,7 +2649,7 @@ pub fn run_turn(
         }
     }
 
-    ensure_game_setup(&turn_lock, config, redaction_key)?;
+    ensure_game_setup(&turn_lock, config, &scratchpad_plan, redaction_key)?;
 
     let seat_cost_unit = config.seats.cost_unit();
     let active_cap = match seat_cost_unit.unwrap_or(CostUnit::Credits) {
@@ -2347,6 +2673,10 @@ pub fn run_turn(
         let mut handles = Vec::new();
 
         for (idx, seat) in config.seats.seats.iter().enumerate() {
+            let keeps_scratchpad = scratchpad_plan
+                .per_seat
+                .get(idx)
+                .is_some_and(|d| d.keeps_scratchpad);
             match &seat.backend {
                 SeatBackend::File { .. } => slots.push((
                     idx,
@@ -2361,7 +2691,8 @@ pub fn run_turn(
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
                     handles.push(scope.spawn(move || {
-                        let view = view_openrouter_seat(&config.endpoint_url, or_seat);
+                        let view =
+                            view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
                             config,
                             &guild,
@@ -2381,7 +2712,7 @@ pub fn run_turn(
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
                     handles.push(scope.spawn(move || {
-                        let view = view_local_seat(local_seat);
+                        let view = view_local_seat(local_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
                             config,
                             &guild,
@@ -2420,11 +2751,13 @@ pub fn run_turn(
 fn view_openrouter_seat<'a>(
     endpoint_url: &'a str,
     seat: &'a OpenRouterSeat,
+    keeps_scratchpad: bool,
 ) -> AutomatedSeatView<'a> {
     AutomatedSeatView {
         backend_kind: BackendKind::Openrouter,
         endpoint_url,
         tokenize_url: None,
+        keeps_scratchpad,
         model: &seat.model,
         temperature: seat.temperature,
         max_output_tokens: seat.max_output_tokens,
@@ -2435,11 +2768,12 @@ fn view_openrouter_seat<'a>(
     }
 }
 
-fn view_local_seat(seat: &LocalSeat) -> AutomatedSeatView<'_> {
+fn view_local_seat(seat: &LocalSeat, keeps_scratchpad: bool) -> AutomatedSeatView<'_> {
     AutomatedSeatView {
         backend_kind: BackendKind::Local,
         endpoint_url: &seat.endpoint_url,
         tokenize_url: Some(&seat.tokenize_url),
+        keeps_scratchpad,
         model: &seat.model,
         temperature: seat.temperature,
         max_output_tokens: seat.max_output_tokens,
@@ -2450,10 +2784,12 @@ fn view_local_seat(seat: &LocalSeat) -> AutomatedSeatView<'_> {
     }
 }
 
-fn build_system_message(raw_wrapper: &str, mode: MemoryMode) -> String {
+fn build_system_message(raw_wrapper: &str, mode: MemoryMode, keeps_scratchpad: bool) -> String {
     match mode {
-        MemoryMode::Snapshot => prepend_wrapper(raw_wrapper, wording_slot("system_snapshot_note")),
-        MemoryMode::Emc | MemoryMode::Full => raw_wrapper.to_owned(),
+        MemoryMode::Snapshot if keeps_scratchpad => {
+            prepend_wrapper(raw_wrapper, &wording_slot("system_snapshot_note"))
+        }
+        MemoryMode::Snapshot | MemoryMode::Emc | MemoryMode::Full => raw_wrapper.to_owned(),
     }
 }
 
@@ -2556,7 +2892,7 @@ fn run_single_automated_seat(
         };
     };
 
-    let system_wire = build_system_message(base_wrapper, config.memory_mode);
+    let system_wire = build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
 
     let older_replies_sec =
         if config.memory_mode == MemoryMode::Emc && loaded.turns.len() > EMC_VERBATIM_TURN_WINDOW {
@@ -2576,19 +2912,19 @@ fn run_single_automated_seat(
         .iter()
         .map(|s| s.guild.as_str())
         .collect();
-    let negotiation_sec = match &negotiation_opt {
-        Some(neg) => match format_negotiation_block(neg, &seated_guilds) {
-            Ok(neg_block) => Some(neg_block),
+    let (no_new_deals_sec, other_seats_messages_sec) = match &negotiation_opt {
+        Some(neg) => match split_negotiation_sections(neg, &seated_guilds) {
+            Ok((fallback_sec, whispers_sec)) => (Some(fallback_sec), Some(whispers_sec)),
             Err(e) => {
                 return SeatOutcome::SeatError {
                     detail: redact_secrets(&e.to_string(), redaction_key),
                 };
             }
         },
-        None => None,
+        None => (None, None),
     };
 
-    let scratchpad_sec = if config.memory_mode == MemoryMode::Snapshot {
+    let scratchpad_sec = if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad {
         let saved_pad = if scratchpad_path.exists() {
             match fs::read_to_string(&scratchpad_path) {
                 Ok(s) => Some(s),
@@ -2601,9 +2937,12 @@ fn run_single_automated_seat(
         } else {
             None
         };
-        if let Some(trimmed_saved) = saved_pad.as_deref().map(str::trim)
-            && !trimmed_saved.is_empty()
-        {
+        let sanitized_saved = saved_pad
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(sanitize_scratchpad_for_prompt);
+        if let Some(ref shown_saved) = sanitized_saved {
             let Some(tokenize_url) = seat.tokenize_url else {
                 return SeatOutcome::SeatError {
                     detail:
@@ -2611,7 +2950,7 @@ fn run_single_automated_seat(
                             .to_owned(),
                 };
             };
-            match transport.count_tokens(tokenize_url, seat.model, trimmed_saved, seat.timeout) {
+            match transport.count_tokens(tokenize_url, seat.model, shown_saved, seat.timeout) {
                 Ok(token_count) if token_count > MAX_SCRATCHPAD_TOKENS => {
                     return SeatOutcome::SeatError {
                         detail: format!(
@@ -2632,7 +2971,9 @@ fn run_single_automated_seat(
                 }
             }
         }
-        Some(format_scratchpad_section(saved_pad.as_deref()))
+        Some(format_sanitized_scratchpad_section(
+            sanitized_saved.as_deref(),
+        ))
     } else {
         None
     };
@@ -2647,12 +2988,14 @@ fn run_single_automated_seat(
             }
             "turn_prompt" => composed_sections.push(raw_block.clone()),
             "no_new_deals" => {
-                if let Some(ref s) = negotiation_sec {
+                if let Some(ref s) = no_new_deals_sec {
                     composed_sections.push(s.clone());
                 }
             }
             "other_seats_messages" => {
-                // Emitted immediately after `no_new_deals` inside `format_negotiation_block`.
+                if let Some(ref s) = other_seats_messages_sec {
+                    composed_sections.push(s.clone());
+                }
             }
             "scratchpad" => {
                 if let Some(ref s) = scratchpad_sec {
@@ -2705,8 +3048,13 @@ fn run_single_automated_seat(
         content: &user_content,
     });
 
-    let response_format_wire = config
-        .response_format
+    let effective_response_format = match (&config.response_format, seat.keeps_scratchpad) {
+        (Some(rf), true) => Some(rf.clone()),
+        (Some(rf), false) => Some(rf.without_scratchpad_property()),
+        (None, _) => None,
+    };
+
+    let response_format_wire = effective_response_format
         .as_ref()
         .map(|rf| ResponseFormatWire {
             kind: "json_schema",
@@ -2901,7 +3249,7 @@ fn run_single_automated_seat(
         let raw_evaluated = evaluate_call_result(
             call_result,
             exclude_thinking,
-            config.response_format.as_ref(),
+            effective_response_format.as_ref(),
             redaction_key,
         );
 
@@ -2912,7 +3260,7 @@ fn run_single_automated_seat(
                 persisted_reasoning,
                 model_returned,
                 usage,
-            } if config.memory_mode == MemoryMode::Snapshot => {
+            } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
                 match extract_scratchpad_update(&reply_content) {
                     None => EvaluatedCall::Success {
                         reply_content,
@@ -2930,11 +3278,12 @@ fn run_single_automated_seat(
                         }
                     }
                     Some(candidate_pad) => {
+                        let shown_candidate = sanitize_scratchpad_for_prompt(&candidate_pad);
                         let tokenize_res = match seat.tokenize_url {
                             Some(tok_url) => transport.count_tokens(
                                 tok_url,
                                 seat.model,
-                                &candidate_pad,
+                                &shown_candidate,
                                 seat.timeout,
                             ),
                             None => Err(TransportError::Network(

@@ -135,6 +135,10 @@ pub struct SeatReasoningConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SeatFileWrappedWire {
+    #[serde(default)]
+    scratchpad: Option<bool>,
+    #[serde(default)]
+    mixed_scratchpad_arm: bool,
     seats: Vec<SeatEntryWire>,
 }
 
@@ -159,6 +163,8 @@ struct SeatEntryWire {
     max_gpu_secs_per_call: Option<f64>,
     #[serde(default)]
     reasoning: Option<SeatReasoningConfig>,
+    #[serde(default)]
+    scratchpad: Option<bool>,
 }
 
 /// Validated parameters for a `local` OpenAI-compatible seat (such as vLLM on the VM).
@@ -224,6 +230,8 @@ pub struct SeatSpec {
     pub guild: String,
     /// Backend configuration.
     pub backend: SeatBackend,
+    /// Optional explicit per-seat scratchpad override (`R2-B1`, `R2-B3`).
+    pub scratchpad: Option<bool>,
 }
 
 /// Validated collection of seats for a game.
@@ -231,6 +239,10 @@ pub struct SeatSpec {
 pub struct SeatFile {
     /// Ordered list of seats.
     pub seats: Vec<SeatSpec>,
+    /// Optional table-level scratchpad request (`R2-B3`).
+    pub scratchpad: Option<bool>,
+    /// `true` when the seat file explicitly declares a deliberate mixed scratchpad/no-scratchpad arm (`R2-B1`).
+    pub mixed_scratchpad_arm: bool,
 }
 
 fn seat_err(msg: impl AsRef<str>, key: Option<&ApiKey>) -> RelayError {
@@ -278,12 +290,25 @@ impl SeatFile {
             ));
         }
 
-        let entries: Vec<SeatEntryWire> = if value.is_array() {
-            serde_json::from_value(value).map_err(|e| seat_err(e.to_string(), redaction_key))?
+        let (entries, file_scratchpad, mixed_scratchpad_arm): (
+            Vec<SeatEntryWire>,
+            Option<bool>,
+            bool,
+        ) = if value.is_array() {
+            (
+                serde_json::from_value(value)
+                    .map_err(|e| seat_err(e.to_string(), redaction_key))?,
+                None,
+                false,
+            )
         } else {
-            serde_json::from_value::<SeatFileWrappedWire>(value)
-                .map_err(|e| seat_err(e.to_string(), redaction_key))?
-                .seats
+            let wrapped = serde_json::from_value::<SeatFileWrappedWire>(value)
+                .map_err(|e| seat_err(e.to_string(), redaction_key))?;
+            (
+                wrapped.seats,
+                wrapped.scratchpad,
+                wrapped.mixed_scratchpad_arm,
+            )
         };
 
         if entries.is_empty() {
@@ -323,6 +348,12 @@ impl SeatFile {
                 }
                 BackendKind::Openrouter => {
                     saw_openrouter = true;
+                    if entry.scratchpad.or(file_scratchpad) == Some(true) {
+                        return Err(RelayError::SeatConfig(format!(
+                            "openrouter seat '{}' cannot keep a scratchpad (no /tokenize endpoint)",
+                            entry.guild
+                        )));
+                    }
                     if entry.base_url.is_some() {
                         return Err(RelayError::SeatConfig(format!(
                             "openrouter seat '{}' must not set 'base_url'",
@@ -446,6 +477,7 @@ impl SeatFile {
             seats.push(SeatSpec {
                 guild: entry.guild,
                 backend,
+                scratchpad: entry.scratchpad,
             });
         }
 
@@ -457,7 +489,11 @@ impl SeatFile {
             }
         }
 
-        Ok(Self { seats })
+        Ok(Self {
+            seats,
+            scratchpad: file_scratchpad,
+            mixed_scratchpad_arm,
+        })
     }
 
     /// Whether at least one seat uses the `openrouter` backend.

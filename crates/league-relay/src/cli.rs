@@ -6,6 +6,7 @@
 use crate::error::RelayError;
 use crate::relay::{
     MemoryMode, ResponseFormatConfig, Round, TurnConfig, TurnSummary, run_turn, validate_day,
+    validate_scratchpad_setup,
 };
 use crate::seats::{SeatFile, validate_vm_host_allowance};
 use crate::secret::{
@@ -30,6 +31,9 @@ Options:
   --wrapper <path>           System wrapper markdown sent as role='system' (required on turn 1)
   --memory-mode <mode>       Prompt memory mode: snapshot (default), emc, or full
   --response-schema <path>   Optional JSON Schema file sent in response_format (json_schema)
+  --scratchpad               Require persistent scratchpad notes (requires snapshot mode + schema)
+  --no-scratchpad            Disable persistent scratchpad notes for this run
+  --mixed-scratchpad-arm     Permit a deliberate arm mixing scratchpad and no-scratchpad seats
   --cap-gpu-secs <n>         Cumulative GPU-seconds ceiling for local OpenAI-compatible seats
   --allow-vm-host <host>     Additional VM-local server address permitted in local seat base_url
   --live                     Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
@@ -65,6 +69,10 @@ pub struct TurnArgs {
     pub memory_mode: MemoryMode,
     /// `--response-schema <path>`
     pub response_schema_path: Option<PathBuf>,
+    /// `--scratchpad` / `--no-scratchpad`
+    pub scratchpad_requested: Option<bool>,
+    /// `--mixed-scratchpad-arm`
+    pub mixed_scratchpad_arm: bool,
     /// `--live`
     pub live: bool,
     /// `--cap-credits <n>`
@@ -124,6 +132,8 @@ where
     let mut wrapper_path: Option<PathBuf> = None;
     let mut memory_mode = MemoryMode::default();
     let mut response_schema_path: Option<PathBuf> = None;
+    let mut scratchpad_requested: Option<bool> = None;
+    let mut mixed_scratchpad_arm = false;
     let mut live = false;
     let mut cap_credits: Option<f64> = None;
     let mut cap_gpu_secs: Option<f64> = None;
@@ -192,6 +202,48 @@ where
                 let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
                 response_schema_path = Some(PathBuf::from(val));
                 idx += step;
+            }
+            "--scratchpad" => {
+                let req = match inline_val {
+                    None => true,
+                    Some("true") => true,
+                    Some("false") => false,
+                    Some(_) => {
+                        return Err(RelayError::Usage(
+                            "--scratchpad takes no value (or '=true' / '=false')".to_owned(),
+                        ));
+                    }
+                };
+                if scratchpad_requested.is_some_and(|prev| prev != req) {
+                    return Err(RelayError::Usage(
+                        "--scratchpad and --no-scratchpad cannot be used together".to_owned(),
+                    ));
+                }
+                scratchpad_requested = Some(req);
+                idx += 1;
+            }
+            "--no-scratchpad" => {
+                if inline_val.is_some() {
+                    return Err(RelayError::Usage(
+                        "--no-scratchpad takes no value".to_owned(),
+                    ));
+                }
+                if scratchpad_requested == Some(true) {
+                    return Err(RelayError::Usage(
+                        "--scratchpad and --no-scratchpad cannot be used together".to_owned(),
+                    ));
+                }
+                scratchpad_requested = Some(false);
+                idx += 1;
+            }
+            "--mixed-scratchpad-arm" => {
+                if inline_val.is_some() {
+                    return Err(RelayError::Usage(
+                        "--mixed-scratchpad-arm takes no value".to_owned(),
+                    ));
+                }
+                mixed_scratchpad_arm = true;
+                idx += 1;
             }
             "--cap-credits" => {
                 let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
@@ -271,6 +323,8 @@ where
         wrapper_path,
         memory_mode,
         response_schema_path,
+        scratchpad_requested,
+        mixed_scratchpad_arm,
         live,
         cap_credits,
         cap_gpu_secs,
@@ -448,21 +502,28 @@ where
         None => None,
     };
 
+    let base_cfg = TurnConfig::new(
+        turn_args.game_dir,
+        turn_args.day,
+        turn_args.round,
+        seats.clone(),
+        turn_args.wrapper_path,
+        turn_args.live,
+        turn_args.cap_credits,
+    )
+    .with_memory_mode(turn_args.memory_mode)
+    .with_cap_gpu_secs(turn_args.cap_gpu_secs)
+    .with_response_format(response_format)
+    .with_scratchpad(turn_args.scratchpad_requested)
+    .with_mixed_scratchpad_arm(turn_args.mixed_scratchpad_arm)
+    .with_allowed_vm_hosts(turn_args.allowed_vm_hosts.clone());
+
+    validate_scratchpad_setup(&base_cfg)?;
+
     let summary = if let Some(mock_dir) = &turn_args.mock_dir {
         let mock_transport = MockDirTransport::load_with_key(mock_dir, redact_ref)?;
-        let cfg = TurnConfig::new(
-            turn_args.game_dir,
-            turn_args.day,
-            turn_args.round,
-            seats,
-            turn_args.wrapper_path,
-            false,
-            turn_args.cap_credits,
-        )
-        .with_memory_mode(turn_args.memory_mode)
-        .with_cap_gpu_secs(turn_args.cap_gpu_secs)
-        .with_response_format(response_format)
-        .with_allowed_vm_hosts(turn_args.allowed_vm_hosts);
+        let mut cfg = base_cfg;
+        cfg.live = false;
         run_turn(&cfg, &mock_transport, redact_ref)?
     } else if seats.has_local_seat() {
         let local_gate = LocalGate::acquire(
@@ -471,50 +532,18 @@ where
             any_forbidden_local_key,
             &turn_args.allowed_vm_hosts,
         )?;
-        let cfg = TurnConfig::new(
-            turn_args.game_dir,
-            turn_args.day,
-            turn_args.round,
-            seats,
-            turn_args.wrapper_path,
-            false,
-            None,
-        )
-        .with_memory_mode(turn_args.memory_mode)
-        .with_cap_gpu_secs(Some(local_gate.cap_gpu_secs()))
-        .with_response_format(response_format)
-        .with_allowed_vm_hosts(turn_args.allowed_vm_hosts);
+        let cfg = base_cfg.with_cap_gpu_secs(Some(local_gate.cap_gpu_secs()));
         let local_transport = LocalOpenAiTransport::new(local_gate);
         run_turn(&cfg, &local_transport, None)?
     } else if turn_args.live || seats.has_openrouter_seat() {
         let gate = LiveGate::acquire(turn_args.live, turn_args.cap_credits, env_key.clone())?;
-        let cfg = TurnConfig::new(
-            turn_args.game_dir,
-            turn_args.day,
-            turn_args.round,
-            seats,
-            turn_args.wrapper_path,
-            true,
-            Some(gate.cap_credits()),
-        )
-        .with_memory_mode(turn_args.memory_mode)
-        .with_response_format(response_format);
+        let mut cfg = base_cfg;
+        cfg.live = true;
+        cfg.cap_credits = Some(gate.cap_credits());
         let live_transport = UreqTransport::new(gate);
         run_turn(&cfg, &live_transport, redact_ref)?
     } else {
-        let cfg = TurnConfig::new(
-            turn_args.game_dir,
-            turn_args.day,
-            turn_args.round,
-            seats,
-            turn_args.wrapper_path,
-            false,
-            turn_args.cap_credits,
-        )
-        .with_memory_mode(turn_args.memory_mode)
-        .with_cap_gpu_secs(turn_args.cap_gpu_secs)
-        .with_response_format(response_format);
-        run_turn(&cfg, &NoopManualTransport, redact_ref)?
+        run_turn(&base_cfg, &NoopManualTransport, redact_ref)?
     };
     Ok(Some(summary))
 }

@@ -13,18 +13,18 @@ use std::fs;
 use std::path::Path;
 
 /// Active named arm for all model-facing labels and instructions in `league-relay`.
-pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r2";
+pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r3";
 
 /// Maximum whitespace-delimited words permitted across `intent_header` + `body`
 /// in one inter-seat message (`B4.4`, `A-5`).
 pub const MAX_WHISPER_WORDS: usize = 120;
 
 /// Maximum UTF-8 characters permitted across `intent_header` + `body`
-/// in one inter-seat message (`B4.4`, `A-5`), bounding spaceless token stuffing.
+/// in one inter-seat message (`B4.4`, `A-5`, `R2-A1`), bounding spaceless token stuffing.
 pub const MAX_WHISPER_CHARS: usize = 1_800;
 
-/// Maximum model tokens permitted in a seat's persistent scratchpad (`C5`, `A-3`),
-/// enforced via the local server's `POST /tokenize` endpoint.
+/// Maximum model tokens permitted in a seat's persistent scratchpad (`C5`, `A-3`, `R2-B2`),
+/// enforced via the local server's `POST /tokenize` endpoint on the exact shown text.
 pub const MAX_SCRATCHPAD_TOKENS: usize = 500;
 
 /// Number of most-recent completed turns kept verbatim in `emc` mode (`C5` toggle).
@@ -34,35 +34,45 @@ pub const EMC_VERBATIM_TURN_WINDOW: usize = 5;
 pub const EMC_OLDER_REPLY_EXCERPT_CHARS: usize = 160;
 
 /// Maximum recursion depth accepted inside an untrusted `intent_header` JSON value.
-const MAX_INTENT_HEADER_DEPTH: usize = 8;
+pub const MAX_INTENT_HEADER_DEPTH: usize = 8;
 
 /// One named slot in [`MODEL_FACING_WORDING`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WordingEntry {
     /// Internal slot identifier (never shown to the model).
     pub slot: &'static str,
-    /// Exact UTF-8 wording or identifier shown to the model.
+    /// Exact UTF-8 wording template or identifier shown to the model (numeric bounds
+    /// rendered from [`MAX_SCRATCHPAD_TOKENS`], [`EMC_OLDER_REPLY_EXCERPT_CHARS`], and
+    /// [`EMC_VERBATIM_TURN_WINDOW`] via [`wording_slot`], `R2-A2`).
     pub shown_text: &'static str,
 }
 
-/// Complete table of model-facing labels, JSON keys, schema names, and section ordering
-/// owned by `league-relay` (`A-4`, `B-1`..`B-4`).
+/// Complete table of model-facing labels, JSON keys, schema field descriptions, schema names,
+/// and section ordering owned by `league-relay` (`A-4`, `B-1`..`B-4`, `R2-A2`, `R2-B3`).
 pub const MODEL_FACING_WORDING: &[WordingEntry] = &[
     WordingEntry {
         slot: "system_snapshot_note",
-        shown_text: "Your notes from earlier turns are below (at most 500 tokens).",
+        shown_text: "Your notes from earlier turns are below (at most {MAX_SCRATCHPAD_TOKENS} tokens).",
     },
     WordingEntry {
         slot: "scratchpad_header",
-        shown_text: "=== YOUR SAVED SCRATCHPAD (AT MOST 500 TOKENS) ===",
+        shown_text: "=== YOUR SAVED SCRATCHPAD (AT MOST {MAX_SCRATCHPAD_TOKENS} TOKENS) ===",
     },
     WordingEntry {
         slot: "scratchpad_empty",
         shown_text: "(empty)",
     },
     WordingEntry {
+        slot: "scratchpad_schema_key",
+        shown_text: "scratchpad",
+    },
+    WordingEntry {
+        slot: "scratchpad_schema_description",
+        shown_text: "Notes for your next turn, replacing earlier notes (at most {MAX_SCRATCHPAD_TOKENS} tokens; empty string for none).",
+    },
+    WordingEntry {
         slot: "emc_older_replies_header",
-        shown_text: "=== YOUR EARLIER REPLIES (the first 160 characters of each, from turns before the last 5) ===",
+        shown_text: "=== YOUR EARLIER REPLIES (the first {EMC_OLDER_REPLY_EXCERPT_CHARS} characters of each, from turns before the last {EMC_VERBATIM_TURN_WINDOW}) ===",
     },
     WordingEntry {
         slot: "fallback_header",
@@ -114,14 +124,51 @@ pub const MODEL_FACING_WORDING: &[WordingEntry] = &[
     },
 ];
 
-/// Look up a shown string from [`MODEL_FACING_WORDING`] by internal slot name.
-pub fn wording_slot(slot: &str) -> &'static str {
+/// Look up the raw template string from [`MODEL_FACING_WORDING`] by internal slot name.
+pub fn wording_template(slot: &str) -> &'static str {
     for entry in MODEL_FACING_WORDING {
         if entry.slot == slot {
             return entry.shown_text;
         }
     }
     unreachable!("unknown MODEL_FACING_WORDING slot: {slot}")
+}
+
+/// Render a slot from [`MODEL_FACING_WORDING`] substituting the given numeric bounds (`R2-A2`).
+pub fn render_wording_slot_with(
+    slot: &str,
+    max_scratchpad_tokens: usize,
+    emc_older_reply_excerpt_chars: usize,
+    emc_verbatim_turn_window: usize,
+) -> String {
+    let rendered = wording_template(slot)
+        .replace(
+            "{MAX_SCRATCHPAD_TOKENS}",
+            &max_scratchpad_tokens.to_string(),
+        )
+        .replace(
+            "{EMC_OLDER_REPLY_EXCERPT_CHARS}",
+            &emc_older_reply_excerpt_chars.to_string(),
+        )
+        .replace(
+            "{EMC_VERBATIM_TURN_WINDOW}",
+            &emc_verbatim_turn_window.to_string(),
+        );
+    debug_assert!(
+        !rendered.contains('{') && !rendered.contains('}'),
+        "unexpanded placeholder in MODEL_FACING_WORDING slot '{slot}': {rendered}"
+    );
+    rendered
+}
+
+/// Render the exact shown string from [`MODEL_FACING_WORDING`] using the enforced constants (`R2-A2`).
+pub fn wording_slot(slot: &str) -> String {
+    render_wording_slot_with(
+        slot,
+        MAX_SCRATCHPAD_TOKENS,
+        EMC_OLDER_REPLY_EXCERPT_CHARS,
+        EMC_VERBATIM_TURN_WINDOW,
+    )
 }
 
 /// One raw untrusted inter-seat message arriving in a negotiation input bundle (`B4.4`).
@@ -189,6 +236,90 @@ pub fn cap_words_and_chars(raw: &str, max_words: usize, max_chars: usize) -> (St
     (clipped, final_words, true)
 }
 
+fn json_escaped_char_len(c: char) -> usize {
+    if matches!(c, '"' | '\\' | '\x08' | '\x0c' | '\n' | '\r' | '\t') {
+        2
+    } else if (c as u32) < 0x20 || is_dangerous_prompt_char(c) {
+        6
+    } else {
+        1
+    }
+}
+
+fn cap_untrusted_string_with_quote_budget(
+    raw: &str,
+    max_words: usize,
+    max_escaped_chars_with_quotes: usize,
+) -> Option<(String, usize, usize, bool)> {
+    if max_escaped_chars_with_quotes < 2 {
+        return None;
+    }
+    if raw.trim().is_empty() {
+        let was_trunc = raw.chars().count().saturating_add(2) > max_escaped_chars_with_quotes;
+        return Some((String::new(), 0, 2, was_trunc));
+    }
+    if max_words == 0 || max_escaped_chars_with_quotes < 3 {
+        return None;
+    }
+
+    let mut out = String::new();
+    let mut escaped_chars = 2usize; // opening and closing quotes
+    let mut word_count = 0usize;
+    let mut was_trunc = false;
+
+    for word in raw.split_whitespace() {
+        if word_count >= max_words {
+            was_trunc = true;
+            break;
+        }
+        let sep_len = usize::from(word_count > 0);
+        let word_escaped_len: usize = word.chars().map(json_escaped_char_len).sum();
+        if escaped_chars + sep_len + word_escaped_len <= max_escaped_chars_with_quotes {
+            if sep_len > 0 {
+                out.push(' ');
+            }
+            out.push_str(word);
+            escaped_chars += sep_len + word_escaped_len;
+            word_count += 1;
+        } else {
+            was_trunc = true;
+            if escaped_chars + sep_len < max_escaped_chars_with_quotes {
+                let mut partial = String::new();
+                let mut partial_cost = 0usize;
+                for c in word.chars() {
+                    let c_cost = json_escaped_char_len(c);
+                    if escaped_chars + sep_len + partial_cost + c_cost
+                        > max_escaped_chars_with_quotes
+                    {
+                        break;
+                    }
+                    partial.push(c);
+                    partial_cost += c_cost;
+                }
+                if !partial.is_empty() {
+                    if sep_len > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&partial);
+                    escaped_chars += sep_len + partial_cost;
+                    word_count += 1;
+                }
+            }
+            break;
+        }
+    }
+
+    if word_count == 0 {
+        return None;
+    }
+
+    debug_assert_eq!(
+        json_escape_untrusted_str(&out).chars().count(),
+        escaped_chars
+    );
+    Some((out, word_count, escaped_chars, was_trunc))
+}
+
 fn cap_json_value_budget(
     val: &serde_json::Value,
     rem_words: &mut usize,
@@ -197,8 +328,9 @@ fn cap_json_value_budget(
     truncated: &mut bool,
     depth: usize,
 ) -> Option<serde_json::Value> {
-    if *rem_words == 0 || *rem_chars == 0 || depth > MAX_INTENT_HEADER_DEPTH {
+    if *rem_words == 0 || *rem_chars < 2 || depth > MAX_INTENT_HEADER_DEPTH {
         *truncated = true;
+        *rem_chars = 0;
         return None;
     }
     match val {
@@ -217,27 +349,34 @@ fn cap_json_value_budget(
             Some(val.clone())
         }
         serde_json::Value::String(s) => {
-            if s.trim().is_empty() {
-                return Some(serde_json::Value::String(String::new()));
-            }
-            let (capped, w_count, was_trunc) = cap_words_and_chars(s, *rem_words, *rem_chars);
+            let Some((capped, w_count, escaped_chars, was_trunc)) =
+                cap_untrusted_string_with_quote_budget(s, *rem_words, *rem_chars)
+            else {
+                *truncated = true;
+                *rem_words = 0;
+                *rem_chars = 0;
+                return None;
+            };
             if was_trunc {
                 *truncated = true;
             }
-            let c_len = capped.chars().count();
-            let consumed = w_count.max(usize::from(!capped.is_empty()));
-            *rem_words = rem_words.saturating_sub(consumed);
-            *rem_chars = rem_chars.saturating_sub(c_len);
-            *used_words += consumed;
+            *rem_words = rem_words.saturating_sub(w_count);
+            *rem_chars = rem_chars.saturating_sub(escaped_chars);
+            *used_words += w_count;
             Some(serde_json::Value::String(capped))
         }
         serde_json::Value::Array(items) => {
+            // Account for `[` and `]` unconditionally (`R2-A1`).
+            *rem_chars -= 2;
             let mut out = Vec::new();
-            for item in items {
-                if *rem_words == 0 || *rem_chars == 0 {
+            for (idx, item) in items.iter().enumerate() {
+                let sep_cost = usize::from(!out.is_empty());
+                if *rem_words == 0 || *rem_chars < sep_cost + 2 {
                     *truncated = true;
+                    *rem_chars = 0;
                     break;
                 }
+                *rem_chars -= sep_cost;
                 if let Some(capped_item) = cap_json_value_budget(
                     item,
                     rem_words,
@@ -247,33 +386,56 @@ fn cap_json_value_budget(
                     depth + 1,
                 ) {
                     out.push(capped_item);
+                    if *truncated && idx + 1 < items.len() {
+                        *rem_chars = 0;
+                        break;
+                    }
+                } else {
+                    *truncated = true;
+                    *rem_chars = 0;
+                    break;
                 }
             }
             Some(serde_json::Value::Array(out))
         }
         serde_json::Value::Object(map) => {
+            // Account for `{` and `}` unconditionally (`R2-A1`).
+            *rem_chars -= 2;
             let mut out = serde_json::Map::new();
-            for (k, v) in map {
-                if *rem_words == 0 || *rem_chars == 0 {
+            for (idx, (k, v)) in map.iter().enumerate() {
+                let sep_cost = usize::from(!out.is_empty());
+                // Minimum entry cost: optional `,` + `""` key (2) + `:` (1) + minimal value (2).
+                if *rem_words == 0 || *rem_chars < sep_cost + 5 {
                     *truncated = true;
+                    *rem_chars = 0;
                     break;
                 }
-                let (capped_k, k_words, k_trunc) = cap_words_and_chars(k, *rem_words, *rem_chars);
+                let max_key_chars = *rem_chars - sep_cost - 3;
+                let Some((capped_k, k_words, key_escaped_chars, k_trunc)) =
+                    cap_untrusted_string_with_quote_budget(k, *rem_words, max_key_chars)
+                else {
+                    *truncated = true;
+                    *rem_chars = 0;
+                    break;
+                };
                 if k_trunc {
                     *truncated = true;
                 }
-                let k_consumed = k_words.max(usize::from(!capped_k.is_empty()));
-                *rem_words = rem_words.saturating_sub(k_consumed);
-                *rem_chars = rem_chars.saturating_sub(capped_k.chars().count());
-                *used_words += k_consumed;
-                if *rem_words == 0 || *rem_chars == 0 {
-                    *truncated = true;
-                    break;
-                }
+                *rem_words = rem_words.saturating_sub(k_words);
+                *rem_chars = rem_chars.saturating_sub(sep_cost + key_escaped_chars + 1);
+                *used_words += k_words;
                 if let Some(capped_v) =
                     cap_json_value_budget(v, rem_words, rem_chars, used_words, truncated, depth + 1)
                 {
                     out.insert(capped_k, capped_v);
+                    if *truncated && idx + 1 < map.len() {
+                        *rem_chars = 0;
+                        break;
+                    }
+                } else {
+                    *truncated = true;
+                    *rem_chars = 0;
+                    break;
                 }
             }
             Some(serde_json::Value::Object(out))
@@ -323,7 +485,7 @@ fn json_escape_untrusted_value(val: &serde_json::Value) -> String {
     escape_json_encoded_prompt_hazards(&encoded)
 }
 
-/// Length-cap (`<= 120` words and `<= 1800` chars combined across `intent_header` and `body`, `A-5`)
+/// Length-cap (`<= 120` words and `<= 1800` serialized chars combined across `intent_header` and `body`, `A-5`, `R2-A1`)
 /// one [`UntrustedWhisper`].
 pub fn sanitize_whisper(whisper: &UntrustedWhisper) -> SanitizedWhisper {
     let (from_capped, _, _) = cap_words_and_chars(&whisper.from_guild, 8, 64);
@@ -344,11 +506,25 @@ pub fn sanitize_whisper(whisper: &UntrustedWhisper) -> SanitizedWhisper {
         None => None,
     };
 
-    let (capped_body, body_words, body_trunc) =
-        cap_words_and_chars(&whisper.body, rem_words, rem_chars);
-    if body_trunc {
+    let (capped_body, body_words) = if whisper.body.trim().is_empty() {
+        (String::new(), 0)
+    } else if rem_words == 0 || rem_chars < 3 {
         truncated = true;
-    }
+        (String::new(), 0)
+    } else {
+        match cap_untrusted_string_with_quote_budget(&whisper.body, rem_words, rem_chars) {
+            Some((b, w, _, b_trunc)) => {
+                if b_trunc {
+                    truncated = true;
+                }
+                (b, w)
+            }
+            None => {
+                truncated = true;
+                (String::new(), 0)
+            }
+        }
+    };
     used_words += body_words;
 
     SanitizedWhisper {
@@ -384,28 +560,26 @@ pub fn render_json_escaped_whisper_line(sanitized: &SanitizedWhisper) -> String 
     }
 }
 
-/// Format a seat's no-new-deals baseline beside its sanitized, JSON-escaped messages from other seats (`B4.4`, `B-5`).
+/// Validate and format the separate `no_new_deals` and `other_seats_messages` sections (`B4.4`, `B-5`, `R2-B4`).
 ///
 /// Refuses if `batna` is empty/whitespace or if any message's `from_guild` is not an exact
 /// guild name in `seated_guilds` (`B-5`, blocking spoofed senders such as `"Referee (system notice)"`).
-pub fn format_negotiation_block(
+pub fn split_negotiation_sections(
     inputs: &NegotiationInputs,
     seated_guilds: &[&str],
-) -> Result<String, RelayError> {
+) -> Result<(String, String), RelayError> {
     let batna_trimmed = inputs.batna.trim();
     if batna_trimmed.is_empty() {
         return Err(RelayError::Io(
             "negotiation inputs require a non-empty 'batna' fallback line".to_owned(),
         ));
     }
-    let mut out = String::new();
-    out.push_str(wording_slot("fallback_header"));
-    out.push('\n');
-    out.push_str(batna_trimmed);
-    out.push_str("\n\n");
-    out.push_str(wording_slot("whispers_header"));
-    out.push('\n');
-    out.push_str(wording_slot("whispers_notice"));
+    let fallback_sec = format!("{}\n{batna_trimmed}", wording_slot("fallback_header"));
+
+    let mut whispers_sec = String::new();
+    whispers_sec.push_str(&wording_slot("whispers_header"));
+    whispers_sec.push('\n');
+    whispers_sec.push_str(&wording_slot("whispers_notice"));
     for whisper in &inputs.whispers {
         let sender = whisper.from_guild.trim();
         if sender.is_empty() {
@@ -420,10 +594,22 @@ pub fn format_negotiation_block(
             ));
         }
         let sanitized = sanitize_whisper(whisper);
-        out.push('\n');
-        out.push_str(&render_json_escaped_whisper_line(&sanitized));
+        whispers_sec.push('\n');
+        whispers_sec.push_str(&render_json_escaped_whisper_line(&sanitized));
     }
-    Ok(out)
+    Ok((fallback_sec, whispers_sec))
+}
+
+/// Format a seat's no-new-deals baseline beside its sanitized, JSON-escaped messages from other seats (`B4.4`, `B-5`).
+///
+/// Refuses if `batna` is empty/whitespace or if any message's `from_guild` is not an exact
+/// guild name in `seated_guilds` (`B-5`, blocking spoofed senders such as `"Referee (system notice)"`).
+pub fn format_negotiation_block(
+    inputs: &NegotiationInputs,
+    seated_guilds: &[&str],
+) -> Result<String, RelayError> {
+    let (fallback_sec, whispers_sec) = split_negotiation_sections(inputs, seated_guilds)?;
+    Ok(format!("{fallback_sec}\n\n{whispers_sec}"))
 }
 
 /// Load and validate optional `day-DD-<round>-<Guild>.negotiation.json` if present.
@@ -464,35 +650,42 @@ pub fn sanitize_scratchpad_for_prompt(raw: &str) -> String {
     escaped.replace("===", "\\u003d\\u003d\\u003d")
 }
 
-/// Format a token-validated saved scratchpad section appended to a snapshot turn's user message (`C5`, `A-3`).
-///
-/// Callers must first verify non-empty `saved_scratchpad` via `POST /tokenize` (`<= 500` tokens).
-pub fn format_scratchpad_section(saved_scratchpad: Option<&str>) -> String {
-    let body = match saved_scratchpad.map(str::trim) {
-        Some(s) if !s.is_empty() => sanitize_scratchpad_for_prompt(s),
-        _ => wording_slot("scratchpad_empty").to_owned(),
+/// Format an already-sanitized scratchpad text under [`wording_slot`]`("scratchpad_header")` (`R2-B2`).
+pub fn format_sanitized_scratchpad_section(sanitized_scratchpad: Option<&str>) -> String {
+    let body = match sanitized_scratchpad {
+        Some(s) if !s.is_empty() => s.to_owned(),
+        _ => wording_slot("scratchpad_empty"),
     };
     format!("{}\n{body}", wording_slot("scratchpad_header"))
 }
 
-/// Extract an updated scratchpad from an assistant reply if the reply supplies either
-/// a JSON `"scratchpad"` string property or a `<scratchpad>...</scratchpad>` block (`A-3`).
+/// Format a token-validated saved scratchpad section appended to a snapshot turn's user message (`C5`, `A-3`).
 ///
-/// Returns the raw trimmed scratchpad text without word or character clipping so the
-/// caller can validate its exact token count via `POST /tokenize`.
+/// Callers must first verify the sanitized shown text via `POST /tokenize` (`<= 500` tokens, `R2-B2`).
+pub fn format_scratchpad_section(saved_scratchpad: Option<&str>) -> String {
+    match saved_scratchpad.map(str::trim) {
+        Some(s) if !s.is_empty() => {
+            let sanitized = sanitize_scratchpad_for_prompt(s);
+            format_sanitized_scratchpad_section(Some(&sanitized))
+        }
+        _ => format_sanitized_scratchpad_section(None),
+    }
+}
+
+/// Extract an updated scratchpad from a structured JSON assistant reply via the pinned
+/// `"scratchpad"` property (`A-3`, `R2-B3`).
+///
+/// Per `R2-B3`, every seat that keeps notes uses a response schema and only JSON `"scratchpad"`
+/// updates are accepted; free-text `<scratchpad>` tags are never harvested.
 pub fn extract_scratchpad_update(reply: &str) -> Option<String> {
+    let key = wording_slot("scratchpad_schema_key");
     if let Ok(serde_json::Value::Object(map)) =
         serde_json::from_str::<serde_json::Value>(reply.trim())
-        && let Some(serde_json::Value::String(s)) = map.get("scratchpad")
+        && let Some(serde_json::Value::String(s)) = map.get(&key)
     {
         return Some(s.trim().to_owned());
     }
-    let open = "<scratchpad>";
-    let close = "</scratchpad>";
-    let start = reply.find(open)? + open.len();
-    let rest = &reply[start..];
-    let end = rest.find(close)?;
-    Some(rest[..end].trim().to_owned())
+    None
 }
 
 /// Strip inline `<think>...</think>` blocks when a seat's roster pins `exclude_from_transcript = true` (`B4.3`).
