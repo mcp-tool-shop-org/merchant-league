@@ -9,20 +9,22 @@ use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
 use chrono::{SecondsFormat, Utc};
+use same_file::Handle as SameFileHandle;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::any::Any;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, OpenOptions, TryLockError};
 use std::io::{Seek, SeekFrom, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CAP_EPSILON: f64 = 1e-12;
 
@@ -164,17 +166,23 @@ pub struct CallLogEntry {
     pub cost: Option<f64>,
     /// Credits charged against `--cap-credits` for this entry: `usage.cost` when a valid
     /// non-negative finite cost was reported, `max_cost_per_call` when the call was sent
-    /// without a valid reported cost, or `0.0` when refused pre-call.
+    /// without a valid reported cost or reconciled from an orphaned pre-call reservation,
+    /// or `0.0` when refused pre-call.
     #[serde(default)]
     pub charged_credits: f64,
-    /// Wall-clock call duration in milliseconds (`0` when refused pre-call).
+    /// Wall-clock call duration in milliseconds (`0` when refused or reserved pre-call).
     pub latency_ms: u64,
-    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"CAP_REACHED"`,
-    /// `"COST_UNKNOWN"`, `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
+    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"RESERVED"`,
+    /// `"CAP_REACHED"`, `"COST_UNKNOWN"`, `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
     pub outcome: String,
     /// Redacted failure or refusal reason when `outcome != "OK"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Unique pre-call reservation identifier tying a sent call's final record (or reconciled
+    /// `"RESERVED"` entry) to its durable pre-send reservation (`None` on pre-call refusals or
+    /// legacy lines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<String>,
 }
 
 /// Per-seat outcome produced by [`run_turn`].
@@ -375,8 +383,16 @@ fn io_err(path: &Path, err: impl fmt::Display, key: Option<&ApiKey>) -> RelayErr
 }
 
 const TURN_LOCK_FILENAME: &str = "turn.lock";
+const SIDE_FILE_LOCK_FILENAME: &str = "calls.side.lock";
 const PENDING_CALLS_FILENAME: &str = "calls.pending.jsonl";
 const PENDING_CALLS_TMP_FILENAME: &str = "calls.pending.jsonl.tmp";
+const RESERVED_CALLS_FILENAME: &str = "calls.reserved.jsonl";
+const RESERVED_CALLS_TMP_FILENAME: &str = "calls.reserved.jsonl.tmp";
+const SIDE_FILE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn side_file_lock_path(sibling_path: &Path) -> PathBuf {
+    sibling_path.with_file_name(SIDE_FILE_LOCK_FILENAME)
+}
 
 fn pending_calls_path(calls_path: &Path) -> PathBuf {
     calls_path.with_file_name(PENDING_CALLS_FILENAME)
@@ -384,6 +400,72 @@ fn pending_calls_path(calls_path: &Path) -> PathBuf {
 
 fn pending_calls_tmp_path(pending_path: &Path) -> PathBuf {
     pending_path.with_file_name(PENDING_CALLS_TMP_FILENAME)
+}
+
+fn reserved_calls_path(calls_path: &Path) -> PathBuf {
+    calls_path.with_file_name(RESERVED_CALLS_FILENAME)
+}
+
+fn reserved_calls_tmp_path(reserved_path: &Path) -> PathBuf {
+    reserved_path.with_file_name(RESERVED_CALLS_TMP_FILENAME)
+}
+
+fn run_reservation_lock_path(calls_path: &Path, run_id: &str) -> PathBuf {
+    calls_path.with_file_name(format!("calls.resv-{run_id}.lock"))
+}
+
+fn next_unique_run_id() -> String {
+    static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
+    let seq = NEXT_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!("{}-{nanos}-{seq}", std::process::id())
+}
+
+struct SideFileLockGuard {
+    file: fs::File,
+}
+
+impl SideFileLockGuard {
+    fn acquire(sibling_path: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
+        let lock_path = side_file_lock_path(sibling_path);
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e, redaction_key))?;
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| io_err(&lock_path, e, redaction_key))?;
+        let start = Instant::now();
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { file }),
+                Err(TryLockError::WouldBlock) => {
+                    if start.elapsed() >= SIDE_FILE_LOCK_TIMEOUT {
+                        return Err(io_err(
+                            &lock_path,
+                            "timed out waiting for exclusive side-file lock",
+                            redaction_key,
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(TryLockError::Error(e)) => {
+                    return Err(io_err(&lock_path, e, redaction_key));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for SideFileLockGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 fn read_lock_holder(lock_path: &Path, key: Option<&ApiKey>) -> Option<String> {
@@ -397,15 +479,34 @@ fn read_lock_holder(lock_path: &Path, key: Option<&ApiKey>) -> Option<String> {
 }
 
 struct TurnLock {
-    file: File,
+    lock_path: PathBuf,
+    handle: SameFileHandle,
 }
 
 impl TurnLock {
     fn acquire(game_dir: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
+        match fs::metadata(game_dir) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(io_err(
+                    game_dir,
+                    "game directory path is not a directory",
+                    redaction_key,
+                ));
+            }
+            Err(e) => {
+                return Err(io_err(
+                    game_dir,
+                    format!("game directory does not exist ({e})"),
+                    redaction_key,
+                ));
+            }
+        }
+
         let relay_dir = game_dir.join("relay");
         fs::create_dir_all(&relay_dir).map_err(|e| io_err(&relay_dir, e, redaction_key))?;
         let lock_path = relay_dir.join(TURN_LOCK_FILENAME);
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -425,24 +526,52 @@ impl TurnLock {
                 return Err(io_err(&lock_path, e, redaction_key));
             }
         }
+        let handle =
+            SameFileHandle::from_file(file).map_err(|e| io_err(&lock_path, e, redaction_key))?;
+        let mut lock = Self { lock_path, handle };
+        lock.verify_identity(redaction_key)?;
+
         let holder_line = format!(
             "pid={} started_utc={}\n",
             std::process::id(),
             now_utc_rfc3339()
         );
-        let _ = file.set_len(0);
-        let _ = file.seek(SeekFrom::Start(0));
-        let _ = file.write_all(holder_line.as_bytes());
-        let _ = file.flush();
-        Ok(Self { file })
+        let locked_file = lock.handle.as_file_mut();
+        let _ = locked_file.set_len(0);
+        let _ = locked_file.seek(SeekFrom::Start(0));
+        let _ = locked_file.write_all(holder_line.as_bytes());
+        let _ = locked_file.flush();
+        Ok(lock)
+    }
+
+    fn verify_identity(&self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        match SameFileHandle::from_path(&self.lock_path) {
+            Ok(path_handle) if path_handle == self.handle => Ok(()),
+            Ok(_) => Err(RelayError::TurnLocked {
+                lock_path: redact_secrets(&self.lock_path.display().to_string(), redaction_key),
+                holder: Some(
+                    "compromised: lock file at path refers to a different file".to_owned(),
+                ),
+            }),
+            Err(e) => Err(RelayError::TurnLocked {
+                lock_path: redact_secrets(&self.lock_path.display().to_string(), redaction_key),
+                holder: Some(redact_secrets(
+                    &format!("compromised: lock file missing or unreadable ({e})"),
+                    redaction_key,
+                )),
+            }),
+        }
     }
 }
 
 impl Drop for TurnLock {
     fn drop(&mut self) {
-        let _ = self.file.set_len(0);
-        let _ = self.file.flush();
-        let _ = self.file.unlock();
+        if self.verify_identity(None).is_ok() {
+            let locked_file = self.handle.as_file_mut();
+            let _ = locked_file.set_len(0);
+            let _ = locked_file.flush();
+        }
+        let _ = self.handle.as_file().unlock();
     }
 }
 
@@ -524,7 +653,166 @@ fn filter_unmigrated_entries(
     out
 }
 
-fn write_pending_side_file(
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct ActiveReservation {
+    reservation_id: String,
+    run_id: String,
+    entry: CallLogEntry,
+}
+
+const RUN_RESV_LOCK_PREFIX: &str = "calls.resv-";
+const RUN_RESV_LOCK_SUFFIX: &str = ".lock";
+
+fn has_entry_with_reservation_id(entries: &[CallLogEntry], reservation_id: &str) -> bool {
+    !reservation_id.is_empty()
+        && entries
+            .iter()
+            .any(|e| e.reservation_id.as_deref() == Some(reservation_id))
+}
+
+fn is_run_reservation_lock_live(resv_lock_path: &Path) -> bool {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(resv_lock_path)
+        .or_else(|_| OpenOptions::new().read(true).open(resv_lock_path))
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = file.unlock();
+            drop(file);
+            let _ = fs::remove_file(resv_lock_path);
+            false
+        }
+        Err(TryLockError::WouldBlock | TryLockError::Error(_)) => true,
+    }
+}
+
+fn sweep_stale_reservation_locks(calls_path: &Path, active_reserved: &[ActiveReservation]) {
+    let Some(relay_dir) = calls_path.parent() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(relay_dir) else {
+        return;
+    };
+    for dir_entry in entries.flatten() {
+        let file_name = dir_entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(run_id) = name
+            .strip_prefix(RUN_RESV_LOCK_PREFIX)
+            .and_then(|rest| rest.strip_suffix(RUN_RESV_LOCK_SUFFIX))
+        else {
+            continue;
+        };
+        if active_reserved.iter().any(|r| r.run_id == run_id) {
+            continue;
+        }
+        let _ = is_run_reservation_lock_live(&dir_entry.path());
+    }
+}
+
+fn read_reserved_file(
+    reserved_path: &Path,
+    redaction_key: Option<&ApiKey>,
+) -> Result<Vec<ActiveReservation>, RelayError> {
+    let raw =
+        fs::read_to_string(reserved_path).map_err(|e| io_err(reserved_path, e, redaction_key))?;
+    let mut entries = Vec::new();
+    for (idx, line) in raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed: ActiveReservation = serde_json::from_str(line).map_err(|e| {
+            RelayError::CorruptLog(redact_secrets(
+                &format!("{} line {}: {e}", reserved_path.display(), idx + 1),
+                redaction_key,
+            ))
+        })?;
+        entries.push(parsed);
+    }
+    Ok(entries)
+}
+
+fn write_reserved_entries_unlocked(
+    reserved_path: &Path,
+    entries: &[ActiveReservation],
+    key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    if entries.is_empty() {
+        if reserved_path.exists() {
+            match fs::remove_file(reserved_path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_err(reserved_path, e, key)),
+            }
+        }
+        return Ok(());
+    }
+    if let Some(parent) = reserved_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err(parent, e, key))?;
+    }
+    if reserved_path.exists() {
+        let meta = fs::metadata(reserved_path).map_err(|e| io_err(reserved_path, e, key))?;
+        if !meta.is_file() {
+            return Err(io_err(
+                reserved_path,
+                "reservation side file path is not a regular file",
+                key,
+            ));
+        }
+        if meta.permissions().readonly() {
+            return Err(io_err(
+                reserved_path,
+                "reservation side file is read-only",
+                key,
+            ));
+        }
+    }
+    let mut blob = String::new();
+    for item in entries {
+        let line = serde_json::to_string(item).map_err(|e| io_err(reserved_path, e, key))?;
+        blob.push_str(&line);
+        blob.push('\n');
+    }
+    let tmp_path = reserved_calls_tmp_path(reserved_path);
+    if tmp_path.exists() {
+        fs::remove_file(&tmp_path).map_err(|e| io_err(&tmp_path, e, key))?;
+    }
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| io_err(&tmp_path, e, key))?;
+    let write_res: Result<(), std::io::Error> = (|| {
+        tmp_file.write_all(blob.as_bytes())?;
+        tmp_file.flush()?;
+        tmp_file.sync_all()
+    })();
+    drop(tmp_file);
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(&tmp_path, e, key));
+    }
+    if let Err(e) = fs::rename(&tmp_path, reserved_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(reserved_path, e, key));
+    }
+    #[cfg(unix)]
+    if let Some(parent) = reserved_path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
+fn write_pending_side_file_unlocked(
     pending_path: &Path,
     new_entries: &[CallLogEntry],
     key: Option<&ApiKey>,
@@ -598,27 +886,50 @@ fn write_pending_side_file(
     }
     #[cfg(unix)]
     if let Some(parent) = pending_path.parent()
-        && let Ok(dir) = File::open(parent)
+        && let Ok(dir) = fs::File::open(parent)
     {
         let _ = dir.sync_all();
     }
     Ok(())
 }
 
-struct CallLedger {
+fn write_pending_side_file(
+    pending_path: &Path,
+    new_entries: &[CallLogEntry],
+    key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    let _side_lock = SideFileLockGuard::acquire(pending_path, key)?;
+    write_pending_side_file_unlocked(pending_path, new_entries, key)
+}
+
+struct LoadedLedgerState {
+    active_resvs: Vec<ActiveReservation>,
+    persisted_for_sum: Vec<CallLogEntry>,
+}
+
+struct CallLedger<'a> {
+    turn_lock: &'a TurnLock,
     calls_path: PathBuf,
     pending_path: PathBuf,
+    reserved_path: PathBuf,
+    run_id: String,
+    run_resv_lock_path: PathBuf,
+    run_resv_lock_file: Option<fs::File>,
+    next_reservation_seq: u64,
     cap_credits: Option<f64>,
     reserved_in_flight: f64,
     prior_unmigrated_pending: Vec<CallLogEntry>,
     pending_unwritten: Vec<(f64, CallLogEntry)>,
+    unreleased_reservations: Vec<String>,
+    lock_compromised: Option<RelayError>,
     ledger_write_failed_in_turn: bool,
     cost_unknown_in_turn: bool,
     cost_over_estimate_in_turn: bool,
 }
 
 enum PreCallDecision {
-    Reserved,
+    Reserved(String),
+    LockCompromised(RelayError),
     CapReached {
         charged_sum: f64,
         reserved_in_flight: f64,
@@ -630,15 +941,22 @@ enum PreCallDecision {
     CostOverEstimate,
 }
 
-impl CallLedger {
+impl<'a> CallLedger<'a> {
     fn open(
+        turn_lock: &'a TurnLock,
         calls_path: PathBuf,
         day: &str,
         round: Round,
         cap_credits: Option<f64>,
         redaction_key: Option<&ApiKey>,
     ) -> Result<Self, RelayError> {
+        turn_lock.verify_identity(redaction_key)?;
         let pending_path = pending_calls_path(&calls_path);
+        let reserved_path = reserved_calls_path(&calls_path);
+        let run_id = next_unique_run_id();
+        let run_resv_lock_path = run_reservation_lock_path(&calls_path, &run_id);
+
+        let _side_lock = SideFileLockGuard::acquire(&calls_path, redaction_key)?;
         let mut effective_entries = if calls_path.exists() {
             read_calls_file(&calls_path, redaction_key)?
         } else {
@@ -649,6 +967,7 @@ impl CallLedger {
         if pending_path.exists() {
             let pending_entries = read_calls_file(&pending_path, redaction_key)?;
             let unmigrated = filter_unmigrated_entries(&effective_entries, &pending_entries);
+            turn_lock.verify_identity(redaction_key)?;
             if unmigrated.is_empty() {
                 let _ = fs::remove_file(&pending_path);
             } else {
@@ -668,6 +987,66 @@ impl CallLedger {
             }
         }
 
+        let mut remaining_reserved = Vec::new();
+        if reserved_path.exists() {
+            let original_reserved = read_reserved_file(&reserved_path, redaction_key)?;
+            let base_recorded_entries = effective_entries.clone();
+            let mut orphans_to_migrate: Vec<(ActiveReservation, CallLogEntry)> = Vec::new();
+
+            for r in &original_reserved {
+                let already_recorded =
+                    has_entry_with_reservation_id(&base_recorded_entries, &r.reservation_id);
+                let lock_path = run_reservation_lock_path(&calls_path, &r.run_id);
+                if is_run_reservation_lock_live(&lock_path) {
+                    remaining_reserved.push(r.clone());
+                    if !already_recorded {
+                        effective_entries.push(r.entry.clone());
+                    }
+                } else if !already_recorded
+                    && !orphans_to_migrate
+                        .iter()
+                        .any(|(prev, _)| prev.reservation_id == r.reservation_id)
+                {
+                    turn_lock.verify_identity(redaction_key)?;
+                    let mut orphan_entry = r.entry.clone();
+                    if orphan_entry.reservation_id.is_none() && !r.reservation_id.is_empty() {
+                        orphan_entry.reservation_id = Some(r.reservation_id.clone());
+                    }
+                    orphans_to_migrate.push((r.clone(), orphan_entry));
+                }
+            }
+
+            if !orphans_to_migrate.is_empty() {
+                let mut orphan_blob = String::new();
+                for (_, orphan_entry) in &orphans_to_migrate {
+                    let line = serde_json::to_string(orphan_entry)
+                        .map_err(|e| io_err(&calls_path, e, redaction_key))?;
+                    orphan_blob.push_str(&line);
+                    orphan_blob.push('\n');
+                }
+                if append_text_synced(&calls_path, &orphan_blob, redaction_key).is_ok() {
+                    effective_entries
+                        .extend(orphans_to_migrate.into_iter().map(|(_, entry)| entry));
+                } else {
+                    for (r, orphan_entry) in orphans_to_migrate {
+                        prior_unmigrated_pending.push(orphan_entry.clone());
+                        effective_entries.push(orphan_entry);
+                        remaining_reserved.push(r);
+                    }
+                }
+            }
+
+            if remaining_reserved != original_reserved {
+                let _ = write_reserved_entries_unlocked(
+                    &reserved_path,
+                    &remaining_reserved,
+                    redaction_key,
+                );
+            }
+        }
+        sweep_stale_reservation_locks(&calls_path, &remaining_reserved);
+        drop(_side_lock);
+
         let mut cost_unknown_in_turn = false;
         let mut cost_over_estimate_in_turn = false;
         for entry in &effective_entries {
@@ -681,33 +1060,119 @@ impl CallLedger {
             }
         }
         Ok(Self {
+            turn_lock,
             calls_path,
             pending_path,
+            reserved_path,
+            run_id,
+            run_resv_lock_path,
+            run_resv_lock_file: None,
+            next_reservation_seq: 1,
             cap_credits,
             reserved_in_flight: 0.0,
             prior_unmigrated_pending,
             pending_unwritten: Vec::new(),
+            unreleased_reservations: Vec::new(),
+            lock_compromised: None,
             ledger_write_failed_in_turn: false,
             cost_unknown_in_turn,
             cost_over_estimate_in_turn,
         })
     }
 
-    fn read_persisted_entries(
+    fn check_lock_identity(&mut self, redaction_key: Option<&ApiKey>) {
+        if self.lock_compromised.is_none()
+            && let Err(lock_err) = self.turn_lock.verify_identity(redaction_key)
+        {
+            self.lock_compromised = Some(lock_err);
+        }
+    }
+
+    fn ensure_run_resv_lock(&mut self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        if self.run_resv_lock_file.is_some() {
+            return Ok(());
+        }
+        if let Some(parent) = self.run_resv_lock_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e, redaction_key))?;
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.run_resv_lock_path)
+            .map_err(|e| io_err(&self.run_resv_lock_path, e, redaction_key))?;
+        match file.try_lock() {
+            Ok(()) => {
+                self.run_resv_lock_file = Some(file);
+                Ok(())
+            }
+            Err(TryLockError::WouldBlock) => Err(io_err(
+                &self.run_resv_lock_path,
+                "run reservation lock unexpectedly contended",
+                redaction_key,
+            )),
+            Err(TryLockError::Error(e)) => Err(io_err(&self.run_resv_lock_path, e, redaction_key)),
+        }
+    }
+
+    fn release_reservations_unlocked(
+        &self,
+        ids: &[String],
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<(), RelayError> {
+        if ids.is_empty() || !self.reserved_path.exists() {
+            return Ok(());
+        }
+        let mut current = read_reserved_file(&self.reserved_path, redaction_key)?;
+        let before = current.len();
+        current.retain(|r| !ids.iter().any(|id| id == &r.reservation_id));
+        if current.len() != before {
+            write_reserved_entries_unlocked(&self.reserved_path, &current, redaction_key)?;
+        }
+        Ok(())
+    }
+
+    fn read_state_unlocked(
         &self,
         redaction_key: Option<&ApiKey>,
-    ) -> Result<Vec<CallLogEntry>, RelayError> {
-        let mut entries = if self.calls_path.exists() {
+    ) -> Result<LoadedLedgerState, RelayError> {
+        let mut base_entries = if self.calls_path.exists() {
             read_calls_file(&self.calls_path, redaction_key)?
         } else {
             Vec::new()
         };
         if self.pending_path.exists() {
             let pending = read_calls_file(&self.pending_path, redaction_key)?;
-            let unmigrated = filter_unmigrated_entries(&entries, &pending);
-            entries.extend(unmigrated);
+            let unmigrated = filter_unmigrated_entries(&base_entries, &pending);
+            base_entries.extend(unmigrated);
         }
-        Ok(entries)
+        let active_resvs = if self.reserved_path.exists() {
+            read_reserved_file(&self.reserved_path, redaction_key)?
+        } else {
+            Vec::new()
+        };
+        let mut persisted_for_sum = base_entries.clone();
+        let mut counted_orphan_ids: Vec<String> = Vec::new();
+        for r in &active_resvs {
+            if r.run_id == self.run_id {
+                continue;
+            }
+            if has_entry_with_reservation_id(&base_entries, &r.reservation_id) {
+                continue;
+            }
+            let lock_path = run_reservation_lock_path(&self.calls_path, &r.run_id);
+            if is_run_reservation_lock_live(&lock_path) {
+                persisted_for_sum.push(r.entry.clone());
+            } else if !counted_orphan_ids.iter().any(|id| id == &r.reservation_id) {
+                counted_orphan_ids.push(r.reservation_id.clone());
+                persisted_for_sum.push(r.entry.clone());
+            }
+        }
+        Ok(LoadedLedgerState {
+            active_resvs,
+            persisted_for_sum,
+        })
     }
 
     fn unpersisted_memory_sum(&self, persisted: &[CallLogEntry]) -> f64 {
@@ -730,43 +1195,76 @@ impl CallLedger {
     fn try_reserve(
         &mut self,
         seat_max_cost: f64,
+        reservation_template: &CallLogEntry,
         redaction_key: Option<&ApiKey>,
     ) -> Result<PreCallDecision, RelayError> {
+        self.check_lock_identity(redaction_key);
+        if let Some(lock_err) = &self.lock_compromised {
+            return Ok(PreCallDecision::LockCompromised(lock_err.clone()));
+        }
         if self.ledger_write_failed_in_turn {
             return Ok(PreCallDecision::LedgerWriteFailed);
         }
         if self.cost_over_estimate_in_turn {
             return Ok(PreCallDecision::CostOverEstimate);
         }
-        let Some(cap) = self.cap_credits else {
-            self.reserved_in_flight += seat_max_cost;
-            return Ok(PreCallDecision::Reserved);
-        };
-        let persisted = self.read_persisted_entries(redaction_key)?;
-        let recorded_sum = sum_charged_credits(&persisted)?;
-        let charged_sum = recorded_sum + self.unpersisted_memory_sum(&persisted);
-        if charged_sum + self.reserved_in_flight + seat_max_cost > cap + CAP_EPSILON {
-            return Ok(PreCallDecision::CapReached {
-                charged_sum,
-                reserved_in_flight: self.reserved_in_flight,
-                requested: seat_max_cost,
-                cap,
-            });
+
+        let _side_lock = SideFileLockGuard::acquire(&self.calls_path, redaction_key)?;
+        let LoadedLedgerState {
+            mut active_resvs,
+            persisted_for_sum,
+        } = self.read_state_unlocked(redaction_key)?;
+
+        if let Some(cap) = self.cap_credits {
+            let recorded_sum = sum_charged_credits(&persisted_for_sum)?;
+            let charged_sum = recorded_sum + self.unpersisted_memory_sum(&persisted_for_sum);
+            if charged_sum + self.reserved_in_flight + seat_max_cost > cap + CAP_EPSILON {
+                return Ok(PreCallDecision::CapReached {
+                    charged_sum,
+                    reserved_in_flight: self.reserved_in_flight,
+                    requested: seat_max_cost,
+                    cap,
+                });
+            }
+            if self.cost_unknown_in_turn {
+                return Ok(PreCallDecision::CostUnknown);
+            }
         }
-        if self.cost_unknown_in_turn {
-            return Ok(PreCallDecision::CostUnknown);
+
+        self.ensure_run_resv_lock(redaction_key)?;
+        let reservation_id = format!("{}-{}", self.run_id, self.next_reservation_seq);
+        self.next_reservation_seq += 1;
+        let mut reserved_entry = reservation_template.clone();
+        reserved_entry.reservation_id = Some(reservation_id.clone());
+        active_resvs.push(ActiveReservation {
+            reservation_id: reservation_id.clone(),
+            run_id: self.run_id.clone(),
+            entry: reserved_entry,
+        });
+        write_reserved_entries_unlocked(&self.reserved_path, &active_resvs, redaction_key)?;
+
+        self.check_lock_identity(redaction_key);
+        if let Some(lock_err) = &self.lock_compromised {
+            let _ = self.release_reservations_unlocked(
+                std::slice::from_ref(&reservation_id),
+                redaction_key,
+            );
+            return Ok(PreCallDecision::LockCompromised(lock_err.clone()));
         }
+
         self.reserved_in_flight += seat_max_cost;
-        Ok(PreCallDecision::Reserved)
+        Ok(PreCallDecision::Reserved(reservation_id))
     }
 
     fn finish_call_and_record(
         &mut self,
+        reservation_id: &str,
         reserved_amount: f64,
         entry: &CallLogEntry,
         over_estimate: bool,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
         if entry_marks_cost_unknown(entry) {
             self.cost_unknown_in_turn = true;
         }
@@ -779,9 +1277,14 @@ impl CallLedger {
                 line.push('\n');
                 append_text(&self.calls_path, &line, redaction_key)
             });
+        let single_id = [reservation_id.to_owned()];
         match append_res {
             Ok(()) => {
                 self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
+                if let Ok(_side_lock) = SideFileLockGuard::acquire(&self.calls_path, redaction_key)
+                {
+                    let _ = self.release_reservations_unlocked(&single_id, redaction_key);
+                }
                 Ok(())
             }
             Err(e) => {
@@ -789,13 +1292,26 @@ impl CallLedger {
                 let held_charge = entry.charged_credits.max(reserved_amount);
                 self.pending_unwritten.push((held_charge, entry.clone()));
                 self.ledger_write_failed_in_turn = true;
+                self.check_lock_identity(redaction_key);
                 let pending_snapshot: Vec<CallLogEntry> = self
                     .pending_unwritten
                     .iter()
                     .map(|(_, item)| item.clone())
                     .collect();
-                let _ =
-                    write_pending_side_file(&self.pending_path, &pending_snapshot, redaction_key);
+                match SideFileLockGuard::acquire(&self.calls_path, redaction_key).and_then(|_g| {
+                    write_pending_side_file_unlocked(
+                        &self.pending_path,
+                        &pending_snapshot,
+                        redaction_key,
+                    )?;
+                    let _ = self.release_reservations_unlocked(&single_id, redaction_key);
+                    Ok(())
+                }) {
+                    Ok(()) => {}
+                    Err(_) => {
+                        self.unreleased_reservations.push(reservation_id.to_owned());
+                    }
+                }
                 Err(e)
             }
         }
@@ -806,6 +1322,10 @@ impl CallLedger {
         entry: &CallLogEntry,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
+        if let Some(lock_err) = &self.lock_compromised {
+            return Err(lock_err.clone());
+        }
         if entry_marks_cost_unknown(entry) {
             self.cost_unknown_in_turn = true;
         }
@@ -818,13 +1338,29 @@ impl CallLedger {
         append_text(&self.calls_path, &line, redaction_key)
     }
 
+    fn clear_unreleased_reservations(&mut self, redaction_key: Option<&ApiKey>) {
+        if self.unreleased_reservations.is_empty() {
+            return;
+        }
+        let ids = std::mem::take(&mut self.unreleased_reservations);
+        if let Ok(_side_lock) = SideFileLockGuard::acquire(&self.calls_path, redaction_key) {
+            let _ = self.release_reservations_unlocked(&ids, redaction_key);
+        }
+    }
+
     fn finalize_turn(&mut self, redaction_key: Option<&ApiKey>) -> Result<(), RelayError> {
+        self.check_lock_identity(redaction_key);
         if self.pending_unwritten.is_empty() {
+            self.clear_unreleased_reservations(redaction_key);
+            if let Some(lock_err) = self.lock_compromised.take() {
+                return Err(lock_err);
+            }
             return Ok(());
         }
 
         let mut last_ledger_err: Option<RelayError> = None;
         while let Some((_, pending_entry)) = self.pending_unwritten.first().cloned() {
+            self.check_lock_identity(redaction_key);
             let mut line = match serde_json::to_string(&pending_entry) {
                 Ok(s) => s,
                 Err(e) => {
@@ -836,6 +1372,17 @@ impl CallLedger {
             match append_text_synced(&self.calls_path, &line, redaction_key) {
                 Ok(()) => {
                     self.pending_unwritten.remove(0);
+                    if let Some(ref resv_id) = pending_entry.reservation_id {
+                        self.unreleased_reservations.retain(|id| id != resv_id);
+                        if let Ok(_side_lock) =
+                            SideFileLockGuard::acquire(&self.calls_path, redaction_key)
+                        {
+                            let _ = self.release_reservations_unlocked(
+                                std::slice::from_ref(resv_id),
+                                redaction_key,
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     last_ledger_err = Some(e);
@@ -845,34 +1392,45 @@ impl CallLedger {
         }
 
         if self.pending_unwritten.is_empty() {
-            if self.pending_path.is_file() {
-                let calls_entries = if self.calls_path.exists() {
-                    read_calls_file(&self.calls_path, redaction_key)?
-                } else {
-                    Vec::new()
-                };
-                let side_entries = read_calls_file(&self.pending_path, redaction_key)?;
-                let unmigrated = filter_unmigrated_entries(&calls_entries, &side_entries);
-                if unmigrated.is_empty() {
-                    let _ = fs::remove_file(&self.pending_path);
-                    self.prior_unmigrated_pending.clear();
-                } else {
-                    let mut migrated_blob = String::new();
-                    for entry in &unmigrated {
-                        let line = serde_json::to_string(entry)
-                            .map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
-                        migrated_blob.push_str(&line);
-                        migrated_blob.push('\n');
-                    }
-                    if append_text_synced(&self.calls_path, &migrated_blob, redaction_key).is_ok() {
+            self.clear_unreleased_reservations(redaction_key);
+            if self.lock_compromised.is_none() {
+                let _side_lock = SideFileLockGuard::acquire(&self.calls_path, redaction_key)?;
+                if self.pending_path.is_file() {
+                    let calls_entries = if self.calls_path.exists() {
+                        read_calls_file(&self.calls_path, redaction_key)?
+                    } else {
+                        Vec::new()
+                    };
+                    let side_entries = read_calls_file(&self.pending_path, redaction_key)?;
+                    let unmigrated = filter_unmigrated_entries(&calls_entries, &side_entries);
+                    if unmigrated.is_empty() {
                         let _ = fs::remove_file(&self.pending_path);
                         self.prior_unmigrated_pending.clear();
+                    } else {
+                        let mut migrated_blob = String::new();
+                        for entry in &unmigrated {
+                            let line = serde_json::to_string(entry)
+                                .map_err(|e| io_err(&self.calls_path, e, redaction_key))?;
+                            migrated_blob.push_str(&line);
+                            migrated_blob.push('\n');
+                        }
+                        if append_text_synced(&self.calls_path, &migrated_blob, redaction_key)
+                            .is_ok()
+                        {
+                            let _ = fs::remove_file(&self.pending_path);
+                            self.prior_unmigrated_pending.clear();
+                        }
                     }
                 }
+            }
+            self.check_lock_identity(redaction_key);
+            if let Some(lock_err) = self.lock_compromised.take() {
+                return Err(lock_err);
             }
             return Ok(());
         }
 
+        self.check_lock_identity(redaction_key);
         let remaining: Vec<CallLogEntry> = self
             .pending_unwritten
             .iter()
@@ -881,9 +1439,17 @@ impl CallLedger {
         match write_pending_side_file(&self.pending_path, &remaining, redaction_key) {
             Ok(()) => {
                 self.pending_unwritten.clear();
+                self.clear_unreleased_reservations(redaction_key);
+                self.check_lock_identity(redaction_key);
+                if let Some(lock_err) = self.lock_compromised.take() {
+                    return Err(lock_err);
+                }
                 Ok(())
             }
             Err(side_err) => {
+                // Keep unreleased reservations on disk in `calls.reserved.jsonl` when neither
+                // `calls.jsonl` nor `calls.pending.jsonl` could be written (exit 3), preserving
+                // the durable pre-call record so a subsequent run still counts `max_cost_per_call`.
                 let mut all_held: Vec<(f64, CallLogEntry)> = self
                     .prior_unmigrated_pending
                     .iter()
@@ -936,6 +1502,16 @@ impl CallLedger {
                     detail,
                 })
             }
+        }
+    }
+}
+
+impl Drop for CallLedger<'_> {
+    fn drop(&mut self) {
+        if let Some(file) = self.run_resv_lock_file.take() {
+            let _ = file.unlock();
+            drop(file);
+            let _ = fs::remove_file(&self.run_resv_lock_path);
         }
     }
 }
@@ -1064,6 +1640,7 @@ pub fn run_turn(
 
     let calls_path = config.game_dir.join("relay").join("calls.jsonl");
     let ledger = Mutex::new(CallLedger::open(
+        &turn_lock,
         calls_path.clone(),
         &config.day,
         config.round,
@@ -1120,6 +1697,7 @@ pub fn run_turn(
         guard.finalize_turn(redaction_key)?;
     }
 
+    drop(ledger);
     drop(turn_lock);
     Ok(TurnSummary { reports })
 }
@@ -1131,7 +1709,7 @@ fn run_single_openrouter_seat(
     seat: &OpenRouterSeat,
     wrapper_text: Option<&str>,
     transport: &dyn Transport,
-    ledger: &Mutex<CallLedger>,
+    ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
     redaction_key: Option<&ApiKey>,
 ) -> SeatOutcome {
@@ -1202,11 +1780,25 @@ fn run_single_openrouter_seat(
 
     for attempt in [1_u8, 2_u8] {
         let trigger = if attempt == 1 { "turn" } else { "harness" };
+        let reservation_template = reserved_call_entry(
+            config,
+            guild,
+            attempt,
+            trigger,
+            &seat.model,
+            &request_body_sha256,
+            seat.max_cost_per_call,
+        );
 
-        {
+        let reservation_id = {
             let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-            match guard.try_reserve(seat.max_cost_per_call, redaction_key) {
-                Ok(PreCallDecision::Reserved) => {}
+            match guard.try_reserve(seat.max_cost_per_call, &reservation_template, redaction_key) {
+                Ok(PreCallDecision::Reserved(resv_id)) => resv_id,
+                Ok(PreCallDecision::LockCompromised(lock_err)) => {
+                    return SeatOutcome::SeatError {
+                        detail: lock_err.to_string(),
+                    };
+                }
                 Ok(PreCallDecision::CapReached {
                     charged_sum,
                     reserved_in_flight,
@@ -1299,7 +1891,7 @@ fn run_single_openrouter_seat(
                     };
                 }
             }
-        }
+        };
 
         let (call_result, latency_ms) = call_with_wall_timeout(
             transport,
@@ -1349,10 +1941,12 @@ fn run_single_openrouter_seat(
                     latency_ms,
                     outcome: outcome_str,
                     error: err_opt,
+                    reservation_id: Some(reservation_id.clone()),
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
+                        &reservation_id,
                         seat.max_cost_per_call,
                         &entry,
                         over_estimate,
@@ -1360,6 +1954,11 @@ fn run_single_openrouter_seat(
                     ) {
                         return SeatOutcome::SeatError {
                             detail: e.to_string(),
+                        };
+                    }
+                    if let Some(lock_err) = &guard.lock_compromised {
+                        return SeatOutcome::SeatError {
+                            detail: lock_err.to_string(),
                         };
                     }
                 }
@@ -1428,10 +2027,12 @@ fn run_single_openrouter_seat(
                     latency_ms,
                     outcome: outcome_label.to_owned(),
                     error: Some(reason),
+                    reservation_id: Some(reservation_id.clone()),
                 };
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
+                        &reservation_id,
                         seat.max_cost_per_call,
                         &entry,
                         over_estimate,
@@ -1453,6 +2054,39 @@ fn run_single_openrouter_seat(
     }
 
     unreachable!("two-attempt loop always returns on attempt 2")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reserved_call_entry(
+    config: &TurnConfig,
+    guild: &str,
+    attempt: u8,
+    trigger: &str,
+    model: &str,
+    request_body_sha256: &str,
+    max_cost_per_call: f64,
+) -> CallLogEntry {
+    CallLogEntry {
+        time_utc: now_utc_rfc3339(),
+        day: config.day.clone(),
+        round: config.round,
+        guild: guild.to_owned(),
+        attempt,
+        trigger: trigger.to_owned(),
+        model_requested: model.to_owned(),
+        model_returned: None,
+        request_body_sha256: request_body_sha256.to_owned(),
+        reply_sha256: None,
+        prompt_tokens: None,
+        completion_tokens: None,
+        total_tokens: None,
+        cost: None,
+        charged_credits: max_cost_per_call,
+        latency_ms: 0,
+        outcome: "RESERVED".to_owned(),
+        error: Some("orphaned pre-call reservation from interrupted run".to_owned()),
+        reservation_id: None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1485,6 +2119,7 @@ fn refused_call_entry(
         latency_ms: 0,
         outcome: outcome.to_owned(),
         error: Some(reason),
+        reservation_id: None,
     }
 }
 

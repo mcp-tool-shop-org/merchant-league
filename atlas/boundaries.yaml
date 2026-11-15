@@ -16,6 +16,10 @@ boundaries:
     globs:
       - crates/league-dice/**
     role: code
+  - name: league-gen
+    globs:
+      - crates/league-gen/**
+    role: code
   - name: league-ledger
     globs:
       - crates/league-ledger/**
