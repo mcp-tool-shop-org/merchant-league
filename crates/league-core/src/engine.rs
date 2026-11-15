@@ -7,13 +7,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::commit::{
-    AtomicSwapProposal, CommitmentHash, ConverterRunOrder, CouncilVoteBallot, EscrowFinishUnlock,
-    IntentPledge, IntentTarget, MandateReveal, OrderReveal, SealedOrderBundle, beacon_roll_bps,
-    compute_preimage_condition, verify_mandate_reveal, verify_order_reveal,
+    AtomicSwapProposal, CommitmentHash, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot,
+    EscrowFinishUnlock, IntentPledge, IntentTarget, MandateReveal, OrderReveal, SealedOrderBundle,
+    beacon_roll_bps, break_tie_with_beacon, compute_preimage_condition, verify_mandate_reveal,
+    verify_order_reveal,
 };
 use crate::contracts::{
     ActiveCharter, BondSpec, CartelDomain, CheckStatus, CredOffer, CreditCheck, EscrowProposal,
-    EscrowStatus, MarketAction, OfferProposal, OfferSide, TokenEscrowVault,
+    EscrowStatus, MAX_CARTEL_DOMAINS, MarketAction, OfferProposal, OfferSide, TokenEscrowVault,
     check_offer_domain_access, effective_export_tariff_bps,
 };
 use crate::scoring::{
@@ -23,10 +24,11 @@ use crate::scoring::{
 use crate::types::{
     ActiveShock, AssetId, Bps, CharterRole, CreditTier, DEFAULT_PBRS_GAMMA_BPS, EngineError,
     MAX_TARIFF_BPS, ScheduledShockSpec, Seat, SeatIdentity, ShockKind, TableId, TableSpec, Turn,
-    Units, ceil_bps_fee, ceil_units_parity, floor_bps_part, half_up_bps, mul_units_parity,
+    Units, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
+    floor_bps_part, half_up_bps,
 };
 
-type PoliticsOutcome = (Option<(u8, u8)>, Vec<(CharterRole, u8)>);
+type PoliticsOutcome = (Option<(u8, u8)>, Vec<(CharterRole, u8)>, Units);
 
 mod delivery_ledger_serde {
     use super::*;
@@ -41,7 +43,13 @@ mod delivery_ledger_serde {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<LedgerMap, D::Error> {
         let entries = Vec::<LedgerEntry>::deserialize(deserializer)?;
-        Ok(entries.into_iter().collect())
+        let mut map = LedgerMap::new();
+        for (k, v) in entries {
+            if map.insert(k, v).is_some() {
+                return Err(serde::de::Error::custom("duplicate key in delivery_ledger"));
+            }
+        }
+        Ok(map)
     }
 }
 
@@ -126,8 +134,10 @@ pub struct EngineState {
     pub pledges: BTreeMap<u64, IntentPledge>,
     /// Pledge IDs already resolved (either fulfilled or flagged broken).
     pub audited_pledges: BTreeSet<u64>,
-    /// Permissioned cartel trade domains (`DomainID` 0 initialized by default for non-D seats).
+    /// Permissioned cartel trade domains (empty at Turn 1; founded and updated by elected Cartel Chairs).
     pub domains: Vec<CartelDomain>,
+    /// Public council platforms filed ahead of Turn-`4n` elections via `StandForOffice`, keyed by seat.
+    pub council_platforms: BTreeMap<u8, CouncilPlatform>,
     /// Active rotating Syndicate Charters.
     pub charters: Vec<ActiveCharter>,
     /// Active realized Horizon Shocks modifying turn behavior.
@@ -218,8 +228,12 @@ pub struct SweepReceipt {
     pub charters_awarded: Vec<(CharterRole, u8)>,
     /// Publicly forecasted Horizon Shocks announced in Step 8 (`forecast_turn`).
     pub public_forecasts: Vec<ShockForecastEvent>,
-    /// Newly activated realized shocks enacted in Step 8 (`realize_turn`).
+    /// Newly activated realized shocks enacted for `turn` (`realize_turn == turn`).
     pub newly_activated_shocks: Vec<ActiveShock>,
+    /// Total voluntary `CRED` auto-debt repaid in Step 2.
+    pub cred_debt_repaid: Units,
+    /// Total `CRED` burned by Syndicate Charter auctions in Step 7.
+    pub charter_cred_burned: Units,
     /// `true` if the season closed on this Sweep (moving into `AwaitingMandateReveal`).
     pub season_closed: bool,
     /// Per-seat PBRS shaped returns `F_i = gamma * Psi_{t+1} - Psi_t` (`DEFAULT_PBRS_GAMMA_BPS`).
@@ -264,10 +278,6 @@ impl TurnEngine {
             })
             .collect();
 
-        let default_domain = CartelDomain {
-            domain_id: 0,
-            members: (0..spec.seat_count).collect(),
-        };
         let mut engine = Self {
             state: EngineState {
                 table_id: spec.table_id,
@@ -283,7 +293,8 @@ impl TurnEngine {
                 escrows: BTreeMap::new(),
                 pledges: BTreeMap::new(),
                 audited_pledges: BTreeSet::new(),
-                domains: vec![default_domain],
+                domains: Vec::new(),
+                council_platforms: BTreeMap::new(),
                 charters: Vec::new(),
                 active_shocks: Vec::new(),
                 next_offer_id: 1,
@@ -298,6 +309,7 @@ impl TurnEngine {
                 last_closing_roll_bps: None,
             },
         };
+        engine.activate_shocks_for_turn(1);
         let initial_pots: Vec<Units> = (0..n as u8)
             .map(|s| compute_potential(&engine.state, s))
             .collect();
@@ -362,17 +374,29 @@ impl TurnEngine {
         if self.state.mandate_commits[idx].is_some() {
             return Err(EngineError::AlreadySubmitted(seat.0));
         }
+        if commitment != self.state.spec.dealt_mandate_commits[idx] {
+            return Err(EngineError::CommitmentMismatch(seat.0));
+        }
         self.state.mandate_commits[idx] = Some(commitment);
         Ok(())
     }
 
-    /// Applies one Phase 1 (`TalkAndMarket`) market, contract, escrow, or intent action.
+    /// Applies one Phase 1 (`TalkAndMarket`) market, contract, escrow, or intent action atomically.
     pub fn apply_market_action(&mut self, action: MarketAction) -> Result<(), EngineError> {
         if self.state.phase != TurnPhase::TalkAndMarket {
             return Err(EngineError::InvalidPhase(
                 "market actions require TalkAndMarket phase".to_owned(),
             ));
         }
+        let snapshot = self.state.clone();
+        let outcome = self.apply_market_action_inner(action);
+        if outcome.is_err() {
+            self.state = snapshot;
+        }
+        outcome
+    }
+
+    fn apply_market_action_inner(&mut self, action: MarketAction) -> Result<(), EngineError> {
         match action {
             MarketAction::PostOffer { seat, order } => self.handle_post_offer(seat, order),
             MarketAction::CancelOffer { seat, offer_id } => {
@@ -381,6 +405,7 @@ impl TurnEngine {
             MarketAction::CreateCheck { seat, check } => {
                 self.ensure_seat(seat)?;
                 self.ensure_seat(check.payee)?;
+                self.ensure_valid_asset(check.asset)?;
                 if seat == check.payee
                     || check.send_max <= 0
                     || check.deliver_min <= 0
@@ -446,6 +471,44 @@ impl TurnEngine {
                         "invalid Track-2 IntentPledge fields".to_owned(),
                     ));
                 }
+                match pledge.target {
+                    IntentTarget::VoteForSeat {
+                        office_turn,
+                        candidate,
+                    } => {
+                        self.ensure_seat(candidate)?;
+                        if office_turn < self.state.turn
+                            || office_turn > 28
+                            || !office_turn.is_multiple_of(4)
+                        {
+                            return Err(EngineError::InvalidOrder(format!(
+                                "invalid VoteForSeat office_turn {office_turn}"
+                            )));
+                        }
+                    }
+                    IntentTarget::PreserveCartelMembership {
+                        office_turn,
+                        beneficiary,
+                        ..
+                    } => {
+                        self.ensure_seat(beneficiary)?;
+                        if office_turn < self.state.turn
+                            || office_turn > 28
+                            || !office_turn.is_multiple_of(4)
+                        {
+                            return Err(EngineError::InvalidOrder(format!(
+                                "invalid PreserveCartelMembership office_turn {office_turn}"
+                            )));
+                        }
+                    }
+                    IntentTarget::RevealPreimage { escrow_id, .. } => {
+                        if escrow_id == 0 {
+                            return Err(EngineError::InvalidOrder(
+                                "RevealPreimage escrow_id must be positive".to_owned(),
+                            ));
+                        }
+                    }
+                }
                 if self.state.pledges.contains_key(&pledge.pledge_id) {
                     return Err(EngineError::InvalidOrder(format!(
                         "duplicate pledge_id {}",
@@ -472,6 +535,28 @@ impl TurnEngine {
                     ));
                 }
                 self.state.seats[usize::from(target_seat)].wash_frozen_until_turn = self.state.turn;
+                Ok(())
+            }
+            MarketAction::StandForOffice { seat, platform } => {
+                self.ensure_seat(seat)?;
+                for &(target, _) in &platform.proposed_tariffs_bps {
+                    self.ensure_seat(target)?;
+                }
+                let mut known_domains: BTreeSet<u8> =
+                    self.state.domains.iter().map(|d| d.domain_id).collect();
+                for &(dom_id, member) in &platform.cartel_admissions {
+                    self.ensure_seat(member)?;
+                    known_domains.insert(dom_id);
+                }
+                if known_domains.len() > MAX_CARTEL_DOMAINS {
+                    return Err(EngineError::InvalidOrder(format!(
+                        "platform would exceed MAX_CARTEL_DOMAINS ({MAX_CARTEL_DOMAINS})"
+                    )));
+                }
+                for &(_, member) in &platform.cartel_revocations {
+                    self.ensure_seat(member)?;
+                }
+                self.state.council_platforms.insert(seat, platform);
                 Ok(())
             }
         }
@@ -545,6 +630,10 @@ impl TurnEngine {
         if self.state.turn_reveals.contains_key(&seat.0) {
             return Err(EngineError::AlreadySubmitted(seat.0));
         }
+        for swap in &reveal.bundle.atomic_swaps {
+            self.ensure_valid_asset(swap.maker_asset)?;
+            self.ensure_valid_asset(swap.taker_asset)?;
+        }
         self.state.turn_reveals.insert(seat.0, reveal);
         Ok(())
     }
@@ -559,17 +648,19 @@ impl TurnEngine {
         let turn = self.state.turn;
         let n = self.state.seats.len();
 
-        // Step 1: Validate reveals, run EIP-4399 Regent fallback, track 3-miss AI conversion.
+        // Step 1: Validate reveals, run Regent fallback (non-committers only), track 3-miss AI conversion.
         let (non_reveal_seats, regent_acted_seats, converted_to_ai, active_bundles) =
             self.step1_validate_reveals_and_regents(turn, n);
 
-        // Step 2: Settle EscrowFinish reveals, Steward bonds, co-signed Batch swaps,
+        // Step 2: Settle EscrowFinish reveals, co-signed Batch swaps, Steward bond & expiry checks,
         // voluntary auto-debt repayments, and Tier-2 converters.
         let mut broken_promises = Vec::new();
-        let (escrows_finished, escrows_cancelled_or_forfeited) =
-            self.step2_settle_escrows_and_bonds(turn, &active_bundles, &mut broken_promises);
+        let mut escrows_finished = self.step2a_finish_preimage_escrows(turn, &active_bundles);
         let atomic_swaps_settled = self.step2_settle_atomic_swaps(turn, &active_bundles)?;
-        self.step2_voluntary_debt_repayment(&active_bundles);
+        let (bond_finished, escrows_cancelled_or_forfeited) =
+            self.step2b_evaluate_bonds_and_expired_escrows(turn, &mut broken_promises);
+        escrows_finished.extend(bond_finished);
+        let cred_debt_repaid = self.step2_voluntary_debt_repayment(&active_bundles);
         let converter_batches_run = self.step2_settle_converters(&active_bundles);
 
         // Step 3: Clear maturing Track-2 CheckCash requests & apply Check bounce downgrades.
@@ -586,8 +677,8 @@ impl TurnEngine {
         let total_spoilage_clawed_back = self.step6_apply_perishable_spoilage(turn);
 
         // Step 7: Audit vote pledges, settle 4-turn council politics, and 6-turn charters.
-        let (elected_officers, charters_awarded) =
-            self.step7_politics_and_charters(turn, &active_bundles, &mut broken_promises);
+        let (elected_officers, charters_awarded, charter_cred_burned) = self
+            .step7_politics_and_charters(turn, turn_beacon, &active_bundles, &mut broken_promises);
 
         // Step 8: Advance Horizon Shocks and evaluate stochastic close roll (Turns 24..=28).
         let (public_forecasts, newly_activated_shocks, season_closed) =
@@ -611,6 +702,7 @@ impl TurnEngine {
             self.state.phase = TurnPhase::AwaitingMandateReveal;
         } else {
             self.state.turn = turn + 1;
+            self.activate_shocks_for_turn(turn + 1);
             self.state.phase = TurnPhase::TalkAndMarket;
         }
 
@@ -635,6 +727,8 @@ impl TurnEngine {
             charters_awarded,
             public_forecasts,
             newly_activated_shocks,
+            cred_debt_repaid,
+            charter_cred_burned,
             season_closed,
             pbrs_deltas,
             post_state_digest,
@@ -663,6 +757,18 @@ impl TurnEngine {
         if !verify_mandate_reveal(self.state.table_id, seat, commitment, &reveal)? {
             return Err(EngineError::CommitmentMismatch(seat.0));
         }
+        if !self
+            .state
+            .spec
+            .mandate_deck
+            .iter()
+            .any(|c| c.kind == reveal.mandate.kind && c.bonus_equity == reveal.mandate.bonus_equity)
+        {
+            return Err(EngineError::InvalidOrder(format!(
+                "seat {} mandate reveal is not a card in table mandate_deck",
+                seat.0
+            )));
+        }
         self.state.mandate_reveals[idx] = Some(reveal);
         Ok(())
     }
@@ -687,6 +793,15 @@ impl TurnEngine {
         }
     }
 
+    fn ensure_valid_asset(&self, asset: AssetId) -> Result<(), EngineError> {
+        let n = self.state.seats.len() as u8;
+        match asset {
+            AssetId::Cred => Ok(()),
+            AssetId::Raw(g) | AssetId::Refined(g) if g < n => Ok(()),
+            AssetId::Raw(g) | AssetId::Refined(g) => Err(EngineError::InvalidSeat(g)),
+        }
+    }
+
     fn ensure_valid_good(&self, asset: AssetId) -> Result<(), EngineError> {
         let n = self.state.seats.len() as u8;
         match asset {
@@ -702,7 +817,7 @@ impl TurnEngine {
         self.state
             .charters
             .iter()
-            .any(|c| c.role == role && c.holder == seat && c.expires_at_turn > self.state.turn)
+            .any(|c| c.role == role && c.holder == seat && c.expires_at_turn >= self.state.turn)
     }
 
     fn base_tariff_bps(&self, asset: AssetId) -> Bps {
@@ -756,11 +871,13 @@ impl TurnEngine {
     }
 
     fn free_balance(&self, seat: u8, asset: AssetId) -> Units {
-        let s = &self.state.seats[usize::from(seat)];
+        let Some(s) = self.state.seats.get(usize::from(seat)) else {
+            return 0;
+        };
         match asset {
             AssetId::Cred => s.cred,
-            AssetId::Raw(g) => s.raw[usize::from(g)],
-            AssetId::Refined(m) => s.refined[usize::from(m)],
+            AssetId::Raw(g) => s.raw.get(usize::from(g)).copied().unwrap_or(0),
+            AssetId::Refined(m) => s.refined.get(usize::from(m)).copied().unwrap_or(0),
         }
     }
 
@@ -770,11 +887,21 @@ impl TurnEngine {
         asset: AssetId,
         delta: Units,
     ) -> Result<(), EngineError> {
-        let s = &mut self.state.seats[usize::from(seat)];
+        let s = self
+            .state
+            .seats
+            .get_mut(usize::from(seat))
+            .ok_or(EngineError::InvalidSeat(seat))?;
         let slot = match asset {
             AssetId::Cred => &mut s.cred,
-            AssetId::Raw(g) => &mut s.raw[usize::from(g)],
-            AssetId::Refined(m) => &mut s.refined[usize::from(m)],
+            AssetId::Raw(g) => s
+                .raw
+                .get_mut(usize::from(g))
+                .ok_or(EngineError::InvalidSeat(g))?,
+            AssetId::Refined(m) => s
+                .refined
+                .get_mut(usize::from(m))
+                .ok_or(EngineError::InvalidSeat(m))?,
         };
         let next = (*slot)
             .checked_add(delta)
@@ -791,11 +918,12 @@ impl TurnEngine {
 
     fn record_delivery(&mut self, from: u8, to: u8, asset: AssetId, net_units: Units) {
         if net_units > 0 {
-            *self
+            let slot = self
                 .state
                 .delivery_ledger
                 .entry((from, to, asset))
-                .or_insert(0) += net_units;
+                .or_insert(0);
+            *slot = slot.saturating_add(net_units);
         }
     }
 
@@ -822,9 +950,9 @@ impl TurnEngine {
             broker,
         )?;
 
+        let max_lock = checked_ceil_units_parity(order.amount, order.price_per_unit_cred)?;
         match order.side {
             OfferSide::Buy => {
-                let max_lock = ceil_units_parity(order.amount, order.price_per_unit_cred);
                 if self.free_balance(seat, AssetId::Cred) < max_lock {
                     return Err(EngineError::InsufficientBalance(format!(
                         "seat {seat} needs {max_lock} CRED to post buy offer"
@@ -855,7 +983,7 @@ impl TurnEngine {
             let trade_cred = if fill == maker.remaining_units && maker.side == OfferSide::Buy {
                 maker.locked_cred
             } else {
-                let computed = mul_units_parity(fill, maker.price_per_unit_cred);
+                let computed = checked_mul_units_parity(fill, maker.price_per_unit_cred)?;
                 if maker.side == OfferSide::Buy {
                     computed.min(maker.locked_cred)
                 } else {
@@ -908,7 +1036,7 @@ impl TurnEngine {
             self.state.next_offer_id += 1;
             let locked_cred = match order.side {
                 OfferSide::Buy => {
-                    let lock = ceil_units_parity(remaining, order.price_per_unit_cred);
+                    let lock = checked_ceil_units_parity(remaining, order.price_per_unit_cred)?;
                     self.adjust_free_balance(seat, AssetId::Cred, -lock)?;
                     lock
                 }
@@ -987,6 +1115,16 @@ impl TurnEngine {
         if self.state.seats[usize::from(maker.maker)].wash_frozen_until_turn >= self.state.turn {
             return false;
         }
+        if (taker_domain.is_some() || maker.domain_id.is_some())
+            && (!self.state.seats[usize::from(taker)]
+                .credit_tier
+                .may_access_prime_cartel()
+                || !self.state.seats[usize::from(maker.maker)]
+                    .credit_tier
+                    .may_access_prime_cartel())
+        {
+            return false;
+        }
         match (taker_domain, maker.domain_id) {
             (None, None) => true,
             (Some(td), Some(md)) if td == md => {
@@ -1048,6 +1186,7 @@ impl TurnEngine {
         }
         let bond = match proposal.bond {
             Some(bp) => {
+                self.ensure_valid_asset(bp.good)?;
                 if bp.required_units <= 0
                     || bp.deadline_turn < self.state.turn
                     || bp.deadline_turn >= proposal.cancel_after_turn
@@ -1140,6 +1279,7 @@ impl TurnEngine {
 
         for s in 0..n as u8 {
             let idx = usize::from(s);
+            let did_commit = self.state.turn_commits.contains_key(&s);
             if let Some(rev) = self.state.turn_reveals.get(&s) {
                 self.state.seats[idx].consecutive_misses = 0;
                 bundles[idx] = rev.bundle.clone();
@@ -1147,7 +1287,8 @@ impl TurnEngine {
                 non_reveal_seats.push(s);
                 self.state.seats[idx].consecutive_misses =
                     self.state.seats[idx].consecutive_misses.saturating_add(1);
-                if self.state.seats[idx].identity == SeatIdentity::Human
+                if !did_commit
+                    && self.state.seats[idx].identity == SeatIdentity::Human
                     && let Some(doctrine) = self.state.spec.seats[idx].regent
                 {
                     bundles[idx] = self.synthesize_regent_bundle(turn, s, &doctrine);
@@ -1190,19 +1331,29 @@ impl TurnEngine {
         let mut converter_runs = Vec::new();
         let seat_cfg = &self.state.spec.seats[usize::from(seat)];
         let seat_state = &self.state.seats[usize::from(seat)];
+        let mut avail_raw = seat_state.raw.clone();
         for (recipe_idx, conv) in seat_cfg.converters.iter().enumerate() {
             let mut max_possible = conv.max_runs_per_turn;
             for &(raw_g, amt) in &conv.inputs {
-                let avail = (seat_state.raw[usize::from(raw_g)] - doctrine.min_raw_reserve).max(0);
+                let avail = avail_raw
+                    .get(usize::from(raw_g))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_sub(doctrine.min_raw_reserve)
+                    .max(0);
                 let possible = (avail / amt).max(0) as u32;
                 max_possible = max_possible.min(possible);
             }
             if max_possible > 0 {
+                for &(raw_g, amt) in &conv.inputs {
+                    if let Some(slot) = avail_raw.get_mut(usize::from(raw_g)) {
+                        *slot = slot.saturating_sub(amt.saturating_mul(i64::from(max_possible)));
+                    }
+                }
                 converter_runs.push(ConverterRunOrder {
                     recipe_idx,
                     runs: max_possible,
                 });
-                break;
             }
         }
         SealedOrderBundle {
@@ -1212,14 +1363,12 @@ impl TurnEngine {
         }
     }
 
-    fn step2_settle_escrows_and_bonds(
+    fn step2a_finish_preimage_escrows(
         &mut self,
         turn: u8,
         bundles: &[SealedOrderBundle],
-        broken_promises: &mut Vec<BrokenPromiseRecord>,
-    ) -> (Vec<u64>, Vec<u64>) {
+    ) -> Vec<u64> {
         let mut finished = Vec::new();
-        let mut cancelled = Vec::new();
 
         // Collect all EscrowFinish unlocks deterministically by (escrow_id, unlock_seat).
         let mut requests: Vec<(u64, u8, EscrowFinishUnlock)> = Vec::new();
@@ -1267,8 +1416,18 @@ impl TurnEngine {
                 }
             }
         }
+        finished
+    }
 
-        // Evaluate Steward-refereed delivery bonds at deadline.
+    fn step2b_evaluate_bonds_and_expired_escrows(
+        &mut self,
+        turn: u8,
+        broken_promises: &mut Vec<BrokenPromiseRecord>,
+    ) -> (Vec<u64>, Vec<u64>) {
+        let mut finished = Vec::new();
+        let mut cancelled = Vec::new();
+
+        // Evaluate Steward-refereed delivery bonds at deadline (after Step 2 swaps settle).
         let vault_ids: Vec<u64> = self.state.escrows.keys().copied().collect();
         for escrow_id in vault_ids {
             let Some(vault) = self.state.escrows.get(&escrow_id).cloned() else {
@@ -1286,7 +1445,7 @@ impl TurnEngine {
                     .get(&(bond.obligor, bond.beneficiary, bond.good))
                     .copied()
                     .unwrap_or(0);
-                let delta_delivered = cum_now - bond.baseline_delivered;
+                let delta_delivered = cum_now.saturating_sub(bond.baseline_delivered);
                 if delta_delivered >= bond.required_units {
                     if let Some(slot) = self.state.escrows.get_mut(&escrow_id) {
                         slot.status = EscrowStatus::Finished;
@@ -1305,7 +1464,7 @@ impl TurnEngine {
                     );
                     let ob = &mut self.state.seats[usize::from(bond.obligor)];
                     ob.bond_breaches += 1;
-                    ob.honor_penalties += vault.amount_cred;
+                    ob.honor_penalties = ob.honor_penalties.saturating_add(vault.amount_cred);
                     cancelled.push(escrow_id);
                 }
                 continue;
@@ -1351,6 +1510,8 @@ impl TurnEngine {
                 if prop.maker < n
                     && prop.taker < n
                     && prop.maker != prop.taker
+                    && self.ensure_valid_asset(prop.maker_asset).is_ok()
+                    && self.ensure_valid_asset(prop.taker_asset).is_ok()
                     && prop.maker_amount > 0
                     && prop.taker_amount > 0
                     && (s == prop.maker || s == prop.taker)
@@ -1422,7 +1583,8 @@ impl TurnEngine {
         Ok(settled)
     }
 
-    fn step2_voluntary_debt_repayment(&mut self, bundles: &[SealedOrderBundle]) {
+    fn step2_voluntary_debt_repayment(&mut self, bundles: &[SealedOrderBundle]) -> Units {
+        let mut total_repaid = 0;
         for (s_idx, b) in bundles.iter().enumerate() {
             if b.debt_repayment_cred <= 0 {
                 continue;
@@ -1432,13 +1594,16 @@ impl TurnEngine {
             if repay > 0 {
                 seat.cred -= repay;
                 seat.cred_debt -= repay;
+                total_repaid += repay;
             }
         }
+        total_repaid
     }
 
     fn step2_settle_converters(&mut self, bundles: &[SealedOrderBundle]) -> usize {
         let mut total_batches = 0usize;
         for (s_idx, bundle) in bundles.iter().enumerate() {
+            let mut runs_used: BTreeMap<usize, u32> = BTreeMap::new();
             for order in &bundle.converter_runs {
                 if order.runs == 0 {
                     continue;
@@ -1450,12 +1615,15 @@ impl TurnEngine {
                 else {
                     continue;
                 };
-                if order.runs > recipe.max_runs_per_turn {
+                let used = runs_used.get(&order.recipe_idx).copied().unwrap_or(0);
+                let remaining_cap = recipe.max_runs_per_turn.saturating_sub(used);
+                if order.runs > remaining_cap {
                     continue;
                 }
                 let runs_i64 = i64::from(order.runs);
                 let has_all = recipe.inputs.iter().all(|&(raw_g, amt)| {
-                    self.state.seats[s_idx].raw[usize::from(raw_g)] >= amt.saturating_mul(runs_i64)
+                    amt.checked_mul(runs_i64)
+                        .is_some_and(|req| self.state.seats[s_idx].raw[usize::from(raw_g)] >= req)
                 });
                 if !has_all {
                     continue;
@@ -1463,9 +1631,11 @@ impl TurnEngine {
                 for &(raw_g, amt) in &recipe.inputs {
                     self.state.seats[s_idx].raw[usize::from(raw_g)] -= amt.saturating_mul(runs_i64);
                 }
-                self.state.seats[s_idx].refined[usize::from(recipe.output_good)] +=
-                    recipe.output_amount.saturating_mul(runs_i64);
-                total_batches += 1;
+                self.state.seats[s_idx].refined[usize::from(recipe.output_good)] =
+                    self.state.seats[s_idx].refined[usize::from(recipe.output_good)]
+                        .saturating_add(recipe.output_amount.saturating_mul(runs_i64));
+                *runs_used.entry(order.recipe_idx).or_insert(0) += order.runs;
+                total_batches += order.runs as usize;
             }
         }
         total_batches
@@ -1477,11 +1647,17 @@ impl TurnEngine {
         bundles: &[SealedOrderBundle],
     ) -> (Vec<u64>, Vec<u64>, Vec<u8>) {
         let mut check_ids = BTreeSet::new();
-        let mut requester_by_id = BTreeMap::new();
         for (s_idx, b) in bundles.iter().enumerate() {
+            let presenter = s_idx as u8;
             for &cid in &b.check_cashes {
-                requester_by_id.entry(cid).or_insert(s_idx as u8);
-                check_ids.insert(cid);
+                if self
+                    .state
+                    .checks
+                    .get(&cid)
+                    .is_some_and(|c| c.payee == presenter)
+                {
+                    check_ids.insert(cid);
+                }
             }
         }
 
@@ -1493,9 +1669,7 @@ impl TurnEngine {
             let Some(check) = self.state.checks.get(&check_id).cloned() else {
                 continue;
             };
-            let req = requester_by_id.get(&check_id).copied().unwrap_or(u8::MAX);
             if check.status != CheckStatus::Open
-                || check.payee != req
                 || check.due_turn > turn
                 || turn >= check.expiration_turn
             {
@@ -1590,7 +1764,9 @@ impl TurnEngine {
                 };
                 let b_i64 = i64::from(proj_ord.batches);
                 let has_all = recipe.inputs.iter().all(|&(ref_g, amt)| {
-                    self.state.seats[s_idx].refined[usize::from(ref_g)] >= amt.saturating_mul(b_i64)
+                    amt.checked_mul(b_i64).is_some_and(|req| {
+                        self.state.seats[s_idx].refined[usize::from(ref_g)] >= req
+                    })
                 });
                 if !has_all {
                     continue;
@@ -1613,7 +1789,9 @@ impl TurnEngine {
                     .unwrap_or(0);
                 let base_pts = recipe.equity_points.saturating_mul(b_i64);
                 let bonus = half_up_bps(base_pts, surge_bps);
-                self.state.seats[s_idx].project_equity += base_pts + bonus;
+                self.state.seats[s_idx].project_equity = self.state.seats[s_idx]
+                    .project_equity
+                    .saturating_add(base_pts.saturating_add(bonus));
                 completed += 1;
             }
         }
@@ -1634,13 +1812,14 @@ impl TurnEngine {
                 .max()
                 .unwrap_or(0);
             let actual_yield = base_yield - floor_bps_part(base_yield, freeze_bps);
-            self.state.seats[s_idx].raw[s_idx] += actual_yield;
+            self.state.seats[s_idx].raw[s_idx] =
+                self.state.seats[s_idx].raw[s_idx].saturating_add(actual_yield);
         }
         completed
     }
 
     fn step5_collect_upkeep_and_debt(&mut self) -> Units {
-        let mut total_shortfall_debt = 0;
+        let mut total_shortfall_debt: Units = 0;
         for s_idx in 0..self.state.seats.len() {
             let rate = self.state.seats[s_idx].credit_tier.interest_bps();
             let interest = half_up_bps(self.state.seats[s_idx].cred_debt, rate);
@@ -1658,7 +1837,7 @@ impl TurnEngine {
                 let new_debt = ceil_units_parity(shortfall, parity);
                 self.state.seats[s_idx].cred_debt =
                     self.state.seats[s_idx].cred_debt.saturating_add(new_debt);
-                total_shortfall_debt += new_debt;
+                total_shortfall_debt = total_shortfall_debt.saturating_add(new_debt);
             }
         }
         total_shortfall_debt
@@ -1687,13 +1866,13 @@ impl TurnEngine {
             rate_by_good.push(eff);
         }
 
-        let mut total_clawed = 0;
+        let mut total_clawed: Units = 0;
         for seat_state in self.state.seats.iter_mut().take(n) {
             for (g, &eff_rate) in rate_by_good.iter().enumerate() {
                 let free = seat_state.raw[g];
                 let decay = floor_bps_part(free, eff_rate);
                 seat_state.raw[g] -= decay;
-                total_clawed += decay;
+                total_clawed = total_clawed.saturating_add(decay);
             }
         }
         // Raw sell offers stay in custody of the issuer's perishable trust line; shrink them
@@ -1706,7 +1885,7 @@ impl TurnEngine {
                 let eff_rate = rate_by_good[usize::from(g)];
                 let decay = floor_bps_part(offer.remaining_units, eff_rate);
                 offer.remaining_units -= decay;
-                total_clawed += decay;
+                total_clawed = total_clawed.saturating_add(decay);
                 if offer.remaining_units <= 0 {
                     to_remove.push(oid);
                 }
@@ -1721,6 +1900,7 @@ impl TurnEngine {
     fn step7_politics_and_charters(
         &mut self,
         turn: u8,
+        turn_beacon: [u8; 32],
         bundles: &[SealedOrderBundle],
         broken_promises: &mut Vec<BrokenPromiseRecord>,
     ) -> PoliticsOutcome {
@@ -1769,13 +1949,24 @@ impl TurnEngine {
                 }
             }
 
-            let tm = pick_plurality_winner(&tm_votes, self.state.trade_minister);
-            let cc = pick_plurality_winner(&cc_votes, self.state.cartel_chair);
+            let tm = pick_plurality_winner_with_beacon(
+                &tm_votes,
+                self.state.trade_minister,
+                turn_beacon,
+                b"trade_minister",
+            );
+            let cc = pick_plurality_winner_with_beacon(
+                &cc_votes,
+                self.state.cartel_chair,
+                turn_beacon,
+                b"cartel_chair",
+            );
             self.state.trade_minister = tm;
             self.state.cartel_chair = cc;
 
-            if let Some((_, win_tm_ballot)) = valid_ballots.iter().find(|&&(s, _)| s == tm) {
-                for &(target, (raw_bps, ref_bps)) in &win_tm_ballot.proposed_tariffs_bps {
+            // T3: Winners enact their publicly filed StandForOffice platforms (even without voting).
+            if let Some(win_tm_platform) = self.state.council_platforms.get(&tm).cloned() {
+                for &(target, (raw_bps, ref_bps)) in &win_tm_platform.proposed_tariffs_bps {
                     if usize::from(target) < n {
                         self.state.seats[usize::from(target)].raw_tariff_bps =
                             raw_bps.min(MAX_TARIFF_BPS);
@@ -1786,22 +1977,32 @@ impl TurnEngine {
             }
 
             let mut revoked_pairs = BTreeSet::new();
-            if let Some((_, win_cc_ballot)) = valid_ballots.iter().find(|&&(s, _)| s == cc) {
-                for &(dom_id, seat_idx) in &win_cc_ballot.cartel_admissions {
+            if let Some(win_cc_platform) = self.state.council_platforms.get(&cc).cloned() {
+                for &(dom_id, seat_idx) in &win_cc_platform.cartel_admissions {
                     if usize::from(seat_idx) < n
                         && self.state.seats[usize::from(seat_idx)]
                             .credit_tier
                             .may_access_prime_cartel()
-                        && let Some(dom) = self
+                    {
+                        if let Some(dom) = self
                             .state
                             .domains
                             .iter_mut()
                             .find(|d| d.domain_id == dom_id)
-                    {
-                        dom.members.insert(seat_idx);
+                        {
+                            dom.members.insert(seat_idx);
+                        } else if self.state.domains.len() < MAX_CARTEL_DOMAINS {
+                            let mut members = BTreeSet::new();
+                            members.insert(seat_idx);
+                            self.state.domains.push(CartelDomain {
+                                domain_id: dom_id,
+                                members,
+                            });
+                            self.state.domains.sort_by_key(|d| d.domain_id);
+                        }
                     }
                 }
-                for &(dom_id, seat_idx) in &win_cc_ballot.cartel_revocations {
+                for &(dom_id, seat_idx) in &win_cc_platform.cartel_revocations {
                     if usize::from(seat_idx) < n
                         && let Some(dom) = self
                             .state
@@ -1815,6 +2016,7 @@ impl TurnEngine {
                     }
                 }
             }
+            self.state.council_platforms.clear();
 
             let cartel_pledges: Vec<IntentPledge> = self
                 .state
@@ -1848,6 +2050,7 @@ impl TurnEngine {
         }
 
         let mut awarded = Vec::new();
+        let mut charter_cred_burned: Units = 0;
         if turn.is_multiple_of(6) {
             self.state.charters.retain(|c| c.expires_at_turn > turn);
             let roles = [
@@ -1879,6 +2082,7 @@ impl TurnEngine {
                 }
                 if let Some((win_bid, winner)) = best {
                     self.state.seats[usize::from(winner)].cred -= win_bid;
+                    charter_cred_burned = charter_cred_burned.saturating_add(win_bid);
                     self.state.charters.retain(|c| c.role != role);
                     self.state.charters.push(ActiveCharter {
                         role,
@@ -1889,7 +2093,7 @@ impl TurnEngine {
                 }
             }
         }
-        (elected, awarded)
+        (elected, awarded, charter_cred_burned)
     }
 
     fn record_broken_promise(
@@ -1909,15 +2113,30 @@ impl TurnEngine {
         });
     }
 
+    fn activate_shocks_for_turn(&mut self, turn: u8) {
+        for shock in &self.state.spec.shocks {
+            if shock.realize_turn == turn {
+                let dur = match shock.kind {
+                    ShockKind::DemandSurge => 2,
+                    ShockKind::SupplyFreeze
+                    | ShockKind::TariffHoliday
+                    | ShockKind::SpoilageSpike => 1,
+                };
+                self.state.active_shocks.push(ActiveShock {
+                    target_seat: shock.target_seat,
+                    kind: shock.kind,
+                    magnitude_bps: shock.magnitude_bps,
+                    expires_after_turn: turn + dur - 1,
+                });
+            }
+        }
+    }
+
     fn step8_shocks_and_close(
         &mut self,
         turn: u8,
         turn_beacon: [u8; 32],
     ) -> (Vec<ShockForecastEvent>, Vec<ActiveShock>, bool) {
-        self.state
-            .active_shocks
-            .retain(|s| s.expires_after_turn > turn);
-
         let mut public_forecasts = Vec::new();
         let mut newly_activated = Vec::new();
         for shock in &self.state.spec.shocks {
@@ -1935,16 +2154,17 @@ impl TurnEngine {
                     | ShockKind::TariffHoliday
                     | ShockKind::SpoilageSpike => 1,
                 };
-                let active = ActiveShock {
+                newly_activated.push(ActiveShock {
                     target_seat: shock.target_seat,
                     kind: shock.kind,
                     magnitude_bps: shock.magnitude_bps,
-                    expires_after_turn: turn + dur,
-                };
-                self.state.active_shocks.push(active);
-                newly_activated.push(active);
+                    expires_after_turn: turn + dur - 1,
+                });
             }
         }
+        self.state
+            .active_shocks
+            .retain(|s| s.expires_after_turn > turn);
 
         for seat in &mut self.state.seats {
             if seat.wash_frozen_until_turn <= turn {
@@ -1967,45 +2187,37 @@ impl TurnEngine {
     }
 }
 
-fn pick_plurality_winner(votes: &[u32], fallback: u8) -> u8 {
-    let mut best_votes = 0u32;
-    let mut best_seat = fallback;
-    for (idx, &v) in votes.iter().enumerate() {
-        if v > best_votes {
-            best_votes = v;
-            best_seat = idx as u8;
-        }
+fn pick_plurality_winner_with_beacon(
+    votes: &[u32],
+    incumbent: u8,
+    turn_beacon: [u8; 32],
+    domain_tag: &[u8],
+) -> u8 {
+    let max_votes = votes.iter().copied().max().unwrap_or(0);
+    if max_votes == 0 {
+        return incumbent;
     }
-    best_seat
+    let tied: Vec<u8> = votes
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, &v)| (v == max_votes).then_some(idx as u8))
+        .collect();
+    break_tie_with_beacon(turn_beacon, domain_tag, &tied)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commit::{
-        MandateKind, PrivateMandate, RevealSalt, compute_mandate_commitment,
-        compute_order_commitment, derive_turn_beacon,
-    };
+    use crate::commit::{RevealSalt, compute_order_commitment, derive_turn_beacon};
 
     #[test]
     fn turn_engine_handles_commit_reveal_errors_and_three_miss_ai_conversion() {
         let Ok(spec) = TableSpec::standard_chiral_ring(TableId(7), 4, 42) else {
             panic!("valid spec");
         };
+        let m_hash = spec.dealt_mandate_commits[0];
         let Ok(mut engine) = TurnEngine::new(spec) else {
             panic!("init ok");
-        };
-        let m_rev = MandateReveal {
-            mandate: PrivateMandate {
-                kind: MandateKind::MaintainCleanCredit {
-                    min_tier: CreditTier::Aaa,
-                },
-                bonus_equity: 2_500,
-            },
-            salt: RevealSalt([0x77; 32]),
-        };
-        let Ok(m_hash) = compute_mandate_commitment(TableId(7), Seat(0), &m_rev) else {
-            panic!("mandate hash");
         };
         assert!(engine.submit_mandate_commitment(Seat(0), m_hash).is_ok());
         assert!(matches!(

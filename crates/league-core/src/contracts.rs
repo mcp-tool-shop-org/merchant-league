@@ -6,8 +6,11 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commit::{CommitmentHash, IntentPledge};
+use crate::commit::{CommitmentHash, CouncilPlatform, IntentPledge};
 use crate::types::{AssetId, Bps, CharterRole, CreditTier, EngineError, Units};
+
+/// Maximum number of distinct `PermissionedDomain` cartel zones allowed on a table.
+pub const MAX_CARTEL_DOMAINS: usize = 16;
 
 /// Active cartel trade domain isolating zero-tariff insider order books (`PermissionedDomain`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,6 +279,13 @@ pub enum MarketAction {
         /// Suspected seat placed under temporary market hold for the remainder of the turn.
         target_seat: u8,
     },
+    /// File or update a public council platform ahead of a Turn-`4n` council election (`T3`).
+    StandForOffice {
+        /// Candidate seat filing its tariff / cartel platform.
+        seat: u8,
+        /// Public platform enacted without requiring a Turn-`4n` ballot if `seat` wins.
+        platform: CouncilPlatform,
+    },
 }
 
 /// Validates and computes required tariff rate (`bps`) for a commodity transfer between two seats.
@@ -324,7 +334,12 @@ pub fn check_offer_domain_access(
     let Some(dom) = domains.iter().find(|d| d.domain_id == d_id) else {
         return Err(EngineError::UnknownObject(format!("cartel domain {d_id}")));
     };
-    if !credit_tier.may_access_prime_cartel() || !dom.members.contains(&seat) {
+    if !credit_tier.may_access_prime_cartel() {
+        return Err(EngineError::DomainAccessDenied(format!(
+            "seat {seat} with tier {credit_tier:?} cannot access cartel domain {d_id}"
+        )));
+    }
+    if !dom.members.contains(&seat) {
         if is_hybrid && has_broker_charter {
             return Ok(());
         }

@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Pure-state v2 simultaneous turn engine, dual-track contracts, Cardinal Net Equity and PBRS scoring, 4-turn council and 6-turn charter governance, 3-stage Horizon Shocks, and deterministic season replay (`league-core`).
+- Pure-state v2 simultaneous turn engine, dual-track contracts, Cardinal Net Equity and PBRS scoring, 4-turn council and 6-turn charter governance, 3-stage Horizon Shocks, and deterministic season replay (`league-core`), including checked fixed-point DEX order math, atomic Phase-1 actions, per-converter turn caps, payee-only check clearing, empty initial cartel domains, beacon tie-breaking, public `StandForOffice` platforms, non-committer Regent synthesis, and deck-dealt `3–8 VP` mandates.
 - Chiral converter-ring table generator, linear-programming feasibility and shadow-price/Shapley equity filter, fixed `CRED` numeraire with ISO/crypto ticker deny-list, Prioritized Level Replay sampler, and random-vs-ring lock-in and static HHI benchmark (`league-gen`, pure-Rust crate with no ledger).
 - Paper-test seat relay (`league-relay`, library and binary), for games 3 onward.
   - Reads JSON seat files (`openrouter` with case-insensitively unique `[A-Za-z][A-Za-z0-9_-]*` guild names, pinned `provider/model` slugs, temperature, `max_output_tokens`, per-seat wall timeout, and `max_cost_per_call`; `file` seats report manual relay and make no call).

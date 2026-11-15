@@ -5,11 +5,21 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commit::{CommitmentHash, MandateReveal, OrderReveal};
+use crate::commit::{CommitmentHash, MandateReveal, OrderReveal, derive_turn_beacon};
 use crate::contracts::MarketAction;
 use crate::engine::{SweepReceipt, TurnEngine, TurnPhase};
 use crate::scoring::FinalScoreboard;
-use crate::types::{EngineError, Seat, TableSpec};
+use crate::types::{EngineError, Seat, TableSpec, Turn};
+
+/// Verification mode for per-turn beacons during [`replay_season`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReplayBeaconMode {
+    /// Eval / standalone mode: verifies `turn_beacon == derive_turn_beacon(seed, table_id, turn)`.
+    #[default]
+    SeedDerived,
+    /// Game mode with public drand beacon: requires strictly increasing `drand_round` and non-zero beacon.
+    ExternalDrand,
+}
 
 /// Recorded ordered inputs for a single simultaneous turn (`TalkAndMarket -> Commit -> Reveal -> Sweep`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +34,9 @@ pub struct LoggedTurn {
     pub reveals: BTreeMap<u8, OrderReveal>,
     /// Publicly logged randomness beacon (`drand` in Game Mode or deterministic PRNG in Eval Mode).
     pub turn_beacon: [u8; 32],
+    /// Optional drand round number required when `beacon_mode == ReplayBeaconMode::ExternalDrand`.
+    #[serde(default)]
+    pub drand_round: Option<u64>,
 }
 
 /// Complete portable audit log replaying an entire season without any ledger I/O.
@@ -33,6 +46,9 @@ pub struct SeasonReplayLog {
     pub spec: TableSpec,
     /// Season replay seed associated with this log.
     pub seed: u64,
+    /// Verification rule applied to each logged turn beacon.
+    #[serde(default)]
+    pub beacon_mode: ReplayBeaconMode,
     /// Optional Turn-1 Private Charter Mandate commitments per seat (`0..seat_count`).
     pub mandate_commits: Vec<Option<CommitmentHash>>,
     /// Chronological sequence of turns executed from Turn `1` through closing turn `T in 24..=28`.
@@ -75,6 +91,7 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
 
     let mut receipts = Vec::with_capacity(log.turns.len());
     let mut state_digests = Vec::with_capacity(log.turns.len());
+    let mut prev_drand_round: Option<u64> = None;
 
     for logged in &log.turns {
         if engine.state().phase != TurnPhase::TalkAndMarket {
@@ -91,8 +108,41 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
                 logged.turn
             )));
         }
+        match log.beacon_mode {
+            ReplayBeaconMode::SeedDerived => {
+                let expected_beacon =
+                    derive_turn_beacon(log.seed, log.spec.table_id, Turn(logged.turn));
+                if logged.turn_beacon != expected_beacon {
+                    return Err(EngineError::SeasonEnded(format!(
+                        "turn {} beacon does not match seed {} and table {}",
+                        logged.turn, log.seed, log.spec.table_id.0
+                    )));
+                }
+            }
+            ReplayBeaconMode::ExternalDrand => {
+                let Some(round) = logged.drand_round else {
+                    return Err(EngineError::SeasonEnded(format!(
+                        "turn {} missing drand_round in ExternalDrand mode",
+                        logged.turn
+                    )));
+                };
+                if prev_drand_round.is_some_and(|prev| round <= prev) {
+                    return Err(EngineError::SeasonEnded(format!(
+                        "turn {} drand_round {round} is not strictly increasing",
+                        logged.turn
+                    )));
+                }
+                if logged.turn_beacon == [0u8; 32] {
+                    return Err(EngineError::SeasonEnded(format!(
+                        "turn {} has all-zero external drand beacon",
+                        logged.turn
+                    )));
+                }
+                prev_drand_round = Some(round);
+            }
+        }
         for action in &logged.market_actions {
-            engine.apply_market_action(action.clone())?;
+            let _ = engine.apply_market_action(action.clone());
         }
         engine.advance_to_commit()?;
         for (&seat_idx, &commit) in &logged.commitments {
@@ -130,20 +180,20 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commit::{
-        MandateKind, PrivateMandate, RevealSalt, SealedOrderBundle, compute_mandate_commitment,
-        compute_order_commitment, derive_turn_beacon,
-    };
-    use crate::types::{CreditTier, TableId, Turn};
+    use crate::commit::{RevealSalt, SealedOrderBundle, compute_order_commitment};
+    use crate::types::{TableId, Turn};
 
     #[test]
     fn replay_rejects_incomplete_tampered_and_post_close_logs() {
-        let Ok(spec) = TableSpec::standard_chiral_ring(TableId(101), 4, 7) else {
+        let Ok((spec, dealt_reveals)) =
+            TableSpec::standard_chiral_ring_with_mandates(TableId(101), 4, 7)
+        else {
             panic!("valid spec");
         };
         let empty = SeasonReplayLog {
             spec: spec.clone(),
             seed: 7,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
             mandate_commits: vec![None; 4],
             turns: Vec::new(),
             mandate_reveals: vec![None; 4],
@@ -156,6 +206,7 @@ mod tests {
         let bad_len = SeasonReplayLog {
             spec: spec.clone(),
             seed: 7,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
             mandate_commits: vec![None; 3],
             turns: Vec::new(),
             mandate_reveals: vec![None; 4],
@@ -172,18 +223,8 @@ mod tests {
         };
         let mut mandate_commits = vec![None; 4];
         let mut mandate_reveals = vec![None; 4];
-        let rev0 = MandateReveal {
-            mandate: PrivateMandate {
-                kind: MandateKind::MaintainCleanCredit {
-                    min_tier: CreditTier::Aaa,
-                },
-                bonus_equity: 3_000,
-            },
-            salt: RevealSalt([0x33; 32]),
-        };
-        let Ok(mc0) = compute_mandate_commitment(TableId(101), Seat(0), &rev0) else {
-            panic!("mandate commit");
-        };
+        let rev0 = dealt_reveals[0].clone();
+        let mc0 = spec.dealt_mandate_commits[0];
         mandate_commits[0] = Some(mc0);
         mandate_reveals[0] = Some(rev0.clone());
         assert!(engine.submit_mandate_commitment(Seat(0), mc0).is_ok());
@@ -223,6 +264,7 @@ mod tests {
                 commitments,
                 reveals,
                 turn_beacon: beacon,
+                drand_round: None,
             });
             if receipt.season_closed {
                 break;
@@ -236,6 +278,7 @@ mod tests {
         let log = SeasonReplayLog {
             spec,
             seed: 7,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
             mandate_commits,
             turns: turns.clone(),
             mandate_reveals,
@@ -262,6 +305,7 @@ mod tests {
             commitments: BTreeMap::new(),
             reveals: BTreeMap::new(),
             turn_beacon: [0; 32],
+            drand_round: None,
         });
         assert!(matches!(
             replay_season(&extra),

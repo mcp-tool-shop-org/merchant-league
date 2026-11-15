@@ -7,7 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::types::{
-    AssetId, Bps, CharterRole, CreditTier, EngineError, Seat, TableId, Turn, Units,
+    AssetId, BPS_SCALE, Bps, CharterRole, CreditTier, EngineError, MAX_MANDATE_BONUS_EQUITY,
+    MIN_MANDATE_BONUS_EQUITY, Seat, TableId, Turn, Units,
 };
 
 mod hex32 {
@@ -120,19 +121,26 @@ pub struct EscrowFinishUnlock {
     pub preimage: Option<PreimageSecret>,
 }
 
-/// Sealed council election and tariff/cartel ballot submitted on turns divisible by `4`.
+/// Public council platform filed ahead of an election turn (`StandForOffice`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CouncilPlatform {
+    /// Preferred export tariff policy changes `(seat, (raw_bps, refined_bps))` enacted if elected Trade Minister.
+    pub proposed_tariffs_bps: Vec<(u8, (Bps, Bps))>,
+    /// Preferred domain admissions `(domain_id, seat)` enacted (founding new domains when needed) if elected Cartel Chair.
+    pub cartel_admissions: Vec<(u8, u8)>,
+    /// Preferred domain credential deletions `(domain_id, seat)` enacted if elected Cartel Chair.
+    pub cartel_revocations: Vec<(u8, u8)>,
+}
+
+/// Sealed council election ballot submitted on turns divisible by `4`.
+///
+/// Tariffs and cartel membership changes come from the winner's filed [`CouncilPlatform`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CouncilVoteBallot {
     /// Preferred seat index for Trade Minister (`0..seat_count`).
     pub trade_minister: u8,
-    /// Preferred export tariff policy changes `(seat, (raw_bps, refined_bps))` enacted if candidate wins.
-    pub proposed_tariffs_bps: Vec<(u8, (Bps, Bps))>,
     /// Preferred seat index for Cartel Chair (`0..seat_count`).
     pub cartel_chair: u8,
-    /// Preferred domain admissions `(domain_id, seat)` enacted if candidate wins.
-    pub cartel_admissions: Vec<(u8, u8)>,
-    /// Preferred domain credential deletions `(domain_id, seat)` enacted if candidate wins.
-    pub cartel_revocations: Vec<(u8, u8)>,
 }
 
 /// Sealed equity bid for a 6-turn Syndicate Charter on turns divisible by `6`.
@@ -265,6 +273,144 @@ pub struct MandateReveal {
     pub salt: RevealSalt,
 }
 
+/// Card in a table's public Turn-1 Private Mandate deck with calibrated difficulty and bonus (`3–8 VP`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GradedMandateCard {
+    /// Unique card identifier within the table deck.
+    pub card_id: u16,
+    /// Objective rule evaluated at terminal Turn `T`.
+    pub kind: MandateKind,
+    /// Playtest completion rate (`0..=10_000 bps`) used to grade card difficulty.
+    pub difficulty_completion_bps: Bps,
+    /// Irreversible equity bonus (`3_000..=8_000`, i.e., `3–8 VP`) granted upon completion.
+    pub bonus_equity: Units,
+}
+
+/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3–8 VP` (`3_000..=8_000`).
+#[must_use]
+pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
+    let clamped = i64::from(completion_bps.min(10_000));
+    let hard_bps = (BPS_SCALE as i64) - clamped;
+    MIN_MANDATE_BONUS_EQUITY
+        + ((MAX_MANDATE_BONUS_EQUITY - MIN_MANDATE_BONUS_EQUITY) * hard_bps) / (BPS_SCALE as i64)
+}
+
+/// Builds the canonical 8-card graded mandate deck for `seat_count` (`4..=6`), covering all
+/// [`MandateKind`] variants with monopoly-safe thresholds (`max_safe = seat_count - 2`) and
+/// bonuses spanning `3_000..=8_000` (`3–8 VP`).
+#[must_use]
+pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
+    let max_safe = seat_count.saturating_sub(2).max(1);
+    let specs = [
+        (
+            1,
+            MandateKind::MaintainCleanCredit {
+                min_tier: CreditTier::Bbb,
+            },
+            10_000,
+        ),
+        (2, MandateKind::MinProjectEquity { target: 16_000 }, 8_000),
+        (
+            3,
+            MandateKind::MinRefinedVariety {
+                distinct_goods: max_safe.min(2),
+                min_each: 1_500,
+            },
+            7_000,
+        ),
+        (
+            4,
+            MandateKind::MinActivePartners {
+                min_partners: max_safe,
+            },
+            6_000,
+        ),
+        (
+            5,
+            MandateKind::MaintainCleanCredit {
+                min_tier: CreditTier::Aaa,
+            },
+            4_000,
+        ),
+        (
+            6,
+            MandateKind::MinRefinedVariety {
+                distinct_goods: max_safe,
+                min_each: 3_000,
+            },
+            2_500,
+        ),
+        (7, MandateKind::MinProjectEquity { target: 28_000 }, 1_500),
+        (8, MandateKind::MinProjectEquity { target: 36_000 }, 0),
+    ];
+    specs
+        .into_iter()
+        .map(
+            |(card_id, kind, difficulty_completion_bps)| GradedMandateCard {
+                card_id,
+                kind,
+                difficulty_completion_bps,
+                bonus_equity: bonus_equity_for_completion_bps(difficulty_completion_bps),
+            },
+        )
+        .collect()
+}
+
+/// Deterministically shuffles `deck` and deals one [`MandateReveal`] and [`CommitmentHash`] per seat.
+pub fn deal_graded_mandates(
+    table_id: TableId,
+    seat_count: u8,
+    seed: u64,
+    deck: &[GradedMandateCard],
+) -> Result<(Vec<CommitmentHash>, Vec<MandateReveal>), EngineError> {
+    let n = usize::from(seat_count);
+    if n == 0 || deck.len() < n {
+        return Err(EngineError::InvalidConfig(format!(
+            "mandate deck ({}) smaller than seat_count ({seat_count})",
+            deck.len()
+        )));
+    }
+    let mut indices: Vec<usize> = (0..deck.len()).collect();
+    for i in (1..indices.len()).rev() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-core/mandate-deal/v2");
+        hasher.update(seed.to_le_bytes());
+        hasher.update(table_id.0.to_le_bytes());
+        hasher.update((i as u32).to_le_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        let mut le = [0u8; 8];
+        le.copy_from_slice(&digest[0..8]);
+        let j = (u64::from_le_bytes(le) as usize) % (i + 1);
+        indices.swap(i, j);
+    }
+
+    let mut commits = Vec::with_capacity(n);
+    let mut reveals = Vec::with_capacity(n);
+    for (seat_idx, &card_idx) in indices.iter().take(n).enumerate() {
+        let card = deck[card_idx];
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-core/mandate-salt/v2");
+        hasher.update(seed.to_le_bytes());
+        hasher.update(table_id.0.to_le_bytes());
+        hasher.update([seat_idx as u8]);
+        let mut salt: [u8; 32] = hasher.finalize().into();
+        if salt.iter().all(|&b| b == 0) {
+            salt[0] = 1;
+        }
+        let reveal = MandateReveal {
+            mandate: PrivateMandate {
+                kind: card.kind,
+                bonus_equity: card.bonus_equity,
+            },
+            salt: RevealSalt(salt),
+        };
+        let commit = compute_mandate_commitment(table_id, Seat(seat_idx as u8), &reveal)?;
+        commits.push(commit);
+        reveals.push(reveal);
+    }
+    Ok((commits, reveals))
+}
+
 /// Computes `SHA-256("league-core/preimage/v2" || secret)` for conditional `TokenEscrow`.
 #[must_use]
 pub fn compute_preimage_condition(secret: &PreimageSecret) -> CommitmentHash {
@@ -347,4 +493,23 @@ pub fn beacon_roll_bps(beacon: [u8; 32]) -> Bps {
     let mut le = [0u8; 8];
     le.copy_from_slice(&beacon[0..8]);
     (u64::from_le_bytes(le) % 10_000) as Bps
+}
+
+/// Deterministically breaks an election plurality tie among `tied` seat indices using `turn_beacon`.
+#[must_use]
+pub fn break_tie_with_beacon(beacon: [u8; 32], domain_tag: &[u8], tied: &[u8]) -> u8 {
+    match tied {
+        [] => 0,
+        [only] => *only,
+        _ => {
+            let mut hasher = Sha256::new();
+            hasher.update(b"league-core/tie-break/v2");
+            hasher.update(domain_tag);
+            hasher.update(beacon);
+            let digest: [u8; 32] = hasher.finalize().into();
+            let mut le = [0u8; 8];
+            le.copy_from_slice(&digest[0..8]);
+            tied[(u64::from_le_bytes(le) as usize) % tied.len()]
+        }
+    }
 }

@@ -9,8 +9,8 @@ use crate::commit::{MandateKind, MandateReveal};
 use crate::contracts::{CheckStatus, EscrowStatus, OfferSide};
 use crate::engine::EngineState;
 use crate::types::{
-    AssetId, Bps, CreditTier, EngineError, TableSpec, UNIT_SCALE, Units, mul_units_parity,
-    scale_bps_signed,
+    AssetId, Bps, CreditTier, EngineError, MAX_MANDATE_BONUS_EQUITY, MIN_MANDATE_BONUS_EQUITY,
+    TableSpec, UNIT_SCALE, Units, mul_units_parity, scale_bps_signed,
 };
 
 /// Fundamental shadow parities derived deterministically from table converter stoichiometry
@@ -179,7 +179,17 @@ pub fn evaluate_mandate_bonus(
     let Some(seat_state) = state.seats.get(idx) else {
         return (false, 0);
     };
-    let ok = match reveal.mandate.kind {
+    let Some(card) =
+        state.spec.mandate_deck.iter().find(|c| {
+            c.kind == reveal.mandate.kind && c.bonus_equity == reveal.mandate.bonus_equity
+        })
+    else {
+        return (false, 0);
+    };
+    if !(MIN_MANDATE_BONUS_EQUITY..=MAX_MANDATE_BONUS_EQUITY).contains(&card.bonus_equity) {
+        return (false, 0);
+    }
+    let ok = match card.kind {
         MandateKind::MinProjectEquity { target } => seat_state.project_equity >= target,
         MandateKind::MinRefinedVariety {
             distinct_goods,
@@ -210,7 +220,7 @@ pub fn evaluate_mandate_bonus(
         }
     };
     if ok {
-        (true, reveal.mandate.bonus_equity.max(0))
+        (true, card.bonus_equity)
     } else {
         (false, 0)
     }

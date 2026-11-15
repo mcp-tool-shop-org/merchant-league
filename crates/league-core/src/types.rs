@@ -6,6 +6,11 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::commit::{
+    CommitmentHash, GradedMandateCard, MandateKind, MandateReveal, deal_graded_mandates,
+    default_graded_mandate_deck,
+};
+
 /// Integer milli-unit quantity (`1_000 == 1.000` unit of `CRED`, commodity, or equity).
 pub type Units = i64;
 
@@ -27,14 +32,30 @@ pub const DEFAULT_CLOSING_HAZARD_BPS: [Bps; 4] = [2_000, 3_500, 5_500, 8_000];
 /// Default PBRS discount factor `gamma = 0.95` (`9_500 bps`).
 pub const DEFAULT_PBRS_GAMMA_BPS: Bps = 9_500;
 
-/// Computes `ceil(amount * bps / 10_000)` using `i128` intermediates. Returns `0` for `amount <= 0`.
+/// Minimum Turn-1 Private Mandate bank bonus (`3.000 VP`).
+pub const MIN_MANDATE_BONUS_EQUITY: Units = 3 * UNIT_SCALE;
+
+/// Maximum Turn-1 Private Mandate bank bonus (`8.000 VP`).
+pub const MAX_MANDATE_BONUS_EQUITY: Units = 8 * UNIT_SCALE;
+
+const fn clamp_i128_to_units(value: i128) -> Units {
+    if value > Units::MAX as i128 {
+        Units::MAX
+    } else if value < Units::MIN as i128 {
+        Units::MIN
+    } else {
+        value as Units
+    }
+}
+
+/// Computes `ceil(amount * bps / 10_000)` using `i128` intermediates, saturating into `Units` bounds.
 #[must_use]
 pub const fn ceil_bps_fee(amount: Units, bps: Bps) -> Units {
     if amount <= 0 || bps == 0 {
         return 0;
     }
     let num = (amount as i128) * (bps as i128) + (BPS_SCALE - 1);
-    (num / BPS_SCALE) as Units
+    clamp_i128_to_units(num / BPS_SCALE)
 }
 
 /// Computes `floor(amount * bps / 10_000)` clamped into `0..=amount`.
@@ -43,45 +64,81 @@ pub const fn floor_bps_part(amount: Units, bps: Bps) -> Units {
     if amount <= 0 || bps == 0 {
         return 0;
     }
-    let part = (((amount as i128) * (bps as i128)) / BPS_SCALE) as Units;
+    let part = clamp_i128_to_units(((amount as i128) * (bps as i128)) / BPS_SCALE);
     if part > amount { amount } else { part }
 }
 
-/// Computes half-up `round(amount * bps / 10_000)` using `i128` intermediates.
+/// Computes half-up `round(amount * bps / 10_000)` using `i128` intermediates, saturating cleanly.
 #[must_use]
 pub const fn half_up_bps(amount: Units, bps: Bps) -> Units {
     if amount <= 0 || bps == 0 {
         return 0;
     }
-    (((amount as i128) * (bps as i128) + (BPS_SCALE / 2)) / BPS_SCALE) as Units
+    clamp_i128_to_units(((amount as i128) * (bps as i128) + (BPS_SCALE / 2)) / BPS_SCALE)
 }
 
-/// Computes `floor(amount * parity_per_unit / UNIT_SCALE)` for positive valuations.
+/// Computes `floor(amount * parity_per_unit / UNIT_SCALE)` for positive valuations, saturating cleanly.
 #[must_use]
 pub const fn mul_units_parity(amount: Units, parity_per_unit: Units) -> Units {
     if amount == 0 || parity_per_unit == 0 {
         return 0;
     }
-    (((amount as i128) * (parity_per_unit as i128)) / (UNIT_SCALE as i128)) as Units
+    clamp_i128_to_units(((amount as i128) * (parity_per_unit as i128)) / (UNIT_SCALE as i128))
 }
 
-/// Computes `ceil(shortfall * parity_per_unit / UNIT_SCALE)` for debt conversions.
+/// Computes `ceil(shortfall * parity_per_unit / UNIT_SCALE)` for debt conversions, saturating cleanly.
 #[must_use]
 pub const fn ceil_units_parity(shortfall: Units, parity_per_unit: Units) -> Units {
     if shortfall <= 0 || parity_per_unit <= 0 {
         return 0;
     }
     let scale = UNIT_SCALE as i128;
-    (((shortfall as i128) * (parity_per_unit as i128) + (scale - 1)) / scale) as Units
+    clamp_i128_to_units(((shortfall as i128) * (parity_per_unit as i128) + (scale - 1)) / scale)
 }
 
-/// Scales a signed equity potential by a basis-point discount factor (`gamma <= 10_000`).
+/// Checked `floor(amount * parity_per_unit / UNIT_SCALE)` returning `Err(InvalidOrder)` on negative inputs or `i64` overflow.
+pub fn checked_mul_units_parity(
+    amount: Units,
+    parity_per_unit: Units,
+) -> Result<Units, EngineError> {
+    if amount < 0 || parity_per_unit < 0 {
+        return Err(EngineError::InvalidOrder(
+            "negative units or price in units multiplication".to_owned(),
+        ));
+    }
+    if amount == 0 || parity_per_unit == 0 {
+        return Ok(0);
+    }
+    let raw = ((amount as i128) * (parity_per_unit as i128)) / (UNIT_SCALE as i128);
+    Units::try_from(raw).map_err(|_| EngineError::InvalidOrder("units * price overflow".to_owned()))
+}
+
+/// Checked `ceil(shortfall * parity_per_unit / UNIT_SCALE)` returning `Err(InvalidOrder)` on negative inputs or `i64` overflow.
+pub fn checked_ceil_units_parity(
+    shortfall: Units,
+    parity_per_unit: Units,
+) -> Result<Units, EngineError> {
+    if shortfall < 0 || parity_per_unit < 0 {
+        return Err(EngineError::InvalidOrder(
+            "negative units or price in ceil units multiplication".to_owned(),
+        ));
+    }
+    if shortfall == 0 || parity_per_unit == 0 {
+        return Ok(0);
+    }
+    let scale = UNIT_SCALE as i128;
+    let raw = ((shortfall as i128) * (parity_per_unit as i128) + (scale - 1)) / scale;
+    Units::try_from(raw)
+        .map_err(|_| EngineError::InvalidOrder("ceil units * price overflow".to_owned()))
+}
+
+/// Scales a signed equity potential by a basis-point discount factor (`gamma <= 10_000`), rounding toward `-infinity`.
 #[must_use]
 pub const fn scale_bps_signed(value: i64, gamma_bps: Bps) -> i64 {
     if gamma_bps == 10_000 {
         return value;
     }
-    (((value as i128) * (gamma_bps as i128)) / BPS_SCALE) as i64
+    clamp_i128_to_units(((value as i128) * (gamma_bps as i128)).div_euclid(BPS_SCALE))
 }
 
 /// Identifies a table: one game of 4 to 6 merchants in v2 (or 2 to 6 legacy).
@@ -311,6 +368,10 @@ pub struct TableSpec {
     pub shocks: Vec<ScheduledShockSpec>,
     /// Stochastic season closing hazards (in bps) evaluated on Turns `24, 25, 26, 27`.
     pub closing_hazard_bps: [Bps; 4],
+    /// Public graded Turn-1 mandate deck defining valid cards and `3–8 VP` bank bonuses (`T5`).
+    pub mandate_deck: Vec<GradedMandateCard>,
+    /// Pre-dealt Turn-1 mandate commitments indexed by seat (`0..seat_count`).
+    pub dealt_mandate_commits: Vec<CommitmentHash>,
 }
 
 impl TableSpec {
@@ -375,16 +436,58 @@ impl TableSpec {
                 ));
             }
         }
+        if self.dealt_mandate_commits.len() != n {
+            return Err(EngineError::InvalidConfig(format!(
+                "expected {n} dealt_mandate_commits, got {}",
+                self.dealt_mandate_commits.len()
+            )));
+        }
+        if self.mandate_deck.len() < n {
+            return Err(EngineError::InvalidConfig(format!(
+                "mandate_deck size ({}) must be >= seat_count ({n})",
+                self.mandate_deck.len()
+            )));
+        }
+        let mut seen_cards = BTreeSet::new();
+        for card in &self.mandate_deck {
+            if !seen_cards.insert(card.card_id)
+                || card.difficulty_completion_bps > 10_000
+                || !(MIN_MANDATE_BONUS_EQUITY..=MAX_MANDATE_BONUS_EQUITY)
+                    .contains(&card.bonus_equity)
+            {
+                return Err(EngineError::InvalidConfig(format!(
+                    "invalid graded mandate card {}",
+                    card.card_id
+                )));
+            }
+            let kind_valid = match card.kind {
+                MandateKind::MinProjectEquity { target } => target > 0,
+                MandateKind::MinRefinedVariety {
+                    distinct_goods,
+                    min_each,
+                } => distinct_goods >= 1 && distinct_goods <= self.seat_count && min_each > 0,
+                MandateKind::MaintainCleanCredit { .. } => true,
+                MandateKind::MinActivePartners { min_partners } => {
+                    min_partners >= 1 && min_partners < self.seat_count
+                }
+            };
+            if !kind_valid {
+                return Err(EngineError::InvalidConfig(format!(
+                    "invalid mandate card {} threshold bounds",
+                    card.card_id
+                )));
+            }
+        }
         Ok(())
     }
 
-    /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] for tests and
-    /// standalone evaluation, parameterized by `table_id`, `seat_count` (`4..=6`), and `seed`.
-    pub fn standard_chiral_ring(
+    /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] plus its deterministically
+    /// dealt Turn-1 mandate reveals for `table_id`, `seat_count` (`4..=6`), and `seed`.
+    pub fn standard_chiral_ring_with_mandates(
         table_id: TableId,
         seat_count: u8,
         seed: u64,
-    ) -> Result<Self, EngineError> {
+    ) -> Result<(Self, Vec<MandateReveal>), EngineError> {
         if !(4..=6).contains(&seat_count) {
             return Err(EngineError::InvalidConfig(format!(
                 "seat_count must be 4..=6, got {seat_count}"
@@ -477,6 +580,10 @@ impl TableSpec {
             },
         ];
 
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, dealt_reveals) =
+            deal_graded_mandates(table_id, seat_count, seed, &mandate_deck)?;
+
         let spec = Self {
             table_id,
             seat_count,
@@ -484,9 +591,21 @@ impl TableSpec {
             projects,
             shocks,
             closing_hazard_bps: DEFAULT_CLOSING_HAZARD_BPS,
+            mandate_deck,
+            dealt_mandate_commits,
         };
         spec.validate()?;
-        Ok(spec)
+        Ok((spec, dealt_reveals))
+    }
+
+    /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] for tests and
+    /// standalone evaluation, parameterized by `table_id`, `seat_count` (`4..=6`), and `seed`.
+    pub fn standard_chiral_ring(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+    ) -> Result<Self, EngineError> {
+        Ok(Self::standard_chiral_ring_with_mandates(table_id, seat_count, seed)?.0)
     }
 }
 
@@ -539,10 +658,16 @@ fn validate_seat_config(
                 "invalid converter ownership or yield on seat {expected_idx}"
             )));
         }
+        let mut seen_inputs = BTreeSet::new();
         for &(raw_g, amt) in &conv.inputs {
             if raw_g >= seat_count || amt <= 0 {
                 return Err(EngineError::InvalidConfig(format!(
                     "invalid converter input ({raw_g}, {amt}) on seat {expected_idx}"
+                )));
+            }
+            if !conv.is_secondary && (raw_g == seat.seat || !seen_inputs.insert(raw_g)) {
+                return Err(EngineError::InvalidConfig(format!(
+                    "primary converter on seat {expected_idx} requires distinct foreign inputs (got {raw_g})"
                 )));
             }
         }
