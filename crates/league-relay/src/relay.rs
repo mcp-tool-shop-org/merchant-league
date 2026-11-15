@@ -1,12 +1,24 @@
-//! Core single-turn relay execution: wrapper prepending, transcript replay,
-//! concurrent seat dispatch, wall-clock timeouts, one identical `harness`
-//! re-send on delivery failure, verbatim reply writes, and credit-cap gating.
+//! Core single-turn relay execution: `role: "system"` wrapper separation,
+//! bounded snapshot + `<= 500`-token scratchpad / 5-turn EMC / full transcript
+//! memory modes, concurrent `local` and `openrouter` seat dispatch, structured
+//! `response_format` JSON schema with one-retry `harness` fallback, per-seat
+//! reasoning pinning, untrusted whisper isolation + BATNA framing, and shared
+//! reservation-backed cap gating in credits or GPU-seconds.
 
 use crate::error::RelayError;
-use crate::seats::{OpenRouterSeat, SeatBackend, SeatFile};
+use crate::seats::{
+    BackendKind, CostUnit, LocalSeat, OpenRouterSeat, ReasoningEffort, SeatBackend, SeatFile,
+    SeatReasoningConfig, validate_local_base_url,
+};
 use crate::secret::{ApiKey, redact_and_truncate, redact_secrets};
 use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
+};
+use crate::wording::{
+    ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
+    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_sanitized_scratchpad_section,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt,
+    split_negotiation_sections, strip_thinking_tags, wording_slot,
 };
 use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
@@ -15,7 +27,7 @@ use sha2::{Digest, Sha256};
 use std::any::Any;
 #[cfg(any(test, feature = "test-hooks"))]
 use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fs::{self, OpenOptions, TryLockError};
 use std::io::{Seek, SeekFrom, Write};
@@ -28,6 +40,8 @@ use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CAP_EPSILON: f64 = 1e-12;
+const SETUP_FILENAME: &str = "setup.json";
+const SETUP_TMP_FILENAME: &str = "setup.json.tmp";
 
 /// Market-day round selector (`talk` or `act`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +80,337 @@ impl fmt::Display for Round {
     }
 }
 
+/// Seat prompt memory delivery mode (`B4.1` / Director ruling `C5`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryMode {
+    /// Ruled default (`C5`): bounded current-turn snapshot plus a `<= 500`-token persistent scratchpad.
+    #[default]
+    Snapshot,
+    /// Playtest toggle (`C5`): 5-turn Episodic Memory Compaction window.
+    Emc,
+    /// Full uncompacted multi-turn transcript replay.
+    Full,
+}
+
+impl MemoryMode {
+    /// Parse `"snapshot"`, `"emc"`, or `"full"`.
+    pub fn parse(raw: &str) -> Result<Self, RelayError> {
+        match raw.trim() {
+            "snapshot" => Ok(Self::Snapshot),
+            "emc" => Ok(Self::Emc),
+            "full" => Ok(Self::Full),
+            _ => Err(RelayError::Usage(
+                "--memory-mode must be 'snapshot', 'emc', or 'full'".to_owned(),
+            )),
+        }
+    }
+
+    /// Canonical wire string (`"snapshot"`, `"emc"`, or `"full"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Snapshot => "snapshot",
+            Self::Emc => "emc",
+            Self::Full => "full",
+        }
+    }
+}
+
+impl fmt::Display for MemoryMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Validated `response_format` JSON schema configuration (`B4.2`).
+///
+/// Sent on `/v1/chat/completions` requests in the OpenAI / vLLM format
+/// `{"type": "json_schema", "json_schema": {"name": ..., "schema": ...}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponseFormatConfig {
+    /// Schema identifier (`[A-Za-z0-9_-]+`).
+    pub name: String,
+    /// Optional `strict` flag forwarded when specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    /// JSON Schema object (`{"type": "object", ...}`).
+    pub schema: serde_json::Value,
+}
+
+impl ResponseFormatConfig {
+    /// Load and validate a JSON Schema file from `path`.
+    ///
+    /// Accepts `{ "type": "json_schema", "json_schema": { "name": ..., "schema": ... } }`,
+    /// `{ "name": ..., "schema": ... }`, or a bare JSON Schema object `{ "type": "object", ... }`.
+    pub fn load(path: &Path, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
+        let raw = fs::read_to_string(path).map_err(|e| io_err(path, e, redaction_key))?;
+        Self::from_json_str(&raw, redaction_key)
+    }
+
+    /// Parse and validate a [`ResponseFormatConfig`] from raw JSON text.
+    pub fn from_json_str(raw: &str, redaction_key: Option<&ApiKey>) -> Result<Self, RelayError> {
+        let val: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
+            RelayError::Usage(redact_secrets(
+                &format!("invalid --response-schema JSON: {e}"),
+                redaction_key,
+            ))
+        })?;
+        let Some(obj) = val.as_object() else {
+            return Err(RelayError::Usage(
+                "--response-schema must be a JSON object".to_owned(),
+            ));
+        };
+
+        let (name, strict, mut schema) =
+            if obj.get("type").and_then(|v| v.as_str()) == Some("json_schema") {
+                let Some(inner) = obj.get("json_schema").and_then(|v| v.as_object()) else {
+                    return Err(RelayError::Usage(
+                        "response_format with type='json_schema' requires a 'json_schema' object"
+                            .to_owned(),
+                    ));
+                };
+                for unpinned_key in ["description", "title", "examples"] {
+                    if inner.contains_key(unpinned_key) {
+                        return Err(RelayError::Usage(format!(
+                            "response_format json_schema cannot carry unpinned '{unpinned_key}'"
+                        )));
+                    }
+                }
+                let n = inner
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        RelayError::Usage("json_schema requires a string 'name'".to_owned())
+                    })?
+                    .to_owned();
+                let strict_opt = match inner.get("strict") {
+                    Some(serde_json::Value::Bool(b)) => Some(*b),
+                    Some(_) => {
+                        return Err(RelayError::Usage(
+                            "json_schema 'strict' must be a boolean".to_owned(),
+                        ));
+                    }
+                    None => None,
+                };
+                let s = inner
+                    .get("schema")
+                    .cloned()
+                    .ok_or_else(|| RelayError::Usage("json_schema requires 'schema'".to_owned()))?;
+                (n, strict_opt, s)
+            } else if obj.contains_key("schema") && obj.get("name").is_some_and(|v| v.is_string()) {
+                for unpinned_key in ["description", "title", "examples"] {
+                    if obj.contains_key(unpinned_key) {
+                        return Err(RelayError::Usage(format!(
+                            "response_format cannot carry unpinned '{unpinned_key}'"
+                        )));
+                    }
+                }
+                let n = obj["name"].as_str().unwrap_or_default().to_owned();
+                let strict_opt = match obj.get("strict") {
+                    Some(serde_json::Value::Bool(b)) => Some(*b),
+                    Some(_) => {
+                        return Err(RelayError::Usage(
+                            "response schema 'strict' must be a boolean".to_owned(),
+                        ));
+                    }
+                    None => None,
+                };
+                (n, strict_opt, obj["schema"].clone())
+            } else {
+                (wording_slot("default_schema_name"), None, val)
+            };
+
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(RelayError::Usage(
+                "response_format schema 'name' must match [A-Za-z0-9_-]+".to_owned(),
+            ));
+        }
+        let Some(schema_obj) = schema.as_object_mut() else {
+            return Err(RelayError::Usage(
+                "response_format 'schema' must be a JSON object".to_owned(),
+            ));
+        };
+        for unpinned_top_key in ["description", "title", "examples"] {
+            if schema_obj.contains_key(unpinned_top_key) {
+                return Err(RelayError::Usage(format!(
+                    "response_format top-level schema cannot carry unpinned '{unpinned_top_key}'"
+                )));
+            }
+        }
+        if let Some(req_val) = schema_obj.get("required")
+            && !req_val
+                .as_array()
+                .is_some_and(|arr| arr.iter().all(|v| v.is_string()))
+        {
+            return Err(RelayError::Usage(
+                "response_format schema 'required' must be an array of strings".to_owned(),
+            ));
+        }
+
+        let pad_key = wording_slot("scratchpad_schema_key");
+        let pinned_pad_desc = wording_slot("scratchpad_schema_description");
+        let mut has_pad_prop = false;
+        if let Some(props_val) = schema_obj.get_mut("properties") {
+            let Some(props_obj) = props_val.as_object_mut() else {
+                return Err(RelayError::Usage(
+                    "response_format schema 'properties' must be a JSON object".to_owned(),
+                ));
+            };
+            if let Some(pad_prop) = props_obj.get_mut(&pad_key) {
+                has_pad_prop = true;
+                let Some(pad_obj) = pad_prop.as_object_mut() else {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' must be a JSON object"
+                    )));
+                };
+                for key in pad_obj.keys() {
+                    if !matches!(key.as_str(), "type" | "description" | "maxLength") {
+                        return Err(RelayError::Usage(format!(
+                            "response_format schema property '{pad_key}' cannot carry unpinned keyword '{key}' (only 'type', 'description', and 'maxLength' are permitted)"
+                        )));
+                    }
+                }
+                if pad_obj.get("type").and_then(|v| v.as_str()) != Some("string") {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' must have JSON type 'string'"
+                    )));
+                }
+                if let Some(max_len) = pad_obj.get("maxLength")
+                    && !max_len.as_u64().is_some_and(|n| n > 0)
+                {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema property '{pad_key}' 'maxLength' must be a positive integer"
+                    )));
+                }
+                match pad_obj.get("description") {
+                    None | Some(serde_json::Value::Null) => {
+                        pad_obj.insert(
+                            "description".to_owned(),
+                            serde_json::Value::String(pinned_pad_desc),
+                        );
+                    }
+                    Some(serde_json::Value::String(existing)) if existing == &pinned_pad_desc => {}
+                    Some(serde_json::Value::String(_)) => {
+                        return Err(RelayError::Usage(format!(
+                            "response_format '{pad_key}' description must omit 'description' (populated from MODEL_FACING_WORDING) or match the pinned wording slot 'scratchpad_schema_description'"
+                        )));
+                    }
+                    Some(_) => {
+                        return Err(RelayError::Usage(format!(
+                            "response_format '{pad_key}' description must be a string"
+                        )));
+                    }
+                }
+            }
+        }
+        if has_pad_prop {
+            let req_entry = schema_obj
+                .entry("required".to_owned())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+            if let Some(req_arr) = req_entry.as_array_mut()
+                && !req_arr.iter().any(|v| v.as_str() == Some(pad_key.as_str()))
+            {
+                req_arr.push(serde_json::Value::String(pad_key));
+            }
+        }
+        Ok(Self {
+            name,
+            strict,
+            schema,
+        })
+    }
+
+    /// Canonical SHA-256 digest of this validated `response_format` configuration (`B-9`).
+    pub fn canonical_sha256(&self) -> String {
+        sha256_hex(&serde_json::to_vec(self).unwrap_or_default())
+    }
+
+    /// Whether `schema.properties` defines the pinned `"notes"` property (`R2-B3`, `R3-A1`).
+    pub fn schema_has_scratchpad_property(&self) -> bool {
+        let pad_key = wording_slot("scratchpad_schema_key");
+        self.schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .is_some_and(|props| props.contains_key(&pad_key))
+    }
+
+    /// Return a copy of this configuration with `"notes"` removed from `properties` and
+    /// `required`, used for seats that keep no notes (`R2-B1`, `R2-B3`, `R3-A1`).
+    pub fn without_scratchpad_property(&self) -> Self {
+        let pad_key = wording_slot("scratchpad_schema_key");
+        let mut cloned = self.clone();
+        if let Some(schema_obj) = cloned.schema.as_object_mut() {
+            if let Some(props) = schema_obj
+                .get_mut("properties")
+                .and_then(|v| v.as_object_mut())
+            {
+                props.remove(&pad_key);
+            }
+            if let Some(req) = schema_obj
+                .get_mut("required")
+                .and_then(|v| v.as_array_mut())
+            {
+                req.retain(|v| v.as_str() != Some(pad_key.as_str()));
+            }
+        }
+        cloned
+    }
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+/// Per-seat summary persisted inside [`GameSetupRecord`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupSeatRecord {
+    /// Seated guild identifier.
+    pub guild: String,
+    /// Backend (`"local"`, `"openrouter"`, or `"file"`).
+    pub backend: BackendKind,
+    /// Pinned model string if present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Pinned reasoning configuration if present (`B4.3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<SeatReasoningConfig>,
+    /// Per-seat scratchpad policy recorded for this game (`R2-B1`, `R2-B3`).
+    #[serde(default)]
+    pub scratchpad: String,
+}
+
+/// Per-game relay setup record persisted at `<game-dir>/relay/setup.json` (`B4.1` / `C5` / `B-9` / `R2-B1` / `R2-B3`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameSetupRecord {
+    /// Prompt memory delivery mode used by this game (`"snapshot"`, `"emc"`, or `"full"`).
+    pub memory_mode: MemoryMode,
+    /// Table-level scratchpad policy (for example `"none (no tokenizer)"`, `"none (no response schema)"`,
+    /// `"tokenized (at most 500 tokens)"`, or `"mixed (deliberate arm)"`).
+    #[serde(default)]
+    pub scratchpad: String,
+    /// `true` when this setup explicitly opted into a deliberate mixed scratchpad/no-scratchpad arm (`R2-B1`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mixed_scratchpad_arm: bool,
+    /// Ledger cost unit (`"gpu_seconds"` or `"credits"`, or `None` when manual-only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_unit: Option<CostUnit>,
+    /// Active model-facing wording arm (`ACTIVE_WORDING_ARM`).
+    pub wording_arm: String,
+    /// Optional structured output schema name if `--response-schema` was configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_schema_name: Option<String>,
+    /// Optional canonical SHA-256 digest of `--response-schema` (`B-9`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_schema_sha256: Option<String>,
+    /// Roster snapshot recorded for this game.
+    #[serde(default)]
+    pub seats: Vec<SetupSeatRecord>,
+}
+
 /// Validate a two-digit day identifier (`"01"`..=`"99"`).
 pub fn validate_day(day: &str) -> Result<(), RelayError> {
     if day.len() != 2 || !day.bytes().all(|b| b.is_ascii_digit()) || day == "00" {
@@ -87,18 +432,30 @@ pub struct TurnConfig {
     pub round: Round,
     /// Validated seat configuration.
     pub seats: SeatFile,
-    /// Optional path to first-turn wrapper markdown.
+    /// Optional path to `role: "system"` wrapper markdown (`required` on a seat's first turn).
     pub wrapper_path: Option<PathBuf>,
-    /// Whether this run is operating in live mode (`--live`).
+    /// Whether this run is operating in live OpenRouter mode (`--live`).
     pub live: bool,
-    /// Maximum cumulative recorded credits allowed before refusing calls.
+    /// Maximum cumulative recorded OpenRouter credits allowed before refusing calls.
     pub cap_credits: Option<f64>,
-    /// Target chat-completions URL.
+    /// Maximum cumulative recorded GPU-seconds allowed on `local` seats before refusing calls.
+    pub cap_gpu_secs: Option<f64>,
+    /// Prompt memory mode (`MemoryMode::Snapshot` by default per `C5`).
+    pub memory_mode: MemoryMode,
+    /// Optional structured output JSON Schema (`B4.2`).
+    pub response_format: Option<ResponseFormatConfig>,
+    /// Optional explicit scratchpad request (`--scratchpad` / `--no-scratchpad`, `R2-B3`).
+    pub scratchpad_requested: Option<bool>,
+    /// `true` when a deliberate arm mixing scratchpad and no-scratchpad seats is permitted (`R2-B1`).
+    pub mixed_scratchpad_arm: bool,
+    /// Additional validated VM-local hosts allowed in `local` seat `base_url`s.
+    pub allowed_vm_hosts: Vec<String>,
+    /// Target chat-completions URL for `openrouter` seats.
     pub endpoint_url: String,
 }
 
 impl TurnConfig {
-    /// Create a configuration targeting [`OPENROUTER_CHAT_COMPLETIONS_URL`].
+    /// Create a configuration targeting [`OPENROUTER_CHAT_COMPLETIONS_URL`] with default [`MemoryMode::Snapshot`].
     pub fn new(
         game_dir: PathBuf,
         day: String,
@@ -116,8 +473,50 @@ impl TurnConfig {
             wrapper_path,
             live,
             cap_credits,
+            cap_gpu_secs: None,
+            memory_mode: MemoryMode::default(),
+            response_format: None,
+            scratchpad_requested: None,
+            mixed_scratchpad_arm: false,
+            allowed_vm_hosts: Vec::new(),
             endpoint_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
         }
+    }
+
+    /// Configure the prompt memory delivery mode (`snapshot`, `emc`, or `full`).
+    pub fn with_memory_mode(mut self, mode: MemoryMode) -> Self {
+        self.memory_mode = mode;
+        self
+    }
+
+    /// Configure the GPU-seconds ceiling for `local` OpenAI-compatible seats.
+    pub fn with_cap_gpu_secs(mut self, cap_gpu_secs: Option<f64>) -> Self {
+        self.cap_gpu_secs = cap_gpu_secs;
+        self
+    }
+
+    /// Configure structured output (`response_format` JSON schema).
+    pub fn with_response_format(mut self, response_format: Option<ResponseFormatConfig>) -> Self {
+        self.response_format = response_format;
+        self
+    }
+
+    /// Explicitly request or disable persistent scratchpad notes (`R2-B3`).
+    pub fn with_scratchpad(mut self, scratchpad: Option<bool>) -> Self {
+        self.scratchpad_requested = scratchpad;
+        self
+    }
+
+    /// Permit a deliberate arm mixing scratchpad and no-scratchpad seats (`R2-B1`).
+    pub fn with_mixed_scratchpad_arm(mut self, mixed_arm: bool) -> Self {
+        self.mixed_scratchpad_arm = mixed_arm;
+        self
+    }
+
+    /// Configure permitted VM-local server hosts alongside loopback.
+    pub fn with_allowed_vm_hosts(mut self, hosts: Vec<String>) -> Self {
+        self.allowed_vm_hosts = hosts;
+        self
     }
 }
 
@@ -128,10 +527,13 @@ pub struct TranscriptEntry {
     pub day: String,
     /// Round when this turn was recorded (`talk` or `act`).
     pub round: Round,
-    /// Chat role (`"user"` or `"assistant"` only; never `"system"`).
+    /// Chat role (`"system"` on line 1, then alternating `"user"` and `"assistant"`).
     pub role: String,
     /// Exact message content sent or received.
     pub content: String,
+    /// Optional reasoning trace when `exclude_from_transcript == false` (`B4.3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 /// One line in `<game-dir>/relay/calls.jsonl`.
@@ -149,7 +551,7 @@ pub struct CallLogEntry {
     pub attempt: u8,
     /// `"turn"` on attempt 1, `"harness"` on attempt 2.
     pub trigger: String,
-    /// Exact pinned model slug requested for the seat.
+    /// Exact pinned model identifier requested for the seat.
     pub model_requested: String,
     /// Model identifier reported by the response, if any.
     pub model_returned: Option<String>,
@@ -163,12 +565,19 @@ pub struct CallLogEntry {
     pub completion_tokens: Option<u64>,
     /// Total token count reported by `usage.total_tokens`, if any.
     pub total_tokens: Option<u64>,
-    /// Call cost in OpenRouter credits if carried by `usage.cost`.
+    /// Reasoning token count reported by `usage.completion_tokens_details.reasoning_tokens`
+    /// or `usage.reasoning_tokens`, if any (`B4.3`).
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
+    /// Unit for `cost` and `charged_credits` (`"credits"` for OpenRouter, `"gpu_seconds"` for local).
+    #[serde(default)]
+    pub cost_unit: CostUnit,
+    /// Measured wall-clock call duration in seconds on sent attempts (`None` on refusals/reservations).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_secs: Option<f64>,
+    /// Call cost in `cost_unit` (`usage.cost` credits on OpenRouter; measured `wall_secs` GPU-seconds on local).
     pub cost: Option<f64>,
-    /// Credits charged against `--cap-credits` for this entry: `usage.cost` when a valid
-    /// non-negative finite cost was reported, `max_cost_per_call` when the call was sent
-    /// without a valid reported cost or reconciled from an orphaned pre-call reservation,
-    /// or `0.0` when refused pre-call.
+    /// Spend charged against the active cap (`--cap-credits` or `--cap-gpu-secs`) in `cost_unit`.
     #[serde(default)]
     pub charged_credits: f64,
     /// Wall-clock call duration in milliseconds (`0` when refused or reserved pre-call).
@@ -213,7 +622,7 @@ pub enum SeatOutcome {
         /// Hex SHA-256 of the serialized request body.
         request_body_sha256: String,
     },
-    /// Refused before calling transport because recorded costs reached/passed `--cap-credits`.
+    /// Refused before calling transport because recorded spend reached/passed the cap.
     CapReached {
         /// Path to `<game-dir>/relay/calls.jsonl`.
         calls_path: PathBuf,
@@ -227,7 +636,7 @@ pub enum SeatOutcome {
         /// Hex SHA-256 of the serialized request body.
         request_body_sha256: String,
     },
-    /// Refused fail-closed because a prior response in this turn exceeded `max_cost_per_call`.
+    /// Refused fail-closed because a prior response in this turn exceeded its per-call estimate.
     CostOverEstimateRefused {
         /// Path to `<game-dir>/relay/calls.jsonl`.
         calls_path: PathBuf,
@@ -336,11 +745,47 @@ struct ChatMessageWire<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct JsonSchemaInnerWire<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strict: Option<bool>,
+    schema: &'a serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct ResponseFormatWire<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    json_schema: JsonSchemaInnerWire<'a>,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenRouterReasoningWire<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    exclude: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct ChatCompletionRequestWire<'a> {
     model: &'a str,
     messages: Vec<ChatMessageWire<'a>>,
     temperature: f64,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormatWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<OpenRouterReasoningWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_token_budget: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_reasoning: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -365,6 +810,16 @@ struct ChatChoiceWire {
 struct ChatChoiceMessageWire {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CompletionTokensDetailsWire {
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -376,7 +831,20 @@ struct UsageWire {
     #[serde(default)]
     total_tokens: Option<u64>,
     #[serde(default)]
+    reasoning_tokens: Option<u64>,
+    #[serde(default)]
+    completion_tokens_details: Option<CompletionTokensDetailsWire>,
+    #[serde(default)]
     cost: Option<f64>,
+}
+
+impl UsageWire {
+    fn effective_reasoning_tokens(&self) -> Option<u64> {
+        self.completion_tokens_details
+            .as_ref()
+            .and_then(|d| d.reasoning_tokens)
+            .or(self.reasoning_tokens)
+    }
 }
 
 fn io_err(path: &Path, err: impl fmt::Display, key: Option<&ApiKey>) -> RelayError {
@@ -740,6 +1208,368 @@ fn append_text_synced(path: &Path, text: &str, key: Option<&ApiKey>) -> Result<(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct SeatScratchpadDecision {
+    keeps_scratchpad: bool,
+    status_label: String,
+    participates_in_mix_check: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TableScratchpadPlan {
+    table_status: String,
+    mixed_scratchpad_arm: bool,
+    per_seat: Vec<SeatScratchpadDecision>,
+}
+
+fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadPlan, RelayError> {
+    if let (Some(cli_req), Some(file_req)) = (config.scratchpad_requested, config.seats.scratchpad)
+        && cli_req != file_req
+    {
+        return Err(RelayError::Usage(
+            "conflicting scratchpad settings between CLI flags and seat file".to_owned(),
+        ));
+    }
+    let table_req = config.scratchpad_requested.or(config.seats.scratchpad);
+    let mixed_arm = config.mixed_scratchpad_arm || config.seats.mixed_scratchpad_arm;
+    let pad_key = wording_slot("scratchpad_schema_key");
+    let schema_has_pad = config
+        .response_format
+        .as_ref()
+        .is_some_and(ResponseFormatConfig::schema_has_scratchpad_property);
+
+    if table_req == Some(true) {
+        if config.memory_mode != MemoryMode::Snapshot {
+            return Err(RelayError::Usage(
+                "scratchpad requires --memory-mode snapshot".to_owned(),
+            ));
+        }
+        if config.response_format.is_none() {
+            return Err(RelayError::Usage(
+                "scratchpad requires --response-schema; every seat that keeps notes must have a response schema".to_owned(),
+            ));
+        }
+        if !schema_has_pad {
+            return Err(RelayError::Usage(format!(
+                "scratchpad requested, but --response-schema has no '{pad_key}' property"
+            )));
+        }
+    }
+
+    let mut per_seat = Vec::with_capacity(config.seats.seats.len());
+    for seat in &config.seats.seats {
+        let seat_req = seat.scratchpad.or(table_req);
+        if seat_req == Some(true) {
+            if config.memory_mode != MemoryMode::Snapshot {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad, which requires --memory-mode snapshot",
+                    seat.guild
+                )));
+            }
+            if matches!(seat.backend, SeatBackend::Openrouter(_)) {
+                return Err(RelayError::SeatConfig(format!(
+                    "openrouter seat '{}' cannot keep a scratchpad (no /tokenize endpoint)",
+                    seat.guild
+                )));
+            }
+            if config.response_format.is_none() {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad without --response-schema; every seat that keeps notes must have a response schema",
+                    seat.guild
+                )));
+            }
+            if !schema_has_pad {
+                return Err(RelayError::Usage(format!(
+                    "seat '{}' requests a scratchpad, but --response-schema has no '{pad_key}' property",
+                    seat.guild
+                )));
+            }
+        }
+
+        let decision = if config.memory_mode != MemoryMode::Snapshot {
+            SeatScratchpadDecision {
+                keeps_scratchpad: false,
+                status_label: format!("none ({})", config.memory_mode),
+                participates_in_mix_check: !matches!(seat.backend, SeatBackend::File { .. })
+                    || seat.scratchpad.is_some(),
+            }
+        } else {
+            match &seat.backend {
+                SeatBackend::Openrouter(_) => SeatScratchpadDecision {
+                    keeps_scratchpad: false,
+                    status_label: "none (no tokenizer)".to_owned(),
+                    participates_in_mix_check: true,
+                },
+                SeatBackend::Local(_) => {
+                    if seat_req == Some(false) {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: "none (disabled)".to_owned(),
+                            participates_in_mix_check: true,
+                        }
+                    } else if config.response_format.is_none() {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: "none (no response schema)".to_owned(),
+                            participates_in_mix_check: true,
+                        }
+                    } else if schema_has_pad {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: true,
+                            status_label: format!(
+                                "tokenized (at most {MAX_SCRATCHPAD_TOKENS} tokens)"
+                            ),
+                            participates_in_mix_check: true,
+                        }
+                    } else {
+                        SeatScratchpadDecision {
+                            keeps_scratchpad: false,
+                            status_label: format!("none (schema has no {pad_key} field)"),
+                            participates_in_mix_check: true,
+                        }
+                    }
+                }
+                SeatBackend::File { .. } => match seat.scratchpad {
+                    Some(true) => SeatScratchpadDecision {
+                        keeps_scratchpad: true,
+                        status_label: "manual (scratchpad)".to_owned(),
+                        participates_in_mix_check: true,
+                    },
+                    Some(false) => SeatScratchpadDecision {
+                        keeps_scratchpad: false,
+                        status_label: "none (disabled)".to_owned(),
+                        participates_in_mix_check: true,
+                    },
+                    None => SeatScratchpadDecision {
+                        keeps_scratchpad: false,
+                        status_label: "none (manual file seat)".to_owned(),
+                        participates_in_mix_check: false,
+                    },
+                },
+            }
+        };
+        per_seat.push(decision);
+    }
+
+    let has_with_pad = per_seat
+        .iter()
+        .any(|d| d.participates_in_mix_check && d.keeps_scratchpad);
+    let has_without_pad = per_seat
+        .iter()
+        .any(|d| d.participates_in_mix_check && !d.keeps_scratchpad);
+    if has_with_pad && has_without_pad && !mixed_arm {
+        return Err(RelayError::SeatConfig(
+            "table mixes scratchpad and no-scratchpad seats; mark mixed_scratchpad_arm=true (--mixed-scratchpad-arm) only when running a deliberate mixed arm".to_owned(),
+        ));
+    }
+
+    let table_status = if has_with_pad && has_without_pad {
+        "mixed (deliberate arm)".to_owned()
+    } else if let Some(first_participating) = per_seat.iter().find(|d| d.participates_in_mix_check)
+    {
+        first_participating.status_label.clone()
+    } else {
+        "none (manual file seat)".to_owned()
+    };
+
+    Ok(TableScratchpadPlan {
+        table_status,
+        mixed_scratchpad_arm: mixed_arm,
+        per_seat,
+    })
+}
+
+/// Validate per-seat and table-level scratchpad, schema, and mixed-arm rules (`R2-B1`, `R2-B3`).
+pub fn validate_scratchpad_setup(config: &TurnConfig) -> Result<(), RelayError> {
+    resolve_table_scratchpad_plan(config).map(|_| ())
+}
+
+fn build_setup_record(config: &TurnConfig, plan: &TableScratchpadPlan) -> GameSetupRecord {
+    let seats = config
+        .seats
+        .seats
+        .iter()
+        .zip(plan.per_seat.iter())
+        .map(|(s, pad_plan)| match &s.backend {
+            SeatBackend::Local(l) => SetupSeatRecord {
+                guild: s.guild.clone(),
+                backend: BackendKind::Local,
+                model: Some(l.model.clone()),
+                reasoning: l.reasoning.clone(),
+                scratchpad: pad_plan.status_label.clone(),
+            },
+            SeatBackend::Openrouter(o) => SetupSeatRecord {
+                guild: s.guild.clone(),
+                backend: BackendKind::Openrouter,
+                model: Some(o.model.clone()),
+                reasoning: o.reasoning.clone(),
+                scratchpad: pad_plan.status_label.clone(),
+            },
+            SeatBackend::File { model } => SetupSeatRecord {
+                guild: s.guild.clone(),
+                backend: BackendKind::File,
+                model: model.clone(),
+                reasoning: None,
+                scratchpad: pad_plan.status_label.clone(),
+            },
+        })
+        .collect();
+    GameSetupRecord {
+        memory_mode: config.memory_mode,
+        scratchpad: plan.table_status.clone(),
+        mixed_scratchpad_arm: plan.mixed_scratchpad_arm,
+        cost_unit: config.seats.cost_unit(),
+        wording_arm: ACTIVE_WORDING_ARM.to_owned(),
+        response_schema_name: config.response_format.as_ref().map(|r| r.name.clone()),
+        response_schema_sha256: config
+            .response_format
+            .as_ref()
+            .map(ResponseFormatConfig::canonical_sha256),
+        seats,
+    }
+}
+
+fn ensure_game_setup(
+    turn_lock: &TurnLock,
+    config: &TurnConfig,
+    plan: &TableScratchpadPlan,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    turn_lock.verify_identity(redaction_key)?;
+    let relay_dir = config.game_dir.join("relay");
+    let setup_path = relay_dir.join(SETUP_FILENAME);
+    let desired = build_setup_record(config, plan);
+
+    if setup_path.exists() {
+        let raw =
+            fs::read_to_string(&setup_path).map_err(|e| io_err(&setup_path, e, redaction_key))?;
+        let existing: GameSetupRecord = serde_json::from_str(&raw).map_err(|e| {
+            RelayError::CorruptLog(redact_secrets(
+                &format!("{}: {e}", setup_path.display()),
+                redaction_key,
+            ))
+        })?;
+        if existing.memory_mode != desired.memory_mode {
+            return Err(RelayError::Usage(format!(
+                "game setup recorded memory_mode '{}' in {}, refusing turn with '{}'",
+                existing.memory_mode,
+                setup_path.display(),
+                desired.memory_mode
+            )));
+        }
+        if let (Some(prev_unit), Some(next_unit)) = (existing.cost_unit, desired.cost_unit)
+            && prev_unit != next_unit
+        {
+            return Err(RelayError::InvalidCap(format!(
+                "game setup recorded cost_unit '{}' in {}, refusing '{}' seats on the same game directory",
+                prev_unit,
+                setup_path.display(),
+                next_unit
+            )));
+        }
+        if existing.wording_arm != desired.wording_arm {
+            return Err(RelayError::Usage(format!(
+                "game setup recorded wording_arm '{}' in {}, refusing '{}'",
+                existing.wording_arm,
+                setup_path.display(),
+                desired.wording_arm
+            )));
+        }
+        if existing.response_schema_name != desired.response_schema_name
+            || existing.response_schema_sha256 != desired.response_schema_sha256
+        {
+            return Err(RelayError::Usage(format!(
+                "game setup recorded response_schema {:?} (sha256 {:?}) in {}, refusing mid-game change to {:?} (sha256 {:?})",
+                existing.response_schema_name,
+                existing.response_schema_sha256,
+                setup_path.display(),
+                desired.response_schema_name,
+                desired.response_schema_sha256
+            )));
+        }
+        if existing.mixed_scratchpad_arm != desired.mixed_scratchpad_arm {
+            return Err(RelayError::SeatConfig(format!(
+                "game setup recorded mixed_scratchpad_arm={} in {}, refusing mid-game change to {}",
+                existing.mixed_scratchpad_arm,
+                setup_path.display(),
+                desired.mixed_scratchpad_arm
+            )));
+        }
+        if existing.cost_unit == desired.cost_unit
+            && !existing.scratchpad.is_empty()
+            && existing.scratchpad != desired.scratchpad
+        {
+            return Err(RelayError::SeatConfig(format!(
+                "game setup recorded scratchpad '{}' in {}, refusing mid-game change to '{}'",
+                existing.scratchpad,
+                setup_path.display(),
+                desired.scratchpad
+            )));
+        }
+        for desired_seat in &desired.seats {
+            if let Some(existing_seat) = existing
+                .seats
+                .iter()
+                .find(|s| s.guild.eq_ignore_ascii_case(&desired_seat.guild))
+            {
+                if existing_seat.reasoning != desired_seat.reasoning {
+                    return Err(RelayError::SeatConfig(format!(
+                        "game setup recorded reasoning pin {:?} for seat '{}' in {}, refusing mid-game change to {:?}",
+                        existing_seat.reasoning,
+                        desired_seat.guild,
+                        setup_path.display(),
+                        desired_seat.reasoning
+                    )));
+                }
+                if existing_seat.backend == desired_seat.backend
+                    && !existing_seat.scratchpad.is_empty()
+                    && existing_seat.scratchpad != desired_seat.scratchpad
+                {
+                    return Err(RelayError::SeatConfig(format!(
+                        "game setup recorded scratchpad '{}' for seat '{}' in {}, refusing mid-game change to '{}'",
+                        existing_seat.scratchpad,
+                        desired_seat.guild,
+                        setup_path.display(),
+                        desired_seat.scratchpad
+                    )));
+                }
+            }
+        }
+        // Skip rewriting when invariants already match so read-only `relay/` re-runs succeed.
+        if existing.cost_unit.is_some() || desired.cost_unit.is_none() {
+            return Ok(());
+        }
+    }
+
+    let mut json_text = serde_json::to_string_pretty(&desired)
+        .map_err(|e| io_err(&setup_path, e, redaction_key))?;
+    json_text.push('\n');
+    let tmp_path = relay_dir.join(SETUP_TMP_FILENAME);
+    if tmp_path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| io_err(&tmp_path, e, redaction_key))?;
+    let write_res: Result<(), std::io::Error> = (|| {
+        tmp_file.write_all(json_text.as_bytes())?;
+        tmp_file.flush()?;
+        tmp_file.sync_all()
+    })();
+    drop(tmp_file);
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(&tmp_path, e, redaction_key));
+    }
+    if let Err(e) = fs::rename(&tmp_path, &setup_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(&setup_path, e, redaction_key));
+    }
+    Ok(())
+}
+
 fn filter_unmigrated_entries(
     ledger_entries: &[CallLogEntry],
     pending_entries: &[CallLogEntry],
@@ -1035,7 +1865,8 @@ struct CallLedger<'a> {
     run_resv_lock_path: PathBuf,
     run_resv_lock_file: Option<fs::File>,
     next_reservation_seq: u64,
-    cap_credits: Option<f64>,
+    cost_unit: CostUnit,
+    cap_limit: Option<f64>,
     reserved_in_flight: f64,
     prior_unmigrated_pending: Vec<CallLogEntry>,
     pending_unwritten: Vec<(f64, CallLogEntry)>,
@@ -1066,7 +1897,8 @@ impl<'a> CallLedger<'a> {
         calls_path: PathBuf,
         day: &str,
         round: Round,
-        cap_credits: Option<f64>,
+        cost_unit: Option<CostUnit>,
+        cap_limit: Option<f64>,
         redaction_key: Option<&ApiKey>,
     ) -> Result<Self, RelayError> {
         turn_lock.verify_identity(redaction_key)?;
@@ -1167,6 +1999,18 @@ impl<'a> CallLedger<'a> {
         sweep_stale_reservation_locks(&calls_path, &remaining_reserved);
         drop(_side_lock);
 
+        if let Some(expected_unit) = cost_unit {
+            for entry in &effective_entries {
+                if entry.cost_unit != expected_unit {
+                    return Err(RelayError::InvalidCap(format!(
+                        "calls.jsonl records cost_unit '{}' which conflicts with current '{}' seats",
+                        entry.cost_unit, expected_unit
+                    )));
+                }
+            }
+        }
+        let ledger_unit = cost_unit.unwrap_or(CostUnit::Credits);
+
         let mut cost_unknown_in_turn = false;
         let mut cost_over_estimate_in_turn = false;
         for entry in &effective_entries {
@@ -1188,7 +2032,8 @@ impl<'a> CallLedger<'a> {
             run_resv_lock_path,
             run_resv_lock_file: None,
             next_reservation_seq: 1,
-            cap_credits,
+            cost_unit: ledger_unit,
+            cap_limit,
             reserved_in_flight: 0.0,
             prior_unmigrated_pending,
             pending_unwritten: Vec::new(),
@@ -1339,8 +2184,8 @@ impl<'a> CallLedger<'a> {
             persisted_for_sum,
         } = self.read_state_unlocked(redaction_key)?;
 
-        if let Some(cap) = self.cap_credits {
-            let recorded_sum = sum_charged_credits(&persisted_for_sum)?;
+        let recorded_sum = sum_charged_for_unit(&persisted_for_sum, self.cost_unit)?;
+        if let Some(cap) = self.cap_limit {
             let charged_sum = recorded_sum + self.unpersisted_memory_sum(&persisted_for_sum);
             if charged_sum + self.reserved_in_flight + seat_max_cost > cap + CAP_EPSILON {
                 return Ok(PreCallDecision::CapReached {
@@ -1571,9 +2416,6 @@ impl<'a> CallLedger<'a> {
                 Ok(())
             }
             Err(side_err) => {
-                // Keep unreleased reservations on disk in `calls.reserved.jsonl` when neither
-                // `calls.jsonl` nor `calls.pending.jsonl` could be written (exit 3), preserving
-                // the durable pre-call record so a subsequent run still counts `max_cost_per_call`.
                 let mut all_held: Vec<(f64, CallLogEntry)> = self
                     .prior_unmigrated_pending
                     .iter()
@@ -1600,12 +2442,16 @@ impl<'a> CallLedger<'a> {
                 }
 
                 let total_unrecorded: f64 = all_held.iter().map(|(h, _)| *h).sum();
+                let unit_field = match self.cost_unit {
+                    CostUnit::Credits => "charged_credits",
+                    CostUnit::GpuSeconds => "charged_gpu_seconds",
+                };
                 let entries_summary = all_held
                     .iter()
                     .map(|(held, e)| {
                         redact_secrets(
                             &format!(
-                                "seat={} day={} round={} attempt={} charged_credits={held:.6}",
+                                "seat={} day={} round={} attempt={} {unit_field}={held:.6}",
                                 e.guild, e.day, e.round, e.attempt
                             ),
                             redaction_key,
@@ -1620,8 +2466,12 @@ impl<'a> CallLedger<'a> {
                     &format!("ledger ({ledger_detail}); side file ({side_err})"),
                     redaction_key,
                 );
+                let formatted_total = match self.cost_unit {
+                    CostUnit::Credits => format!("{total_unrecorded:.6}"),
+                    CostUnit::GpuSeconds => format!("{total_unrecorded:.6} gpu_seconds"),
+                };
                 Err(RelayError::UnrecordedCharge {
-                    charged_credits: format!("{total_unrecorded:.6}"),
+                    charged_credits: formatted_total,
                     entries_summary,
                     detail,
                 })
@@ -1649,6 +2499,9 @@ fn entry_marks_cost_unknown(entry: &CallLogEntry) -> bool {
     }
     if entry.outcome == "OK" {
         return true;
+    }
+    if entry.cost_unit == CostUnit::GpuSeconds {
+        return false;
     }
     let has_tokens = entry.prompt_tokens.is_some() || entry.total_tokens.is_some();
     let is_http_status_err = entry
@@ -1679,9 +2532,18 @@ fn read_calls_file(
     Ok(entries)
 }
 
-fn sum_charged_credits(entries: &[CallLogEntry]) -> Result<f64, RelayError> {
+fn sum_charged_for_unit(
+    entries: &[CallLogEntry],
+    expected_unit: CostUnit,
+) -> Result<f64, RelayError> {
     let mut total = 0.0_f64;
     for entry in entries {
+        if entry.cost_unit != expected_unit {
+            return Err(RelayError::InvalidCap(format!(
+                "calls.jsonl records cost_unit '{}' which conflicts with current '{}' seats",
+                entry.cost_unit, expected_unit
+            )));
+        }
         if let Some(c) = entry.cost
             && (!c.is_finite() || c < 0.0)
         {
@@ -1720,20 +2582,35 @@ pub fn prepend_wrapper(wrapper: &str, block: &str) -> String {
     }
 }
 
-/// Run one paper-test turn across all configured seats.
+struct AutomatedSeatView<'a> {
+    backend_kind: BackendKind,
+    endpoint_url: &'a str,
+    tokenize_url: Option<&'a str>,
+    keeps_scratchpad: bool,
+    model: &'a str,
+    temperature: f64,
+    max_output_tokens: u32,
+    timeout: Duration,
+    max_per_call_spend: f64,
+    cost_unit: CostUnit,
+    reasoning: Option<&'a SeatReasoningConfig>,
+}
+
+/// Run one turn across all configured seats.
 ///
-/// `openrouter` seats execute concurrently; a failure or panic in one seat
-/// never halts another seat.
+/// Automated seats (`local` or `openrouter`) execute concurrently; a failure or
+/// panic in one seat never halts another seat.
 pub fn run_turn(
     config: &TurnConfig,
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
 ) -> Result<TurnSummary, RelayError> {
     validate_day(&config.day)?;
+    let scratchpad_plan = resolve_table_scratchpad_plan(config)?;
 
-    if config.live && config.cap_credits.is_none() {
-        return Err(RelayError::InvalidCap(
-            "--cap-credits <n> is required when --live is passed".to_owned(),
+    if config.cap_credits.is_some() && config.cap_gpu_secs.is_some() {
+        return Err(RelayError::Usage(
+            "--cap-credits and --cap-gpu-secs cannot be used together".to_owned(),
         ));
     }
     if let Some(cap) = config.cap_credits
@@ -1741,6 +2618,63 @@ pub fn run_turn(
     {
         return Err(RelayError::InvalidCap(
             "--cap-credits must be a finite non-negative number".to_owned(),
+        ));
+    }
+    if let Some(cap) = config.cap_gpu_secs
+        && (!cap.is_finite() || cap < 0.0)
+    {
+        return Err(RelayError::InvalidCap(
+            "--cap-gpu-secs must be a finite non-negative number".to_owned(),
+        ));
+    }
+
+    if config.seats.has_local_seat() {
+        if redaction_key.is_some() {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "local transport refuses API keys; unset OPENROUTER_API_KEY so keys never leak into VM logs".to_owned(),
+            ));
+        }
+        if config.live {
+            return Err(RelayError::Usage(
+                "--live applies only to OpenRouter seats; omit --live for local seats".to_owned(),
+            ));
+        }
+        if config.cap_credits.is_some() {
+            return Err(RelayError::InvalidCap(
+                "--cap-credits applies to openrouter seats; pass --cap-gpu-secs for local seats"
+                    .to_owned(),
+            ));
+        }
+        let normalized_allowed =
+            crate::seats::normalize_allowed_vm_hosts(&config.allowed_vm_hosts)?;
+        let mut seen_local_hosts = HashSet::new();
+        for seat in &config.seats.seats {
+            if let SeatBackend::Local(local_seat) = &seat.backend {
+                let (_, host) = validate_local_base_url(
+                    &seat.guild,
+                    &local_seat.base_url,
+                    &normalized_allowed,
+                )?;
+                seen_local_hosts.insert(host);
+            }
+        }
+        for allowed_host in &normalized_allowed {
+            if !seen_local_hosts.contains(allowed_host) {
+                return Err(RelayError::SeatConfig(format!(
+                    "--allow-vm-host '{allowed_host}' is not referenced by any 'local' seat in the seat file"
+                )));
+            }
+        }
+    } else if config.seats.has_openrouter_seat() && config.cap_gpu_secs.is_some() {
+        return Err(RelayError::InvalidCap(
+            "--cap-gpu-secs applies to local seats; pass --cap-credits for openrouter seats"
+                .to_owned(),
+        ));
+    }
+
+    if config.live && config.cap_credits.is_none() {
+        return Err(RelayError::InvalidCap(
+            "--cap-credits <n> is required when --live is passed".to_owned(),
         ));
     }
 
@@ -1752,9 +2686,13 @@ pub fn run_turn(
     };
 
     for seat in &config.seats.seats {
-        if matches!(seat.backend, SeatBackend::Openrouter(_)) {
+        if matches!(
+            seat.backend,
+            SeatBackend::Openrouter(_) | SeatBackend::Local(_)
+        ) {
             let transcript_path = transcript_file_path(&config.game_dir, &seat.guild);
-            if !transcript_has_entries(&transcript_path, redaction_key)? && wrapper_text.is_none() {
+            let loaded = load_transcript(&transcript_path, redaction_key)?;
+            if loaded.turns.is_empty() && wrapper_text.is_none() {
                 return Err(RelayError::MissingWrapper {
                     guild: seat.guild.clone(),
                 });
@@ -1762,13 +2700,22 @@ pub fn run_turn(
         }
     }
 
+    ensure_game_setup(&turn_lock, config, &scratchpad_plan, redaction_key)?;
+
+    let seat_cost_unit = config.seats.cost_unit();
+    let active_cap = match seat_cost_unit.unwrap_or(CostUnit::Credits) {
+        CostUnit::Credits => config.cap_credits,
+        CostUnit::GpuSeconds => config.cap_gpu_secs,
+    };
+
     let calls_path = config.game_dir.join("relay").join("calls.jsonl");
     let ledger = Mutex::new(CallLedger::open(
         &turn_lock,
         calls_path.clone(),
         &config.day,
         config.round,
-        config.cap_credits,
+        seat_cost_unit,
+        active_cap,
         redaction_key,
     )?);
 
@@ -1777,6 +2724,10 @@ pub fn run_turn(
         let mut handles = Vec::new();
 
         for (idx, seat) in config.seats.seats.iter().enumerate() {
+            let keeps_scratchpad = scratchpad_plan
+                .per_seat
+                .get(idx)
+                .is_some_and(|d| d.keeps_scratchpad);
             match &seat.backend {
                 SeatBackend::File { .. } => slots.push((
                     idx,
@@ -1791,10 +2742,32 @@ pub fn run_turn(
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
                     handles.push(scope.spawn(move || {
-                        let outcome = run_single_openrouter_seat(
+                        let view =
+                            view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
+                        let outcome = run_single_automated_seat(
                             config,
                             &guild,
-                            or_seat,
+                            &view,
+                            wrapper_ref,
+                            transport,
+                            ledger_ref,
+                            calls_ref,
+                            redaction_key,
+                        );
+                        (idx, SeatReport { guild, outcome })
+                    }));
+                }
+                SeatBackend::Local(local_seat) => {
+                    let guild = seat.guild.clone();
+                    let wrapper_ref = wrapper_text.as_deref();
+                    let ledger_ref = &ledger;
+                    let calls_ref = &calls_path;
+                    handles.push(scope.spawn(move || {
+                        let view = view_local_seat(local_seat, keeps_scratchpad);
+                        let outcome = run_single_automated_seat(
+                            config,
+                            &guild,
+                            &view,
                             wrapper_ref,
                             transport,
                             ledger_ref,
@@ -1826,21 +2799,101 @@ pub fn run_turn(
     Ok(TurnSummary { reports })
 }
 
+fn view_openrouter_seat<'a>(
+    endpoint_url: &'a str,
+    seat: &'a OpenRouterSeat,
+    keeps_scratchpad: bool,
+) -> AutomatedSeatView<'a> {
+    AutomatedSeatView {
+        backend_kind: BackendKind::Openrouter,
+        endpoint_url,
+        tokenize_url: None,
+        keeps_scratchpad,
+        model: &seat.model,
+        temperature: seat.temperature,
+        max_output_tokens: seat.max_output_tokens,
+        timeout: seat.timeout,
+        max_per_call_spend: seat.max_cost_per_call,
+        cost_unit: CostUnit::Credits,
+        reasoning: seat.reasoning.as_ref(),
+    }
+}
+
+fn view_local_seat(seat: &LocalSeat, keeps_scratchpad: bool) -> AutomatedSeatView<'_> {
+    AutomatedSeatView {
+        backend_kind: BackendKind::Local,
+        endpoint_url: &seat.endpoint_url,
+        tokenize_url: Some(&seat.tokenize_url),
+        keeps_scratchpad,
+        model: &seat.model,
+        temperature: seat.temperature,
+        max_output_tokens: seat.max_output_tokens,
+        timeout: seat.timeout,
+        max_per_call_spend: seat.max_gpu_secs_per_call,
+        cost_unit: CostUnit::GpuSeconds,
+        reasoning: seat.reasoning.as_ref(),
+    }
+}
+
+fn build_system_message(raw_wrapper: &str, mode: MemoryMode, keeps_scratchpad: bool) -> String {
+    match mode {
+        MemoryMode::Snapshot if keeps_scratchpad => {
+            prepend_wrapper(raw_wrapper, &wording_slot("system_snapshot_note"))
+        }
+        MemoryMode::Snapshot | MemoryMode::Emc | MemoryMode::Full => raw_wrapper.to_owned(),
+    }
+}
+
+fn format_emc_compacted_older_turns(
+    emc_path: &Path,
+    older_turns: &[(TranscriptEntry, TranscriptEntry)],
+    redaction_key: Option<&ApiKey>,
+) -> String {
+    let k_day = wording_slot("emc_key_day");
+    let k_round = wording_slot("emc_key_round");
+    let k_excerpt = wording_slot("emc_key_reply_excerpt");
+    let mut lines = Vec::with_capacity(older_turns.len());
+    for (u, a) in older_turns {
+        let excerpt_short: String = a
+            .content
+            .trim()
+            .chars()
+            .take(EMC_OLDER_REPLY_EXCERPT_CHARS)
+            .collect();
+        let escaped = json_escape_untrusted_str(&excerpt_short);
+        lines.push(format!(
+            "{{\"{k_day}\":\"{}\",\"{k_round}\":\"{}\",\"{k_excerpt}\":{escaped}}}",
+            u.day, u.round
+        ));
+    }
+    let body = lines.join("\n");
+    let _ =
+        fs::write(emc_path, format!("{body}\n")).map_err(|e| io_err(emc_path, e, redaction_key));
+    format!("{}\n{body}", wording_slot("emc_older_replies_header"))
+}
+
 #[allow(clippy::too_many_arguments)]
-fn run_single_openrouter_seat(
+fn run_single_automated_seat(
     config: &TurnConfig,
     guild: &str,
-    seat: &OpenRouterSeat,
+    seat: &AutomatedSeatView<'_>,
     wrapper_text: Option<&str>,
     transport: &dyn Transport,
     ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
     redaction_key: Option<&ApiKey>,
 ) -> SeatOutcome {
-    let filename = format!("day-{}-{}-{guild}.md", config.day, config.round);
+    let stem = format!("day-{}-{}-{guild}", config.day, config.round);
+    let filename = format!("{stem}.md");
     let to_seat_path = config.game_dir.join("to-seat").join(&filename);
+    let negotiation_path = config
+        .game_dir
+        .join("to-seat")
+        .join(format!("{stem}.negotiation.json"));
     let from_seat_path = config.game_dir.join("from-seat").join(&filename);
     let transcript_path = transcript_file_path(&config.game_dir, guild);
+    let scratchpad_path = scratchpad_file_path(&config.game_dir, guild);
+    let emc_path = emc_file_path(&config.game_dir, guild);
 
     if from_seat_path.exists() {
         return SeatOutcome::SeatError {
@@ -1863,7 +2916,16 @@ fn run_single_openrouter_seat(
         }
     };
 
-    let history = match load_transcript(&transcript_path, redaction_key) {
+    let negotiation_opt = match load_negotiation_inputs_if_present(&negotiation_path) {
+        Ok(n) => n,
+        Err(e) => {
+            return SeatOutcome::SeatError {
+                detail: redact_secrets(&e.to_string(), redaction_key),
+            };
+        }
+    };
+
+    let loaded = match load_transcript(&transcript_path, redaction_key) {
         Ok(h) => h,
         Err(e) => {
             return SeatOutcome::SeatError {
@@ -1872,28 +2934,222 @@ fn run_single_openrouter_seat(
         }
     };
 
-    let user_content = match (history.is_empty(), wrapper_text) {
-        (true, Some(w)) => prepend_wrapper(w, &raw_block),
-        _ => raw_block,
+    let Some(base_wrapper) = loaded.system_wrapper.as_deref().or(wrapper_text) else {
+        return SeatOutcome::SeatError {
+            detail: RelayError::MissingWrapper {
+                guild: guild.to_owned(),
+            }
+            .to_string(),
+        };
     };
 
-    let mut messages: Vec<ChatMessageWire<'_>> = history
+    let system_wire = build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
+
+    let older_replies_sec =
+        if config.memory_mode == MemoryMode::Emc && loaded.turns.len() > EMC_VERBATIM_TURN_WINDOW {
+            let older = &loaded.turns[..loaded.turns.len() - EMC_VERBATIM_TURN_WINDOW];
+            Some(format_emc_compacted_older_turns(
+                &emc_path,
+                older,
+                redaction_key,
+            ))
+        } else {
+            None
+        };
+
+    let seated_guilds: Vec<&str> = config
+        .seats
+        .seats
         .iter()
-        .map(|entry| ChatMessageWire {
-            role: &entry.role,
-            content: &entry.content,
-        })
+        .map(|s| s.guild.as_str())
         .collect();
+    let (no_new_deals_sec, other_seats_messages_sec) = match &negotiation_opt {
+        Some(neg) => match split_negotiation_sections(neg, &seated_guilds) {
+            Ok((fallback_sec, whispers_sec)) => (Some(fallback_sec), Some(whispers_sec)),
+            Err(e) => {
+                return SeatOutcome::SeatError {
+                    detail: redact_secrets(&e.to_string(), redaction_key),
+                };
+            }
+        },
+        None => (None, None),
+    };
+
+    let scratchpad_sec = if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad {
+        let saved_pad = if scratchpad_path.exists() {
+            match fs::read_to_string(&scratchpad_path) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    return SeatOutcome::SeatError {
+                        detail: io_err(&scratchpad_path, e, redaction_key).to_string(),
+                    };
+                }
+            }
+        } else {
+            None
+        };
+        let sanitized_saved = saved_pad
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(sanitize_scratchpad_for_prompt);
+        if let Some(ref shown_saved) = sanitized_saved {
+            let Some(tokenize_url) = seat.tokenize_url else {
+                return SeatOutcome::SeatError {
+                    detail:
+                        "snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
+                            .to_owned(),
+                };
+            };
+            match transport.count_tokens(tokenize_url, seat.model, shown_saved, seat.timeout) {
+                Ok(token_count) if token_count > MAX_SCRATCHPAD_TOKENS => {
+                    return SeatOutcome::SeatError {
+                        detail: format!(
+                            "saved scratchpad for '{guild}' has {token_count} tokens, exceeding the {MAX_SCRATCHPAD_TOKENS}-token cap"
+                        ),
+                    };
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    return SeatOutcome::SeatError {
+                        detail: redact_secrets(
+                            &format!(
+                                "cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
+                            ),
+                            redaction_key,
+                        ),
+                    };
+                }
+            }
+        }
+        Some(format_sanitized_scratchpad_section(
+            sanitized_saved.as_deref(),
+        ))
+    } else {
+        None
+    };
+
+    let mut composed_sections: Vec<String> = Vec::new();
+    for section_key in wording_slot("user_section_order").split(',') {
+        match section_key {
+            "older_replies" => {
+                if let Some(ref s) = older_replies_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            "turn_prompt" => composed_sections.push(raw_block.clone()),
+            "no_new_deals" => {
+                if let Some(ref s) = no_new_deals_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            "other_seats_messages" => {
+                if let Some(ref s) = other_seats_messages_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            "scratchpad" => {
+                if let Some(ref s) = scratchpad_sec {
+                    composed_sections.push(s.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let user_content = composed_sections.join("\n\n");
+
+    let mut messages: Vec<ChatMessageWire<'_>> = Vec::new();
+    messages.push(ChatMessageWire {
+        role: "system",
+        content: &system_wire,
+    });
+
+    match config.memory_mode {
+        MemoryMode::Snapshot => {}
+        MemoryMode::Emc => {
+            let start_idx = loaded.turns.len().saturating_sub(EMC_VERBATIM_TURN_WINDOW);
+            for (u, a) in &loaded.turns[start_idx..] {
+                messages.push(ChatMessageWire {
+                    role: &u.role,
+                    content: &u.content,
+                });
+                messages.push(ChatMessageWire {
+                    role: &a.role,
+                    content: &a.content,
+                });
+            }
+        }
+        MemoryMode::Full => {
+            for (u, a) in &loaded.turns {
+                messages.push(ChatMessageWire {
+                    role: &u.role,
+                    content: &u.content,
+                });
+                messages.push(ChatMessageWire {
+                    role: &a.role,
+                    content: &a.content,
+                });
+            }
+        }
+    }
+
     messages.push(ChatMessageWire {
         role: "user",
         content: &user_content,
     });
 
+    let effective_response_format = match (&config.response_format, seat.keeps_scratchpad) {
+        (Some(rf), true) => Some(rf.clone()),
+        (Some(rf), false) => Some(rf.without_scratchpad_property()),
+        (None, _) => None,
+    };
+
+    let response_format_wire = effective_response_format
+        .as_ref()
+        .map(|rf| ResponseFormatWire {
+            kind: "json_schema",
+            json_schema: JsonSchemaInnerWire {
+                name: &rf.name,
+                strict: rf.strict,
+                schema: &rf.schema,
+            },
+        });
+
+    let (or_reasoning, local_effort, local_budget, local_kwargs, local_include_reasoning) =
+        match (seat.backend_kind, seat.reasoning) {
+            (BackendKind::Openrouter, Some(r)) => (
+                Some(OpenRouterReasoningWire {
+                    effort: r.effort.map(ReasoningEffort::as_str),
+                    max_tokens: r.budget_tokens,
+                    exclude: r.exclude_from_transcript,
+                }),
+                None,
+                None,
+                None,
+                None,
+            ),
+            (BackendKind::Local, Some(r)) => (
+                None,
+                r.effort.map(ReasoningEffort::as_str),
+                r.budget_tokens,
+                r.chat_template_kwargs.as_ref(),
+                Some(!r.exclude_from_transcript),
+            ),
+            _ => (None, None, None, None, None),
+        };
+
     let request_wire = ChatCompletionRequestWire {
-        model: &seat.model,
+        model: seat.model,
         messages,
         temperature: seat.temperature,
         max_tokens: seat.max_output_tokens,
+        response_format: response_format_wire,
+        reasoning: or_reasoning,
+        reasoning_effort: local_effort,
+        thinking_token_budget: local_budget,
+        chat_template_kwargs: local_kwargs,
+        include_reasoning: local_include_reasoning,
     };
     let Ok(request_body) = serde_json::to_string(&request_wire) else {
         return SeatOutcome::SeatError {
@@ -1901,6 +3157,10 @@ fn run_single_openrouter_seat(
         };
     };
     let request_body_sha256 = sha256_hex(request_body.as_bytes());
+    let estimate_label = match seat.cost_unit {
+        CostUnit::Credits => "max_cost_per_call",
+        CostUnit::GpuSeconds => "max_gpu_secs_per_call",
+    };
 
     for attempt in [1_u8, 2_u8] {
         let trigger = if attempt == 1 { "turn" } else { "harness" };
@@ -1909,14 +3169,19 @@ fn run_single_openrouter_seat(
             guild,
             attempt,
             trigger,
-            &seat.model,
+            seat.model,
             &request_body_sha256,
-            seat.max_cost_per_call,
+            seat.cost_unit,
+            seat.max_per_call_spend,
         );
 
         let reservation_id = {
             let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-            match guard.try_reserve(seat.max_cost_per_call, &reservation_template, redaction_key) {
+            match guard.try_reserve(
+                seat.max_per_call_spend,
+                &reservation_template,
+                redaction_key,
+            ) {
                 Ok(PreCallDecision::Reserved(resv_id)) => resv_id,
                 Ok(PreCallDecision::LockCompromised(lock_err)) => {
                     return SeatOutcome::SeatError {
@@ -1934,11 +3199,12 @@ fn run_single_openrouter_seat(
                         guild,
                         attempt,
                         trigger,
-                        &seat.model,
+                        seat.model,
                         &request_body_sha256,
+                        seat.cost_unit,
                         "CAP_REACHED",
                         format!(
-                            "charged {charged_sum:.6} + reserved {reserved_in_flight:.6} + max_cost_per_call {requested:.6} exceeds cap {cap:.6}"
+                            "charged {charged_sum:.6} + reserved {reserved_in_flight:.6} + {estimate_label} {requested:.6} exceeds cap {cap:.6}"
                         ),
                     );
                     if let Err(e) = guard.record_refusal(&entry, redaction_key) {
@@ -1959,8 +3225,9 @@ fn run_single_openrouter_seat(
                         guild,
                         attempt,
                         trigger,
-                        &seat.model,
+                        seat.model,
                         &request_body_sha256,
+                        seat.cost_unit,
                         "LEDGER_ERROR",
                         detail.clone(),
                     );
@@ -1973,8 +3240,9 @@ fn run_single_openrouter_seat(
                         guild,
                         attempt,
                         trigger,
-                        &seat.model,
+                        seat.model,
                         &request_body_sha256,
+                        seat.cost_unit,
                         "COST_UNKNOWN",
                         "prior call in turn carried no cost; failing closed".to_owned(),
                     );
@@ -1994,10 +3262,11 @@ fn run_single_openrouter_seat(
                         guild,
                         attempt,
                         trigger,
-                        &seat.model,
+                        seat.model,
                         &request_body_sha256,
+                        seat.cost_unit,
                         "COST_OVER_ESTIMATE",
-                        "prior call in turn exceeded max_cost_per_call; failing closed".to_owned(),
+                        format!("prior call in turn exceeded {estimate_label}; failing closed"),
                     );
                     if let Err(e) = guard.record_refusal(&entry, redaction_key) {
                         return SeatOutcome::SeatError {
@@ -2017,31 +3286,166 @@ fn run_single_openrouter_seat(
             }
         };
 
-        let (call_result, latency_ms) = call_with_wall_timeout(
+        let (call_result, elapsed) = call_with_wall_timeout(
             transport,
-            &config.endpoint_url,
+            seat.endpoint_url,
             &request_body,
             seat.timeout,
             redaction_key,
         );
+        let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        let wall_secs = elapsed.as_secs_f64();
+        let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
 
-        match evaluate_call_result(call_result, redaction_key) {
+        let raw_evaluated = evaluate_call_result(
+            call_result,
+            exclude_thinking,
+            effective_response_format.as_ref(),
+            redaction_key,
+        );
+
+        let mut validated_scratchpad_update: Option<String> = None;
+        let evaluated = match raw_evaluated {
             EvaluatedCall::Success {
                 reply_content,
+                persisted_reasoning,
+                model_returned,
+                usage,
+            } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
+                match extract_scratchpad_update(&reply_content) {
+                    None => EvaluatedCall::DeliveryFailure {
+                        reason: format!(
+                            "structured output missing required '{}' string property",
+                            wording_slot("scratchpad_schema_key")
+                        ),
+                        model_returned,
+                        usage,
+                        is_late_reply: false,
+                    },
+                    Some(candidate_pad) if candidate_pad.is_empty() => {
+                        validated_scratchpad_update = Some(String::new());
+                        EvaluatedCall::Success {
+                            reply_content,
+                            persisted_reasoning,
+                            model_returned,
+                            usage,
+                        }
+                    }
+                    Some(candidate_pad) => {
+                        let shown_candidate = sanitize_scratchpad_for_prompt(&candidate_pad);
+                        let tokenize_res = match seat.tokenize_url {
+                            Some(tok_url) => transport.count_tokens(
+                                tok_url,
+                                seat.model,
+                                &shown_candidate,
+                                seat.timeout,
+                            ),
+                            None => Err(TransportError::Network(
+                                "backend has no /tokenize endpoint".to_owned(),
+                            )),
+                        };
+                        match tokenize_res {
+                            Ok(pad_tokens) if pad_tokens <= MAX_SCRATCHPAD_TOKENS => {
+                                validated_scratchpad_update = Some(candidate_pad);
+                                EvaluatedCall::Success {
+                                    reply_content,
+                                    persisted_reasoning,
+                                    model_returned,
+                                    usage,
+                                }
+                            }
+                            Ok(pad_tokens) => EvaluatedCall::DeliveryFailure {
+                                reason: format!(
+                                    "scratchpad has {pad_tokens} tokens, exceeding {MAX_SCRATCHPAD_TOKENS}-token cap"
+                                ),
+                                model_returned,
+                                usage,
+                                is_late_reply: false,
+                            },
+                            Err(tok_err) => {
+                                let detail = redact_secrets(
+                                    &format!(
+                                        "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
+                                    ),
+                                    redaction_key,
+                                );
+                                let (valid_cost, charged_credits, over_estimate, _) =
+                                    compute_call_accounting(
+                                        seat.cost_unit,
+                                        usage.cost,
+                                        wall_secs,
+                                        seat.max_per_call_spend,
+                                    );
+                                let entry = CallLogEntry {
+                                    time_utc: now_utc_rfc3339(),
+                                    day: config.day.clone(),
+                                    round: config.round,
+                                    guild: guild.to_owned(),
+                                    attempt,
+                                    trigger: trigger.to_owned(),
+                                    model_requested: seat.model.to_owned(),
+                                    model_returned,
+                                    request_body_sha256: request_body_sha256.clone(),
+                                    reply_sha256: None,
+                                    prompt_tokens: usage.prompt_tokens,
+                                    completion_tokens: usage.completion_tokens,
+                                    total_tokens: usage.total_tokens,
+                                    reasoning_tokens: usage.effective_reasoning_tokens(),
+                                    cost_unit: seat.cost_unit,
+                                    wall_secs: Some(wall_secs),
+                                    cost: valid_cost,
+                                    charged_credits,
+                                    latency_ms,
+                                    outcome: if over_estimate {
+                                        "COST_OVER_ESTIMATE".to_owned()
+                                    } else {
+                                        "TOKENIZE_UNAVAILABLE".to_owned()
+                                    },
+                                    error: Some(detail.clone()),
+                                    reservation_id: Some(reservation_id.clone()),
+                                };
+                                let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                                if let Err(e) = guard.finish_call_and_record(
+                                    &reservation_id,
+                                    seat.max_per_call_spend,
+                                    &entry,
+                                    over_estimate,
+                                    redaction_key,
+                                ) {
+                                    return SeatOutcome::SeatError {
+                                        detail: e.to_string(),
+                                    };
+                                }
+                                return SeatOutcome::SeatError { detail };
+                            }
+                        }
+                    }
+                }
+            }
+            other => other,
+        };
+
+        match evaluated {
+            EvaluatedCall::Success {
+                reply_content,
+                persisted_reasoning,
                 model_returned,
                 usage,
             } => {
-                let valid_cost = sanitize_cost(usage.cost);
-                let charged_credits = valid_cost.unwrap_or(seat.max_cost_per_call);
-                let over_estimate =
-                    valid_cost.is_some_and(|c| c > seat.max_cost_per_call + CAP_EPSILON);
+                let (valid_cost, charged_credits, over_estimate, observed_cost) =
+                    compute_call_accounting(
+                        seat.cost_unit,
+                        usage.cost,
+                        wall_secs,
+                        seat.max_per_call_spend,
+                    );
                 let reply_sha256 = sha256_hex(reply_content.as_bytes());
-                let (outcome_str, err_opt) = match (over_estimate, valid_cost) {
+                let (outcome_str, err_opt) = match (over_estimate, observed_cost) {
                     (true, Some(c)) => (
                         "COST_OVER_ESTIMATE".to_owned(),
                         Some(format!(
-                            "returned cost {c:.6} exceeded max_cost_per_call {:.6}",
-                            seat.max_cost_per_call
+                            "returned cost {c:.6} exceeded {estimate_label} {:.6}",
+                            seat.max_per_call_spend
                         )),
                     ),
                     _ => ("OK".to_owned(), None),
@@ -2053,13 +3457,16 @@ fn run_single_openrouter_seat(
                     guild: guild.to_owned(),
                     attempt,
                     trigger: trigger.to_owned(),
-                    model_requested: seat.model.clone(),
+                    model_requested: seat.model.to_owned(),
                     model_returned,
                     request_body_sha256: request_body_sha256.clone(),
                     reply_sha256: Some(reply_sha256.clone()),
                     prompt_tokens: usage.prompt_tokens,
                     completion_tokens: usage.completion_tokens,
                     total_tokens: usage.total_tokens,
+                    reasoning_tokens: usage.effective_reasoning_tokens(),
+                    cost_unit: seat.cost_unit,
+                    wall_secs: Some(wall_secs),
                     cost: valid_cost,
                     charged_credits,
                     latency_ms,
@@ -2071,7 +3478,7 @@ fn run_single_openrouter_seat(
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
                         &reservation_id,
-                        seat.max_cost_per_call,
+                        seat.max_per_call_spend,
                         &entry,
                         over_estimate,
                         redaction_key,
@@ -2092,12 +3499,30 @@ fn run_single_openrouter_seat(
                         detail: e.to_string(),
                     };
                 }
-                if let Err(e) = append_transcript_pair(
+                if let Some(updated_pad) = validated_scratchpad_update {
+                    if let Some(parent) = scratchpad_path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = fs::write(&scratchpad_path, updated_pad.as_bytes()) {
+                        return SeatOutcome::SeatError {
+                            detail: io_err(&scratchpad_path, e, redaction_key).to_string(),
+                        };
+                    }
+                }
+                let system_to_persist =
+                    if loaded.system_wrapper.is_none() && loaded.turns.is_empty() {
+                        Some(base_wrapper)
+                    } else {
+                        None
+                    };
+                if let Err(e) = append_transcript_turn(
                     &transcript_path,
                     &config.day,
                     config.round,
+                    system_to_persist,
                     &user_content,
                     &reply_content,
+                    persisted_reasoning,
                     redaction_key,
                 ) {
                     return SeatOutcome::SeatError {
@@ -2119,10 +3544,12 @@ fn run_single_openrouter_seat(
                 usage,
                 is_late_reply,
             } => {
-                let valid_cost = sanitize_cost(usage.cost);
-                let charged_credits = valid_cost.unwrap_or(seat.max_cost_per_call);
-                let over_estimate =
-                    valid_cost.is_some_and(|c| c > seat.max_cost_per_call + CAP_EPSILON);
+                let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
+                    seat.cost_unit,
+                    usage.cost,
+                    wall_secs,
+                    seat.max_per_call_spend,
+                );
                 let outcome_label = if is_late_reply {
                     "LATE_DISCARDED"
                 } else if over_estimate {
@@ -2139,13 +3566,16 @@ fn run_single_openrouter_seat(
                     guild: guild.to_owned(),
                     attempt,
                     trigger: trigger.to_owned(),
-                    model_requested: seat.model.clone(),
+                    model_requested: seat.model.to_owned(),
                     model_returned,
                     request_body_sha256: request_body_sha256.clone(),
                     reply_sha256: None,
                     prompt_tokens: usage.prompt_tokens,
                     completion_tokens: usage.completion_tokens,
                     total_tokens: usage.total_tokens,
+                    reasoning_tokens: usage.effective_reasoning_tokens(),
+                    cost_unit: seat.cost_unit,
+                    wall_secs: Some(wall_secs),
                     cost: valid_cost,
                     charged_credits,
                     latency_ms,
@@ -2157,7 +3587,7 @@ fn run_single_openrouter_seat(
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
                         &reservation_id,
-                        seat.max_cost_per_call,
+                        seat.max_per_call_spend,
                         &entry,
                         over_estimate,
                         redaction_key,
@@ -2180,6 +3610,32 @@ fn run_single_openrouter_seat(
     unreachable!("two-attempt loop always returns on attempt 2")
 }
 
+fn compute_call_accounting(
+    cost_unit: CostUnit,
+    usage_cost: Option<f64>,
+    wall_secs: f64,
+    max_per_call_spend: f64,
+) -> (Option<f64>, f64, bool, Option<f64>) {
+    match cost_unit {
+        CostUnit::Credits => {
+            let vc = sanitize_cost(usage_cost);
+            let over = vc.is_some_and(|c| c > max_per_call_spend + CAP_EPSILON);
+            (vc, vc.unwrap_or(max_per_call_spend), over, vc)
+        }
+        CostUnit::GpuSeconds => {
+            let raw_wall = sanitize_cost(Some(wall_secs));
+            let over = raw_wall.is_some_and(|w| w > max_per_call_spend + CAP_EPSILON);
+            let clamped = raw_wall.map(|w| w.min(max_per_call_spend));
+            (
+                clamped,
+                clamped.unwrap_or(max_per_call_spend),
+                over,
+                raw_wall,
+            )
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn reserved_call_entry(
     config: &TurnConfig,
@@ -2188,7 +3644,8 @@ fn reserved_call_entry(
     trigger: &str,
     model: &str,
     request_body_sha256: &str,
-    max_cost_per_call: f64,
+    cost_unit: CostUnit,
+    max_per_call_spend: f64,
 ) -> CallLogEntry {
     CallLogEntry {
         time_utc: now_utc_rfc3339(),
@@ -2204,8 +3661,11 @@ fn reserved_call_entry(
         prompt_tokens: None,
         completion_tokens: None,
         total_tokens: None,
+        reasoning_tokens: None,
+        cost_unit,
+        wall_secs: None,
         cost: None,
-        charged_credits: max_cost_per_call,
+        charged_credits: max_per_call_spend,
         latency_ms: 0,
         outcome: "RESERVED".to_owned(),
         error: Some("orphaned pre-call reservation from interrupted run".to_owned()),
@@ -2221,6 +3681,7 @@ fn refused_call_entry(
     trigger: &str,
     model: &str,
     request_body_sha256: &str,
+    cost_unit: CostUnit,
     outcome: &str,
     reason: String,
 ) -> CallLogEntry {
@@ -2238,6 +3699,9 @@ fn refused_call_entry(
         prompt_tokens: None,
         completion_tokens: None,
         total_tokens: None,
+        reasoning_tokens: None,
+        cost_unit,
+        wall_secs: None,
         cost: None,
         charged_credits: 0.0,
         latency_ms: 0,
@@ -2256,6 +3720,7 @@ enum CallTransportResult {
 enum EvaluatedCall {
     Success {
         reply_content: String,
+        persisted_reasoning: Option<String>,
         model_returned: Option<String>,
         usage: UsageWire,
     },
@@ -2267,8 +3732,75 @@ enum EvaluatedCall {
     },
 }
 
+fn validate_json_value_against_schema(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    path: &str,
+) -> Result<(), String> {
+    let Some(schema_obj) = schema.as_object() else {
+        return Ok(());
+    };
+    if let Some(expected_type) = schema_obj.get("type").and_then(|v| v.as_str()) {
+        let matches_type = match expected_type {
+            "object" => value.is_object(),
+            "array" => value.is_array(),
+            "string" => value.is_string(),
+            "boolean" => value.is_boolean(),
+            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+            "number" => value.is_number(),
+            "null" => value.is_null(),
+            _ => true,
+        };
+        if !matches_type {
+            return Err(format!("'{path}' expected JSON type '{expected_type}'"));
+        }
+    }
+    if let Some(allowed) = schema_obj.get("enum").and_then(|v| v.as_array())
+        && !allowed.contains(value)
+    {
+        return Err(format!("'{path}' value not in schema enum"));
+    }
+    if let Some(obj) = value.as_object() {
+        if let Some(req_list) = schema_obj.get("required").and_then(|v| v.as_array()) {
+            for req_key in req_list.iter().filter_map(|v| v.as_str()) {
+                if !obj.contains_key(req_key) {
+                    return Err(format!("'{path}' missing required property '{req_key}'"));
+                }
+            }
+        }
+        let props_opt = schema_obj.get("properties").and_then(|v| v.as_object());
+        if schema_obj.get("additionalProperties") == Some(&serde_json::Value::Bool(false))
+            && let Some(props) = props_opt
+        {
+            for k in obj.keys() {
+                if !props.contains_key(k) {
+                    return Err(format!("'{path}' contains disallowed property '{k}'"));
+                }
+            }
+        }
+        if let Some(props) = props_opt {
+            for (k, sub_schema) in props {
+                if let Some(child_val) = obj.get(k) {
+                    let child_path = format!("{path}.{k}");
+                    validate_json_value_against_schema(child_val, sub_schema, &child_path)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_structured_reply(content: &str, rf: &ResponseFormatConfig) -> Result<(), String> {
+    let parsed: serde_json::Value = serde_json::from_str(content.trim())
+        .map_err(|e| format!("structured output invalid JSON ({e})"))?;
+    validate_json_value_against_schema(&parsed, &rf.schema, "$")
+        .map_err(|msg| format!("structured output failed schema '{}': {msg}", rf.name))
+}
+
 fn evaluate_call_result(
     call_result: CallTransportResult,
+    exclude_thinking: Option<bool>,
+    response_format: Option<&ResponseFormatConfig>,
     redaction_key: Option<&ApiKey>,
 ) -> EvaluatedCall {
     let raw = match call_result {
@@ -2358,19 +3890,40 @@ fn evaluate_call_result(
         };
     }
 
-    let content_opt = parsed
-        .choices
-        .into_iter()
-        .next()
-        .and_then(|c| c.message)
-        .and_then(|m| m.content);
+    let msg_opt = parsed.choices.into_iter().next().and_then(|c| c.message);
+    let (raw_content_opt, raw_reasoning_opt) = match msg_opt {
+        Some(m) => (m.content, m.reasoning.or(m.reasoning_content)),
+        None => (None, None),
+    };
 
-    match content_opt {
-        Some(content) if !content.trim().is_empty() => EvaluatedCall::Success {
-            reply_content: content,
-            model_returned,
-            usage,
-        },
+    let processed_content = raw_content_opt.map(|c| match exclude_thinking {
+        Some(true) => strip_thinking_tags(&c),
+        _ => c,
+    });
+    let persisted_reasoning = match exclude_thinking {
+        Some(false) => raw_reasoning_opt.filter(|r| !r.trim().is_empty()),
+        _ => None,
+    };
+
+    match processed_content {
+        Some(content) if !content.trim().is_empty() => {
+            if let Some(rf) = response_format
+                && let Err(schema_err) = validate_structured_reply(&content, rf)
+            {
+                return EvaluatedCall::DeliveryFailure {
+                    reason: redact_and_truncate(&schema_err, redaction_key, 200),
+                    model_returned,
+                    usage,
+                    is_late_reply: false,
+                };
+            }
+            EvaluatedCall::Success {
+                reply_content: content,
+                persisted_reasoning,
+                model_returned,
+                usage,
+            }
+        }
         _ => EvaluatedCall::DeliveryFailure {
             reason: "empty reply".to_owned(),
             model_returned,
@@ -2390,7 +3943,7 @@ fn call_with_wall_timeout(
     body: &str,
     timeout: Duration,
     redaction_key: Option<&ApiKey>,
-) -> (CallTransportResult, u64) {
+) -> (CallTransportResult, Duration) {
     let start = Instant::now();
     let (tx, rx) = mpsc::channel();
     std::thread::scope(|scope| {
@@ -2419,8 +3972,7 @@ fn call_with_wall_timeout(
             },
             Err(mpsc::RecvTimeoutError::Disconnected) => CallTransportResult::TimedOut,
         };
-        let elapsed = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        (outcome, elapsed)
+        (outcome, start.elapsed())
     })
 }
 
@@ -2441,26 +3993,38 @@ fn transcript_file_path(game_dir: &Path, guild: &str) -> PathBuf {
         .join(format!("{guild}.jsonl"))
 }
 
-fn transcript_has_entries(
-    transcript_path: &Path,
-    redaction_key: Option<&ApiKey>,
-) -> Result<bool, RelayError> {
-    if !transcript_path.exists() {
-        return Ok(false);
-    }
-    Ok(!load_transcript(transcript_path, redaction_key)?.is_empty())
+fn scratchpad_file_path(game_dir: &Path, guild: &str) -> PathBuf {
+    game_dir
+        .join("relay")
+        .join("seats")
+        .join(format!("{guild}.scratchpad.md"))
+}
+
+fn emc_file_path(game_dir: &Path, guild: &str) -> PathBuf {
+    game_dir
+        .join("relay")
+        .join("seats")
+        .join(format!("{guild}.emc.md"))
+}
+
+struct LoadedTranscript {
+    system_wrapper: Option<String>,
+    turns: Vec<(TranscriptEntry, TranscriptEntry)>,
 }
 
 fn load_transcript(
     transcript_path: &Path,
     redaction_key: Option<&ApiKey>,
-) -> Result<Vec<TranscriptEntry>, RelayError> {
+) -> Result<LoadedTranscript, RelayError> {
     if !transcript_path.exists() {
-        return Ok(Vec::new());
+        return Ok(LoadedTranscript {
+            system_wrapper: None,
+            turns: Vec::new(),
+        });
     }
     let raw = fs::read_to_string(transcript_path)
         .map_err(|e| io_err(transcript_path, e, redaction_key))?;
-    let mut entries = Vec::new();
+    let mut parsed_lines: Vec<(usize, TranscriptEntry)> = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
@@ -2471,25 +4035,34 @@ fn load_transcript(
                 redaction_key,
             ))
         })?;
-        let expected_role = if entries.len() % 2 == 0 {
-            "user"
-        } else {
-            "assistant"
-        };
-        if parsed.role != expected_role {
-            return Err(RelayError::CorruptLog(redact_secrets(
-                &format!(
-                    "{} line {} has role '{}', expected '{expected_role}'",
-                    transcript_path.display(),
-                    idx + 1,
-                    parsed.role
-                ),
-                redaction_key,
-            )));
-        }
-        entries.push(parsed);
+        parsed_lines.push((idx + 1, parsed));
     }
-    if entries.len() % 2 != 0 {
+    if parsed_lines.is_empty() {
+        return Ok(LoadedTranscript {
+            system_wrapper: None,
+            turns: Vec::new(),
+        });
+    }
+
+    let mut cursor = 0;
+    let system_wrapper = if parsed_lines[0].1.role == "system" {
+        cursor = 1;
+        Some(parsed_lines[0].1.content.clone())
+    } else {
+        None
+    };
+
+    let rest = &parsed_lines[cursor..];
+    if rest.is_empty() {
+        return Err(RelayError::CorruptLog(redact_secrets(
+            &format!(
+                "{} contains a lone system entry with no completed turn pair",
+                transcript_path.display()
+            ),
+            redaction_key,
+        )));
+    }
+    if !rest.len().is_multiple_of(2) {
         return Err(RelayError::CorruptLog(redact_secrets(
             &format!(
                 "{} ends on an unpaired user turn",
@@ -2498,7 +4071,36 @@ fn load_transcript(
             redaction_key,
         )));
     }
-    Ok(entries)
+
+    let mut turns = Vec::with_capacity(rest.len() / 2);
+    for [(u_line, u_entry), (a_line, a_entry)] in rest.as_chunks::<2>().0 {
+        if u_entry.role != "user" {
+            return Err(RelayError::CorruptLog(redact_secrets(
+                &format!(
+                    "{} line {u_line} has role '{}', expected 'user'",
+                    transcript_path.display(),
+                    u_entry.role
+                ),
+                redaction_key,
+            )));
+        }
+        if a_entry.role != "assistant" {
+            return Err(RelayError::CorruptLog(redact_secrets(
+                &format!(
+                    "{} line {a_line} has role '{}', expected 'assistant'",
+                    transcript_path.display(),
+                    a_entry.role
+                ),
+                redaction_key,
+            )));
+        }
+        turns.push((u_entry.clone(), a_entry.clone()));
+    }
+
+    Ok(LoadedTranscript {
+        system_wrapper,
+        turns,
+    })
 }
 
 fn write_verbatim_reply(
@@ -2513,31 +4115,53 @@ fn write_verbatim_reply(
         .map_err(|e| io_err(from_seat_path, e, redaction_key))
 }
 
-fn append_transcript_pair(
+#[allow(clippy::too_many_arguments)]
+fn append_transcript_turn(
     transcript_path: &Path,
     day: &str,
     round: Round,
+    first_turn_system: Option<&str>,
     user_content: &str,
     assistant_content: &str,
+    assistant_reasoning: Option<String>,
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
+    let mut payload = String::new();
+    if let Some(sys_text) = first_turn_system {
+        let sys_entry = TranscriptEntry {
+            day: day.to_owned(),
+            round,
+            role: "system".to_owned(),
+            content: sys_text.to_owned(),
+            reasoning: None,
+        };
+        let sys_json = serde_json::to_string(&sys_entry)
+            .map_err(|e| io_err(transcript_path, e, redaction_key))?;
+        payload.push_str(&sys_json);
+        payload.push('\n');
+    }
     let user_entry = TranscriptEntry {
         day: day.to_owned(),
         round,
         role: "user".to_owned(),
         content: user_content.to_owned(),
+        reasoning: None,
     };
     let assistant_entry = TranscriptEntry {
         day: day.to_owned(),
         round,
         role: "assistant".to_owned(),
         content: assistant_content.to_owned(),
+        reasoning: assistant_reasoning,
     };
     let u_json = serde_json::to_string(&user_entry)
         .map_err(|e| io_err(transcript_path, e, redaction_key))?;
     let a_json = serde_json::to_string(&assistant_entry)
         .map_err(|e| io_err(transcript_path, e, redaction_key))?;
-    let payload = format!("{u_json}\n{a_json}\n");
+    payload.push_str(&u_json);
+    payload.push('\n');
+    payload.push_str(&a_json);
+    payload.push('\n');
     append_text(transcript_path, &payload, redaction_key)
 }
 

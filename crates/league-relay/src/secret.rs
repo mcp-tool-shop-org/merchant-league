@@ -1,19 +1,34 @@
-//! Secret handling, live-call capability gate, and secret redaction.
+//! Secret handling, live-call capability gates, and secret redaction.
 //!
 //! The OpenRouter key is read exclusively from the `OPENROUTER_API_KEY`
 //! environment variable. [`ApiKey`] hides its contents in [`fmt::Debug`] and
 //! does not implement [`fmt::Display`]. [`LiveGate`] is the only way to build
-//! [`UreqTransport`](crate::transport::UreqTransport), guaranteeing at the type
-//! level that no HTTP client exists unless `--live`, `--cap-credits`, and
-//! `OPENROUTER_API_KEY` are all present.
+//! [`UreqTransport`](crate::transport::UreqTransport), and [`LocalGate`] is the
+//! only way to build [`LocalOpenAiTransport`](crate::transport::LocalOpenAiTransport)
+//! (refusing if any API key is present in the environment so keys never leak
+//! into VM logs).
 
 use crate::error::RelayError;
+use crate::seats::normalize_allowed_vm_hosts;
 use std::fmt;
 
 /// Name of the sole environment variable from which the OpenRouter key is read.
 pub const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
-/// Placeholder substituted whenever a key or bearer token is scrubbed.
+/// Environment variables checked (including common case variants, `C-6`) and refused whenever
+/// the local OpenAI-compatible transport runs.
+pub const FORBIDDEN_LOCAL_KEY_ENVS: &[&str] = &[
+    "OPENROUTER_API_KEY",
+    "openrouter_api_key",
+    "OPENAI_API_KEY",
+    "openai_api_key",
+    "VLLM_API_KEY",
+    "vllm_api_key",
+    "LOCAL_API_KEY",
+    "local_api_key",
+];
+
+/// Placeholder substituted whenever a key or authorization credential is scrubbed.
 pub const REDACTED_MARKER: &str = "<REDACTED_API_KEY>";
 
 /// An OpenRouter API key read from `OPENROUTER_API_KEY`. Never printed.
@@ -48,14 +63,14 @@ impl fmt::Debug for ApiKey {
     }
 }
 
-/// Proof token required to construct the live HTTP transport.
+/// Proof token required to construct the live OpenRouter HTTP transport.
 pub struct LiveGate {
     api_key: ApiKey,
     cap_credits: f64,
 }
 
 impl LiveGate {
-    /// Acquire permission for live network calls.
+    /// Acquire permission for live OpenRouter network calls.
     ///
     /// Refuses unless `live_flag` is `true`, `cap_credits` is a finite non-negative
     /// number, and `api_key` succeeded from `OPENROUTER_API_KEY`.
@@ -99,6 +114,58 @@ impl fmt::Debug for LiveGate {
     }
 }
 
+/// Proof token required to construct [`LocalOpenAiTransport`](crate::transport::LocalOpenAiTransport).
+///
+/// Guarantees at the type level that no API key was supplied in the environment,
+/// `--live` was not passed, `--cap-gpu-secs` is finite and non-negative, and every
+/// allowed host is loopback or a validated VM-local address.
+#[derive(Debug, Clone)]
+pub struct LocalGate {
+    cap_gpu_secs: f64,
+    allowed_vm_hosts: Vec<String>,
+}
+
+impl LocalGate {
+    /// Acquire permission to call a local OpenAI-compatible server on the VM.
+    pub fn acquire(
+        live_flag: bool,
+        cap_gpu_secs: Option<f64>,
+        any_env_key_present: bool,
+        allowed_vm_hosts: &[String],
+    ) -> Result<Self, RelayError> {
+        if any_env_key_present {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "local transport refuses API keys; unset OPENROUTER_API_KEY, OPENAI_API_KEY, and VLLM_API_KEY so keys never leak into VM logs".to_owned(),
+            ));
+        }
+        if live_flag {
+            return Err(RelayError::Usage(
+                "--live applies only to OpenRouter seats; omit --live for local seats".to_owned(),
+            ));
+        }
+        let Some(cap) = cap_gpu_secs.filter(|c| c.is_finite() && *c >= 0.0) else {
+            return Err(RelayError::InvalidCap(
+                "--cap-gpu-secs <n> (finite, non-negative) is required for local seats".to_owned(),
+            ));
+        };
+        let normalized_hosts = normalize_allowed_vm_hosts(allowed_vm_hosts)?;
+        Ok(Self {
+            cap_gpu_secs: cap,
+            allowed_vm_hosts: normalized_hosts,
+        })
+    }
+
+    /// Validated GPU-seconds ceiling for this local run.
+    pub fn cap_gpu_secs(&self) -> f64 {
+        self.cap_gpu_secs
+    }
+
+    /// Normalized VM-local hosts permitted alongside loopback.
+    pub fn allowed_vm_hosts(&self) -> &[String] {
+        &self.allowed_vm_hosts
+    }
+}
+
 /// Upper bound in bytes scanned by [`redact_secrets`] and [`redact_and_truncate`].
 ///
 /// Any tail beyond 4 KiB is discarded before scanning so large upstream HTML
@@ -123,16 +190,26 @@ pub fn cap_utf8_bytes(input: &str, max_bytes: usize) -> &str {
     &input[..end]
 }
 
-/// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
-/// `8+` character substring of `key`), `Bearer <token>`, or `sk-or-...` tokens.
-pub fn redact_secrets_with_limit(input: &str, key: Option<&ApiKey>, max_bytes: usize) -> String {
+/// Cap `input` at `max_bytes` and scrub any occurrence of every key in `keys`
+/// (including any `8+` character substring), `Bearer <token>`, `sk-or-...`, or `sk-proj-...` tokens (`C-7`).
+pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
     let bounded = cap_utf8_bytes(input, max_bytes);
-    let scrubbed = match key {
-        Some(k) => redact_key_substrings(bounded, k.secret_str()),
-        None => bounded.to_owned(),
-    };
+    let mut scrubbed = bounded.to_owned();
+    for k in keys {
+        scrubbed = redact_key_substrings(&scrubbed, k.secret_str());
+    }
     let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
-    redact_prefixed_token(&scrubbed, "sk-or-", false)
+    let scrubbed = redact_prefixed_token(&scrubbed, "sk-or-", false);
+    redact_prefixed_token(&scrubbed, "sk-proj-", false)
+}
+
+/// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
+/// `8+` character substring of `key`), `Bearer <token>`, `sk-or-...`, or `sk-proj-...` tokens.
+pub fn redact_secrets_with_limit(input: &str, key: Option<&ApiKey>, max_bytes: usize) -> String {
+    match key {
+        Some(k) => redact_secrets_multi_with_limit(input, std::slice::from_ref(k), max_bytes),
+        None => redact_secrets_multi_with_limit(input, &[], max_bytes),
+    }
 }
 
 /// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`) and scrub any occurrence

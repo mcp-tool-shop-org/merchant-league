@@ -51,7 +51,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-core",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -67,7 +67,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-dice",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -189,8 +189,8 @@
     "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
     "files": [
       {
-        "commits": 8,
-        "lines": 217,
+        "commits": 9,
+        "lines": 225,
         "path": ".github/workflows/ci.yml"
       },
       {
@@ -199,8 +199,8 @@
         "path": ".gitignore"
       },
       {
-        "commits": 20,
-        "lines": 144,
+        "commits": 29,
+        "lines": 170,
         "path": "CHANGELOG.md"
       },
       {
@@ -209,13 +209,13 @@
         "path": "CLAUDE.md"
       },
       {
-        "commits": 11,
-        "lines": 8429,
+        "commits": 13,
+        "lines": 8467,
         "path": "Cargo.lock"
       },
       {
-        "commits": 8,
-        "lines": 81,
+        "commits": 9,
+        "lines": 82,
         "path": "Cargo.toml"
       },
       {
@@ -234,48 +234,83 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 26,
-        "lines": 608,
+        "commits": 36,
+        "lines": 830,
         "path": "atlas/README.md"
       },
       {
-        "commits": 5,
-        "lines": 84,
+        "commits": 6,
+        "lines": 88,
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 26,
-        "lines": 1905,
+        "commits": 36,
+        "lines": 2812,
         "path": "atlas/page.json"
       },
       {
-        "commits": 26,
-        "lines": 10697,
+        "commits": 36,
+        "lines": 12444,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 26,
-        "lines": 23456,
+        "commits": 36,
+        "lines": 30668,
         "path": "atlas/structure.json"
       },
       {
-        "commits": 2,
-        "lines": 24,
+        "commits": 4,
+        "lines": 42,
         "path": "crates/league-core/Cargo.toml"
       },
       {
         "commits": 2,
-        "lines": 76,
+        "lines": 1762,
+        "path": "crates/league-core/src/commit.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 702,
+        "path": "crates/league-core/src/contracts.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 5756,
+        "path": "crates/league-core/src/engine.rs"
+      },
+      {
+        "commits": 4,
+        "lines": 218,
         "path": "crates/league-core/src/lib.rs"
       },
       {
         "commits": 2,
-        "lines": 24,
-        "path": "crates/league-dice/Cargo.toml"
+        "lines": 850,
+        "path": "crates/league-core/src/replay.rs"
       },
       {
         "commits": 2,
-        "lines": 86,
+        "lines": 686,
+        "path": "crates/league-core/src/scoring.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 1662,
+        "path": "crates/league-core/src/types.rs"
+      },
+      {
+        "commits": 2,
+        "lines": 10848,
+        "path": "crates/league-core/tests/replay_invariants.rs"
+      },
+      {
+        "commits": 4,
+        "lines": 32,
+        "path": "crates/league-dice/Cargo.toml"
+      },
+      {
+        "commits": 4,
+        "lines": 368,
         "path": "crates/league-dice/src/lib.rs"
       },
       {
@@ -394,18 +429,18 @@
         "path": "crates/league-relay/Cargo.toml"
       },
       {
-        "commits": 4,
-        "lines": 380,
+        "commits": 11,
+        "lines": 917,
         "path": "crates/league-relay/src/cli.rs"
       },
       {
-        "commits": 4,
-        "lines": 103,
+        "commits": 8,
+        "lines": 183,
         "path": "crates/league-relay/src/error.rs"
       },
       {
-        "commits": 3,
-        "lines": 42,
+        "commits": 9,
+        "lines": 177,
         "path": "crates/league-relay/src/lib.rs"
       },
       {
@@ -414,28 +449,33 @@
         "path": "crates/league-relay/src/main.rs"
       },
       {
-        "commits": 5,
-        "lines": 2200,
+        "commits": 12,
+        "lines": 6465,
         "path": "crates/league-relay/src/relay.rs"
       },
       {
-        "commits": 1,
-        "lines": 280,
+        "commits": 5,
+        "lines": 1888,
         "path": "crates/league-relay/src/seats.rs"
       },
       {
-        "commits": 3,
-        "lines": 320,
+        "commits": 6,
+        "lines": 505,
         "path": "crates/league-relay/src/secret.rs"
       },
       {
-        "commits": 3,
-        "lines": 226,
+        "commits": 6,
+        "lines": 456,
         "path": "crates/league-relay/src/transport.rs"
       },
       {
-        "commits": 5,
-        "lines": 6188,
+        "commits": 4,
+        "lines": 1309,
+        "path": "crates/league-relay/src/wording.rs"
+      },
+      {
+        "commits": 13,
+        "lines": 17287,
         "path": "crates/league-relay/tests/relay_integration.rs"
       },
       {
@@ -449,33 +489,33 @@
         "path": "crates/league-season/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 24,
+        "commits": 2,
+        "lines": 50,
         "path": "crates/league-standalone/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 1271,
+        "commits": 2,
+        "lines": 2576,
         "path": "crates/league-standalone/src/client.rs"
       },
       {
-        "commits": 1,
-        "lines": 1039,
+        "commits": 2,
+        "lines": 3332,
         "path": "crates/league-standalone/src/conformance.rs"
       },
       {
-        "commits": 1,
-        "lines": 763,
+        "commits": 2,
+        "lines": 2618,
         "path": "crates/league-standalone/src/docker.rs"
       },
       {
-        "commits": 1,
-        "lines": 385,
+        "commits": 2,
+        "lines": 780,
         "path": "crates/league-standalone/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 114,
+        "commits": 2,
+        "lines": 364,
         "path": "crates/league-standalone/tests/standalone_live.rs"
       },
       {
@@ -489,8 +529,8 @@
         "path": "crates/league-tui/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 334,
+        "commits": 3,
+        "lines": 366,
         "path": "docs/design-v2.md"
       },
       {
@@ -634,8 +674,8 @@
         "path": "docs/paper-test/game-06/setup.md"
       },
       {
-        "commits": 5,
-        "lines": 184,
+        "commits": 12,
+        "lines": 406,
         "path": "docs/paper-test/relay.md"
       },
       {
@@ -829,8 +869,8 @@
         "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/hash_check.py"
       },
       {
-        "commits": 1,
-        "lines": 78,
+        "commits": 2,
+        "lines": 170,
         "path": "docs/standalone-xrpld.md"
       },
       {
@@ -2669,77 +2709,189 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-15T15:20:24.723Z",
+  "generatedAt": "2026-11-15T21:15:23.691Z",
   "generatedFrom": {
-    "commit": "1ac76e7ed11bc75055a4fb805acf8fa92f40e0ce"
+    "commit": "812f4f48a3e93056ea16c16f5eb5a2cb0a5ce966"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
-      "b": "Cargo.lock",
-      "either": 15,
-      "shared": 8,
-      "strength": 0.533333
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 22,
+      "shared": 11,
+      "strength": 0.5
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/paper-test/relay.md",
+      "either": 22,
+      "shared": 11,
+      "strength": 0.5
     },
     {
       "a": "Cargo.lock",
       "b": "Cargo.toml",
-      "either": 8,
+      "either": 9,
       "shared": 5,
-      "strength": 0.625
+      "strength": 0.555556
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 19,
-      "shared": 19,
+      "either": 27,
+      "shared": 27,
       "strength": 1
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/error.rs",
+      "either": 10,
+      "shared": 7,
+      "strength": 0.7
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/lib.rs",
+      "either": 11,
+      "shared": 7,
+      "strength": 0.636364
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 11,
+      "shared": 10,
+      "strength": 0.909091
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 12,
+      "shared": 10,
+      "strength": 0.833333
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 11,
+      "shared": 10,
+      "strength": 0.909091
+    },
+    {
+      "a": "crates/league-relay/src/error.rs",
+      "b": "crates/league-relay/src/lib.rs",
+      "either": 10,
+      "shared": 5,
+      "strength": 0.5
+    },
+    {
+      "a": "crates/league-relay/src/error.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 11,
+      "shared": 7,
+      "strength": 0.636364
+    },
+    {
+      "a": "crates/league-relay/src/error.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 12,
+      "shared": 7,
+      "strength": 0.583333
+    },
+    {
+      "a": "crates/league-relay/src/error.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 11,
+      "shared": 7,
+      "strength": 0.636364
+    },
+    {
+      "a": "crates/league-relay/src/lib.rs",
+      "b": "crates/league-relay/src/relay.rs",
+      "either": 11,
+      "shared": 8,
+      "strength": 0.727273
+    },
+    {
+      "a": "crates/league-relay/src/lib.rs",
+      "b": "crates/league-relay/src/secret.rs",
+      "either": 8,
+      "shared": 5,
+      "strength": 0.625
+    },
+    {
+      "a": "crates/league-relay/src/lib.rs",
+      "b": "crates/league-relay/src/transport.rs",
+      "either": 8,
+      "shared": 5,
+      "strength": 0.625
+    },
+    {
+      "a": "crates/league-relay/src/lib.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 12,
+      "shared": 8,
+      "strength": 0.666667
+    },
+    {
+      "a": "crates/league-relay/src/lib.rs",
+      "b": "docs/paper-test/relay.md",
+      "either": 11,
+      "shared": 8,
+      "strength": 0.727273
     },
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 5,
-      "shared": 5,
-      "strength": 1
+      "either": 12,
+      "shared": 11,
+      "strength": 0.916667
     },
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "docs/paper-test/relay.md",
+      "either": 11,
+      "shared": 11,
+      "strength": 1
+    },
+    {
+      "a": "crates/league-relay/src/secret.rs",
+      "b": "crates/league-relay/src/transport.rs",
       "either": 5,
       "shared": 5,
       "strength": 1
@@ -2747,9 +2899,9 @@
     {
       "a": "crates/league-relay/tests/relay_integration.rs",
       "b": "docs/paper-test/relay.md",
-      "either": 5,
-      "shared": 5,
-      "strength": 1
+      "either": 12,
+      "shared": 11,
+      "strength": 0.916667
     },
     {
       "a": "scripts/check-copy.sh",
@@ -2769,16 +2921,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-15T07:22:04-05:00",
-    "inScopeFiles": 510,
+    "headDate": "2026-11-15T12:09:20-05:00",
+    "inScopeFiles": 501,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 32,
+    "qualifyingCommits": 40,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-19T12:22:04.000Z",
+    "since": "2026-05-19T17:09:20.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
@@ -2794,7 +2946,7 @@
     ],
     "sourceFileReach": 20,
     "sourceFileRise": 25,
-    "sourceFilesReachingStrongFloor": 0,
+    "sourceFilesReachingStrongFloor": 3,
     "strength": 0.5,
     "windowDays": 180
   },
