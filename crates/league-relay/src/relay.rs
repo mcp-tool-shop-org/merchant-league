@@ -1015,93 +1015,83 @@ struct RegexAtom {
     max_rep: usize,
 }
 
+fn skip_regex_bracket(chars: &[char], idx: &mut usize) {
+    *idx += 1;
+    while *idx < chars.len() && chars[*idx] != ']' {
+        *idx += if chars[*idx] == '\\' { 2 } else { 1 };
+    }
+    if *idx < chars.len() {
+        *idx += 1;
+    }
+}
+
 fn expand_regex_branches(pattern: &str, max_branches: usize) -> Vec<String> {
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' {
-            i += 2;
-            continue;
-        }
-        if chars[i] == '[' {
-            i += 1;
-            while i < chars.len() && chars[i] != ']' {
-                if chars[i] == '\\' {
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            i += 1;
-            continue;
-        }
-        if chars[i] == '(' {
-            let start = i;
-            let mut depth = 1usize;
-            let mut j = i + 1;
-            let mut split_positions = Vec::new();
-            while j < chars.len() && depth > 0 {
-                if chars[j] == '\\' {
-                    j += 2;
-                    continue;
-                }
-                if chars[j] == '[' {
-                    j += 1;
-                    while j < chars.len() && chars[j] != ']' {
-                        if chars[j] == '\\' {
-                            j += 2;
-                        } else {
+        match chars[i] {
+            '\\' => i += 2,
+            '[' => skip_regex_bracket(&chars, &mut i),
+            '(' => {
+                let start = i;
+                let (mut depth, mut j) = (1usize, i + 1);
+                let mut splits = Vec::new();
+                while j < chars.len() && depth > 0 {
+                    match chars[j] {
+                        '\\' => j += 2,
+                        '[' => skip_regex_bracket(&chars, &mut j),
+                        '(' => {
+                            depth += 1;
                             j += 1;
                         }
-                    }
-                    j += 1;
-                    continue;
-                }
-                if chars[j] == '(' {
-                    depth += 1;
-                } else if chars[j] == ')' {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                } else if chars[j] == '|' && depth == 1 {
-                    split_positions.push(j);
-                }
-                j += 1;
-            }
-            if depth == 0 {
-                let prefix: String = chars[..start].iter().collect();
-                let suffix: String = chars[j + 1..].iter().collect();
-                let mut inner_start = start + 1;
-                if inner_start + 1 < j && chars[inner_start] == '?' && chars[inner_start + 1] == ':'
-                {
-                    inner_start += 2;
-                }
-                if split_positions.is_empty() {
-                    let inner: String = chars[inner_start..j].iter().collect();
-                    let merged = format!("{prefix}{inner}{suffix}");
-                    return expand_regex_branches(&merged, max_branches);
-                }
-                let mut results = Vec::new();
-                let mut seg_start = inner_start;
-                for &sp in split_positions.iter().chain(std::iter::once(&j)) {
-                    let opt: String = chars[seg_start..sp].iter().collect();
-                    let candidate = format!("{prefix}{opt}{suffix}");
-                    for sub in expand_regex_branches(
-                        &candidate,
-                        max_branches.saturating_sub(results.len()),
-                    ) {
-                        results.push(sub);
-                        if results.len() >= max_branches {
-                            return results;
+                        ')' => {
+                            depth -= 1;
+                            if depth > 0 {
+                                j += 1;
+                            }
                         }
+                        '|' if depth == 1 => {
+                            splits.push(j);
+                            j += 1;
+                        }
+                        _ => j += 1,
                     }
-                    seg_start = sp + 1;
                 }
-                return results;
+                if depth == 0 {
+                    let prefix: String = chars[..start].iter().collect();
+                    let suffix: String = chars[j + 1..].iter().collect();
+                    let inner_start =
+                        if start + 2 < j && chars[start + 1] == '?' && chars[start + 2] == ':' {
+                            start + 3
+                        } else {
+                            start + 1
+                        };
+                    if splits.is_empty() {
+                        let inner: String = chars[inner_start..j].iter().collect();
+                        return expand_regex_branches(
+                            &format!("{prefix}{inner}{suffix}"),
+                            max_branches,
+                        );
+                    }
+                    let mut results = Vec::new();
+                    let mut seg_start = inner_start;
+                    for &sp in splits.iter().chain(std::iter::once(&j)) {
+                        let opt: String = chars[seg_start..sp].iter().collect();
+                        let rem = max_branches.saturating_sub(results.len());
+                        for sub in expand_regex_branches(&format!("{prefix}{opt}{suffix}"), rem) {
+                            results.push(sub);
+                            if results.len() >= max_branches {
+                                return results;
+                            }
+                        }
+                        seg_start = sp + 1;
+                    }
+                    return results;
+                }
+                i += 1;
             }
+            _ => i += 1,
         }
-        i += 1;
     }
     pattern
         .split('|')
@@ -1119,20 +1109,27 @@ fn letter_bit(c: char) -> u32 {
     0
 }
 
+fn next_class_char(chars: &[char], idx: &mut usize) -> char {
+    if chars[*idx] == '\\' && *idx + 1 < chars.len() {
+        *idx += 2;
+        chars[*idx - 1]
+    } else {
+        *idx += 1;
+        chars[*idx - 1]
+    }
+}
+
 fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
+    const ALL_LETTERS: u32 = (1u32 << 26) - 1;
     let chars: Vec<char> = branch.chars().collect();
     let mut atoms: Vec<RegexAtom> = Vec::new();
     let mut i = 0;
     while i < chars.len() {
-        let ch = chars[i];
-        match ch {
-            '^' | '$' | '(' | ')' => {
-                i += 1;
-                continue;
-            }
+        match chars[i] {
+            '^' | '$' | '(' | ')' => i += 1,
             '.' => {
                 atoms.push(RegexAtom {
-                    letter_mask: (1u32 << 26) - 1,
+                    letter_mask: ALL_LETTERS,
                     specific: false,
                     min_rep: 1,
                     max_rep: 1,
@@ -1141,32 +1138,20 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
             }
             '[' => {
                 i += 1;
-                let negated = if i < chars.len() && chars[i] == '^' {
+                let negated = i < chars.len() && chars[i] == '^';
+                if negated {
                     i += 1;
-                    true
-                } else {
-                    false
-                };
+                }
                 let mut mask = 0u32;
                 while i < chars.len() && chars[i] != ']' {
-                    let start_c = if chars[i] == '\\' && i + 1 < chars.len() {
-                        i += 2;
-                        chars[i - 1]
-                    } else {
-                        i += 1;
-                        chars[i - 1]
-                    };
+                    let start_c = next_class_char(&chars, &mut i);
                     if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] != ']' {
                         i += 1;
-                        let end_c = if chars[i] == '\\' && i + 1 < chars.len() {
-                            i += 2;
-                            chars[i - 1]
-                        } else {
-                            i += 1;
-                            chars[i - 1]
-                        };
-                        let lo = (start_c as u32).min(end_c as u32);
-                        let hi = (start_c as u32).max(end_c as u32);
+                        let end_c = next_class_char(&chars, &mut i);
+                        let (lo, hi) = (
+                            (start_c as u32).min(end_c as u32),
+                            (start_c as u32).max(end_c as u32),
+                        );
                         if hi - lo <= 128 {
                             for cp in lo..=hi {
                                 if let Some(rc) = char::from_u32(cp) {
@@ -1174,43 +1159,39 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
                                 }
                             }
                         } else {
-                            mask = (1u32 << 26) - 1;
+                            mask = ALL_LETTERS;
                         }
                     } else {
                         mask |= letter_bit(start_c);
                     }
                 }
-                if i < chars.len() && chars[i] == ']' {
+                if i < chars.len() {
                     i += 1;
                 }
                 if negated {
-                    mask = ((1u32 << 26) - 1) & !mask;
+                    mask = ALL_LETTERS & !mask;
                 }
-                let width = mask.count_ones();
                 atoms.push(RegexAtom {
                     letter_mask: mask,
-                    specific: (1..=4).contains(&width),
+                    specific: (1..=4).contains(&mask.count_ones()),
                     min_rep: 1,
                     max_rep: 1,
                 });
             }
             '\\' => {
-                i += 1;
-                if i >= chars.len() {
+                if i + 1 >= chars.len() {
                     break;
                 }
-                let esc = chars[i];
-                i += 1;
+                let esc = chars[i + 1];
+                i += 2;
                 match esc {
-                    'b' | 'B' | 'A' | 'z' | 'Z' => continue,
-                    'w' | 'S' => {
-                        atoms.push(RegexAtom {
-                            letter_mask: (1u32 << 26) - 1,
-                            specific: false,
-                            min_rep: 1,
-                            max_rep: 1,
-                        });
-                    }
+                    'b' | 'B' | 'A' | 'z' | 'Z' => {}
+                    'w' | 'S' => atoms.push(RegexAtom {
+                        letter_mask: ALL_LETTERS,
+                        specific: false,
+                        min_rep: 1,
+                        max_rep: 1,
+                    }),
                     'x' if i + 2 <= chars.len() => {
                         let hex: String = chars[i..i + 2].iter().collect();
                         if let Ok(byte) = u8::from_str_radix(&hex, 16) {
@@ -1255,7 +1236,6 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
                     last.min_rep = 0;
                 }
                 i += 1;
-                continue;
             }
             '*' => {
                 if let Some(last) = atoms.last_mut() {
@@ -1263,22 +1243,16 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
                     last.max_rep = 12;
                 }
                 i += 1;
-                continue;
             }
             '+' => {
                 if let Some(last) = atoms.last_mut() {
                     last.max_rep = 12;
                 }
                 i += 1;
-                continue;
             }
             '{' => {
-                let mut j = i + 1;
-                while j < chars.len() && chars[j] != '}' {
-                    j += 1;
-                }
-                if j < chars.len() {
-                    let quant: String = chars[i + 1..j].iter().collect();
+                if let Some(rel_end) = chars[i + 1..].iter().position(|&c| c == '}') {
+                    let quant: String = chars[i + 1..i + 1 + rel_end].iter().collect();
                     let (min_q, max_q) = if let Some((lo_s, hi_s)) = quant.split_once(',') {
                         let lo = lo_s.trim().parse::<usize>().unwrap_or(0);
                         let hi = if hi_s.trim().is_empty() {
@@ -1288,8 +1262,7 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
                         };
                         (lo, hi.max(lo))
                     } else if let Ok(exact) = quant.trim().parse::<usize>() {
-                        let b = exact.min(12);
-                        (b, b)
+                        (exact.min(12), exact.min(12))
                     } else {
                         (1, 1)
                     };
@@ -1297,24 +1270,21 @@ fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
                         last.min_rep = min_q;
                         last.max_rep = max_q;
                     }
-                    i = j + 1;
-                    continue;
+                    i += rel_end + 2;
+                } else {
+                    i += 1;
                 }
-                i += 1;
-                continue;
             }
             other => {
-                if is_ignorable_confusable_mark(other) {
-                    i += 1;
-                    continue;
+                if !is_ignorable_confusable_mark(other) {
+                    let mask = letter_bit(other);
+                    atoms.push(RegexAtom {
+                        letter_mask: mask,
+                        specific: mask != 0,
+                        min_rep: 1,
+                        max_rep: 1,
+                    });
                 }
-                let mask = letter_bit(other);
-                atoms.push(RegexAtom {
-                    letter_mask: mask,
-                    specific: mask != 0,
-                    min_rep: 1,
-                    max_rep: 1,
-                });
                 i += 1;
             }
         }
@@ -3008,15 +2978,15 @@ fn build_setup_record(
     }
 }
 
-fn check_existing_setup_compatibility(
+fn load_compatible_setup_if_exists(
     turn_lock: &TurnLock,
     game_dir: &Path,
     redaction_key: Option<&ApiKey>,
-) -> Result<(), RelayError> {
+) -> Result<Option<GameSetupRecord>, RelayError> {
     turn_lock.verify_identity(redaction_key)?;
     let setup_path = game_dir.join("relay").join(SETUP_FILENAME);
     if !setup_path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let raw = fs::read_to_string(&setup_path).map_err(|e| io_err(&setup_path, e, redaction_key))?;
     let raw_json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
@@ -3062,7 +3032,15 @@ fn check_existing_setup_compatibility(
             redaction_key,
         )));
     }
-    Ok(())
+    Ok(Some(existing))
+}
+
+fn check_existing_setup_compatibility(
+    turn_lock: &TurnLock,
+    game_dir: &Path,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    load_compatible_setup_if_exists(turn_lock, game_dir, redaction_key).map(|_| ())
 }
 
 fn ensure_game_setup(
@@ -3073,46 +3051,13 @@ fn ensure_game_setup(
     fallback_wrapper: Option<&str>,
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
-    turn_lock.verify_identity(redaction_key)?;
     let relay_dir = config.game_dir.join("relay");
     let setup_path = relay_dir.join(SETUP_FILENAME);
     let desired = build_setup_record(config, plan, seat_wrappers, fallback_wrapper);
 
-    if setup_path.exists() {
-        let raw =
-            fs::read_to_string(&setup_path).map_err(|e| io_err(&setup_path, e, redaction_key))?;
-        let raw_json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-            RelayError::CorruptLog(redact_secrets(
-                &format!("{}: {e}", setup_path.display()),
-                redaction_key,
-            ))
-        })?;
-        let has_non_pinned_field = raw_json
-            .as_object()
-            .is_some_and(|obj| obj.contains_key("non_pinned_model_facing_strings"));
-        let existing: GameSetupRecord = serde_json::from_value(raw_json).map_err(|e| {
-            RelayError::CorruptLog(redact_secrets(
-                &format!("{}: {e}", setup_path.display()),
-                redaction_key,
-            ))
-        })?;
-        if !has_non_pinned_field {
-            let arm_detail = if existing.wording_arm != desired.wording_arm {
-                format!(
-                    " and recorded earlier wording_arm '{}' (active arm is '{}')",
-                    existing.wording_arm, desired.wording_arm
-                )
-            } else {
-                String::new()
-            };
-            return Err(RelayError::IncompatibleSetup(redact_secrets(
-                &format!(
-                    "{} predates the 'non_pinned_model_facing_strings' audit record{arm_detail}; start a new --game-dir",
-                    setup_path.display()
-                ),
-                redaction_key,
-            )));
-        }
+    if let Some(existing) =
+        load_compatible_setup_if_exists(turn_lock, &config.game_dir, redaction_key)?
+    {
         if existing.memory_mode != desired.memory_mode {
             return Err(RelayError::Usage(format!(
                 "game setup recorded memory_mode '{}' in {}, refusing turn with '{}'",
@@ -3129,17 +3074,6 @@ fn ensure_game_setup(
                 prev_unit,
                 setup_path.display(),
                 next_unit
-            )));
-        }
-        if existing.wording_arm != desired.wording_arm {
-            return Err(RelayError::IncompatibleSetup(redact_secrets(
-                &format!(
-                    "{} recorded earlier wording_arm '{}', which is incompatible with active wording_arm '{}'; start a new --game-dir",
-                    setup_path.display(),
-                    existing.wording_arm,
-                    desired.wording_arm
-                ),
-                redaction_key,
             )));
         }
         if existing.response_schema_name != desired.response_schema_name

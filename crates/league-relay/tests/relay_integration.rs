@@ -15866,7 +15866,7 @@ fn fix5_p36_b1_wording_arm_pinned_against_rendered_default_prompt_digest() -> Te
 }
 
 #[test]
-fn fix5_c12_refuses_dollar_ref_anywhere_in_note_keeping_schema() -> TestResult {
+fn fix5_c12_refuses_schema_ref_anywhere_in_note_keeping_schema() -> TestResult {
     let refused_cases: &[(&str, Json)] = &[
         (
             "orders $ref to #/properties/notes",
@@ -16578,7 +16578,17 @@ fn fix5_nits_c13_c14_c15_regressions() -> TestResult {
     );
 
     // Nested case-variants (`Notes`), Cyrillic confusables (`nоtes`), and `my_scratchpad` remain refused even without top-level `notes`:
-    for bad_nested in ["Notes", "n\u{043E}tes", "my_scratchpad"] {
+    for bad_nested in [
+        "Notes",
+        "n\u{043E}tes",
+        "my_scratchpad",
+        "\u{1D427}\u{1D428}\u{1D42D}\u{1D41E}\u{1D42C}",
+        "\u{1D5E1}\u{1D5E2}\u{1D5E7}\u{1D5D8}\u{1D5E6}",
+        "\u{03BD}o\u{03C4}\u{03B5}\u{03C2}",
+        "myScratchpad",
+        "\u{0441}\u{0440}\u{0430}\u{0432}\u{0435}\u{0445}\u{0443}\u{0456}\u{043A}\u{043C}\u{043D}_scratchpad",
+        "àçďĥĵķĺñŕţùŵýź_scratchpad",
+    ] {
         let mut p = serde_json::Map::new();
         p.insert(bad_nested.to_owned(), json!({"type": "string"}));
         let bad_schema = json!({
@@ -16595,6 +16605,151 @@ fn fix5_nits_c13_c14_c15_regressions() -> TestResult {
             "nested '{bad_nested}' must still be refused without top-level notes"
         );
     }
+
+    // Additional regex branch, escape, quantifier, root-composition `$ref`, `dependentRequired`, `dependentSchemas`,
+    // `propertyNames`, and malformed-subschema checks:
+    for extra_refused in [
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": {"^(?:orders|notes)$": {"type": "string"}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": {"\\[a|b\\]|^\\x6e\\u006ftes$": {"type": "string"}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": {"^\\bno+te?s*\\b$": {"type": "string"}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": {"^n{1,2}o{1}t{1,}es$": {"type": "string"}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": {"^[^0-9][m-o]\\w[\\e]s$": {"type": "string"}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "propertyNames": {"pattern": "^n.tes$"}}),
+        json!({"$ref": "#/$defs/root_def", "$defs": {"root_def": {"properties": {"notes": {"type": "string"}}}}}),
+        json!({"allOf": [{"$ref": "#/$defs/root_def"}], "$defs": {"root_def": {"properties": {"notes": {"type": "string"}}}}}),
+        json!({"type": "object", "additionalProperties": false, "properties": {"orders": {"type": "array"}}, "dependentRequired": {"orders": ["missing_prop"]}}),
+        json!({"type": "object", "additionalProperties": false, "properties": {"orders": {"type": "array"}}, "dependentRequired": {"missing_key": ["orders"]}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "dependentRequired": {"orders": ["orders", "orders"]}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "dependentRequired": 7}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "dependentRequired": {"orders": "not_array"}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "dependentRequired": {"orders": [7]}}),
+        json!({"type": "object", "properties": {"orders": {"type": "array"}}, "patternProperties": 7}),
+        json!({"type": "object", "properties": {"orders": {"properties": 7}}}),
+        json!({"type": "object", "properties": {"orders": {"required": 7}}}),
+        json!({"type": "object", "properties": {"orders": {"required": [7]}}}),
+        json!({"type": "object", "properties": {"orders": {"required": ["a", "a"], "properties": {"a": {"type": "string"}}}}}),
+        json!({"type": "object", "properties": {"orders": {"$ref": "   "}}}),
+        json!({"type": "object", "properties": {"orders": {"$ref": 9}}}),
+        json!({"type": "object", "properties": {"orders": {"dependentSchemas": {"my_scratchpad": {"type": "object"}}}}}),
+        json!({"type": "object", "properties": {"orders": {"$defs": {"notes": {"type": "string"}}}}}),
+        json!({"type": "object", "properties": {"orders": {"my_scratchpad": true}}}),
+        json!({"type": "object", "my_scratchpad": true, "properties": {"orders": {"type": "array"}}}),
+        json!({"type": "object", "properties": {"notes": {"type": "string"}, "orders": {"default": [{"notes": "x"}]}}}),
+        json!({"type": "object", "default": [{"notes": "x"}], "properties": {"orders": {"type": "array"}}}),
+    ] {
+        assert!(
+            ResponseFormatConfig::from_json_str(&extra_refused.to_string(), None).is_err(),
+            "expected refusal for {extra_refused}"
+        );
+    }
+
+    // Valid complex no-notes schema exercising `collect_non_pinned_strings` across `default`, `examples`, `const`, `prefixItems`, `dependentSchemas`:
+    let complex_valid = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "properties": {
+                "orders": {
+                    "type": "array",
+                    "prefixItems": [{"type": "string", "const": "open"}],
+                    "default": [{"good": "salt"}],
+                    "examples": ["buy_salt"]
+                }
+            },
+            "dependentSchemas": {
+                "orders": {
+                    "type": "object",
+                    "properties": {"tag": {"type": "string"}}
+                }
+            },
+            "patternProperties": {
+                "^[A-Za-z0-9]{1,x}[\\u{0000}-\\u{0100}]+$": {"type": "string"}
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    let audited = complex_valid.collect_non_pinned_strings();
+    assert!(audited.iter().any(|e| e.text == "open"));
+    assert!(audited.iter().any(|e| e.text == "salt"));
+    assert!(audited.iter().any(|e| e.text == "buy_salt"));
+    assert!(audited.iter().any(|e| e.text == "tag"));
+
+    // CLI option-parsing and manual-transport branches:
+    assert!(matches!(parse_args(["--help"]), Ok(CliCommand::Help)));
+    assert!(matches!(parse_args(["help"]), Ok(CliCommand::Help)));
+    assert!(matches!(parse_args(["turn", "-h"]), Ok(CliCommand::Help)));
+    let mut help_out = Vec::new();
+    let mut help_err = Vec::new();
+    assert_eq!(
+        execute_cli(["--help"], |_| None, &mut help_out, &mut help_err),
+        0
+    );
+    assert!(!help_out.is_empty());
+
+    let parsed_sp_true = parse_args([
+        "turn",
+        "--game-dir=g",
+        "--day=01",
+        "--round=talk",
+        "--seats=s.json",
+        "--scratchpad=true",
+    ])?;
+    assert!(matches!(parsed_sp_true, CliCommand::Turn(_)));
+    let parsed_sp_false = parse_args([
+        "turn",
+        "--game-dir=g",
+        "--day=01",
+        "--round=act",
+        "--seats=s.json",
+        "--scratchpad=false",
+    ])?;
+    assert!(matches!(parsed_sp_false, CliCommand::Turn(_)));
+
+    for bad_cli in [
+        vec![],
+        vec!["unknown-sub"],
+        vec!["--api-key=secret"],
+        vec!["turn", "--live=1"],
+        vec!["turn", "--scratchpad=maybe"],
+        vec!["turn", "--scratchpad", "--no-scratchpad"],
+        vec!["turn", "--no-scratchpad", "--scratchpad=true"],
+        vec!["turn", "--no-scratchpad=1"],
+        vec!["turn", "--mixed-scratchpad-arm=1"],
+        vec!["turn", "positional"],
+        vec!["turn", "--unknown-flag=val"],
+        vec!["turn", "--game-dir"],
+        vec!["turn", "--live", "--mock-dir", "m"],
+        vec!["turn", "--cap-credits", "1", "--cap-gpu-secs", "1"],
+        vec![
+            "turn", "--day", "01", "--round", "talk", "--seats", "s.json",
+        ],
+        vec![
+            "turn",
+            "--game-dir",
+            "g",
+            "--round",
+            "talk",
+            "--seats",
+            "s.json",
+        ],
+        vec![
+            "turn",
+            "--game-dir",
+            "g",
+            "--day",
+            "01",
+            "--seats",
+            "s.json",
+        ],
+        vec!["turn", "--game-dir", "g", "--day", "01", "--round", "talk"],
+    ] {
+        assert!(parse_args(bad_cli).is_err());
+    }
+    assert!(
+        league_relay::cli::NoopManualTransport
+            .post_chat_completions("http://127.0.0.1:1/v1", "{}", Duration::from_secs(1))
+            .is_err()
+    );
 
     Ok(())
 }
