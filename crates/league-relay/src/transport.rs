@@ -1,11 +1,16 @@
-//! HTTP transport abstraction, live `ureq` implementation, and directory mock transport.
+//! HTTP transport abstraction, OpenRouter `ureq` implementation, local
+//! OpenAI-compatible VM implementation, and directory mock transport.
 //!
 //! All relay logic runs against [`Transport`] so tests and offline mock runs
-//! exercise every code path without touching a socket. [`UreqTransport`] can
-//! only be constructed from a [`LiveGate`].
+//! exercise every code path. [`UreqTransport`] can only be constructed from a
+//! [`LiveGate`], and [`LocalOpenAiTransport`] can only be constructed from a
+//! [`LocalGate`] (which refuses any API key, enforces loopback / VM-local URLs,
+//! disables HTTP redirects, ignores environment proxies, and never sends an
+//! `Authorization` header).
 
 use crate::error::RelayError;
-use crate::secret::{ApiKey, LiveGate, redact_secrets};
+use crate::seats::{validate_local_base_url, validate_local_tokenize_url};
+use crate::secret::{ApiKey, LiveGate, LocalGate, redact_secrets};
 use serde::Deserialize;
 use std::fmt;
 use std::fs;
@@ -45,7 +50,7 @@ impl fmt::Display for TransportError {
 
 impl std::error::Error for TransportError {}
 
-/// Synchronous HTTP transport for chat-completions POST calls.
+/// Synchronous HTTP transport for chat-completions POST calls and local token counting.
 pub trait Transport: Send + Sync {
     /// Send `body` (JSON) to `url` bounded by wall timeout `timeout`.
     fn post_chat_completions(
@@ -54,6 +59,24 @@ pub trait Transport: Send + Sync {
         body: &str,
         timeout: Duration,
     ) -> Result<RawHttpResponse, TransportError>;
+
+    /// Count model tokens in `text` via the local server's `POST /tokenize` endpoint (`A-3`,
+    /// `<https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/#tokenizer-api>`).
+    ///
+    /// Transports without a tokenizer endpoint return `Err` so the relay refuses the turn
+    /// rather than guessing by word or character count.
+    fn count_tokens(
+        &self,
+        tokenize_url: &str,
+        model: &str,
+        text: &str,
+        timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        let _ = (tokenize_url, model, text, timeout);
+        Err(TransportError::Network(
+            "token counting endpoint (/tokenize) is unavailable on this transport".to_owned(),
+        ))
+    }
 }
 
 /// Map a `ureq::Error` into a redacted [`TransportError`].
@@ -64,7 +87,15 @@ pub fn map_ureq_error(err: ureq::Error, key: &ApiKey) -> TransportError {
     }
 }
 
-/// Live HTTPS transport backed by `ureq`.
+/// Map a keyless local `ureq::Error` into a redacted [`TransportError`].
+pub fn map_local_ureq_error(err: ureq::Error) -> TransportError {
+    match err {
+        ureq::Error::Timeout(_) => TransportError::Timeout,
+        other => TransportError::Network(redact_secrets(&other.to_string(), None)),
+    }
+}
+
+/// Live OpenRouter HTTPS transport backed by `ureq`.
 ///
 /// Requires a [`LiveGate`] so it cannot be constructed unless `--live`,
 /// `--cap-credits`, and `OPENROUTER_API_KEY` were all verified.
@@ -112,6 +143,111 @@ impl Transport for UreqTransport {
             .read_to_string()
             .map_err(|e| map_ureq_error(e, self.gate.api_key()))?;
         Ok(RawHttpResponse { status, body: text })
+    }
+}
+
+/// Keyless HTTP transport for OpenAI-compatible servers (vLLM or similar) on loopback / VM.
+///
+/// Requires a [`LocalGate`], sends no `Authorization` header, disables HTTP
+/// redirects (`max_redirects(0)`), ignores environment proxies (`proxy(None)`),
+/// and re-validates every target URL against loopback and the gate's allowed
+/// VM-local hosts before connecting.
+#[derive(Debug, Clone)]
+pub struct LocalOpenAiTransport {
+    gate: LocalGate,
+}
+
+impl LocalOpenAiTransport {
+    /// Build a keyless local transport from a verified [`LocalGate`].
+    pub fn new(gate: LocalGate) -> Self {
+        Self { gate }
+    }
+
+    /// Underlying [`LocalGate`].
+    pub fn gate(&self) -> &LocalGate {
+        &self.gate
+    }
+}
+
+impl Transport for LocalOpenAiTransport {
+    fn post_chat_completions(
+        &self,
+        url: &str,
+        body: &str,
+        timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        let (validated_endpoint, _) =
+            validate_local_base_url("local", url, self.gate.allowed_vm_hosts())
+                .map_err(|e| TransportError::Network(e.to_string()))?;
+        let agent: Agent = Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .proxy(None)
+            .build()
+            .into();
+        let resp = agent
+            .post(&validated_endpoint)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(map_local_ureq_error)?;
+        let status = resp.status().as_u16();
+        let text = resp
+            .into_body()
+            .read_to_string()
+            .map_err(map_local_ureq_error)?;
+        Ok(RawHttpResponse { status, body: text })
+    }
+
+    fn count_tokens(
+        &self,
+        tokenize_url: &str,
+        model: &str,
+        text: &str,
+        timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        let (validated_url, _) =
+            validate_local_tokenize_url("local", tokenize_url, self.gate.allowed_vm_hosts())
+                .map_err(|e| TransportError::Network(e.to_string()))?;
+        let payload = serde_json::json!({
+            "model": model,
+            "prompt": text,
+            "add_special_tokens": false,
+        })
+        .to_string();
+        let agent: Agent = Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .proxy(None)
+            .build()
+            .into();
+        let resp = agent
+            .post(&validated_url)
+            .header("Content-Type", "application/json")
+            .send(&payload)
+            .map_err(map_local_ureq_error)?;
+        let status = resp.status().as_u16();
+        let body = resp
+            .into_body()
+            .read_to_string()
+            .map_err(map_local_ureq_error)?;
+        if status != 200 {
+            return Err(TransportError::Network(format!(
+                "POST /tokenize returned HTTP {status}"
+            )));
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|_| {
+            TransportError::Network("POST /tokenize returned invalid JSON".to_owned())
+        })?;
+        let Some(raw_count) = parsed.get("count").and_then(serde_json::Value::as_u64) else {
+            return Err(TransportError::Network(
+                "POST /tokenize response missing non-negative integer 'count'".to_owned(),
+            ));
+        };
+        usize::try_from(raw_count).map_err(|_| {
+            TransportError::Network("POST /tokenize 'count' overflowed usize".to_owned())
+        })
     }
 }
 

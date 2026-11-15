@@ -28,30 +28,55 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 6,
+      "added": 2,
+      "changed": 18,
       "moved": 0,
-      "parts": 2,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
-        "kind": "landing",
-        "sentence": "CHANGELOG.md is now read by scripts/test-guards.sh.",
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `SecretInForbiddenPlace`, before `Usage`.",
         "subjects": [
-          "CHANGELOG.md",
-          "scripts/test-guards.sh"
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 3 more changes to the order of work.",
+        "subjects": []
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-relay/src/wording.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-relay/src/wording.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "1 file added and 6 changed content, across 2 parts.",
+        "sentence": "2 files added and 18 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "1ac76e7ed11bc75055a4fb805acf8fa92f40e0ce",
-      "generatedAt": "2026-11-15T15:20:24.723Z"
+      "commit": "d601dbbac4b0af52be1df34861cd9606b0ed266e",
+      "generatedAt": "2026-11-15T17:13:36.000Z"
     },
     "unchanged": false
   },
@@ -137,9 +162,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "d601dbbac4b0af52be1df34861cd9606b0ed266e",
+  "commit": "a71b2bc068c37a199a1333e76bfd0ad6c1825cc2",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (335 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -363,11 +388,11 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T17:13:36.000Z",
+  "generatedAt": "2026-11-15T23:08:33.115Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
-    "370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.",
+    "371 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 368 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -391,9 +416,7 @@
   "startBeside": [
     {
       "files": [
-        "crates/league-relay/src/relay.rs",
-        "crates/league-relay/src/seats.rs",
-        "crates/league-relay/src/transport.rs"
+        "crates/league-relay/src/relay.rs"
       ],
       "from": "crates/league-relay/src/cli.rs"
     }
@@ -404,6 +427,7 @@
     "crates/league-relay/src/lib.rs",
     "crates/league-relay/src/cli.rs",
     "crates/league-relay/src/secret.rs",
+    "crates/league-relay/src/seats.rs",
     "crates/league-relay/src/error.rs"
   ],
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
