@@ -7,64 +7,147 @@
   "breaks": [
     {
       "doors": 4,
-      "importedBy": [],
+      "importedBy": [
+        "league-standalone"
+      ],
       "importedByTests": [],
       "kind": "part",
       "name": "league-ledger",
       "partLabel": "league-ledger"
+    },
+    {
+      "doors": 1,
+      "importedBy": [
+        "league-standalone"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-core",
+      "partLabel": "league-core"
     }
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 10,
+      "added": 14,
+      "changed": 9,
       "moved": 0,
-      "parts": 2,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `SecretInForbiddenPlace`, before `Usage`.",
+        "kind": "import-added",
+        "sentence": "league-standalone now imports league-core.",
         "subjects": [
-          "crates/league-relay/src/cli.rs"
+          "league-standalone",
+          "league-core"
         ]
       },
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `InvalidCap`, after `parse`.",
+        "kind": "import-added",
+        "sentence": "league-standalone now imports league-ledger.",
         "subjects": [
-          "crates/league-relay/src/cli.rs"
+          "league-standalone",
+          "league-ledger"
         ]
       },
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `redact_secrets`.",
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 2 more.",
         "subjects": [
-          "crates/league-relay/src/cli.rs"
+          ".github/workflows/ci.yml",
+          "crates/league-core/src/engine.rs",
+          "crates/league-core/src/lib.rs",
+          "crates/league-core/src/replay.rs",
+          "crates/league-core/tests/",
+          "crates/league-standalone/"
         ]
       },
       {
-        "kind": "sequence",
-        "sentence": "And 1 more change to the order of work.",
-        "subjects": []
+        "kind": "door",
+        "sentence": "CI no longer runs crates/league-core/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-core/"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/ is now also read by crates/league-standalone/Cargo.toml.",
+        "subjects": [
+          "crates/league-core/",
+          "crates/league-standalone/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-ledger/ is now also read by crates/league-standalone/Cargo.toml.",
+        "subjects": [
+          "crates/league-ledger/",
+          "crates/league-standalone/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-standalone/ is now read by Cargo.toml.",
+        "subjects": [
+          "crates/league-standalone/",
+          "Cargo.toml"
+        ]
+      },
+      {
+        "kind": "part",
+        "sentence": "league-standalone is a new part, drawn from `crates/league-standalone/**`.",
+        "subjects": [
+          "league-standalone"
+        ]
       },
       {
         "kind": "counts",
-        "sentence": "10 files changed content, across 2 parts.",
+        "sentence": "14 files added and 9 changed content, across 6 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "da74d108cbf1532b8bcff344298ca721cebca2e7",
-      "generatedAt": "2026-11-15T14:25:48.500Z"
+      "commit": "1c4ea4c8d86b759b98a2de3ca433f3d192918b15",
+      "generatedAt": "2026-11-15T15:52:19.804Z"
     },
     "unchanged": false
   },
   "changesTogether": [
     {
+      "a": "crates/league-relay/src/secret.rs",
+      "b": "crates/league-relay/src/transport.rs",
+      "either": 5,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 5
+    },
+    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 11,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 10
+    },
+    {
+      "a": "crates/league-relay/src/cli.rs",
+      "b": "crates/league-relay/src/relay.rs",
       "either": 10,
       "partLabels": [
         null,
@@ -79,8 +162,8 @@
     },
     {
       "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 9,
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 11,
       "partLabels": [
         null,
         null
@@ -90,41 +173,11 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 8
+      "shared": 9
     },
     {
       "a": "crates/league-relay/src/cli.rs",
       "b": "crates/league-relay/src/error.rs",
-      "either": 8,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 10,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 8
-    },
-    {
-      "a": "crates/league-relay/src/error.rs",
-      "b": "crates/league-relay/src/relay.rs",
       "either": 9,
       "partLabels": [
         null,
@@ -140,12 +193,12 @@
   ],
   "changesTogetherNote": [
     "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
-    "Window: 180 days; a pair counts from 3 shared commits, since 1 source file reaches 10 revisions; the floor rises to 10 when 25 do."
+    "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "1c4ea4c8d86b759b98a2de3ca433f3d192918b15",
+  "commit": "b7a1773ee8323c4a50f46fc98934405eb553b2ef",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (324 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -164,7 +217,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 1
+          "files": 8
         },
         {
           "boundary": "league-dice",
@@ -187,6 +240,11 @@
           "files": 1
         },
         {
+          "boundary": "league-standalone",
+          "depth": 0,
+          "files": 5
+        },
+        {
           "boundary": "league-tui",
           "depth": 0,
           "files": 1
@@ -201,7 +259,10 @@
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
         "scripts/test-guards.sh",
-        "crates/league-core/",
+        "crates/league-core/src/engine.rs",
+        "crates/league-core/src/lib.rs",
+        "crates/league-core/src/replay.rs",
+        "crates/league-core/tests/",
         "crates/league-dice/",
         "crates/league-gen/src/empirical.rs",
         "crates/league-gen/src/feasibility.rs",
@@ -215,10 +276,11 @@
         "crates/league-ledger/tests/vectors.rs",
         "crates/league-relay/tests/",
         "crates/league-season/",
+        "crates/league-standalone/",
         "crates/league-tui/"
       ],
-      "runsCount": 18,
-      "runsMore": 18,
+      "runsCount": 22,
+      "runsMore": 26,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -360,7 +422,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T15:52:19.804Z",
+  "generatedAt": "2026-11-15T15:58:13.088Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
@@ -376,11 +438,12 @@
     "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-season": "league-season",
+    "league-standalone": "league-standalone",
     "league-tui": "league-tui",
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 10,
+  "parts": 11,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -405,18 +468,18 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 28,
+  "testFiles": 36,
   "testedBy": {
-    "league-core": 1,
+    "league-core": 5,
     "league-dice": 1,
     "league-gen": 7,
-    "league-ledger": 6,
+    "league-ledger": 7,
     "league-season": 1,
+    "league-standalone": 5,
     "league-tui": 1
   },
-  "testedCodeParts": 6,
+  "testedCodeParts": 7,
   "testedInside": [
-    "league-core",
     "league-dice",
     "league-season",
     "league-tui"
@@ -431,7 +494,6 @@
   "unreadNote": [],
   "untested": [],
   "untestedNote": [
-    "league-core is tested only by the unit tests in its own files.",
     "league-dice is tested only by the unit tests in its own files.",
     "league-season is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files.",

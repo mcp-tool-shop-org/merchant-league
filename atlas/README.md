@@ -1,24 +1,28 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 1c4ea4c by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit b7a1773 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-10 parts, mostly Rust (324 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (da74d10)
+## What changed since 2026-11-15 (1c4ea4c)
 
-- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `SecretInForbiddenPlace`, before `Usage`.
-- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `InvalidCap`, after `parse`.
-- In crates/league-relay/src/cli.rs, `execute_cli` lost a step, `redact_secrets`.
-- And 1 more change to the order of work.
-- 10 files changed content, across 2 parts.
+- league-standalone now imports league-core.
+- league-standalone now imports league-ledger.
+- CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 2 more.
+- CI no longer runs crates/league-core/.
+- crates/league-core/ is now also read by crates/league-standalone/Cargo.toml.
+- crates/league-ledger/ is now also read by crates/league-standalone/Cargo.toml.
+- crates/league-standalone/ is now read by Cargo.toml.
+- league-standalone is a new part, drawn from `crates/league-standalone/**`.
+- 14 files added and 9 changed content, across 6 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 18 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 26 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
@@ -27,7 +31,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 3 files in 3 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, 4 files in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 8 files in 4 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -47,27 +51,26 @@ CI writes nothing in the files this map could read; 1 file could not be.
 
 ## What breaks what
 
-- **league-ledger** is imported by no other part and sits on the path of 4 doors.
+- **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
+- **league-core** is imported by 1 part (league-standalone) and sits on the path of 1 door.
 
 scripts holds only shell files, which this map does not read, so what uses it cannot be seen.
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 9 of 10 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 8 of 9 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 7 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 8 of 10 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 9 commits.
+- **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 5 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 10 of 11 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 9 of 10 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 9 of 11 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 7 of 9 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 1 source file reaches 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
 Every code part this map reads is touched by at least one test.
-
-league-core is tested only by the unit tests in its own files.
 
 league-dice is tested only by the unit tests in its own files.
 
