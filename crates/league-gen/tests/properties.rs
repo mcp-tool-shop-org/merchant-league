@@ -220,7 +220,7 @@ proptest! {
         };
         prop_assert_eq!(&decoded, &t1);
 
-        let recheck = match check_feasibility(&decoded, &cfg) {
+        let recheck = match check_feasibility(&decoded) {
             Ok(r) => r,
             Err(err) => return Err(TestCaseError::fail(format!("recheck failed: {err}"))),
         };
@@ -331,7 +331,7 @@ proptest! {
             }
         }
 
-        let verdict = check_feasibility(&table, &cfg);
+        let verdict = check_feasibility(&table);
         if oracle_any_pair {
             let rejected = matches!(verdict, Err(FeasibilityError::PairCoversUpkeep { .. }));
             prop_assert!(rejected, "expected PairCoversUpkeep, got {verdict:?}");
@@ -361,7 +361,7 @@ proptest! {
         for s in &mut low_yield.seats {
             s.raw_yield_per_turn *= 0.05;
         }
-        let low_res = check_feasibility(&low_yield, &cfg);
+        let low_res = check_feasibility(&low_yield);
         let rejected_surplus = matches!(low_res, Err(FeasibilityError::InsufficientSurplus { .. }));
         prop_assert!(rejected_surplus, "expected InsufficientSurplus, got {low_res:?}");
 
@@ -369,7 +369,7 @@ proptest! {
         let mut asym = table;
         let idx = seat_pick % sc.as_usize();
         asym.seats[idx].raw_yield_per_turn *= 3.0;
-        let asym_res = check_feasibility(&asym, &cfg);
+        let asym_res = check_feasibility(&asym);
         let rejected_ev = matches!(asym_res, Err(FeasibilityError::SeatEvOutOfTolerance { .. }));
         prop_assert!(rejected_ev, "expected SeatEvOutOfTolerance, got {asym_res:?}");
     }

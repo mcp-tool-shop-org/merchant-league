@@ -7,20 +7,21 @@
 //! [`ALLOWED_COMMODITY_GLOSSARY`] (`#26a`), embeds its [`GeneratorConfig`],
 //! [`GENERATOR_VERSION`], Tier-3 [`ProjectSpec`]s (`1..=N` pairs plus `100`
 //! full-ring Concordat), and graded `3.0..=8.0 VP` [`MandateCardSpec`] deck (`B2.2`),
-//! and is verified by [`check_feasibility`] plus deterministic multi-agent
-//! [`compute_rollout_grading`] to prove:
+//! and is verified by [`check_feasibility`] (which also executes [`compute_rollout_grading`], a
+//! deterministic scripted proxy rollout inside `league-gen`, rather than `league-core`'s turn
+//! engine) to prove:
 //! 1. **Zero 2-seat self-sufficiency:** every pair `{i, j}` has no internal
 //!    converter chain supplying either seat's upkeep (structural check via
 //!    [`pair_has_structural_autarky`] and LP check via [`coalition_upkeep_coverage`]).
 //! 2. **Strict aggregate & per-converter surplus:** full-table conversion covers all
 //!    mandatory upkeep with net Syndicate Project surplus exceeding
-//!    `config.min_surplus_ratio`, and every converter maintains positive clearing-price
-//!    value-added (`B2.1`).
+//!    `config.min_surplus_ratio`, and every converter maintains positive value-added
+//!    evaluated at the shadow LP's objective/salvage floor coefficients (`B2.1`).
 //! 3. **Seat expected-value balance & top-pair cap:** expected seat values per turn
 //!    (computed by [`EvMethod::ShadowPrice`] by default per `docs/design-v2.md` §1.5,
 //!    conserving [`FeasibilityReport::season_effective_net_surplus`], or
 //!    [`EvMethod::Shapley`]) fall within `±config.ev_tolerance` of the table mean,
-//!    and no unordered pair exceeds the C6 table pair-share cap.
+//!    and no unordered pair exceeds the provisional C6 table pair-share cap.
 //!
 //! Quantitative figures from the seed-26 report (random bilateral lock-in rates
 //! and dyadic HHI comparisons) are kept as hypotheses in [`ReportHypotheses`].

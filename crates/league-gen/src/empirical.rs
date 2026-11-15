@@ -105,7 +105,9 @@ pub fn compute_hhi(pair_volumes: &[f64]) -> HhiMetrics {
     }
 }
 
-/// Deterministic multi-agent season rollout grading summary for a candidate [`RingTable`] (`B2.2`).
+/// Scripted proxy rollout grading summary across deterministic 26-turn episodes for a candidate
+/// [`RingTable`] (`B2.2`). Executed inside `league-gen` using heuristic cadence/barter rules; not
+/// `league-core`'s `TurnEngine`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RolloutGradingReport {
     /// Number of seeded deterministic 26-turn multi-agent rollout episodes executed.
@@ -163,7 +165,8 @@ pub struct RingTableMetrics {
     pub max_4seat_upkeep_coverage: Option<f64>,
     /// Static 1-turn LP grand-coalition optimal-flow dyadic concentration model output.
     pub trade_concentration: HhiMetrics,
-    /// Multi-agent rollout project and mandate grading telemetry (`B2.2`).
+    /// Scripted proxy rollout project and mandate grading telemetry inside `league-gen` (`B2.2`,
+    /// not `league-core`'s `TurnEngine`).
     pub rollout_grading: RolloutGradingReport,
 }
 
@@ -457,14 +460,28 @@ const ROLLOUT_EPISODES: usize = 8;
 const ROLLOUT_TURNS: u8 = 26;
 const MAX_SEATS: usize = 6;
 
-/// Runs deterministic multi-agent 26-turn season rollouts (`B2.2`) to grade Syndicate Project
-/// completion, full-ring Concordat activity, per-card mandate difficulty, and rollout pair shares.
+/// Runs a scripted proxy rollout across deterministic 26-turn episodes inside `league-gen` (`B2.2`)
+/// to grade Syndicate Project completion, full-ring Concordat activity, per-card mandate
+/// difficulty, and rollout pair shares. This is a self-contained proxy heuristic, not `league-core`'s
+/// `TurnEngine`.
 #[must_use]
 pub fn compute_rollout_grading(
     table: &RingTable,
     report: &FeasibilityReport,
 ) -> RolloutGradingReport {
     let n = table.seat_count.as_usize().min(MAX_SEATS);
+    let mean_upkeep = table
+        .seats
+        .iter()
+        .take(n)
+        .map(|s| s.upkeep_amount)
+        .sum::<f64>()
+        / (n.max(1) as f64);
+    let q_scale = if mean_upkeep > 0.0 && !(1e-3..=1e6).contains(&mean_upkeep) {
+        mean_upkeep / 2.0
+    } else {
+        1.0
+    };
     let deck_len = table.mandate_deck.len();
     let total_pairs = table.seat_count.pair_count();
     let mut pair_volumes = vec![0.0_f64; total_pairs];
@@ -474,20 +491,7 @@ pub fn compute_rollout_grading(
     let mut goods_produced_mask = 0u8;
 
     let concordat_opt = table.projects.iter().find(|p| p.id == PROJECT_CONCORDAT_ID);
-    let mut conv_base_runs = [0.0_f64; 12];
-    let mut conv_flat = 0usize;
-    for seat in table.seats.iter().take(n) {
-        for _ in &seat.converters {
-            if conv_flat < conv_base_runs.len() {
-                conv_base_runs[conv_flat] = report
-                    .optimal_converter_runs
-                    .get(conv_flat)
-                    .copied()
-                    .unwrap_or(0.0);
-            }
-            conv_flat += 1;
-        }
-    }
+    let conv_base_runs = &report.optimal_converter_runs;
 
     let mut stream = SeedStream::new(table.seed, b"MLV2|ROLLOUT_GRADING");
 
@@ -558,8 +562,8 @@ pub fn compute_rollout_grading(
                     let base_run = conv_base_runs.get(c_cursor).copied().unwrap_or(0.0);
                     c_cursor += 1;
                     let target_run = if conv.is_secondary {
-                        if base_run > 1e-6 || yield_mult.iter().any(|&y| y < 0.99) {
-                            base_run.max(0.35) * seat_cadence[owner]
+                        if base_run > 1e-6 * q_scale || yield_mult.iter().any(|&y| y < 0.99) {
+                            base_run.max(0.35 * q_scale) * seat_cadence[owner]
                         } else {
                             0.0
                         }
@@ -583,7 +587,7 @@ pub fn compute_rollout_grading(
                             affordable = cap_k;
                         }
                     }
-                    if affordable > 1e-6 {
+                    if affordable > 1e-6 * q_scale {
                         for &(raw_g, amt) in &conv.inputs {
                             let k = usize::from(raw_g);
                             if k >= n || amt <= 0.0 {
@@ -624,7 +628,7 @@ pub fn compute_rollout_grading(
                     1.0 + table.seats[prod].refined_export_tariff * tariff_mult[prod]
                 };
                 let needed_gross = table.seats[s].upkeep_amount * mult;
-                if ref_owned[prod][prod] + 1e-9 >= needed_gross {
+                if ref_owned[prod][prod] + 1e-9 * q_scale >= needed_gross {
                     ref_owned[prod][prod] = (ref_owned[prod][prod] - needed_gross).max(0.0);
                     if prod != s {
                         partners_mask[s] |= 1u8 << prod;
@@ -648,9 +652,9 @@ pub fn compute_rollout_grading(
                     if partner == s {
                         continue;
                     }
-                    let swap_qty =
-                        (ref_owned[s][s].min(ref_owned[partner][partner]) * 0.20).min(0.85);
-                    if swap_qty > 0.05 {
+                    let swap_qty = (ref_owned[s][s].min(ref_owned[partner][partner]) * 0.20)
+                        .min(0.85 * q_scale);
+                    if swap_qty > 0.05 * q_scale {
                         ref_owned[s][s] -= swap_qty;
                         ref_owned[partner][partner] -= swap_qty;
                         ref_owned[s][partner] += swap_qty;
@@ -780,7 +784,8 @@ pub fn compute_rollout_grading(
     }
 }
 
-/// Validates B2.2 multi-agent rollout grading gates before seed acceptance.
+/// Validates B2.2 scripted proxy rollout grading gates before seed acceptance (uses
+/// `league-gen`'s proxy rollout model, not `league-core`'s `TurnEngine`).
 pub fn verify_rollout_grading(
     table: &RingTable,
     grading: &RolloutGradingReport,
@@ -814,7 +819,7 @@ pub fn verify_rollout_grading(
     Ok(())
 }
 
-/// Evaluates coalition coverage, 1-turn LP flow HHI, and multi-agent rollout grading (`B2.2`).
+/// Evaluates coalition coverage, 1-turn LP flow HHI, and scripted proxy rollout grading (`B2.2`).
 #[must_use]
 pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> RingTableMetrics {
     let pair_volumes = compute_ring_lp_pair_volumes(table, &report.optimal_converter_runs);

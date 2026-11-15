@@ -16,7 +16,9 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::empirical::{compute_ring_lp_pair_volumes, top_pair_share};
+use crate::empirical::{
+    compute_ring_lp_pair_volumes, compute_rollout_grading, top_pair_share, verify_rollout_grading,
+};
 use crate::lp::{LpStatus, solve_lp};
 use crate::schema::{
     BPS_SCALE, ConverterSpec, EvMethod, FeasibilityError, GeneratorConfig, HorizonShockKind,
@@ -42,10 +44,13 @@ const SHAPLEY_UPKEEP_PENALTY_MULT: f64 = 1.10;
 /// Minimum clearing-price margin tolerance for per-converter value-added validation (`B2.1`).
 const CONVERTER_MARGIN_TOL: f64 = 1e-9;
 
-/// Per-converter clearing-price value-added diagnostic (`B2.1`).
+/// Per-converter value-added diagnostic evaluated at the shadow LP's objective and raw-salvage
+/// coefficients (`B2.1`).
 ///
-/// Evaluates `output_amount * project_value[output_good] - sum_k(input_k * tariff_mult_k * raw_salvage[k])`
-/// under both Turn-1 baseline clearing prices and shock-amortized season clearing prices.
+/// Uses the shadow LP's fixed objective price (`refined_project_value`) for outputs and its fixed
+/// raw-salvage floor coefficient (`RAW_SALVAGE_PROJECT_FRACTION * mean_proj * (1.0 - decay_rate)`
+/// grossed up by `1 + raw_export_tariff` for cross-seat inputs) rather than the LP's dual shadow
+/// prices (which leave active uncapacitated converters at zero complementary-slackness margin).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConverterMarginDiag {
     /// Owning seat index (`0..N`).
@@ -54,9 +59,9 @@ pub struct ConverterMarginDiag {
     pub converter_index: usize,
     /// Whether this recipe is a secondary cross-converter (`1.12x` in / `0.94x` out).
     pub is_secondary: bool,
-    /// Net value added per batch at unshocked Turn-1 clearing prices.
+    /// Net value added per batch at Turn-1 baseline LP objective/salvage coefficients.
     pub baseline_clearing_margin: f64,
-    /// Net value added per batch at shock-amortized season clearing prices.
+    /// Net value added per batch at shock-amortized season LP objective/salvage coefficients.
     pub season_clearing_margin: f64,
 }
 
@@ -98,11 +103,10 @@ pub struct FeasibilityReport {
     pub optimal_converter_runs: Vec<f64>,
 }
 
-/// Evaluates all structural rules, C6 top-pair share cap, and the three LP feasibility invariants.
-pub fn check_feasibility(
-    table: &RingTable,
-    config: &GeneratorConfig,
-) -> Result<FeasibilityReport, FeasibilityError> {
+/// Evaluates all structural rules, C6 top-pair share cap, the three LP feasibility invariants,
+/// and the `B2.2` scripted proxy rollout gate using `&table.config`.
+pub fn check_feasibility(table: &RingTable) -> Result<FeasibilityReport, FeasibilityError> {
+    let config = &table.config;
     let converter_margins = validate_config_and_table(table, config)?;
     let min_converter_clearing_margin = converter_margins
         .iter()
@@ -225,7 +229,7 @@ pub fn check_feasibility(
         None
     };
 
-    Ok(FeasibilityReport {
+    let report = FeasibilityReport {
         ev_method: config.ev_method,
         max_1seat_upkeep_coverage: max_1seat,
         max_2seat_upkeep_coverage: max_2seat,
@@ -241,14 +245,19 @@ pub fn check_feasibility(
         mean_seat_ev,
         max_relative_ev_deviation,
         optimal_converter_runs,
-    })
+    };
+    let grading = compute_rollout_grading(table, &report);
+    verify_rollout_grading(table, &grading, cap)?;
+    Ok(report)
 }
 
-/// Computes per-converter Turn-1 baseline and shock-amortized season clearing margins (`B2.1`).
+/// Computes per-converter Turn-1 baseline and shock-amortized season value-added margins (`B2.1`).
 ///
-/// Refined outputs are valued at `project_value`, while raw inputs are priced at the shadow-LP
-/// raw salvage clearing price `RAW_SALVAGE_PROJECT_FRACTION * mean_proj * (1.0 - decay_rate)`
-/// grossed up by `1 + raw_export_tariff` when imported from another seat.
+/// Prices outputs and inputs using the shadow LP's fixed objective coefficient (`refined_project_value`)
+/// and fixed raw-salvage floor coefficient (`RAW_SALVAGE_PROJECT_FRACTION * mean_proj * (1.0 - decay_rate)`
+/// grossed up by `1 + raw_export_tariff` for imported raw goods), **not** the LP's dual shadow prices
+/// (at the optimal duals, active uncapacitated converters always earn zero margin by complementary
+/// slackness).
 pub fn compute_converter_clearing_margins(
     table: &RingTable,
 ) -> Result<Vec<ConverterMarginDiag>, FeasibilityError> {
@@ -1490,7 +1499,7 @@ mod tests {
             for sc in SeatCount::ALL {
                 let mut table = make_symmetric_table(sc);
                 table.config = cfg.clone();
-                let Ok(report) = check_feasibility(&table, &cfg) else {
+                let Ok(report) = check_feasibility(&table) else {
                     panic!("symmetric table for {sc:?} / {ev_method:?} must be feasible");
                 };
                 assert_eq!(report.ev_method, ev_method);
@@ -1527,8 +1536,7 @@ mod tests {
             seat.converters[0].inputs =
                 vec![(((i + 1) % 4) as u8, 2.0), (((i + 2) % 4) as u8, 2.0)];
         }
-        let cfg = GeneratorConfig::default();
-        let Ok(report) = check_feasibility(&table, &cfg) else {
+        let Ok(report) = check_feasibility(&table) else {
             panic!("degenerate symmetric N=4 ring must balance dual face symmetrically");
         };
         assert!(report.max_relative_ev_deviation < 1e-9);
@@ -1536,13 +1544,11 @@ mod tests {
 
     #[test]
     fn negative_controls_reject_each_invariant_and_edge_cases() {
-        let cfg = GeneratorConfig::default();
-
         // 0. Non-CRED numeraire rejected.
         let mut t0 = make_symmetric_table(SeatCount::Four);
         t0.numeraire_code = "XRP".to_owned();
         assert!(matches!(
-            check_feasibility(&t0, &cfg),
+            check_feasibility(&t0),
             Err(FeasibilityError::InvalidTable(_))
         ));
 
@@ -1550,7 +1556,7 @@ mod tests {
         let mut t1 = make_symmetric_table(SeatCount::Five);
         t1.seats[0].converters[0].inputs = vec![(0, 2.0), (1, 2.0)];
         assert!(matches!(
-            check_feasibility(&t1, &cfg),
+            check_feasibility(&t1),
             Err(FeasibilityError::PairCoversUpkeep { pair: (0, 1), .. })
         ));
 
@@ -1565,7 +1571,7 @@ mod tests {
             is_secondary: true,
         });
         assert!(matches!(
-            check_feasibility(&t_tiny, &cfg),
+            check_feasibility(&t_tiny),
             Err(FeasibilityError::PairCoversUpkeep { pair: (0, 1), .. })
         ));
 
@@ -1575,7 +1581,7 @@ mod tests {
             s.raw_yield_per_turn = 1.0;
         }
         assert!(matches!(
-            check_feasibility(&t2, &cfg),
+            check_feasibility(&t2),
             Err(FeasibilityError::InsufficientSurplus { .. })
         ));
 
@@ -1583,28 +1589,36 @@ mod tests {
         for ev_method in [EvMethod::ShadowPrice, EvMethod::Shapley] {
             let mut t3 = make_symmetric_table(SeatCount::Five);
             t3.seats[0].raw_yield_per_turn = 25.0;
-            let c_ev = GeneratorConfig {
-                ev_method,
-                ..GeneratorConfig::default()
-            };
+            t3.config.ev_method = ev_method;
             assert!(matches!(
-                check_feasibility(&t3, &c_ev),
+                check_feasibility(&t3),
                 Err(FeasibilityError::SeatEvOutOfTolerance { .. })
             ));
         }
 
-        // 4. Small-unit scale invariance (`x1e-12` yield and upkeep, C4).
+        // 4. Small-unit scale invariance (`x1e-12` yield, upkeep, projects, and mandates, C4).
         let mut t_small = make_symmetric_table(SeatCount::Five);
         for s in &mut t_small.seats {
             s.raw_yield_per_turn *= 1e-12;
             s.upkeep_amount *= 1e-12;
         }
-        assert!(check_feasibility(&t_small, &cfg).is_ok());
-        let shapley_cfg = GeneratorConfig {
-            ev_method: EvMethod::Shapley,
-            ..GeneratorConfig::default()
-        };
-        assert!(check_feasibility(&t_small, &shapley_cfg).is_ok());
+        for p in &mut t_small.projects {
+            for input in &mut p.required_inputs {
+                input.2 *= 1e-12;
+            }
+            p.output_project_equity *= 1e-12;
+        }
+        for card in &mut t_small.mandate_deck {
+            match &mut card.kind {
+                MandateObjective::MinProjectEquity { target } => *target *= 1e-12,
+                MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= 1e-12,
+                MandateObjective::MaintainCleanCredit { .. }
+                | MandateObjective::MinActivePartners { .. } => {}
+            }
+        }
+        assert!(check_feasibility(&t_small).is_ok());
+        t_small.config.ev_method = EvMethod::Shapley;
+        assert!(check_feasibility(&t_small).is_ok());
 
         // 5. Public coalition_upkeep_coverage validates malformed indices instead of panicking (C5).
         let mut t_bad = make_symmetric_table(SeatCount::Four);
@@ -1617,7 +1631,6 @@ mod tests {
 
     #[test]
     fn b21_per_converter_clearing_margin_rejects_negative_value_added_with_secondary_diagnostic() {
-        let cfg = GeneratorConfig::default();
         let mut table = make_symmetric_table(SeatCount::Five);
         table.seats[0].converters.push(ConverterSpec {
             owner: 0,
@@ -1627,7 +1640,7 @@ mod tests {
             max_runs_per_turn: 2.0,
             is_secondary: true,
         });
-        let Err(err) = check_feasibility(&table, &cfg) else {
+        let Err(err) = check_feasibility(&table) else {
             panic!("negative-margin secondary must fail");
         };
         match err {
@@ -1643,7 +1656,6 @@ mod tests {
 
     #[test]
     fn b22_project_concordat_all_goods_and_b12_mandate_bounds_are_enforced() {
-        let cfg = GeneratorConfig::default();
         let mut t_proj = make_symmetric_table(SeatCount::Five);
         let Some(concordat) = t_proj
             .projects
@@ -1654,14 +1666,14 @@ mod tests {
         };
         concordat.required_inputs.pop();
         assert!(matches!(
-            check_feasibility(&t_proj, &cfg),
+            check_feasibility(&t_proj),
             Err(FeasibilityError::InvalidTable(_))
         ));
 
         let mut t_mand = make_symmetric_table(SeatCount::Four);
         t_mand.mandate_deck[0].kind = MandateObjective::MinActivePartners { min_partners: 3 };
         assert!(matches!(
-            check_feasibility(&t_mand, &cfg),
+            check_feasibility(&t_mand),
             Err(FeasibilityError::InvalidTable(_))
         ));
     }
@@ -1679,8 +1691,7 @@ mod tests {
                 magnitude: 0.25,
             });
         }
-        let cfg = GeneratorConfig::default();
-        let Ok(report) = check_feasibility(&shocked, &cfg) else {
+        let Ok(report) = check_feasibility(&shocked) else {
             panic!("uniform demand surge stays balanced");
         };
         let sum_evs: f64 = report.seat_expected_values.iter().sum();
@@ -1696,13 +1707,42 @@ mod tests {
             "shocked shadow LP reference differs measurably from Turn-1 unshocked baseline"
         );
 
-        let strict_cap_cfg = GeneratorConfig {
-            max_pair_share_cap: Some(0.05),
-            ..GeneratorConfig::default()
-        };
+        shocked.config.max_pair_share_cap = Some(0.05);
         assert!(matches!(
-            check_feasibility(&shocked, &strict_cap_cfg),
+            check_feasibility(&shocked),
             Err(FeasibilityError::PairShareExceedsCap { .. })
         ));
+    }
+
+    #[test]
+    fn loaded_table_failing_rollout_gate_is_refused_by_check_feasibility() {
+        let cfg = GeneratorConfig {
+            seat_count: Some(SeatCount::Five),
+            ..GeneratorConfig::default()
+        };
+        let Ok((table, _)) = crate::generator::generate_ring_table(17, &cfg) else {
+            panic!("seed 17 must generate cleanly");
+        };
+        let Ok(json) = serde_json::to_string(&table) else {
+            panic!("table must serialize");
+        };
+        let Ok(mut loaded) = serde_json::from_str::<RingTable>(&json) else {
+            panic!("table must deserialize");
+        };
+        let Some(concordat) = loaded
+            .projects
+            .iter_mut()
+            .find(|p| p.id == PROJECT_CONCORDAT_ID)
+        else {
+            panic!("loaded table must carry Concordat project");
+        };
+        for input in &mut concordat.required_inputs {
+            input.2 = 10_000.0;
+        }
+        let res = check_feasibility(&loaded);
+        assert!(
+            matches!(res, Err(FeasibilityError::RolloutGateFailed(_))),
+            "expected RolloutGateFailed on loaded table, got {res:?}"
+        );
     }
 }

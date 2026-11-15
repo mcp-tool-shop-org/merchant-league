@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
-pub const GENERATOR_VERSION: &str = "league-gen/v2.2.0";
+pub const GENERATOR_VERSION: &str = "league-gen/v2.2.1";
 
 /// Fixed ledger numeraire currency code specified by `docs/design-v2.md` §1.2.
 pub const NUMERAIRE_CODE: &str = "CRED";
@@ -71,7 +71,11 @@ impl SeatCount {
         n * (n - 1) / 2
     }
 
-    /// Default C6 table-level top-pair share cap (`4p: 0.45`, `5p: 0.35`, `6p: 0.30`).
+    /// Provisional C6 table-level top-pair share cap (`4p: 0.45`, `5p: 0.35`, `6p: 0.30`).
+    ///
+    /// Provisional pending playtest calibration: the 2026-11-15 ruling established the pair-share
+    /// table check concept without specifying numeric cap values, and these thresholds do not bind
+    /// on generated tables today (`static_max_pair_share` and rollout pair shares fall well below).
     #[must_use]
     pub const fn default_max_pair_share_cap(self) -> f64 {
         match self {
@@ -753,8 +757,9 @@ pub struct GeneratorConfig {
     /// Seat expected-value allocation method for Invariant 3 ([`EvMethod::ShadowPrice`] default
     /// per `docs/design-v2.md` §1.5 "optimal competitive/cooperative shadow-price allocation").
     pub ev_method: EvMethod,
-    /// Optional override for the C6 table-level top-pair share cap (`None` uses
-    /// [`SeatCount::default_max_pair_share_cap`]: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`).
+    /// Optional override for the provisional C6 table-level top-pair share cap (`None` uses
+    /// [`SeatCount::default_max_pair_share_cap`]: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`; the 2026-11-15
+    /// ruling gave no numeric cap values and these defaults do not bind on generated tables today).
     pub max_pair_share_cap: Option<f64>,
 }
 
@@ -768,7 +773,8 @@ impl Default for GeneratorConfig {
     /// - `decay_range: (0.15, 0.25)` (provisional ±5% band around `docs/design-v2.md` §1.4 20%/turn)
     /// - `max_attempts: 512` (stationary sampling retry cap; G1 removes dispersion annealing)
     /// - `ev_method: EvMethod::ShadowPrice` (`docs/design-v2.md` §1.5 shadow-price allocation)
-    /// - `max_pair_share_cap: None` (defaults per seat count: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`)
+    /// - `max_pair_share_cap: None` (provisional defaults: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`;
+    ///   2026-11-15 ruling gave no values and these caps do not bind on generated tables today)
     fn default() -> Self {
         Self {
             seat_count: None,
