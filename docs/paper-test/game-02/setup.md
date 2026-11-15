@@ -103,3 +103,19 @@ drand quicknet, read as in `../board.md`. Day *k* uses round 33966360 + 5·(*k* 
 | Board | `board.md`, SHA-256 `48eb3658a8f99d0219d96794cb12b17617efeab32a9c20d38d54d504db36c03c` |
 | Rules | `docs/design.md`, SHA-256 `b1f22ec20dea2a7653bbf29757bd768b64cad9e9ba88df13c733a2178ba9ddcf` |
 | Skeleton | `51cfe978fd2d812640f3586204b531a18e825bbcd8cf171013c7ef8a8497ea91` |
+
+## Revealed after the bell
+
+The game ended at the bell, at the **close of day 12**. Everything sealed above was opened on 2026-11-15, and each item matches its hash.
+
+| Sealed | Revealed | Check |
+|---|---|---|
+| the Saltworks' card | [`cards/Saltworks.md`](cards/Saltworks.md) | matches |
+| the Weavers' card | [`cards/Weavers.md`](cards/Weavers.md) | matches |
+| the Smiths' card | [`cards/Smiths.md`](cards/Smiths.md) | matches |
+| the Dyers' card | [`cards/Dyers.md`](cards/Dyers.md) | matches |
+| the Tanners' card | [`cards/Tanners.md`](cards/Tanners.md) | matches |
+| the bell | day 12, salt `48e1c0d9c0bf2b0db1b39f1a69693a4a` | SHA-256(`12:48e1c0d9c0bf2b0db1b39f1a69693a4a`) matches |
+| the bell's round | 33966450, randomness `2cd084858ead520671f84cd54a8497659df464a8c0bf0f4988bba516d719675f` | matches drand; it gives day 12 by `../board.md`'s rule |
+
+The scores and the mandates' results are in [`score.md`](score.md). The referee's records are [`log.md`](log.md) and [`metrics.md`](metrics.md), and its sealed state is [`sealed-state.json`](sealed-state.json).

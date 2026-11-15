@@ -1,5 +1,7 @@
 # Paper test, game 3: setup
 
+**Not played.** The paper test ended after game 2 (Publisher, 2026-11-15), once the v2 design (`docs/design-v2.md`) was approved. This setup stays as it was fixed, and its seals (the cards and the bell) are not opened.
+
 Built by hand to the generator's recipe (`docs/design.md`, "Generated tables"), on the board in `../board.md`. Fixed 2026-11-14 19:02 ET, before any of its rounds was published.
 
 ## Seats

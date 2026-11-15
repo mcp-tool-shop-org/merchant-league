@@ -246,6 +246,8 @@ A summary for the Publisher and the Director, in this order:
 
 The design goes back to him with this summary.
 
+**Ended, 2026-11-15.** The test stopped after game 2 (Publisher), because the v2 design (`docs/design-v2.md`) was approved and replaces the design under test. The summary is [`paper-test/results.md`](paper-test/results.md). Its fourth part is written as what carries into v2, not as changes to `design.md`.
+
 ## Cost
 
 Six games of about 11 days with about 4.5 seats come to roughly **300 seat-turns**, each with two rounds, plus the referee's resolution of about 66 days.
