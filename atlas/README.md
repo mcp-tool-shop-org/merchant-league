@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 2d34292 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 3354384 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (648b3e3)
+## What changed since 2026-11-15 (2d34292)
 
-- In crates/league-relay/src/main.rs, `main` gained a step, `from_env`, before `install_redacting_panic_hook`.
-- In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook`, before `execute_cli`.
-- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `truncate_after_redaction`, before `Usage`.
-- And 1 more change to the order of work.
-- 10 files changed content, across 2 parts.
+Nothing structural changed since 2026-11-15; 1 file added.
 
 ## What comes in
 
