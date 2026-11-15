@@ -3,15 +3,28 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
-pub const GENERATOR_VERSION: &str = "league-gen/v2.1.0";
+pub const GENERATOR_VERSION: &str = "league-gen/v2.2.0";
 
 /// Fixed ledger numeraire currency code specified by `docs/design-v2.md` §1.2.
 pub const NUMERAIRE_CODE: &str = "CRED";
 
 /// Provisional upper cap on `GeneratorConfig::max_attempts` preventing unbounded search loops.
 pub const MAX_ATTEMPTS_CAP: u32 = 10_000;
+
+/// Reserved tier-3 full-ring Syndicate Concordat project id (`N`-good collective assembly).
+pub const PROJECT_CONCORDAT_ID: u8 = 100;
+
+/// Minimum Turn-1 Private Charter Mandate completion bonus in Victory Points (`3.0 VP`).
+pub const MIN_MANDATE_BONUS_VP: f64 = 3.0;
+
+/// Maximum Turn-1 Private Charter Mandate completion bonus in Victory Points (`8.0 VP`).
+pub const MAX_MANDATE_BONUS_VP: f64 = 8.0;
+
+/// Basis-point scale (`10_000 = 100%`).
+pub const BPS_SCALE: u16 = 10_000;
 
 /// Validated seat count for a chiral converter ring (`4`, `5`, or `6`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -57,6 +70,16 @@ impl SeatCount {
         let n = self.as_usize();
         n * (n - 1) / 2
     }
+
+    /// Default C6 table-level top-pair share cap (`4p: 0.45`, `5p: 0.35`, `6p: 0.30`).
+    #[must_use]
+    pub const fn default_max_pair_share_cap(self) -> f64 {
+        match self {
+            Self::Four => 0.45,
+            Self::Five => 0.35,
+            Self::Six => 0.30,
+        }
+    }
 }
 
 /// Method used by [`crate::check_feasibility`] to compute per-seat expected value (Invariant 3).
@@ -69,65 +92,155 @@ pub enum EvMethod {
     Shapley,
 }
 
-/// Three-character uppercase ASCII ledger commodity code (`[A-Z]{3}`), excluding
-/// native `"XRP"`, active/historical ISO 4217 codes, common crypto tickers, and reserved words.
+/// Three-character uppercase ASCII ledger commodity code (`[A-Z]{3}`) drawn strictly from the
+/// curated game-word allow-list ([`ALLOWED_COMMODITY_GLOSSARY`]), never overlapping `"XRP"`,
+/// active/historical ISO 4217 currency codes, crypto tickers, or reserved strings.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct CurrencyCode([u8; 3]);
+
+/// Curated, strictly sorted allow-list of 61 medieval-guild game-word commodity codes (`[A-Z]{3}`)
+/// mapped to their descriptive English trade goods (`#26a`).
+///
+/// Generating and validating currency codes exclusively from this list guarantees that neither
+/// active/historical ISO 4217 codes nor cryptocurrency/XRPL ecosystem tickers can ever appear.
+pub const ALLOWED_COMMODITY_GLOSSARY: &[([u8; 3], &str)] = &[
+    (*b"ALM", "alum"),
+    (*b"ANV", "anvil"),
+    (*b"BBL", "barrel"),
+    (*b"BLW", "bellows"),
+    (*b"BLY", "barley"),
+    (*b"BRS", "brass"),
+    (*b"CBL", "cobble"),
+    (*b"CDR", "cedar"),
+    (*b"CHK", "chalk"),
+    (*b"CLY", "clay"),
+    (*b"CNV", "canvas"),
+    (*b"CPR", "copper"),
+    (*b"CRL", "coral"),
+    (*b"DYE", "dye"),
+    (*b"ELM", "elm"),
+    (*b"ENM", "enamel"),
+    (*b"FIR", "fir"),
+    (*b"FLN", "flint"),
+    (*b"GLS", "glass"),
+    (*b"GLZ", "glaze"),
+    (*b"HMP", "hemp"),
+    (*b"HNY", "honey"),
+    (*b"HPS", "hops"),
+    (*b"HRB", "herb"),
+    (*b"IRN", "iron"),
+    (*b"IVR", "ivory"),
+    (*b"JDE", "jade"),
+    (*b"KLN", "kiln"),
+    (*b"KLP", "kelp"),
+    (*b"LOM", "loom"),
+    (*b"LTH", "leather"),
+    (*b"LYE", "lye"),
+    (*b"MLT", "malt"),
+    (*b"MRB", "marble"),
+    (*b"NTR", "nitre"),
+    (*b"OAK", "oak"),
+    (*b"OAT", "oat"),
+    (*b"OLV", "olive"),
+    (*b"PCH", "pitch"),
+    (*b"PLK", "plank"),
+    (*b"PWT", "pewter"),
+    (*b"QRZ", "quartz"),
+    (*b"ROP", "rope"),
+    (*b"RSN", "resin"),
+    (*b"RYE", "rye"),
+    (*b"SLG", "slag"),
+    (*b"SLK", "silk"),
+    (*b"SLT", "salt"),
+    (*b"SPN", "spindle"),
+    (*b"SUF", "sulfur"),
+    (*b"TLW", "tallow"),
+    (*b"TMB", "timber"),
+    (*b"TNG", "tongs"),
+    (*b"TRF", "turf"),
+    (*b"VLM", "vellum"),
+    (*b"VLV", "velvet"),
+    (*b"WHT", "wheat"),
+    (*b"WLK", "whelk"),
+    (*b"WOL", "wool"),
+    (*b"YEW", "yew"),
+    (*b"ZNC", "zinc"),
+];
+
+/// Returns `true` when `bytes` is present in the curated game-word allow-list [`ALLOWED_COMMODITY_GLOSSARY`].
+#[must_use]
+pub fn is_allowed_commodity_code(bytes: [u8; 3]) -> bool {
+    ALLOWED_COMMODITY_GLOSSARY
+        .binary_search_by_key(&bytes, |&(code, _)| code)
+        .is_ok()
+}
+
+/// Returns the descriptive English trade good for an allow-listed [`CurrencyCode`].
+#[must_use]
+pub fn commodity_glossary_word(code: CurrencyCode) -> Option<&'static str> {
+    ALLOWED_COMMODITY_GLOSSARY
+        .binary_search_by_key(&code.0, |&(entry, _)| entry)
+        .ok()
+        .map(|idx| ALLOWED_COMMODITY_GLOSSARY[idx].1)
+}
 
 /// Sorted deny-list of 3-letter currency, precious-metal, crypto/ledger, and reserved codes
 /// excluded from procedural commodity code generation (`docs/design-v2.md` Hard Invariant 1).
 #[rustfmt::skip]
 pub const DENIED_CURRENCY_CODES: &[[u8; 3]] = &[
     *b"AAV", *b"ADA", *b"ADP", *b"AED", *b"AFA", *b"AFN", *b"AKT", *b"ALG", *b"ALK", *b"ALL",
-    *b"AMD", *b"ANG", *b"ANK", *b"AOA", *b"AOK", *b"AON", *b"AOR", *b"APE", *b"APR", *b"APT",
-    *b"APY", *b"ARA", *b"ARB", *b"ARP", *b"ARS", *b"ARY", *b"ASR", *b"ASS", *b"ATM", *b"ATS",
-    *b"AUD", *b"AVA", *b"AWG", *b"AXL", *b"AXS", *b"AZM", *b"AZN", *b"BAD", *b"BAL", *b"BAM",
-    *b"BAT", *b"BBD", *b"BCH", *b"BDT", *b"BEF", *b"BEM", *b"BET", *b"BGL", *b"BGM", *b"BGN",
-    *b"BGO", *b"BHD", *b"BIF", *b"BIS", *b"BLR", *b"BMD", *b"BNB", *b"BND", *b"BNK", *b"BNT",
-    *b"BOB", *b"BOP", *b"BOV", *b"BRB", *b"BRC", *b"BRE", *b"BRL", *b"BRN", *b"BRR", *b"BRZ",
-    *b"BSD", *b"BTC", *b"BTN", *b"BTT", *b"BUK", *b"BUY", *b"BWP", *b"BYB", *b"BYN", *b"BYR",
-    *b"BZD", *b"CAD", *b"CAK", *b"CDF", *b"CEL", *b"CFX", *b"CHE", *b"CHF", *b"CHW", *b"CHZ",
-    *b"CKB", *b"CLF", *b"CLP", *b"CMP", *b"CNY", *b"COP", *b"COR", *b"COU", *b"CPI", *b"CRC",
-    *b"CRD", *b"CRO", *b"CRV", *b"CSC", *b"CSD", *b"CSJ", *b"CSK", *b"CUC", *b"CUP", *b"CVE",
-    *b"CYP", *b"CZK", *b"DAI", *b"DCR", *b"DDM", *b"DEM", *b"DGB", *b"DIE", *b"DJF", *b"DKK",
-    *b"DOG", *b"DOP", *b"DOT", *b"DSH", *b"DYX", *b"DZD", *b"ECS", *b"ECV", *b"EEK", *b"EGL",
-    *b"EGP", *b"EIG", *b"ENA", *b"ENJ", *b"EOS", *b"ERN", *b"ESA", *b"ESB", *b"ESP", *b"ETB",
-    *b"ETC", *b"ETF", *b"ETH", *b"EUR", *b"FCK", *b"FED", *b"FEE", *b"FET", *b"FIL", *b"FIM",
-    *b"FJD", *b"FKP", *b"FLK", *b"FLW", *b"FRF", *b"FTM", *b"FUK", *b"GAL", *b"GBP", *b"GDP",
-    *b"GEK", *b"GEL", *b"GHC", *b"GHP", *b"GHS", *b"GIP", *b"GLM", *b"GMD", *b"GMT", *b"GMX",
-    *b"GNE", *b"GNF", *b"GNO", *b"GNS", *b"GOD", *b"GQE", *b"GRD", *b"GRT", *b"GTQ", *b"GUN",
-    *b"GWE", *b"GWP", *b"GYD", *b"HBR", *b"HKD", *b"HNL", *b"HOT", *b"HRD", *b"HRK", *b"HTG",
-    *b"HTX", *b"HUF", *b"HYP", *b"ICP", *b"ICX", *b"IDR", *b"IEP", *b"ILP", *b"ILR", *b"ILS",
-    *b"IMF", *b"IMX", *b"INJ", *b"INR", *b"IOT", *b"IOU", *b"IPO", *b"IQD", *b"IRR", *b"ISJ",
-    *b"ISK", *b"ITL", *b"JMD", *b"JOD", *b"JPY", *b"JUN", *b"JUP", *b"KAS", *b"KAV", *b"KCS",
-    *b"KES", *b"KGS", *b"KHR", *b"KKK", *b"KLY", *b"KMD", *b"KMF", *b"KNC", *b"KPW", *b"KRH",
-    *b"KRO", *b"KRW", *b"KSM", *b"KWD", *b"KYD", *b"KZT", *b"LAJ", *b"LAK", *b"LBP", *b"LDO",
-    *b"LKR", *b"LNK", *b"LRC", *b"LRD", *b"LSK", *b"LSL", *b"LSM", *b"LTC", *b"LTL", *b"LTT",
-    *b"LUC", *b"LUF", *b"LUL", *b"LUN", *b"LVL", *b"LVR", *b"LYD", *b"MAD", *b"MAF", *b"MAN",
-    *b"MAT", *b"MCF", *b"MDC", *b"MDL", *b"MGA", *b"MGF", *b"MIN", *b"MKD", *b"MKN", *b"MKR",
-    *b"MLF", *b"MMK", *b"MNA", *b"MNT", *b"MOP", *b"MRO", *b"MRU", *b"MTL", *b"MTP", *b"MUR",
-    *b"MVP", *b"MVR", *b"MWK", *b"MXN", *b"MXP", *b"MXV", *b"MYR", *b"MZE", *b"MZM", *b"MZN",
-    *b"NAD", *b"NEO", *b"NER", *b"NGN", *b"NIC", *b"NIO", *b"NLG", *b"NOK", *b"NOT", *b"NPR",
-    *b"NZD", *b"OKB", *b"OMG", *b"OMR", *b"OND", *b"ONE", *b"ONT", *b"OPX", *b"ORC", *b"OSM",
-    *b"PAB", *b"PAY", *b"PEH", *b"PEI", *b"PEN", *b"PEP", *b"PES", *b"PGK", *b"PHP", *b"PKR",
-    *b"PLN", *b"PLZ", *b"PND", *b"POL", *b"PTE", *b"PYG", *b"PYT", *b"QAR", *b"QNT", *b"QTU",
-    *b"RAY", *b"RHD", *b"RND", *b"ROI", *b"ROL", *b"RON", *b"RSD", *b"RSE", *b"RUB", *b"RUN",
-    *b"RUR", *b"RVN", *b"RWF", *b"SAR", *b"SBD", *b"SCR", *b"SDD", *b"SDG", *b"SDP", *b"SEC",
-    *b"SEI", *b"SEK", *b"SEX", *b"SGD", *b"SHB", *b"SHP", *b"SIT", *b"SKK", *b"SLE", *b"SLL",
-    *b"SND", *b"SNX", *b"SOL", *b"SOS", *b"SRD", *b"SRG", *b"SRK", *b"SSP", *b"STD", *b"STN",
-    *b"STX", *b"SUI", *b"SUR", *b"SUS", *b"SVC", *b"SYP", *b"SZL", *b"TAO", *b"TAX", *b"THB",
-    *b"TIA", *b"TJR", *b"TJS", *b"TMM", *b"TMT", *b"TND", *b"TON", *b"TOP", *b"TPE", *b"TRL",
-    *b"TRX", *b"TRY", *b"TTD", *b"TWD", *b"TZS", *b"UAH", *b"UAK", *b"UGS", *b"UGX", *b"UNI",
-    *b"USC", *b"USD", *b"USN", *b"USS", *b"UST", *b"UYI", *b"UYP", *b"UYU", *b"UYW", *b"UZS",
-    *b"VEB", *b"VED", *b"VEF", *b"VES", *b"VET", *b"VNC", *b"VND", *b"VUV", *b"WAR", *b"WAV",
-    *b"WIF", *b"WIN", *b"WLD", *b"WST", *b"WTC", *b"WTF", *b"XAF", *b"XAG", *b"XAH", *b"XAU",
-    *b"XBA", *b"XBB", *b"XBC", *b"XBD", *b"XBT", *b"XCD", *b"XCG", *b"XCH", *b"XCN", *b"XDC",
-    *b"XDR", *b"XEC", *b"XEM", *b"XEU", *b"XFO", *b"XFU", *b"XLM", *b"XMR", *b"XNO", *b"XOF",
-    *b"XPD", *b"XPF", *b"XPT", *b"XRP", *b"XSU", *b"XTS", *b"XTZ", *b"XUA", *b"XVG", *b"XXX",
-    *b"YDD", *b"YER", *b"YFI", *b"YUD", *b"YUM", *b"YUN", *b"YUR", *b"ZAL", *b"ZAR", *b"ZEC",
-    *b"ZIL", *b"ZMK", *b"ZMW", *b"ZRN", *b"ZRX", *b"ZRZ", *b"ZWC", *b"ZWD", *b"ZWG", *b"ZWL",
-    *b"ZWN", *b"ZWR",
+    *b"AMD", *b"ANC", *b"ANG", *b"ANK", *b"ANT", *b"AOA", *b"AOK", *b"AON", *b"AOR", *b"APE",
+    *b"APR", *b"APT", *b"APY", *b"ARA", *b"ARB", *b"ARP", *b"ARS", *b"ARY", *b"ASR", *b"ASS",
+    *b"ATM", *b"ATS", *b"AUD", *b"AVA", *b"AWG", *b"AXL", *b"AXS", *b"AZM", *b"AZN", *b"BAD",
+    *b"BAL", *b"BAM", *b"BAT", *b"BBD", *b"BCH", *b"BDT", *b"BEC", *b"BEF", *b"BEL", *b"BEM",
+    *b"BET", *b"BGL", *b"BGM", *b"BGN", *b"BGO", *b"BHD", *b"BIF", *b"BIS", *b"BLR", *b"BMD",
+    *b"BNB", *b"BND", *b"BNK", *b"BNT", *b"BOB", *b"BOL", *b"BOP", *b"BOV", *b"BRB", *b"BRC",
+    *b"BRE", *b"BRL", *b"BRN", *b"BRR", *b"BRZ", *b"BSD", *b"BSV", *b"BTC", *b"BTN", *b"BTT",
+    *b"BUK", *b"BUY", *b"BWP", *b"BYB", *b"BYN", *b"BYR", *b"BZD", *b"CAD", *b"CAK", *b"CDF",
+    *b"CEL", *b"CFX", *b"CHE", *b"CHF", *b"CHW", *b"CHZ", *b"CKB", *b"CLF", *b"CLP", *b"CMP",
+    *b"CNY", *b"COP", *b"COR", *b"COU", *b"CPI", *b"CRC", *b"CRD", *b"CRO", *b"CRV", *b"CSC",
+    *b"CSD", *b"CSJ", *b"CSK", *b"CUC", *b"CUP", *b"CVC", *b"CVE", *b"CYP", *b"CZK", *b"DAI",
+    *b"DCR", *b"DDM", *b"DEM", *b"DGB", *b"DIE", *b"DJF", *b"DKK", *b"DOG", *b"DOP", *b"DOT",
+    *b"DSH", *b"DYX", *b"DZD", *b"ECS", *b"ECV", *b"EEK", *b"EGL", *b"EGP", *b"EIG", *b"ELG",
+    *b"ELS", *b"ENA", *b"ENJ", *b"EOS", *b"ERN", *b"ESA", *b"ESB", *b"ESP", *b"ETB", *b"ETC",
+    *b"ETF", *b"ETH", *b"EUR", *b"EVR", *b"FCK", *b"FED", *b"FEE", *b"FET", *b"FIL", *b"FIM",
+    *b"FJD", *b"FKP", *b"FLK", *b"FLR", *b"FLW", *b"FRF", *b"FTM", *b"FTT", *b"FUK", *b"GAL",
+    *b"GBP", *b"GBX", *b"GDP", *b"GEK", *b"GEL", *b"GHC", *b"GHP", *b"GHS", *b"GIP", *b"GLM",
+    *b"GMD", *b"GMT", *b"GMX", *b"GNE", *b"GNF", *b"GNO", *b"GNS", *b"GOD", *b"GQE", *b"GRD",
+    *b"GRT", *b"GTQ", *b"GUN", *b"GWE", *b"GWP", *b"GYD", *b"HBR", *b"HKD", *b"HNL", *b"HOT",
+    *b"HRD", *b"HRK", *b"HTG", *b"HTX", *b"HUF", *b"HYP", *b"ICP", *b"ICX", *b"IDR", *b"IEP",
+    *b"ILP", *b"ILR", *b"ILS", *b"IMF", *b"IMX", *b"INJ", *b"INR", *b"IOT", *b"IOU", *b"IPO",
+    *b"IQD", *b"IRR", *b"ISJ", *b"ISK", *b"ITL", *b"JMD", *b"JOD", *b"JPY", *b"JUN", *b"JUP",
+    *b"KAS", *b"KAV", *b"KCS", *b"KES", *b"KGS", *b"KHR", *b"KKK", *b"KLY", *b"KMD", *b"KMF",
+    *b"KNC", *b"KPW", *b"KRH", *b"KRO", *b"KRW", *b"KSM", *b"KWD", *b"KYD", *b"KZT", *b"LAJ",
+    *b"LAK", *b"LBP", *b"LDO", *b"LEO", *b"LKR", *b"LNK", *b"LRC", *b"LRD", *b"LSK", *b"LSL",
+    *b"LSM", *b"LTC", *b"LTL", *b"LTT", *b"LUC", *b"LUF", *b"LUL", *b"LUN", *b"LVL", *b"LVR",
+    *b"LYD", *b"MAD", *b"MAF", *b"MAN", *b"MAT", *b"MCF", *b"MDC", *b"MDL", *b"MGA", *b"MGF",
+    *b"MIN", *b"MIR", *b"MKD", *b"MKN", *b"MKR", *b"MLF", *b"MLN", *b"MMK", *b"MNA", *b"MNT",
+    *b"MOP", *b"MRO", *b"MRU", *b"MTL", *b"MTP", *b"MUR", *b"MVP", *b"MVR", *b"MWK", *b"MXN",
+    *b"MXP", *b"MXV", *b"MYR", *b"MZE", *b"MZM", *b"MZN", *b"NAD", *b"NEO", *b"NER", *b"NGN",
+    *b"NIC", *b"NIO", *b"NLG", *b"NMR", *b"NOK", *b"NOT", *b"NPR", *b"NZD", *b"OGN", *b"OKB",
+    *b"OMG", *b"OMR", *b"OND", *b"ONE", *b"ONT", *b"OPX", *b"ORC", *b"OSM", *b"PAB", *b"PAX",
+    *b"PAY", *b"PEH", *b"PEI", *b"PEN", *b"PEP", *b"PES", *b"PGK", *b"PHP", *b"PKR", *b"PLN",
+    *b"PLZ", *b"PND", *b"POL", *b"PTE", *b"PYG", *b"PYT", *b"QAR", *b"QNT", *b"QTU", *b"RAY",
+    *b"RHD", *b"RND", *b"ROI", *b"ROK", *b"ROL", *b"RON", *b"RPL", *b"RSD", *b"RSE", *b"RUB",
+    *b"RUN", *b"RUR", *b"RVN", *b"RWF", *b"SAR", *b"SBD", *b"SCR", *b"SDD", *b"SDG", *b"SDP",
+    *b"SEC", *b"SEI", *b"SEK", *b"SEX", *b"SGB", *b"SGD", *b"SHB", *b"SHP", *b"SIT", *b"SKK",
+    *b"SLE", *b"SLL", *b"SND", *b"SNX", *b"SOL", *b"SOS", *b"SRD", *b"SRG", *b"SRK", *b"SRM",
+    *b"SSP", *b"SSV", *b"STD", *b"STN", *b"STX", *b"SUI", *b"SUN", *b"SUR", *b"SUS", *b"SVC",
+    *b"SYP", *b"SZL", *b"TAO", *b"TAX", *b"THB", *b"TIA", *b"TJR", *b"TJS", *b"TMM", *b"TMT",
+    *b"TND", *b"TON", *b"TOP", *b"TPE", *b"TRL", *b"TRX", *b"TRY", *b"TTD", *b"TWD", *b"TZS",
+    *b"UAH", *b"UAK", *b"UGS", *b"UGX", *b"UNI", *b"USC", *b"USD", *b"USN", *b"USS", *b"UST",
+    *b"UYI", *b"UYP", *b"UYU", *b"UYW", *b"UZS", *b"VEB", *b"VED", *b"VEF", *b"VEN", *b"VES",
+    *b"VET", *b"VNC", *b"VND", *b"VUV", *b"WAR", *b"WAV", *b"WBT", *b"WIF", *b"WIN", *b"WLD",
+    *b"WST", *b"WTC", *b"WTF", *b"XAF", *b"XAG", *b"XAH", *b"XAU", *b"XBA", *b"XBB", *b"XBC",
+    *b"XBD", *b"XBT", *b"XCD", *b"XCG", *b"XCH", *b"XCN", *b"XDC", *b"XDR", *b"XEC", *b"XEM",
+    *b"XEU", *b"XFO", *b"XFU", *b"XLM", *b"XMR", *b"XNO", *b"XOF", *b"XPD", *b"XPF", *b"XPR",
+    *b"XPT", *b"XRE", *b"XRP", *b"XSU", *b"XTS", *b"XTZ", *b"XUA", *b"XVG", *b"XXX", *b"YDD",
+    *b"YER", *b"YFI", *b"YUD", *b"YUM", *b"YUN", *b"YUR", *b"ZAL", *b"ZAR", *b"ZEC", *b"ZIL",
+    *b"ZMK", *b"ZMW", *b"ZRN", *b"ZRX", *b"ZRZ", *b"ZWC", *b"ZWD", *b"ZWG", *b"ZWL", *b"ZWN",
+    *b"ZWR",
 ];
 
 /// Returns `true` when `bytes` is on the real-currency, crypto ticker, or reserved deny-list.
@@ -137,8 +250,8 @@ pub fn is_denied_currency_code(bytes: [u8; 3]) -> bool {
 }
 
 impl CurrencyCode {
-    /// Constructs a [`CurrencyCode`] if `bytes` are 3 ASCII uppercase letters outside
-    /// [`DENIED_CURRENCY_CODES`].
+    /// Constructs a [`CurrencyCode`] if `bytes` are 3 ASCII uppercase letters strictly inside
+    /// [`ALLOWED_COMMODITY_GLOSSARY`] and outside [`DENIED_CURRENCY_CODES`].
     pub fn from_bytes(bytes: [u8; 3]) -> Result<Self, FeasibilityError> {
         if !bytes.iter().all(|b| b.is_ascii_uppercase()) {
             return Err(FeasibilityError::InvalidTable(
@@ -149,6 +262,11 @@ impl CurrencyCode {
             return Err(FeasibilityError::InvalidTable(
                 "currency code uses a denied real-world currency, crypto ticker, or reserved code"
                     .to_owned(),
+            ));
+        }
+        if !is_allowed_commodity_code(bytes) {
+            return Err(FeasibilityError::InvalidTable(
+                "currency code is not in the curated game-word allow-list".to_owned(),
             ));
         }
         Ok(Self(bytes))
@@ -278,6 +396,309 @@ pub struct SeatSpec {
     pub converters: Vec<ConverterSpec>,
 }
 
+/// Tier-3 Syndicate Project definition emitted for table setup (`1..=N` chiral pair charters
+/// plus reserved id `100` Syndicate Concordat requiring all `N` refined goods).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectSpec {
+    /// Project id (`1..=N` for chiral neighbor pairs, `100` for the full-ring Concordat).
+    pub id: u8,
+    /// Human-readable project charter title.
+    pub name: String,
+    /// Required refined good inputs `(refined_good_index, code, units_per_batch)`.
+    pub required_inputs: Vec<(u8, CurrencyCode, f64)>,
+    /// Irreversible Project Equity points minted per completed batch.
+    pub output_project_equity: f64,
+    /// Optional per-turn completion limit (`None` = unconstrained).
+    pub max_completions_per_turn: Option<u32>,
+}
+
+/// Terminal hard-credit solvency tier used by Turn-1 Charter Mandates (`MaintainCleanCredit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum CreditRatingTier {
+    /// Clean balance sheet with zero hard credit defaults or escrow breaches.
+    Aaa = 0,
+    /// Minor transitory distress resolved before close.
+    Bbb = 1,
+    /// Elevated credit stress.
+    B = 2,
+    /// Hard credit default.
+    D = 3,
+}
+
+/// Objective predicate for a Turn-1 Private Charter Mandate card, keeping structural thresholds
+/// within B1.2's monopoly-safe bounds (`1..=seat_count - 2`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MandateObjective {
+    /// Accumulate at least `target` irreversible Project Equity points by season close.
+    MinProjectEquity {
+        /// Minimum irreversible Project Equity threshold (`> 0`).
+        target: f64,
+    },
+    /// Hold at least `min_each` units of at least `distinct_goods` (`1..=N-2`) refined goods.
+    MinRefinedVariety {
+        /// Required distinct refined goods held (`1..=seat_count - 2`).
+        distinct_goods: u8,
+        /// Minimum units required for each counted refined good (`> 0`).
+        min_each: f64,
+    },
+    /// Maintain hard credit solvency at or above `min_tier` (`Aaa` or `Bbb`).
+    MaintainCleanCredit {
+        /// Cleanest tolerated terminal credit tier.
+        min_tier: CreditRatingTier,
+    },
+    /// Complete positive deliveries with at least `min_partners` (`1..=N-2`) distinct counterparties.
+    MinActivePartners {
+        /// Required distinct counterparties (`1..=seat_count - 2`).
+        min_partners: u8,
+    },
+}
+
+impl MandateObjective {
+    /// Validates objective parameters against `seat_count`, strictly enforcing B1.2's
+    /// `1..=seat_count - 2` ceiling on `distinct_goods` and `min_partners`.
+    pub fn validate_for_seat_count(&self, seat_count: SeatCount) -> Result<(), FeasibilityError> {
+        let max_safe = seat_count.as_u8().saturating_sub(2);
+        match *self {
+            Self::MinProjectEquity { target } => {
+                if !target.is_finite() || target <= 0.0 {
+                    return Err(FeasibilityError::InvalidTable(
+                        "mandate MinProjectEquity target must be finite and > 0".to_owned(),
+                    ));
+                }
+            }
+            Self::MinRefinedVariety {
+                distinct_goods,
+                min_each,
+            } => {
+                if distinct_goods == 0 || distinct_goods > max_safe {
+                    return Err(FeasibilityError::InvalidTable(format!(
+                        "mandate MinRefinedVariety distinct_goods {distinct_goods} outside 1..={max_safe}"
+                    )));
+                }
+                if !min_each.is_finite() || min_each <= 0.0 {
+                    return Err(FeasibilityError::InvalidTable(
+                        "mandate MinRefinedVariety min_each must be finite and > 0".to_owned(),
+                    ));
+                }
+            }
+            Self::MaintainCleanCredit { min_tier } => {
+                if matches!(min_tier, CreditRatingTier::B | CreditRatingTier::D) {
+                    return Err(FeasibilityError::InvalidTable(
+                        "mandate MaintainCleanCredit must require Aaa or Bbb solvency".to_owned(),
+                    ));
+                }
+            }
+            Self::MinActivePartners { min_partners } => {
+                if min_partners == 0 || min_partners > max_safe {
+                    return Err(FeasibilityError::InvalidTable(format!(
+                        "mandate MinActivePartners min_partners {min_partners} outside 1..={max_safe}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One card in the public Turn-1 graded Charter Mandate deck (`3.0..=8.0 VP` scale per T5 / A7).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MandateCardSpec {
+    /// Stable deck slot identifier (`1..=M`).
+    pub card_id: u8,
+    /// Structural win-condition objective.
+    pub kind: MandateObjective,
+    /// Provisional or rollout-measured completion frequency (`0..=10_000 bps`).
+    pub difficulty_completion_bps: u16,
+    /// Graded Victory Point bonus in `[MIN_MANDATE_BONUS_VP, MAX_MANDATE_BONUS_VP]` (`3.0..=8.0`).
+    pub bonus_vp: f64,
+}
+
+/// Maps empirical/structural completion frequency (`0..=10_000 bps`) monotonically onto
+/// `[MIN_MANDATE_BONUS_VP, MAX_MANDATE_BONUS_VP]` (`3.0..=8.0 VP`, exact milli-VP grid matching
+/// `league-core::bonus_equity_for_completion_bps`).
+#[must_use]
+pub fn bonus_vp_for_completion_bps(completion_bps: u16) -> f64 {
+    let clamped = i64::from(completion_bps.min(BPS_SCALE));
+    let hard_bps = i64::from(BPS_SCALE) - clamped;
+    let milli_vp = 3_000_i64 + (5_000_i64 * hard_bps) / i64::from(BPS_SCALE);
+    (milli_vp as f64) / 1_000.0
+}
+
+/// Deals `seat_count` distinct [`MandateCardSpec`]s using external 256-bit `deal_seed` entropy
+/// (`B1.3`/`M3`), strictly separate from the public table `seed: u64` and rejecting `[0u8; 32]`.
+pub fn deal_mandate_indices_with_entropy(
+    mandate_deck: &[MandateCardSpec],
+    seat_count: SeatCount,
+    deal_seed: [u8; 32],
+) -> Result<Vec<usize>, FeasibilityError> {
+    if deal_seed == [0u8; 32] {
+        return Err(FeasibilityError::InvalidTable(
+            "mandate deal_seed must be non-zero 256-bit entropy".to_owned(),
+        ));
+    }
+    let n = seat_count.as_usize();
+    if mandate_deck.len() < n {
+        return Err(FeasibilityError::InvalidTable(format!(
+            "mandate_deck length {} is smaller than seat_count {n}",
+            mandate_deck.len()
+        )));
+    }
+    let mut order: Vec<usize> = (0..mandate_deck.len()).collect();
+    for i in 0..n {
+        let remaining = order.len() - i;
+        let bound = remaining as u64;
+        let limit = u64::MAX - (u64::MAX % bound);
+        let mut counter = 0u64;
+        let offset = loop {
+            let mut hasher = Sha256::new();
+            hasher.update(b"MLV2|MANDATE_DEAL|");
+            hasher.update(deal_seed);
+            hasher.update((i as u64).to_le_bytes());
+            hasher.update(counter.to_le_bytes());
+            let digest = hasher.finalize();
+            let word = u64::from_le_bytes([
+                digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6],
+                digest[7],
+            ]);
+            if word < limit {
+                break (word % bound) as usize;
+            }
+            counter = counter.wrapping_add(1);
+        };
+        order.swap(i, i + offset);
+    }
+    order.truncate(n);
+    Ok(order)
+}
+
+fn round3_schema(v: f64) -> f64 {
+    (v * 1_000.0).round() / 1_000.0
+}
+
+/// Builds canonical Tier-3 Syndicate Projects for `seats`: `1..=N` adjacent chiral neighbor
+/// pairs plus `100` Syndicate Concordat requiring all `N` distinct refined goods (`C1` held rule).
+#[must_use]
+pub fn default_projects_for_seats(seats: &[SeatSpec]) -> Vec<ProjectSpec> {
+    let n = seats.len();
+    let mut projects = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let eq =
+            round3_schema((seats[i].refined_project_value + seats[j].refined_project_value) * 1.05);
+        projects.push(ProjectSpec {
+            id: (i + 1) as u8,
+            name: format!("Pair Charter {}-{}", i + 1, j + 1),
+            required_inputs: vec![
+                (i as u8, seats[i].refined_code, 1.0),
+                (j as u8, seats[j].refined_code, 1.0),
+            ],
+            output_project_equity: eq,
+            max_completions_per_turn: None,
+        });
+    }
+    let concordat_eq =
+        round3_schema(seats.iter().map(|s| s.refined_project_value).sum::<f64>() * 1.15);
+    let concordat_inputs = (0..n)
+        .map(|g| (g as u8, seats[g].refined_code, 1.0))
+        .collect();
+    projects.push(ProjectSpec {
+        id: PROJECT_CONCORDAT_ID,
+        name: "Syndicate Concordat".to_owned(),
+        required_inputs: concordat_inputs,
+        output_project_equity: concordat_eq,
+        max_completions_per_turn: None,
+    });
+    projects
+}
+
+/// Builds the canonical 8-card Turn-1 public graded Charter Mandate deck (`3.0..=8.0 VP` scale
+/// per `T5`/`A7`), strictly enforcing B1.2's `1..=seat_count - 2` bounds on `distinct_goods`
+/// and `min_partners`.
+///
+/// The `difficulty_completion_bps` values remain provisional structural weights; empirical rollout
+/// completion is measured in [`crate::RolloutGradingReport`], and full VP calibration from test
+/// games stays queued per the Director's ruling (`T5`).
+#[must_use]
+pub fn default_mandate_deck_for_table(
+    seat_count: SeatCount,
+    seats: &[SeatSpec],
+) -> Vec<MandateCardSpec> {
+    let n = seats.len().max(1);
+    let mean_proj = seats.iter().map(|s| s.refined_project_value).sum::<f64>() / (n as f64);
+    let max_safe = seat_count.as_u8().saturating_sub(2).max(1);
+    let specs = [
+        (
+            1,
+            MandateObjective::MaintainCleanCredit {
+                min_tier: CreditRatingTier::Bbb,
+            },
+            10_000,
+        ),
+        (
+            2,
+            MandateObjective::MinProjectEquity {
+                target: round3_schema(mean_proj * 7.0),
+            },
+            8_000,
+        ),
+        (
+            3,
+            MandateObjective::MinRefinedVariety {
+                distinct_goods: max_safe.min(2),
+                min_each: 1.5,
+            },
+            7_000,
+        ),
+        (
+            4,
+            MandateObjective::MinActivePartners {
+                min_partners: max_safe,
+            },
+            6_000,
+        ),
+        (
+            5,
+            MandateObjective::MaintainCleanCredit {
+                min_tier: CreditRatingTier::Aaa,
+            },
+            4_000,
+        ),
+        (
+            6,
+            MandateObjective::MinRefinedVariety {
+                distinct_goods: max_safe,
+                min_each: 3.0,
+            },
+            2_500,
+        ),
+        (
+            7,
+            MandateObjective::MinProjectEquity {
+                target: round3_schema(mean_proj * 12.5),
+            },
+            1_500,
+        ),
+        (
+            8,
+            MandateObjective::MinProjectEquity {
+                target: round3_schema(mean_proj * 16.5),
+            },
+            0,
+        ),
+    ];
+    specs
+        .into_iter()
+        .map(
+            |(card_id, kind, difficulty_completion_bps)| MandateCardSpec {
+                card_id,
+                kind,
+                difficulty_completion_bps,
+                bonus_vp: bonus_vp_for_completion_bps(difficulty_completion_bps),
+            },
+        )
+        .collect()
+}
+
 /// Complete specification for a generated chiral converter-ring table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RingTable {
@@ -297,6 +718,10 @@ pub struct RingTable {
     pub season_turn_window: (u8, u8),
     /// Per-seat economic definitions in index order `0..N`.
     pub seats: Vec<SeatSpec>,
+    /// Tier-3 Syndicate Projects (`1..=N` chiral pairs plus `100` full-ring Concordat).
+    pub projects: Vec<ProjectSpec>,
+    /// Public Turn-1 graded Charter Mandate deck (`3.0..=8.0 VP` scale).
+    pub mandate_deck: Vec<MandateCardSpec>,
     /// Pre-sampled 3-stage `OracleSet` horizon shock schedule for the season.
     pub shocks: Vec<ScheduledShock>,
 }
@@ -323,23 +748,27 @@ pub struct GeneratorConfig {
     /// provisional ±5% band around the `20%`/turn baseline in `docs/design-v2.md` §1.4).
     pub decay_range: (f64, f64),
     /// Maximum candidate sampling attempts before returning [`GenError::NoFeasibleTableFound`]
-    /// (`512`, capped at [`MAX_ATTEMPTS_CAP`]; provisional, calibrate in playtest 1).
+    /// (`512`, capped at [`MAX_ATTEMPTS_CAP`]).
     pub max_attempts: u32,
     /// Seat expected-value allocation method for Invariant 3 ([`EvMethod::ShadowPrice`] default
     /// per `docs/design-v2.md` §1.5 "optimal competitive/cooperative shadow-price allocation").
     pub ev_method: EvMethod,
+    /// Optional override for the C6 table-level top-pair share cap (`None` uses
+    /// [`SeatCount::default_max_pair_share_cap`]: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`).
+    pub max_pair_share_cap: Option<f64>,
 }
 
 impl Default for GeneratorConfig {
-    /// Defaults combine `docs/design-v2.md` §1.4–§1.5 baselines with provisional playtest-1 knobs:
+    /// Defaults combine `docs/design-v2.md` §1.4–§1.5 baselines with Director v2 rulings (`G1`/`C6`):
     /// - `seat_count: None` (`docs/design-v2.md` §1.5: uniform draw over `N in {4, 5, 6}`)
     /// - `ev_tolerance: 0.03` (`docs/design-v2.md` §1.5 item 3 & seed-26 report)
     /// - `min_surplus_ratio: 0.15` (provisional, calibrate in playtest 1)
     /// - `enable_secondary_converters: true` (`docs/design-v2.md` §1.3 & §1.5)
     /// - `max_tariff: 0.20` (`docs/design-v2.md` §1.5 item 3: 0%–20% initial baseline)
     /// - `decay_range: (0.15, 0.25)` (provisional ±5% band around `docs/design-v2.md` §1.4 20%/turn)
-    /// - `max_attempts: 512` (provisional retry cap with late-attempt jitter annealing)
+    /// - `max_attempts: 512` (stationary sampling retry cap; G1 removes dispersion annealing)
     /// - `ev_method: EvMethod::ShadowPrice` (`docs/design-v2.md` §1.5 shadow-price allocation)
+    /// - `max_pair_share_cap: None` (defaults per seat count: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`)
     fn default() -> Self {
         Self {
             seat_count: None,
@@ -350,6 +779,7 @@ impl Default for GeneratorConfig {
             decay_range: (0.15, 0.25),
             max_attempts: 512,
             ev_method: EvMethod::ShadowPrice,
+            max_pair_share_cap: None,
         }
     }
 }
@@ -357,7 +787,8 @@ impl Default for GeneratorConfig {
 /// Reasons a candidate [`RingTable`] can fail structural or LP feasibility checks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FeasibilityError {
-    /// Candidate table failed structural validation (indices, codes, positive quantities, shock timing).
+    /// Candidate table failed structural validation (indices, codes, positive quantities, shock timing,
+    /// converter positive clearing value-added, projects, or mandate bounds).
     InvalidTable(String),
     /// At least one 1-seat or 2-seat subset satisfied non-zero internal upkeep without external trade.
     PairCoversUpkeep {
@@ -384,6 +815,17 @@ pub enum FeasibilityError {
         /// Per-seat expected values under the active [`EvMethod`].
         seat_evs: Vec<f64>,
     },
+    /// Optimal ring LP trade share on a single unordered pair exceeded the C6 table cap.
+    PairShareExceedsCap {
+        /// Ordered seat pair `(i, j)` with `i < j`.
+        pair: (u8, u8),
+        /// Observed share of total bilateral volume carried by `(i, j)`.
+        share: f64,
+        /// Enforced upper cap (`0.45 / 0.35 / 0.30` or custom override).
+        cap: f64,
+    },
+    /// Deterministic multi-agent rollout grading failed B2.2 acceptance checks.
+    RolloutGateFailed(String),
     /// Underlying simplex LP solver hit an unexpected numerical or unbounded state.
     SolverFailure(String),
 }
@@ -416,6 +858,12 @@ impl fmt::Display for FeasibilityError {
                 f,
                 "seat EV deviation {max_relative_deviation:.4} exceeds tolerance {tolerance:.4}"
             ),
+            Self::PairShareExceedsCap { pair, share, cap } => write!(
+                f,
+                "pair ({}, {}) volume share {share:.4} exceeds cap {cap:.4}",
+                pair.0, pair.1
+            ),
+            Self::RolloutGateFailed(msg) => write!(f, "rollout grading failed: {msg}"),
             Self::SolverFailure(msg) => write!(f, "LP solver error: {msg}"),
         }
     }
@@ -495,13 +943,117 @@ mod tests {
         for ticker in [
             *b"XRP", *b"BTC", *b"ETH", *b"SOL", *b"XLM", *b"DOT", *b"KGS", *b"AZN", *b"BHD",
             *b"TWD", *b"CZK", *b"NGN", *b"DZD", *b"USD", *b"EUR", *b"GBP", *b"JPY", *b"CHF",
-            *b"XAU", *b"XAG", *b"CRD",
+            *b"XAU", *b"XAG", *b"CRD", *b"LEO", *b"BSV", *b"FTT", *b"FLR", *b"SGB", *b"EVR",
+            *b"GBX", *b"ELS", *b"ANC",
         ] {
             assert!(is_denied_currency_code(ticker));
             assert!(CurrencyCode::from_bytes(ticker).is_err());
         }
         assert_eq!(NUMERAIRE_CODE, "CRED");
         assert_eq!(EvMethod::default(), EvMethod::ShadowPrice);
+    }
+
+    #[test]
+    fn allowed_commodity_glossary_is_strictly_sorted_disjoint_and_wide() {
+        assert!(
+            ALLOWED_COMMODITY_GLOSSARY.len() >= 60,
+            "glossary must hold at least 60 allow-listed goods (has {})",
+            ALLOWED_COMMODITY_GLOSSARY.len()
+        );
+        assert!(
+            ALLOWED_COMMODITY_GLOSSARY
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0),
+            "ALLOWED_COMMODITY_GLOSSARY must remain strictly sorted for binary_search"
+        );
+        for &(code, word) in ALLOWED_COMMODITY_GLOSSARY {
+            assert!(
+                code.iter().all(|b| b.is_ascii_uppercase()),
+                "allow-list code {code:?} must be uppercase ASCII"
+            );
+            assert!(
+                !word.is_empty(),
+                "allow-list code {code:?} must have non-empty word"
+            );
+            assert!(
+                !is_denied_currency_code(code),
+                "allow-list code {code:?} collides with DENIED_CURRENCY_CODES"
+            );
+            let Ok(parsed) = CurrencyCode::from_bytes(code) else {
+                panic!("allow-listed code {code:?} must parse");
+            };
+            assert_eq!(commodity_glossary_word(parsed), Some(word));
+        }
+        // Arbitrary non-allow-listed 3-letter codes are rejected even when absent from deny-list.
+        assert!(CurrencyCode::from_bytes(*b"QRA").is_err());
+        assert!(CurrencyCode::from_bytes(*b"ZZQ").is_err());
+    }
+
+    #[test]
+    fn seat_count_pair_share_caps_and_mandate_validation() {
+        assert!((SeatCount::Four.default_max_pair_share_cap() - 0.45).abs() < 1e-12);
+        assert!((SeatCount::Five.default_max_pair_share_cap() - 0.35).abs() < 1e-12);
+        assert!((SeatCount::Six.default_max_pair_share_cap() - 0.30).abs() < 1e-12);
+        assert!((bonus_vp_for_completion_bps(0) - MAX_MANDATE_BONUS_VP).abs() < 1e-12);
+        assert!((bonus_vp_for_completion_bps(BPS_SCALE) - MIN_MANDATE_BONUS_VP).abs() < 1e-12);
+
+        for sc in SeatCount::ALL {
+            let max_safe = sc.as_u8() - 2;
+            assert!(
+                MandateObjective::MinRefinedVariety {
+                    distinct_goods: max_safe,
+                    min_each: 1.5,
+                }
+                .validate_for_seat_count(sc)
+                .is_ok()
+            );
+            assert!(
+                MandateObjective::MinRefinedVariety {
+                    distinct_goods: 0,
+                    min_each: 1.5,
+                }
+                .validate_for_seat_count(sc)
+                .is_err()
+            );
+            assert!(
+                MandateObjective::MinRefinedVariety {
+                    distinct_goods: max_safe + 1,
+                    min_each: 1.5,
+                }
+                .validate_for_seat_count(sc)
+                .is_err()
+            );
+            assert!(
+                MandateObjective::MinActivePartners {
+                    min_partners: max_safe + 1,
+                }
+                .validate_for_seat_count(sc)
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn mandate_entropy_deal_rejects_zero_seed_and_deals_distinct_cards() {
+        let deck: Vec<MandateCardSpec> = (1..=8u8)
+            .map(|id| MandateCardSpec {
+                card_id: id,
+                kind: MandateObjective::MaintainCleanCredit {
+                    min_tier: CreditRatingTier::Bbb,
+                },
+                difficulty_completion_bps: 5_000,
+                bonus_vp: bonus_vp_for_completion_bps(5_000),
+            })
+            .collect();
+        assert!(deal_mandate_indices_with_entropy(&deck, SeatCount::Five, [0u8; 32]).is_err());
+
+        let Ok(deal) = deal_mandate_indices_with_entropy(&deck, SeatCount::Six, [0xA5u8; 32])
+        else {
+            panic!("non-zero 256-bit entropy deals cleanly");
+        };
+        assert_eq!(deal.len(), 6);
+        let uniq: std::collections::BTreeSet<usize> = deal.iter().copied().collect();
+        assert_eq!(uniq.len(), 6);
     }
 
     #[test]
@@ -522,6 +1074,12 @@ mod tests {
                 tolerance: 0.03,
                 seat_evs: vec![10.0, 12.0],
             },
+            FeasibilityError::PairShareExceedsCap {
+                pair: (0, 1),
+                share: 0.52,
+                cap: 0.45,
+            },
+            FeasibilityError::RolloutGateFailed("low completion".to_owned()),
             FeasibilityError::SolverFailure("singular".to_owned()),
         ];
         for err in &errs {

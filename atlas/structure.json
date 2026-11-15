@@ -1208,12 +1208,38 @@
         {
           "exports": [
             "compute_hhi",
+            "compute_ring_lp_pair_volumes",
+            "compute_rollout_grading",
             "evaluate_random_table",
             "evaluate_ring_table",
             "generate_random_table",
-            "measure_lockin_and_hhi"
+            "measure_lockin_and_hhi",
+            "top_pair_share",
+            "verify_rollout_grading"
           ],
-          "hash": "4480460abd8ac19d595cfffe9c2e1848667ef95d8e89cb6166c22b0c8baf3089",
+          "failurePaths": [
+            {
+              "in": "verify_rollout_grading",
+              "kind": "err",
+              "line": 791
+            },
+            {
+              "in": "verify_rollout_grading",
+              "kind": "err",
+              "line": 797
+            },
+            {
+              "in": "verify_rollout_grading",
+              "kind": "err",
+              "line": 803
+            },
+            {
+              "in": "verify_rollout_grading",
+              "kind": "err",
+              "line": 809
+            }
+          ],
+          "hash": "3d10ab9cc5589771183edb58fffc8b6ba875c2d634eba849b949b3ee414a2217",
           "importsFiles": [
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/generator.rs",
@@ -1227,6 +1253,8 @@
           "exports": [
             "check_feasibility",
             "coalition_upkeep_coverage",
+            "compute_converter_clearing_margins",
+            "compute_shadow_price_allocation",
             "compute_shadow_price_seat_evs",
             "compute_shapley_seat_evs",
             "pair_has_structural_autarky"
@@ -1235,196 +1263,272 @@
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 82
+              "line": 118
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 90
+              "line": 126
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 107
+              "line": 143
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 121
+              "line": 161
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 133
+              "line": 173
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 146
+              "line": 186
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 159
+              "line": 199
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 214
             },
             {
               "in": "pair_has_structural_autarky",
               "kind": "err",
-              "line": 201
+              "line": 318
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 240
+              "line": 357
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 356
+              "line": 473
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 359
+              "line": 476
             },
             {
-              "in": "compute_shadow_price_seat_evs",
+              "in": "compute_shadow_price_allocation",
               "kind": "err",
-              "line": 453
+              "line": 580
             },
             {
-              "in": "compute_shadow_price_seat_evs",
+              "in": "compute_shadow_price_allocation",
               "kind": "err",
-              "line": 460
+              "line": 587
             },
             {
               "in": "select_balanced_optimal_dual",
               "kind": "match-err",
-              "line": 593
+              "line": 720
             },
             {
               "in": "solve_grand_surplus",
               "kind": "err",
-              "line": 733
+              "line": 860
             },
             {
               "in": "solve_grand_surplus",
               "kind": "err",
-              "line": 738
+              "line": 865
             },
             {
               "in": "evaluate_coalition_net_equity",
               "kind": "err",
-              "line": 908
+              "line": 1035
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1001
+              "line": 1128
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1008
+              "line": 1135
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1015
+              "line": 1142
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1021
+              "line": 1148
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1037
+              "line": 1164
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1042
+              "line": 1169
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1049
+              "line": 1176
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1055
+              "line": 1183
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1061
+              "line": 1189
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1069
+              "line": 1195
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1075
+              "line": 1203
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1081
+              "line": 1209
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1087
+              "line": 1215
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1097
+              "line": 1221
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1104
+              "line": 1231
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1112
+              "line": 1238
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1117
+              "line": 1246
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1123
+              "line": 1251
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1133
+              "line": 1257
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1144
+              "line": 1267
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1161
+              "line": 1278
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1295
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1303
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1311
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1320
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1334
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1343
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1351
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1358
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1366
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1373
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1381
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1388
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1404
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1412
             }
           ],
-          "hash": "09e0ddff9a93cc50fd037f940f498192356330080b285c693e7a23f08adc3f2a",
+          "hash": "c471333f019f550e923331d7ca3114ef0a7c8f29b3b5016e1190d67f8ba0752c",
           "importsFiles": [
+            "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/lp.rs",
             "crates/league-gen/src/schema.rs"
           ],
@@ -1439,46 +1543,57 @@
             {
               "in": "generate_ring_table",
               "kind": "match-err",
-              "line": 88
+              "line": 100
+            },
+            {
+              "in": "generate_ring_table",
+              "kind": "match-err",
+              "line": 103
             },
             {
               "in": "generate_ring_table",
               "kind": "err",
-              "line": 92
+              "line": 107
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 100
+              "line": 115
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 106
+              "line": 121
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 111
+              "line": 126
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 116
+              "line": 131
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 127
+              "line": 138
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 149
             },
             {
               "in": "sample_unique_codes",
               "kind": "err",
-              "line": 290
+              "line": 272
             }
           ],
-          "hash": "2c2f4677a764e80ad89078a53225175846c3713c08cef70647755a578d2d06c1",
+          "hash": "27ea5948632d757add80d311361e250aa91f66c68abd8ccbee6dd1467f95ff47",
           "importsFiles": [
+            "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/rng.rs",
             "crates/league-gen/src/schema.rs"
@@ -1487,7 +1602,7 @@
           "testsInside": true
         },
         {
-          "hash": "c1bc482a54eb55d29af0f01a00800eddb04095baf3356a01be5444300decdf41",
+          "hash": "dd76e42b86794ed17442a784d68f5d63cfa63981e4a9e758164c0dfbcc9e42d9",
           "importsFiles": [
             "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/feasibility.rs",
@@ -1575,31 +1690,77 @@
         },
         {
           "exports": [
+            "bonus_vp_for_completion_bps",
+            "commodity_glossary_word",
+            "deal_mandate_indices_with_entropy",
+            "default_mandate_deck_for_table",
+            "default_projects_for_seats",
+            "is_allowed_commodity_code",
             "is_denied_currency_code"
           ],
           "failurePaths": [
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 144
+              "line": 257
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 149
+              "line": 262
+            },
+            {
+              "in": "from_bytes",
+              "kind": "err",
+              "line": 268
             },
             {
               "in": "try_from",
               "kind": "err",
-              "line": 195
+              "line": 313
+            },
+            {
+              "in": "validate_for_seat_count",
+              "kind": "err",
+              "line": 464
+            },
+            {
+              "in": "validate_for_seat_count",
+              "kind": "err",
+              "line": 474
+            },
+            {
+              "in": "validate_for_seat_count",
+              "kind": "err",
+              "line": 479
+            },
+            {
+              "in": "validate_for_seat_count",
+              "kind": "err",
+              "line": 486
+            },
+            {
+              "in": "validate_for_seat_count",
+              "kind": "err",
+              "line": 493
+            },
+            {
+              "in": "deal_mandate_indices_with_entropy",
+              "kind": "err",
+              "line": 535
+            },
+            {
+              "in": "deal_mandate_indices_with_entropy",
+              "kind": "err",
+              "line": 541
             }
           ],
-          "hash": "1f6cb6ee750860b17b0144beded6ccb3743561b005d61b05a53b03ac25a4200c",
+          "hash": "c11d99684d4bf452363afd0525c89f407679706ca5f5a905863c488ce878d249",
           "path": "crates/league-gen/src/schema.rs",
           "testsInside": true
         },
         {
-          "hash": "0929347b16e923689dd5743bfc0d7f5204face29d8656dfcc6655a415c004cba",
+          "hash": "a038a39a7f26d268afad957a43a5c160da3623d276ce37c36f02baf6f9c90848",
           "importsFiles": [
             "crates/league-gen/src/lib.rs"
           ],
@@ -2377,6 +2538,10 @@
           "path": ".gitignore"
         },
         {
+          "hash": "2e5b20d54391a0c2e2e07a605ba795d900ddf8d0db08ce1762b88e3c9ea4aa68",
+          "path": "CHANGELOG.md"
+        },
+        {
           "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
           "path": "CLAUDE.md"
         },
@@ -3090,10 +3255,21 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "1ac76e7ed11bc75055a4fb805acf8fa92f40e0ce",
-    "tracked": 494
+    "commit": "d601dbbac4b0af52be1df34861cd9606b0ed266e",
+    "tracked": 495
   },
   "landings": [
+    {
+      "readers": [
+        {
+          "by": "scripts/test-guards.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "CHANGELOG.md",
+      "writers": []
+    },
     {
       "readers": [
         {

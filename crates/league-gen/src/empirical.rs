@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use crate::feasibility::FeasibilityReport;
 use crate::generator::generate_ring_table;
 use crate::rng::SeedStream;
-use crate::schema::{GeneratorConfig, RingTable, SeatCount};
+use crate::schema::{
+    CreditRatingTier, FeasibilityError, GeneratorConfig, HorizonShockKind, MandateObjective,
+    PROJECT_CONCORDAT_ID, RingTable, SeatCount,
+};
 
 /// Analytical priors reported in the seed-26 design blueprint.
 ///
@@ -48,7 +51,7 @@ impl ReportHypotheses {
     };
 }
 
-/// Dyadic trade concentration metrics across all unordered seat pairs.
+/// Dyadic trade concentration metrics across all unordered seat pairs (`B2.3`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HhiMetrics {
     /// Total number of unordered seat pairs `N * (N - 1) / 2`.
@@ -59,6 +62,9 @@ pub struct HhiMetrics {
     pub hhi: f64,
     /// Inverse concentration `1.0 / hhi` (`0.0` if zero pairs).
     pub effective_dyads: f64,
+    /// Largest single unordered pair's share of total bilateral volume `max_ij s_{ij}` (`B2.3`
+    /// unconditional telemetry; also enforced against C6 table caps via `check_feasibility`).
+    pub max_pair_share: f64,
 }
 
 /// Computes exact [`HhiMetrics`] from a slice of nonnegative pair trade volumes.
@@ -72,15 +78,20 @@ pub fn compute_hhi(pair_volumes: &[f64]) -> HhiMetrics {
             active_pairs: 0,
             hhi: if total_pairs > 0 { 1.0 } else { 0.0 },
             effective_dyads: if total_pairs > 0 { 1.0 } else { 0.0 },
+            max_pair_share: if total_pairs > 0 { 1.0 } else { 0.0 },
         };
     }
 
     let mut active_pairs = 0usize;
     let mut hhi = 0.0_f64;
+    let mut max_share = 0.0_f64;
     for &vol in pair_volumes {
         if vol > 1e-12 {
             active_pairs += 1;
             let share = vol / total_vol;
+            if share > max_share {
+                max_share = share;
+            }
             hhi += share * share;
         }
     }
@@ -90,7 +101,27 @@ pub fn compute_hhi(pair_volumes: &[f64]) -> HhiMetrics {
         active_pairs,
         hhi,
         effective_dyads,
+        max_pair_share: max_share,
     }
+}
+
+/// Deterministic multi-agent season rollout grading summary for a candidate [`RingTable`] (`B2.2`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RolloutGradingReport {
+    /// Number of seeded deterministic 26-turn multi-agent rollout episodes executed.
+    pub episodes: usize,
+    /// Observed completion frequency in basis points (`0..=10_000`) per card in `mandate_deck`.
+    pub per_card_completion_bps: Vec<u16>,
+    /// Arithmetic mean completion rate (`0..=10_000 bps`) across all cards in `mandate_deck`.
+    pub mean_mandate_completion_bps: u16,
+    /// Total Tier-3 Syndicate Project batches completed across all rollout episodes.
+    pub total_project_batches: u32,
+    /// Total full-ring Concordat (`id = 100`) batches completed across all rollout episodes.
+    pub concordat_batches: u32,
+    /// Count of distinct refined goods (`0..=N`) with positive rollout production.
+    pub distinct_refined_goods_produced: usize,
+    /// Aggregated bilateral trade concentration observed across all rollout episodes.
+    pub rollout_trade_concentration: HhiMetrics,
 }
 
 /// Baseline random resource-endowment table for measuring combinatorial bilateral lock-in probabilities.
@@ -119,7 +150,7 @@ pub struct RandomTableMetrics {
     pub trade_concentration: HhiMetrics,
 }
 
-/// Coalition coverage bounds and 1-turn LP-flow trade concentration for one [`RingTable`].
+/// Coalition coverage bounds, 1-turn LP-flow concentration, and rollout grading for one [`RingTable`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RingTableMetrics {
     /// Maximum 1-seat internal upkeep coverage (`0.0` by Invariant 1 construction).
@@ -132,6 +163,8 @@ pub struct RingTableMetrics {
     pub max_4seat_upkeep_coverage: Option<f64>,
     /// Static 1-turn LP grand-coalition optimal-flow dyadic concentration model output.
     pub trade_concentration: HhiMetrics,
+    /// Multi-agent rollout project and mandate grading telemetry (`B2.2`).
+    pub rollout_grading: RolloutGradingReport,
 }
 
 /// Aggregated statistics across an ensemble of seeded tables.
@@ -161,6 +194,10 @@ pub struct EnsembleStats {
     pub mean_effective_dyads: f64,
     /// Mean number of active modeled trading pairs across trials.
     pub mean_active_pairs: f64,
+    /// Mean top-pair share `max_ij s_{ij}` across trials (`B2.3` telemetry).
+    pub mean_max_pair_share: f64,
+    /// Peak top-pair share observed across any trial in the ensemble (`B2.3` telemetry).
+    pub max_pair_share_observed: f64,
 }
 
 /// Side-by-side summary of random-endowment Monte Carlo rates vs. LP-certified ring rejection rates and static-model HHIs.
@@ -303,9 +340,12 @@ pub fn evaluate_random_table(table: &RandomEndowmentTable) -> RandomTableMetrics
     }
 }
 
-/// Evaluates coalition coverage bounds and 1-turn LP grand-coalition flow HHI on a [`RingTable`].
+/// Computes 1-turn optimal LP-flow dyadic trade volumes across all `N*(N-1)/2` unordered pairs.
 #[must_use]
-pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> RingTableMetrics {
+pub(crate) fn compute_ring_lp_pair_volumes(
+    table: &RingTable,
+    optimal_converter_runs: &[f64],
+) -> Vec<f64> {
     let n = table.seat_count.as_usize();
     let total_pairs = table.seat_count.pair_count();
     let mut pair_volumes = vec![0.0_f64; total_pairs];
@@ -348,15 +388,11 @@ pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> Rin
         };
     }
 
-    // Flatten converter specs in exact order matching `report.optimal_converter_runs`.
+    // Flatten converter specs in exact order matching `optimal_converter_runs`.
     let mut conv_idx = 0usize;
     for seat in &table.seats {
         for conv in &seat.converters {
-            let runs = report
-                .optimal_converter_runs
-                .get(conv_idx)
-                .copied()
-                .unwrap_or(0.0);
+            let runs = optimal_converter_runs.get(conv_idx).copied().unwrap_or(0.0);
             conv_idx += 1;
             if runs <= 1e-12 {
                 continue;
@@ -392,12 +428,405 @@ pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> Rin
         }
     }
 
+    pair_volumes
+}
+
+/// Returns the `(pair, share)` with the largest volume fraction across unordered pairs.
+#[must_use]
+pub(crate) fn top_pair_share(n: usize, pair_volumes: &[f64]) -> ((u8, u8), f64) {
+    let total: f64 = pair_volumes.iter().copied().filter(|&v| v > 0.0).sum();
+    if n < 2 || pair_volumes.is_empty() || total <= 1e-12 {
+        return ((0, 1), 0.0);
+    }
+    let mut best_pair = (0u8, 1u8);
+    let mut best_vol = -1.0_f64;
+    let mut idx = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if idx < pair_volumes.len() && pair_volumes[idx] > best_vol {
+                best_vol = pair_volumes[idx];
+                best_pair = (i as u8, j as u8);
+            }
+            idx += 1;
+        }
+    }
+    (best_pair, best_vol.max(0.0) / total)
+}
+
+const ROLLOUT_EPISODES: usize = 8;
+const ROLLOUT_TURNS: u8 = 26;
+const MAX_SEATS: usize = 6;
+
+/// Runs deterministic multi-agent 26-turn season rollouts (`B2.2`) to grade Syndicate Project
+/// completion, full-ring Concordat activity, per-card mandate difficulty, and rollout pair shares.
+#[must_use]
+pub fn compute_rollout_grading(
+    table: &RingTable,
+    report: &FeasibilityReport,
+) -> RolloutGradingReport {
+    let n = table.seat_count.as_usize().min(MAX_SEATS);
+    let deck_len = table.mandate_deck.len();
+    let total_pairs = table.seat_count.pair_count();
+    let mut pair_volumes = vec![0.0_f64; total_pairs];
+    let mut card_completions = vec![0usize; deck_len];
+    let mut total_project_batches = 0u32;
+    let mut concordat_batches = 0u32;
+    let mut goods_produced_mask = 0u8;
+
+    let concordat_opt = table.projects.iter().find(|p| p.id == PROJECT_CONCORDAT_ID);
+    let mut conv_base_runs = [0.0_f64; 12];
+    let mut conv_flat = 0usize;
+    for seat in table.seats.iter().take(n) {
+        for _ in &seat.converters {
+            if conv_flat < conv_base_runs.len() {
+                conv_base_runs[conv_flat] = report
+                    .optimal_converter_runs
+                    .get(conv_flat)
+                    .copied()
+                    .unwrap_or(0.0);
+            }
+            conv_flat += 1;
+        }
+    }
+
+    let mut stream = SeedStream::new(table.seed, b"MLV2|ROLLOUT_GRADING");
+
+    for ep in 0..ROLLOUT_EPISODES {
+        let mut raw_inv = [0.0_f64; MAX_SEATS];
+        let mut ref_owned = [[0.0_f64; MAX_SEATS]; MAX_SEATS];
+        let mut project_equity = [0.0_f64; MAX_SEATS];
+        let mut credit_defaults = [0u32; MAX_SEATS];
+        let mut partners_mask = [0u8; MAX_SEATS];
+
+        // Episode policy spread exercises tight/relaxed conversion cadence, partner focus, and hoarding.
+        let mut seat_cadence = [1.0_f64; MAX_SEATS];
+        let mut seat_project_propensity = [1.0_f64; MAX_SEATS];
+        for s in 0..n {
+            seat_cadence[s] = stream.range_f64(0.68, 1.04);
+            seat_project_propensity[s] = stream.range_f64(0.35, 1.00);
+        }
+        let diversify_refined_barter = (ep % 2) == 0;
+        let prefer_concordat = (ep % 3) != 2;
+
+        for turn in 1..=ROLLOUT_TURNS {
+            let mut yield_mult = [1.0_f64; MAX_SEATS];
+            let mut tariff_mult = [1.0_f64; MAX_SEATS];
+            let mut proj_mult = [1.0_f64; MAX_SEATS];
+            let mut extra_decay = [0.0_f64; MAX_SEATS];
+
+            for shock in &table.shocks {
+                let target = usize::from(shock.target_seat);
+                if target >= n {
+                    continue;
+                }
+                match shock.kind {
+                    HorizonShockKind::SupplyFreeze if turn == shock.realize_turn => {
+                        yield_mult[target] *= (1.0 - shock.magnitude).max(0.20);
+                    }
+                    HorizonShockKind::TariffHoliday
+                        if turn >= shock.realize_turn && turn <= shock.realize_turn + 1 =>
+                    {
+                        tariff_mult[target] *= (1.0 - shock.magnitude).max(0.0);
+                    }
+                    HorizonShockKind::DemandSurge
+                        if turn >= shock.realize_turn && turn <= shock.realize_turn + 1 =>
+                    {
+                        proj_mult[target] *= 1.0 + shock.magnitude;
+                    }
+                    HorizonShockKind::SpoilageSpike if turn == shock.realize_turn => {
+                        extra_decay[target] += shock.magnitude * 0.5;
+                    }
+                    _ => {}
+                }
+            }
+
+            // 1. Raw extraction (including occasional low-yield dip for credit-stress realism).
+            for s in 0..n {
+                let pulse = if ((ep + usize::from(turn) + s) % 9) == 0 {
+                    0.78
+                } else {
+                    1.0
+                };
+                raw_inv[s] +=
+                    table.seats[s].raw_yield_per_turn * yield_mult[s] * seat_cadence[s] * pulse;
+            }
+
+            // 2. Chiral raw imports & converter batch execution.
+            let mut c_cursor = 0usize;
+            for owner in 0..n {
+                for conv in &table.seats[owner].converters {
+                    let base_run = conv_base_runs.get(c_cursor).copied().unwrap_or(0.0);
+                    c_cursor += 1;
+                    let target_run = if conv.is_secondary {
+                        if base_run > 1e-6 || yield_mult.iter().any(|&y| y < 0.99) {
+                            base_run.max(0.35) * seat_cadence[owner]
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        base_run * seat_cadence[owner]
+                    };
+                    let mut affordable = target_run.min(conv.max_runs_per_turn);
+                    for &(raw_g, amt) in &conv.inputs {
+                        let k = usize::from(raw_g);
+                        if k >= n || amt <= 0.0 {
+                            affordable = 0.0;
+                            continue;
+                        }
+                        let mult = if k == owner {
+                            1.0
+                        } else {
+                            1.0 + table.seats[k].raw_export_tariff * tariff_mult[k]
+                        };
+                        let cap_k = raw_inv[k] / (amt * mult);
+                        if cap_k < affordable {
+                            affordable = cap_k;
+                        }
+                    }
+                    if affordable > 1e-6 {
+                        for &(raw_g, amt) in &conv.inputs {
+                            let k = usize::from(raw_g);
+                            if k >= n || amt <= 0.0 {
+                                continue;
+                            }
+                            let mult = if k == owner {
+                                1.0
+                            } else {
+                                1.0 + table.seats[k].raw_export_tariff * tariff_mult[k]
+                            };
+                            let shipped = affordable * amt * mult;
+                            raw_inv[k] = (raw_inv[k] - shipped).max(0.0);
+                            if k != owner {
+                                partners_mask[owner] |= 1u8 << k;
+                                partners_mask[k] |= 1u8 << owner;
+                                let pidx = unordered_pair_index(n, owner, k);
+                                if pidx < pair_volumes.len() {
+                                    pair_volumes[pidx] +=
+                                        affordable * amt * table.seats[k].refined_project_value;
+                                }
+                            }
+                        }
+                        ref_owned[owner][owner] += affordable * conv.output_amount;
+                        goods_produced_mask |= 1u8 << owner;
+                    }
+                }
+            }
+
+            // 3. Mandatory neighbor upkeep settlement (`M_{(s+n-1)%n}` -> `s`).
+            for s in 0..n {
+                let prod = usize::from(table.seats[s].upkeep_good);
+                if prod >= n {
+                    continue;
+                }
+                let mult = if prod == s {
+                    1.0
+                } else {
+                    1.0 + table.seats[prod].refined_export_tariff * tariff_mult[prod]
+                };
+                let needed_gross = table.seats[s].upkeep_amount * mult;
+                if ref_owned[prod][prod] + 1e-9 >= needed_gross {
+                    ref_owned[prod][prod] = (ref_owned[prod][prod] - needed_gross).max(0.0);
+                    if prod != s {
+                        partners_mask[s] |= 1u8 << prod;
+                        partners_mask[prod] |= 1u8 << s;
+                        let pidx = unordered_pair_index(n, s, prod);
+                        if pidx < pair_volumes.len() {
+                            pair_volumes[pidx] += table.seats[s].upkeep_amount
+                                * table.seats[prod].refined_project_value;
+                        }
+                    }
+                } else {
+                    credit_defaults[s] += 1;
+                }
+            }
+
+            // 4. Multilateral refined swaps for variety mandates & Tier-3 projects.
+            if diversify_refined_barter && (turn % 2) == 0 {
+                let hop = 1 + ((ep + usize::from(turn)) % (n.saturating_sub(1).max(1)));
+                for s in 0..n {
+                    let partner = (s + hop) % n;
+                    if partner == s {
+                        continue;
+                    }
+                    let swap_qty =
+                        (ref_owned[s][s].min(ref_owned[partner][partner]) * 0.20).min(0.85);
+                    if swap_qty > 0.05 {
+                        ref_owned[s][s] -= swap_qty;
+                        ref_owned[partner][partner] -= swap_qty;
+                        ref_owned[s][partner] += swap_qty;
+                        ref_owned[partner][s] += swap_qty;
+                        partners_mask[s] |= 1u8 << partner;
+                        partners_mask[partner] |= 1u8 << s;
+                        let pidx = unordered_pair_index(n, s, partner);
+                        if pidx < pair_volumes.len() {
+                            pair_volumes[pidx] += swap_qty
+                                * (table.seats[s].refined_project_value
+                                    + table.seats[partner].refined_project_value);
+                        }
+                    }
+                }
+            }
+
+            // 5. Periodic Tier-3 Syndicate Project completion (Concordat 100 & neighbor pairs 1..=N).
+            if let Some(concordat) = concordat_opt
+                && prefer_concordat
+                && (turn % 3) == 0
+                && concordat.required_inputs.iter().all(|&(g, _, qty)| {
+                    usize::from(g) < n && ref_owned[usize::from(g)][usize::from(g)] >= qty
+                })
+            {
+                let mut boost_sum = 0.0_f64;
+                for &(g, _, qty) in &concordat.required_inputs {
+                    let gi = usize::from(g);
+                    ref_owned[gi][gi] -= qty;
+                    boost_sum += proj_mult[gi];
+                }
+                let mean_boost = boost_sum / (n as f64);
+                let per_seat_eq = (concordat.output_project_equity * mean_boost) / (n as f64);
+                for s in 0..n {
+                    project_equity[s] += per_seat_eq * seat_project_propensity[s];
+                }
+                concordat_batches += 1;
+                total_project_batches += 1;
+            }
+
+            if (turn % 2) == 1 {
+                for proj in &table.projects {
+                    if proj.id == PROJECT_CONCORDAT_ID {
+                        continue;
+                    }
+                    let can_run = proj.required_inputs.iter().all(|&(g, _, qty)| {
+                        let gi = usize::from(g);
+                        gi < n && ref_owned[gi][gi] >= qty && seat_project_propensity[gi] > 0.40
+                    });
+                    if can_run {
+                        let k_parts = proj.required_inputs.len() as f64;
+                        let mut avg_boost = 0.0_f64;
+                        for &(g, _, qty) in &proj.required_inputs {
+                            let gi = usize::from(g);
+                            ref_owned[gi][gi] -= qty;
+                            avg_boost += proj_mult[gi];
+                        }
+                        let share_eq =
+                            (proj.output_project_equity * (avg_boost / k_parts)) / k_parts;
+                        for &(g, _, _) in &proj.required_inputs {
+                            let gi = usize::from(g);
+                            project_equity[gi] +=
+                                share_eq * (0.65 + 0.35 * seat_project_propensity[gi]);
+                        }
+                        total_project_batches += 1;
+                    }
+                }
+            }
+
+            // 6. Perishable end-of-turn Clawback spoilage on remaining raw stock.
+            for s in 0..n {
+                let decay = (table.seats[s].perishable_decay_rate + extra_decay[s]).min(0.99);
+                raw_inv[s] *= 1.0 - decay;
+            }
+        }
+
+        // Terminal Turn-26 Mandate grading across all N seats.
+        for s in 0..n {
+            let tier = match credit_defaults[s] {
+                0 => CreditRatingTier::Aaa,
+                1 => CreditRatingTier::Bbb,
+                2 => CreditRatingTier::B,
+                _ => CreditRatingTier::D,
+            };
+            let distinct_partners = partners_mask[s].count_ones() as u8;
+            for (c_idx, card) in table.mandate_deck.iter().enumerate() {
+                let met = match card.kind {
+                    MandateObjective::MinProjectEquity { target } => project_equity[s] >= target,
+                    MandateObjective::MinRefinedVariety {
+                        distinct_goods,
+                        min_each,
+                    } => {
+                        let count = (0..n).filter(|&g| ref_owned[s][g] >= min_each).count();
+                        count >= usize::from(distinct_goods)
+                    }
+                    MandateObjective::MaintainCleanCredit { min_tier } => tier <= min_tier,
+                    MandateObjective::MinActivePartners { min_partners } => {
+                        distinct_partners >= min_partners
+                    }
+                };
+                if met {
+                    card_completions[c_idx] += 1;
+                }
+            }
+        }
+    }
+
+    let total_seat_eps = (ROLLOUT_EPISODES * n).max(1);
+    let per_card_completion_bps: Vec<u16> = card_completions
+        .into_iter()
+        .map(|wins| ((wins * 10_000) / total_seat_eps).min(10_000) as u16)
+        .collect();
+    let mean_mandate_completion_bps = if per_card_completion_bps.is_empty() {
+        0
+    } else {
+        let sum: u32 = per_card_completion_bps.iter().map(|&b| u32::from(b)).sum();
+        (sum / (per_card_completion_bps.len() as u32)) as u16
+    };
+
+    RolloutGradingReport {
+        episodes: ROLLOUT_EPISODES,
+        per_card_completion_bps,
+        mean_mandate_completion_bps,
+        total_project_batches,
+        concordat_batches,
+        distinct_refined_goods_produced: goods_produced_mask.count_ones() as usize,
+        rollout_trade_concentration: compute_hhi(&pair_volumes),
+    }
+}
+
+/// Validates B2.2 multi-agent rollout grading gates before seed acceptance.
+pub fn verify_rollout_grading(
+    table: &RingTable,
+    grading: &RolloutGradingReport,
+    max_pair_share_cap: f64,
+) -> Result<(), FeasibilityError> {
+    let n = table.seat_count.as_usize();
+    if grading.distinct_refined_goods_produced < n {
+        return Err(FeasibilityError::RolloutGateFailed(format!(
+            "only {} of {n} distinct refined goods produced in rollouts",
+            grading.distinct_refined_goods_produced
+        )));
+    }
+    if grading.total_project_batches == 0 || grading.concordat_batches == 0 {
+        return Err(FeasibilityError::RolloutGateFailed(format!(
+            "projects stagnated in rollouts (total={}, concordat={})",
+            grading.total_project_batches, grading.concordat_batches
+        )));
+    }
+    if grading.mean_mandate_completion_bps == 0 || grading.mean_mandate_completion_bps >= 10_000 {
+        return Err(FeasibilityError::RolloutGateFailed(format!(
+            "degenerate mandate rollout completion bps: {}",
+            grading.mean_mandate_completion_bps
+        )));
+    }
+    if grading.rollout_trade_concentration.max_pair_share > max_pair_share_cap + 1e-9 {
+        return Err(FeasibilityError::RolloutGateFailed(format!(
+            "rollout max_pair_share {:.4} exceeds cap {:.4}",
+            grading.rollout_trade_concentration.max_pair_share, max_pair_share_cap
+        )));
+    }
+    Ok(())
+}
+
+/// Evaluates coalition coverage, 1-turn LP flow HHI, and multi-agent rollout grading (`B2.2`).
+#[must_use]
+pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> RingTableMetrics {
+    let pair_volumes = compute_ring_lp_pair_volumes(table, &report.optimal_converter_runs);
+    let rollout_grading = compute_rollout_grading(table, report);
+
     RingTableMetrics {
         max_1seat_upkeep_coverage: report.max_1seat_upkeep_coverage,
         max_2seat_upkeep_coverage: report.max_2seat_upkeep_coverage,
         max_3seat_upkeep_coverage: report.max_3seat_upkeep_coverage,
         max_4seat_upkeep_coverage: report.max_4seat_upkeep_coverage,
         trade_concentration: compute_hhi(&pair_volumes),
+        rollout_grading,
     }
 }
 
@@ -439,6 +868,8 @@ fn run_random_ensemble(
     let mut max_hhi = 0.0_f64;
     let mut sum_eff = 0.0_f64;
     let mut sum_active = 0.0_f64;
+    let mut sum_max_pair = 0.0_f64;
+    let mut max_pair_obs = 0.0_f64;
 
     for t in 0..trials {
         let tbl = generate_random_table(
@@ -462,6 +893,8 @@ fn run_random_ensemble(
         max_hhi = max_hhi.max(m.trade_concentration.hhi);
         sum_eff += m.trade_concentration.effective_dyads;
         sum_active += m.trade_concentration.active_pairs as f64;
+        sum_max_pair += m.trade_concentration.max_pair_share;
+        max_pair_obs = max_pair_obs.max(m.trade_concentration.max_pair_share);
     }
 
     let denom = trials as f64;
@@ -478,6 +911,8 @@ fn run_random_ensemble(
         max_hhi,
         mean_effective_dyads: sum_eff / denom,
         mean_active_pairs: sum_active / denom,
+        mean_max_pair_share: sum_max_pair / denom,
+        max_pair_share_observed: max_pair_obs,
     }
 }
 
@@ -494,6 +929,8 @@ fn run_ring_ensemble(seed: u64, trials: usize, seat_count: SeatCount) -> Ensembl
     let mut max_hhi = 0.0_f64;
     let mut sum_eff = 0.0_f64;
     let mut sum_active = 0.0_f64;
+    let mut sum_max_pair = 0.0_f64;
+    let mut max_pair_obs = 0.0_f64;
     let mut completed = 0usize;
     let mut total_rejected = 0usize;
     let mut total_sampled = 0usize;
@@ -518,6 +955,8 @@ fn run_ring_ensemble(seed: u64, trials: usize, seat_count: SeatCount) -> Ensembl
             max_hhi = max_hhi.max(m.trade_concentration.hhi);
             sum_eff += m.trade_concentration.effective_dyads;
             sum_active += m.trade_concentration.active_pairs as f64;
+            sum_max_pair += m.trade_concentration.max_pair_share;
+            max_pair_obs = max_pair_obs.max(m.trade_concentration.max_pair_share);
             completed += 1;
         }
     }
@@ -537,6 +976,8 @@ fn run_ring_ensemble(seed: u64, trials: usize, seat_count: SeatCount) -> Ensembl
         max_hhi,
         mean_effective_dyads: sum_eff / denom,
         mean_active_pairs: sum_active / denom,
+        mean_max_pair_share: sum_max_pair / denom,
+        max_pair_share_observed: max_pair_obs,
     }
 }
 
@@ -637,35 +1078,92 @@ mod tests {
             cmp.ring_5p.mean_hhi,
             hyp.chiral_ring_5p_hhi
         );
+        assert!(
+            cmp.ring_4p.max_pair_share_observed
+                <= SeatCount::Four.default_max_pair_share_cap() + 1e-9,
+            "ring_4p observed max_pair_share {} exceeded C6 cap",
+            cmp.ring_4p.max_pair_share_observed
+        );
+        assert!(
+            cmp.ring_5p.max_pair_share_observed
+                <= SeatCount::Five.default_max_pair_share_cap() + 1e-9,
+            "ring_5p observed max_pair_share {} exceeded C6 cap",
+            cmp.ring_5p.max_pair_share_observed
+        );
+        assert!(
+            cmp.ring_6p.max_pair_share_observed
+                <= SeatCount::Six.default_max_pair_share_cap() + 1e-9,
+            "ring_6p observed max_pair_share {} exceeded C6 cap",
+            cmp.ring_6p.max_pair_share_observed
+        );
 
         println!(
-            "EMPIRICAL n={}: rand_5p_4r lockin={:.3} cov75={:.3} model_hhi={:.3} mean_inv_hhi={:.2} | rand_5p_6r cov75={:.3} model_hhi={:.3} mean_inv_hhi={:.2} | ring_4p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1} | ring_5p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1} | ring_6p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1}",
+            "EMPIRICAL n={}: rand_5p_4r lockin={:.3} cov75={:.3} model_hhi={:.3} mean_inv_hhi={:.2} max_pair={:.3} | rand_5p_6r cov75={:.3} model_hhi={:.3} mean_inv_hhi={:.2} max_pair={:.3} | ring_4p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1} max_pair={:.3} | ring_5p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1} max_pair={:.3} | ring_6p rej={:.3} ({}/{}) model_hhi={:.3} mean_inv_hhi={:.2} act={:.1} max_pair={:.3}",
             cmp.trials,
             cmp.random_5p_4r.frac_100pct_dyad_lockin,
             cmp.random_5p_4r.frac_75pct_dyad_coverage,
             cmp.random_5p_4r.mean_hhi,
             cmp.random_5p_4r.mean_effective_dyads,
+            cmp.random_5p_4r.mean_max_pair_share,
             cmp.random_5p_6r.frac_75pct_dyad_coverage,
             cmp.random_5p_6r.mean_hhi,
             cmp.random_5p_6r.mean_effective_dyads,
+            cmp.random_5p_6r.mean_max_pair_share,
             cmp.ring_4p.filter_rejection_rate,
             cmp.ring_4p.candidates_rejected,
             cmp.ring_4p.candidates_sampled,
             cmp.ring_4p.mean_hhi,
             cmp.ring_4p.mean_effective_dyads,
             cmp.ring_4p.mean_active_pairs,
+            cmp.ring_4p.mean_max_pair_share,
             cmp.ring_5p.filter_rejection_rate,
             cmp.ring_5p.candidates_rejected,
             cmp.ring_5p.candidates_sampled,
             cmp.ring_5p.mean_hhi,
             cmp.ring_5p.mean_effective_dyads,
             cmp.ring_5p.mean_active_pairs,
+            cmp.ring_5p.mean_max_pair_share,
             cmp.ring_6p.filter_rejection_rate,
             cmp.ring_6p.candidates_rejected,
             cmp.ring_6p.candidates_sampled,
             cmp.ring_6p.mean_hhi,
             cmp.ring_6p.mean_effective_dyads,
             cmp.ring_6p.mean_active_pairs,
+            cmp.ring_6p.mean_max_pair_share,
         );
+    }
+
+    #[test]
+    fn hhi_max_pair_share_and_rollout_grading_are_deterministic_and_bounded() {
+        let uniform = compute_hhi(&[10.0, 10.0, 10.0, 10.0]);
+        assert!((uniform.max_pair_share - 0.25).abs() < 1e-12);
+        let skewed = compute_hhi(&[70.0, 20.0, 10.0]);
+        assert!((skewed.max_pair_share - 0.70).abs() < 1e-12);
+        let empty = compute_hhi(&[]);
+        assert_eq!(empty.max_pair_share, 0.0);
+
+        for sc in SeatCount::ALL {
+            let cfg = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            let Ok((table, report)) = generate_ring_table(42 + u64::from(sc.as_u8()), &cfg) else {
+                panic!("table generates");
+            };
+            let g1 = compute_rollout_grading(&table, &report);
+            let g2 = compute_rollout_grading(&table, &report);
+            assert_eq!(g1, g2);
+            assert_eq!(g1.per_card_completion_bps.len(), table.mandate_deck.len());
+            assert_eq!(g1.distinct_refined_goods_produced, sc.as_usize());
+            assert!(g1.total_project_batches > 0);
+            assert!(g1.concordat_batches > 0);
+            assert!(verify_rollout_grading(&table, &g1, sc.default_max_pair_share_cap()).is_ok());
+
+            let strict_fail = verify_rollout_grading(&table, &g1, 0.05);
+            assert!(matches!(
+                strict_fail,
+                Err(FeasibilityError::RolloutGateFailed(_))
+            ));
+        }
     }
 }

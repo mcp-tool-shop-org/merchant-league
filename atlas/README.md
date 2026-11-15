@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit 1ac76e7 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit d601dbb by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,10 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (335 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (1908c46)
+## What changed since 2026-11-15 (1ac76e7)
 
-- league-standalone now imports league-core.
-- CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 1 more.
-- CI no longer runs crates/league-core/.
-- crates/league-core/ is now also read by crates/league-standalone/Cargo.toml.
-- 7 files added, 1 removed and 19 changed content, across 5 parts.
+- CHANGELOG.md is now read by scripts/test-guards.sh.
+- 1 file added and 6 changed content, across 2 parts.
 
 ## What comes in
 
@@ -54,7 +51,11 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 5 of 5 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 6 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 6 of 7 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 5 of 6 commits.
+- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 5 of 7 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 

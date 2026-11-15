@@ -1,15 +1,15 @@
 //! Seeded chiral converter-ring table generator and Prioritized Level Replay (PLR) sampler.
 
-use std::collections::HashSet;
-
 use serde::{Deserialize, Serialize};
 
+use crate::empirical::{compute_rollout_grading, verify_rollout_grading};
 use crate::feasibility::{FeasibilityReport, check_feasibility};
 use crate::rng::SeedStream;
 use crate::schema::{
-    ConverterSpec, CurrencyCode, FeasibilityError, GENERATOR_VERSION, GenError, GeneratorConfig,
-    HorizonShockKind, MAX_ATTEMPTS_CAP, NUMERAIRE_CODE, RingTable, ScheduledShock, SeatCount,
-    SeatSpec, is_denied_currency_code,
+    ALLOWED_COMMODITY_GLOSSARY, ConverterSpec, CurrencyCode, FeasibilityError, GENERATOR_VERSION,
+    GenError, GeneratorConfig, HorizonShockKind, MAX_ATTEMPTS_CAP, NUMERAIRE_CODE, RingTable,
+    ScheduledShock, SeatCount, SeatSpec, default_mandate_deck_for_table,
+    default_projects_for_seats,
 };
 
 /// Stochastic season close turn window `(24, 28)` from `docs/design-v2.md` §6.2.
@@ -29,10 +29,19 @@ const BASE_UPKEEP_RANGE: (f64, f64) = (1.6, 2.2);
 /// Base Syndicate Project fundamental valuation range for `M_i` (provisional, calibrate in playtest 1).
 const BASE_PROJECT_VAL_RANGE: (f64, f64) = (1.6, 2.8);
 
-/// Per-seat stoichiometry and yield relative jitter span (`±2.5%`; provisional, calibrate in playtest 1).
-const STOICH_JITTER_SPAN: f64 = 0.025;
-/// Per-seat upkeep and project valuation relative jitter span (`±2.0%`; provisional, calibrate in playtest 1).
-const VALUE_JITTER_SPAN: f64 = 0.020;
+/// Stationary G1 per-seat stoichiometry and yield relative jitter span (`±0.35%` from attempt 0,
+/// zero annealing; calibrated for matched variety and >=25% attempt-0 pass rate across `N = 4..=6`
+/// under `ShadowPrice`).
+const STOICH_JITTER_SPAN: f64 = 0.0035;
+/// Stationary G1 per-seat upkeep and project valuation relative jitter span (`±0.35%` from attempt 0).
+const VALUE_JITTER_SPAN: f64 = 0.0035;
+/// Stationary G1 half-band fraction of `max_tariff` around `base_tariff` (capped at
+/// [`MAX_TARIFF_JITTER_ABS`]).
+const TARIFF_JITTER_HALF_FRAC: f64 = 0.08;
+/// Maximum absolute half-band (`±0.018`) for per-seat baseline tariff jitter around `base_tariff`.
+const MAX_TARIFF_JITTER_ABS: f64 = 0.018;
+/// Stationary G1 half-band fraction of `(decay_hi - decay_lo)` around `base_decay`.
+const DECAY_JITTER_HALF_FRAC: f64 = 0.20;
 
 /// Primary converter capacity cap per turn (`4.0` batch runs; provisional, calibrate in playtest 1).
 const PRIMARY_MAX_RUNS_PER_TURN: f64 = 4.0;
@@ -55,12 +64,9 @@ const SHOCK_DEMAND_SURGE_RANGE: (f64, f64) = (0.15, 0.30);
 /// Spoilage spike extra decay range (provisional, calibrate in playtest 1).
 const SHOCK_SPOILAGE_SPIKE_RANGE: (f64, f64) = (0.15, 0.30);
 
-/// Number of full-dispersion candidate attempts before progressive jitter annealing begins
-/// (provisional retry-schedule parameter, calibrate in playtest 1).
-const FULL_DISPERSION_ATTEMPTS: u32 = 24;
-
 /// Generates a feasible chiral converter-ring [`RingTable`] deterministically from `seed`
-/// and `config`, proving all three LP feasibility invariants via [`check_feasibility`].
+/// and `config`, proving all three LP feasibility invariants, C6 pair-share cap, and B2.2
+/// multi-agent rollout grading before accepting the seed.
 pub fn generate_ring_table(
     seed: u64,
     config: &GeneratorConfig,
@@ -77,6 +83,9 @@ pub fn generate_ring_table(
             SeatCount::ALL[idx]
         }
     };
+    let effective_cap = config
+        .max_pair_share_cap
+        .unwrap_or_else(|| seat_count.default_max_pair_share_cap());
 
     let mut last_error =
         FeasibilityError::InvalidTable("no generation attempts executed".to_owned());
@@ -84,7 +93,13 @@ pub fn generate_ring_table(
     for attempt in 0..config.max_attempts {
         let candidate = sample_candidate(seed, attempt, seat_count, config, &mut stream)?;
         match check_feasibility(&candidate, config) {
-            Ok(report) => return Ok((candidate, report)),
+            Ok(report) => {
+                let grading = compute_rollout_grading(&candidate, &report);
+                match verify_rollout_grading(&candidate, &grading, effective_cap) {
+                    Ok(()) => return Ok((candidate, report)),
+                    Err(err) => last_error = err,
+                }
+            }
             Err(err) => last_error = err,
         }
     }
@@ -117,6 +132,13 @@ fn validate_generator_config(config: &GeneratorConfig) -> Result<(), GenError> {
             "max_tariff must lie in [0.0, 0.35]".to_owned(),
         ));
     }
+    if let Some(cap) = config.max_pair_share_cap
+        && (!cap.is_finite() || cap <= 0.0 || cap > 1.0)
+    {
+        return Err(GenError::InvalidConfig(
+            "max_pair_share_cap must lie in (0.0, 1.0]".to_owned(),
+        ));
+    }
     let (decay_lo, decay_hi) = config.decay_range;
     if !decay_lo.is_finite()
         || !decay_hi.is_finite()
@@ -131,17 +153,6 @@ fn validate_generator_config(config: &GeneratorConfig) -> Result<(), GenError> {
     Ok(())
 }
 
-fn retry_dispersion(attempt: u32) -> f64 {
-    if attempt < FULL_DISPERSION_ATTEMPTS {
-        1.0
-    } else {
-        // Halve cross-seat asymmetry every 8 failed retries so tail seeds always converge
-        // cleanly within `max_attempts` while preserving full variance on early candidates.
-        let halvings = ((attempt - (FULL_DISPERSION_ATTEMPTS - 8)) / 8).min(20);
-        1.0 / f64::from(1u32 << halvings)
-    }
-}
-
 fn sample_candidate(
     seed: u64,
     attempt: u32,
@@ -151,10 +162,9 @@ fn sample_candidate(
 ) -> Result<RingTable, GenError> {
     let n = seat_count.as_usize();
 
-    // Sample `2 * N` distinct valid 3-char commodity currency codes (`numeraire` is fixed `CRED`).
+    // Sample `2 * N` distinct curated game-word commodity currency codes (`numeraire` is fixed `CRED`).
     let codes = sample_unique_codes(stream, 2 * n)?;
 
-    let disp = retry_dispersion(attempt);
     let base_yield = stream.range_f64(BASE_YIELD_RANGE.0, BASE_YIELD_RANGE.1);
     let base_in_a = stream.range_f64(BASE_IN_A_RANGE.0, BASE_IN_A_RANGE.1);
     let base_in_b = stream.range_f64(BASE_IN_B_RANGE.0, BASE_IN_B_RANGE.1);
@@ -170,37 +180,26 @@ fn sample_candidate(
         && n >= 5
         && (seat_count == SeatCount::Six || stream.next_u32_bounded(2) == 1);
 
+    let tariff_half = (config.max_tariff * TARIFF_JITTER_HALF_FRAC).min(MAX_TARIFF_JITTER_ABS);
+    let decay_half = (config.decay_range.1 - config.decay_range.0) * DECAY_JITTER_HALF_FRAC;
+    let t_lo = (base_tariff - tariff_half).max(0.0);
+    let t_hi = (base_tariff + tariff_half).min(config.max_tariff);
+    let d_lo = (base_decay - decay_half).max(config.decay_range.0);
+    let d_hi = (base_decay + decay_half).min(config.decay_range.1);
+
     let mut seats = Vec::with_capacity(n);
     for i in 0..n {
-        let stoich_span = STOICH_JITTER_SPAN * disp;
-        let value_span = VALUE_JITTER_SPAN * disp;
         let jitter = |s: &mut SeedStream, span: f64| 1.0 + s.range_f64(-span, span);
-        let raw_yield_per_turn = round3(base_yield * jitter(stream, stoich_span));
-        let in_a = round3(base_in_a * jitter(stream, stoich_span));
-        let in_b = round3(base_in_b * jitter(stream, stoich_span));
-        let out_amt = round3(base_out * jitter(stream, stoich_span));
-        let upkeep_amount = round3(base_upkeep * jitter(stream, value_span));
-        let refined_project_value = round3(base_project_val * jitter(stream, value_span));
+        let raw_yield_per_turn = round3(base_yield * jitter(stream, STOICH_JITTER_SPAN));
+        let in_a = round3(base_in_a * jitter(stream, STOICH_JITTER_SPAN));
+        let in_b = round3(base_in_b * jitter(stream, STOICH_JITTER_SPAN));
+        let out_amt = round3(base_out * jitter(stream, STOICH_JITTER_SPAN));
+        let upkeep_amount = round3(base_upkeep * jitter(stream, VALUE_JITTER_SPAN));
+        let refined_project_value = round3(base_project_val * jitter(stream, VALUE_JITTER_SPAN));
 
-        let (raw_export_tariff, refined_export_tariff, perishable_decay_rate) = if disp >= 1.0 {
-            (
-                round4(stream.range_f64(0.0, config.max_tariff)),
-                round4(stream.range_f64(0.0, config.max_tariff)),
-                round4(stream.range_f64(config.decay_range.0, config.decay_range.1)),
-            )
-        } else {
-            let tariff_half = 0.5 * config.max_tariff * disp;
-            let decay_half = 0.5 * (config.decay_range.1 - config.decay_range.0) * disp;
-            let t_lo = (base_tariff - tariff_half).max(0.0);
-            let t_hi = (base_tariff + tariff_half).min(config.max_tariff);
-            let d_lo = (base_decay - decay_half).max(config.decay_range.0);
-            let d_hi = (base_decay + decay_half).min(config.decay_range.1);
-            (
-                round4(stream.range_f64(t_lo, t_hi)),
-                round4(stream.range_f64(t_lo, t_hi)),
-                round4(stream.range_f64(d_lo, d_hi)),
-            )
-        };
+        let raw_export_tariff = round4(stream.range_f64(t_lo, t_hi));
+        let refined_export_tariff = round4(stream.range_f64(t_lo, t_hi));
+        let perishable_decay_rate = round4(stream.range_f64(d_lo, d_hi));
 
         let next_1 = ((i + 1) % n) as u8;
         let next_2 = ((i + 2) % n) as u8;
@@ -246,12 +245,9 @@ fn sample_candidate(
         });
     }
 
-    let shock_scale = if attempt < 48 {
-        1.0
-    } else {
-        retry_dispersion(attempt - 24).max(0.01)
-    };
-    let shocks = sample_shocks(stream, n, shock_scale);
+    let projects = default_projects_for_seats(&seats);
+    let mandate_deck = default_mandate_deck_for_table(seat_count, &seats);
+    let shocks = sample_shocks(stream, n);
 
     Ok(RingTable {
         generator_version: GENERATOR_VERSION.to_owned(),
@@ -262,6 +258,8 @@ fn sample_candidate(
         numeraire_code: NUMERAIRE_CODE.to_owned(),
         season_turn_window: SEASON_TURN_WINDOW,
         seats,
+        projects,
+        mandate_deck,
         shocks,
     })
 }
@@ -270,31 +268,23 @@ fn sample_unique_codes(
     stream: &mut SeedStream,
     count: usize,
 ) -> Result<Vec<CurrencyCode>, GenError> {
-    let mut seen = HashSet::with_capacity(count);
-    let mut out = Vec::with_capacity(count);
-    let mut guard = 0usize;
-    while out.len() < count && guard < 10_000 {
-        guard += 1;
-        let b0 = b'A' + (stream.next_u32_bounded(26) as u8);
-        let b1 = b'A' + (stream.next_u32_bounded(26) as u8);
-        let b2 = b'A' + (stream.next_u32_bounded(26) as u8);
-        let bytes = [b0, b1, b2];
-        if !is_denied_currency_code(bytes)
-            && let Ok(code) = CurrencyCode::from_bytes(bytes)
-            && seen.insert(code)
-        {
-            out.push(code);
-        }
+    if count > ALLOWED_COMMODITY_GLOSSARY.len() {
+        return Err(GenError::InvalidConfig(format!(
+            "requested {count} unique codes exceeds allow-list size {}",
+            ALLOWED_COMMODITY_GLOSSARY.len()
+        )));
     }
-    if out.len() < count {
-        return Err(GenError::InvalidConfig(
-            "failed to draw unique valid currency codes".to_owned(),
-        ));
+    let indices = stream.sample_distinct_indices(ALLOWED_COMMODITY_GLOSSARY.len(), count);
+    let mut out = Vec::with_capacity(count);
+    for idx in indices {
+        let code = CurrencyCode::from_bytes(ALLOWED_COMMODITY_GLOSSARY[idx].0)
+            .map_err(|err| GenError::InvalidConfig(format!("invalid allow-list code: {err}")))?;
+        out.push(code);
     }
     Ok(out)
 }
 
-fn sample_shocks(stream: &mut SeedStream, n: usize, scale: f64) -> Vec<ScheduledShock> {
+fn sample_shocks(stream: &mut SeedStream, n: usize) -> Vec<ScheduledShock> {
     let mut kinds = [
         HorizonShockKind::SupplyFreeze,
         HorizonShockKind::TariffHoliday,
@@ -321,7 +311,7 @@ fn sample_shocks(stream: &mut SeedStream, n: usize, scale: f64) -> Vec<Scheduled
                 stream.range_f64(SHOCK_SPOILAGE_SPIKE_RANGE.0, SHOCK_SPOILAGE_SPIKE_RANGE.1)
             }
         };
-        let magnitude = round3(raw_mag * scale).max(0.001);
+        let magnitude = round3(raw_mag).max(0.001);
         shocks.push(ScheduledShock {
             hint_turn,
             forecast_turn: hint_turn + 1,
@@ -561,9 +551,14 @@ impl PlrSampler {
 mod tests {
     use std::time::Instant;
 
+    use sha2::{Digest, Sha256};
+
     use super::*;
     use crate::feasibility::{compute_shadow_price_seat_evs, compute_shapley_seat_evs};
-    use crate::schema::EvMethod;
+    use crate::schema::{
+        EvMethod, PROJECT_CONCORDAT_ID, commodity_glossary_word, is_allowed_commodity_code,
+        is_denied_currency_code,
+    };
 
     #[test]
     fn generates_feasible_tables_for_all_seat_counts_and_both_ev_methods() {
@@ -643,16 +638,53 @@ mod tests {
             "enable_secondary_converters",
             "max_attempts",
             "ev_method",
+            "max_pair_share_cap",
+            "projects",
+            "mandate_deck",
         ] {
             assert!(
                 json.contains(expected_key),
                 "serialized RingTable missing {expected_key}"
             );
         }
+        assert!(
+            table.projects.iter().any(|p| p.id == PROJECT_CONCORDAT_ID),
+            "generated table missing Concordat project"
+        );
+        assert!(
+            !table.mandate_deck.is_empty(),
+            "generated table missing public mandate deck"
+        );
     }
 
     #[test]
-    fn generated_codes_never_collide_with_iso_or_crypto_denylist() {
+    fn generated_codes_always_use_curated_allowlist_and_pass_external_iso_crypto_audit() {
+        // Independent external ISO 4217 (active + historical) and XRPL/crypto ticker audit list
+        // including all tickers flagged in #26 and PR #18 Opus re-review B-2.
+        const EXTERNAL_TICKER_AUDIT: &[[u8; 3]] = &[
+            *b"AED", *b"ALL", *b"ANG", *b"AOA", *b"ARS", *b"ATS", *b"AUD", *b"AZM", *b"AZN",
+            *b"BAM", *b"BBD", *b"BDT", *b"BEC", *b"BEF", *b"BEL", *b"BGB", *b"BGL", *b"BGN",
+            *b"BHD", *b"BNB", *b"BRL", *b"BSD", *b"BSV", *b"BTC", *b"BTG", *b"BWP", *b"BYN",
+            *b"CAD", *b"CHF", *b"CLP", *b"CNY", *b"COP", *b"CRC", *b"CRD", *b"CSD", *b"CUP",
+            *b"CYP", *b"CZK", *b"DAI", *b"DEM", *b"DKK", *b"DOT", *b"DZD", *b"EEK", *b"EGP",
+            *b"ELS", *b"ESP", *b"ETB", *b"ETH", *b"EUR", *b"EVR", *b"FIM", *b"FJD", *b"FLR",
+            *b"FRF", *b"FTT", *b"GBP", *b"GBX", *b"GEL", *b"GHC", *b"GHS", *b"GRD", *b"GTQ",
+            *b"HKD", *b"HRK", *b"HUF", *b"IDR", *b"IEP", *b"ILS", *b"INR", *b"IQD", *b"IRR",
+            *b"ISK", *b"ITL", *b"JMD", *b"JOD", *b"JPY", *b"KES", *b"KGS", *b"KRW", *b"KWD",
+            *b"KZT", *b"LEO", *b"LKR", *b"LTC", *b"LTL", *b"LUF", *b"LVL", *b"LYD", *b"MAD",
+            *b"MDL", *b"MKD", *b"MMK", *b"MOP", *b"MRO", *b"MRU", *b"MTL", *b"MUR", *b"MXN",
+            *b"MYR", *b"MZM", *b"MZN", *b"NAD", *b"NGN", *b"NIO", *b"NLG", *b"NMR", *b"NOK",
+            *b"NPR", *b"NZD", *b"OMR", *b"PAB", *b"PAX", *b"PEN", *b"PHP", *b"PKR", *b"PLN",
+            *b"PTE", *b"PYG", *b"QAR", *b"ROK", *b"ROL", *b"RON", *b"RPL", *b"RSD", *b"RUB",
+            *b"RUR", *b"SAR", *b"SDG", *b"SEK", *b"SGB", *b"SGD", *b"SIT", *b"SKK", *b"SLL",
+            *b"SOL", *b"SOS", *b"SRD", *b"SSP", *b"STD", *b"STN", *b"SYP", *b"THB", *b"TJS",
+            *b"TMT", *b"TND", *b"TRL", *b"TRY", *b"TTD", *b"TWD", *b"TZS", *b"UAH", *b"UGX",
+            *b"UNI", *b"USD", *b"UST", *b"UYU", *b"UZS", *b"VEB", *b"VEF", *b"VES", *b"VND",
+            *b"WBT", *b"XAF", *b"XAG", *b"XAU", *b"XCD", *b"XCG", *b"XDR", *b"XLM", *b"XMR",
+            *b"XOF", *b"XPD", *b"XPF", *b"XPT", *b"XRE", *b"XRP", *b"XTZ", *b"YER", *b"ZAL",
+            *b"ZAR", *b"ZEC", *b"ZMW", *b"ZWD", *b"ZWL",
+        ];
+
         let mut cases: Vec<(u64, GeneratorConfig)> = vec![
             (3, GeneratorConfig::default()),
             (41, GeneratorConfig::default()),
@@ -697,16 +729,25 @@ mod tests {
             };
             assert_eq!(table.numeraire_code, NUMERAIRE_CODE);
             for seat in &table.seats {
-                assert!(
-                    !is_denied_currency_code(seat.raw_code.as_bytes()),
-                    "denied raw code {} on seed {seed}",
-                    seat.raw_code
-                );
-                assert!(
-                    !is_denied_currency_code(seat.refined_code.as_bytes()),
-                    "denied refined code {} on seed {seed}",
-                    seat.refined_code
-                );
+                for (kind, code) in [("raw", seat.raw_code), ("refined", seat.refined_code)] {
+                    let bytes = code.as_bytes();
+                    assert!(
+                        is_allowed_commodity_code(bytes),
+                        "seed {seed} {kind} code {code} is outside ALLOWED_COMMODITY_GLOSSARY"
+                    );
+                    assert!(
+                        commodity_glossary_word(code).is_some(),
+                        "seed {seed} {kind} code {code} has no glossary word"
+                    );
+                    assert!(
+                        !EXTERNAL_TICKER_AUDIT.contains(&bytes),
+                        "seed {seed} {kind} code {code} collided with external ticker audit"
+                    );
+                    assert!(
+                        !is_denied_currency_code(bytes),
+                        "seed {seed} {kind} code {code} hit deny-list"
+                    );
+                }
             }
         }
     }
@@ -963,6 +1004,228 @@ mod tests {
             boost_both_reject,
             boost_sp_reject_only,
             boost_sh_reject_only,
+        );
+
+        assert_eq!(total_tables, 180);
+        assert!(
+            sp_attempt0_pass >= 75,
+            "G1 stationary sampling must accept >= 25% of seeds at attempt 0 under ShadowPrice, got {sp_attempt0_pass}/{attempt0_total}"
+        );
+        assert!(
+            sh_passes_when_sp_passes >= total_tables / 2,
+            "Shapley pass rate on ShadowPrice-accepted tables expected >= 50%, got {sh_passes_when_sp_passes}/{total_tables}"
+        );
+        assert!(
+            boost_both_reject + boost_sp_reject_only >= total_tables / 2,
+            "asymmetry +20% output probe must trigger rejections reliably"
+        );
+    }
+
+    #[test]
+    fn g1_stationary_dispersion_and_attempt0_acceptance() {
+        let stddev_mean = |vals: &[f64]| -> (f64, f64) {
+            let n = vals.len() as f64;
+            let mean = vals.iter().sum::<f64>() / n;
+            let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+            (mean, var.sqrt())
+        };
+        let min_max = |vals: &[f64]| -> (f64, f64) {
+            let lo = vals.iter().copied().fold(f64::INFINITY, f64::min);
+            let hi = vals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            (lo, hi)
+        };
+
+        let mut sp_attempt0_rates = Vec::new();
+        let mut mean_tariff_ranges = Vec::new();
+        let mut mean_yield_spreads = Vec::new();
+
+        for sc in SeatCount::ALL {
+            let cfg_sp_1 = GeneratorConfig {
+                seat_count: Some(sc),
+                max_attempts: 1,
+                ev_method: EvMethod::ShadowPrice,
+                ..GeneratorConfig::default()
+            };
+            let mut sp_a0 = 0usize;
+            for seed in 0u64..600 {
+                if generate_ring_table(seed, &cfg_sp_1).is_ok() {
+                    sp_a0 += 1;
+                }
+            }
+
+            let cfg_sh_1 = GeneratorConfig {
+                seat_count: Some(sc),
+                max_attempts: 1,
+                ev_method: EvMethod::Shapley,
+                ..GeneratorConfig::default()
+            };
+            let mut sh_a0 = 0usize;
+            for seed in 0u64..200 {
+                if generate_ring_table(seed, &cfg_sh_1).is_ok() {
+                    sh_a0 += 1;
+                }
+            }
+
+            let cfg_full = GeneratorConfig {
+                seat_count: Some(sc),
+                ev_method: EvMethod::ShadowPrice,
+                ..GeneratorConfig::default()
+            };
+            let mut full_pass = 0usize;
+            let mut attempts_sum = 0u64;
+            let mut max_att = 0u32;
+            let mut yield_cvs = Vec::new();
+            let mut tariff_cvs = Vec::new();
+            let mut out_cvs = Vec::new();
+            let mut upkeep_cvs = Vec::new();
+            let mut yield_spreads = Vec::new();
+            let mut tariff_ranges = Vec::new();
+            let mut decay_ranges = Vec::new();
+            let mut s0_yields = Vec::new();
+            let mut s0_tariffs = Vec::new();
+            let mut s0_outs = Vec::new();
+            let mut s0_decays = Vec::new();
+            let mut sh0_mags = Vec::new();
+
+            for seed in 0u64..600 {
+                let Ok((t, _)) = generate_ring_table(seed, &cfg_full) else {
+                    panic!("G1 seed {seed} failed for {sc:?}");
+                };
+                full_pass += 1;
+                attempts_sum += u64::from(t.attempt);
+                max_att = max_att.max(t.attempt);
+                let ys: Vec<f64> = t.seats.iter().map(|s| s.raw_yield_per_turn).collect();
+                let ts: Vec<f64> = t.seats.iter().map(|s| s.raw_export_tariff).collect();
+                let os: Vec<f64> = t
+                    .seats
+                    .iter()
+                    .map(|s| s.converters[0].output_amount)
+                    .collect();
+                let us: Vec<f64> = t.seats.iter().map(|s| s.upkeep_amount).collect();
+                let ds: Vec<f64> = t.seats.iter().map(|s| s.perishable_decay_rate).collect();
+
+                let (ym, ysd) = stddev_mean(&ys);
+                let (tm, tsd) = stddev_mean(&ts);
+                let (om, osd) = stddev_mean(&os);
+                let (um, usd) = stddev_mean(&us);
+                yield_cvs.push(ysd / ym.max(1e-12));
+                tariff_cvs.push(tsd / tm.max(1e-12));
+                out_cvs.push(osd / om.max(1e-12));
+                upkeep_cvs.push(usd / um.max(1e-12));
+
+                let (y_lo, y_hi) = min_max(&ys);
+                let (t_lo, t_hi) = min_max(&ts);
+                let (d_lo, d_hi) = min_max(&ds);
+                yield_spreads.push((y_hi / y_lo) - 1.0);
+                tariff_ranges.push(t_hi - t_lo);
+                decay_ranges.push(d_hi - d_lo);
+
+                s0_yields.push(ys[0]);
+                s0_tariffs.push(ts[0]);
+                s0_outs.push(os[0]);
+                s0_decays.push(ds[0]);
+                sh0_mags.push(t.shocks[0].magnitude);
+            }
+
+            let nf = full_pass as f64;
+            let mean_ycv = yield_cvs.iter().sum::<f64>() / nf;
+            let mean_tcv = tariff_cvs.iter().sum::<f64>() / nf;
+            let mean_ocv = out_cvs.iter().sum::<f64>() / nf;
+            let mean_ucv = upkeep_cvs.iter().sum::<f64>() / nf;
+            let mean_yspread = yield_spreads.iter().sum::<f64>() / nf;
+            let mean_trange = tariff_ranges.iter().sum::<f64>() / nf;
+            let mean_drange = decay_ranges.iter().sum::<f64>() / nf;
+            let (s0y_m, s0y_sd) = stddev_mean(&s0_yields);
+            let (s0t_m, s0t_sd) = stddev_mean(&s0_tariffs);
+            let (s0o_m, s0o_sd) = stddev_mean(&s0_outs);
+            let (s0d_m, s0d_sd) = stddev_mean(&s0_decays);
+            let (sh0_m, sh0_sd) = stddev_mean(&sh0_mags);
+            println!(
+                "G1_AFTER N={}: sp_attempt0={sp_a0}/600 ({:.1}%) sh_attempt0={sh_a0}/200 ({:.1}%) full_pass={full_pass}/600 mean_att={:.2} max_att={max_att} annealed=0 | intra_cv(yield={mean_ycv:.4} tariff={mean_tcv:.4} out={mean_ocv:.4} upkeep={mean_ucv:.4}) | spread(yield={mean_yspread:.4} tariff_rng={mean_trange:.4} decay_rng={mean_drange:.4}) | inter_cv(s0_yield={:.4} s0_tariff={:.4} s0_out={:.4} s0_decay={:.4} shock0_mag={:.4})",
+                sc.as_usize(),
+                100.0 * sp_a0 as f64 / 600.0,
+                100.0 * sh_a0 as f64 / 200.0,
+                attempts_sum as f64 / nf,
+                s0y_sd / s0y_m,
+                s0t_sd / s0t_m,
+                s0o_sd / s0o_m,
+                s0d_sd / s0d_m,
+                sh0_sd / sh0_m,
+            );
+            sp_attempt0_rates.push(sp_a0);
+            mean_yield_spreads.push(mean_yspread);
+            mean_tariff_ranges.push(mean_trange);
+            assert!(
+                sp_a0 >= 150,
+                "N={} attempt-0 ShadowPrice pass count {sp_a0}/600 must be >= 150 (25%)",
+                sc.as_usize()
+            );
+        }
+
+        // Verify N=6 retains matched variety relative to N=4 (no more 24% collapse).
+        assert!(
+            mean_tariff_ranges[2] >= 0.85 * mean_tariff_ranges[0],
+            "N=6 tariff range {} dropped vs N=4 {}",
+            mean_tariff_ranges[2],
+            mean_tariff_ranges[0]
+        );
+        assert!(
+            mean_yield_spreads[2] >= 0.85 * mean_yield_spreads[0],
+            "N=6 yield spread {} dropped vs N=4 {}",
+            mean_yield_spreads[2],
+            mean_yield_spreads[0]
+        );
+
+        // Edge configs under stationary jitter must all still accept cleanly.
+        for edge_cfg in [
+            GeneratorConfig {
+                seat_count: Some(SeatCount::Six),
+                max_tariff: 0.0,
+                decay_range: (0.0, 0.0),
+                ..GeneratorConfig::default()
+            },
+            GeneratorConfig {
+                seat_count: Some(SeatCount::Six),
+                max_tariff: 0.35,
+                ..GeneratorConfig::default()
+            },
+            GeneratorConfig {
+                seat_count: Some(SeatCount::Six),
+                decay_range: (0.99, 0.999),
+                ..GeneratorConfig::default()
+            },
+            GeneratorConfig {
+                seat_count: Some(SeatCount::Six),
+                enable_secondary_converters: false,
+                ..GeneratorConfig::default()
+            },
+        ] {
+            for seed in 0u64..20 {
+                assert!(
+                    generate_ring_table(seed, &edge_cfg).is_ok(),
+                    "edge config {edge_cfg:?} failed on seed {seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn golden_v2_2_0_table_serialization_digest_matches_pinned_seed42() {
+        let cfg = GeneratorConfig::default();
+        let Ok((table, _)) = generate_ring_table(42, &cfg) else {
+            panic!("seed 42 generates cleanly");
+        };
+        assert_eq!(table.generator_version, "league-gen/v2.2.0");
+        let Ok(bytes) = serde_json::to_vec(&table) else {
+            panic!("RingTable serializes deterministically");
+        };
+        let digest = Sha256::digest(&bytes);
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        const EXPECTED_GOLDEN_SHA256: &str =
+            "b8535a4484ccd278c4adfb262fc88c56245470414704d85bb3293a3ef3fe0090";
+        assert_eq!(
+            hex, EXPECTED_GOLDEN_SHA256,
+            "v2.2.0 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
         );
     }
 }
