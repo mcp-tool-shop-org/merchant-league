@@ -105,6 +105,10 @@ impl fmt::Debug for LiveGate {
 /// error bodies cannot trigger quadratic work while preserving redact-before-truncate.
 pub const MAX_REDACTION_SCAN_BYTES: usize = 4096;
 
+/// Upper bound in bytes scanned when formatting [`crate::RelayError::UnrecordedCharge`]
+/// on `stderr`, allowing hundreds of held seat lines to print in full with secret redaction.
+pub const MAX_UNRECORDED_CHARGE_SCAN_BYTES: usize = 65_536;
+
 const MIN_KEY_SUBSTRING_CHARS: usize = 8;
 
 /// Return the longest UTF-8 prefix of `input` whose byte length is at most `max_bytes`.
@@ -119,17 +123,23 @@ pub fn cap_utf8_bytes(input: &str, max_bytes: usize) -> &str {
     &input[..end]
 }
 
-/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`) and scrub any occurrence
-/// of `key` (including any `8+` character substring of `key`), `Bearer <token>`,
-/// or `sk-or-...` tokens.
-pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
-    let bounded = cap_utf8_bytes(input, MAX_REDACTION_SCAN_BYTES);
+/// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
+/// `8+` character substring of `key`), `Bearer <token>`, or `sk-or-...` tokens.
+pub fn redact_secrets_with_limit(input: &str, key: Option<&ApiKey>, max_bytes: usize) -> String {
+    let bounded = cap_utf8_bytes(input, max_bytes);
     let scrubbed = match key {
         Some(k) => redact_key_substrings(bounded, k.secret_str()),
         None => bounded.to_owned(),
     };
     let scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
     redact_prefixed_token(&scrubbed, "sk-or-", false)
+}
+
+/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`) and scrub any occurrence
+/// of `key` (including any `8+` character substring of `key`), `Bearer <token>`,
+/// or `sk-or-...` tokens.
+pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
+    redact_secrets_with_limit(input, key, MAX_REDACTION_SCAN_BYTES)
 }
 
 /// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`), redact secrets first,

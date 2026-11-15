@@ -14,15 +14,17 @@ pub mod secret;
 pub mod transport;
 
 pub use error::RelayError;
+#[cfg(any(test, feature = "test-hooks"))]
+pub use relay::set_fail_pending_temp_write_for_test;
 pub use relay::{
     CallLogEntry, Round, SeatOutcome, SeatReport, TranscriptEntry, TurnConfig, TurnSummary,
     prepend_wrapper, run_turn, sha256_hex, validate_day,
 };
 pub use seats::{BackendKind, OpenRouterSeat, SeatBackend, SeatFile, SeatSpec};
 pub use secret::{
-    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, OPENROUTER_API_KEY_ENV, REDACTED_MARKER,
-    cap_utf8_bytes, install_redacting_panic_hook, redact_and_truncate, redact_secrets,
-    truncate_after_redaction,
+    ApiKey, LiveGate, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+    OPENROUTER_API_KEY_ENV, REDACTED_MARKER, cap_utf8_bytes, install_redacting_panic_hook,
+    redact_and_truncate, redact_secrets, redact_secrets_with_limit, truncate_after_redaction,
 };
 pub use transport::{
     MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
