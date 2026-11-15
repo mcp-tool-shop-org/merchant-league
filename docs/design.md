@@ -323,7 +323,7 @@ The steward is trusted: it can mint and claw back. The fence is publicity. Every
 
 **The full plan is `docs/paper-test.md`.** In short:
 
-- **Who plays:** the AI crew, not people (Director, 2026-11-14). That's six games of 4 or 5 seats, from different model families: Gemini (AI Studio, the Gemini app, one Antigravity card), Claude subagents, and optionally a local model.
+- **Who plays:** the AI crew, not people (Director, 2026-11-14). That's six games of 4 or 5 seats, from different model families: Gemini (AI Studio and the Gemini app), Claude subagents, GPT-OSS 120B on one Antigravity card while it's available (it's removed on 18 November 2026), and optionally a local model.
 - **The referee:** a Claude session that doesn't play. It runs the steward's written procedure by hand, and writes a log anyone can replay.
 - **The setups:** six, built by hand to the generator's recipe. The generator isn't built yet, so the games test what its proof would.
 - **The stop rule:** if a shortcut wins two tables, stop and fix the rules on paper first.
