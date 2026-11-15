@@ -16,22 +16,22 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 0,
+      "added": 0,
+      "changed": 6,
       "moved": 0,
-      "parts": 1,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 1 file added.",
+        "sentence": "Nothing structural changed since 2026-11-15; 6 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "b68e259dc07a411ad269b61ccff51d8cfa42550c",
-      "generatedAt": "2026-11-15T08:25:54.396Z"
+      "commit": "41d4b19e1959df059b0f3b25d981d38727287b94",
+      "generatedAt": "2026-11-15T08:42:19.668Z"
     },
     "unchanged": true
   },
@@ -40,7 +40,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "41d4b19e1959df059b0f3b25d981d38727287b94",
+  "commit": "2a432619d3720d414fdda21e54661880dd03cf63",
   "defaultBranch": "main",
   "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -244,7 +244,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T08:42:19.668Z",
+  "generatedAt": "2026-11-15T09:02:44.565Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

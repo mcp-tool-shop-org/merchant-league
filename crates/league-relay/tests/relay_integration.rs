@@ -3028,67 +3028,54 @@ fn b1_ledger_write_failure_keeps_charge_and_stops_turn() -> TestResult {
     );
     assert!(m1g_entries.iter().any(|e| e.outcome == "LEDGER_ERROR"));
 
-    // Sub-case 2: Permanent ledger write failure stops any subsequent call in the turn even when cap = 1.0.
-    struct PermanentBlockTransport {
-        calls_path: std::path::PathBuf,
-        calls: AtomicUsize,
-    }
-    impl Transport for PermanentBlockTransport {
-        fn post_chat_completions(
-            &self,
-            _url: &str,
-            _body: &str,
-            _timeout: Duration,
-        ) -> Result<RawHttpResponse, TransportError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let _ = fs::create_dir_all(&self.calls_path);
-            Ok(ok_completion_json(
-                "   ",
-                "google/gemini-2.5-pro-06-05",
-                Some(0.01),
-            ))
-        }
-    }
-
-    let perm_game = tmp.path().join("b1_perm_game");
-    let one_seat = SeatFile::from_json_str(
-        &json!({
-            "seats": [{
-                "guild": "Saltworks",
-                "backend": "openrouter",
-                "model": "google/gemini-2.5-pro-06-05",
-                "temperature": 0.2,
-                "max_output_tokens": 128,
-                "timeout_secs": 3.0,
-                "max_cost_per_call": 0.01
-            }]
-        })
-        .to_string(),
-        None,
-    )?;
-    write_to_seat(&perm_game, "01", "talk", "Saltworks", "B1_PERM")?;
-    let perm_tx = PermanentBlockTransport {
-        calls_path: perm_game.join("relay").join("calls.jsonl"),
-        calls: AtomicUsize::new(0),
+    // Sub-case 2 (C3): Even with abundant cap headroom (cap = 1.00, 100x max_cost_per_call),
+    // Seat A's failed append sets ledger_write_failed_in_turn so Seat B's harness re-send is
+    // refused pre-call with LEDGER_ERROR (2 billed calls, whereas pre-B1 code would allow
+    // Seat B's Attempt 2 under cap = 1.00 and bill 3 calls).
+    let uncap_game = tmp.path().join("b1_uncapped_fail_closed_game");
+    write_to_seat(&uncap_game, "01", "talk", "Saltworks", "B1_SEAT_A")?;
+    write_to_seat(&uncap_game, "01", "talk", "Weavers", "B1_SEAT_B")?;
+    let uncap_tx = M1gTransientDirBlockTransport {
+        calls_path: uncap_game.join("relay").join("calls.jsonl"),
+        billed_calls: AtomicUsize::new(0),
+        arrivals: (Mutex::new(0), Condvar::new()),
+        seat_a_returned: (Mutex::new(false), Condvar::new()),
     };
-    let perm_summary = run_turn(
+    let uncap_summary = run_turn(
         &TurnConfig::new(
-            perm_game,
+            uncap_game.clone(),
             "01".to_owned(),
             Round::Talk,
-            one_seat,
+            two_seats,
             Some(wrapper),
             true,
-            Some(1.0),
+            Some(1.00),
         ),
-        &perm_tx,
+        &uncap_tx,
         None,
     )?;
-    assert_eq!(perm_tx.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        uncap_tx.billed_calls.load(Ordering::SeqCst),
+        2,
+        "ledger_write_failed_in_turn must block Seat B Attempt 2 even when cap = 1.00"
+    );
     assert!(matches!(
-        perm_summary.reports[0].outcome,
+        uncap_summary.reports[0].outcome,
         SeatOutcome::SeatError { .. }
     ));
+    assert!(matches!(
+        uncap_summary.reports[1].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    let uncap_entries = read_calls_log(&uncap_game)?;
+    assert!(uncap_entries.iter().any(|e| e.outcome == "LEDGER_ERROR"));
+    assert!(
+        !uncap_game
+            .join("relay")
+            .join("calls.pending.jsonl")
+            .exists(),
+        "end-of-turn flush should drain Seat A's line into calls.jsonl once Seat B unblocked it"
+    );
 
     Ok(())
 }
@@ -3475,6 +3462,557 @@ fn c4_caps_error_body_at_4kib_before_redaction_and_truncation() -> TestResult {
     let summary_text = format!("{}\n{summary:?}", summary.format_paths_and_hashes());
     assert_no_8char_key_piece(&calls_raw, BOUNDARY_KEY, "C4 calls.jsonl");
     assert_no_8char_key_piece(&summary_text, BOUNDARY_KEY, "C4 TurnSummary");
+
+    Ok(())
+}
+
+fn set_file_readonly(path: &Path) -> std::io::Result<()> {
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(path, perms)
+}
+
+fn set_file_writable(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+    }
+    #[cfg(not(unix))]
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        let mut perms = fs::metadata(path)?.permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms)
+    }
+}
+
+#[test]
+fn b5_held_charge_persists_across_runs_flushes_migrates_and_reports_unwritable() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    let one_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // 1. Reviewer's B1-rerun case:
+    //    One seat, cap = 0.01, max_cost_per_call = 0.01; ledger read-only in run 1, writable in run 2.
+    //    Run 1 bills 1 call (0.01) and persists the pending line to relay/calls.pending.jsonl;
+    //    Run 2 makes 0 calls (CAP_REACHED via the side file), migrating the line into calls.jsonl.
+    let rerun_game = tmp.path().join("b5_rerun_game");
+    write_to_seat(&rerun_game, "01", "talk", "Saltworks", "B5_RERUN_PROMPT")?;
+    fs::create_dir_all(rerun_game.join("relay"))?;
+    let rerun_calls_path = rerun_game.join("relay").join("calls.jsonl");
+    let rerun_pending_path = rerun_game.join("relay").join("calls.pending.jsonl");
+    fs::write(&rerun_calls_path, "")?;
+    set_file_readonly(&rerun_calls_path)?;
+
+    let run1_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Paid reply whose ledger append fails",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let run1_summary = run_turn(
+        &TurnConfig::new(
+            rerun_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &run1_tx,
+        None,
+    )?;
+    assert_eq!(run1_tx.call_count(), 1);
+    assert!(matches!(
+        run1_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    assert!(
+        rerun_pending_path.is_file(),
+        "expected calls.pending.jsonl to be written when calls.jsonl is read-only"
+    );
+    assert_eq!(fs::read_to_string(&rerun_calls_path)?, "");
+
+    // Even if the operator re-runs BEFORE clearing read-only on calls.jsonl, 0 calls are made.
+    let still_ro_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Must not be sent while read-only",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let _ = run_turn(
+        &TurnConfig::new(
+            rerun_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &still_ro_tx,
+        None,
+    )?;
+    assert_eq!(still_ro_tx.call_count(), 0);
+    assert!(rerun_pending_path.is_file());
+
+    // Now make calls.jsonl writable for Run 2 -> Run 2 makes 0 calls (CAP_REACHED) and migrates side file.
+    set_file_writable(&rerun_calls_path)?;
+    let run2_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Must not be sent in Run 2",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let run2_summary = run_turn(
+        &TurnConfig::new(
+            rerun_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.01),
+        ),
+        &run2_tx,
+        None,
+    )?;
+    assert_eq!(
+        run2_tx.call_count(),
+        0,
+        "Run 2 must make 0 calls when cap 0.01 was already consumed in Run 1"
+    );
+    assert!(matches!(
+        run2_summary.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    assert!(
+        !rerun_pending_path.exists(),
+        "calls.pending.jsonl should be removed once migrated into writable calls.jsonl"
+    );
+    let rerun_ledger = read_calls_log(&rerun_game)?;
+    assert_eq!(rerun_ledger.len(), 2);
+    assert_eq!(rerun_ledger[0].outcome, "OK");
+    assert!((rerun_ledger[0].charged_credits - 0.01).abs() < 1e-9);
+    assert_eq!(rerun_ledger[1].outcome, "CAP_REACHED");
+    assert!((rerun_ledger[1].charged_credits - 0.0).abs() < 1e-9);
+
+    // 2. End-of-run flush case:
+    //    calls.jsonl is read-only when Saltworks finishes its call, then becomes writable before
+    //    run_turn ends (via concurrent Weavers). finalize_turn flushes Saltworks's line into
+    //    calls.jsonl and leaves no calls.pending.jsonl side file.
+    struct EndOfRunFlushTransport {
+        calls_path: std::path::PathBuf,
+        arrivals: (Mutex<usize>, Condvar),
+        salt_done: (Mutex<bool>, Condvar),
+    }
+    impl Transport for EndOfRunFlushTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let (arr_lock, arr_cvar) = &self.arrivals;
+            if let Ok(mut n) = arr_lock.lock() {
+                *n += 1;
+                if *n >= 2 {
+                    arr_cvar.notify_all();
+                } else {
+                    while *n < 2 {
+                        let (next, res) = arr_cvar
+                            .wait_timeout(n, Duration::from_secs(2))
+                            .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
+                        n = next;
+                        if res.timed_out() {
+                            break;
+                        }
+                    }
+                }
+            }
+            if body.contains("B5_FLUSH_SALT") {
+                let _ = fs::write(&self.calls_path, "");
+                let _ = set_file_readonly(&self.calls_path);
+                let resp = ok_completion_json(
+                    "Saltworks reply",
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                );
+                let (d_lock, d_cvar) = &self.salt_done;
+                if let Ok(mut done) = d_lock.lock() {
+                    *done = true;
+                    d_cvar.notify_all();
+                }
+                return Ok(resp);
+            }
+            let (d_lock, d_cvar) = &self.salt_done;
+            if let Ok(mut done) = d_lock.lock() {
+                while !*done {
+                    let (next, res) = d_cvar
+                        .wait_timeout(done, Duration::from_secs(2))
+                        .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
+                    done = next;
+                    if res.timed_out() {
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(30));
+            let _ = set_file_writable(&self.calls_path);
+            Ok(ok_completion_json(
+                "Weavers reply",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let two_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.01
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let flush_game = tmp.path().join("b5_end_flush_game");
+    write_to_seat(&flush_game, "01", "talk", "Saltworks", "B5_FLUSH_SALT")?;
+    write_to_seat(&flush_game, "01", "talk", "Weavers", "B5_FLUSH_WEAVERS")?;
+    fs::create_dir_all(flush_game.join("relay"))?;
+    let flush_tx = EndOfRunFlushTransport {
+        calls_path: flush_game.join("relay").join("calls.jsonl"),
+        arrivals: (Mutex::new(0), Condvar::new()),
+        salt_done: (Mutex::new(false), Condvar::new()),
+    };
+    let flush_summary = run_turn(
+        &TurnConfig::new(
+            flush_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            two_seats,
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &flush_tx,
+        None,
+    )?;
+    assert!(matches!(
+        flush_summary.reports[0].outcome,
+        SeatOutcome::SeatError { .. }
+    ));
+    assert!(matches!(
+        flush_summary.reports[1].outcome,
+        SeatOutcome::Delivered { .. }
+    ));
+    assert!(
+        !flush_game
+            .join("relay")
+            .join("calls.pending.jsonl")
+            .exists(),
+        "no side file should remain when end-of-turn flush succeeds"
+    );
+    let flushed_entries = read_calls_log(&flush_game)?;
+    assert_eq!(flushed_entries.len(), 2);
+    let flushed_sum: f64 = flushed_entries.iter().map(|e| e.charged_credits).sum();
+    assert!((flushed_sum - 0.02).abs() < 1e-9);
+    assert!(flushed_entries.iter().any(|e| e.guild == "Saltworks"));
+    assert!(flushed_entries.iter().any(|e| e.guild == "Weavers"));
+
+    // 3. Both-unwritable case (library + CLI):
+    //    Neither calls.jsonl nor calls.pending.jsonl can be written -> distinct RelayError::UnrecordedCharge,
+    //    CLI exits 3 (non-zero, distinct), prints charge (amount, seat, day, round) to stderr, never leaks key.
+    const B5_KEY: &str = "PlainB5SecretKey_AlphaBravoCharlie9876";
+    let key = ApiKey::from_env_reader(|_| Some(B5_KEY.to_owned()))?;
+
+    let both_bad_game = tmp.path().join("b5_both_unwritable");
+    write_to_seat(&both_bad_game, "01", "talk", "Saltworks", "B5_BOTH_BAD")?;
+    let both_relay_dir = both_bad_game.join("relay");
+
+    struct BlockBothOnSendTransport {
+        calls_path: std::path::PathBuf,
+        pending_path: std::path::PathBuf,
+    }
+    impl Transport for BlockBothOnSendTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let _ = fs::create_dir_all(&self.calls_path);
+            let _ = fs::create_dir_all(&self.pending_path);
+            Ok(ok_completion_json(
+                "Paid reply with both files unwritable",
+                "google/gemini-2.5-pro-06-05",
+                Some(0.01),
+            ))
+        }
+    }
+
+    let both_err = run_turn(
+        &TurnConfig::new(
+            both_bad_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.05),
+        ),
+        &BlockBothOnSendTransport {
+            calls_path: both_relay_dir.join("calls.jsonl"),
+            pending_path: both_relay_dir.join("calls.pending.jsonl"),
+        },
+        Some(&key),
+    )
+    .err()
+    .ok_or("expected RelayError::UnrecordedCharge when both ledger and side file fail")?;
+
+    assert!(
+        matches!(both_err, RelayError::UnrecordedCharge { .. }),
+        "expected distinct UnrecordedCharge error, got: {both_err:?}"
+    );
+    let err_display = format!("{both_err}\n{both_err:?}");
+    assert!(err_display.contains("0.010000"));
+    assert!(err_display.contains("seat=Saltworks"));
+    assert!(err_display.contains("day=01"));
+    assert!(err_display.contains("round=talk"));
+    assert_no_8char_key_piece(&err_display, B5_KEY, "UnrecordedCharge Display/Debug");
+
+    // Also verify CLI path (execute_cli): non-zero exit code 3 + charge printed on stderr + key scrubbed.
+    // Pre-seed readable read-only calls.jsonl ("") and readable read-only calls.pending.jsonl (a 0-charge refusal)
+    // so CallLedger::open succeeds, the mock call runs, and both post-call writes fail on Windows and Linux.
+    let cli_both_game = tmp.path().join("b5_cli_both_unwritable");
+    write_to_seat(&cli_both_game, "01", "talk", "Saltworks", "B5_CLI_BOTH_BAD")?;
+    fs::create_dir_all(cli_both_game.join("relay"))?;
+    let cli_calls_file = cli_both_game.join("relay").join("calls.jsonl");
+    let cli_pending_file = cli_both_game.join("relay").join("calls.pending.jsonl");
+    fs::write(&cli_calls_file, "")?;
+    set_file_readonly(&cli_calls_file)?;
+    fs::write(
+        &cli_pending_file,
+        format!("{}\n", serde_json::to_string(&rerun_ledger[1])?),
+    )?;
+    set_file_readonly(&cli_pending_file)?;
+    let seats_path = tmp.path().join("b5_seats.json");
+    fs::write(
+        &seats_path,
+        serde_json::to_string(&json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 3.0,
+                "max_cost_per_call": 0.01
+            }]
+        }))?,
+    )?;
+    let mock_dir = tmp.path().join("b5_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "B5_CLI_BOTH_BAD",
+                "status": 500,
+                "response": {"error": format!("upstream error echoing {B5_KEY}")}
+            }]
+        }))?,
+    )?;
+    let mut cli_out = Vec::new();
+    let mut cli_err = Vec::new();
+    let exit_code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            cli_both_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "0.05",
+        ],
+        |_| Some(B5_KEY.to_owned()),
+        &mut cli_out,
+        &mut cli_err,
+    );
+    assert_eq!(exit_code, 3, "expected distinct exit code 3");
+    let stderr_str = String::from_utf8(cli_err)?;
+    let stdout_str = String::from_utf8(cli_out)?;
+    assert!(
+        stderr_str.contains("unrecorded charge 0.010000")
+            && stderr_str.contains("seat=Saltworks")
+            && stderr_str.contains("day=01")
+            && stderr_str.contains("round=talk"),
+        "expected charge breakdown on stderr, got: {stderr_str}"
+    );
+    assert_no_8char_key_piece(&stderr_str, B5_KEY, "CLI UnrecordedCharge stderr");
+    assert_no_8char_key_piece(&stdout_str, B5_KEY, "CLI UnrecordedCharge stdout");
+    set_file_writable(&cli_calls_file)?;
+    set_file_writable(&cli_pending_file)?;
+
+    // 4. Migration single-count case:
+    //    Side-file lines are counted ONCE, never twice, when migrated into calls.jsonl (including
+    //    if an entry already exists in both files after an interrupted migration).
+    let mig_game = tmp.path().join("b5_migration_once_game");
+    write_to_seat(&mig_game, "01", "talk", "Saltworks", "B5_MIG_1")?;
+    fs::create_dir_all(mig_game.join("relay"))?;
+    let mig_calls = mig_game.join("relay").join("calls.jsonl");
+    let mig_pending = mig_game.join("relay").join("calls.pending.jsonl");
+    fs::write(&mig_calls, "")?;
+    set_file_readonly(&mig_calls)?;
+
+    // Run 1 at cap = 0.02 records 0.01 into calls.pending.jsonl.
+    let mig_tx_1 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Run 1 reply",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let _ = run_turn(
+        &TurnConfig::new(
+            mig_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &mig_tx_1,
+        None,
+    )?;
+    assert!(mig_pending.is_file());
+
+    // Make calls.jsonl writable AND also simulate an already-copied duplicate in calls.jsonl on a separate game
+    // after verifying normal Run 2 at cap = 0.02 allows 1 more 0.01 call (0.01 + 0.01 == 0.02, NOT 0.02 + 0.01 > 0.02!).
+    set_file_writable(&mig_calls)?;
+    let mig_tx_2 = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Run 2 reply fits in 0.02 cap because side file is counted once",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let mig_sum_2 = run_turn(
+        &TurnConfig::new(
+            mig_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        ),
+        &mig_tx_2,
+        None,
+    )?;
+    assert!(
+        mig_sum_2.all_clean(),
+        "expected Run 2 to deliver when side-file 0.01 is counted once against cap 0.02"
+    );
+    assert_eq!(mig_tx_2.call_count(), 1);
+    assert!(!mig_pending.exists());
+    let mig_entries = read_calls_log(&mig_game)?;
+    assert_eq!(mig_entries.len(), 2);
+    let mig_charged: f64 = mig_entries.iter().map(|e| e.charged_credits).sum();
+    assert!((mig_charged - 0.02).abs() < 1e-9);
+
+    // Run 3 at cap = 0.02 must now refuse with CAP_REACHED (0 calls).
+    write_to_seat(&mig_game, "01", "act", "Saltworks", "B5_MIG_3")?;
+    let mig_tx_3 = ScriptedTransport::new(vec![]);
+    let mig_sum_3 = run_turn(
+        &TurnConfig::new(
+            mig_game.clone(),
+            "01".to_owned(),
+            Round::Act,
+            one_seat.clone(),
+            None,
+            true,
+            Some(0.02),
+        ),
+        &mig_tx_3,
+        None,
+    )?;
+    assert_eq!(mig_tx_3.call_count(), 0);
+    assert!(matches!(
+        mig_sum_3.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+
+    // Interrupted-migration duplicate check: identical line in both calls.jsonl and calls.pending.jsonl
+    // is deduplicated 1-to-1 and counted once (0.01), not twice (0.02).
+    let dup_game = tmp.path().join("b5_dup_mig_game");
+    write_to_seat(&dup_game, "01", "talk", "Saltworks", "B5_DUP")?;
+    fs::create_dir_all(dup_game.join("relay"))?;
+    let single_line = format!("{}\n", serde_json::to_string(&mig_entries[0])?);
+    fs::write(dup_game.join("relay").join("calls.jsonl"), &single_line)?;
+    fs::write(
+        dup_game.join("relay").join("calls.pending.jsonl"),
+        &single_line,
+    )?;
+    let dup_tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Fits under 0.02 cap without double-counting",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let dup_sum = run_turn(
+        &TurnConfig::new(
+            dup_game.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            one_seat,
+            Some(wrapper),
+            true,
+            Some(0.02),
+        ),
+        &dup_tx,
+        None,
+    )?;
+    assert!(dup_sum.all_clean());
+    assert!(!dup_game.join("relay").join("calls.pending.jsonl").exists());
+    assert_eq!(read_calls_log(&dup_game)?.len(), 2);
 
     Ok(())
 }
