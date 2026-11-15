@@ -1,28 +1,33 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-14 from commit ddc80b8 by Atlas 1.26.0.
+Mapped at 2026-11-15 from commit 2d34292 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-14 (ef971a4)
+## What changed since 2026-11-15 (648b3e3)
 
-Nothing structural changed since 2026-11-14; 16 files added.
+- In crates/league-relay/src/main.rs, `main` gained a step, `from_env`, before `install_redacting_panic_hook`.
+- In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook`, before `execute_cli`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `truncate_after_redaction`, before `Usage`.
+- And 1 more change to the order of work.
+- 10 files changed content, across 2 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 10 more.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 11 more; checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
-5. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
+5. **league-relay** (a command people run). Runs crates/league-relay/src/main.rs.
+6. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
-1. The workflow runs crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, crates/league-tui/ in league-tui, and scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, crates/league-core/ in league-core, crates/league-dice/ in league-dice, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 2 files in 2 more places; it checks crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -35,6 +40,8 @@ CI writes nothing in the files this map could read; 1 file could not be.
 **testnet_proof** (a command people run with `cargo run --example testnet_proof`) runs crates/league-ledger/examples/testnet_proof.rs.
 
 **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`) runs crates/league-ledger/examples/testnet_requireauth.rs.
+
+**league-relay** (a command people run) runs crates/league-relay/src/main.rs.
 
 **xrpl** (a command built from vendor/xrpl-rust, which nothing ships) runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
@@ -82,15 +89,17 @@ People write .github/, docs/ and the repository root. Nothing in the files this 
 
 ## Where to start
 
-vendor/xrpl-rust/src/bin/xrpl.rs → vendor/xrpl-rust/src/lib.rs → vendor/xrpl-rust/src/account/mod.rs → vendor/xrpl-rust/src/asynch/account/mod.rs → vendor/xrpl-rust/src/core/addresscodec/mod.rs → vendor/xrpl-rust/src/core/addresscodec/utils.rs → vendor/xrpl-rust/src/core/addresscodec/exceptions.rs
+crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/error.rs
 
-Read those in order to follow one run of xrpl end to end. This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.
+Read those in order to follow one run of league-relay end to end. This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.
+
+Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/relay.rs, crates/league-relay/src/seats.rs and crates/league-relay/src/transport.rs.
 
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 4 writes and 3 reads go to a path their caller passes, not to this repository.
-- 360 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 357 more.
+- 370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.
 - Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

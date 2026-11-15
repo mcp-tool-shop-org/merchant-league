@@ -16,37 +16,66 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 16,
-      "changed": 0,
+      "added": 0,
+      "changed": 10,
       "moved": 0,
-      "parts": 1,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `from_env`, before `install_redacting_panic_hook`.",
+        "subjects": [
+          "crates/league-relay/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook`, before `execute_cli`.",
+        "subjects": [
+          "crates/league-relay/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `truncate_after_redaction`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 1 more change to the order of work.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-14; 16 files added.",
+        "sentence": "10 files changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "ef971a49042a717ec849dee71f44727036cde398",
-      "generatedAt": "2026-11-14T11:59:28.631Z"
+      "commit": "648b3e3837bdbfbc6fe8fa8ec9d90fa9d91ce7cc",
+      "generatedAt": "2026-11-15T07:03:21.980Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [],
   "changesTogetherNote": [
     "Window: 180 days; a pair counts from 3 shared commits, since the window holds fewer than 30 qualifying commits."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "ddc80b8ce40e7642d2ee031fc9c1978ab71adb43",
+  "commit": "2d34292808b9a2afa344d83bddee0e985a32a4aa",
   "defaultBranch": "main",
-  "derived": "9 parts, mostly Rust (306 files), Python (3), shell (3) and JavaScript (1). Work enters through 5 doors; the busiest is CI, which reaches 6 parts. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "9 parts, mostly Rust (315 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 6 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
-      "checks": [],
-      "checksCount": 0,
+      "checks": [
+        "crates/league-relay/src/lib.rs",
+        "crates/league-relay/src/main.rs"
+      ],
+      "checksCount": 2,
       "checksMore": 0,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
@@ -94,11 +123,12 @@
         "crates/league-ledger/examples/",
         "crates/league-ledger/src/",
         "crates/league-ledger/tests/vectors.rs",
+        "crates/league-relay/tests/",
         "crates/league-season/",
         "crates/league-tui/"
       ],
-      "runsCount": 10,
-      "runsMore": 10,
+      "runsCount": 11,
+      "runsMore": 11,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -192,6 +222,26 @@
       "triggers": []
     },
     {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": "crates/league-relay/Cargo.toml",
+      "id": "crates/league-relay/Cargo.toml#league-relay",
+      "kind": "command",
+      "landings": [],
+      "name": "league-relay",
+      "pushes": false,
+      "reach": [],
+      "runs": [
+        "crates/league-relay/src/main.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
+    },
+    {
       "builtFrom": "vendor/xrpl-rust",
       "checks": [],
       "checksCount": 0,
@@ -220,11 +270,11 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-14T12:25:44.031Z",
+  "generatedAt": "2026-11-15T07:46:56.816Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
-    "360 files belong to no part: vendor/xrpl-rust/Cargo.toml, vendor/xrpl-rust/Cargo.toml.orig, vendor/xrpl-rust/LICENSE and 357 more.",
+    "370 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 367 more.",
     "Statistics confidence is low: fewer than 30 qualifying commits in the window, and fewer than 25 source files reach 10 revisions."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -243,20 +293,28 @@
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
-  "startDoor": "vendor/xrpl-rust/Cargo.toml#xrpl",
-  "startHere": [
-    "vendor/xrpl-rust/src/bin/xrpl.rs",
-    "vendor/xrpl-rust/src/lib.rs",
-    "vendor/xrpl-rust/src/account/mod.rs",
-    "vendor/xrpl-rust/src/asynch/account/mod.rs",
-    "vendor/xrpl-rust/src/core/addresscodec/mod.rs",
-    "vendor/xrpl-rust/src/core/addresscodec/utils.rs",
-    "vendor/xrpl-rust/src/core/addresscodec/exceptions.rs"
+  "startBeside": [
+    {
+      "files": [
+        "crates/league-relay/src/relay.rs",
+        "crates/league-relay/src/seats.rs",
+        "crates/league-relay/src/transport.rs"
+      ],
+      "from": "crates/league-relay/src/cli.rs"
+    }
   ],
-  "startReason": "This path follows xrpl (a command built from vendor/xrpl-rust, which nothing ships) from its entry, since CI runs only tests.",
+  "startDoor": "crates/league-relay/Cargo.toml#league-relay",
+  "startHere": [
+    "crates/league-relay/src/main.rs",
+    "crates/league-relay/src/lib.rs",
+    "crates/league-relay/src/cli.rs",
+    "crates/league-relay/src/secret.rs",
+    "crates/league-relay/src/error.rs"
+  ],
+  "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 20,
+  "testFiles": 21,
   "testedBy": {
     "league-core": 1,
     "league-dice": 1,

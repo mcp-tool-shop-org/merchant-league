@@ -1,0 +1,27 @@
+[package]
+name = "league-relay"
+description = "Merchant League paper-test seat relay: OpenRouter chat completions with local transcripts and credit cap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "league-relay"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4.45"
+hex = "0.4.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.9"
+ureq = { version = "3.5", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
