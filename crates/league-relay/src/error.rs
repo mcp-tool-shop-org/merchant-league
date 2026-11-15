@@ -37,9 +37,10 @@ pub enum RelayError {
         /// Optional redacted holder metadata (`pid=... started_utc=...`) or mid-turn compromise detail.
         holder: Option<String>,
     },
-    /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call.
+    /// Neither `relay/calls.jsonl` nor `relay/calls.pending.jsonl` could be written after a sent call;
+    /// the pre-call `max_cost_per_call` reservation remains held in `relay/calls.reserved.jsonl` for the next run.
     UnrecordedCharge {
-        /// Total unrecorded credits held in memory for this run.
+        /// Total credits held across kept reservations and unmigrated side-file lines.
         charged_credits: String,
         /// Redacted per-call summary (`seat`, `day`, `round`, `attempt`, `charged_credits`).
         entries_summary: String,
@@ -90,7 +91,7 @@ impl fmt::Display for RelayError {
                 detail,
             } => write!(
                 f,
-                "unrecorded charge {charged_credits} credits could not be persisted to ledger or pending side file ({entries_summary}); do not re-run blind: {detail}"
+                "post-call charge {charged_credits} credits could not be written to ledger or pending side file ({entries_summary}); the charge is held as a reservation in relay/calls.reserved.jsonl that the next run counts at max_cost_per_call — do not enter it into relay/calls.jsonl by hand or it will be counted twice: {detail}"
             ),
         }
     }
