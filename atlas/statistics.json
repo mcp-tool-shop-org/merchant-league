@@ -245,12 +245,12 @@
       },
       {
         "commits": 31,
-        "lines": 2372,
+        "lines": 2368,
         "path": "atlas/page.json"
       },
       {
         "commits": 31,
-        "lines": 11977,
+        "lines": 11984,
         "path": "atlas/statistics.json"
       },
       {
@@ -475,7 +475,7 @@
       },
       {
         "commits": 9,
-        "lines": 15885,
+        "lines": 15886,
         "path": "crates/league-relay/tests/relay_integration.rs"
       },
       {
@@ -2714,9 +2714,9 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-15T22:27:45.156Z",
+  "generatedAt": "2026-11-15T23:25:37.453Z",
   "generatedFrom": {
-    "commit": "c87420e72d3866c6634415741943434c436a184e"
+    "commit": "f3e1d5db764710d6463694f97537afd84c415c11"
   },
   "pairs": [
     {
@@ -2884,7 +2884,7 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-15T17:17:08-05:00",
+    "headDate": "2026-11-15T17:56:13-05:00",
     "inScopeFiles": 502,
     "pinnedStart": null,
     "priorFloor": "fallen",
@@ -2893,7 +2893,7 @@
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-19T22:17:08.000Z",
+    "since": "2026-05-19T22:56:13.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

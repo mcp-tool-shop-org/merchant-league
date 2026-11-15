@@ -224,9 +224,19 @@ impl ResponseFormatConfig {
                 None => None,
             };
             (n, strict_opt, obj["schema"].clone())
+        } else if obj.contains_key("schema")
+            && obj.contains_key("name")
+            && !obj.contains_key("properties")
+        {
+            return Err(RelayError::Usage(
+                "response_format 'name' must be a string".to_owned(),
+            ));
         } else {
             (wording_slot("default_schema_name"), None, val)
         };
+
+        let pad_key = wording_slot("scratchpad_schema_key");
+        let pinned_pad_desc = wording_slot("scratchpad_schema_description");
 
         if name.is_empty()
             || !name
@@ -236,6 +246,11 @@ impl ResponseFormatConfig {
             return Err(RelayError::Usage(
                 "response_format schema 'name' must match [A-Za-z0-9_-]+".to_owned(),
             ));
+        }
+        if is_confusable_with_scratchpad(&name) {
+            return Err(RelayError::Usage(format!(
+                "response_format schema 'name' cannot contain legacy 'scratchpad' ('{name}'); rename it or use '{pad_key}'"
+            )));
         }
         let Some(schema_obj) = schema.as_object_mut() else {
             return Err(RelayError::Usage(
@@ -250,36 +265,8 @@ impl ResponseFormatConfig {
             }
         }
 
-        let pad_key = wording_slot("scratchpad_schema_key");
-        let pinned_pad_desc = wording_slot("scratchpad_schema_description");
-
-        if let Some(req_val) = schema_obj.get("required") {
-            let Some(req_arr) = req_val.as_array() else {
-                return Err(RelayError::Usage(
-                    "response_format schema 'required' must be an array of strings".to_owned(),
-                ));
-            };
-            let mut seen_req = HashSet::with_capacity(req_arr.len());
-            for item in req_arr {
-                let Some(req_name) = item.as_str() else {
-                    return Err(RelayError::Usage(
-                        "response_format schema 'required' must be an array of strings".to_owned(),
-                    ));
-                };
-                check_forbidden_notes_alias(
-                    req_name,
-                    &pad_key,
-                    "response_format schema 'required'",
-                )?;
-                if !seen_req.insert(req_name) {
-                    return Err(RelayError::Usage(format!(
-                        "response_format schema 'required' cannot contain duplicate property '{req_name}'"
-                    )));
-                }
-            }
-        }
-
         let mut has_pad_prop = false;
+        let mut root_prop_names: HashSet<String> = HashSet::new();
         if let Some(props_val) = schema_obj.get_mut("properties") {
             let Some(props_obj) = props_val.as_object_mut() else {
                 return Err(RelayError::Usage(
@@ -287,11 +274,14 @@ impl ResponseFormatConfig {
                 ));
             };
             for prop_name in props_obj.keys() {
-                check_forbidden_notes_alias(
+                validate_property_key(
                     prop_name,
                     &pad_key,
+                    true,
+                    true,
                     "response_format schema 'properties'",
                 )?;
+                root_prop_names.insert(prop_name.clone());
             }
             if let Some(pad_prop) = props_obj.get_mut(&pad_key) {
                 has_pad_prop = true;
@@ -334,6 +324,34 @@ impl ResponseFormatConfig {
             }
         }
 
+        if let Some(req_val) = schema_obj.get("required") {
+            let Some(req_arr) = req_val.as_array() else {
+                return Err(RelayError::Usage(
+                    "response_format schema 'required' must be an array of strings".to_owned(),
+                ));
+            };
+            let mut seen_req = HashSet::with_capacity(req_arr.len());
+            for item in req_arr {
+                let Some(req_name) = item.as_str() else {
+                    return Err(RelayError::Usage(
+                        "response_format schema 'required' must be an array of strings".to_owned(),
+                    ));
+                };
+                check_schema_identifier(
+                    req_name,
+                    &pad_key,
+                    true,
+                    has_pad_prop,
+                    "response_format schema 'required'",
+                )?;
+                if !seen_req.insert(req_name) {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema 'required' cannot contain duplicate property '{req_name}'"
+                    )));
+                }
+            }
+        }
+
         if has_pad_prop {
             for top_key in schema_obj.keys() {
                 if !matches!(
@@ -365,15 +383,42 @@ impl ResponseFormatConfig {
             {
                 req_arr.push(serde_json::Value::String(pad_key.clone()));
             }
-        } else if schema_obj
-            .get("required")
-            .and_then(|v| v.as_array())
-            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(pad_key.as_str())))
-        {
-            return Err(RelayError::Usage(format!(
-                "response_format schema 'required' cannot name '{pad_key}' outside 'properties.{pad_key}'"
-            )));
         }
+
+        let root_strict_props = has_pad_prop
+            || (schema_obj.get("additionalProperties") == Some(&serde_json::Value::Bool(false))
+                && !schema_obj.contains_key("patternProperties")
+                && !schema_obj.contains_key("$ref"));
+        if root_strict_props
+            && let Some(req_arr) = schema_obj.get("required").and_then(|v| v.as_array())
+        {
+            for item in req_arr {
+                if let Some(req_name) = item.as_str()
+                    && !root_prop_names.contains(req_name)
+                {
+                    return Err(RelayError::Usage(format!(
+                        "response_format schema 'required' names '{req_name}', which is not defined in 'properties'"
+                    )));
+                }
+            }
+        }
+
+        let root_uses_ref = root_composition_uses_ref(schema_obj);
+        let root_rule = SubschemaRule {
+            pad_key: &pad_key,
+            forbid_notes: true,
+            forbid_ref: has_pad_prop,
+        };
+        let nested_prop_rule = SubschemaRule {
+            pad_key: &pad_key,
+            forbid_notes: has_pad_prop,
+            forbid_ref: has_pad_prop,
+        };
+        let defs_rule = SubschemaRule {
+            pad_key: &pad_key,
+            forbid_notes: has_pad_prop || root_uses_ref,
+            forbid_ref: has_pad_prop,
+        };
 
         for (top_key, top_val) in schema_obj.iter() {
             match top_key.as_str() {
@@ -381,59 +426,90 @@ impl ResponseFormatConfig {
                     if let Some(props_obj) = top_val.as_object() {
                         for (prop_name, prop_val) in props_obj {
                             if prop_name != &pad_key {
-                                validate_subschema_outside_notes(
+                                validate_subschema(
                                     prop_val,
                                     &format!("schema.properties.{prop_name}"),
-                                    &pad_key,
+                                    nested_prop_rule,
                                 )?;
                             }
                         }
                     }
                 }
                 "type" | "required" => {}
+                "$ref" => {
+                    validate_ref_value(top_val, "schema.$ref", root_rule)?;
+                }
                 "default" | "const" | "enum" | "examples" => {
                     reject_literal_object_key_naming_notes(
                         top_val,
                         &format!("schema.{top_key}"),
-                        &pad_key,
+                        root_rule,
                     )?;
                 }
-                "dependentSchemas" | "$defs" | "definitions" => {
+                "$defs" | "definitions" => {
                     if let Some(sub_map) = top_val.as_object() {
                         for (sub_k, sub_v) in sub_map {
-                            if is_notes_or_legacy_name(sub_k, &pad_key) {
-                                return Err(RelayError::Usage(format!(
-                                    "response_format 'schema.{top_key}' cannot name '{sub_k}' outside top-level 'properties.{pad_key}'"
-                                )));
-                            }
-                            validate_subschema_outside_notes(
+                            check_schema_identifier(
+                                sub_k,
+                                &pad_key,
+                                true,
+                                false,
+                                &format!("response_format 'schema.{top_key}'"),
+                            )?;
+                            validate_subschema(
                                 sub_v,
                                 &format!("schema.{top_key}.{sub_k}"),
+                                defs_rule,
+                            )?;
+                        }
+                    }
+                }
+                "dependentSchemas" => {
+                    if let Some(sub_map) = top_val.as_object() {
+                        for (sub_k, sub_v) in sub_map {
+                            check_schema_identifier(
+                                sub_k,
                                 &pad_key,
+                                true,
+                                false,
+                                "response_format 'schema.dependentSchemas'",
+                            )?;
+                            validate_subschema(
+                                sub_v,
+                                &format!("schema.dependentSchemas.{sub_k}"),
+                                root_rule,
                             )?;
                         }
                     }
                 }
                 "dependentRequired" => {
-                    validate_dependent_required_outside_notes(
+                    validate_dependent_required(
                         top_val,
                         "schema.dependentRequired",
-                        &pad_key,
+                        root_strict_props.then_some(&root_prop_names),
+                        root_rule,
                     )?;
                 }
                 "patternProperties" => {
-                    validate_pattern_properties_outside_notes(
-                        top_val,
-                        "schema.patternProperties",
-                        &pad_key,
-                    )?;
+                    validate_pattern_properties(top_val, "schema.patternProperties", root_rule)?;
+                }
+                "propertyNames" => {
+                    validate_property_names(top_val, "schema.propertyNames", root_rule)?;
+                }
+                "items" | "prefixItems" | "additionalItems" | "unevaluatedItems" | "contains" => {
+                    validate_subschema(top_val, &format!("schema.{top_key}"), nested_prop_rule)?;
                 }
                 _ => {
-                    validate_subschema_outside_notes(
-                        top_val,
-                        &format!("schema.{top_key}"),
-                        &pad_key,
-                    )?;
+                    if !is_standard_json_schema_keyword(top_key) {
+                        check_schema_identifier(
+                            top_key,
+                            &pad_key,
+                            true,
+                            false,
+                            "response_format top-level schema keyword",
+                        )?;
+                    }
+                    validate_subschema(top_val, &format!("schema.{top_key}"), root_rule)?;
                 }
             }
         }
@@ -503,20 +579,340 @@ impl ResponseFormatConfig {
     }
 }
 
-fn is_notes_or_legacy_name(key: &str, pad_key: &str) -> bool {
-    key.eq_ignore_ascii_case(pad_key) || key.eq_ignore_ascii_case("scratchpad")
+#[derive(Clone, Copy)]
+struct SubschemaRule<'a> {
+    pad_key: &'a str,
+    forbid_notes: bool,
+    forbid_ref: bool,
 }
 
-fn check_forbidden_notes_alias(key: &str, pad_key: &str, location: &str) -> Result<(), RelayError> {
-    if key.eq_ignore_ascii_case("scratchpad") {
+fn is_valid_ascii_property_name(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn is_ignorable_confusable_mark(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{0300}'..='\u{036F}'
+                | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'
+                | '\u{17B5}'
+                | '\u{180B}'..='\u{180E}'
+                | '\u{1AB0}'..='\u{1AFF}'
+                | '\u{1DC0}'..='\u{1DFF}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{20D0}'..='\u{20FF}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FE20}'..='\u{FE2F}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+        )
+}
+
+fn is_confusable_separator(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '_' | '-' | '.' | '/' | ':')
+}
+
+fn fold_confusable_ascii_char(c: char) -> Option<(char, bool)> {
+    if is_ignorable_confusable_mark(c) || is_confusable_separator(c) {
+        return None;
+    }
+    if c.is_ascii() {
+        return Some((c.to_ascii_lowercase(), c.is_ascii_uppercase()));
+    }
+    let cp = c as u32;
+    if (0xFF01..=0xFF5E).contains(&cp)
+        && let Some(ascii_ch) = char::from_u32(cp - 0xFEE0)
+    {
+        return Some((ascii_ch.to_ascii_lowercase(), ascii_ch.is_ascii_uppercase()));
+    }
+    if (0x1D400..=0x1D6A3).contains(&cp) {
+        for &(start, upper) in &[
+            (0x1D400u32, true),
+            (0x1D41A, false),
+            (0x1D434, true),
+            (0x1D44E, false),
+            (0x1D468, true),
+            (0x1D482, false),
+            (0x1D5A0, true),
+            (0x1D5BA, false),
+            (0x1D5D4, true),
+            (0x1D5EE, false),
+            (0x1D608, true),
+            (0x1D622, false),
+            (0x1D63C, true),
+            (0x1D656, false),
+            (0x1D670, true),
+            (0x1D68A, false),
+        ] {
+            if (start..start + 26).contains(&cp)
+                && let Some(ch) = char::from_u32(b'a' as u32 + (cp - start))
+            {
+                return Some((ch, upper));
+            }
+        }
+    }
+    let was_upper = c.is_uppercase();
+    let lower = c.to_lowercase().next().unwrap_or(c);
+    let mapped = match lower {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' | 'ǎ' | 'а' | 'α' => 'a',
+        'в' | 'β' => 'b',
+        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' | 'с' => 'c',
+        'ď' | 'đ' => 'd',
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' | 'е' | 'ё' | 'є' | 'ε' => {
+            'e'
+        }
+        'ĥ' | 'ħ' | 'н' | 'η' => 'h',
+        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' | 'і' | 'ї' | 'ι' => 'i',
+        'ĵ' | 'ј' => 'j',
+        'ķ' | 'к' | 'κ' => 'k',
+        'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => 'l',
+        'м' | 'μ' => 'm',
+        'ñ' | 'ń' | 'ņ' | 'ň' | 'ŉ' | 'ν' => 'n',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' | 'ơ' | 'ǒ' | 'о' | 'ѳ' | 'ο' => {
+            'o'
+        }
+        'р' | 'ρ' => 'p',
+        'ŕ' | 'ŗ' | 'ř' => 'r',
+        'ś' | 'ŝ' | 'ş' | 'š' | 'ș' | '\u{017F}' | 'ѕ' | 'σ' | 'ς' => 's',
+        'ţ' | 'ť' | 'ŧ' | 'ț' | 'т' | 'τ' => 't',
+        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' | 'ư' | 'ǔ' => 'u',
+        'ŵ' => 'w',
+        'х' | 'χ' => 'x',
+        'ý' | 'ÿ' | 'ŷ' | 'у' => 'y',
+        'ź' | 'ż' | 'ž' => 'z',
+        other => other,
+    };
+    Some((mapped, was_upper))
+}
+
+fn confusable_compact_and_words(raw: &str) -> (String, Vec<String>) {
+    let mut compact = String::with_capacity(raw.len());
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut prev_was_lower = false;
+
+    for c in raw.chars() {
+        if is_ignorable_confusable_mark(c) {
+            continue;
+        }
+        if is_confusable_separator(c) {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            prev_was_lower = false;
+            continue;
+        }
+        if let Some((folded, was_upper)) = fold_confusable_ascii_char(c) {
+            if was_upper && prev_was_lower && !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            compact.push(folded);
+            cur.push(folded);
+            prev_was_lower = !was_upper && folded.is_ascii_alphabetic();
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    (compact, words)
+}
+
+fn is_confusable_with_scratchpad(raw: &str) -> bool {
+    let (compact, _) = confusable_compact_and_words(raw);
+    compact.contains("scratchpad")
+}
+
+fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
+    let pad_lower = pad_key.to_ascii_lowercase();
+    let (compact, words) = confusable_compact_and_words(raw);
+    compact == pad_lower
+        || compact == "note"
+        || compact.contains(&pad_lower)
+        || words.iter().any(|w| w == &pad_lower || w == "note")
+}
+
+fn validate_property_key(
+    key: &str,
+    pad_key: &str,
+    forbid_notes: bool,
+    allow_exact_pad_key: bool,
+    location: &str,
+) -> Result<(), RelayError> {
+    check_schema_identifier(key, pad_key, forbid_notes, allow_exact_pad_key, location)?;
+    if !is_valid_ascii_property_name(key) {
         return Err(RelayError::Usage(format!(
-            "{location} cannot name legacy field '{key}'; rename it to '{pad_key}'"
+            "{location} property name '{key}' must match [A-Za-z0-9_-]+"
         )));
     }
-    if key != pad_key && key.eq_ignore_ascii_case(pad_key) {
+    Ok(())
+}
+
+fn check_schema_identifier(
+    key: &str,
+    pad_key: &str,
+    forbid_notes: bool,
+    allow_exact_pad_key: bool,
+    location: &str,
+) -> Result<(), RelayError> {
+    if is_confusable_with_scratchpad(key) {
+        return Err(RelayError::Usage(format!(
+            "{location} cannot name legacy or confusable 'scratchpad' field '{key}'; rename it to '{pad_key}'"
+        )));
+    }
+    if key == pad_key {
+        if allow_exact_pad_key || !forbid_notes {
+            return Ok(());
+        }
+        return Err(RelayError::Usage(format!(
+            "{location} cannot name '{pad_key}' outside top-level 'properties.{pad_key}'"
+        )));
+    }
+    if key.eq_ignore_ascii_case(pad_key) {
         return Err(RelayError::Usage(format!(
             "{location} cannot name case-variant '{key}'; rename it to exact lowercase '{pad_key}'"
         )));
+    }
+    let has_non_ident_or_non_ascii = !is_valid_ascii_property_name(key);
+    if (forbid_notes || has_non_ident_or_non_ascii) && is_confusable_with_notes(key, pad_key) {
+        return Err(RelayError::Usage(format!(
+            "{location} cannot name confusable '{key}' outside top-level 'properties.{pad_key}'"
+        )));
+    }
+    Ok(())
+}
+
+fn root_composition_uses_ref(schema_obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+    if schema_obj.contains_key("$ref") {
+        return true;
+    }
+    for key in [
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "not",
+        "if",
+        "then",
+        "else",
+        "dependentSchemas",
+    ] {
+        if let Some(sub) = schema_obj.get(key)
+            && value_contains_root_ref(sub)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn value_contains_root_ref(val: &serde_json::Value) -> bool {
+    match val {
+        serde_json::Value::Array(arr) => arr.iter().any(value_contains_root_ref),
+        serde_json::Value::Object(map) => {
+            if map.contains_key("$ref") {
+                return true;
+            }
+            for (k, v) in map {
+                if !matches!(
+                    k.as_str(),
+                    "properties"
+                        | "items"
+                        | "prefixItems"
+                        | "additionalItems"
+                        | "unevaluatedItems"
+                        | "contains"
+                        | "$defs"
+                        | "definitions"
+                ) && value_contains_root_ref(v)
+                {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn percent_decode_lossy(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            )
+        {
+            out.push(((hi << 4) | lo) as u8);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn validate_ref_value(
+    val: &serde_json::Value,
+    path: &str,
+    rule: SubschemaRule<'_>,
+) -> Result<(), RelayError> {
+    if rule.forbid_ref {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' is forbidden in a schema with '{}' ('{}' schemas cannot use '$ref')",
+            rule.pad_key, rule.pad_key
+        )));
+    }
+    let Some(ref_str) = val.as_str() else {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' must be a non-empty string"
+        )));
+    };
+    if ref_str.trim().is_empty() {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' must be a non-empty string"
+        )));
+    }
+    let decoded = percent_decode_lossy(ref_str);
+    for candidate in [ref_str, decoded.as_str()] {
+        for seg in candidate.split('/') {
+            if is_confusable_with_scratchpad(seg) {
+                return Err(RelayError::Usage(format!(
+                    "response_format '{path}' cannot reference legacy 'scratchpad' ('{ref_str}'); use '{}'",
+                    rule.pad_key
+                )));
+            }
+            if rule.forbid_notes && is_confusable_with_notes(seg, rule.pad_key) {
+                return Err(RelayError::Usage(format!(
+                    "response_format '{path}' cannot reference '{}' outside top-level 'properties.{}'",
+                    ref_str, rule.pad_key
+                )));
+            }
+        }
+        if candidate.starts_with("#/properties/")
+            && candidate
+                .split('/')
+                .nth(2)
+                .is_some_and(|s| is_confusable_with_notes(s, rule.pad_key))
+        {
+            return Err(RelayError::Usage(format!(
+                "response_format '{path}' cannot reference top-level 'properties.{}' ('{ref_str}')",
+                rule.pad_key
+            )));
+        }
     }
     Ok(())
 }
@@ -524,22 +920,24 @@ fn check_forbidden_notes_alias(key: &str, pad_key: &str, location: &str) -> Resu
 fn reject_literal_object_key_naming_notes(
     val: &serde_json::Value,
     path: &str,
-    pad_key: &str,
+    rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     match val {
         serde_json::Value::Array(arr) => {
             for (idx, item) in arr.iter().enumerate() {
-                reject_literal_object_key_naming_notes(item, &format!("{path}[{idx}]"), pad_key)?;
+                reject_literal_object_key_naming_notes(item, &format!("{path}[{idx}]"), rule)?;
             }
         }
         serde_json::Value::Object(map) => {
             for (k, v) in map {
-                if is_notes_or_legacy_name(k, pad_key) {
-                    return Err(RelayError::Usage(format!(
-                        "response_format '{path}' cannot name '{k}' outside top-level 'properties.{pad_key}'"
-                    )));
-                }
-                reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), pad_key)?;
+                check_schema_identifier(
+                    k,
+                    rule.pad_key,
+                    rule.forbid_notes,
+                    false,
+                    &format!("response_format '{path}'"),
+                )?;
+                reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), rule)?;
             }
         }
         _ => {}
@@ -547,10 +945,11 @@ fn reject_literal_object_key_naming_notes(
     Ok(())
 }
 
-fn validate_dependent_required_outside_notes(
+fn validate_dependent_required(
     val: &serde_json::Value,
     path: &str,
-    pad_key: &str,
+    known_props: Option<&HashSet<String>>,
+    rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     let Some(dep_map) = val.as_object() else {
         return Err(RelayError::Usage(format!(
@@ -558,9 +957,18 @@ fn validate_dependent_required_outside_notes(
         )));
     };
     for (dep_k, dep_v) in dep_map {
-        if is_notes_or_legacy_name(dep_k, pad_key) {
+        check_schema_identifier(
+            dep_k,
+            rule.pad_key,
+            rule.forbid_notes,
+            false,
+            &format!("response_format '{path}'"),
+        )?;
+        if let Some(props) = known_props
+            && !props.contains(dep_k)
+        {
             return Err(RelayError::Usage(format!(
-                "response_format '{path}' cannot name '{dep_k}' outside top-level 'properties.{pad_key}'"
+                "response_format '{path}' names '{dep_k}', which is not defined in 'properties'"
             )));
         }
         let Some(arr) = dep_v.as_array() else {
@@ -575,9 +983,18 @@ fn validate_dependent_required_outside_notes(
                     "response_format '{path}.{dep_k}' must be an array of strings"
                 )));
             };
-            if is_notes_or_legacy_name(req_s, pad_key) {
+            check_schema_identifier(
+                req_s,
+                rule.pad_key,
+                rule.forbid_notes,
+                false,
+                &format!("response_format '{path}.{dep_k}'"),
+            )?;
+            if let Some(props) = known_props
+                && !props.contains(req_s)
+            {
                 return Err(RelayError::Usage(format!(
-                    "response_format '{path}.{dep_k}' cannot name '{req_s}' outside top-level 'properties.{pad_key}'"
+                    "response_format '{path}.{dep_k}' names '{req_s}', which is not defined in 'properties'"
                 )));
             }
             if !seen.insert(req_s) {
@@ -590,81 +1007,488 @@ fn validate_dependent_required_outside_notes(
     Ok(())
 }
 
-fn pattern_names_notes_or_legacy(pattern: &str, pad_key: &str) -> bool {
-    let lower = pattern.to_ascii_lowercase();
-    lower.contains(&pad_key.to_ascii_lowercase()) || lower.contains("scratchpad")
+#[derive(Clone)]
+struct RegexAtom {
+    letter_mask: u32,
+    specific: bool,
+    min_rep: usize,
+    max_rep: usize,
 }
 
-fn validate_pattern_properties_outside_notes(
+fn expand_regex_branches(pattern: &str, max_branches: usize) -> Vec<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if chars[i] == '[' {
+            i += 1;
+            while i < chars.len() && chars[i] != ']' {
+                if chars[i] == '\\' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if chars[i] == '(' {
+            let start = i;
+            let mut depth = 1usize;
+            let mut j = i + 1;
+            let mut split_positions = Vec::new();
+            while j < chars.len() && depth > 0 {
+                if chars[j] == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '[' {
+                    j += 1;
+                    while j < chars.len() && chars[j] != ']' {
+                        if chars[j] == '\\' {
+                            j += 2;
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if chars[j] == '(' {
+                    depth += 1;
+                } else if chars[j] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                } else if chars[j] == '|' && depth == 1 {
+                    split_positions.push(j);
+                }
+                j += 1;
+            }
+            if depth == 0 {
+                let prefix: String = chars[..start].iter().collect();
+                let suffix: String = chars[j + 1..].iter().collect();
+                let mut inner_start = start + 1;
+                if inner_start + 1 < j && chars[inner_start] == '?' && chars[inner_start + 1] == ':'
+                {
+                    inner_start += 2;
+                }
+                if split_positions.is_empty() {
+                    let inner: String = chars[inner_start..j].iter().collect();
+                    let merged = format!("{prefix}{inner}{suffix}");
+                    return expand_regex_branches(&merged, max_branches);
+                }
+                let mut results = Vec::new();
+                let mut seg_start = inner_start;
+                for &sp in split_positions.iter().chain(std::iter::once(&j)) {
+                    let opt: String = chars[seg_start..sp].iter().collect();
+                    let candidate = format!("{prefix}{opt}{suffix}");
+                    for sub in expand_regex_branches(
+                        &candidate,
+                        max_branches.saturating_sub(results.len()),
+                    ) {
+                        results.push(sub);
+                        if results.len() >= max_branches {
+                            return results;
+                        }
+                    }
+                    seg_start = sp + 1;
+                }
+                return results;
+            }
+        }
+        i += 1;
+    }
+    pattern
+        .split('|')
+        .take(max_branches)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn letter_bit(c: char) -> u32 {
+    if let Some((folded, _)) = fold_confusable_ascii_char(c)
+        && folded.is_ascii_lowercase()
+    {
+        return 1u32 << (folded as u8 - b'a');
+    }
+    0
+}
+
+fn parse_regex_atoms(branch: &str) -> Vec<RegexAtom> {
+    let chars: Vec<char> = branch.chars().collect();
+    let mut atoms: Vec<RegexAtom> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        match ch {
+            '^' | '$' | '(' | ')' => {
+                i += 1;
+                continue;
+            }
+            '.' => {
+                atoms.push(RegexAtom {
+                    letter_mask: (1u32 << 26) - 1,
+                    specific: false,
+                    min_rep: 1,
+                    max_rep: 1,
+                });
+                i += 1;
+            }
+            '[' => {
+                i += 1;
+                let negated = if i < chars.len() && chars[i] == '^' {
+                    i += 1;
+                    true
+                } else {
+                    false
+                };
+                let mut mask = 0u32;
+                while i < chars.len() && chars[i] != ']' {
+                    let start_c = if chars[i] == '\\' && i + 1 < chars.len() {
+                        i += 2;
+                        chars[i - 1]
+                    } else {
+                        i += 1;
+                        chars[i - 1]
+                    };
+                    if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] != ']' {
+                        i += 1;
+                        let end_c = if chars[i] == '\\' && i + 1 < chars.len() {
+                            i += 2;
+                            chars[i - 1]
+                        } else {
+                            i += 1;
+                            chars[i - 1]
+                        };
+                        let lo = (start_c as u32).min(end_c as u32);
+                        let hi = (start_c as u32).max(end_c as u32);
+                        if hi - lo <= 128 {
+                            for cp in lo..=hi {
+                                if let Some(rc) = char::from_u32(cp) {
+                                    mask |= letter_bit(rc);
+                                }
+                            }
+                        } else {
+                            mask = (1u32 << 26) - 1;
+                        }
+                    } else {
+                        mask |= letter_bit(start_c);
+                    }
+                }
+                if i < chars.len() && chars[i] == ']' {
+                    i += 1;
+                }
+                if negated {
+                    mask = ((1u32 << 26) - 1) & !mask;
+                }
+                let width = mask.count_ones();
+                atoms.push(RegexAtom {
+                    letter_mask: mask,
+                    specific: (1..=4).contains(&width),
+                    min_rep: 1,
+                    max_rep: 1,
+                });
+            }
+            '\\' => {
+                i += 1;
+                if i >= chars.len() {
+                    break;
+                }
+                let esc = chars[i];
+                i += 1;
+                match esc {
+                    'b' | 'B' | 'A' | 'z' | 'Z' => continue,
+                    'w' | 'S' => {
+                        atoms.push(RegexAtom {
+                            letter_mask: (1u32 << 26) - 1,
+                            specific: false,
+                            min_rep: 1,
+                            max_rep: 1,
+                        });
+                    }
+                    'x' if i + 2 <= chars.len() => {
+                        let hex: String = chars[i..i + 2].iter().collect();
+                        if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                            i += 2;
+                            let mask = letter_bit(byte as char);
+                            atoms.push(RegexAtom {
+                                letter_mask: mask,
+                                specific: mask != 0,
+                                min_rep: 1,
+                                max_rep: 1,
+                            });
+                        }
+                    }
+                    'u' if i + 4 <= chars.len() => {
+                        let hex: String = chars[i..i + 4].iter().collect();
+                        if let Ok(cp) = u32::from_str_radix(&hex, 16)
+                            && let Some(uc) = char::from_u32(cp)
+                        {
+                            i += 4;
+                            let mask = letter_bit(uc);
+                            atoms.push(RegexAtom {
+                                letter_mask: mask,
+                                specific: mask != 0,
+                                min_rep: 1,
+                                max_rep: 1,
+                            });
+                        }
+                    }
+                    other => {
+                        let mask = letter_bit(other);
+                        atoms.push(RegexAtom {
+                            letter_mask: mask,
+                            specific: mask != 0,
+                            min_rep: 1,
+                            max_rep: 1,
+                        });
+                    }
+                }
+            }
+            '?' => {
+                if let Some(last) = atoms.last_mut() {
+                    last.min_rep = 0;
+                }
+                i += 1;
+                continue;
+            }
+            '*' => {
+                if let Some(last) = atoms.last_mut() {
+                    last.min_rep = 0;
+                    last.max_rep = 12;
+                }
+                i += 1;
+                continue;
+            }
+            '+' => {
+                if let Some(last) = atoms.last_mut() {
+                    last.max_rep = 12;
+                }
+                i += 1;
+                continue;
+            }
+            '{' => {
+                let mut j = i + 1;
+                while j < chars.len() && chars[j] != '}' {
+                    j += 1;
+                }
+                if j < chars.len() {
+                    let quant: String = chars[i + 1..j].iter().collect();
+                    let (min_q, max_q) = if let Some((lo_s, hi_s)) = quant.split_once(',') {
+                        let lo = lo_s.trim().parse::<usize>().unwrap_or(0);
+                        let hi = if hi_s.trim().is_empty() {
+                            12
+                        } else {
+                            hi_s.trim().parse::<usize>().unwrap_or(lo).min(12)
+                        };
+                        (lo, hi.max(lo))
+                    } else if let Ok(exact) = quant.trim().parse::<usize>() {
+                        let b = exact.min(12);
+                        (b, b)
+                    } else {
+                        (1, 1)
+                    };
+                    if let Some(last) = atoms.last_mut() {
+                        last.min_rep = min_q;
+                        last.max_rep = max_q;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            other => {
+                if is_ignorable_confusable_mark(other) {
+                    i += 1;
+                    continue;
+                }
+                let mask = letter_bit(other);
+                atoms.push(RegexAtom {
+                    letter_mask: mask,
+                    specific: mask != 0,
+                    min_rep: 1,
+                    max_rep: 1,
+                });
+                i += 1;
+            }
+        }
+    }
+    atoms
+}
+
+fn atoms_target_word(atoms: &[RegexAtom], target: &[u8], min_specific: usize) -> bool {
+    let t_len = target.len();
+    for start_atom in 0..atoms.len() {
+        // dp[pos] = max specific matches reaching target[..pos]
+        let mut dp: Vec<Option<usize>> = vec![None; t_len + 1];
+        dp[0] = Some(0);
+        for atom in &atoms[start_atom..] {
+            let mut next_dp: Vec<Option<usize>> = vec![None; t_len + 1];
+            for (pos, cur_spec_opt) in dp.iter().enumerate() {
+                let Some(cur_spec) = *cur_spec_opt else {
+                    continue;
+                };
+                if atom.min_rep == 0 {
+                    next_dp[pos] = Some(next_dp[pos].map_or(cur_spec, |prev| prev.max(cur_spec)));
+                }
+                for rep in 1..=atom.max_rep {
+                    let next_pos = pos + rep;
+                    if next_pos > t_len {
+                        break;
+                    }
+                    let target_bit = 1u32 << (target[next_pos - 1] - b'a');
+                    if (atom.letter_mask & target_bit) == 0 {
+                        break;
+                    }
+                    if rep >= atom.min_rep {
+                        let gained = if atom.specific { rep } else { 0 };
+                        let cand = cur_spec + gained;
+                        next_dp[next_pos] =
+                            Some(next_dp[next_pos].map_or(cand, |prev| prev.max(cand)));
+                    }
+                }
+            }
+            dp = next_dp;
+            if let Some(spec) = dp[t_len]
+                && spec >= min_specific
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn pattern_targets_word(pattern: &str, target: &str, min_specific: usize) -> bool {
+    let target_lower = target.to_ascii_lowercase();
+    let target_bytes = target_lower.as_bytes();
+    for branch in expand_regex_branches(pattern, 16) {
+        let atoms = parse_regex_atoms(&branch);
+        if atoms_target_word(&atoms, target_bytes, min_specific) {
+            return true;
+        }
+    }
+    false
+}
+
+fn pattern_names_forbidden_identifier(pattern: &str, rule: SubschemaRule<'_>) -> bool {
+    if is_confusable_with_scratchpad(pattern) || pattern_targets_word(pattern, "scratchpad", 7) {
+        return true;
+    }
+    if rule.forbid_notes
+        && (is_confusable_with_notes(pattern, rule.pad_key)
+            || pattern_targets_word(pattern, rule.pad_key, 3))
+    {
+        return true;
+    }
+    false
+}
+
+fn validate_pattern_properties(
     val: &serde_json::Value,
     path: &str,
-    pad_key: &str,
+    rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     let Some(pat_map) = val.as_object() else {
         return Err(RelayError::Usage(format!(
             "response_format '{path}' must be a JSON object"
         )));
     };
+    let child_rule = SubschemaRule {
+        pad_key: rule.pad_key,
+        forbid_notes: rule.forbid_ref,
+        forbid_ref: rule.forbid_ref,
+    };
     for (pat, sub_v) in pat_map {
-        if pattern_names_notes_or_legacy(pat, pad_key) {
+        if pattern_names_forbidden_identifier(pat, rule) {
             return Err(RelayError::Usage(format!(
-                "response_format '{path}' pattern '{pat}' cannot name '{pad_key}' outside top-level 'properties.{pad_key}'"
+                "response_format '{path}' pattern '{pat}' cannot name '{}' outside top-level 'properties.{}'",
+                rule.pad_key, rule.pad_key
             )));
         }
-        validate_subschema_outside_notes(sub_v, &format!("{path}.{pat}"), pad_key)?;
+        validate_subschema(sub_v, &format!("{path}.{pat}"), child_rule)?;
     }
     Ok(())
 }
 
-fn validate_property_names_outside_notes(
+fn validate_property_names(
     val: &serde_json::Value,
     path: &str,
-    pad_key: &str,
+    rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     if let Some(obj) = val.as_object() {
-        if let Some(s) = obj.get("const").and_then(|v| v.as_str())
-            && is_notes_or_legacy_name(s, pad_key)
-        {
-            return Err(RelayError::Usage(format!(
-                "response_format '{path}.const' cannot name '{s}' outside top-level 'properties.{pad_key}'"
-            )));
+        if let Some(s) = obj.get("const").and_then(|v| v.as_str()) {
+            check_schema_identifier(
+                s,
+                rule.pad_key,
+                rule.forbid_notes,
+                false,
+                &format!("response_format '{path}.const'"),
+            )?;
         }
         if let Some(arr) = obj.get("enum").and_then(|v| v.as_array()) {
             for item in arr {
-                if let Some(s) = item.as_str()
-                    && is_notes_or_legacy_name(s, pad_key)
-                {
-                    return Err(RelayError::Usage(format!(
-                        "response_format '{path}.enum' cannot name '{s}' outside top-level 'properties.{pad_key}'"
-                    )));
+                if let Some(s) = item.as_str() {
+                    check_schema_identifier(
+                        s,
+                        rule.pad_key,
+                        rule.forbid_notes,
+                        false,
+                        &format!("response_format '{path}.enum'"),
+                    )?;
                 }
             }
         }
         if let Some(pat) = obj.get("pattern").and_then(|v| v.as_str())
-            && pattern_names_notes_or_legacy(pat, pad_key)
+            && pattern_names_forbidden_identifier(pat, rule)
         {
             return Err(RelayError::Usage(format!(
-                "response_format '{path}.pattern' cannot name '{pad_key}' outside top-level 'properties.{pad_key}'"
+                "response_format '{path}.pattern' cannot name '{}' outside top-level 'properties.{}'",
+                rule.pad_key, rule.pad_key
             )));
         }
     }
-    validate_subschema_outside_notes(val, path, pad_key)
+    validate_subschema(val, path, rule)
 }
 
-fn validate_subschema_outside_notes(
+fn validate_subschema(
     val: &serde_json::Value,
     path: &str,
-    pad_key: &str,
+    rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     match val {
         serde_json::Value::Array(arr) => {
             for (idx, item) in arr.iter().enumerate() {
-                validate_subschema_outside_notes(item, &format!("{path}[{idx}]"), pad_key)?;
+                validate_subschema(item, &format!("{path}[{idx}]"), rule)?;
             }
         }
         serde_json::Value::Object(map) => {
+            let local_props: HashSet<String> = map
+                .get("properties")
+                .and_then(|v| v.as_object())
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            let strict_local_props = map.get("additionalProperties")
+                == Some(&serde_json::Value::Bool(false))
+                && !map.contains_key("patternProperties")
+                && !map.contains_key("$ref");
+            let nested_child_rule = SubschemaRule {
+                pad_key: rule.pad_key,
+                forbid_notes: rule.forbid_ref,
+                forbid_ref: rule.forbid_ref,
+            };
+
             for (k, v) in map {
                 match k.as_str() {
+                    "$ref" => {
+                        validate_ref_value(v, &format!("{path}.$ref"), rule)?;
+                    }
                     "properties" => {
                         let Some(props_obj) = v.as_object() else {
                             return Err(RelayError::Usage(format!(
@@ -672,20 +1496,17 @@ fn validate_subschema_outside_notes(
                             )));
                         };
                         for (prop_k, prop_v) in props_obj {
-                            check_forbidden_notes_alias(
+                            validate_property_key(
                                 prop_k,
-                                pad_key,
+                                rule.pad_key,
+                                rule.forbid_notes,
+                                false,
                                 &format!("response_format '{path}.properties'"),
                             )?;
-                            if prop_k == pad_key {
-                                return Err(RelayError::Usage(format!(
-                                    "response_format '{path}.properties' cannot name '{pad_key}' outside top-level 'properties.{pad_key}'"
-                                )));
-                            }
-                            validate_subschema_outside_notes(
+                            validate_subschema(
                                 prop_v,
                                 &format!("{path}.properties.{prop_k}"),
-                                pad_key,
+                                nested_child_rule,
                             )?;
                         }
                     }
@@ -702,14 +1523,16 @@ fn validate_subschema_outside_notes(
                                     "response_format '{path}.required' must be an array of strings"
                                 )));
                             };
-                            check_forbidden_notes_alias(
+                            check_schema_identifier(
                                 req_s,
-                                pad_key,
+                                rule.pad_key,
+                                rule.forbid_notes,
+                                false,
                                 &format!("response_format '{path}.required'"),
                             )?;
-                            if req_s == pad_key {
+                            if strict_local_props && !local_props.contains(req_s) {
                                 return Err(RelayError::Usage(format!(
-                                    "response_format '{path}.required' cannot name '{pad_key}' outside top-level 'properties.{pad_key}'"
+                                    "response_format '{path}.required' names '{req_s}', which is not defined in '{path}.properties'"
                                 )));
                             }
                             if !seen.insert(req_s) {
@@ -719,48 +1542,74 @@ fn validate_subschema_outside_notes(
                             }
                         }
                     }
-                    "dependentSchemas" | "$defs" | "definitions" => {
+                    "$defs" | "definitions" => {
                         if let Some(sub_map) = v.as_object() {
                             for (sub_k, sub_v) in sub_map {
-                                if is_notes_or_legacy_name(sub_k, pad_key) {
-                                    return Err(RelayError::Usage(format!(
-                                        "response_format '{path}.{k}' cannot name '{sub_k}' outside top-level 'properties.{pad_key}'"
-                                    )));
-                                }
-                                validate_subschema_outside_notes(
+                                check_schema_identifier(
+                                    sub_k,
+                                    rule.pad_key,
+                                    true,
+                                    false,
+                                    &format!("response_format '{path}.{k}'"),
+                                )?;
+                                validate_subschema(
                                     sub_v,
                                     &format!("{path}.{k}.{sub_k}"),
-                                    pad_key,
+                                    nested_child_rule,
+                                )?;
+                            }
+                        }
+                    }
+                    "dependentSchemas" => {
+                        if let Some(sub_map) = v.as_object() {
+                            for (sub_k, sub_v) in sub_map {
+                                check_schema_identifier(
+                                    sub_k,
+                                    rule.pad_key,
+                                    rule.forbid_notes,
+                                    false,
+                                    &format!("response_format '{path}.dependentSchemas'"),
+                                )?;
+                                validate_subschema(
+                                    sub_v,
+                                    &format!("{path}.dependentSchemas.{sub_k}"),
+                                    rule,
                                 )?;
                             }
                         }
                     }
                     "dependentRequired" => {
-                        validate_dependent_required_outside_notes(
+                        validate_dependent_required(
                             v,
                             &format!("{path}.dependentRequired"),
-                            pad_key,
+                            strict_local_props.then_some(&local_props),
+                            rule,
                         )?;
                     }
                     "patternProperties" => {
-                        validate_pattern_properties_outside_notes(
-                            v,
-                            &format!("{path}.patternProperties"),
-                            pad_key,
-                        )?;
+                        validate_pattern_properties(v, &format!("{path}.patternProperties"), rule)?;
                     }
                     "propertyNames" => {
-                        validate_property_names_outside_notes(
-                            v,
-                            &format!("{path}.propertyNames"),
-                            pad_key,
-                        )?;
+                        validate_property_names(v, &format!("{path}.propertyNames"), rule)?;
                     }
                     "default" | "const" | "enum" | "examples" => {
-                        reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), pad_key)?;
+                        reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), rule)?;
+                    }
+                    "items" | "prefixItems" | "additionalItems" | "unevaluatedItems"
+                    | "contains" => {
+                        validate_subschema(v, &format!("{path}.{k}"), nested_child_rule)?;
                     }
                     _ => {
-                        validate_subschema_outside_notes(v, &format!("{path}.{k}"), pad_key)?;
+                        if !is_standard_json_schema_keyword(k) {
+                            check_schema_identifier(
+                                k,
+                                rule.pad_key,
+                                rule.forbid_notes,
+                                false,
+                                &format!("response_format '{path}' keyword"),
+                            )?;
+                        }
+                        validate_subschema(v, &format!("{path}.{k}"), rule)?;
                     }
                 }
             }
@@ -2159,6 +3008,63 @@ fn build_setup_record(
     }
 }
 
+fn check_existing_setup_compatibility(
+    turn_lock: &TurnLock,
+    game_dir: &Path,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    turn_lock.verify_identity(redaction_key)?;
+    let setup_path = game_dir.join("relay").join(SETUP_FILENAME);
+    if !setup_path.exists() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&setup_path).map_err(|e| io_err(&setup_path, e, redaction_key))?;
+    let raw_json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        RelayError::CorruptLog(redact_secrets(
+            &format!("{}: {e}", setup_path.display()),
+            redaction_key,
+        ))
+    })?;
+    let has_non_pinned_field = raw_json
+        .as_object()
+        .is_some_and(|obj| obj.contains_key("non_pinned_model_facing_strings"));
+    let existing: GameSetupRecord = serde_json::from_value(raw_json).map_err(|e| {
+        RelayError::CorruptLog(redact_secrets(
+            &format!("{}: {e}", setup_path.display()),
+            redaction_key,
+        ))
+    })?;
+    if !has_non_pinned_field {
+        let arm_detail = if existing.wording_arm != ACTIVE_WORDING_ARM {
+            format!(
+                " and recorded earlier wording_arm '{}' (active arm is '{}')",
+                existing.wording_arm, ACTIVE_WORDING_ARM
+            )
+        } else {
+            String::new()
+        };
+        return Err(RelayError::IncompatibleSetup(redact_secrets(
+            &format!(
+                "{} predates the 'non_pinned_model_facing_strings' audit record{arm_detail}; start a new --game-dir",
+                setup_path.display()
+            ),
+            redaction_key,
+        )));
+    }
+    if existing.wording_arm != ACTIVE_WORDING_ARM {
+        return Err(RelayError::IncompatibleSetup(redact_secrets(
+            &format!(
+                "{} recorded earlier wording_arm '{}', which is incompatible with active wording_arm '{}'; start a new --game-dir",
+                setup_path.display(),
+                existing.wording_arm,
+                ACTIVE_WORDING_ARM
+            ),
+            redaction_key,
+        )));
+    }
+    Ok(())
+}
+
 fn ensure_game_setup(
     turn_lock: &TurnLock,
     config: &TurnConfig,
@@ -2175,12 +3081,38 @@ fn ensure_game_setup(
     if setup_path.exists() {
         let raw =
             fs::read_to_string(&setup_path).map_err(|e| io_err(&setup_path, e, redaction_key))?;
-        let existing: GameSetupRecord = serde_json::from_str(&raw).map_err(|e| {
+        let raw_json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
             RelayError::CorruptLog(redact_secrets(
                 &format!("{}: {e}", setup_path.display()),
                 redaction_key,
             ))
         })?;
+        let has_non_pinned_field = raw_json
+            .as_object()
+            .is_some_and(|obj| obj.contains_key("non_pinned_model_facing_strings"));
+        let existing: GameSetupRecord = serde_json::from_value(raw_json).map_err(|e| {
+            RelayError::CorruptLog(redact_secrets(
+                &format!("{}: {e}", setup_path.display()),
+                redaction_key,
+            ))
+        })?;
+        if !has_non_pinned_field {
+            let arm_detail = if existing.wording_arm != desired.wording_arm {
+                format!(
+                    " and recorded earlier wording_arm '{}' (active arm is '{}')",
+                    existing.wording_arm, desired.wording_arm
+                )
+            } else {
+                String::new()
+            };
+            return Err(RelayError::IncompatibleSetup(redact_secrets(
+                &format!(
+                    "{} predates the 'non_pinned_model_facing_strings' audit record{arm_detail}; start a new --game-dir",
+                    setup_path.display()
+                ),
+                redaction_key,
+            )));
+        }
         if existing.memory_mode != desired.memory_mode {
             return Err(RelayError::Usage(format!(
                 "game setup recorded memory_mode '{}' in {}, refusing turn with '{}'",
@@ -2200,11 +3132,14 @@ fn ensure_game_setup(
             )));
         }
         if existing.wording_arm != desired.wording_arm {
-            return Err(RelayError::Usage(format!(
-                "game setup recorded wording_arm '{}' in {}, refusing '{}'",
-                existing.wording_arm,
-                setup_path.display(),
-                desired.wording_arm
+            return Err(RelayError::IncompatibleSetup(redact_secrets(
+                &format!(
+                    "{} recorded earlier wording_arm '{}', which is incompatible with active wording_arm '{}'; start a new --game-dir",
+                    setup_path.display(),
+                    existing.wording_arm,
+                    desired.wording_arm
+                ),
+                redaction_key,
             )));
         }
         if existing.response_schema_name != desired.response_schema_name
@@ -3428,6 +4363,7 @@ pub fn run_turn(
     }
 
     let turn_lock = TurnLock::acquire(&config.game_dir, redaction_key)?;
+    check_existing_setup_compatibility(&turn_lock, &config.game_dir, redaction_key)?;
 
     let wrapper_text = match &config.wrapper_path {
         Some(path) => Some(fs::read_to_string(path).map_err(|e| io_err(path, e, redaction_key))?),
