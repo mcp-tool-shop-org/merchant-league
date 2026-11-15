@@ -366,6 +366,8 @@ pub struct GradedMandateCard {
     /// Objective rule evaluated at terminal Turn `T`.
     pub kind: MandateKind,
     /// Playtest completion rate (`0..=10_000 bps`) used to grade card difficulty.
+    /// Uncalibrated placeholder difficulty estimate in basis points (`0..=10_000`) used to
+    /// size provisional completion bonuses until empirical playtest calibration replaces these values.
     pub difficulty_completion_bps: Bps,
     /// Irreversible equity bonus (`3_000..=8_000`, i.e., `3–8 VP`) granted upon completion.
     pub bonus_equity: Units,
@@ -383,6 +385,10 @@ pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
 /// Builds the canonical 8-card graded mandate deck for `seat_count` (`4..=6`), covering all
 /// [`MandateKind`] variants with monopoly-safe thresholds (`max_safe = seat_count - 2`) and
 /// bonuses spanning `3_000..=8_000` (`3–8 VP`).
+///
+/// Provisional default deck (`F3`): the current `difficulty_completion_bps` numbers on these
+/// cards are uncalibrated placeholders derived for structural balance only until empirical
+/// playtest calibration replaces them.
 #[must_use]
 pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
     let max_safe = seat_count.saturating_sub(2).max(1);
@@ -441,18 +447,102 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
         .collect()
 }
 
-/// Deterministically shuffles `deck` and deals one [`MandateReveal`] and [`CommitmentHash`] per seat.
+/// Sealed initial charter-mandate deal generated from fresh 256-bit OS CSPRNG entropy.
+///
+/// `deal_seed` shuffles the candidate deck independently of any public replay RNG `seed: u64`,
+/// and each seat receives an independent 256-bit OS-drawn [`RevealSalt`] in `seat_reveals`.
+/// Raw entropy and per-seat secrets are redacted in `Debug` output (`CLAUDE.md` invariant).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SealedMandateDeal {
+    /// Fresh 256-bit shuffle entropy drawn independently of any table replay `seed`.
+    #[serde(with = "hex32")]
+    pub deal_seed: [u8; 32],
+    /// Ordered private mandate reveals for seats `0..seat_count`.
+    pub seat_reveals: Vec<MandateReveal>,
+}
+
+impl fmt::Debug for SealedMandateDeal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SealedMandateDeal")
+            .field("deal_seed", &"[REDACTED]")
+            .field("seat_reveals_len", &self.seat_reveals.len())
+            .finish()
+    }
+}
+
+/// Maps a 32-byte digest into `[0, upper_exclusive)` using `u64` modulo reduction
+/// before narrowing to `usize`, guaranteeing identical selection on 32-bit and 64-bit targets.
+///
+/// # Panics
+/// Panics if `upper_exclusive == 0`.
+#[must_use]
+pub fn width_independent_index(digest: [u8; 32], upper_exclusive: usize) -> usize {
+    assert!(upper_exclusive > 0, "upper_exclusive must be non-zero");
+    let mut le = [0u8; 8];
+    le.copy_from_slice(&digest[0..8]);
+    let bound = u64::try_from(upper_exclusive).unwrap_or(u64::MAX);
+    let idx_u64 = u64::from_le_bytes(le) % bound;
+    usize::try_from(idx_u64).unwrap_or(0)
+}
+
+fn draw_nonzero_256_bits() -> Result<[u8; 32], EngineError> {
+    for _ in 0..8 {
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).map_err(|err| {
+            EngineError::InvalidOrder(format!("OS CSPRNG failure drawing 256 bits: {err}"))
+        })?;
+        if bytes != [0u8; 32] {
+            return Ok(bytes);
+        }
+    }
+    Err(EngineError::InvalidOrder(
+        "OS CSPRNG returned all-zero 256-bit block after 8 attempts".to_owned(),
+    ))
+}
+
+/// Shuffles `deck` with fresh 256-bit OS CSPRNG entropy (`deal_seed` and per-seat [`RevealSalt`]s)
+/// and deals one [`CommitmentHash`] and [`MandateReveal`] per seat (`M3`).
+///
+/// Never derives mandate order or salts from a table's public replay RNG `seed: u64`.
 pub fn deal_graded_mandates(
     table_id: TableId,
     seat_count: u8,
-    seed: u64,
     deck: &[GradedMandateCard],
-) -> Result<(Vec<CommitmentHash>, Vec<MandateReveal>), EngineError> {
+) -> Result<(Vec<CommitmentHash>, SealedMandateDeal), EngineError> {
+    let n = usize::from(seat_count);
+    let deal_seed = draw_nonzero_256_bits()?;
+    let mut seat_salts = Vec::with_capacity(n);
+    for _ in 0..n {
+        seat_salts.push(RevealSalt(draw_nonzero_256_bits()?));
+    }
+    deal_graded_mandates_with_entropy(table_id, seat_count, deal_seed, &seat_salts, deck)
+}
+
+/// Deterministically shuffles `deck` and deals one [`CommitmentHash`] and [`MandateReveal`] per
+/// seat from caller-supplied 256-bit `deal_seed` and per-seat `seat_salts`.
+pub fn deal_graded_mandates_with_entropy(
+    table_id: TableId,
+    seat_count: u8,
+    deal_seed: [u8; 32],
+    seat_salts: &[RevealSalt],
+    deck: &[GradedMandateCard],
+) -> Result<(Vec<CommitmentHash>, SealedMandateDeal), EngineError> {
     let n = usize::from(seat_count);
     if !(4..=6).contains(&seat_count) || deck.len() < n {
         return Err(EngineError::InvalidConfig(format!(
             "invalid mandate deal config: seat_count={seat_count}, deck_len={}",
             deck.len()
+        )));
+    }
+    if deal_seed == [0u8; 32] {
+        return Err(EngineError::InvalidConfig(
+            "degenerate all-zero mandate deal_seed is forbidden".to_owned(),
+        ));
+    }
+    if seat_salts.len() != n {
+        return Err(EngineError::InvalidConfig(format!(
+            "expected {n} mandate seat_salts, got {}",
+            seat_salts.len()
         )));
     }
     for card in deck {
@@ -470,41 +560,63 @@ pub fn deal_graded_mandates(
     for i in (1..indices.len()).rev() {
         let mut hasher = Sha256::new();
         hasher.update(b"league-core/mandate-deal/v2");
-        hasher.update(seed.to_le_bytes());
+        hasher.update(deal_seed);
         hasher.update(table_id.0.to_le_bytes());
-        hasher.update((i as u32).to_le_bytes());
+        hasher.update(u64::try_from(i).unwrap_or(u64::MAX).to_le_bytes());
         let digest: [u8; 32] = hasher.finalize().into();
-        let mut le = [0u8; 8];
-        le.copy_from_slice(&digest[0..8]);
-        let j = (u64::from_le_bytes(le) as usize) % (i + 1);
+        let j = width_independent_index(digest, i + 1);
         indices.swap(i, j);
     }
 
     let mut commits = Vec::with_capacity(n);
     let mut reveals = Vec::with_capacity(n);
     for (seat_idx, &card_idx) in indices.iter().take(n).enumerate() {
+        let salt = &seat_salts[seat_idx];
+        salt.validate().map_err(|err| {
+            EngineError::InvalidConfig(format!("invalid salt for seat {seat_idx}: {err}"))
+        })?;
         let card = deck[card_idx];
-        let mut hasher = Sha256::new();
-        hasher.update(b"league-core/mandate-salt/v2");
-        hasher.update(seed.to_le_bytes());
-        hasher.update(table_id.0.to_le_bytes());
-        hasher.update([seat_idx as u8]);
-        let mut salt: [u8; 32] = hasher.finalize().into();
-        if salt.iter().all(|&b| b == 0) {
-            salt[0] = 1;
-        }
+        let seat = u8::try_from(seat_idx).unwrap_or(0);
         let reveal = MandateReveal {
             mandate: PrivateMandate {
                 kind: card.kind,
                 bonus_equity: card.bonus_equity,
             },
-            salt: RevealSalt(salt),
+            salt: salt.clone(),
         };
-        let commit = compute_mandate_commitment(table_id, Seat(seat_idx as u8), &reveal)?;
+        let commit = compute_mandate_commitment(table_id, Seat(seat), &reveal)?;
         commits.push(commit);
         reveals.push(reveal);
     }
-    Ok((commits, reveals))
+    Ok((
+        commits,
+        SealedMandateDeal {
+            deal_seed,
+            seat_reveals: reveals,
+        },
+    ))
+}
+
+/// Verifies that `deal` reproduces `expected_commits` and the shuffled card assignments under
+/// `deck`.
+pub fn verify_sealed_mandate_deal(
+    table_id: TableId,
+    seat_count: u8,
+    deck: &[GradedMandateCard],
+    expected_commits: &[CommitmentHash],
+    deal: &SealedMandateDeal,
+) -> Result<bool, EngineError> {
+    let n = usize::from(seat_count);
+    if expected_commits.len() != n || deal.seat_reveals.len() != n {
+        return Ok(false);
+    }
+    let salts: Vec<RevealSalt> = deal.seat_reveals.iter().map(|r| r.salt.clone()).collect();
+    let Ok((recomputed_commits, recomputed_deal)) =
+        deal_graded_mandates_with_entropy(table_id, seat_count, deal.deal_seed, &salts, deck)
+    else {
+        return Ok(false);
+    };
+    Ok(recomputed_commits == expected_commits && recomputed_deal == *deal)
 }
 
 #[must_use]
@@ -638,9 +750,130 @@ pub fn break_tie_with_beacon(beacon: [u8; 32], domain_tag: &[u8], tied: &[u8]) -
             hasher.update(domain_tag);
             hasher.update(beacon);
             let digest: [u8; 32] = hasher.finalize().into();
-            let mut le = [0u8; 8];
-            le.copy_from_slice(&digest[0..8]);
-            tied[(u64::from_le_bytes(le) as usize) % tied.len()]
+            tied[width_independent_index(digest, tied.len())]
         }
     }
+}
+
+/// League of Entropy drand `quicknet` genesis Unix timestamp (`2023-08-23T15:09:27Z`).
+pub const DRAND_QUICKNET_GENESIS_UNIX: u64 = 1_692_803_367;
+
+/// League of Entropy drand `quicknet` beacon cadence in seconds.
+pub const DRAND_QUICKNET_PERIOD_SECS: u64 = 3;
+
+/// Expected byte length of a compressed BLS12-381 G1 drand `quicknet` signature.
+pub const DRAND_QUICKNET_SIGNATURE_BYTES: usize = 48;
+
+/// Pre-named turn close schedule used in `ExternalDrand` tables so every turn's round number is
+/// fixed deterministically before cards are dealt (`design-v2` §6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrandSchedule {
+    /// Scheduled Unix timestamp (UTC seconds) at which Turn 1 closes.
+    pub turn_1_close_unix: u64,
+    /// Seconds elapsed between consecutive turn close timestamps (must be `>= 1`).
+    pub turn_period_secs: u64,
+}
+
+impl DrandSchedule {
+    /// Validates that the schedule lies on or after drand `quicknet` genesis and has positive period.
+    pub fn validate(&self) -> Result<(), EngineError> {
+        if self.turn_period_secs == 0 {
+            return Err(EngineError::InvalidConfig(
+                "DrandSchedule turn_period_secs must be >= 1".to_owned(),
+            ));
+        }
+        if self.turn_1_close_unix < DRAND_QUICKNET_GENESIS_UNIX {
+            return Err(EngineError::InvalidConfig(format!(
+                "DrandSchedule turn_1_close_unix ({}) precedes quicknet genesis ({DRAND_QUICKNET_GENESIS_UNIX})",
+                self.turn_1_close_unix
+            )));
+        }
+        let _ = self.close_unix_for_turn(Turn(u8::MAX))?;
+        Ok(())
+    }
+
+    /// Computes the scheduled close Unix timestamp for `turn` (`>= 1`).
+    pub fn close_unix_for_turn(&self, turn: Turn) -> Result<u64, EngineError> {
+        if turn.0 == 0 {
+            return Err(EngineError::InvalidConfig(
+                "turn must be >= 1 for DrandSchedule".to_owned(),
+            ));
+        }
+        let delta = u64::from(turn.0 - 1)
+            .checked_mul(self.turn_period_secs)
+            .ok_or_else(|| {
+                EngineError::InvalidConfig("DrandSchedule timestamp overflow".to_owned())
+            })?;
+        self.turn_1_close_unix.checked_add(delta).ok_or_else(|| {
+            EngineError::InvalidConfig("DrandSchedule timestamp overflow".to_owned())
+        })
+    }
+
+    /// Returns the expected drand `quicknet` round for `turn` per `design-v2` §6.1.
+    pub fn expected_round_for_turn(&self, turn: Turn) -> Result<u64, EngineError> {
+        let close_unix = self.close_unix_for_turn(turn)?;
+        drand_quicknet_round_for_close(close_unix)
+    }
+}
+
+/// Maps a Unix close timestamp (seconds) to its League of Entropy drand `quicknet` round number
+/// per `design-v2` §6.1: `floor((close - 1692803367) / 3) + 1`.
+pub fn drand_quicknet_round_for_close(close_unix_secs: u64) -> Result<u64, EngineError> {
+    if close_unix_secs < DRAND_QUICKNET_GENESIS_UNIX {
+        return Err(EngineError::InvalidOrder(format!(
+            "close timestamp {close_unix_secs} precedes drand quicknet genesis {DRAND_QUICKNET_GENESIS_UNIX}"
+        )));
+    }
+    Ok((close_unix_secs - DRAND_QUICKNET_GENESIS_UNIX) / DRAND_QUICKNET_PERIOD_SECS + 1)
+}
+
+/// Derives the 32-byte turn randomness beacon as `SHA-256(drand_signature)` (`design-v2` §6.1).
+///
+/// **Deferred verification notice:** BLS12-381 pairing verification against the League of Entropy
+/// `quicknet` chain public key follows in the live oracle/harness layer. As a result, this helper
+/// and replay logs using `ExternalDrand` guarantee internal log self-consistency (`turn_beacon ==
+/// SHA-256(drand_signature)` on the scheduled `drand_round`), not yet cryptographic authentication
+/// against the quicknet chain key inside `league-core`.
+pub fn derive_drand_beacon(drand_signature: &[u8]) -> Result<[u8; 32], EngineError> {
+    if drand_signature.len() != DRAND_QUICKNET_SIGNATURE_BYTES {
+        return Err(EngineError::InvalidOrder(format!(
+            "drand quicknet signature must be {DRAND_QUICKNET_SIGNATURE_BYTES} bytes, got {}",
+            drand_signature.len()
+        )));
+    }
+    if drand_signature.iter().all(|&b| b == 0) {
+        return Err(EngineError::InvalidOrder(
+            "degenerate all-zero drand signature is forbidden".to_owned(),
+        ));
+    }
+    Ok(Sha256::digest(drand_signature).into())
+}
+
+/// Validates an `ExternalDrand` turn beacon against a pre-named `DrandSchedule`, confirming
+/// `drand_round == expected_round_for_turn(turn)` and `expected_beacon == SHA-256(drand_signature)`.
+///
+/// See [`derive_drand_beacon`] regarding deferred BLS12-381 signature authentication.
+pub fn verify_drand_quicknet_beacon(
+    schedule: &DrandSchedule,
+    turn: Turn,
+    drand_round: u64,
+    drand_signature: &[u8],
+    expected_beacon: [u8; 32],
+) -> Result<(), EngineError> {
+    schedule.validate()?;
+    let expected_round = schedule.expected_round_for_turn(turn)?;
+    if drand_round != expected_round {
+        return Err(EngineError::InvalidOrder(format!(
+            "turn {} expected drand quicknet round {expected_round}, got {drand_round}",
+            turn.0
+        )));
+    }
+    let derived = derive_drand_beacon(drand_signature)?;
+    if derived != expected_beacon {
+        return Err(EngineError::InvalidOrder(format!(
+            "turn {} turn_beacon does not equal SHA-256(drand_signature)",
+            turn.0
+        )));
+    }
+    Ok(())
 }

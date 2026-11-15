@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "927aa7c834b73fafe616391880f6f7920f923f1737f898be5d5bc7aa05615a11",
+          "hash": "812aa2f606672505fb4e8ccc7301334664721f8a579bc8deb6a2d6685781d175",
           "path": "docs/design-v2.md"
         },
         {
@@ -345,7 +345,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "c6902d6dc99fdfe9d1e8772aa2c2d9761492d9c9d6acc080b6876f43fa33b0b7",
+          "hash": "2c249c420796ed22ef016d63a05be31e240eebe1f6135c2b43cd5162ea7f1fc9",
           "path": "crates/league-core/Cargo.toml"
         },
         {
@@ -357,12 +357,18 @@
             "compute_order_commitment",
             "compute_preimage_condition",
             "deal_graded_mandates",
+            "deal_graded_mandates_with_entropy",
             "default_graded_mandate_deck",
+            "derive_drand_beacon",
             "derive_turn_beacon",
+            "drand_quicknet_round_for_close",
             "raw_zero_preimage_condition_hash",
+            "verify_drand_quicknet_beacon",
             "verify_mandate_reveal",
             "verify_order_reveal",
-            "verify_preimage_condition"
+            "verify_preimage_condition",
+            "verify_sealed_mandate_deal",
+            "width_independent_index"
           ],
           "failurePaths": [
             {
@@ -401,32 +407,87 @@
               "line": 333
             },
             {
-              "in": "deal_graded_mandates",
+              "in": "draw_nonzero_256_bits",
               "kind": "err",
-              "line": 453
+              "line": 498
             },
             {
-              "in": "deal_graded_mandates",
+              "in": "deal_graded_mandates_with_entropy",
               "kind": "err",
-              "line": 462
+              "line": 532
+            },
+            {
+              "in": "deal_graded_mandates_with_entropy",
+              "kind": "err",
+              "line": 538
+            },
+            {
+              "in": "deal_graded_mandates_with_entropy",
+              "kind": "err",
+              "line": 543
+            },
+            {
+              "in": "deal_graded_mandates_with_entropy",
+              "kind": "err",
+              "line": 552
             },
             {
               "in": "verify_preimage_condition",
               "kind": "err",
-              "line": 535
+              "line": 647
             },
             {
               "in": "verify_order_reveal",
               "kind": "err",
-              "line": 570
+              "line": 682
             },
             {
               "in": "verify_mandate_reveal",
               "kind": "err",
-              "line": 603
+              "line": 715
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 781
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 786
+            },
+            {
+              "in": "close_unix_for_turn",
+              "kind": "err",
+              "line": 798
+            },
+            {
+              "in": "drand_quicknet_round_for_close",
+              "kind": "err",
+              "line": 823
+            },
+            {
+              "in": "derive_drand_beacon",
+              "kind": "err",
+              "line": 839
+            },
+            {
+              "in": "derive_drand_beacon",
+              "kind": "err",
+              "line": 845
+            },
+            {
+              "in": "verify_drand_quicknet_beacon",
+              "kind": "err",
+              "line": 866
+            },
+            {
+              "in": "verify_drand_quicknet_beacon",
+              "kind": "err",
+              "line": 873
             }
           ],
-          "hash": "2096409b92db55a4f27b96f22d7ae3951dd733897665c7178f337d4ef7dfa584",
+          "hash": "fd6a7014bb846bc41379e6412cb4c37b879b7c848c046a167ca8cd069fbcaf2b",
           "importsFiles": [
             "crates/league-core/src/types.rs"
           ],
@@ -471,280 +532,295 @@
             {
               "in": "deserialize",
               "kind": "err",
-              "line": 50
+              "line": 51
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 507
+              "line": 508
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 517
+              "line": 518
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 523
+              "line": 524
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 526
+              "line": 527
             },
             {
               "in": "apply_market_action",
               "kind": "err",
-              "line": 535
+              "line": 536
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 564
+              "line": 565
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 594
+              "line": 595
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 599
+              "line": 600
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 618
+              "line": 619
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 632
+              "line": 633
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 647
+              "line": 648
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 654
+              "line": 655
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 661
+              "line": 662
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 676
+              "line": 677
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 681
+              "line": 682
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 700
+              "line": 701
             },
             {
               "in": "advance_to_commit",
               "kind": "err",
-              "line": 716
+              "line": 717
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 731
+              "line": 732
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 737
+              "line": 738
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 742
+              "line": 743
             },
             {
               "in": "advance_to_reveal",
               "kind": "err",
-              "line": 751
+              "line": 752
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 766
+              "line": 771
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 772
+              "line": 777
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 781
+              "line": 786
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 784
+              "line": 789
             },
             {
               "in": "preview_bundle_with_context",
               "kind": "err",
-              "line": 825
+              "line": 830
             },
             {
               "in": "preview_bundle_with_context",
               "kind": "match-err",
-              "line": 850
+              "line": 855
             },
             {
               "in": "preview_bundle_with_context",
               "kind": "err",
-              "line": 855
+              "line": 860
+            },
+            {
+              "in": "sweep_turn_with_drand",
+              "kind": "err",
+              "line": 969
+            },
+            {
+              "in": "sweep_turn_with_drand",
+              "kind": "err",
+              "line": 974
             },
             {
               "in": "sweep_turn_detailed",
               "kind": "err",
-              "line": 957
+              "line": 994
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1074
+              "line": 1111
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1085
+              "line": 1124
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1091
+              "line": 1131
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1100
+              "line": 1140
             },
             {
               "in": "finalize_season",
               "kind": "err",
-              "line": 1112
+              "line": 1152
             },
             {
               "in": "ensure_seat",
               "kind": "err",
-              "line": 1125
+              "line": 1165
             },
             {
               "in": "ensure_valid_asset",
               "kind": "err",
-              "line": 1134
+              "line": 1174
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1141
+              "line": 1181
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1145
+              "line": 1185
             },
             {
               "in": "adjust_free_balance",
               "kind": "err",
-              "line": 1243
+              "line": 1283
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1267
+              "line": 1307
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1272
+              "line": 1312
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1290
+              "line": 1330
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1297
+              "line": 1337
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 1480
+              "line": 1520
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 1484
+              "line": 1524
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 1502
+              "line": 1542
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 1509
+              "line": 1549
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 1516
+              "line": 1556
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 1523
+              "line": 1563
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 1534
+              "line": 1574
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 1583
+              "line": 1623
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 1589
+              "line": 1629
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 1594
+              "line": 1634
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 1599
+              "line": 1639
+            },
+            {
+              "in": "step2_settle_atomic_swaps",
+              "kind": "err",
+              "line": 1965
             }
           ],
-          "hash": "3a31b5393bab3e4336cfd577005d7cd6f02e571b1ad12e3401df36f0c08af0b5",
+          "hash": "2477c41e06072daee1731b861c9f8f3b8db3e828c6d6a436fd3ab4bf750f5787",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -755,7 +831,7 @@
           "testsInside": true
         },
         {
-          "hash": "f7d3508090e2af6eb7624fccb54611c4c6b8d4901a306f6234f26684453576ff",
+          "hash": "963f0840d3e93aee9eccdfb690bc9e3cdaf7fdbd7e3953b6d0ce775f62f75082",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -775,27 +851,17 @@
             {
               "in": "replay_season",
               "kind": "err",
-              "line": 77
+              "line": 91
             },
             {
               "in": "replay_season",
               "kind": "err",
-              "line": 87
+              "line": 102
             },
             {
               "in": "replay_season",
               "kind": "err",
-              "line": 98
-            },
-            {
-              "in": "replay_season",
-              "kind": "err",
-              "line": 105
-            },
-            {
-              "in": "replay_season",
-              "kind": "err",
-              "line": 116
+              "line": 109
             },
             {
               "in": "replay_season",
@@ -805,20 +871,45 @@
             {
               "in": "replay_season",
               "kind": "err",
-              "line": 130
+              "line": 135
             },
             {
               "in": "replay_season",
               "kind": "err",
-              "line": 136
+              "line": 142
+            },
+            {
+              "in": "replay_season",
+              "kind": "err",
+              "line": 153
             },
             {
               "in": "replay_season",
               "kind": "err",
               "line": 161
+            },
+            {
+              "in": "replay_season",
+              "kind": "err",
+              "line": 167
+            },
+            {
+              "in": "replay_season",
+              "kind": "err",
+              "line": 173
+            },
+            {
+              "in": "replay_season",
+              "kind": "err",
+              "line": 179
+            },
+            {
+              "in": "replay_season",
+              "kind": "err",
+              "line": 210
             }
           ],
-          "hash": "4210b2b4fdaf8df857b3fd717b2eee7a778b72b4b44584e1905819de815c8b04",
+          "hash": "8bfabf1caebda077f7d8925fcb1b1fea8f4c949e82fa21641d368695eca8bb70",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -841,10 +932,10 @@
             {
               "in": "compute_final_scoreboard",
               "kind": "err",
-              "line": 290
+              "line": 304
             }
           ],
-          "hash": "acb3fe06e3c68c03271fdd0b002c88583c84d5d7087206a87328385ef636ba7a",
+          "hash": "a6055ef3db46b3d875d4f2a4fc0c9112f2b5b88f5db7383c3ee3816820f1d9cf",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -878,107 +969,112 @@
             {
               "in": "validate",
               "kind": "err",
-              "line": 381
+              "line": 384
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 388
+              "line": 391
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 397
+              "line": 400
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 404
+              "line": 407
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 411
+              "line": 414
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 420
+              "line": 423
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 434
+              "line": 437
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 440
+              "line": 443
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 446
+              "line": 450
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 458
+              "line": 459
             },
             {
-              "in": "standard_chiral_ring_with_mandates",
+              "in": "validate",
               "kind": "err",
-              "line": 476
+              "line": 471
+            },
+            {
+              "in": "build_chiral_ring_spec_with_deal",
+              "kind": "err",
+              "line": 539
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 602
+              "line": 663
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 612
+              "line": 673
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 617
+              "line": 678
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 625
+              "line": 686
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 630
+              "line": 691
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 641
+              "line": 702
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 648
+              "line": 709
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 653
+              "line": 714
             }
           ],
-          "hash": "049c63d92f92af5bc25ffb40bf8e138924c8aa70c81d1153902965475af03768",
+          "hash": "50f6f6618aaca0ec18b0facb4aa81b701fa0312ce04f43865927631eb85f8d86",
           "importsFiles": [
             "crates/league-core/src/commit.rs"
           ],
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "eff689d09590a9f2fec92bdf74ff86e9baf8800f6ca4619b2f6ab19d10d49c8f",
+          "hash": "6c606995faa94a7a552862a51f6e3c56db02a97b6b18f52beae58b88b1e49339",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1826,7 +1922,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "0b2b55358491f88634a60ee7f73133e581d3a642764e5e737e1b3460d5554b9f",
+          "hash": "4273ac14066e7bf9c9b04afb5c255bfc5d8a3a12c2d66e97d591da06071a7da4",
           "path": "CHANGELOG.md"
         },
         {
@@ -1834,7 +1930,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "5c314ae77494fd7223184a111434f2e54442a0b900faabf0bdd88a85d513eef2",
+          "hash": "dc008ca6fbc4ad1fc0c2b9dd43082b23a328cc5a1beee56ec769b9f8150fa3e4",
           "path": "Cargo.lock"
         },
         {
@@ -2503,7 +2599,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "eb74411fb7e03940b5105ac5ba472483b512eaff",
+    "commit": "dc929160f6cb0b9657b77d85eafbc9909bfe5967",
     "tracked": 488
   },
   "landings": [

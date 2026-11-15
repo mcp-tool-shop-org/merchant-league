@@ -109,7 +109,7 @@ Sequential turns impose an $(N-1)/N$ waiting penalty and let backward induction 
   - Council election and tariff votes (Turns 4, 8, 12, 16, 20, 24).
 - **On-ledger commit-reveal primitive:** Lock 1 drop (or deal collateral) in `EscrowCreate` with `Condition = PREIMAGE-SHA-256` and a salted SHA-256 digest in `Memos` ($\le 1\text{ KB}$), then reveal by submitting `EscrowFinish` with `Fulfillment` (paying the elevated XRPL fulfillment fee floor, $\ge 330$ drops) at the reveal gate. Pure-state simulation (Part 3) models the identical `(commitment_hash, reveal_payload, salt)` envelope deterministically with no ledger I/O.
 - **Standing Regent Delegation (`PermissionDelegationV1_1`):** To prevent absent humans ("Civil Disorder") from starving downstream ring neighbors of $R_i$ or $M_i$, each human seat may pre-authorize a scoped **Standing Regent Agent** via XRPL `DelegateSet` (`PermissionDelegationV1_1`) without exposing its master seed. The Regent is strictly scoped by a 3-slider player Doctrine (risk tolerance, minimum conversion reserve, maximum credit spread) to run upkeep converters, cash maturing Checks/Escrows, and maintain standing quotes. After **3 consecutive missed turn cutoffs**, the seat converts cleanly to a disclosed `SEAT_AI_SYNDICATE` seat.
-- **Non-reveal penalty (EIP-4399 rule):** Any seat that fails to submit a valid reveal matching its Phase 2 commitment forfeits its sealed discretionary actions for that turn (falling back to Regent/hold defaults where eligible) and **never triggers a table re-roll**.
+- **Non-reveal penalty (EIP-4399 + `T4` ruling, `2026-11-15`):** Any seat that fails to submit a valid reveal matching its Phase 2 commitment forfeits its sealed discretionary actions for that turn and **never triggers a table re-roll**. Under Director ruling `T4` (`2026-11-15`), Standing Regent fallback applies **only** to seats that never submitted a Phase 2 commitment on that turn; committed non-revealers receive neither discretionary actions nor Regent execution.
 
 ### Phase 3: Deterministic Resolution Sweep ("Sweep")
 
@@ -160,7 +160,7 @@ Every seat $i$ maximizes continuous **Total Equity** at terminal turn $T \in [24
 $$\text{Total Equity}_i(T) = \text{Project Equity}_i(T) + \text{Net Asset Equity}_i(T) + \text{Mandate Bonus}_i(T)$$
 - **Project Equity:** Irreversible points earned by consuming Tier-3 Refined bundles at Authority during Turns `1` through $T$.
 - **Net Asset Equity ($\Phi_i(T)$):** Fundamental mark-to-market value of remaining `CRED`, Raw/Refined commodities (valued at converter/upkeep fundamental shadow parity rather than thin last-turn spot quotes so late wash trades cannot inflate marks), plus collectible collateralized `TokenEscrow` receivables, **minus** unpaid `CRED` auto-debt and outstanding `CheckCreate` credit liabilities.
-- **Private Charter Mandates:** On Turn 1, each seat commits a SHA-256 hash of its dealt secret Charter Mandates (graded asymmetric endgame objective weights/bonuses). Revealing a valid mandate at close adds its bonus; an unrevealed mandate scores `0`.
+- **Private Charter Mandates (`T5` ruling `2026-11-15`, `M3`):** Each table publishes a graded mandate deck carrying objective cards and bank-awarded bonuses between `3` and `8` VP (`3_000..=8_000` equity milli-units; `1 VP = 1.000` equity unit, pending Director confirmation; current default difficulty estimates are provisional placeholders until calibrated from test games). Before Turn 1 opens, Steward draws fresh 256-bit OS CSPRNG entropy (`deal_seed` and independent per-seat salts, never derived from any public replay `seed`) to deal one unique deck card without replacement to each seat and publishes the resulting `dealt_mandate_commits` in `TableSpec`. A Turn-1 `submit_mandate_commitment` echo is optional (if omitted, verification uses the public dealt commitment); revealing the matching card and salt at Season Close credits its bank bonus, while an unrevealed mandate scores `0`.
 
 Because every marginal unit of Equity increases final standing and score, trailing seats retain constructive trading incentives through the final turn: punishing a traitor is priced as rational deterrence rather than zero-cost "dead-player" kingmaking.
 
@@ -174,13 +174,17 @@ where $\Phi_i(s_t)$ is Seat $i$'s fundamental mark-to-market Net Equity at state
 
 ## 5. Politics: Tariffs, Cartels, and Rotating Institutional Charters
 
-### 5.1 Quadrennial Council Elections (Every 4 Turns: Turns 4, 8, 12, 16, 20, 24)
+### 5.1 Quadrennial Council Elections (Every 4 Turns: Turns 4, 8, 12, 16, 20, 24; `T1–T3` ruling `2026-11-15`, `M1`)
 
-Seats vote simultaneously in Phase 2 (weighted by rule-defined franchise—equal seat vote or Project-Equity/credit-gated franchise as parameterized by the chapter pack) to fill two political offices for the next 4-turn term:
+Candidates may file a Phase-1 `StandForOffice` platform specifying proposed export tariffs (`0%` to `35%`) and cartel domain admissions or revocations prior to the vote. Seats vote simultaneously in Phase 2 (weighted by rule-defined franchise—equal seat vote or Project-Equity/credit-gated franchise as parameterized by the chapter pack) to fill two political offices for the next 4-turn term:
 1. **Trade Minister (Tariff Authority):** Sets per-commodity export tariffs (`0%` to `35%`) applied on-ledger by Authority via issuer `AccountSet` `TransferRate`. Tariffs tax external settlement flows and transfer tariff incidence between net exporters and importers without blocking trade altogether.
-2. **Cartel Chairs (Bloc Governance):** Govern cartel trade blocs implemented on-ledger via `PermissionedDomainSet` (`1` to `10` `AcceptedCredentials`) and `PermissionedDEX` (`OfferCreate` carrying `DomainID`).
+2. **Cartel Chairs (Bloc Governance):** Zero seats belong to any cartel at table start (`T1`); elected Cartel Chairs found and govern cartel trade blocs implemented on-ledger via `PermissionedDomainSet` (`1` to `10` `AcceptedCredentials`) and `PermissionedDEX` (`OfferCreate` carrying `DomainID`).
    - Within a cartel domain, members trade at reduced or zero bloc tariff surcharges without crossing open-book offers.
    - **Instant Embargo (`CredentialDelete`):** A Cartel Chair (or council majority rule) can revoke a target seat's cartel credential via `CredentialDelete`, immediately invalidating that rival's resting domain offers (`tecNO_PERMISSION`) on subsequent fills.
+
+Under Director rulings `T1–T3` (`2026-11-15`) and engine enforcement (`M1`):
+- **Platform enactment (`T3`, `M1`):** A `StandForOffice` platform takes effect when that candidate wins an office with at least `1` vote, even if the winning candidate abstained from casting a Phase-2 ballot (`T3`). Zero-vote elections retain the existing officer indices without enacting any platform, so never-elected starting officers cannot found cartels or change tariffs without winning a vote (`M1`). Stale un-enacted platforms clear at the end of every election turn.
+- **Tie-breaking (`T2`):** Plurality ties among candidates with the highest positive vote tally are broken deterministically from the turn's public `drand quicknet` beacon (`SHA-256("league-core/tie-break/v2" || office_tag || turn_beacon)`). (Whether Headless Evaluation Mode may use the seeded table beacon for council ties instead of `drand` awaits Director confirmation.)
 
 ### 5.2 Rotating Syndicate Charters (Every 6 Turns: Turns 6, 12, 18, 24)
 
@@ -204,7 +208,7 @@ Unannounced shocks add pure lottery variance, while static 24-turn tables solidi
   - *Demand Surge:* elevated Project Equity multiplier for specific Refined bundles for 2 turns.
   - *Spoilage Spike:* temporary elevation of `Clawback` decay on one raw good.
 
-**Randomness Source:** In Game Mode on public Testnet, shock draws and closing rolls consume pre-named **drand quicknet** rounds (`round = floor((close - 1692803367) / 3) + 1`, never falling back to steerable ledger hashes if drand stalls). In Headless Evaluation Mode, mirrored duplicate tables share identical pre-sampled deterministic PRNG shock schedules across all seat rotations to isolate agent skill.
+**Randomness Source (`M2`):** In Game Mode on public Testnet, shock draws, closing rolls, and council election tie-breaks consume pre-named **drand quicknet** rounds (`round = floor((close - 1692803367) / 3) + 1`, never falling back to steerable ledger hashes if drand stalls). Game-Mode replay logs record `(drand_round, drand_signature)` per turn and require `drand_round` to match the table's pre-named `DrandSchedule` plus `turn_beacon == SHA-256(drand_signature)`. BLS12-381 signature authentication against the `drand quicknet` public key follows later in the live oracle/harness layer; inside `league-core`, `ExternalDrand` replay logs are verified internally self-consistent (`turn_beacon == SHA-256(drand_signature)` on schedule) but not yet authenticated against the `quicknet` chain key. In Headless Evaluation Mode, mirrored duplicate tables share identical pre-sampled deterministic PRNG shock schedules across all seat rotations to isolate agent skill.
 
 ### 6.2 24–28 Turn Season with Stochastic Closing Roll
 

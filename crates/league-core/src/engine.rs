@@ -10,8 +10,9 @@ use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot,
     EscrowFinishUnlock, IntentPledge, IntentTarget, MandateReveal, OrderReveal, RevealSalt,
     SealedOrderBundle, beacon_roll_bps, break_tie_with_beacon, compute_order_commitment,
-    derive_turn_beacon, raw_zero_preimage_condition_hash, verify_mandate_reveal,
-    verify_order_reveal, verify_preimage_condition,
+    derive_drand_beacon, derive_turn_beacon, raw_zero_preimage_condition_hash,
+    verify_drand_quicknet_beacon, verify_mandate_reveal, verify_order_reveal,
+    verify_preimage_condition,
 };
 use crate::contracts::{
     ActiveCharter, BondSpec, CartelDomain, CheckStatus, CredOffer, CreditCheck, EscrowProposal,
@@ -757,6 +758,10 @@ impl TurnEngine {
     }
 
     /// Verifies and stores a seat's Phase 2 order reveal during `Reveal`.
+    ///
+    /// Rejects the whole reveal (`Err`) before recording it if any `atomic_swaps` entry
+    /// references an unknown asset ID for this table. Individual malformed orders inside an
+    /// otherwise well-typed bundle are refused separately during the 8-step Sweep.
     pub fn submit_order_reveal(
         &mut self,
         seat: Seat,
@@ -949,6 +954,38 @@ impl TurnEngine {
         Ok(self.sweep_turn_detailed(turn_beacon)?.0)
     }
 
+    /// Executes the 8-step deterministic `Sweep` for the current turn using an `ExternalDrand`
+    /// `quicknet` round and 48-byte signature validated against `spec.drand_schedule` (`M2`).
+    ///
+    /// Derives `turn_beacon = SHA-256(drand_signature)` and requires `drand_round` to equal
+    /// `schedule.expected_round_for_turn(current_turn)`. Note: BLS12-381 signature
+    /// authentication against the `quicknet` chain public key follows in the live oracle layer.
+    pub fn sweep_turn_with_drand(
+        &mut self,
+        drand_round: u64,
+        drand_signature: &[u8],
+    ) -> Result<SweepReceipt, EngineError> {
+        if self.state.phase != TurnPhase::Reveal {
+            return Err(EngineError::InvalidPhase(
+                "sweep_turn_with_drand requires Reveal phase".to_owned(),
+            ));
+        }
+        let Some(schedule) = self.state.spec.drand_schedule else {
+            return Err(EngineError::InvalidConfig(
+                "sweep_turn_with_drand requires TableSpec::drand_schedule".to_owned(),
+            ));
+        };
+        let beacon = derive_drand_beacon(drand_signature)?;
+        verify_drand_quicknet_beacon(
+            &schedule,
+            Turn(self.state.turn),
+            drand_round,
+            drand_signature,
+            beacon,
+        )?;
+        self.sweep_turn(beacon)
+    }
+
     fn sweep_turn_detailed(
         &mut self,
         turn_beacon: [u8; 32],
@@ -1081,11 +1118,14 @@ impl TurnEngine {
             .kind
             .validate_for_seat_count(self.state.spec.seat_count)?;
         let idx = usize::from(seat.0);
-        let Some(commitment) = self.state.mandate_commits[idx] else {
-            return Err(EngineError::UnknownObject(format!(
-                "seat {} recorded no Turn-1 mandate commit",
-                seat.0
-            )));
+        let dealt_commitment = self.state.spec.dealt_mandate_commits[idx];
+        let commitment = match self.state.mandate_commits[idx] {
+            Some(echoed) if echoed != dealt_commitment => {
+                return Err(EngineError::CommitmentMismatch(seat.0));
+            }
+            Some(echoed) => echoed,
+            // F2: Turn-1 commitment echo is optional; fall back to the public dealt commitment.
+            None => dealt_commitment,
         };
         if !verify_mandate_reveal(self.state.table_id, seat, commitment, &reveal)? {
             return Err(EngineError::CommitmentMismatch(seat.0));
@@ -1913,10 +1953,21 @@ impl TurnEngine {
             let m_net = swap.maker_amount - ceil_bps_fee(swap.maker_amount, m_tariff_bps);
             let t_net = swap.taker_amount - ceil_bps_fee(swap.taker_amount, t_tariff_bps);
 
-            self.adjust_free_balance(swap.maker, swap.maker_asset, -swap.maker_amount)?;
-            self.adjust_free_balance(swap.taker, swap.taker_asset, -swap.taker_amount)?;
-            self.adjust_free_balance(swap.taker, swap.maker_asset, m_net)?;
-            self.adjust_free_balance(swap.maker, swap.taker_asset, t_net)?;
+            if self
+                .free_balance(swap.taker, swap.maker_asset)
+                .checked_add(m_net)
+                .is_none()
+                || self
+                    .free_balance(swap.maker, swap.taker_asset)
+                    .checked_add(t_net)
+                    .is_none()
+            {
+                return Err(EngineError::InvalidOrder("balance overflow".to_owned()));
+            }
+            let _ = self.adjust_free_balance(swap.maker, swap.maker_asset, -swap.maker_amount);
+            let _ = self.adjust_free_balance(swap.taker, swap.taker_asset, -swap.taker_amount);
+            let _ = self.adjust_free_balance(swap.taker, swap.maker_asset, m_net);
+            let _ = self.adjust_free_balance(swap.maker, swap.taker_asset, t_net);
             self.record_delivery(swap.maker, swap.taker, swap.maker_asset, m_net);
             self.record_delivery(swap.taker, swap.maker, swap.taker_asset, t_net);
             settled += 1;
@@ -2389,13 +2440,13 @@ impl TurnEngine {
                 }
             }
 
-            let tm = pick_plurality_winner_with_beacon(
+            let (tm, tm_won_vote) = pick_plurality_winner_with_beacon(
                 &tm_votes,
                 self.state.trade_minister,
                 turn_beacon,
                 b"trade_minister",
             );
-            let cc = pick_plurality_winner_with_beacon(
+            let (cc, cc_won_vote) = pick_plurality_winner_with_beacon(
                 &cc_votes,
                 self.state.cartel_chair,
                 turn_beacon,
@@ -2404,8 +2455,10 @@ impl TurnEngine {
             self.state.trade_minister = tm;
             self.state.cartel_chair = cc;
 
-            // T3: Winners enact their publicly filed StandForOffice platforms (even without voting).
-            if let Some(win_tm_platform) = self.state.council_platforms.get(&tm).cloned() {
+            // T3 & M1: Only seats elected with >= 1 vote enact their publicly filed StandForOffice platforms.
+            if tm_won_vote
+                && let Some(win_tm_platform) = self.state.council_platforms.get(&tm).cloned()
+            {
                 for &(target, (raw_bps, ref_bps)) in &win_tm_platform.proposed_tariffs_bps {
                     if usize::from(target) < n {
                         self.state.seats[usize::from(target)].raw_tariff_bps =
@@ -2417,7 +2470,9 @@ impl TurnEngine {
             }
 
             let mut revoked_pairs = BTreeSet::new();
-            if let Some(win_cc_platform) = self.state.council_platforms.get(&cc).cloned() {
+            if cc_won_vote
+                && let Some(win_cc_platform) = self.state.council_platforms.get(&cc).cloned()
+            {
                 for &(dom_id, seat_idx) in &win_cc_platform.cartel_admissions {
                     if usize::from(seat_idx) < n
                         && self.state.seats[usize::from(seat_idx)]
@@ -2486,7 +2541,7 @@ impl TurnEngine {
                     }
                 }
             }
-            elected = Some((tm, cc));
+            elected = (tm_won_vote || cc_won_vote).then_some((tm, cc));
         }
 
         let mut awarded = Vec::new();
@@ -2632,17 +2687,17 @@ fn pick_plurality_winner_with_beacon(
     incumbent: u8,
     turn_beacon: [u8; 32],
     domain_tag: &[u8],
-) -> u8 {
+) -> (u8, bool) {
     let max_votes = votes.iter().copied().max().unwrap_or(0);
     if max_votes == 0 {
-        return incumbent;
+        return (incumbent, false);
     }
     let tied: Vec<u8> = votes
         .iter()
         .enumerate()
         .filter_map(|(idx, &v)| (v == max_votes).then_some(idx as u8))
         .collect();
-    break_tie_with_beacon(turn_beacon, domain_tag, &tied)
+    (break_tie_with_beacon(turn_beacon, domain_tag, &tied), true)
 }
 
 #[cfg(test)]

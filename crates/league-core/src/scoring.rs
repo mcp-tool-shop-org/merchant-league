@@ -5,12 +5,12 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commit::{MandateKind, MandateReveal};
+use crate::commit::{MandateKind, MandateReveal, verify_mandate_reveal};
 use crate::contracts::{CheckStatus, EscrowStatus, OfferSide};
 use crate::engine::EngineState;
 use crate::types::{
     AssetId, Bps, CreditTier, EngineError, MAX_MANDATE_BONUS_EQUITY, MIN_MANDATE_BONUS_EQUITY,
-    TableSpec, UNIT_SCALE, Units, mul_units_parity, scale_bps_signed,
+    Seat, TableSpec, UNIT_SCALE, Units, mul_units_parity, scale_bps_signed,
 };
 
 /// Fundamental shadow parities derived deterministically from table converter stoichiometry
@@ -180,6 +180,20 @@ pub fn evaluate_mandate_bonus(
         return (false, 0);
     };
     if reveal.salt.is_degenerate() {
+        return (false, 0);
+    }
+    let Some(&dealt_commit) = state.spec.dealt_mandate_commits.get(idx) else {
+        return (false, 0);
+    };
+    if let Some(Some(logged_commit)) = state.mandate_commits.get(idx)
+        && *logged_commit != dealt_commit
+    {
+        return (false, 0);
+    }
+    if !matches!(
+        verify_mandate_reveal(state.table_id, Seat(seat), dealt_commit, reveal),
+        Ok(true)
+    ) {
         return (false, 0);
     }
     let Some(card) =

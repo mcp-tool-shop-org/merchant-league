@@ -7,8 +7,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::commit::{
-    CommitmentHash, GradedMandateCard, MandateReveal, deal_graded_mandates,
-    default_graded_mandate_deck,
+    CommitmentHash, DrandSchedule, GradedMandateCard, RevealSalt, SealedMandateDeal,
+    deal_graded_mandates, deal_graded_mandates_with_entropy, default_graded_mandate_deck,
 };
 
 /// Integer milli-unit quantity (`1_000 == 1.000` unit of `CRED`, commodity, or equity).
@@ -372,6 +372,9 @@ pub struct TableSpec {
     pub mandate_deck: Vec<GradedMandateCard>,
     /// Pre-dealt Turn-1 mandate commitments indexed by seat (`0..seat_count`).
     pub dealt_mandate_commits: Vec<CommitmentHash>,
+    /// Optional pre-named drand `quicknet` close schedule required for `ExternalDrand` tables (`M2`).
+    #[serde(default)]
+    pub drand_schedule: Option<DrandSchedule>,
 }
 
 impl TableSpec {
@@ -442,6 +445,16 @@ impl TableSpec {
                 self.dealt_mandate_commits.len()
             )));
         }
+        for (seat_idx, commit) in self.dealt_mandate_commits.iter().enumerate() {
+            if commit.is_degenerate() {
+                return Err(EngineError::InvalidConfig(format!(
+                    "degenerate all-zero dealt_mandate_commit for seat {seat_idx}"
+                )));
+            }
+        }
+        if let Some(schedule) = self.drand_schedule {
+            schedule.validate()?;
+        }
         if self.mandate_deck.len() < n {
             return Err(EngineError::InvalidConfig(format!(
                 "mandate_deck size ({}) must be >= seat_count ({n})",
@@ -467,11 +480,61 @@ impl TableSpec {
 
     /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] plus its deterministically
     /// dealt Turn-1 mandate reveals for `table_id`, `seat_count` (`4..=6`), and `seed`.
+    /// Constructs the deterministic canonical `TableSpec` parameterized by public layout `seed`,
+    /// dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
     pub fn standard_chiral_ring_with_mandates(
         table_id: TableId,
         seat_count: u8,
         seed: u64,
-    ) -> Result<(Self, Vec<MandateReveal>), EngineError> {
+    ) -> Result<(Self, SealedMandateDeal), EngineError> {
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) =
+            deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
+        Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )
+    }
+
+    /// Constructs the canonical `TableSpec` using caller-supplied `deal_seed` and `seat_salts`
+    /// for deterministic fixture/golden tests without coupling mandates to a replay `seed: u64`.
+    pub fn standard_chiral_ring_with_explicit_deal(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[RevealSalt],
+    ) -> Result<(Self, SealedMandateDeal), EngineError> {
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) = deal_graded_mandates_with_entropy(
+            table_id,
+            seat_count,
+            deal_seed,
+            seat_salts,
+            &mandate_deck,
+        )?;
+        Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )
+    }
+
+    fn build_chiral_ring_spec_with_deal(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        mandate_deck: Vec<GradedMandateCard>,
+        dealt_mandate_commits: Vec<CommitmentHash>,
+        sealed_deal: SealedMandateDeal,
+    ) -> Result<(Self, SealedMandateDeal), EngineError> {
         if !(4..=6).contains(&seat_count) {
             return Err(EngineError::InvalidConfig(format!(
                 "seat_count must be 4..=6, got {seat_count}"
@@ -564,10 +627,6 @@ impl TableSpec {
             },
         ];
 
-        let mandate_deck = default_graded_mandate_deck(seat_count);
-        let (dealt_mandate_commits, dealt_reveals) =
-            deal_graded_mandates(table_id, seat_count, seed, &mandate_deck)?;
-
         let spec = Self {
             table_id,
             seat_count,
@@ -577,13 +636,15 @@ impl TableSpec {
             closing_hazard_bps: DEFAULT_CLOSING_HAZARD_BPS,
             mandate_deck,
             dealt_mandate_commits,
+            drand_schedule: None,
         };
         spec.validate()?;
-        Ok((spec, dealt_reveals))
+        Ok((spec, sealed_deal))
     }
 
     /// Constructs a canonical balanced chiral converter-ring [`TableSpec`] for tests and
-    /// standalone evaluation, parameterized by `table_id`, `seat_count` (`4..=6`), and `seed`.
+    /// standalone evaluation, parameterized by public layout `seed` (`seat_count` in `4..=6`),
+    /// with private mandates dealt from OS CSPRNG entropy.
     pub fn standard_chiral_ring(
         table_id: TableId,
         seat_count: u8,

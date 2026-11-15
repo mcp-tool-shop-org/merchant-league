@@ -10,20 +10,24 @@ use league_core::{
     CharterBidOrder, CharterRole, CheckOrderPreview, CheckPreviewOutcome, CheckProposal,
     CheckStatus, CommitmentHash, ConverterOrderPreview, ConverterRecipe, ConverterRunOrder,
     CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
-    DEFAULT_PBRS_GAMMA_BPS, EngineError, EngineState, EscrowFinishUnlock, EscrowProposal,
-    FinalScoreboard, FundamentalParities, GradedMandateCard, IntentPledge, IntentTarget,
-    LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
-    MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide,
-    OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview,
-    ProjectRecipe, RegentDoctrine, ReplayBeaconMode, RevealSalt, SealedOrderBundle,
-    SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableSpec, Turn, TurnEngine,
-    TurnPhase, UNIT_SCALE, bonus_equity_for_completion_bps, break_tie_with_beacon, ceil_bps_fee,
-    ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
-    compute_final_scoreboard, compute_mandate_commitment, compute_net_asset_equity,
-    compute_order_commitment, compute_pbrs_reward, compute_potential, compute_preimage_condition,
-    deal_graded_mandates, default_graded_mandate_deck, derive_turn_beacon, floor_bps_part,
-    half_up_bps, mul_units_parity, replay_season, scale_bps_signed, verify_order_reveal,
-    verify_preimage_condition,
+    DEFAULT_PBRS_GAMMA_BPS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS,
+    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError, EngineState, EscrowFinishUnlock,
+    EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities, GradedMandateCard,
+    IntentPledge, IntentTarget, LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY,
+    MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction,
+    OfferProposal, OfferSide, OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder,
+    ProjectOrderPreview, ProjectRecipe, RegentDoctrine, ReplayBeaconMode, RevealSalt,
+    SealedOrderBundle, SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableSpec,
+    Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, bonus_equity_for_completion_bps,
+    break_tie_with_beacon, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
+    checked_mul_units_parity, compute_final_scoreboard, compute_mandate_commitment,
+    compute_net_asset_equity, compute_order_commitment, compute_pbrs_reward, compute_potential,
+    compute_preimage_condition, deal_graded_mandates, deal_graded_mandates_with_entropy,
+    default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
+    drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
+    mul_units_parity, replay_season, scale_bps_signed, verify_drand_quicknet_beacon,
+    verify_order_reveal, verify_preimage_condition, verify_sealed_mandate_deal,
+    width_independent_index,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -72,7 +76,7 @@ fn run_scripted_full_season(
     seed: u64,
 ) -> (SeasonReplayLog, FinalScoreboard, Vec<[u8; 32]>) {
     let table_id = TableId(500 + u64::from(seat_count) * 10 + seed);
-    let (spec, dealt_reveals) = must_ok(
+    let (spec, sealed_deal) = must_ok(
         TableSpec::standard_chiral_ring_with_mandates(table_id, seat_count, seed),
         "standard_chiral_ring_with_mandates",
     );
@@ -90,7 +94,7 @@ fn run_scripted_full_season(
             "submit_mandate_commitment",
         );
         mandate_commits[idx] = Some(commit);
-        mandate_reveals[idx] = Some(dealt_reveals[idx].clone());
+        mandate_reveals[idx] = Some(sealed_deal.seat_reveals[idx].clone());
     }
 
     let mut turns = Vec::new();
@@ -339,6 +343,7 @@ fn run_scripted_full_season(
             reveals,
             turn_beacon: beacon,
             drand_round: None,
+            drand_signature: None,
         });
         if receipt.season_closed {
             break;
@@ -362,6 +367,7 @@ fn run_scripted_full_season(
         spec,
         seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
+        sealed_mandate_deal: sealed_deal,
         mandate_commits,
         turns,
         mandate_reveals,
@@ -1537,7 +1543,7 @@ fn additional_branch_and_turn_28_hard_close_coverage() {
     let mut eng = must_ok(TurnEngine::new(hard_close_spec.clone()), "hard_close_eng");
 
     // Seat 0 submits its dealt Turn-1 Private Mandate commitment; Seat 1 does NOT.
-    let rev0 = dealt_hc[0].clone();
+    let rev0 = dealt_hc.seat_reveals[0].clone();
     let cm0 = hard_close_spec.dealt_mandate_commits[0];
     must_ok(eng.submit_mandate_commitment(Seat(0), cm0), "sub cm0");
 
@@ -1770,11 +1776,16 @@ fn additional_branch_and_turn_28_hard_close_coverage() {
     assert_eq!(eng.state().turn, 28);
     assert_eq!(eng.state().phase, TurnPhase::AwaitingMandateReveal);
 
-    // Mandate reveal error branches
+    // Mandate reveal error branches & optional Turn-1 echo (F2): wrong seat's reveal triggers
+    // CommitmentMismatch against pre-dealt commitment, while Seat 1's genuine reveal succeeds.
     assert!(matches!(
         eng.submit_mandate_reveal(Seat(1), rev0.clone()),
-        Err(EngineError::UnknownObject(_))
+        Err(EngineError::CommitmentMismatch(1))
     ));
+    must_ok(
+        eng.submit_mandate_reveal(Seat(1), dealt_hc.seat_reveals[1].clone()),
+        "F2 reveal without Turn-1 echo",
+    );
     let wrong_salt = MandateReveal {
         salt: RevealSalt([0x99; 32]),
         ..rev0.clone()
@@ -2616,26 +2627,28 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
             reveals,
             turn_beacon: beacon,
             drand_round: None,
+            drand_signature: None,
         });
         if r.season_closed {
             break;
         }
     }
     must_ok(
-        live_eng.submit_mandate_reveal(Seat(0), dealt2[0].clone()),
+        live_eng.submit_mandate_reveal(Seat(0), dealt2.seat_reveals[0].clone()),
         "rev0",
     );
     let live_board = must_ok(live_eng.finalize_season(), "fin");
     let mut mandate_commits = vec![None; 4];
     mandate_commits[0] = Some(mc0);
     let mut mandate_reveals = vec![None; 4];
-    mandate_reveals[0] = Some(dealt2[0].clone());
+    mandate_reveals[0] = Some(dealt2.seat_reveals[0].clone());
     let _unused = dealt_reveals;
     let out = must_ok(
         replay_season(&SeasonReplayLog {
             spec: spec2,
             seed: 2,
             beacon_mode: ReplayBeaconMode::SeedDerived,
+            sealed_mandate_deal: dealt2,
             mandate_commits,
             turns: logged_turns,
             mandate_reveals,
@@ -2817,7 +2830,7 @@ fn council_zero_vote_keeps_incumbent_beacon_breaks_ties_and_platform_needs_no_ba
             assert!(eng.state().domains[0].members.contains(&3));
         }
         if t == 8 {
-            assert_eq!(r.elected_officers, Some((2, 3)));
+            assert_eq!(r.elected_officers, None);
             assert_eq!(eng.state().trade_minister, 2);
             assert_eq!(eng.state().cartel_chair, 3);
         }
@@ -2977,19 +2990,21 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
 
     // 2. Opus bonus_equity = 1_000_000_000_000 exploit blocked at commit.
     let tid = TableId(912);
-    let (deal_seed, mut spec, dealt) = must_ok(
-        (0..50_u64)
-            .find_map(|s| {
-                let (sp, d) = must_ok(
-                    TableSpec::standard_chiral_ring_with_mandates(tid, 4, s),
+    let beacon_seed = 7_u64;
+    let (mut spec, dealt_deal) = must_ok(
+        (0..128_u32)
+            .find_map(|_| {
+                let (sp, deal) = must_ok(
+                    TableSpec::standard_chiral_ring_with_mandates(tid, 4, beacon_seed),
                     "spec",
                 );
-                d.iter()
+                deal.seat_reveals
+                    .iter()
                     .any(|r| matches!(r.mandate.kind, MandateKind::MaintainCleanCredit { .. }))
-                    .then_some((s, sp, d))
+                    .then_some((sp, deal))
             })
-            .ok_or("some seed deals MaintainCleanCredit from default deck"),
-        "deal_seed",
+            .ok_or("some OS deal draws MaintainCleanCredit from default deck"),
+        "dealt_deal",
     );
     spec.closing_hazard_bps = DEFAULT_CLOSING_HAZARD_BPS;
     let mut eng = must_ok(TurnEngine::new(spec.clone()), "new");
@@ -3014,13 +3029,14 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
     // 3. Valid dealt mandate commits cleanly and awards exact deck bonus in 3_000..=8_000.
     // Find a seat holding MaintainCleanCredit so an empty season satisfies it deterministically.
     let clean_seat = must_ok(
-        dealt
+        dealt_deal
+            .seat_reveals
             .iter()
             .position(|r| matches!(r.mandate.kind, MandateKind::MaintainCleanCredit { .. }))
-            .ok_or("selected seed deals MaintainCleanCredit"),
+            .ok_or("selected deal holds MaintainCleanCredit"),
         "clean_seat",
     );
-    let expected_bonus = dealt[clean_seat].mandate.bonus_equity;
+    let expected_bonus = dealt_deal.seat_reveals[clean_seat].mandate.bonus_equity;
     assert!((MIN_MANDATE_BONUS_EQUITY..=MAX_MANDATE_BONUS_EQUITY).contains(&expected_bonus));
     must_ok(
         eng.submit_mandate_commitment(
@@ -3035,7 +3051,7 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
         }
         commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
         let r = must_ok(
-            eng.sweep_turn(derive_turn_beacon(deal_seed, tid, Turn(t))),
+            eng.sweep_turn(derive_turn_beacon(beacon_seed, tid, Turn(t))),
             "sweep",
         );
         if r.season_closed {
@@ -3043,7 +3059,10 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
         }
     }
     must_ok(
-        eng.submit_mandate_reveal(Seat(clean_seat as u8), dealt[clean_seat].clone()),
+        eng.submit_mandate_reveal(
+            Seat(clean_seat as u8),
+            dealt_deal.seat_reveals[clean_seat].clone(),
+        ),
         "valid reveal",
     );
     let board = must_ok(eng.finalize_season(), "finalize");
@@ -3076,7 +3095,7 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
         bad_dup_id.validate(),
         Err(EngineError::InvalidConfig(_))
     ));
-    let bad_deal = deal_graded_mandates(tid, 4, 5, &spec.mandate_deck[0..3]);
+    let bad_deal = deal_graded_mandates(tid, 4, &spec.mandate_deck[0..3]);
     assert!(matches!(bad_deal, Err(EngineError::InvalidConfig(_))));
     let mut bad_self_conv = spec.clone();
     bad_self_conv.seats[0].converters[0].inputs.push((0, 500));
@@ -3097,7 +3116,7 @@ fn graded_mandate_deck_blocks_arbitrary_bonus_and_validates_foreign_converter_in
 fn replay_verifies_seed_derived_and_external_drand_beacons() {
     let tid = TableId(913);
     let seed = 11_u64;
-    let (spec, _) = must_ok(
+    let (spec, sealed_deal) = must_ok(
         TableSpec::standard_chiral_ring_with_mandates(tid, 4, seed),
         "spec",
     );
@@ -3117,7 +3136,8 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
             commitments,
             reveals,
             turn_beacon: beacon,
-            drand_round: Some(10_000 + u64::from(t)),
+            drand_round: None,
+            drand_signature: None,
         });
         if r.season_closed {
             break;
@@ -3127,6 +3147,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         spec,
         seed,
         beacon_mode: ReplayBeaconMode::SeedDerived,
+        sealed_mandate_deal: sealed_deal.clone(),
         mandate_commits: vec![None; 4],
         turns,
         mandate_reveals: vec![None; 4],
@@ -3148,16 +3169,85 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         Err(EngineError::SeasonEnded(_))
     ));
 
-    // ExternalDrand mode accepts strictly increasing rounds and rejects missing/non-increasing/zero.
-    let mut drand_ok = log;
-    drand_ok.beacon_mode = ReplayBeaconMode::ExternalDrand;
+    // ExternalDrand mode requires spec.drand_schedule + scheduled drand_round + drand_signature
+    // where turn_beacon == SHA-256(drand_signature) (M2).
+    assert!(matches!(
+        replay_season(&SeasonReplayLog {
+            beacon_mode: ReplayBeaconMode::ExternalDrand,
+            ..log
+        }),
+        Err(EngineError::InvalidConfig(_))
+    ));
+
+    let schedule = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
+        turn_period_secs: 60,
+    };
+    let tid_drand = TableId(9130);
+    let (mut spec_drand, deal_drand) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid_drand, 4, seed),
+        "spec_drand",
+    );
+    spec_drand.drand_schedule = Some(schedule);
+    let mut eng_drand = must_ok(TurnEngine::new(spec_drand.clone()), "eng_drand");
+    let mut drand_turns = Vec::new();
+    for t in 1..=28_u8 {
+        if eng_drand.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) = commit_and_reveal_all(
+            &mut eng_drand,
+            tid_drand,
+            t,
+            vec![SealedOrderBundle::default(); 4],
+        );
+        let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "expected round");
+        let sig = vec![0x40_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+        let beacon = must_ok(derive_drand_beacon(&sig), "drand beacon");
+        let r = must_ok(eng_drand.sweep_turn_with_drand(round, &sig), "sweep drand");
+        drand_turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: Some(round),
+            drand_signature: Some(sig),
+        });
+        if r.season_closed {
+            break;
+        }
+    }
+    let drand_ok = SeasonReplayLog {
+        spec: spec_drand,
+        seed: 0,
+        beacon_mode: ReplayBeaconMode::ExternalDrand,
+        sealed_mandate_deal: deal_drand,
+        mandate_commits: vec![None; 4],
+        turns: drand_turns,
+        mandate_reveals: vec![None; 4],
+    };
     assert!(replay_season(&drand_ok).is_ok());
 
-    let mut drand_missing = drand_ok.clone();
-    drand_missing.turns[0].drand_round = None;
+    let mut drand_missing_round = drand_ok.clone();
+    drand_missing_round.turns[0].drand_round = None;
     assert!(matches!(
-        replay_season(&drand_missing),
+        replay_season(&drand_missing_round),
         Err(EngineError::SeasonEnded(_))
+    ));
+
+    let mut drand_missing_sig = drand_ok.clone();
+    drand_missing_sig.turns[0].drand_signature = None;
+    assert!(matches!(
+        replay_season(&drand_missing_sig),
+        Err(EngineError::SeasonEnded(_))
+    ));
+
+    let mut drand_off_sched = drand_ok.clone();
+    drand_off_sched.turns[0].drand_round = drand_off_sched.turns[0].drand_round.map(|r| r + 1);
+    assert!(matches!(
+        replay_season(&drand_off_sched),
+        Err(EngineError::InvalidOrder(_))
     ));
 
     let mut drand_noninc = drand_ok.clone();
@@ -3167,11 +3257,11 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         Err(EngineError::SeasonEnded(_))
     ));
 
-    let mut drand_zero = drand_ok;
-    drand_zero.turns[0].turn_beacon = [0u8; 32];
+    let mut drand_bad_beacon = drand_ok;
+    drand_bad_beacon.turns[0].turn_beacon[0] ^= 1;
     assert!(matches!(
-        replay_season(&drand_zero),
-        Err(EngineError::SeasonEnded(_))
+        replay_season(&drand_bad_beacon),
+        Err(EngineError::InvalidOrder(_))
     ));
 }
 
@@ -3179,7 +3269,16 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
 fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     // 1. Exact Opus hand-checked Turn 1 & Turn 2 numbers on TableId(8), 4 seats, seed 42 (B3).
     let tid = TableId(8);
-    let spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 42), "spec");
+    let salts = [
+        RevealSalt([0x11; 32]),
+        RevealSalt([0x22; 32]),
+        RevealSalt([0x33; 32]),
+        RevealSalt([0x44; 32]),
+    ];
+    let (spec, _) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(tid, 4, 42, [0x42; 32], &salts),
+        "spec",
+    );
     let mut eng = must_ok(TurnEngine::new(spec), "new");
     let mut final_digest = [0u8; 32];
     for t in 1..=28_u8 {
@@ -3214,7 +3313,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "166faa69fdbc0f13da89a81eab23d5f84abd29561be4fa09401f6cbab6824661"
+        "d2cce72d1581236f312963272d42a398c4b858556810a29b941e18098e09de79"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -3338,7 +3437,11 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
 #[test]
 fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_stably() {
     let tid = TableId(920);
-    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
+    let (spec, deal_b1_1a) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid, 4, 3),
+        "spec",
+    );
+    let mut spec = spec;
     // Give seats 1 and 2 larger yields so Seat 0 can gather inputs for 3 whole converter runs,
     // while Seat 0 requests 6 runs (holding-clamped to 3 when cap is 5 -> k = 3 < 6).
     spec.seats[0].converters[0].max_runs_per_turn = 5;
@@ -3361,6 +3464,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         reveals: rev1,
         turn_beacon: b1,
         drand_round: None,
+        drand_signature: None,
     });
 
     // Turn 2: Swap 7_000 Raw(1) & 7_000 Raw(2) into Seat 0 (800 bps tariff leaves 6_440 net;
@@ -3415,6 +3519,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         reveals: rev2,
         turn_beacon: b2,
         drand_round: None,
+        drand_signature: None,
     });
 
     while eng.state().phase == TurnPhase::TalkAndMarket {
@@ -3430,6 +3535,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
             reveals: rev,
             turn_beacon: beacon,
             drand_round: None,
+            drand_signature: None,
         });
     }
     let outcome = must_ok(
@@ -3437,6 +3543,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
             spec,
             seed: 3,
             beacon_mode: ReplayBeaconMode::SeedDerived,
+            sealed_mandate_deal: deal_b1_1a,
             mandate_commits: vec![None; 4],
             turns: logged_turns,
             mandate_reveals: vec![None; 4],
@@ -3449,7 +3556,10 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     // Separate table directly verifying capacity-clamped converter (0 < k=5 < requested 7)
     // AND holdings-clamped project delivery (0 < k=2 < requested 6), plus full replay stability.
     let tid_p = TableId(921);
-    let mut spec_p = must_ok(TableSpec::standard_chiral_ring(tid_p, 4, 7), "spec_p");
+    let (mut spec_p, deal_b1_1b) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid_p, 4, 7),
+        "spec_p",
+    );
     spec_p.seats[0].converters[0].max_runs_per_turn = 5;
     spec_p.seats[1].raw_yield_per_turn = 30_000;
     spec_p.seats[2].raw_yield_per_turn = 30_000;
@@ -3471,6 +3581,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         reveals: prev1,
         turn_beacon: rb1,
         drand_round: None,
+        drand_signature: None,
     });
 
     // Turn 2: Give Seat 0 12_000 Raw(1)&(2) (8% tariff -> 11_040 net >= 10_000 for 5 runs) & request 7 against cap=5 -> k=5!
@@ -3542,6 +3653,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         reveals: prev2,
         turn_beacon: rb2,
         drand_round: None,
+        drand_signature: None,
     });
 
     // Turn 3: Seat 1 swaps 2_500 Refined(1) to Seat 0; Seat 0 requests 6 batches of Project 1
@@ -3577,6 +3689,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         reveals: prev3,
         turn_beacon: rb3,
         drand_round: None,
+        drand_signature: None,
     });
 
     while eng_clean.state().phase == TurnPhase::TalkAndMarket {
@@ -3596,6 +3709,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
             reveals: rev,
             turn_beacon: beacon,
             drand_round: None,
+            drand_signature: None,
         });
     }
     let replayed = must_ok(
@@ -3603,6 +3717,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
             spec: spec_p,
             seed: 7,
             beacon_mode: ReplayBeaconMode::SeedDerived,
+            sealed_mandate_deal: deal_b1_1b,
             mandate_commits: vec![None; 4],
             turns: replay_turns,
             mandate_reveals: vec![None; 4],
@@ -3663,7 +3778,7 @@ fn b1_2_mandate_validation_enforces_seat_count_minus_two_bounds() {
             Err(EngineError::InvalidConfig(_))
         ));
         assert!(matches!(
-            deal_graded_mandates(spec.table_id, n, 1, &spec.mandate_deck),
+            deal_graded_mandates(spec.table_id, n, &spec.mandate_deck),
             Err(EngineError::InvalidConfig(_))
         ));
     }
@@ -3949,4 +4064,933 @@ fn b1_4_preview_bundle_leaves_state_digest_unchanged_and_matches_real_sweep() {
         executed_batches: 1,
         clamped: false,
     };
+}
+
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+#[test]
+fn m1_unelected_and_zero_vote_officers_never_enact_platforms() {
+    let tid = TableId(940);
+    let spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 1), "spec");
+    let mut eng = must_ok(TurnEngine::new(spec), "new");
+
+    // Probe P8 reproducer (4 seats, Turn 4, zero ballots): Seat 0 starts in default officer slots
+    // without ever winning a vote; its StandForOffice platform must NOT enact.
+    for t in 1..=3_u8 {
+        commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let _ = must_ok(
+            eng.sweep_turn(derive_turn_beacon(1, tid, Turn(t))),
+            "sweep 1..3",
+        );
+    }
+    must_ok(
+        eng.apply_market_action(MarketAction::StandForOffice {
+            seat: 0,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: vec![(1, (5_000, 5_000))],
+                cartel_admissions: vec![(7, 0), (7, 1)],
+                cartel_revocations: Vec::new(),
+            },
+        }),
+        "stand 0 turn 4",
+    );
+    commit_and_reveal_all(&mut eng, tid, 4, vec![SealedOrderBundle::default(); 4]);
+    let r4 = must_ok(
+        eng.sweep_turn(derive_turn_beacon(1, tid, Turn(4))),
+        "sweep 4",
+    );
+    assert_eq!(r4.elected_officers, None);
+    assert!(eng.state().domains.is_empty());
+    assert_eq!(eng.state().seats[1].raw_tariff_bps, 800);
+    assert_eq!(eng.state().seats[1].refined_tariff_bps, 600);
+
+    // Turns 5..8: Seat 0 files a platform again and receives >= 1 real ballot -> MUST enact.
+    for t in 5..=7_u8 {
+        commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let _ = must_ok(
+            eng.sweep_turn(derive_turn_beacon(1, tid, Turn(t))),
+            "sweep 5..7",
+        );
+    }
+    must_ok(
+        eng.apply_market_action(MarketAction::StandForOffice {
+            seat: 0,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: vec![(1, (5_000, 5_000))],
+                cartel_admissions: vec![(7, 0), (7, 1)],
+                cartel_revocations: Vec::new(),
+            },
+        }),
+        "stand 0 turn 8",
+    );
+    let mut b8 = vec![SealedOrderBundle::default(); 4];
+    b8[2].council_vote = Some(CouncilVoteBallot {
+        trade_minister: 0,
+        cartel_chair: 0,
+    });
+    commit_and_reveal_all(&mut eng, tid, 8, b8);
+    let r8 = must_ok(
+        eng.sweep_turn(derive_turn_beacon(1, tid, Turn(8))),
+        "sweep 8",
+    );
+    assert_eq!(r8.elected_officers, Some((0, 0)));
+    assert_eq!(eng.state().domains.len(), 1);
+    assert_eq!(eng.state().domains[0].domain_id, 7);
+    assert!(eng.state().domains[0].members.contains(&0));
+    assert!(eng.state().domains[0].members.contains(&1));
+    assert_eq!(eng.state().seats[1].raw_tariff_bps, MAX_TARIFF_BPS);
+    assert_eq!(eng.state().seats[1].refined_tariff_bps, MAX_TARIFF_BPS);
+
+    // Turns 9..12: Previously elected incumbent files a new platform on Turn 12 with ZERO votes ->
+    // incumbent keeps office index, elected_officers is None, and the unvoted platform is ignored.
+    for t in 9..=11_u8 {
+        commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let _ = must_ok(
+            eng.sweep_turn(derive_turn_beacon(1, tid, Turn(t))),
+            "sweep 9..11",
+        );
+    }
+    must_ok(
+        eng.apply_market_action(MarketAction::StandForOffice {
+            seat: 0,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: vec![(2, (2_100, 1_900))],
+                cartel_admissions: vec![(3, 2)],
+                cartel_revocations: Vec::new(),
+            },
+        }),
+        "stand 0 turn 12",
+    );
+    commit_and_reveal_all(&mut eng, tid, 12, vec![SealedOrderBundle::default(); 4]);
+    let r12 = must_ok(
+        eng.sweep_turn(derive_turn_beacon(1, tid, Turn(12))),
+        "sweep 12",
+    );
+    assert_eq!(r12.elected_officers, None);
+    assert_eq!(eng.state().trade_minister, 0);
+    assert_eq!(eng.state().cartel_chair, 0);
+    assert_eq!(eng.state().domains.len(), 1);
+    assert_eq!(eng.state().seats[2].raw_tariff_bps, 800);
+    assert_eq!(eng.state().seats[2].refined_tariff_bps, 600);
+}
+
+#[test]
+fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
+    assert_eq!(
+        drand_quicknet_round_for_close(DRAND_QUICKNET_GENESIS_UNIX),
+        Ok(1)
+    );
+    assert_eq!(
+        drand_quicknet_round_for_close(DRAND_QUICKNET_GENESIS_UNIX + 2),
+        Ok(1)
+    );
+    assert_eq!(
+        drand_quicknet_round_for_close(DRAND_QUICKNET_GENESIS_UNIX + 3),
+        Ok(2)
+    );
+    assert!(matches!(
+        drand_quicknet_round_for_close(DRAND_QUICKNET_GENESIS_UNIX - 1),
+        Err(EngineError::InvalidOrder(_))
+    ));
+
+    let schedule = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 300,
+        turn_period_secs: DRAND_QUICKNET_PERIOD_SECS * 10,
+    };
+    let tid = TableId(941);
+    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 5), "spec");
+    spec.drand_schedule = Some(schedule);
+    let mut eng = must_ok(TurnEngine::new(spec), "new");
+    for t in 1..=3_u8 {
+        commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "round");
+        let sig = vec![0x30_u8.wrapping_add(t); DRAND_QUICKNET_SIGNATURE_BYTES];
+        let _ = must_ok(eng.sweep_turn_with_drand(round, &sig), "sweep drand 1..3");
+    }
+
+    // Turn 4: 2-2 tie between seats 1 and 2 settled deterministically by SHA-256(drand_signature).
+    let mut t4 = vec![SealedOrderBundle::default(); 4];
+    t4[0].council_vote = Some(CouncilVoteBallot {
+        trade_minister: 1,
+        cartel_chair: 1,
+    });
+    t4[1].council_vote = Some(CouncilVoteBallot {
+        trade_minister: 1,
+        cartel_chair: 1,
+    });
+    t4[2].council_vote = Some(CouncilVoteBallot {
+        trade_minister: 2,
+        cartel_chair: 2,
+    });
+    t4[3].council_vote = Some(CouncilVoteBallot {
+        trade_minister: 2,
+        cartel_chair: 2,
+    });
+    commit_and_reveal_all(&mut eng, tid, 4, t4);
+
+    let r4_expected = must_ok(schedule.expected_round_for_turn(Turn(4)), "round 4");
+    let sig_4 = vec![0x7B_u8; DRAND_QUICKNET_SIGNATURE_BYTES];
+    let expected_beacon = must_ok(derive_drand_beacon(&sig_4), "beacon 4");
+    assert!(
+        verify_drand_quicknet_beacon(&schedule, Turn(4), r4_expected, &sig_4, expected_beacon)
+            .is_ok()
+    );
+
+    // Off-schedule round, truncated signature, and all-zero signature must all be rejected before sweep.
+    assert!(matches!(
+        eng.sweep_turn_with_drand(r4_expected + 1, &sig_4),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        eng.sweep_turn_with_drand(r4_expected, &[0x7B; 47]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        eng.sweep_turn_with_drand(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+
+    let expected_tm = break_tie_with_beacon(expected_beacon, b"trade_minister", &[1, 2]);
+    let expected_cc = break_tie_with_beacon(expected_beacon, b"cartel_chair", &[1, 2]);
+    let r4 = must_ok(
+        eng.sweep_turn_with_drand(r4_expected, &sig_4),
+        "sweep 4 drand",
+    );
+    assert_eq!(r4.elected_officers, Some((expected_tm, expected_cc)));
+}
+
+#[test]
+fn m3_mandates_use_os_csprng_and_resist_seed_bruteforce_probe_p9() {
+    use sha2::{Digest, Sha256};
+
+    let tid = TableId(777);
+    let replay_seed = 27_431_u64;
+    let (spec_a, deal_a) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid, 5, replay_seed),
+        "deal a",
+    );
+    let (spec_b, deal_b) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(tid, 5, replay_seed),
+        "deal b",
+    );
+
+    // Public ring layout for identical table layout seed matches while private mandate entropy differs.
+    assert_eq!(spec_a.seats, spec_b.seats);
+    assert_eq!(spec_a.shocks, spec_b.shocks);
+    assert_ne!(deal_a.deal_seed, deal_b.deal_seed);
+    assert_ne!(spec_a.dealt_mandate_commits, spec_b.dealt_mandate_commits);
+    for idx in 0..5 {
+        assert_ne!(deal_a.seat_reveals[idx].salt, deal_b.seat_reveals[idx].salt);
+    }
+
+    // Debug formatting redacts raw deal_seed.
+    let dbg = format!("{deal_a:?}");
+    assert!(dbg.contains("[REDACTED]"));
+    assert!(!dbg.contains(&hex::encode(deal_a.deal_seed)));
+
+    assert!(matches!(
+        verify_sealed_mandate_deal(
+            tid,
+            5,
+            &spec_a.mandate_deck,
+            &spec_a.dealt_mandate_commits,
+            &deal_a,
+        ),
+        Ok(true)
+    ));
+    let mut tampered_deal = deal_a.clone();
+    tampered_deal.deal_seed[0] ^= 1;
+    assert!(matches!(
+        verify_sealed_mandate_deal(
+            tid,
+            5,
+            &spec_a.mandate_deck,
+            &spec_a.dealt_mandate_commits,
+            &tampered_deal,
+        ),
+        Ok(false)
+    ));
+
+    // Probe P9 brute-force scan across candidate integer seeds 0..30_000 (spanning 27_431)
+    // trying legacy SHA-256("league-core/mandate-salt/v2" || seed || table || 0) must find 0 matches.
+    let target_commit = spec_a.dealt_mandate_commits[0];
+    let deck = &spec_a.mandate_deck;
+    let mut recovered = false;
+    'scan: for cand_seed in 0..30_000_u64 {
+        let mut h = Sha256::new();
+        h.update(b"league-core/mandate-salt/v2");
+        h.update(cand_seed.to_le_bytes());
+        h.update(tid.0.to_le_bytes());
+        h.update([0_u8]);
+        let mut salt_bytes: [u8; 32] = h.finalize().into();
+        if salt_bytes == [0u8; 32] {
+            salt_bytes[0] = 1;
+        }
+        let salt = RevealSalt(salt_bytes);
+        for card in deck {
+            let candidate_rev = MandateReveal {
+                mandate: PrivateMandate {
+                    kind: card.kind,
+                    bonus_equity: card.bonus_equity,
+                },
+                salt: salt.clone(),
+            };
+            if let Ok(c) = compute_mandate_commitment(tid, Seat(0), &candidate_rev)
+                && c == target_commit
+            {
+                recovered = true;
+                break 'scan;
+            }
+        }
+    }
+    assert!(
+        !recovered,
+        "Probe P9 legacy seed scan must recover zero OS-entropy mandates"
+    );
+
+    // Also verify replay_season rejects a tampered sealed_mandate_deal.
+    let mut eng = must_ok(TurnEngine::new(spec_a.clone()), "eng");
+    let mut turns = Vec::new();
+    for t in 1..=28_u8 {
+        if eng.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) =
+            commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 5]);
+        let beacon = derive_turn_beacon(replay_seed, tid, Turn(t));
+        let r = must_ok(eng.sweep_turn(beacon), "sweep");
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: None,
+            drand_signature: None,
+        });
+        if r.season_closed {
+            break;
+        }
+    }
+    let valid_log = SeasonReplayLog {
+        spec: spec_a,
+        seed: replay_seed,
+        beacon_mode: ReplayBeaconMode::SeedDerived,
+        sealed_mandate_deal: deal_a,
+        mandate_commits: vec![None; 5],
+        turns,
+        mandate_reveals: vec![None; 5],
+    };
+    assert!(replay_season(&valid_log).is_ok());
+    let mut bad_deal_log = valid_log;
+    bad_deal_log.sealed_mandate_deal = tampered_deal;
+    assert!(matches!(
+        replay_season(&bad_deal_log),
+        Err(EngineError::InvalidConfig(_))
+    ));
+}
+
+#[test]
+fn f1_f2_scoring_refuses_undealt_card_and_reveal_succeeds_without_turn1_echo() {
+    let tid = TableId(942);
+    let salts = [
+        RevealSalt([0x21; 32]),
+        RevealSalt([0x22; 32]),
+        RevealSalt([0x23; 32]),
+        RevealSalt([0x24; 32]),
+    ];
+    let (spec, sealed_deal) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(tid, 4, 9, [0x99; 32], &salts),
+        "explicit spec",
+    );
+    let clean_seat = must_ok(
+        sealed_deal
+            .seat_reveals
+            .iter()
+            .position(|r| matches!(r.mandate.kind, MandateKind::MaintainCleanCredit { .. }))
+            .ok_or("at least one seat dealt MaintainCleanCredit"),
+        "clean_seat",
+    );
+    let undealt_seat = if clean_seat == 0 { 1 } else { 0 };
+    assert_ne!(
+        sealed_deal.seat_reveals[undealt_seat].mandate,
+        sealed_deal.seat_reveals[clean_seat].mandate
+    );
+
+    let mut eng = must_ok(TurnEngine::new(spec.clone()), "eng");
+    let mut turns = Vec::new();
+    // F2: Do NOT call submit_mandate_commitment anywhere during Turn 1!
+    for t in 1..=28_u8 {
+        if eng.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) =
+            commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let beacon = derive_turn_beacon(9, tid, Turn(t));
+        let r = must_ok(eng.sweep_turn(beacon), "sweep");
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: None,
+            drand_signature: None,
+        });
+        if r.season_closed {
+            break;
+        }
+    }
+
+    // F1 (Probe P10): calling evaluate_mandate_bonus or compute_final_scoreboard directly with a
+    // forged/undealt card + non-zero salt MUST score (false, 0) / 0.
+    let forged_clean = MandateReveal {
+        mandate: sealed_deal.seat_reveals[clean_seat].mandate,
+        salt: RevealSalt([0xEE; 32]),
+    };
+    assert_eq!(
+        evaluate_mandate_bonus(eng.state(), undealt_seat as u8, &forged_clean),
+        (false, 0)
+    );
+    let mut forged_vec = vec![None; 4];
+    forged_vec[undealt_seat] = Some(forged_clean);
+    let forged_board = must_ok(
+        compute_final_scoreboard(eng.state(), &forged_vec),
+        "forged scoreboard call",
+    );
+    let undealt_entry = must_ok(
+        forged_board
+            .standings
+            .iter()
+            .find(|e| e.seat == undealt_seat as u8)
+            .ok_or("undealt entry"),
+        "find",
+    );
+    assert_eq!(undealt_entry.mandate_bonus, 0);
+
+    // F2: Genuine dealt mandate reveal succeeds WITHOUT a Turn-1 echo commit and pays full bonus.
+    let expected_bonus = sealed_deal.seat_reveals[clean_seat].mandate.bonus_equity;
+    must_ok(
+        eng.submit_mandate_reveal(
+            Seat(clean_seat as u8),
+            sealed_deal.seat_reveals[clean_seat].clone(),
+        ),
+        "reveal without Turn-1 echo",
+    );
+    let live_board = must_ok(eng.finalize_season(), "finalize");
+    let clean_entry = must_ok(
+        live_board
+            .standings
+            .iter()
+            .find(|e| e.seat == clean_seat as u8)
+            .ok_or("clean entry"),
+        "find",
+    );
+    assert_eq!(clean_entry.mandate_bonus, expected_bonus);
+
+    let mut mandate_reveals = vec![None; 4];
+    mandate_reveals[clean_seat] = Some(sealed_deal.seat_reveals[clean_seat].clone());
+    let replayed = must_ok(
+        replay_season(&SeasonReplayLog {
+            spec,
+            seed: 9,
+            beacon_mode: ReplayBeaconMode::SeedDerived,
+            sealed_mandate_deal: sealed_deal,
+            mandate_commits: vec![None; 4],
+            turns,
+            mandate_reveals,
+        }),
+        "replay without Turn-1 echo",
+    );
+    assert_eq!(replayed.scoreboard, live_board);
+}
+
+#[test]
+fn f4_width_independent_index_matches_u64_modulo_above_u32_max() {
+    let value: u64 = (1_u64 << 33) + 5; // u64 % 3 == 1, whereas low u32 (5) % 3 == 2
+    let mut digest = [0u8; 32];
+    digest[0..8].copy_from_slice(&value.to_le_bytes());
+    assert_eq!(width_independent_index(digest, 3), 1);
+
+    // Explicitly verify deal_graded_mandates_with_entropy determinism matches across all seats.
+    let deck = default_graded_mandate_deck(4);
+    let salts = vec![
+        RevealSalt([1; 32]),
+        RevealSalt([2; 32]),
+        RevealSalt([3; 32]),
+        RevealSalt([4; 32]),
+    ];
+    let (c1, d1) = must_ok(
+        deal_graded_mandates_with_entropy(TableId(943), 4, [0x55; 32], &salts, &deck),
+        "deal 1",
+    );
+    let (c2, d2) = must_ok(
+        deal_graded_mandates_with_entropy(TableId(943), 4, [0x55; 32], &salts, &deck),
+        "deal 2",
+    );
+    assert_eq!(c1, c2);
+    assert_eq!(d1, d2);
+}
+
+fn table_cred_total(eng: &TurnEngine, total_repaid: Units, total_burned: Units) -> Units {
+    let free: Units = eng.state().seats.iter().map(|s| s.cred).sum();
+    let offer_locked: Units = eng
+        .state()
+        .offers
+        .values()
+        .filter(|o| o.side == OfferSide::Buy)
+        .map(|o| o.locked_cred)
+        .sum();
+    let escrow_locked: Units = eng
+        .state()
+        .escrows
+        .values()
+        .filter(|e| e.status == EscrowStatus::Locked)
+        .map(|e| e.amount_cred)
+        .sum();
+    free + offer_locked + escrow_locked + total_repaid + total_burned
+}
+
+#[test]
+fn f5_f6_random_multi_table_cred_conservation_and_panic_free_sweep_property() {
+    let mut rng = 0x5EED_F5F6_2026_1115_u64;
+    let mut total_turns_swept: usize = 0;
+
+    for table_idx in 0..24_u64 {
+        let seat_count = 4 + (splitmix64(&mut rng) % 3) as u8;
+        let tid = TableId(10_000 + table_idx);
+        let mut spec = must_ok(
+            TableSpec::standard_chiral_ring(tid, seat_count, table_idx + 1),
+            "spec",
+        );
+        spec.seats[0].initial_cred += 5_000;
+        let initial_cred: Units = spec.seats.iter().map(|s| s.initial_cred).sum();
+        let mut eng = must_ok(TurnEngine::new(spec), "eng");
+        let mut total_repaid: Units = 0;
+        let mut total_burned: Units = 0;
+        let mut next_pledge_id: u64 = 1;
+        let mut known_secrets: Vec<(u64, PreimageSecret)> = Vec::new();
+
+        for t in 1..=28_u8 {
+            if eng.state().phase != TurnPhase::TalkAndMarket {
+                break;
+            }
+            let n_actions = 4 + (splitmix64(&mut rng) % 6);
+            for _ in 0..n_actions {
+                let seat = (splitmix64(&mut rng) % u64::from(seat_count)) as u8;
+                let pick = splitmix64(&mut rng) % 10;
+                let action = match pick {
+                    0 => MarketAction::PostOffer {
+                        seat,
+                        order: OfferProposal {
+                            side: if splitmix64(&mut rng).is_multiple_of(2) {
+                                OfferSide::Buy
+                            } else {
+                                OfferSide::Sell
+                            },
+                            good: if splitmix64(&mut rng).is_multiple_of(2) {
+                                AssetId::Raw((splitmix64(&mut rng) % u64::from(seat_count)) as u8)
+                            } else {
+                                AssetId::Refined(
+                                    (splitmix64(&mut rng) % u64::from(seat_count)) as u8,
+                                )
+                            },
+                            amount: 500 + (splitmix64(&mut rng) % 4_000) as Units,
+                            price_per_unit_cred: 500 + (splitmix64(&mut rng) % 3_000) as Units,
+                            domain_id: if splitmix64(&mut rng).is_multiple_of(4) {
+                                Some((splitmix64(&mut rng) % 4) as u8)
+                            } else {
+                                None
+                            },
+                            is_hybrid: splitmix64(&mut rng).is_multiple_of(5),
+                        },
+                    },
+                    1 => MarketAction::CancelOffer {
+                        seat,
+                        offer_id: eng.state().offers.keys().next().copied().unwrap_or(99_999),
+                    },
+                    2 => {
+                        let payee = (seat + 1) % seat_count;
+                        let send_max = 200 + (splitmix64(&mut rng) % 3_000) as Units;
+                        let deliver_min = send_max / 2;
+                        MarketAction::CreateCheck {
+                            seat,
+                            check: CheckProposal {
+                                payee,
+                                asset: if splitmix64(&mut rng).is_multiple_of(3) {
+                                    AssetId::Raw(seat)
+                                } else {
+                                    AssetId::Cred
+                                },
+                                send_max,
+                                deliver_min,
+                                due_turn: t,
+                                expiration_turn: t.saturating_add(3),
+                            },
+                        }
+                    }
+                    3 => MarketAction::CancelCheck {
+                        seat,
+                        check_id: eng.state().checks.keys().next().copied().unwrap_or(99_999),
+                    },
+                    4 => {
+                        let dest = (seat + 1 + (splitmix64(&mut rng) % 2) as u8) % seat_count;
+                        let with_bond = splitmix64(&mut rng).is_multiple_of(2);
+                        let with_secret = splitmix64(&mut rng).is_multiple_of(2);
+                        let mut sec_bytes = [(splitmix64(&mut rng) as u8).max(1); 32];
+                        sec_bytes[0] = (t ^ seat).max(1);
+                        let secret = PreimageSecret(sec_bytes);
+                        let cond_hash = if with_secret {
+                            must_ok(compute_preimage_condition(&secret), "preimage").into()
+                        } else {
+                            None
+                        };
+                        if with_secret {
+                            let next_id =
+                                eng.state().escrows.keys().last().copied().unwrap_or(0) + 1;
+                            known_secrets.push((next_id, secret));
+                        }
+                        MarketAction::CreateEscrow {
+                            seat,
+                            escrow: EscrowProposal {
+                                destination: dest,
+                                asset: AssetId::Cred,
+                                amount: 200 + (splitmix64(&mut rng) % 2_000) as Units,
+                                finish_after_turn: Some(t),
+                                cancel_after_turn: t.saturating_add(2),
+                                condition_hash: cond_hash,
+                                bond: with_bond.then_some(BondProposal {
+                                    good: AssetId::Raw(seat),
+                                    required_units: 500,
+                                    deadline_turn: t.saturating_add(1),
+                                }),
+                            },
+                        }
+                    }
+                    5 => MarketAction::CancelExpiredEscrow {
+                        seat,
+                        escrow_id: eng.state().escrows.keys().next().copied().unwrap_or(99_999),
+                    },
+                    6 => {
+                        let pid = next_pledge_id;
+                        next_pledge_id += 1;
+                        MarketAction::RecordIntentPledge {
+                            seat,
+                            pledge: IntentPledge {
+                                pledge_id: pid,
+                                promisor: seat,
+                                counterparty: (seat + 1) % seat_count,
+                                target: IntentTarget::VoteForSeat {
+                                    office_turn: ((t / 4) + 1) * 4,
+                                    candidate: seat,
+                                },
+                                honor_weight: 25,
+                                memo_digest: [pid as u8; 32],
+                            },
+                        }
+                    }
+                    7 => MarketAction::FlagWashFreeze {
+                        inspector: seat,
+                        target_seat: (seat + 1) % seat_count,
+                    },
+                    8 => MarketAction::StandForOffice {
+                        seat,
+                        platform: CouncilPlatform {
+                            proposed_tariffs_bps: vec![(
+                                (seat + 1) % seat_count,
+                                (
+                                    (splitmix64(&mut rng) % 4_500) as u16,
+                                    (splitmix64(&mut rng) % 4_500) as u16,
+                                ),
+                            )],
+                            cartel_admissions: vec![(
+                                (splitmix64(&mut rng) % 3) as u8,
+                                (seat + (splitmix64(&mut rng) % 2) as u8) % seat_count,
+                            )],
+                            cartel_revocations: vec![((splitmix64(&mut rng) % 3) as u8, 0)],
+                        },
+                    },
+                    _ => MarketAction::PostOffer {
+                        seat: 250,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(99),
+                            amount: i64::MAX,
+                            price_per_unit_cred: 1_000,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    },
+                };
+                let _ = eng.apply_market_action(action);
+                assert_eq!(
+                    table_cred_total(&eng, total_repaid, total_burned),
+                    initial_cred
+                );
+            }
+
+            // Build randomized Phase-2 commitments & reveals covering every bundle field plus
+            // extreme debt_repayment_cred and random non-commits / committed non-reveals.
+            must_ok(eng.advance_to_commit(), "commit");
+            let active_checks: Vec<u64> = eng.state().checks.keys().copied().collect();
+            let active_escrows: Vec<(u64, PreimageSecret)> = known_secrets.clone();
+            let mut planned_bundles = Vec::with_capacity(usize::from(seat_count));
+            let mut commits = Vec::with_capacity(usize::from(seat_count));
+            for s in 0..seat_count {
+                let skip_commit = splitmix64(&mut rng).is_multiple_of(9);
+                if skip_commit {
+                    planned_bundles.push(None);
+                    commits.push(None);
+                    continue;
+                }
+                let mut bundle = SealedOrderBundle::default();
+                if splitmix64(&mut rng).is_multiple_of(2) {
+                    bundle.converter_runs.push(ConverterRunOrder {
+                        recipe_idx: (splitmix64(&mut rng) % 4) as usize,
+                        runs: 1 + (splitmix64(&mut rng) % 6) as u32,
+                    });
+                }
+                if splitmix64(&mut rng).is_multiple_of(3) {
+                    bundle.project_deliveries.push(ProjectDeliveryOrder {
+                        project_id: 1 + (splitmix64(&mut rng) % 105) as u16,
+                        batches: 1 + (splitmix64(&mut rng) % 5) as u32,
+                    });
+                }
+                if splitmix64(&mut rng).is_multiple_of(3) {
+                    let taker = (s + 1) % seat_count;
+                    bundle.atomic_swaps.push(AtomicSwapProposal {
+                        swap_id: splitmix64(&mut rng),
+                        maker: s,
+                        taker,
+                        maker_asset: AssetId::Raw(s),
+                        maker_amount: 500,
+                        taker_asset: AssetId::Cred,
+                        taker_amount: 200,
+                        domain_id: None,
+                    });
+                }
+                if splitmix64(&mut rng).is_multiple_of(2) {
+                    bundle.debt_repayment_cred = if splitmix64(&mut rng).is_multiple_of(11) {
+                        i64::MAX
+                    } else if splitmix64(&mut rng).is_multiple_of(2) {
+                        -10
+                    } else {
+                        (splitmix64(&mut rng) % 5_000) as Units
+                    };
+                }
+                if let Some(&(eid, ref sec)) = active_escrows.first()
+                    && splitmix64(&mut rng).is_multiple_of(2)
+                {
+                    bundle.escrow_finishes.push(EscrowFinishUnlock {
+                        escrow_id: eid,
+                        preimage: Some(sec.clone()),
+                    });
+                }
+                if let Some(&cid) = active_checks.first()
+                    && splitmix64(&mut rng).is_multiple_of(2)
+                {
+                    bundle.check_cashes.push(cid);
+                }
+                if t.is_multiple_of(4) && !splitmix64(&mut rng).is_multiple_of(5) {
+                    bundle.council_vote = Some(CouncilVoteBallot {
+                        trade_minister: (splitmix64(&mut rng) % u64::from(seat_count + 1)) as u8,
+                        cartel_chair: (splitmix64(&mut rng) % u64::from(seat_count + 1)) as u8,
+                    });
+                }
+                if t.is_multiple_of(6) && !splitmix64(&mut rng).is_multiple_of(4) {
+                    bundle.charter_bids.push(CharterBidOrder {
+                        role: match splitmix64(&mut rng) % 3 {
+                            0 => CharterRole::ClearinghouseBroker,
+                            1 => CharterRole::CustomsInspector,
+                            _ => CharterRole::OracleAuditor,
+                        },
+                        bid_cred: if splitmix64(&mut rng).is_multiple_of(13) {
+                            i64::MAX
+                        } else {
+                            100 + (splitmix64(&mut rng) % 2_000) as Units
+                        },
+                    });
+                }
+                let ord_rev = OrderReveal {
+                    bundle: bundle.clone(),
+                    salt: RevealSalt([(t.wrapping_mul(17)).wrapping_add(s).max(1); 32]),
+                };
+                let ch = must_ok(
+                    compute_order_commitment(tid, Turn(t), Seat(s), &ord_rev),
+                    "commit",
+                );
+                must_ok(eng.submit_order_commitment(Seat(s), ch), "sub commit");
+                planned_bundles.push(Some(ord_rev));
+                commits.push(Some(ch));
+            }
+            must_ok(eng.advance_to_reveal(), "advance reveal");
+            for (s_idx, rev_opt) in planned_bundles.into_iter().enumerate() {
+                if let Some(rev) = rev_opt
+                    && !splitmix64(&mut rng).is_multiple_of(10)
+                {
+                    must_ok(eng.submit_order_reveal(Seat(s_idx as u8), rev), "sub rev");
+                }
+            }
+
+            let beacon = derive_turn_beacon(table_idx + 1, tid, Turn(t));
+            let rec = must_ok(eng.sweep_turn(beacon), "sweep never panics or errors");
+            total_turns_swept += 1;
+            total_repaid += rec.cred_debt_repaid;
+            total_burned += rec.charter_cred_burned;
+            assert_eq!(
+                table_cred_total(&eng, total_repaid, total_burned),
+                initial_cred
+            );
+            if rec.season_closed {
+                break;
+            }
+        }
+    }
+    assert!(total_turns_swept >= 24 * 24);
+}
+
+#[test]
+fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
+    let tid = TableId(944);
+    let seed = 42_u64;
+    let salts = [
+        RevealSalt([0x31; 32]),
+        RevealSalt([0x32; 32]),
+        RevealSalt([0x33; 32]),
+        RevealSalt([0x34; 32]),
+    ];
+    let (spec, sealed_deal) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(tid, 4, seed, [0x77; 32], &salts),
+        "rich explicit spec",
+    );
+    let mut eng = must_ok(TurnEngine::new(spec.clone()), "eng");
+    let mut turns = Vec::new();
+    let mut live_digests = Vec::new();
+
+    for t in 1..=28_u8 {
+        if eng.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let mut actions = Vec::new();
+        let mut bundles = vec![SealedOrderBundle::default(); 4];
+        if t == 2 {
+            actions.push(MarketAction::PostOffer {
+                seat: 0,
+                order: OfferProposal {
+                    side: OfferSide::Sell,
+                    good: AssetId::Raw(0),
+                    amount: 2_000,
+                    price_per_unit_cred: 1_500,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            });
+            actions.push(MarketAction::CreateCheck {
+                seat: 1,
+                check: CheckProposal {
+                    payee: 0,
+                    asset: AssetId::Cred,
+                    send_max: 600,
+                    deliver_min: 600,
+                    due_turn: 3,
+                    expiration_turn: 5,
+                },
+            });
+            // Intentionally invalid refused Phase-1 action included in the log (A6):
+            actions.push(MarketAction::CancelOffer {
+                seat: 0,
+                offer_id: 99_999,
+            });
+            let sw = AtomicSwapProposal {
+                swap_id: 700,
+                maker: 1,
+                taker: 2,
+                maker_asset: AssetId::Raw(1),
+                maker_amount: 1_000,
+                taker_asset: AssetId::Cred,
+                taker_amount: 1_200,
+                domain_id: None,
+            };
+            bundles[1].atomic_swaps.push(sw.clone());
+            bundles[2].atomic_swaps.push(sw);
+        }
+        if t == 3 {
+            actions.push(MarketAction::StandForOffice {
+                seat: 2,
+                platform: CouncilPlatform {
+                    proposed_tariffs_bps: vec![(0, (1_100, 800))],
+                    cartel_admissions: vec![(1, 2), (1, 0)],
+                    cartel_revocations: Vec::new(),
+                },
+            });
+            bundles[0].check_cashes.push(1);
+        }
+        if t == 4 {
+            bundles[0].council_vote = Some(CouncilVoteBallot {
+                trade_minister: 2,
+                cartel_chair: 2,
+            });
+        }
+        if t == 6 {
+            bundles[1].charter_bids.push(CharterBidOrder {
+                role: CharterRole::ClearinghouseBroker,
+                bid_cred: 400,
+            });
+        }
+        for action in &actions {
+            let _ = eng.apply_market_action(action.clone());
+        }
+        let (commitments, reveals) = commit_and_reveal_all(&mut eng, tid, t, bundles);
+        let beacon = derive_turn_beacon(seed, tid, Turn(t));
+        let receipt = must_ok(eng.sweep_turn(beacon), "sweep rich");
+        live_digests.push(receipt.post_state_digest);
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: actions,
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: None,
+            drand_signature: None,
+        });
+        if receipt.season_closed {
+            break;
+        }
+    }
+
+    let mut mandate_reveals = vec![None; 4];
+    let rev0 = sealed_deal.seat_reveals[0].clone();
+    mandate_reveals[0] = Some(rev0.clone());
+    must_ok(eng.submit_mandate_reveal(Seat(0), rev0), "rev0");
+    let live_board = must_ok(eng.finalize_season(), "finalize rich");
+    let live_terminal = must_ok(eng.state_digest(), "terminal digest");
+
+    let log = SeasonReplayLog {
+        spec,
+        seed,
+        beacon_mode: ReplayBeaconMode::SeedDerived,
+        sealed_mandate_deal: sealed_deal,
+        mandate_commits: vec![None; 4],
+        turns,
+        mandate_reveals,
+    };
+    let replayed = must_ok(replay_season(&log), "replay rich");
+    assert_eq!(replayed.state_digests, live_digests);
+    assert_eq!(replayed.scoreboard, live_board);
+
+    let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
+    assert_eq!(
+        hex::encode(last_turn_digest),
+        "699f25bb8f2206bc16dd68bd4e4301621b8cac3c79c60e45aba907570727b953"
+    );
+    assert_eq!(
+        hex::encode(live_terminal),
+        "286c3f19d0146eaef7e9da8bdaebbe94bf75007dc239c86a6c8e787423365a33"
+    );
 }

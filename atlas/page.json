@@ -16,43 +16,24 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 7,
-      "changed": 6,
+      "added": 0,
+      "changed": 11,
       "moved": 0,
       "parts": 3,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-core/src/engine.rs, crates/league-core/src/lib.rs, crates/league-core/src/replay.rs and 1 more.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-core/src/engine.rs",
-          "crates/league-core/src/lib.rs",
-          "crates/league-core/src/replay.rs",
-          "crates/league-core/tests/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI no longer runs crates/league-core/.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-core/"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "7 files added and 6 changed content, across 3 parts.",
+        "sentence": "Nothing structural changed since 2026-11-15; 11 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "ea16219238aa40679dfb82e08ae1cba3d628cdcb",
-      "generatedAt": "2026-11-15T12:51:14.862Z"
+      "commit": "eb74411fb7e03940b5105ac5ba472483b512eaff",
+      "generatedAt": "2026-11-15T13:37:13.396Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -136,7 +117,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "eb74411fb7e03940b5105ac5ba472483b512eaff",
+  "commit": "dc929160f6cb0b9657b77d85eafbc9909bfe5967",
   "defaultBranch": "main",
   "derived": "10 parts, mostly Rust (330 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 7 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -356,7 +337,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-15T13:37:13.396Z",
+  "generatedAt": "2026-11-15T14:19:09.192Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

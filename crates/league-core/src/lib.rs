@@ -14,12 +14,16 @@ pub mod types;
 
 pub use commit::{
     AtomicSwapProposal, CharterBidOrder, CommitmentHash, ConverterRunOrder, CouncilPlatform,
-    CouncilVoteBallot, EscrowFinishUnlock, GradedMandateCard, IntentPledge, IntentTarget,
-    MandateKind, MandateReveal, OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder,
-    RevealSalt, SealedOrderBundle, beacon_roll_bps, bonus_equity_for_completion_bps,
-    break_tie_with_beacon, compute_mandate_commitment, compute_order_commitment,
-    compute_preimage_condition, deal_graded_mandates, default_graded_mandate_deck,
-    derive_turn_beacon, verify_mandate_reveal, verify_order_reveal, verify_preimage_condition,
+    CouncilVoteBallot, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS,
+    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EscrowFinishUnlock, GradedMandateCard,
+    IntentPledge, IntentTarget, MandateKind, MandateReveal, OrderReveal, PreimageSecret,
+    PrivateMandate, ProjectDeliveryOrder, RevealSalt, SealedMandateDeal, SealedOrderBundle,
+    beacon_roll_bps, bonus_equity_for_completion_bps, break_tie_with_beacon,
+    compute_mandate_commitment, compute_order_commitment, compute_preimage_condition,
+    deal_graded_mandates, deal_graded_mandates_with_entropy, default_graded_mandate_deck,
+    derive_drand_beacon, derive_turn_beacon, drand_quicknet_round_for_close,
+    verify_drand_quicknet_beacon, verify_mandate_reveal, verify_order_reveal,
+    verify_preimage_condition, verify_sealed_mandate_deal, width_independent_index,
 };
 pub use contracts::{
     ActiveCharter, BondProposal, BondSpec, CartelDomain, CheckProposal, CheckStatus, CredOffer,
