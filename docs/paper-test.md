@@ -63,27 +63,27 @@ Each guild sits out once or twice. A sitting-out guild's good is put on a town l
 - **Gemini:** Carbon in AI Studio and the Gemini app. These are one family.
 - **Claude:** subagents, on Sonnet 5.5 by the studio rule.
 - **Local (optional):** a local open-weight model of another family. It needs the Publisher's GPU grant.
-- **GPT-OSS while available (removed 18 Nov 2026).** Antigravity's models page says GPT-OSS 120B will be removed on 18 November 2026, so the Publisher ruled (2026-11-14):
-  - **Where it sits.** GPT-OSS 120B takes the one Antigravity card as the third family. It plays in game 1, and in game 2 too if game 2 can start and finish by the end of 17 November ET.
-    - In game 1 it takes a Claude seat (2 Gemini, 1 Claude, 1 GPT-OSS), which keeps Claude seats few at a table a Claude session referees.
-    - In game 2 it takes the third Gemini seat (2 Gemini, 2 Claude, 1 GPT-OSS).
-  - **After that.** Any game not finished by then uses the fallback mix: 5 seats are 3 Gemini and 2 Claude, and 4 seats are 2 Gemini and 2 Claude.
-  - **A clean project.** The GPT seat opens in a clean Antigravity project whose tree holds no other seat's setup, brief, mandate or order. Its card says to read no files and to play only from the conversation; every card says so.
-  - **A memory check.** Each turn, the referee checks that the GPT seat still remembers its live contracts. A lost contract is logged in `metrics.md` as a harness fault, not a play choice.
+- **GPT-OSS 120B, while available.** It runs on the one Antigravity card, which draws on Antigravity's Claude and GPT quota, not the Gemini one. Antigravity's models page says it will be removed on 18 November 2026.
 
-  Game 1's and game 2's `setup.md` give the seating with GPT-OSS and the fallback seating.
+**The mix** (Publisher, 2026-11-14, on the Director's suggestion): each game has **one GPT-OSS seat**, with one Antigravity conversation open at a time.
 
-**The constraint.** With three families at most, a 4- or 5-seat table can't give every seat its own family. The rule is "no more than two seats from one family at a table, where possible":
-- **4 seats:** 2 Gemini and 2 Claude.
-- **5 seats with the local model:** 2 Gemini, 2 Claude and 1 local.
-- **5 seats without it:** 3 Gemini and 2 Claude. Gemini takes the extra seat because the referee is Claude, so this keeps Claude seats from being the majority at any table.
+| Table | With GPT-OSS | Fallback |
+|---|---|---|
+| 4 seats | 2 Gemini, 1 Claude, 1 GPT-OSS | 2 Gemini, 2 Claude |
+| 5 seats | 2 Gemini, 2 Claude, 1 GPT-OSS | 3 Gemini, 2 Claude |
+
+- **When the fallback applies.** A game that can't start and finish by the end of 17 November ET uses the fallback mix (the Publisher's earlier ruling, relayed by R&D, the same day). Each game's `setup.md` gives both seatings.
+- **Why these shapes.** No family has more than two seats at a table, and the Claude seats never outnumber the rest, because the referee is a Claude session. The fallback is the plan's mix without a third family.
+- **A clean project.** The GPT-OSS seat opens in a clean Antigravity project whose tree holds no other seat's setup, brief, mandate or order. Its card says to read no files and to play only from the conversation; every card says so.
+- **A memory check.** Each turn, the referee checks that the GPT-OSS seat still remembers its live contracts. A lost contract is logged in `metrics.md` as a harness fault, not a play choice.
+- **A local model,** if one is granted, would replace a Gemini seat in the fallback mix.
 
 **Within a family, seats are as separate as possible:**
 - the two Gemini seats use different surfaces (AI Studio and the Gemini app);
-- the Antigravity card is the GPT-OSS seat (above), not a Gemini seat;
+- the Antigravity card is the GPT-OSS seat, not a Gemini seat;
 - each Claude seat is a fresh subagent.
 
-**Rotation.** Seats rotate so that Gemini and Claude each play every guild at least once across the six games, with or without the GPT-OSS seats. That stops a guild's result from being a family's result. The assignment is written into each game's `setup.md`.
+**Rotation.** Each family plays every guild across the six games: GPT-OSS plays each guild once, and Gemini and Claude each play every guild, under either seating. That stops a guild's result from being a family's result. The assignment is written into each game's `setup.md`.
 
 ## The seat brief
 
