@@ -408,6 +408,436 @@
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 0,
       "entryPoints": [
+        "crates/league-gen/src/lib.rs"
+      ],
+      "externals": 0,
+      "files": [
+        {
+          "hash": "91ebac52fd7b76f10e8d3a978db53ddc59866bf775df523b8ce9b051365a19c6",
+          "path": "crates/league-gen/Cargo.toml"
+        },
+        {
+          "exports": [
+            "compute_hhi",
+            "evaluate_random_table",
+            "evaluate_ring_table",
+            "generate_random_table",
+            "measure_lockin_and_hhi"
+          ],
+          "hash": "4480460abd8ac19d595cfffe9c2e1848667ef95d8e89cb6166c22b0c8baf3089",
+          "importsFiles": [
+            "crates/league-gen/src/feasibility.rs",
+            "crates/league-gen/src/generator.rs",
+            "crates/league-gen/src/rng.rs",
+            "crates/league-gen/src/schema.rs"
+          ],
+          "path": "crates/league-gen/src/empirical.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "check_feasibility",
+            "coalition_upkeep_coverage",
+            "compute_shadow_price_seat_evs",
+            "compute_shapley_seat_evs",
+            "pair_has_structural_autarky"
+          ],
+          "failurePaths": [
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 82
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 90
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 107
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 121
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 133
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 146
+            },
+            {
+              "in": "check_feasibility",
+              "kind": "err",
+              "line": 159
+            },
+            {
+              "in": "pair_has_structural_autarky",
+              "kind": "err",
+              "line": 201
+            },
+            {
+              "in": "coalition_upkeep_coverage",
+              "kind": "err",
+              "line": 240
+            },
+            {
+              "in": "coalition_upkeep_coverage",
+              "kind": "err",
+              "line": 356
+            },
+            {
+              "in": "coalition_upkeep_coverage",
+              "kind": "err",
+              "line": 359
+            },
+            {
+              "in": "compute_shadow_price_seat_evs",
+              "kind": "err",
+              "line": 453
+            },
+            {
+              "in": "compute_shadow_price_seat_evs",
+              "kind": "err",
+              "line": 460
+            },
+            {
+              "in": "select_balanced_optimal_dual",
+              "kind": "match-err",
+              "line": 593
+            },
+            {
+              "in": "solve_grand_surplus",
+              "kind": "err",
+              "line": 733
+            },
+            {
+              "in": "solve_grand_surplus",
+              "kind": "err",
+              "line": 738
+            },
+            {
+              "in": "evaluate_coalition_net_equity",
+              "kind": "err",
+              "line": 908
+            },
+            {
+              "in": "validate_index_bounds",
+              "kind": "err",
+              "line": 1001
+            },
+            {
+              "in": "validate_index_bounds",
+              "kind": "err",
+              "line": 1008
+            },
+            {
+              "in": "validate_index_bounds",
+              "kind": "err",
+              "line": 1015
+            },
+            {
+              "in": "validate_index_bounds",
+              "kind": "err",
+              "line": 1021
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1037
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1042
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1049
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1055
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1061
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1069
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1075
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1081
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1087
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1097
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1104
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1112
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1117
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1123
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1133
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1144
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1161
+            }
+          ],
+          "hash": "09e0ddff9a93cc50fd037f940f498192356330080b285c693e7a23f08adc3f2a",
+          "importsFiles": [
+            "crates/league-gen/src/lp.rs",
+            "crates/league-gen/src/schema.rs"
+          ],
+          "path": "crates/league-gen/src/feasibility.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "generate_ring_table"
+          ],
+          "failurePaths": [
+            {
+              "in": "generate_ring_table",
+              "kind": "match-err",
+              "line": 88
+            },
+            {
+              "in": "generate_ring_table",
+              "kind": "err",
+              "line": 92
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 100
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 106
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 111
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 116
+            },
+            {
+              "in": "validate_generator_config",
+              "kind": "err",
+              "line": 127
+            },
+            {
+              "in": "sample_unique_codes",
+              "kind": "err",
+              "line": 290
+            }
+          ],
+          "hash": "2c2f4677a764e80ad89078a53225175846c3713c08cef70647755a578d2d06c1",
+          "importsFiles": [
+            "crates/league-gen/src/feasibility.rs",
+            "crates/league-gen/src/rng.rs",
+            "crates/league-gen/src/schema.rs"
+          ],
+          "path": "crates/league-gen/src/generator.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "c1bc482a54eb55d29af0f01a00800eddb04095baf3356a01be5444300decdf41",
+          "importsFiles": [
+            "crates/league-gen/src/empirical.rs",
+            "crates/league-gen/src/feasibility.rs",
+            "crates/league-gen/src/generator.rs",
+            "crates/league-gen/src/lp.rs",
+            "crates/league-gen/src/rng.rs",
+            "crates/league-gen/src/schema.rs"
+          ],
+          "path": "crates/league-gen/src/lib.rs"
+        },
+        {
+          "exports": [
+            "solve_lp"
+          ],
+          "failurePaths": [
+            {
+              "in": "solve_lp",
+              "kind": "err",
+              "line": 55
+            },
+            {
+              "in": "solve_lp",
+              "kind": "err",
+              "line": 63
+            },
+            {
+              "in": "solve_lp",
+              "kind": "err",
+              "line": 70
+            },
+            {
+              "in": "solve_lp",
+              "kind": "err",
+              "line": 76
+            },
+            {
+              "in": "run_phase_one",
+              "kind": "err",
+              "line": 240
+            },
+            {
+              "in": "simplex_iterate",
+              "kind": "err",
+              "line": 325
+            },
+            {
+              "in": "pivot",
+              "kind": "err",
+              "line": 341
+            },
+            {
+              "in": "verify_kkt_certificate",
+              "kind": "err",
+              "line": 388
+            },
+            {
+              "in": "verify_kkt_certificate",
+              "kind": "err",
+              "line": 398
+            },
+            {
+              "in": "verify_kkt_certificate",
+              "kind": "err",
+              "line": 407
+            },
+            {
+              "in": "verify_kkt_certificate",
+              "kind": "err",
+              "line": 417
+            },
+            {
+              "in": "verify_kkt_certificate",
+              "kind": "err",
+              "line": 427
+            }
+          ],
+          "hash": "fdf7bc6464a6553418e683dbf4ff3179f6910e21c9c8033ac7c6334a0ba7e37b",
+          "path": "crates/league-gen/src/lp.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "ce9fce683f2172094a62c33ab781a3437ac0e801e87bcb0812ddf06dd13881b2",
+          "path": "crates/league-gen/src/rng.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "is_denied_currency_code"
+          ],
+          "failurePaths": [
+            {
+              "in": "from_bytes",
+              "kind": "err",
+              "line": 144
+            },
+            {
+              "in": "from_bytes",
+              "kind": "err",
+              "line": 149
+            },
+            {
+              "in": "try_from",
+              "kind": "err",
+              "line": 195
+            }
+          ],
+          "hash": "1f6cb6ee750860b17b0144beded6ccb3743561b005d61b05a53b03ac25a4200c",
+          "path": "crates/league-gen/src/schema.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "0929347b16e923689dd5743bfc0d7f5204face29d8656dfcc6655a415c004cba",
+          "importsFiles": [
+            "crates/league-gen/src/lib.rs"
+          ],
+          "library": "crates/league-gen/src/lib.rs",
+          "path": "crates/league-gen/tests/properties.rs",
+          "testsInside": true
+        }
+      ],
+      "globs": [
+        "crates/league-gen/**"
+      ],
+      "importConfidence": "full",
+      "name": "league-gen",
+      "origin": "authored",
+      "role": "code",
+      "testRunners": [
+        "cargo test"
+      ],
+      "testedBy": 7,
+      "unresolvedSites": 0
+    },
+    {
+      "dynamicReads": 0,
+      "dynamicSpawns": 0,
+      "dynamicSpawnsInTests": 0,
+      "dynamicWrites": 0,
+      "entryPoints": [
         "crates/league-ledger/src/lib.rs"
       ],
       "externals": 0,
@@ -752,7 +1182,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "9f0660febc0aa3e64ddbff83fa85d5a9f384bb9e9fa0ba412d4eaafae64f5da0",
+          "hash": "b6faa1d512e91d3f564f190db45a2dc46722a4561f5813cec576bb6f9435127d",
           "path": "CHANGELOG.md"
         },
         {
@@ -760,11 +1190,11 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "7bda9eea32459c5da966ce1e96827a633d68cf96db31cd887d2f0b7b1a3bec7d",
+          "hash": "1cc229b1c4360cf6ecd5df11acc5ff58cf9d2805da7b80f9ee1e31a355cd61b4",
           "path": "Cargo.lock"
         },
         {
-          "hash": "87176dd476a88c675fb9d01525ba52826fd26d2c0b3177881cc6465a53ac6921",
+          "hash": "dcd51fd86a17dd775e04346bf3c4848b4ca35094d75d4d8b55df1bdc7280128d",
           "path": "Cargo.toml"
         },
         {
@@ -828,7 +1258,7 @@
   ],
   "doors": [
     {
-      "checksCount": 2,
+      "checksCount": 3,
       "commands": [
         {
           "dir": "",
@@ -965,6 +1395,11 @@
           "files": 1
         },
         {
+          "boundary": "league-gen",
+          "depth": 0,
+          "files": 8
+        },
+        {
           "boundary": "league-ledger",
           "depth": 0,
           "files": 6
@@ -1000,6 +1435,63 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-dice/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/empirical.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/feasibility.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/generator.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo clippy"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/lp.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/rng.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/schema.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/tests/",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -1080,7 +1572,7 @@
           "runKind": "executes"
         }
       ],
-      "runsCount": 13,
+      "runsCount": 21,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -1095,14 +1587,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 11,
+          "files": 18,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 11,
+          "files": 18,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -1346,8 +1838,8 @@
   "edges": [],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d661143598007c7617e0499dc4fc5f984c29f565",
-    "tracked": 472
+    "commit": "425de10a17d88bcf6f78e4552bc82dd06eaa5dbd",
+    "tracked": 481
   },
   "landings": [
     {
@@ -1430,6 +1922,17 @@
         }
       ],
       "target": "crates/league-dice",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        }
+      ],
+      "target": "crates/league-gen",
       "writers": []
     },
     {
@@ -2082,7 +2585,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 21,
+  "testFiles": 28,
   "unassigned": [
     {
       "hash": "615bafda252cac1a61ad9198c197174bde3e92b36f16bb4b120114e36787a1a2",
