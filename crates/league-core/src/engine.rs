@@ -3036,11 +3036,10 @@ impl TurnEngine {
             let cfg = &self.state.spec.seats[s_idx];
             let upkeep_g = usize::from(cfg.upkeep_good);
             let avail = self.state.seats[s_idx].refined[upkeep_g];
-            let settlement = settle_upkeep(
-                avail,
-                cfg.upkeep_amount,
-                self.state.parities.refined_per_unit[upkeep_g],
-            );
+            let parities = &self.state.parities;
+            let settlement = settle_upkeep(avail, cfg.upkeep_amount, || {
+                parities.refined_per_unit[upkeep_g]
+            });
             let paid = settlement.paid_with_refined;
             self.state.seats[s_idx].refined[upkeep_g] -= paid;
             let new_debt = settlement.new_shortfall_debt;
@@ -3486,12 +3485,17 @@ pub(crate) struct UpkeepSettlement {
 }
 
 /// Settles `owed` units of upkeep against `held` units, converting any shortfall to auto-debt at
-/// `parity` (milli-`CRED` per `1_000` units), exactly as Sweep Step 5 does.
-pub(crate) fn settle_upkeep(held: Units, owed: Units, parity: Units) -> UpkeepSettlement {
+/// the upkeep good's parity (milli-`CRED` per `1_000` units), exactly as Sweep Step 5 does. The
+/// parity is read only when there is a shortfall, as Step 5 always did.
+pub(crate) fn settle_upkeep(
+    held: Units,
+    owed: Units,
+    parity: impl FnOnce() -> Units,
+) -> UpkeepSettlement {
     let paid = held.min(owed);
     let shortfall = owed - paid;
     let new_shortfall_debt = if shortfall > 0 {
-        ceil_units_parity(shortfall, parity)
+        ceil_units_parity(shortfall, parity())
     } else {
         0
     };
@@ -3512,7 +3516,7 @@ pub(crate) fn batches_covered_by_inputs(recipe: &ConverterRecipe, raw: &[Units])
             if amt <= 0 {
                 0
             } else {
-                let avail = raw[usize::from(raw_g)].max(0);
+                let avail = raw.get(usize::from(raw_g)).copied().unwrap_or(0).max(0);
                 u32::try_from(avail / amt).unwrap_or(u32::MAX)
             }
         })
@@ -3598,6 +3602,54 @@ fn pick_plurality_winner_with_beacon(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upkeep_settlement_reads_parity_only_on_a_shortfall_and_input_cover_never_panics() {
+        // A covered upkeep never reads the parity (the review's input: 2_000 held, 1_800 owed,
+        // no parity at all), and settles as Step 5 always did.
+        let covered = settle_upkeep(2_000, 1_800, || panic!("parity read without a shortfall"));
+        assert_eq!(
+            covered,
+            UpkeepSettlement {
+                paid_with_refined: 1_800,
+                shortfall: 0,
+                new_shortfall_debt: 0,
+            }
+        );
+        let short = settle_upkeep(500, 1_800, || 2_000);
+        assert_eq!((short.shortfall, short.new_shortfall_debt), (1_300, 2_600));
+
+        // Step 5 itself on a state whose parity table is empty but every seat is covered.
+        let Ok(spec) = TableSpec::standard_chiral_ring(TableId(77), 4, 1) else {
+            panic!("spec");
+        };
+        let Ok(mut engine) = TurnEngine::new(spec) else {
+            panic!("engine");
+        };
+        engine.state.parities.refined_per_unit = Vec::new();
+        for seat in &mut engine.state.seats {
+            seat.refined = vec![2_000; 4];
+        }
+        let (debt, by_seat) = engine.step5_collect_upkeep_and_debt(&[0; 4]);
+        assert_eq!(debt, 0);
+        assert!(
+            by_seat
+                .iter()
+                .all(|u| u.paid_with_refined == 1_800 && u.new_shortfall_debt == 0)
+        );
+
+        // The review's second input: one raw balance, a recipe input on good 2 -> 0 batches.
+        let recipe = ConverterRecipe {
+            owner: 0,
+            inputs: vec![(2, 2_000)],
+            output_good: 0,
+            output_amount: 3_500,
+            max_runs_per_turn: 4,
+            is_secondary: false,
+        };
+        assert_eq!(batches_covered_by_inputs(&recipe, &[1_000]), 0);
+        assert_eq!(batches_covered_by_inputs(&recipe, &[0, 0, 4_100]), 2);
+    }
     use crate::commit::{RevealSalt, compute_order_commitment, derive_turn_beacon};
 
     #[test]

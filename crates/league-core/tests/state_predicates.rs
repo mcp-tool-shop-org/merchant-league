@@ -5,15 +5,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use league_core::{
-    ActiveShock, AssetId, AtomicSwapProposal, CartelDomain, CharterBidOrder, CharterRole,
-    CheckProposal, CommitmentHash, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot,
-    CredOffer, EngineState, HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal, OfferSide,
-    OrderReveal, ReplayBeaconMode, ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed,
-    SealedMandateDeal, SealedOrderBundle, SeasonReplayLog, Seat, SeatStatePredicates, ShockKind,
-    StatePredicateSection, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase, Units,
-    attach_state_predicates, avoidable_shortfall_turns, coalition_reach,
+    ActiveCharter, ActiveShock, AssetId, AtomicSwapProposal, CartelDomain, CharterBidOrder,
+    CharterRole, CheckProposal, CheckStatus, CommitmentHash, ConverterRunOrder, CouncilPlatform,
+    CouncilVoteBallot, CredOffer, CreditCheck, CreditTier, EngineState, EscrowStatus,
+    HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal, OfferSide, OrderReveal, RegentDoctrine,
+    ReplayBeaconMode, ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed,
+    SealedMandateDeal, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatStatePredicates,
+    ShockKind, StatePredicateSection, TableId, TableMode, TableSpec, TokenEscrowVault, Turn,
+    TurnEngine, TurnPhase, Units, attach_state_predicates, coalition_reach,
     compute_final_marked_net_asset_equity, compute_order_commitment, compute_season_metrics,
-    compute_seat_state_predicates, derive_turn_beacon, mark_good_holding_at_close, replay_season,
+    compute_seat_state_predicates, covered_with_own_offers_but_short_turns, derive_turn_beacon,
+    held_enough_but_short_turns, mark_good_holding_at_close, replay_season,
     replay_season_with_state_predicates, scarcity_and_tariffs, season_end_and_marks,
     spoilage_and_conversion, spoiled_units_over_season, stranded_stock_at_close, upkeep_and_debt,
 };
@@ -207,6 +209,7 @@ fn hand_worked_spoilage_and_conversion() {
     // Raw(1): floor(3_000 * 20%) = 600. Raw(2): floor(5_000 * 20%) = 1_000. Total 3_600.
     // Recipe (Raw(1) 2_000, Raw(2) 2_000): min(3_000/2_000, 5_000/2_000) = min(1, 2) = 1 batch; cap 4.
     let p = must(spoilage_and_conversion(&st, Seat(0)), "spoilage");
+    assert_eq!(p.own_raw_good, 0);
     assert_eq!(p.own_raw_yield_at_sweep, 10_000);
     assert_eq!(p.spoilage_bps_by_good, vec![2_000; 4]);
     assert_eq!(p.spoil_units_held_by_good, vec![2_000, 600, 1_000, 0]);
@@ -214,6 +217,7 @@ fn hand_worked_spoilage_and_conversion() {
     assert_eq!(p.spoil_units_total, 3_600);
     assert_eq!(p.workshop_capacity_runs_left, 4);
     assert_eq!(p.recipes.len(), 1);
+    assert_eq!(p.recipes[0].recipe_idx, 0);
     assert_eq!(p.recipes[0].batches_covered_by_inputs, 1);
     assert_eq!(p.recipes[0].output_good, 0);
     assert_eq!(p.recipes[0].output_units_per_batch, 3_500);
@@ -254,6 +258,8 @@ fn hand_worked_spoilage_and_conversion() {
     assert_eq!(p.spoil_units_held_by_good, vec![1_500, 1_800, 1_000, 0]);
     assert_eq!(p.spoil_units_on_resting_offers, 500);
     assert_eq!(p.spoil_units_total, 1_500 + 1_800 + 1_000 + 500);
+    let p3 = must(spoilage_and_conversion(&st, Seat(3)), "seat 3");
+    assert_eq!(p3.own_raw_good, 3);
 }
 
 #[test]
@@ -394,6 +400,28 @@ fn hand_worked_season_end_and_marks() {
     assert_eq!(proj1.inputs[0].held_units, 1_000);
     assert_eq!(proj1.inputs[1].held_units, 500);
     assert_eq!(proj1.batches_covered, 0);
+    // 2 batches: 2_000 / 1_000 = 2 and 2_500 / 1_000 = 2 -> 2.
+    let mut two = st.clone();
+    two.seats[0].refined[0] = 2_000;
+    two.seats[0].refined[1] = 2_500;
+    let p2b = must(season_end_and_marks(&two, Seat(0)), "two batches");
+    let Some(c) = p2b.projects.iter().find(|c| c.project_id == 1) else {
+        panic!("project 1")
+    };
+    assert_eq!(c.batches_covered, 2);
+    // The scarcer input binds: 3_500 / 1_000 = 3 but 1_200 / 1_000 = 1 -> 1.
+    two.seats[0].refined[0] = 3_500;
+    two.seats[0].refined[1] = 1_200;
+    let p2c = must(season_end_and_marks(&two, Seat(0)), "scarcer binds");
+    let Some(c) = p2c.projects.iter().find(|c| c.project_id == 1) else {
+        panic!("project 1")
+    };
+    assert_eq!(c.batches_covered, 1);
+    // Project 100 takes 500 of every refined good; seat 0 holds 0 Refined(3) -> 0.
+    let Some(c) = p2c.projects.iter().find(|c| c.project_id == 100) else {
+        panic!("project 100")
+    };
+    assert_eq!(c.batches_covered, 0);
 
     // Late season: turn 30 earliest 0 (this Sweep may close), latest 2 (turn 32).
     st.turn = 30;
@@ -598,6 +626,8 @@ fn quiet_seasons_predictions_match_every_sweep_and_the_close_mark() {
 fn predicted_marks_equal_the_close_mark_with_standing_bids() {
     let (mut st, _) = busy_state(4);
     st.turn = HARD_TURN_CAP;
+    // Seat 0 owes Refined(3), so its 1_000 Refined(0) is still held at the close.
+    st.seats[0].refined[0] = 1_000;
     let mut engine = engine_from_state(&st);
     let tid = st.table_id;
     let _ = commit_and_reveal(
@@ -633,8 +663,33 @@ fn predicted_marks_equal_the_close_mark_with_standing_bids() {
                 h.marked_value,
                 mark_good_holding_at_close(&closed, s, h.good, h.units)
             );
+            // Independent invariants: every unit is marked by a bid or at the floor, and the
+            // floor value is 50% of base value over the pooled floor units, rounded down once.
+            assert_eq!(h.units_marked_by_bids + h.units_at_floor, h.units.max(0));
+            let parity = match h.good {
+                AssetId::Raw(g) => closed.parities.raw_per_unit[usize::from(g)],
+                AssetId::Refined(g) => closed.parities.refined_per_unit[usize::from(g)],
+                AssetId::Cred => 0,
+            };
+            assert_eq!(h.value_at_floor, h.units_at_floor * parity / 2_000);
+            let bid_part = h.marked_value - h.value_at_floor;
+            if h.units_marked_by_bids == 0 {
+                assert_eq!(bid_part, 0);
+            }
         }
     }
+    // Hand computation for seat 0's Refined(0) at the close: the only resting bid is seat 2's
+    // 600 at 1_500 (locked 900). 600 * 1_500 / 1_000 = 900 > 600 * 2_000 * 50% / 1_000 = 600,
+    // so 600 units mark at 900; the other 400 pool at the floor: 400 * 2_000 / 2_000 = 400.
+    let p0 = must(season_end_and_marks(&closed, Seat(0)), "seat 0");
+    let Some(h) = p0.holdings.iter().find(|h| h.good == AssetId::Refined(0)) else {
+        panic!("Refined(0)")
+    };
+    assert_eq!(
+        (h.units, h.units_marked_by_bids, h.units_at_floor),
+        (1_000, 600, 400)
+    );
+    assert_eq!((h.value_at_floor, h.marked_value), (400, 1_300));
 }
 
 // --- Privacy -----------------------------------------------------------------------------------
@@ -660,61 +715,100 @@ fn all(st: &EngineState, s: Seat) -> Vec<u8> {
     json(&must(compute_seat_state_predicates(st, s), "all"))
 }
 
-/// Each change touches only seat 1's private data (seat 0 asks).
+/// `busy_state` with the bid walk in play for the asking seat 0: it holds 1_000 Refined(0), which
+/// seat 2 bids for above the floor (offer 1), and 3_500 Raw(0) (free plus its own resting sell),
+/// which seat 1 bids for above the floor (offer 4, open book).
+fn privacy_state(n: u8) -> (EngineState, SealedMandateDeal) {
+    let (mut st, deal) = busy_state(n);
+    st.seats[0].refined[0] = 1_000;
+    st.offers.insert(
+        4,
+        CredOffer {
+            offer_id: 4,
+            maker: 1,
+            side: OfferSide::Buy,
+            good: AssetId::Raw(0),
+            remaining_units: 1_000,
+            price_per_unit_cred: 1_500,
+            locked_cred: 1_500,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 8,
+        },
+    );
+    (st, deal)
+}
+
+/// Each change touches only data that stays private under the 2026-11-16 ruling (mandate cards and
+/// their commitments, committed-but-unrevealed moves, unpublished randomness), on `other`.
 fn private_variants(
     st: &EngineState,
     deal: &SealedMandateDeal,
+    other: u8,
 ) -> Vec<(&'static str, EngineState)> {
+    let o = usize::from(other);
     let mut out = Vec::new();
 
     let mut v = st.clone();
-    v.spec.dealt_mandate_commits[1] = CommitmentHash([0x5a; 32]);
-    v.mandate_commits[1] = Some(CommitmentHash([0x6b; 32]));
-    v.mandate_reveals[1] = Some(deal.seat_reveals[2].clone());
+    v.spec.dealt_mandate_commits[o] = CommitmentHash([0x5a ^ other; 32]);
+    out.push(("dealt mandate commitment", v));
+
+    let mut v = st.clone();
+    v.mandate_commits[o] = Some(CommitmentHash([0x6b ^ other; 32]));
+    out.push(("Turn-1 mandate commitment", v));
+
+    let mut v = st.clone();
+    v.mandate_reveals[o] = Some(deal.seat_reveals[(o + 1) % deal.seat_reveals.len()].clone());
     out.push(("mandate card", v));
 
     let mut v = st.clone();
-    v.turn_commits.insert(1, CommitmentHash([0x7c; 32]));
+    v.turn_commits
+        .insert(other, CommitmentHash([0x7c ^ other; 32]));
+    out.push(("unrevealed turn commitment", v));
+
+    let mut v = st.clone();
     let mut bundle = SealedOrderBundle::default();
     bundle.converter_runs.push(ConverterRunOrder {
         recipe_idx: 0,
         runs: 4,
     });
     bundle.debt_repayment_cred = 200;
+    bundle.check_cashes.push(3);
     bundle.council_vote = Some(CouncilVoteBallot {
-        trade_minister: 1,
-        cartel_chair: 1,
+        trade_minister: other,
+        cartel_chair: other,
     });
     bundle.charter_bids.push(CharterBidOrder {
         role: CharterRole::OracleAuditor,
         bid_cred: 300,
     });
     v.turn_reveals.insert(
-        1,
+        other,
         OrderReveal {
             bundle,
-            salt: RevealSalt([0x8d; 32]),
+            salt: RevealSalt([0x8d ^ other; 32]),
         },
     );
-    out.push(("unrevealed commit", v));
-
-    let mut v = st.clone();
-    v.seats[1].raw = v.seats[1].raw.iter().map(|x| x * 3 + 11).collect();
-    v.seats[1].refined = v.seats[1].refined.iter().map(|x| x * 2 + 7).collect();
-    v.seats[1].cred += 12_345;
-    v.seats[1].cred_debt += 678;
-    out.push(("holdings", v));
+    out.push(("sealed order bundle", v));
 
     let mut v = st.clone();
     v.drawn_shocks.push(ScheduledShockSpec {
         hint_turn: v.turn,
         forecast_turn: v.turn + 1,
         realize_turn: v.turn + 2,
-        target_seat: 0,
+        target_seat: other,
         kind: ShockKind::SpoilageSpike,
         magnitude_bps: 9_000,
     });
-    out.push(("unpublished shock", v));
+    v.drawn_shocks.push(ScheduledShockSpec {
+        hint_turn: v.turn,
+        forecast_turn: v.turn + 1,
+        realize_turn: v.turn + 2,
+        target_seat: 0,
+        kind: ShockKind::TariffHoliday,
+        magnitude_bps: 10_000,
+    });
+    out.push(("unpublished drawn shocks", v));
     out
 }
 
@@ -729,19 +823,164 @@ fn no_predicate_reads_another_seats_private_data() {
         ("struct", all),
     ];
     for n in [4_u8, 5, 6] {
-        let (st, deal) = busy_state(n);
-        for (pname, f) in predicates {
-            let base = f(&st, Seat(0));
-            for (vname, variant) in private_variants(&st, &deal) {
+        let (st, deal) = privacy_state(n);
+        // The bid walk runs for seat 0, against bids made by seats 1 and 2.
+        let marks = must(season_end_and_marks(&st, Seat(0)), "marks");
+        for good in [AssetId::Refined(0), AssetId::Raw(0)] {
+            let Some(h) = marks.holdings.iter().find(|h| h.good == good) else {
+                panic!("holding")
+            };
+            assert!(h.units_marked_by_bids > 0, "n={n}: no bid walk on {good:?}");
+        }
+        for other in [1_u8, 2, 3] {
+            for (vname, variant) in private_variants(&st, &deal, other) {
                 assert_ne!(json(&variant), json(&st), "{vname} must change the state");
-                assert_eq!(
-                    f(&variant, Seat(0)),
-                    base,
-                    "n={n}: {pname} changed with seat 1's {vname}"
-                );
+                for (pname, f) in predicates {
+                    assert_eq!(
+                        f(&variant, Seat(0)),
+                        f(&st, Seat(0)),
+                        "n={n}: {pname} changed with seat {other}'s {vname}"
+                    );
+                }
             }
         }
     }
+}
+
+/// Fields of other seats that are public or simply not read: escrows, checks, the Regent doctrine
+/// and per-seat counters change nothing. A bid maker's wash freeze and credit tier do change the
+/// mark, because the close rule reads them (`scoring.rs` `bid_executable_by_seller`).
+#[test]
+fn other_seats_escrows_checks_regent_and_counters_change_nothing() {
+    let (st, _) = privacy_state(4);
+    let base = all(&st, Seat(0));
+    let mut v = st.clone();
+    v.escrows.insert(
+        5,
+        TokenEscrowVault {
+            escrow_id: 5,
+            sender: 1,
+            destination: 2,
+            amount_cred: 700,
+            finish_after_turn: None,
+            cancel_after_turn: 12,
+            condition_hash: None,
+            bond: None,
+            status: EscrowStatus::Locked,
+        },
+    );
+    v.checks.insert(
+        6,
+        CreditCheck {
+            check_id: 6,
+            drawer: 2,
+            payee: 1,
+            asset: AssetId::Cred,
+            send_max: 400,
+            deliver_min: 400,
+            due_turn: 10,
+            expiration_turn: 12,
+            status: CheckStatus::Open,
+        },
+    );
+    for other in [1_usize, 2] {
+        v.spec.seats[other].regent = Some(RegentDoctrine {
+            risk_tolerance_bps: 9_000,
+            min_raw_reserve: 100,
+            auto_cash_due_claims: false,
+        });
+        let seat = &mut v.seats[other];
+        seat.identity = SeatIdentity::Human;
+        seat.consecutive_misses = 2;
+        seat.consecutive_zero_production_turns = 2;
+        seat.hard_credit_defaults = 1;
+        seat.bond_breaches = 1;
+        seat.broken_promises = 3;
+        seat.honor_penalties = 900;
+    }
+    assert_ne!(json(&v), json(&st));
+    assert_eq!(all(&v, Seat(0)), base);
+
+    // Read by the close rule: a frozen maker's bid stops counting.
+    let mut frozen = st.clone();
+    frozen.seats[1].wash_frozen_until_turn = frozen.turn;
+    assert_ne!(p5(&frozen, Seat(0)), p5(&st, Seat(0)));
+}
+
+fn raw0_mark(st: &EngineState) -> Units {
+    let p = must(season_end_and_marks(st, Seat(0)), "marks");
+    p.holdings
+        .iter()
+        .find(|h| h.good == AssetId::Raw(0))
+        .map_or(0, |h| h.marked_value)
+}
+
+/// The close rule's executability filter for cartel-domain bids (`scoring.rs`
+/// `bid_executable_by_seller`): a domain bid seat 0 cannot sell into changes none of its
+/// predicates; one it can sell into changes its mark.
+#[test]
+fn domain_bids_count_in_the_mark_only_when_executable() {
+    let (base, _) = busy_state(4);
+    // Seat 0 holds 3_500 Raw(0) (1_000 free + 2_500 on its own sell); no open bid on it.
+    // Floor 3_500 * 1_750 / 2_000 = 3_062.
+    assert_eq!(raw0_mark(&base), 3_062);
+    let domain_bid = |is_hybrid: bool| CredOffer {
+        offer_id: 99,
+        maker: 1,
+        side: OfferSide::Buy,
+        good: AssetId::Raw(0),
+        remaining_units: 500,
+        price_per_unit_cred: 1_500,
+        locked_cred: 750,
+        domain_id: Some(0),
+        is_hybrid,
+        created_turn: 8,
+    };
+    let mut with_bid = base.clone();
+    with_bid.offers.insert(99, domain_bid(false));
+
+    // Not executable: seat 0 is not in domain 0 ({1, 2}), holds no broker charter, bid not hybrid.
+    for (pname, f) in [
+        ("p1", p1 as Predicate),
+        ("p2", p2),
+        ("p3", p3),
+        ("p4", p4),
+        ("p5", p5),
+        ("struct", all),
+    ] {
+        assert_eq!(f(&with_bid, Seat(0)), f(&base, Seat(0)), "{pname}");
+    }
+
+    // Executable, three ways. Mark: 500 at 750 (> 500 * 1_750 / 2_000 = 437) plus 3_000 at the
+    // floor (3_000 * 1_750 / 2_000 = 2_625) = 3_375.
+    let mut member = with_bid.clone();
+    member.domains[0].members.insert(0);
+    assert_eq!(raw0_mark(&member), 3_375);
+
+    let mut broker_seller = with_bid.clone();
+    broker_seller.charters.push(ActiveCharter {
+        role: CharterRole::ClearinghouseBroker,
+        holder: 0,
+        expires_at_turn: 12,
+    });
+    assert_eq!(raw0_mark(&broker_seller), 3_375);
+
+    let mut hybrid = base.clone();
+    hybrid.offers.insert(99, domain_bid(true));
+    hybrid.charters.push(ActiveCharter {
+        role: CharterRole::ClearinghouseBroker,
+        holder: 1,
+        expires_at_turn: 12,
+    });
+    assert_eq!(raw0_mark(&hybrid), 3_375);
+    // A hybrid flag without a broker maker is not executable.
+    let mut hybrid_no_broker = base.clone();
+    hybrid_no_broker.offers.insert(99, domain_bid(true));
+    assert_eq!(raw0_mark(&hybrid_no_broker), 3_062);
+    // A member seller whose own tier is D cannot use the domain.
+    let mut member_d = member.clone();
+    member_d.seats[0].credit_tier = CreditTier::D;
+    assert_eq!(raw0_mark(&member_d), 3_062);
 }
 
 /// The privacy test is not vacuous: each predicate does move with the asking seat's own state.
@@ -1017,8 +1256,9 @@ fn metrics_from_a_quiet_season() {
         total_spoiled
     );
     for m in &metrics {
-        // Nobody held upkeep goods and no recipe makes a seat's own upkeep good: nothing avoidable.
-        assert!(m.avoidable_shortfall_turns.is_empty());
+        // Nobody held upkeep goods or offered them: neither count fires.
+        assert!(m.held_enough_but_short_turns.is_empty());
+        assert!(m.covered_with_own_offers_but_short_turns.is_empty());
         assert_eq!(m.spoiled_units, spoiled_units_over_season(&section, m.seat));
         // No bids at the close: every held unit is marked at the floor.
         let Some(close) = section.at_close.iter().find(|p| p.seat == m.seat) else {
@@ -1039,7 +1279,7 @@ fn metrics_from_a_quiet_season() {
 }
 
 #[test]
-fn avoidable_shortfall_counts_held_or_convertible_cover_only() {
+fn held_enough_but_short_counts_held_or_convertible_cover_only() {
     let (log, _) = quiet_season_log(4);
     let (_, base) = must(replay_season_with_state_predicates(&log), "replay");
     let mut section: StatePredicateSection = base.clone();
@@ -1067,9 +1307,162 @@ fn avoidable_shortfall_counts_held_or_convertible_cover_only() {
     rec.at_turn_start[2].upkeep.held_units = 5_000;
     rec.sweep[2].upkeep_shortfall_units = 0;
 
-    assert_eq!(avoidable_shortfall_turns(&section, 0), vec![3]);
-    assert_eq!(avoidable_shortfall_turns(&section, 1), vec![5]);
-    assert!(avoidable_shortfall_turns(&section, 2).is_empty());
-    assert!(avoidable_shortfall_turns(&base, 0).is_empty());
+    assert_eq!(held_enough_but_short_turns(&section, 0), vec![3]);
+    assert_eq!(held_enough_but_short_turns(&section, 1), vec![5]);
+    assert!(held_enough_but_short_turns(&section, 2).is_empty());
+    assert!(held_enough_but_short_turns(&base, 0).is_empty());
+    // Free units that cover also count for the offers metric; the recipe-only turn 5 does not.
+    assert_eq!(
+        covered_with_own_offers_but_short_turns(&section, 0),
+        vec![3]
+    );
+    assert!(covered_with_own_offers_but_short_turns(&section, 1).is_empty());
     assert_eq!(stranded_stock_at_close(&section, 9), (0, 0));
+}
+
+// --- Fix 1 additions -----------------------------------------------------------------------------
+
+/// Predicate 2's batches against a Sweep that runs a converter order: the Sweep runs what the held
+/// inputs cover when the cap does not bind, and the cap when it does.
+#[test]
+fn predicted_converter_cover_equals_the_sweep_runs() {
+    // (raw held of Raw(1) and Raw(2), runs ordered, expected runs). Recipe takes 2_000 of each.
+    for (held, ordered, expected) in [(5_000, 4, 2_u32), (20_000, 9, 4_u32)] {
+        let (spec, _) = quiet_spec(TableId(21), 4);
+        let engine = must(TurnEngine::new(spec), "engine");
+        let mut st = engine.state().clone();
+        st.turn = 2;
+        st.seats[0].raw[1] = held;
+        st.seats[0].raw[2] = held;
+        let p = must(spoilage_and_conversion(&st, Seat(0)), "p2");
+        let r = &p.recipes[0];
+        let predicted = r.batches_covered_by_inputs.min(r.capacity_runs_left);
+        assert_eq!(predicted, expected);
+        let mut eng = engine_from_state(&st);
+        let mut bundles = vec![SealedOrderBundle::default(); 4];
+        bundles[0].converter_runs.push(ConverterRunOrder {
+            recipe_idx: 0,
+            runs: ordered,
+        });
+        let _ = commit_and_reveal(&mut eng, st.table_id, 2, bundles);
+        let receipt = must(
+            eng.sweep_turn(derive_turn_beacon(3, st.table_id, Turn(2))),
+            "sweep",
+        );
+        assert_eq!(receipt.converter_batches_run, expected as usize);
+        assert_eq!(
+            eng.state().seats[0].refined[0] - st.seats[0].refined[0],
+            3_500 * Units::from(expected)
+        );
+    }
+}
+
+/// The review's case: seat 0 owes 1_800 Refined(3), holds 0 free and 2_000 on its own resting sell,
+/// leaves the offer up and is short by 1_800 at the Sweep.
+#[test]
+fn own_offer_cover_counts_a_shortfall_free_holdings_miss() {
+    let (spec, _) = quiet_spec(TableId(22), 4);
+    let engine = must(TurnEngine::new(spec), "engine");
+    let mut st = engine.state().clone();
+    st.turn = 3;
+    st.seats[0].refined[3] = 0;
+    st.offers.insert(
+        1,
+        CredOffer {
+            offer_id: 1,
+            maker: 0,
+            side: OfferSide::Sell,
+            good: AssetId::Refined(3),
+            remaining_units: 2_000,
+            price_per_unit_cred: 9_000,
+            locked_cred: 0,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 3,
+        },
+    );
+    let at_turn_start: Vec<SeatStatePredicates> = (0..4)
+        .map(|s| must(compute_seat_state_predicates(&st, Seat(s)), "predicates"))
+        .collect();
+    assert_eq!(at_turn_start[0].upkeep.held_units, 0);
+    assert_eq!(at_turn_start[0].upkeep.held_on_own_resting_sells, 2_000);
+    let mut eng = engine_from_state(&st);
+    let _ = commit_and_reveal(
+        &mut eng,
+        st.table_id,
+        3,
+        vec![SealedOrderBundle::default(); 4],
+    );
+    let _ = must(
+        eng.sweep_turn(derive_turn_beacon(4, st.table_id, Turn(3))),
+        "sweep",
+    );
+    let after = eng.state();
+    let sweep: Vec<league_core::SeatSweepOutcome> = (0..4)
+        .map(|s| {
+            let p = &at_turn_start[s];
+            let g = usize::from(p.upkeep.upkeep_good);
+            let paid = st.seats[s].refined[g] - after.seats[s].refined[g];
+            league_core::SeatSweepOutcome {
+                seat: s as u8,
+                upkeep_shortfall_units: p.upkeep.owed_units - paid,
+                shortfall_debt_added: 0,
+                spoiled_units: 0,
+            }
+        })
+        .collect();
+    assert_eq!(sweep[0].upkeep_shortfall_units, 1_800);
+    let section = StatePredicateSection {
+        version: league_core::STATE_PREDICATE_SECTION_VERSION,
+        table_id: st.table_id,
+        turns: vec![league_core::TurnPredicateRecord {
+            turn: 3,
+            at_turn_start,
+            sweep,
+        }],
+        at_close: Vec::new(),
+    };
+    assert!(held_enough_but_short_turns(&section, 0).is_empty());
+    assert_eq!(
+        covered_with_own_offers_but_short_turns(&section, 0),
+        vec![3]
+    );
+    // Seat 1 held nothing and offered nothing: neither count.
+    assert!(covered_with_own_offers_but_short_turns(&section, 1).is_empty());
+}
+
+/// Malformed states (the review's two inputs) give results, not panics.
+#[test]
+fn predicates_do_not_panic_on_truncated_state() {
+    let (spec, _) = quiet_spec(TableId(23), 4);
+    let engine = must(TurnEngine::new(spec), "engine");
+    let mut st = engine.state().clone();
+    st.parities.refined_per_unit = Vec::new();
+    st.seats[0].refined = vec![2_000; 4];
+    let p = must(upkeep_and_debt(&st, Seat(0)), "covered, no parity");
+    assert_eq!((p.shortfall_units, p.debt_added_at_sweep), (0, 0));
+
+    let mut st = engine.state().clone();
+    st.seats[0].raw = vec![1_000];
+    let p = must(spoilage_and_conversion(&st, Seat(0)), "truncated raw");
+    assert_eq!(p.recipes[0].batches_covered_by_inputs, 0);
+}
+
+#[test]
+fn replay_record_refuses_a_section_for_another_table() {
+    let (log, _) = quiet_season_log(4);
+    let mut record = must(attach_state_predicates(&log), "attach");
+    let good = json(&record);
+    assert_eq!(
+        must(ReplayRecord::from_json_slice(&good), "same table"),
+        record
+    );
+    if let Some(section) = record.state_predicates.as_mut() {
+        section.table_id = TableId(log.spec.table_id.0 + 1);
+    }
+    let bad = json(&record);
+    let Err(err) = ReplayRecord::from_json_slice(&bad) else {
+        panic!("a section for another table must be refused")
+    };
+    assert!(err.to_string().contains("table_id"));
 }

@@ -48,9 +48,10 @@ pub use predicates::{
     STATE_PREDICATE_SECTION_VERSION, STATE_PREDICATES_VERSION, SeasonEndAndMarks,
     SeatSeasonMetrics, SeatStatePredicates, SeatSweepOutcome, SpoilageAndConversion,
     StatePredicateSection, TurnPredicateRecord, UpkeepAndDebt, all_coalitions_reach,
-    avoidable_shortfall_turns, coalition_reach, compute_season_metrics,
-    compute_seat_state_predicates, scarcity_and_tariffs, season_end_and_marks,
-    spoilage_and_conversion, spoiled_units_over_season, stranded_stock_at_close, upkeep_and_debt,
+    coalition_reach, compute_season_metrics, compute_seat_state_predicates,
+    covered_with_own_offers_but_short_turns, held_enough_but_short_turns, scarcity_and_tariffs,
+    season_end_and_marks, spoilage_and_conversion, spoiled_units_over_season,
+    stranded_stock_at_close, upkeep_and_debt,
 };
 pub use replay::{
     LoggedTurn, ReplayBeaconMode, ReplayOutcome, ReplayRecord, SeasonReplayLog,

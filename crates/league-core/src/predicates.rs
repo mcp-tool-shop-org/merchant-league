@@ -44,6 +44,8 @@ pub struct UpkeepAndDebt {
     pub owed_units: Units,
     /// Units of the upkeep good the seat holds free now.
     pub held_units: Units,
+    /// Units of the upkeep good on the seat's own resting `Sell` offers (not free until cancelled).
+    pub held_on_own_resting_sells: Units,
     /// Units owed and not covered by `held_units` (`0` when covered).
     pub shortfall_units: Units,
     /// `CRED` auto-debt the shortfall would add at this turn's Sweep.
@@ -221,11 +223,19 @@ pub fn upkeep_and_debt(state: &EngineState, seat: Seat) -> Result<UpkeepAndDebt,
         .get(upkeep_g)
         .copied()
         .unwrap_or(0);
-    let settlement = settle_upkeep(held, cfg.upkeep_amount, parity);
+    let settlement = settle_upkeep(held, cfg.upkeep_amount, || parity);
+    let (_, refined_stock) = seat_close_stock(state, seat.0);
+    let on_sells = refined_stock
+        .get(upkeep_g)
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(held)
+        .max(0);
     Ok(UpkeepAndDebt {
         upkeep_good: cfg.upkeep_good,
         owed_units: cfg.upkeep_amount,
         held_units: held,
+        held_on_own_resting_sells: on_sells,
         shortfall_units: settlement.shortfall,
         debt_added_at_sweep: settlement.new_shortfall_debt,
         interest_bps: own.credit_tier.interest_bps(),
@@ -462,6 +472,15 @@ fn turns_until_close(state: &EngineState, pred: impl Fn(Bps) -> bool) -> u8 {
 /// Predicate 5: Sweeps until the earliest and the latest possible close, every good the seat holds
 /// marked by the close-marking rule as if the season closed now (via the rule's own code), and each
 /// project bundle against the seat's refined holdings.
+///
+/// **Which bids the marks read.** Exactly the resting bids the close rule's own filter
+/// (`bid_executable_by_seller` in `scoring.rs`) lets the asking seat sell into: a resting `Buy` on
+/// the good with units left, made by another seat whose wash freeze has ended; on the open book any
+/// such bid; in a cartel domain only when the maker's credit tier may use prime domains and either
+/// the asking seat is a domain member with such a tier (and the maker is a member or the bid is a
+/// hybrid bid from a maker holding an active Clearinghouse Broker charter), or the asking seat holds
+/// an active Clearinghouse Broker charter, or the bid is a hybrid bid from a maker holding one. A
+/// domain bid outside those cases is never read and changes nothing here.
 pub fn season_end_and_marks(
     state: &EngineState,
     seat: Seat,
@@ -619,8 +638,11 @@ pub struct StatePredicateSection {
 pub struct SeatSeasonMetrics {
     /// Seat index.
     pub seat: u8,
-    /// Turns with an avoidable upkeep shortfall ([`avoidable_shortfall_turns`]).
-    pub avoidable_shortfall_turns: Vec<u8>,
+    /// Turns short at the Sweep although enough was held free ([`held_enough_but_short_turns`]).
+    pub held_enough_but_short_turns: Vec<u8>,
+    /// Turns short at the Sweep although free plus own resting sells covered it
+    /// ([`covered_with_own_offers_but_short_turns`]).
+    pub covered_with_own_offers_but_short_turns: Vec<u8>,
     /// Raw units lost to spoilage over the season ([`spoiled_units_over_season`]).
     pub spoiled_units: Units,
     /// Units held at the close that the close rule marked at the `50%` floor ([`stranded_stock_at_close`]).
@@ -634,8 +656,13 @@ fn seat_record(records: &[SeatStatePredicates], seat: u8) -> Option<&SeatStatePr
 }
 
 /// Upkeep units the seat could have had at the Sweep from the start-of-turn predicates alone: what
-/// it held (predicate 1) plus the most any single one of its recipes that makes the upkeep good
+/// it held free (predicate 1) plus the most any single one of its recipes that makes the upkeep good
 /// could add (predicate 2: `min(batches covered by held inputs, runs left) * units per batch`).
+///
+/// The recipe term is unreachable on a validated table: `TableSpec::validate` requires every
+/// recipe's output to be its owner's own refined good, and a seat's upkeep good is never its own,
+/// so no recipe of the seat makes its upkeep good. It is kept so the count stays correct if a
+/// table type ever allows it.
 fn coverable_upkeep_units(p: &SeatStatePredicates) -> Units {
     let convertible = p
         .spoilage
@@ -651,15 +678,11 @@ fn coverable_upkeep_units(p: &SeatStatePredicates) -> Units {
     p.upkeep.held_units.saturating_add(convertible)
 }
 
-/// Metric 1, avoidable shortfalls: the turns on which `seat`'s Sweep left an upkeep shortfall
-/// although, at the start of that turn, it held or could have converted enough to cover it.
-///
-/// "Could have converted" is read strictly from predicates 1 and 2 of the same turn: held units of
-/// the upkeep good plus the output of the best single recipe whose output is the upkeep good,
-/// limited by the batches the held inputs cover and the runs left. A turn counts when the Sweep's
-/// shortfall is above zero and that sum is at least the units owed.
-#[must_use]
-pub fn avoidable_shortfall_turns(section: &StatePredicateSection, seat: u8) -> Vec<u8> {
+fn short_turns_where(
+    section: &StatePredicateSection,
+    seat: u8,
+    covered: impl Fn(&SeatStatePredicates) -> bool,
+) -> Vec<u8> {
     section
         .turns
         .iter()
@@ -668,12 +691,38 @@ pub fn avoidable_shortfall_turns(section: &StatePredicateSection, seat: u8) -> V
                 .sweep
                 .iter()
                 .any(|o| o.seat == seat && o.upkeep_shortfall_units > 0);
-            had_shortfall
-                && seat_record(&rec.at_turn_start, seat)
-                    .is_some_and(|p| coverable_upkeep_units(p) >= p.upkeep.owed_units)
+            had_shortfall && seat_record(&rec.at_turn_start, seat).is_some_and(&covered)
         })
         .map(|rec| rec.turn)
         .collect()
+}
+
+/// Metric 1a: the turns on which `seat`'s Sweep left an upkeep shortfall although, at the start of
+/// that turn, it held enough of the upkeep good **free** to cover it (predicate 1), or could have
+/// converted enough (predicate 2; unreachable on a validated table, see `coverable_upkeep_units`).
+/// On a validated table this is exactly "held enough free at the start, still short at the Sweep".
+#[must_use]
+pub fn held_enough_but_short_turns(section: &StatePredicateSection, seat: u8) -> Vec<u8> {
+    short_turns_where(section, seat, |p| {
+        coverable_upkeep_units(p) >= p.upkeep.owed_units
+    })
+}
+
+/// Metric 1b: the turns on which `seat`'s Sweep left an upkeep shortfall although, at the start of
+/// that turn, its free units of the upkeep good plus the units on its own resting `Sell` offers of it
+/// covered the upkeep (predicate 1), so cancelling its own offer would have covered it. Includes
+/// every turn of [`held_enough_but_short_turns`] that the free units alone cover.
+#[must_use]
+pub fn covered_with_own_offers_but_short_turns(
+    section: &StatePredicateSection,
+    seat: u8,
+) -> Vec<u8> {
+    short_turns_where(section, seat, |p| {
+        p.upkeep
+            .held_units
+            .saturating_add(p.upkeep.held_on_own_resting_sells)
+            >= p.upkeep.owed_units
+    })
 }
 
 /// Metric 2, spoiled units: the raw units `seat` lost to spoilage over the season, summed from the
@@ -716,7 +765,10 @@ pub fn compute_season_metrics(section: &StatePredicateSection) -> Vec<SeatSeason
                 stranded_stock_at_close(section, p.seat);
             SeatSeasonMetrics {
                 seat: p.seat,
-                avoidable_shortfall_turns: avoidable_shortfall_turns(section, p.seat),
+                held_enough_but_short_turns: held_enough_but_short_turns(section, p.seat),
+                covered_with_own_offers_but_short_turns: covered_with_own_offers_but_short_turns(
+                    section, p.seat,
+                ),
                 spoiled_units: spoiled_units_over_season(section, p.seat),
                 stranded_units_at_close,
                 stranded_value_at_close,

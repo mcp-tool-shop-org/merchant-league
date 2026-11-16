@@ -172,6 +172,14 @@ impl ReplayRecord {
         let extra: SectionOnly = serde_json::from_slice(bytes).map_err(|err| {
             EngineError::InvalidConfig(format!("replay record section does not parse: {err}"))
         })?;
+        if let Some(section) = &extra.state_predicates
+            && section.table_id != log.spec.table_id
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "replay record section table_id {} does not match the log's table_id {}",
+                section.table_id.0, log.spec.table_id.0
+            )));
+        }
         Ok(Self {
             log,
             state_predicates: extra.state_predicates,
