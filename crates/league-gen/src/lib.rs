@@ -21,7 +21,10 @@
 //!    (computed by [`EvMethod::ShadowPrice`] by default per `docs/design-v2.md` §1.5,
 //!    conserving [`FeasibilityReport::season_effective_net_surplus`], or
 //!    [`EvMethod::Shapley`]) fall within `±config.ev_tolerance` of the table mean,
-//!    and no unordered pair exceeds the provisional C6 table pair-share cap.
+//!    every seat's exact `2^N` sub-coalition Shapley value stays within
+//!    `±SHAPLEY_GUARD_MAX_REL_DEV` (`7%`) of the seats' Shapley mean (Director
+//!    ruling, `2026-11-16`), and no unordered pair exceeds the provisional C6
+//!    table pair-share cap.
 //!
 //! Quantitative figures from the seed-26 report (random bilateral lock-in rates
 //! and dyadic HHI comparisons) are kept as hypotheses in [`ReportHypotheses`].
@@ -70,10 +73,10 @@ pub use schema::{
     MIN_MANDATE_BONUS_VP, MandateCardSpec, MandateObjective, NUMERAIRE_CODE, PROBE_SEED_MAX,
     PROBE_SEED_MIN, PROJECT_CONCORDAT_ID, ProjectSpec, RESERVED_PROBE_HELD_OUT_TEST_SEEDS,
     RecordedLayoutSeed, RecordedLayoutSeedError, RingTable, SEALED_SEED_MAX, SEALED_SEED_MIN,
-    SEED_POOL_TABLE, ScheduledShock, SealedRingTable, SeatCount, SeatSpec, SeedPool,
-    SeedPoolMismatchError, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose, TableSetupOptions,
-    TrainingLoggedMismatchError, bonus_vp_for_completion_bps, commodity_glossary_word,
-    deal_mandate_indices_with_entropy, default_mandate_deck_for_table, default_projects_for_seats,
-    is_allowed_commodity_code, is_denied_currency_code, is_reserved_test_seed, sealed_seed_sha256,
-    seed_pool,
+    SEED_POOL_TABLE, SHAPLEY_GUARD_MAX_REL_DEV, ScheduledShock, SealedRingTable, SeatCount,
+    SeatSpec, SeedPool, SeedPoolMismatchError, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose,
+    TableSetupOptions, TrainingLoggedMismatchError, bonus_vp_for_completion_bps,
+    commodity_glossary_word, deal_mandate_indices_with_entropy, default_mandate_deck_for_table,
+    default_projects_for_seats, is_allowed_commodity_code, is_denied_currency_code,
+    is_reserved_test_seed, sealed_seed_sha256, seed_pool,
 };

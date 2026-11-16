@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
-pub const GENERATOR_VERSION: &str = "league-gen/v2.4.1";
+pub const GENERATOR_VERSION: &str = "league-gen/v2.5.0";
+
+/// Maximum allowed relative deviation `max_i |(EV_i - mean(EV)) / mean(EV)|` (`7%`, plus the
+/// `1e-9` floating-point comparison slack) of any seat's exact `2^N` sub-coalition Shapley
+/// value ([`crate::compute_shapley_seat_evs`]) from the seats' Shapley mean, enforced beside
+/// `±config.ev_tolerance` across every [`EvMethod`] (Director ruling, `2026-11-16`).
+pub const SHAPLEY_GUARD_MAX_REL_DEV: f64 = 0.07;
 
 /// Fixed ledger numeraire currency code specified by `docs/design-v2.md` §1.2.
 pub const NUMERAIRE_CODE: &str = "CRED";
@@ -510,6 +516,9 @@ impl SeatCount {
 }
 
 /// Method used by [`crate::check_feasibility`] to compute per-seat expected value (Invariant 3).
+///
+/// Regardless of which method is active for `±config.ev_tolerance`, [`crate::check_feasibility`]
+/// also enforces the 7% [`SHAPLEY_GUARD_MAX_REL_DEV`] sub-coalition Shapley guard.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EvMethod {
     /// Competitive/cooperative LP-dual shadow-price allocation (`docs/design-v2.md` §1.5 default).
@@ -1306,6 +1315,7 @@ pub struct GeneratorConfig {
     pub seat_count: Option<SeatCount>,
     /// Maximum allowed relative deviation of any seat's EV from the table mean (`0.03` = ±3%,
     /// from `docs/design-v2.md` §1.5 item 3 and seed-26 report §"Static board layouts…").
+    /// Enforced alongside the 7% [`SHAPLEY_GUARD_MAX_REL_DEV`] sub-coalition Shapley guard.
     pub ev_tolerance: f64,
     /// Minimum required `(net_converter_surplus_value / aggregate_upkeep_value)` margin (`0.15`;
     /// provisional, calibrate in playtest 1 — `docs/design-v2.md` §1.5 requires a positive margin).
@@ -1327,7 +1337,8 @@ pub struct GeneratorConfig {
     /// (`512`, capped at [`MAX_ATTEMPTS_CAP`]).
     pub max_attempts: u32,
     /// Seat expected-value allocation method for Invariant 3 ([`EvMethod::ShadowPrice`] default
-    /// per `docs/design-v2.md` §1.5 "optimal competitive/cooperative shadow-price allocation").
+    /// per `docs/design-v2.md` §1.5 "optimal competitive/cooperative shadow-price allocation");
+    /// [`SHAPLEY_GUARD_MAX_REL_DEV`] (`7%`) is enforced across every method.
     pub ev_method: EvMethod,
     /// Optional override for the provisional C6 table-level top-pair share cap (`None` uses
     /// [`SeatCount::default_max_pair_share_cap`]: `4p: 0.45`, `5p: 0.35`, `6p: 0.30`; the 2026-11-15
@@ -1393,6 +1404,17 @@ pub enum FeasibilityError {
         /// Per-seat expected values under the active [`EvMethod`].
         seat_evs: Vec<f64>,
     },
+    /// At least one seat's exact `2^N` sub-coalition Shapley EV deviates by more than
+    /// [`SHAPLEY_GUARD_MAX_REL_DEV`] (`7%`) from the seats' Shapley mean (Director ruling,
+    /// `2026-11-16`).
+    ShapleyGuardExceeded {
+        /// Maximum relative Shapley deviation `max_i |(ev_i - mean_ev) / mean_ev|` observed.
+        max_relative_deviation: f64,
+        /// Maximum allowed relative Shapley deviation ([`SHAPLEY_GUARD_MAX_REL_DEV`]).
+        max_allowed_deviation: f64,
+        /// Per-seat Shapley expected values from [`crate::compute_shapley_seat_evs`].
+        shapley_seat_evs: Vec<f64>,
+    },
     /// Optimal ring LP trade share on a single unordered pair exceeded the C6 table cap.
     PairShareExceedsCap {
         /// Ordered seat pair `(i, j)` with `i < j`.
@@ -1435,6 +1457,14 @@ impl fmt::Display for FeasibilityError {
             } => write!(
                 f,
                 "seat EV deviation {max_relative_deviation:.4} exceeds tolerance {tolerance:.4}"
+            ),
+            Self::ShapleyGuardExceeded {
+                max_relative_deviation,
+                max_allowed_deviation,
+                ..
+            } => write!(
+                f,
+                "seat Shapley EV deviation {max_relative_deviation:.4} exceeds guard limit {max_allowed_deviation:.4}"
             ),
             Self::PairShareExceedsCap { pair, share, cap } => write!(
                 f,
@@ -1810,6 +1840,11 @@ mod tests {
                 max_relative_deviation: 0.08,
                 tolerance: 0.03,
                 seat_evs: vec![10.0, 12.0],
+            },
+            FeasibilityError::ShapleyGuardExceeded {
+                max_relative_deviation: 0.085,
+                max_allowed_deviation: SHAPLEY_GUARD_MAX_REL_DEV,
+                shapley_seat_evs: vec![10.0, 11.7],
             },
             FeasibilityError::PairShareExceedsCap {
                 pair: (0, 1),

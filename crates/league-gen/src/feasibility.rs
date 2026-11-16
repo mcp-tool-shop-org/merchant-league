@@ -10,7 +10,8 @@
 //! 3. **Seat expected-value balance:** expected seat values per turn (computed via
 //!    [`EvMethod::ShadowPrice`] by default per `docs/design-v2.md` §1.5, or
 //!    [`EvMethod::Shapley`] when selected) fall within `±config.ev_tolerance`
-//!    of the table mean.
+//!    of the table mean, and every seat's exact `2^N` sub-coalition Shapley value
+//!    lies within `±SHAPLEY_GUARD_MAX_REL_DEV` (`7%`) of the seats' Shapley mean.
 
 use std::collections::HashSet;
 
@@ -23,7 +24,7 @@ use crate::lp::{LpStatus, solve_lp};
 use crate::schema::{
     BPS_SCALE, ConverterSpec, EvMethod, FeasibilityError, GeneratorConfig, HorizonShockKind,
     MAX_MANDATE_BONUS_VP, MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, RingTable,
-    bonus_vp_for_completion_bps,
+    SHAPLEY_GUARD_MAX_REL_DEV, bonus_vp_for_completion_bps,
 };
 
 const PAIR_COVERAGE_TOL: f64 = 1e-7;
@@ -103,8 +104,9 @@ pub struct FeasibilityReport {
     pub optimal_converter_runs: Vec<f64>,
 }
 
-/// Evaluates all structural rules, C6 top-pair share cap, the three LP feasibility invariants,
-/// and the `B2.2` scripted proxy rollout gate using `&table.config`.
+/// Evaluates all structural rules, C6 top-pair share cap, the three LP feasibility invariants
+/// (including the 7% [`SHAPLEY_GUARD_MAX_REL_DEV`] sub-coalition Shapley guard across every
+/// [`EvMethod`]), and the `B2.2` scripted proxy rollout gate using `&table.config`.
 pub fn check_feasibility(table: &RingTable) -> Result<FeasibilityReport, FeasibilityError> {
     let config = &table.config;
     let converter_margins = validate_config_and_table(table, config)?;
@@ -152,26 +154,29 @@ pub fn check_feasibility(table: &RingTable) -> Result<FeasibilityReport, Feasibi
     }
 
     // Invariant 3: Seat expected values within `±config.ev_tolerance`, plus shadow-LP reference.
-    let (seat_expected_values, season_effective_net_surplus) = match config.ev_method {
-        EvMethod::ShadowPrice => compute_shadow_price_allocation(table)?,
-        EvMethod::Shapley => {
-            let shapley = compute_shapley_seat_evs(table)?;
-            let (_, shadow_obj) = compute_shadow_price_allocation(table)?;
-            (shapley, shadow_obj)
-        }
-    };
-    let mean_seat_ev = seat_expected_values.iter().sum::<f64>() / (n as f64);
-    if !mean_seat_ev.is_finite() || mean_seat_ev <= 0.0 {
+    // Under `EvMethod::Shapley`, retain `(shapley, max_relative_ev_deviation)` so the 7% Shapley
+    // guard below reuses them without invoking `compute_shapley_seat_evs` a second time.
+    let (seat_expected_values, season_effective_net_surplus, cached_shapley) =
+        match config.ev_method {
+            EvMethod::ShadowPrice => {
+                let (evs, shadow_obj) = compute_shadow_price_allocation(table)?;
+                (evs, shadow_obj, None)
+            }
+            EvMethod::Shapley => {
+                let shapley = compute_shapley_seat_evs(table)?;
+                let (_, shadow_obj) = compute_shadow_price_allocation(table)?;
+                (shapley.clone(), shadow_obj, Some(shapley))
+            }
+        };
+    let Some((mean_seat_ev, max_relative_ev_deviation)) =
+        mean_and_max_relative_deviation(&seat_expected_values)
+    else {
         return Err(FeasibilityError::SeatEvOutOfTolerance {
             max_relative_deviation: f64::INFINITY,
             tolerance: config.ev_tolerance,
             seat_evs: seat_expected_values,
         });
-    }
-    let max_relative_ev_deviation = seat_expected_values
-        .iter()
-        .map(|&ev| ((ev - mean_seat_ev) / mean_seat_ev).abs())
-        .fold(0.0_f64, f64::max);
+    };
 
     if max_relative_ev_deviation > config.ev_tolerance + 1e-9 {
         return Err(FeasibilityError::SeatEvOutOfTolerance {
@@ -248,7 +253,60 @@ pub fn check_feasibility(table: &RingTable) -> Result<FeasibilityReport, Feasibi
     };
     let grading = compute_rollout_grading(table, &report);
     verify_rollout_grading(table, &grading, cap)?;
+    enforce_shapley_guard(
+        table,
+        cached_shapley.map(|evs| (evs, max_relative_ev_deviation)),
+    )?;
     Ok(report)
+}
+
+fn mean_and_max_relative_deviation(values: &[f64]) -> Option<(f64, f64)> {
+    if values.is_empty() {
+        return None;
+    }
+    let mean = values.iter().sum::<f64>() / (values.len() as f64);
+    if !mean.is_finite() || mean <= 0.0 {
+        return None;
+    }
+    let max_rel = values
+        .iter()
+        .map(|&ev| ((ev - mean) / mean).abs())
+        .fold(0.0_f64, f64::max);
+    if !max_rel.is_finite() {
+        return None;
+    }
+    Some((mean, max_rel))
+}
+
+/// Enforces the 7% `SHAPLEY_GUARD_MAX_REL_DEV` sub-coalition guard across every `EvMethod`
+/// (Director ruling, `2026-11-16`), reusing cached Shapley EVs when `EvMethod::Shapley` is
+/// active so `compute_shapley_seat_evs` is never evaluated or counted twice.
+fn enforce_shapley_guard(
+    table: &RingTable,
+    cached_shapley: Option<(Vec<f64>, f64)>,
+) -> Result<(), FeasibilityError> {
+    let (shapley_seat_evs, max_shapley_rel_dev) = match cached_shapley {
+        Some(cached) => cached,
+        None => {
+            let shapley = compute_shapley_seat_evs(table)?;
+            let Some((_, max_rel)) = mean_and_max_relative_deviation(&shapley) else {
+                return Err(FeasibilityError::ShapleyGuardExceeded {
+                    max_relative_deviation: f64::INFINITY,
+                    max_allowed_deviation: SHAPLEY_GUARD_MAX_REL_DEV,
+                    shapley_seat_evs: shapley,
+                });
+            };
+            (shapley, max_rel)
+        }
+    };
+    if max_shapley_rel_dev > SHAPLEY_GUARD_MAX_REL_DEV + 1e-9 {
+        return Err(FeasibilityError::ShapleyGuardExceeded {
+            max_relative_deviation: max_shapley_rel_dev,
+            max_allowed_deviation: SHAPLEY_GUARD_MAX_REL_DEV,
+            shapley_seat_evs,
+        });
+    }
+    Ok(())
 }
 
 /// Computes per-converter Turn-1 baseline and shock-amortized season value-added margins (`B2.1`).
