@@ -4,11 +4,12 @@
 use std::collections::HashSet;
 
 use league_gen::{
-    EvMethod, FeasibilityError, GENERATOR_VERSION, GeneratorConfig, LpStatus, MAX_MANDATE_BONUS_VP,
-    MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, PlrChoice, PlrSampler, RingTable,
-    SeatCount, check_feasibility, coalition_upkeep_coverage, compute_hhi, evaluate_ring_table,
-    generate_ring_table, is_allowed_commodity_code, is_denied_currency_code,
-    pair_has_structural_autarky, solve_lp,
+    EvMethod, FeasibilityError, GENERATOR_VERSION, GenError, GeneratorConfig, LpStatus,
+    MAX_MANDATE_BONUS_VP, MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, PlrChoice,
+    PlrSampler, RingTable, SEED_POOL_TABLE, SeatCount, SeedPool, TablePurpose, check_feasibility,
+    coalition_upkeep_coverage, compute_hhi, evaluate_ring_table, generate_ring_table,
+    generate_ring_table_for_purpose, is_allowed_commodity_code, is_denied_currency_code,
+    pair_has_structural_autarky, seed_pool, solve_lp,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{RngAlgorithm, RngSeed};
@@ -446,14 +447,16 @@ proptest! {
 
     #[test]
     fn plr_respects_capacity_and_tracks_enrolled_seeds(
-        rng_seed in 0u64..100_000,
+        rng_seed in 10_000u64..100_000,
         scores in prop::collection::vec(0u16..1000, 1..24),
     ) {
         let mut plr = PlrSampler::new(rng_seed, 4, 0.25, 0.75, 0.7);
         let mut enrolled = HashSet::new();
         for (idx, s) in scores.into_iter().enumerate() {
             let candidate = rng_seed.wrapping_add((idx as u64) + 1);
-            plr.record_score(candidate, f64::from(s));
+            if plr.record_score(candidate, f64::from(s)).is_err() {
+                unreachable!("train-pool candidate seed must be accepted");
+            }
             enrolled.insert(candidate);
             prop_assert!(plr.len() <= 4);
         }
@@ -461,6 +464,45 @@ proptest! {
             match plr.sample_next() {
                 PlrChoice::Replay(seed) => prop_assert!(enrolled.contains(&seed)),
                 PlrChoice::Fresh(_) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn every_u64_maps_to_one_seed_pool_independently_of_config(seed in any::<u64>()) {
+        let pool = seed_pool(seed);
+        let matching_ranges: Vec<SeedPool> = SEED_POOL_TABLE
+            .iter()
+            .filter_map(|&(lo, hi, p)| (seed >= lo && seed <= hi).then_some(p))
+            .collect();
+        if matching_ranges.is_empty() {
+            prop_assert_eq!(pool, SeedPool::Unassigned);
+        } else {
+            prop_assert_eq!(matching_ranges.len(), 1);
+            prop_assert_eq!(pool, matching_ranges[0]);
+        }
+
+        // Pool membership is a function of `seed` alone, never `SeatCount` or `GeneratorConfig`.
+        let wrong_purpose = if pool == SeedPool::Dev {
+            TablePurpose::Train
+        } else {
+            TablePurpose::Dev
+        };
+        for seat_count in [None, Some(SeatCount::Four), Some(SeatCount::Five), Some(SeatCount::Six)] {
+            for ev_method in [EvMethod::ShadowPrice, EvMethod::Shapley] {
+                let cfg = GeneratorConfig {
+                    seat_count,
+                    ev_method,
+                    max_attempts: 1,
+                    ..GeneratorConfig::default()
+                };
+                let Err(GenError::SeedPoolMismatch { seed_pool: reported_pool, .. }) =
+                    generate_ring_table_for_purpose(seed, wrong_purpose, &cfg)
+                else {
+                    prop_assert!(false, "wrong purpose must report SeedPoolMismatch");
+                    unreachable!();
+                };
+                prop_assert_eq!(reported_pool, pool);
             }
         }
     }

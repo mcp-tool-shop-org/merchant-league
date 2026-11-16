@@ -3,6 +3,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
 pub const GENERATOR_VERSION: &str = "league-gen/v2.4.1";
@@ -24,6 +25,294 @@ pub const MAX_MANDATE_BONUS_VP: f64 = 8.0;
 
 /// Basis-point scale (`10_000 = 100%`).
 pub const BPS_SCALE: u16 = 10_000;
+
+/// Inclusive lower bound of the `dev` layout-seed pool (`0..=9_999`).
+pub const DEV_SEED_MIN: u64 = 0;
+/// Inclusive upper bound of the `dev` layout-seed pool (`0..=9_999`).
+pub const DEV_SEED_MAX: u64 = 9_999;
+/// Inclusive lower bound of the `train` layout-seed pool (`10_000..=999_999`).
+pub const TRAIN_SEED_MIN: u64 = 10_000;
+/// Inclusive upper bound of the `train` layout-seed pool (`10_000..=999_999`).
+pub const TRAIN_SEED_MAX: u64 = 999_999;
+/// Inclusive lower bound of the `probe` layout-seed pool (`1_000_000..=1_099_999`).
+pub const PROBE_SEED_MIN: u64 = 1_000_000;
+/// Inclusive upper bound of the `probe` layout-seed pool (`1_000_000..=1_099_999`).
+pub const PROBE_SEED_MAX: u64 = 1_099_999;
+/// Inclusive lower bound of the `held_out` layout-seed pool (`2_000_000..=2_099_999`).
+pub const HELD_OUT_SEED_MIN: u64 = 2_000_000;
+/// Inclusive upper bound of the `held_out` layout-seed pool (`2_000_000..=2_099_999`).
+pub const HELD_OUT_SEED_MAX: u64 = 2_099_999;
+/// Inclusive lower bound of the `sealed` layout-seed pool (`2^63..=2^64 - 1`).
+pub const SEALED_SEED_MIN: u64 = 1_u64 << 63;
+/// Inclusive upper bound of the `sealed` layout-seed pool (`2^63..=2^64 - 1`).
+pub const SEALED_SEED_MAX: u64 = u64::MAX;
+
+/// Disjoint layout-seed pool classification (`docs/design-v2.md` §7.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedPool {
+    /// Gate tests, reviews, tuning, stubs, and playtests while rules are still changing (`0..=9_999`).
+    Dev,
+    /// Training-logged games; the training curriculum draws strictly from here (`10_000..=999_999`).
+    Train,
+    /// Forward-pass checks during training with no gradient (`1_000_000..=1_099_999`).
+    Probe,
+    /// Counted evaluation of a trained model or rule change (`2_000_000..=2_099_999`).
+    HeldOut,
+    /// Final sealed evaluation range (`2^63..=2^64 - 1`); runs only for [`TablePurpose::Sealed`].
+    Sealed,
+    /// Every other `u64` value; refused for all [`TablePurpose`] values.
+    Unassigned,
+}
+
+impl SeedPool {
+    /// Lowercase canonical name matching this variant's serde representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Train => "train",
+            Self::Probe => "probe",
+            Self::HeldOut => "held_out",
+            Self::Sealed => "sealed",
+            Self::Unassigned => "unassigned",
+        }
+    }
+}
+
+impl fmt::Display for SeedPool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Single canonical inclusive `(min, max, pool)` boundary table for [`seed_pool`].
+pub const SEED_POOL_TABLE: [(u64, u64, SeedPool); 5] = [
+    (DEV_SEED_MIN, DEV_SEED_MAX, SeedPool::Dev),
+    (TRAIN_SEED_MIN, TRAIN_SEED_MAX, SeedPool::Train),
+    (PROBE_SEED_MIN, PROBE_SEED_MAX, SeedPool::Probe),
+    (HELD_OUT_SEED_MIN, HELD_OUT_SEED_MAX, SeedPool::HeldOut),
+    (SEALED_SEED_MIN, SEALED_SEED_MAX, SeedPool::Sealed),
+];
+
+/// Classifies `seed` into its unique [`SeedPool`] from [`SEED_POOL_TABLE`] alone, independent of
+/// seat count or [`GeneratorConfig`]. No other code decides a layout seed's pool.
+///
+/// # Rule for New Code and Tests
+/// Tests and gates call the raw [`crate::generate_ring_table`] generator with `dev`-pool seeds
+/// (`0..=9_999`) only; a test may use `train`-pool seeds (`10_000..=999_999`) only when it is
+/// about the `train` pool or already did so before seed pools were introduced; `probe`,
+/// `held_out`, and the `sealed` range never appear in tests, except made-up `sealed`-range
+/// expressions (such as `1_u64 << 63` or `u64::MAX`) in refusal and redaction tests.
+#[must_use]
+pub const fn seed_pool(seed: u64) -> SeedPool {
+    let mut idx = 0;
+    while idx < SEED_POOL_TABLE.len() {
+        let (lo, hi, pool) = SEED_POOL_TABLE[idx];
+        if seed >= lo && seed <= hi {
+            return pool;
+        }
+        idx += 1;
+    }
+    SeedPool::Unassigned
+}
+
+/// Declared role for which a table is being generated via [`crate::generate_ring_table_for_purpose`]
+/// or [`crate::generate_ring_table_for_setup`].
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TablePurpose {
+    /// Development, gate checks, rule tuning, stubs, and exploratory playtests (`dev` pool, default).
+    #[default]
+    Dev,
+    /// Training-logged curriculum games (`train` pool).
+    Train,
+    /// No-gradient forward-pass probe games during training (`probe` pool).
+    Probe,
+    /// Counted held-out evaluation of a trained model or rule change (`held_out` pool).
+    HeldOut,
+    /// Final check on a seed from the sealed range (`sealed` pool).
+    Sealed,
+}
+
+impl TablePurpose {
+    /// All five valid table purposes in ascending pool order.
+    pub const ALL: [Self; 5] = [
+        Self::Dev,
+        Self::Train,
+        Self::Probe,
+        Self::HeldOut,
+        Self::Sealed,
+    ];
+
+    /// Returns the sole [`SeedPool`] accepted for this purpose.
+    #[must_use]
+    pub const fn expected_pool(self) -> SeedPool {
+        match self {
+            Self::Dev => SeedPool::Dev,
+            Self::Train => SeedPool::Train,
+            Self::Probe => SeedPool::Probe,
+            Self::HeldOut => SeedPool::HeldOut,
+            Self::Sealed => SeedPool::Sealed,
+        }
+    }
+
+    /// Lowercase canonical name matching this variant's serde representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Train => "train",
+            Self::Probe => "probe",
+            Self::HeldOut => "held_out",
+            Self::Sealed => "sealed",
+        }
+    }
+}
+
+impl fmt::Display for TablePurpose {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Purpose and training-log flag passed to [`crate::generate_ring_table_for_setup`].
+///
+/// Defaults to `purpose = TablePurpose::Dev` and `training_logged = false`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TableSetupOptions {
+    /// Declared role for the table (`dev` by default).
+    pub purpose: TablePurpose,
+    /// Whether game trajectories may be written to training logs (`false` by default; valid only
+    /// when `purpose == TablePurpose::Train`).
+    pub training_logged: bool,
+}
+
+/// Computes the lowercase 64-character hex SHA-256 digest of `seed`'s 8 big-endian bytes.
+#[must_use]
+pub fn sealed_seed_sha256(seed: u64) -> String {
+    let digest = Sha256::digest(seed.to_be_bytes());
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    hex
+}
+
+/// Layout-seed representation inside [`GameTableRecord`] and [`GenError`] refusals.
+///
+/// Seeds in [`SeedPool::Sealed`] are hashed immediately via [`sealed_seed_sha256`] so raw
+/// sealed-range values are never stored in clear, printed by `Debug`/`Display`, or serialized.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordedLayoutSeed {
+    /// Clear `u64` layout seed for non-`sealed` pools.
+    Clear(u64),
+    /// Lowercase hex `SHA-256(seed.to_be_bytes())` for [`SeedPool::Sealed`] seeds.
+    SealedSha256(String),
+}
+
+impl RecordedLayoutSeed {
+    /// Encodes `seed` in clear unless `seed_pool(seed) == SeedPool::Sealed`, in which case only
+    /// `SHA-256(seed.to_be_bytes())` is stored.
+    #[must_use]
+    pub fn from_seed(seed: u64) -> Self {
+        if seed_pool(seed) == SeedPool::Sealed {
+            Self::SealedSha256(sealed_seed_sha256(seed))
+        } else {
+            Self::Clear(seed)
+        }
+    }
+}
+
+/// Checked game-table setup record emitted only by [`crate::generate_ring_table_for_setup`] and
+/// [`crate::generate_ring_table_for_purpose`].
+///
+/// Fields are private and `Deserialize` is intentionally omitted so external callers can obtain a
+/// [`GameTableRecord`] solely through the checked table-generation entry point. For
+/// [`SeedPool::Sealed`], `layout_seed` stores [`RecordedLayoutSeed::SealedSha256`] rather than the
+/// raw `u64` seed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GameTableRecord {
+    layout_seed: RecordedLayoutSeed,
+    seat_count: SeatCount,
+    pool: SeedPool,
+    generator_version: String,
+    training_logged: bool,
+}
+
+impl GameTableRecord {
+    pub(crate) fn new_checked(
+        seed: u64,
+        seat_count: SeatCount,
+        pool: SeedPool,
+        generator_version: String,
+        training_logged: bool,
+    ) -> Self {
+        debug_assert_eq!(pool, seed_pool(seed));
+        debug_assert_ne!(pool, SeedPool::Unassigned);
+        debug_assert!(!training_logged || pool == SeedPool::Train);
+        Self {
+            layout_seed: RecordedLayoutSeed::from_seed(seed),
+            seat_count,
+            pool,
+            generator_version,
+            training_logged,
+        }
+    }
+
+    /// Returns the recorded layout seed (clear `u64` for `dev`/`train`/`probe`/`held_out`, or
+    /// 8-byte big-endian SHA-256 digest for `sealed`).
+    #[must_use]
+    pub const fn layout_seed(&self) -> &RecordedLayoutSeed {
+        &self.layout_seed
+    }
+
+    /// Returns `Some(seed)` for non-`sealed` pools, or `None` for [`SeedPool::Sealed`].
+    #[must_use]
+    pub const fn clear_layout_seed(&self) -> Option<u64> {
+        match &self.layout_seed {
+            RecordedLayoutSeed::Clear(seed) => Some(*seed),
+            RecordedLayoutSeed::SealedSha256(_) => None,
+        }
+    }
+
+    /// Returns `Some(sha256_hex)` of `seed.to_be_bytes()` for [`SeedPool::Sealed`], or `None` otherwise.
+    #[must_use]
+    pub fn sealed_seed_sha256(&self) -> Option<&str> {
+        match &self.layout_seed {
+            RecordedLayoutSeed::Clear(_) => None,
+            RecordedLayoutSeed::SealedSha256(digest) => Some(digest.as_str()),
+        }
+    }
+
+    /// Returns the generated table's validated [`SeatCount`].
+    #[must_use]
+    pub const fn seat_count(&self) -> SeatCount {
+        self.seat_count
+    }
+
+    /// Returns the validated [`SeedPool`] of the layout seed.
+    #[must_use]
+    pub const fn pool(&self) -> SeedPool {
+        self.pool
+    }
+
+    /// Returns the [`GENERATOR_VERSION`] embedded in the generated [`RingTable`].
+    #[must_use]
+    pub fn generator_version(&self) -> &str {
+        &self.generator_version
+    }
+
+    /// Returns whether this game's transcripts/trajectories are authorized for training logs.
+    #[must_use]
+    pub const fn training_logged(&self) -> bool {
+        self.training_logged
+    }
+}
 
 /// Validated seat count for a chiral converter ring (`4`, `5`, or `6`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -875,9 +1164,27 @@ impl fmt::Display for FeasibilityError {
 
 impl std::error::Error for FeasibilityError {}
 
-/// Errors returned by table generation and feasibility configuration checks.
+/// Errors returned by table generation, seed-pool checks, and feasibility configuration checks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GenError {
+    /// Layout seed's [`SeedPool`] did not match the requested [`TablePurpose`] (`SEED_POOL_MISMATCH`).
+    SeedPoolMismatch {
+        /// Layout seed (clear `u64` for non-`sealed` pools, 8-byte big-endian SHA-256 for `sealed`).
+        seed: RecordedLayoutSeed,
+        /// Pool returned by [`seed_pool`].
+        seed_pool: SeedPool,
+        /// Requested [`TablePurpose`].
+        purpose: TablePurpose,
+    },
+    /// `training_logged = true` was requested for a [`TablePurpose`] other than [`TablePurpose::Train`].
+    TrainingLoggedMismatch {
+        /// Layout seed (clear `u64` for non-`sealed` pools, 8-byte big-endian SHA-256 for `sealed`).
+        seed: RecordedLayoutSeed,
+        /// Pool returned by [`seed_pool`].
+        seed_pool: SeedPool,
+        /// Requested non-`train` [`TablePurpose`].
+        purpose: TablePurpose,
+    },
     /// Generator configuration contained invalid bounds, zero attempts, or exceeded `MAX_ATTEMPTS_CAP`.
     InvalidConfig(String),
     /// No feasible table passed all three LP invariants within `max_attempts`.
@@ -889,9 +1196,61 @@ pub enum GenError {
     },
 }
 
+impl GenError {
+    /// Constructs a [`GenError::SeedPoolMismatch`] while redacting `sealed`-pool seeds to the
+    /// SHA-256 of their 8 big-endian bytes.
+    #[must_use]
+    pub fn seed_pool_mismatch(seed: u64, seed_pool: SeedPool, purpose: TablePurpose) -> Self {
+        Self::SeedPoolMismatch {
+            seed: RecordedLayoutSeed::from_seed(seed),
+            seed_pool,
+            purpose,
+        }
+    }
+
+    /// Constructs a [`GenError::TrainingLoggedMismatch`] while redacting `sealed`-pool seeds to
+    /// the SHA-256 of their 8 big-endian bytes.
+    #[must_use]
+    pub fn training_logged_mismatch(seed: u64, seed_pool: SeedPool, purpose: TablePurpose) -> Self {
+        Self::TrainingLoggedMismatch {
+            seed: RecordedLayoutSeed::from_seed(seed),
+            seed_pool,
+            purpose,
+        }
+    }
+}
+
 impl fmt::Display for GenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SeedPoolMismatch {
+                seed,
+                seed_pool,
+                purpose,
+            } => match seed {
+                RecordedLayoutSeed::Clear(raw_seed) => write!(
+                    f,
+                    "SEED_POOL_MISMATCH: layout seed {raw_seed} belongs to pool '{seed_pool}', refused for purpose '{purpose}'"
+                ),
+                RecordedLayoutSeed::SealedSha256(digest) => write!(
+                    f,
+                    "SEED_POOL_MISMATCH: layout seed in pool '{seed_pool}' (sha256={digest}) refused for purpose '{purpose}'"
+                ),
+            },
+            Self::TrainingLoggedMismatch {
+                seed,
+                seed_pool,
+                purpose,
+            } => match seed {
+                RecordedLayoutSeed::Clear(raw_seed) => write!(
+                    f,
+                    "TRAINING_LOGGED_MISMATCH: training_logged=true requires purpose 'train', refused for purpose '{purpose}' (pool '{seed_pool}', seed {raw_seed})"
+                ),
+                RecordedLayoutSeed::SealedSha256(digest) => write!(
+                    f,
+                    "TRAINING_LOGGED_MISMATCH: training_logged=true requires purpose 'train', refused for purpose '{purpose}' (pool '{seed_pool}', sha256={digest})"
+                ),
+            },
             Self::InvalidConfig(msg) => write!(f, "invalid generator config: {msg}"),
             Self::NoFeasibleTableFound {
                 attempts,
@@ -1121,5 +1480,78 @@ mod tests {
         };
         assert!(!g1.to_string().is_empty());
         assert!(!g2.to_string().is_empty());
+    }
+
+    #[test]
+    fn seed_pool_pins_every_boundary_and_lowercase_serde_names() {
+        let boundary_cases: [(u64, SeedPool); 14] = [
+            (0, SeedPool::Dev),
+            (9_999, SeedPool::Dev),
+            (10_000, SeedPool::Train),
+            (999_999, SeedPool::Train),
+            (1_000_000, SeedPool::Probe),
+            (1_099_999, SeedPool::Probe),
+            (1_100_000, SeedPool::Unassigned),
+            (1_999_999, SeedPool::Unassigned),
+            (2_000_000, SeedPool::HeldOut),
+            (2_099_999, SeedPool::HeldOut),
+            (2_100_000, SeedPool::Unassigned),
+            ((1_u64 << 63) - 1, SeedPool::Unassigned),
+            (1_u64 << 63, SeedPool::Sealed),
+            (u64::MAX, SeedPool::Sealed),
+        ];
+        for (idx, (seed, expected)) in boundary_cases.into_iter().enumerate() {
+            assert_eq!(
+                seed_pool(seed),
+                expected,
+                "boundary table mismatch at row {idx}"
+            );
+        }
+
+        let serde_cases = [
+            (SeedPool::Dev, "\"dev\""),
+            (SeedPool::Train, "\"train\""),
+            (SeedPool::Probe, "\"probe\""),
+            (SeedPool::HeldOut, "\"held_out\""),
+            (SeedPool::Sealed, "\"sealed\""),
+            (SeedPool::Unassigned, "\"unassigned\""),
+        ];
+        for (pool, expected_json) in serde_cases {
+            let Ok(encoded) = serde_json::to_string(&pool) else {
+                panic!("serialize SeedPool");
+            };
+            assert_eq!(encoded, expected_json);
+            let Ok(decoded) = serde_json::from_str::<SeedPool>(&encoded) else {
+                panic!("deserialize SeedPool");
+            };
+            assert_eq!(decoded, pool);
+        }
+
+        let purpose_cases = [
+            (TablePurpose::Dev, "\"dev\"", SeedPool::Dev),
+            (TablePurpose::Train, "\"train\"", SeedPool::Train),
+            (TablePurpose::Probe, "\"probe\"", SeedPool::Probe),
+            (TablePurpose::HeldOut, "\"held_out\"", SeedPool::HeldOut),
+            (TablePurpose::Sealed, "\"sealed\"", SeedPool::Sealed),
+        ];
+        for (purpose, expected_json, expected_pool) in purpose_cases {
+            let Ok(encoded) = serde_json::to_string(&purpose) else {
+                panic!("serialize TablePurpose");
+            };
+            assert_eq!(encoded, expected_json);
+            let Ok(decoded) = serde_json::from_str::<TablePurpose>(&encoded) else {
+                panic!("deserialize TablePurpose");
+            };
+            assert_eq!(decoded, purpose);
+            assert_eq!(purpose.expected_pool(), expected_pool);
+        }
+
+        assert_eq!(
+            TableSetupOptions::default(),
+            TableSetupOptions {
+                purpose: TablePurpose::Dev,
+                training_logged: false,
+            }
+        );
     }
 }

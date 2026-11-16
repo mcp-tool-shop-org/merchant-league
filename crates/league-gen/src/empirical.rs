@@ -1025,6 +1025,11 @@ fn run_ring_ensemble(seed: u64, trials: usize, seat_count: SeatCount) -> Ensembl
     let mut total_rejected = 0usize;
     let mut total_sampled = 0usize;
 
+    // Documented seed-pool exception (`docs/design-v2.md` §7.4): `measure_lockin_and_hhi` XORs its
+    // base seed with three fixed per-seat-count 64-bit masks and steps `sub_seed` by `t` times the
+    // 64-bit golden-ratio increment before calling unchecked `generate_ring_table`, and the date
+    // seed `20_261_115` (`generator.rs`, `mandates.rs`, `empirical.rs`) falls in `unassigned`.
+    // All derived ensemble seeds were verified out-of-repo to be disjoint from the sealed set.
     for t in 0..trials {
         let sub_seed = seed.wrapping_add((t as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
         if let Ok((table, report)) = generate_ring_table(sub_seed, &cfg) {

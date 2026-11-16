@@ -50,7 +50,10 @@ pub use feasibility::{
     compute_shadow_price_allocation, compute_shadow_price_seat_evs, compute_shapley_seat_evs,
     pair_has_structural_autarky, solve_shadow_price_details,
 };
-pub use generator::{PlrChoice, PlrEntry, PlrSampler, generate_ring_table};
+pub use generator::{
+    PlrChoice, PlrEntry, PlrSampler, generate_ring_table, generate_ring_table_for_purpose,
+    generate_ring_table_for_setup,
+};
 pub use lp::{LpError, LpSolution, LpStatus, solve_lp};
 pub use mandates::{
     CreditTier, GradedMandateCard, MandateKind, deal_graded_mandates,
@@ -61,10 +64,14 @@ pub use mandates::{
 pub use rng::SeedStream;
 pub use schema::{
     ALLOWED_COMMODITY_GLOSSARY, BPS_SCALE, ConverterSpec, CreditRatingTier, CurrencyCode,
-    DENIED_CURRENCY_CODES, EvMethod, FeasibilityError, GENERATOR_VERSION, GenError,
-    GeneratorConfig, HorizonShockKind, MAX_ATTEMPTS_CAP, MAX_MANDATE_BONUS_VP,
-    MIN_MANDATE_BONUS_VP, MandateCardSpec, MandateObjective, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID,
-    ProjectSpec, RingTable, ScheduledShock, SeatCount, SeatSpec, bonus_vp_for_completion_bps,
-    commodity_glossary_word, deal_mandate_indices_with_entropy, default_mandate_deck_for_table,
-    default_projects_for_seats, is_allowed_commodity_code, is_denied_currency_code,
+    DENIED_CURRENCY_CODES, DEV_SEED_MAX, DEV_SEED_MIN, EvMethod, FeasibilityError,
+    GENERATOR_VERSION, GameTableRecord, GenError, GeneratorConfig, HELD_OUT_SEED_MAX,
+    HELD_OUT_SEED_MIN, HorizonShockKind, MAX_ATTEMPTS_CAP, MAX_MANDATE_BONUS_VP,
+    MIN_MANDATE_BONUS_VP, MandateCardSpec, MandateObjective, NUMERAIRE_CODE, PROBE_SEED_MAX,
+    PROBE_SEED_MIN, PROJECT_CONCORDAT_ID, ProjectSpec, RecordedLayoutSeed, RingTable,
+    SEALED_SEED_MAX, SEALED_SEED_MIN, SEED_POOL_TABLE, ScheduledShock, SeatCount, SeatSpec,
+    SeedPool, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose, TableSetupOptions,
+    bonus_vp_for_completion_bps, commodity_glossary_word, deal_mandate_indices_with_entropy,
+    default_mandate_deck_for_table, default_projects_for_seats, is_allowed_commodity_code,
+    is_denied_currency_code, sealed_seed_sha256, seed_pool,
 };

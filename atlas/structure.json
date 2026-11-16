@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "24a4622fa4ea6a42662553d737f41204c3831352c3cf38520a815d1842dd98a8",
+          "hash": "5f6cc08aa176749fb570eeb39289406b8eed5b7ef9d6ee30b5a92ab029be6347",
           "path": "docs/design-v2.md"
         },
         {
@@ -1458,7 +1458,7 @@
               "line": 899
             }
           ],
-          "hash": "ad4b0b4c595b11479f04b761a6efe17b8439c9c121b4c5cfb1fcc7f583db4a2b",
+          "hash": "d6ab56507c6da1d0bee3d796a86578cc0242a0fdfb254d784bb0d08d96e8bb24",
           "importsFiles": [
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/generator.rs",
@@ -1765,56 +1765,73 @@
         },
         {
           "exports": [
-            "generate_ring_table"
+            "generate_ring_table",
+            "generate_ring_table_for_purpose",
+            "generate_ring_table_for_setup"
           ],
           "failurePaths": [
             {
               "in": "generate_ring_table",
               "kind": "match-err",
-              "line": 198
+              "line": 199
             },
             {
               "in": "generate_ring_table",
               "kind": "err",
-              "line": 202
+              "line": 203
+            },
+            {
+              "in": "generate_ring_table_for_setup",
+              "kind": "err",
+              "line": 239
+            },
+            {
+              "in": "generate_ring_table_for_setup",
+              "kind": "err",
+              "line": 246
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 210
+              "line": 265
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 216
+              "line": 271
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 221
+              "line": 276
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 226
+              "line": 281
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 233
+              "line": 288
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 244
+              "line": 299
             },
             {
               "in": "sample_unique_codes",
               "kind": "err",
-              "line": 566
+              "line": 621
+            },
+            {
+              "in": "new",
+              "kind": "err",
+              "line": 717
             }
           ],
-          "hash": "e3a87d3fd59ad6d2c6c22068bcedf536bc21dda6fdfffa796cacd33e3c28dfa5",
+          "hash": "a9e5a2eb986d3065510608067a6fac2b33fcd056be8d7594a24647e51038bce0",
           "importsFiles": [
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/rng.rs",
@@ -1824,7 +1841,7 @@
           "testsInside": true
         },
         {
-          "hash": "a2dd351f2cf9c843202a1810d6fd6b99c6a0aa762399288ef4bfc819de6d8b81",
+          "hash": "778f6bd2a135c442febcbd846c176ee9d80e6b2f4a8602678e703c437d606b82",
           "importsFiles": [
             "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/feasibility.rs",
@@ -1939,56 +1956,58 @@
             "default_mandate_deck_for_table",
             "default_projects_for_seats",
             "is_allowed_commodity_code",
-            "is_denied_currency_code"
+            "is_denied_currency_code",
+            "sealed_seed_sha256",
+            "seed_pool"
           ],
           "failurePaths": [
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 260
+              "line": 549
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 265
+              "line": 554
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 271
+              "line": 560
             },
             {
               "in": "try_from",
               "kind": "err",
-              "line": 316
+              "line": 605
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 467
+              "line": 756
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 477
+              "line": 766
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 482
+              "line": 771
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 489
+              "line": 778
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 496
+              "line": 785
             }
           ],
-          "hash": "64461221f0610b6a4c923fa1a01122dbcf80114d0411b9ea977259775dc61878",
+          "hash": "cb2e2b005523d654ff6e2480d30688b906e6d9a686fdb02f87b6462a4feb36ee",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1996,7 +2015,7 @@
           "testsInside": true
         },
         {
-          "hash": "982b84d947d565ff8b6e64133758204630373df63b48ba4dd065753d33f9ae26",
+          "hash": "906baef2ee42f9ba1939286e67baa138171f4efd02ce7008bacd493d651dc320",
           "importsFiles": [
             "crates/league-gen/src/lib.rs"
           ],
@@ -2794,7 +2813,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "6f07448d087135f6a31c47168430ae6a17a9efbf9e10d87d3b0db379d2166245",
+          "hash": "38f3a5e3492625b10c7a69e4a4afa015f90cea1485a187f23a31b75264d3ea93",
           "path": "CHANGELOG.md"
         },
         {
@@ -3523,7 +3542,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "1b54ef6b3b731b155b4477b849477a55304cfb6d",
+    "commit": "34aac79860ec09135b7e9d110bb4e2c840f186ec",
     "tracked": 500
   },
   "landings": [
