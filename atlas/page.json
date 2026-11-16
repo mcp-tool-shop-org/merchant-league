@@ -29,24 +29,58 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 13,
+      "added": 2,
+      "changed": 12,
       "moved": 0,
-      "parts": 4,
-      "removed": 0
+      "parts": 5,
+      "removed": 2
     },
     "items": [
       {
+        "kind": "landing",
+        "sentence": "crates/league-dice/src/lib.rs is now read by crates/league-dice/tests/fu1_no_seed_secret.rs.",
+        "subjects": [
+          "crates/league-dice/src/lib.rs",
+          "crates/league-dice/tests/fu1_no_seed_secret.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `validate_vm_host_allowance`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 7 more changes to the order of work.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-16; 13 files changed content.",
+        "sentence": "2 files added, 2 removed and 12 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "eb2ea0ff4f97145a25db2f23f9bcad157582f570",
-      "generatedAt": "2026-11-16T06:21:16.746Z"
+      "commit": "35cda393691ca1fc62ab0a4d73cb1abb89e34279",
+      "generatedAt": "2026-11-16T07:42:27.478Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -85,9 +119,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "35cda393691ca1fc62ab0a4d73cb1abb89e34279",
+  "commit": "0a4103882e125d49b12ba5e4e83c0c24ce3688f1",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (337 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (339 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -106,12 +140,12 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 8
+          "files": 9
         },
         {
           "boundary": "league-dice",
           "depth": 0,
-          "files": 1
+          "files": 2
         },
         {
           "boundary": "league-gen",
@@ -170,7 +204,7 @@
         "crates/league-tui/"
       ],
       "runsCount": 23,
-      "runsMore": 27,
+      "runsMore": 29,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -312,7 +346,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-16T07:42:27.478Z",
+  "generatedAt": "2026-11-16T07:58:22.738Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
@@ -360,10 +394,10 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 37,
+  "testFiles": 39,
   "testedBy": {
-    "league-core": 5,
-    "league-dice": 1,
+    "league-core": 6,
+    "league-dice": 2,
     "league-gen": 8,
     "league-ledger": 7,
     "league-season": 1,
@@ -372,7 +406,6 @@
   },
   "testedCodeParts": 7,
   "testedInside": [
-    "league-dice",
     "league-season",
     "league-tui"
   ],
@@ -386,7 +419,6 @@
   "unreadNote": [],
   "untested": [],
   "untestedNote": [
-    "league-dice is tested only by the unit tests in its own files.",
     "league-season is tested only by the unit tests in its own files.",
     "league-tui is tested only by the unit tests in its own files.",
     "scripts holds only shell files, which this map does not read, so whether a test touches it cannot be seen."

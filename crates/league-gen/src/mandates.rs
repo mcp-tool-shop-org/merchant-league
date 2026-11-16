@@ -82,6 +82,32 @@ mod tests {
             gen_deck, core_deck,
             "league-gen must reuse league-core's single deck"
         );
+        let embedded_core_cards: Vec<GradedMandateCard> = table
+            .mandate_deck
+            .iter()
+            .map(|c| c.to_core_card())
+            .collect();
+        assert_eq!(
+            embedded_core_cards, core_deck,
+            "RingTable.mandate_deck must match league-core's single deck card for card"
+        );
+        let schema_deal = match crate::schema::deal_mandate_indices_with_entropy(
+            &table.mandate_deck,
+            SeatCount::Four,
+            [0xA5; 32],
+        ) {
+            Ok(idxs) => idxs,
+            Err(err) => panic!("schema deal failed: {err}"),
+        };
+        let core_table0_deal =
+            match deal_mandate_deck_indices(TableId(0), 4, [0xA5; 32], core_deck.len()) {
+                Ok(idxs) => idxs,
+                Err(err) => panic!("core deal failed: {err}"),
+            };
+        assert_eq!(
+            schema_deal, core_table0_deal,
+            "deal_mandate_indices_with_entropy must use league-core's single shuffle"
+        );
 
         let std_core = default_graded_mandate_deck(4);
         assert_eq!(std_core.len(), gen_deck.len());

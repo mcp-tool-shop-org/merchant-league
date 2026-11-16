@@ -16,10 +16,14 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::empirical::{
+    compute_ring_lp_pair_volumes, compute_rollout_grading, top_pair_share, verify_rollout_grading,
+};
 use crate::lp::{LpStatus, solve_lp};
 use crate::schema::{
-    ConverterSpec, EvMethod, FeasibilityError, GeneratorConfig, HorizonShockKind, NUMERAIRE_CODE,
-    RingTable,
+    BPS_SCALE, ConverterSpec, EvMethod, FeasibilityError, GeneratorConfig, HorizonShockKind,
+    MAX_MANDATE_BONUS_VP, MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, RingTable,
+    bonus_vp_for_completion_bps,
 };
 
 const PAIR_COVERAGE_TOL: f64 = 1e-7;
@@ -37,6 +41,30 @@ const RAW_SALVAGE_PROJECT_FRACTION: f64 = 0.25;
 /// provisional, calibrate in playtest 1).
 const SHAPLEY_UPKEEP_PENALTY_MULT: f64 = 1.10;
 
+/// Minimum clearing-price margin tolerance for per-converter value-added validation (`B2.1`).
+const CONVERTER_MARGIN_TOL: f64 = 1e-9;
+
+/// Per-converter value-added diagnostic evaluated at the shadow LP's objective and raw-salvage
+/// coefficients (`B2.1`).
+///
+/// Uses the shadow LP's fixed objective price (`refined_project_value`) for outputs and its fixed
+/// raw-salvage floor coefficient (`RAW_SALVAGE_PROJECT_FRACTION * mean_proj * (1.0 - decay_rate)`
+/// grossed up by `1 + raw_export_tariff` for cross-seat inputs) rather than the LP's dual shadow
+/// prices (which leave active uncapacitated converters at zero complementary-slackness margin).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConverterMarginDiag {
+    /// Owning seat index (`0..N`).
+    pub owner: u8,
+    /// Converter index within `table.seats[owner].converters`.
+    pub converter_index: usize,
+    /// Whether this recipe is a secondary cross-converter (`false` = primary `(R_{i+1}, R_{i+2})` workshop).
+    pub is_secondary: bool,
+    /// Net value added per batch at Turn-1 baseline LP objective/salvage coefficients.
+    pub baseline_clearing_margin: f64,
+    /// Net value added per batch at shock-amortized season LP objective/salvage coefficients.
+    pub season_clearing_margin: f64,
+}
+
 /// Certified LP metrics and optimal grand-coalition production plan for a [`RingTable`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeasibilityReport {
@@ -50,10 +78,19 @@ pub struct FeasibilityReport {
     pub max_3seat_upkeep_coverage: f64,
     /// Maximum upkeep fraction satisfied internally by any 4-seat bloc (when `N >= 5`).
     pub max_4seat_upkeep_coverage: Option<f64>,
-    /// Total fundamental value of mandatory turn upkeep across all seats.
+    /// Total fundamental value of mandatory turn upkeep across all seats (Turn-1 unshocked baseline).
     pub total_upkeep_value: f64,
-    /// Net refined Syndicate Project surplus value above all mandatory upkeep.
+    /// Net refined Syndicate Project surplus value above all mandatory upkeep in the unshocked
+    /// Turn-1 baseline LP (`solve_grand_surplus`, reference for Invariant 2).
     pub net_converter_surplus: f64,
+    /// Exact shadow-price LP grand objective (shock-amortized season parameters plus raw salvage
+    /// valuation). Under [`EvMethod::ShadowPrice`], `sum(seat_expected_values) == season_effective_net_surplus`
+    /// holds identically by strong LP duality (`#26b`).
+    pub season_effective_net_surplus: f64,
+    /// Minimum clearing-price value-added margin across all table converters (`B2.1`).
+    pub min_converter_clearing_margin: f64,
+    /// Maximum unordered pair trade-volume share in the 1-turn optimal LP flow (`C6` table check).
+    pub static_max_pair_share: f64,
     /// Measured ratio `net_converter_surplus / total_upkeep_value`.
     pub surplus_to_upkeep_ratio: f64,
     /// Per-seat expected value per turn under [`Self::ev_method`].
@@ -66,12 +103,15 @@ pub struct FeasibilityReport {
     pub optimal_converter_runs: Vec<f64>,
 }
 
-/// Evaluates all structural rules and proves the three LP feasibility invariants for `table`.
-pub fn check_feasibility(
-    table: &RingTable,
-    config: &GeneratorConfig,
-) -> Result<FeasibilityReport, FeasibilityError> {
-    validate_config_and_table(table, config)?;
+/// Evaluates all structural rules, C6 top-pair share cap, the three LP feasibility invariants,
+/// and the `B2.2` scripted proxy rollout gate using `&table.config`.
+pub fn check_feasibility(table: &RingTable) -> Result<FeasibilityReport, FeasibilityError> {
+    let config = &table.config;
+    let converter_margins = validate_config_and_table(table, config)?;
+    let min_converter_clearing_margin = converter_margins
+        .iter()
+        .map(|d| d.baseline_clearing_margin.min(d.season_clearing_margin))
+        .fold(f64::INFINITY, f64::min);
     let n = table.seat_count.as_usize();
 
     // Fast structural pass for Invariant 1 before heavier LP solves: if any 1-seat or 2-seat
@@ -111,10 +151,14 @@ pub fn check_feasibility(
         });
     }
 
-    // Invariant 3: Seat expected values within `±config.ev_tolerance`.
-    let seat_expected_values = match config.ev_method {
-        EvMethod::ShadowPrice => compute_shadow_price_seat_evs(table)?,
-        EvMethod::Shapley => compute_shapley_seat_evs(table)?,
+    // Invariant 3: Seat expected values within `±config.ev_tolerance`, plus shadow-LP reference.
+    let (seat_expected_values, season_effective_net_surplus) = match config.ev_method {
+        EvMethod::ShadowPrice => compute_shadow_price_allocation(table)?,
+        EvMethod::Shapley => {
+            let shapley = compute_shapley_seat_evs(table)?;
+            let (_, shadow_obj) = compute_shadow_price_allocation(table)?;
+            (shapley, shadow_obj)
+        }
     };
     let mean_seat_ev = seat_expected_values.iter().sum::<f64>() / (n as f64);
     if !mean_seat_ev.is_finite() || mean_seat_ev <= 0.0 {
@@ -164,6 +208,20 @@ pub fn check_feasibility(
         }
     }
 
+    // C6 table-level top-pair trade-volume share cap.
+    let pair_volumes = compute_ring_lp_pair_volumes(table, &optimal_converter_runs);
+    let (top_pair, static_max_pair_share) = top_pair_share(n, &pair_volumes);
+    let cap = config
+        .max_pair_share_cap
+        .unwrap_or_else(|| table.seat_count.default_max_pair_share_cap());
+    if static_max_pair_share > cap + 1e-9 {
+        return Err(FeasibilityError::PairShareExceedsCap {
+            pair: top_pair,
+            share: static_max_pair_share,
+            cap,
+        });
+    }
+
     let max_3seat = max_subset_coverage(table, n, 3)?;
     let max_4seat = if n >= 5 {
         Some(max_subset_coverage(table, n, 4)?)
@@ -171,7 +229,7 @@ pub fn check_feasibility(
         None
     };
 
-    Ok(FeasibilityReport {
+    let report = FeasibilityReport {
         ev_method: config.ev_method,
         max_1seat_upkeep_coverage: max_1seat,
         max_2seat_upkeep_coverage: max_2seat,
@@ -179,12 +237,80 @@ pub fn check_feasibility(
         max_4seat_upkeep_coverage: max_4seat,
         total_upkeep_value,
         net_converter_surplus,
+        season_effective_net_surplus,
+        min_converter_clearing_margin,
+        static_max_pair_share,
         surplus_to_upkeep_ratio,
         seat_expected_values,
         mean_seat_ev,
         max_relative_ev_deviation,
         optimal_converter_runs,
-    })
+    };
+    let grading = compute_rollout_grading(table, &report);
+    verify_rollout_grading(table, &grading, cap)?;
+    Ok(report)
+}
+
+/// Computes per-converter Turn-1 baseline and shock-amortized season value-added margins (`B2.1`).
+///
+/// Prices outputs and inputs using the shadow LP's fixed objective coefficient (`refined_project_value`)
+/// and fixed raw-salvage floor coefficient (`RAW_SALVAGE_PROJECT_FRACTION * mean_proj * (1.0 - decay_rate)`
+/// grossed up by `1 + raw_export_tariff` for imported raw goods), **not** the LP's dual shadow prices
+/// (at the optimal duals, active uncapacitated converters always earn zero margin by complementary
+/// slackness).
+pub fn compute_converter_clearing_margins(
+    table: &RingTable,
+) -> Result<Vec<ConverterMarginDiag>, FeasibilityError> {
+    let n = validate_index_bounds(table)?;
+    let eff = effective_season_params(table);
+    let base_mean_proj = table
+        .seats
+        .iter()
+        .map(|s| s.refined_project_value)
+        .sum::<f64>()
+        / (n as f64);
+    let eff_mean_proj = eff.iter().map(|p| p.project_value).sum::<f64>() / (n as f64);
+    let base_salvage_weight = RAW_SALVAGE_PROJECT_FRACTION * base_mean_proj;
+    let eff_salvage_weight = RAW_SALVAGE_PROJECT_FRACTION * eff_mean_proj;
+
+    let mut diags = Vec::new();
+    for (idx, seat) in table.seats.iter().enumerate() {
+        for (c_idx, conv) in seat.converters.iter().enumerate() {
+            let mut base_in_cost = 0.0_f64;
+            let mut eff_in_cost = 0.0_f64;
+            for &(raw_g, amt) in &conv.inputs {
+                let k = usize::from(raw_g);
+                if amt <= 0.0 {
+                    continue;
+                }
+                let base_mult = if k == idx {
+                    1.0
+                } else {
+                    1.0 + table.seats[k].raw_export_tariff
+                };
+                let eff_mult = if k == idx {
+                    1.0
+                } else {
+                    1.0 + eff[k].raw_tariff
+                };
+                let base_raw_price =
+                    base_salvage_weight * (1.0 - table.seats[k].perishable_decay_rate);
+                let eff_raw_price = eff_salvage_weight * (1.0 - eff[k].decay_rate);
+                base_in_cost += amt * base_mult * base_raw_price;
+                eff_in_cost += amt * eff_mult * eff_raw_price;
+            }
+            let base_out_val = conv.output_amount * seat.refined_project_value;
+            let eff_out_val = conv.output_amount * eff[idx].project_value;
+            diags.push(ConverterMarginDiag {
+                owner: seat.seat,
+                converter_index: c_idx,
+                is_secondary: conv.is_secondary,
+                baseline_clearing_margin: base_out_val - base_in_cost,
+                season_clearing_margin: eff_out_val - eff_in_cost,
+            });
+        }
+    }
+    Ok(diags)
 }
 
 /// Exact structural check for whether pair `{i, j}` (`i <= j`, or `i == j` for 1-seat)
@@ -362,9 +488,85 @@ pub fn coalition_upkeep_coverage(table: &RingTable, seats: &[u8]) -> Result<f64,
     }
 }
 
+/// Detailed shadow-price LP solution for a [`RingTable`], exposing both seat EVs and the
+/// primal/dual vectors used to evaluate per-seat G1 best-trade orderings (`D1` / `D2`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShadowPriceDetails {
+    /// Per-seat expected value per turn (`sum == season_effective_net_surplus`).
+    pub seat_expected_values: Vec<f64>,
+    /// Exact shadow LP grand objective (`sol.objective * q_scale`).
+    pub season_effective_net_surplus: f64,
+    /// Optimal converter run counts in `flatten_converters(table)` order (`x_c * q_scale`).
+    pub converter_runs: Vec<f64>,
+    /// Shadow LP duals on converter capacity rows `0..num_conv`.
+    pub converter_cap_duals: Vec<f64>,
+    /// Shadow LP duals on raw balance rows `num_conv..num_conv + N`.
+    pub raw_shadow_prices: Vec<f64>,
+    /// Shadow LP duals on refined balance rows `num_conv + N..num_conv + 2*N`.
+    pub refined_shadow_prices: Vec<f64>,
+}
+
+/// Role of a trade option in a seat's G1 item 2 best-trade ordering (`D1`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TradeOptionRole {
+    /// Operating one of the seat's own Tier-2 converters (`x_c * y_cap[c]`).
+    Own,
+    /// Supplying raw good `R_i` into a foreign seat's active converter.
+    Supply,
+}
+
+/// Ring-relative label identifying one best-trade option for a seat under `D1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TradeOptionLabel {
+    /// Ring-relative owner offset `(owner - seat) mod N` (`0` for own converters).
+    pub owner_offset: u8,
+    /// Whether the converter is secondary (`true`) or primary (`false`).
+    pub is_secondary: bool,
+    /// Whether this option represents own capacity rent or foreign raw supply.
+    pub role: TradeOptionRole,
+}
+
+/// Summary of G1 item 2 ring-relative best-trade orderings (`D1`, top-1, and `D2`) for a [`RingTable`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableTradeOrderings {
+    /// Per-seat top-3 ring-relative labels ordered descending by shadow-LP value (`D1`).
+    pub seat_top3_d1: Vec<Vec<TradeOptionLabel>>,
+    /// Minimum count of strictly positive options (`> 1e-9 * seat_max`) across all seats.
+    pub min_positive_options_per_seat: usize,
+    /// True iff every seat has `>= 3` positive options and all `N` seats' top-3 orderings differ (`D1`).
+    pub d1_all_seats_distinct: bool,
+    /// True iff every seat has `>= 1` positive option and all `N` seats' `#1` options differ (report-only).
+    pub top1_all_seats_distinct: bool,
+    /// True iff every seat has non-empty capacity-positive own converters and all `N` orderings differ (`D2`, report-only).
+    pub d2_all_seats_distinct: bool,
+}
+
 /// Computes competitive/cooperative LP-dual shadow-price seat expected values per turn
-/// (`docs/design-v2.md` §1.5), satisfying strong duality `sum(ev_i) == grand_net_surplus`.
+/// (`docs/design-v2.md` §1.5), satisfying strong duality `sum(ev_i) == season_effective_net_surplus`
+/// against the shock-amortized shadow LP objective (`#26b`).
 pub fn compute_shadow_price_seat_evs(table: &RingTable) -> Result<Vec<f64>, FeasibilityError> {
+    compute_shadow_price_allocation(table).map(|(seat_evs, _)| seat_evs)
+}
+
+/// Computes both per-seat shadow-price expected values and the exact shadow LP grand objective
+/// (`season_effective_net_surplus = sol.objective * q_scale`) for which strong duality holds
+/// (`sum(seat_evs) == season_effective_net_surplus` to numerical precision, `#26b`).
+pub fn compute_shadow_price_allocation(
+    table: &RingTable,
+) -> Result<(Vec<f64>, f64), FeasibilityError> {
+    let details = solve_shadow_price_details(table)?;
+    Ok((
+        details.seat_expected_values,
+        details.season_effective_net_surplus,
+    ))
+}
+
+/// Solves the shock-amortized grand shadow LP and returns per-seat EVs together with the exact
+/// primal converter run counts and dual vectors (`converter_cap_duals`, `raw_shadow_prices`,
+/// `refined_shadow_prices`) selected identically to [`compute_shadow_price_allocation`].
+pub fn solve_shadow_price_details(
+    table: &RingTable,
+) -> Result<ShadowPriceDetails, FeasibilityError> {
     let n = validate_index_bounds(table)?;
     let converters = flatten_converters(table);
     let eff = effective_season_params(table);
@@ -507,7 +709,123 @@ pub fn compute_shadow_price_seat_evs(table: &RingTable) -> Result<Vec<f64>, Feas
         })
         .collect();
 
-    Ok(seat_evs)
+    Ok(ShadowPriceDetails {
+        seat_expected_values: seat_evs,
+        season_effective_net_surplus: sol.objective * q_scale,
+        converter_runs: sol.primal[..num_conv]
+            .iter()
+            .map(|&x| x * q_scale)
+            .collect(),
+        converter_cap_duals: y[..num_conv].to_vec(),
+        raw_shadow_prices: y[raw_row_off..ref_row_off].to_vec(),
+        refined_shadow_prices: y[ref_row_off..ref_row_off + n].to_vec(),
+    })
+}
+
+/// Evaluates Opus A-2 ring-relative per-seat best-trade orderings (`D1`, top-1, and `D2`) at the
+/// shadow LP primal/dual solution from [`solve_shadow_price_details`].
+pub fn compute_seat_trade_orderings(
+    table: &RingTable,
+) -> Result<TableTradeOrderings, FeasibilityError> {
+    let n = validate_index_bounds(table)?;
+    let details = solve_shadow_price_details(table)?;
+    let converters = flatten_converters(table);
+
+    let mut seat_top3_d1 = Vec::with_capacity(n);
+    let mut seat_top1 = Vec::with_capacity(n);
+    let mut seat_d2 = Vec::with_capacity(n);
+    let mut min_positive_options_per_seat = usize::MAX;
+    let mut all_have_d2 = true;
+
+    for i in 0..n {
+        let mut options: Vec<(TradeOptionLabel, f64)> = Vec::new();
+        let mut d2_own: Vec<(bool, f64)> = Vec::new();
+        let y_raw_i = details.raw_shadow_prices[i];
+        let tariff_mult = 1.0 + table.seats[i].raw_export_tariff;
+
+        for (c_idx, conv) in converters.iter().enumerate() {
+            let x_c = details.converter_runs[c_idx];
+            if usize::from(conv.owner) == i {
+                let y_cap_c = details.converter_cap_duals[c_idx];
+                options.push((
+                    TradeOptionLabel {
+                        owner_offset: 0,
+                        is_secondary: conv.is_secondary,
+                        role: TradeOptionRole::Own,
+                    },
+                    x_c * y_cap_c,
+                ));
+                if y_cap_c > 1e-9 {
+                    d2_own.push((conv.is_secondary, y_cap_c));
+                }
+            } else {
+                let qty: f64 = conv
+                    .inputs
+                    .iter()
+                    .filter(|&&(raw_g, amt)| usize::from(raw_g) == i && amt > 0.0)
+                    .map(|&(_, amt)| amt)
+                    .sum();
+                if qty > 0.0 {
+                    let owner_offset = ((usize::from(conv.owner) + n - i) % n) as u8;
+                    options.push((
+                        TradeOptionLabel {
+                            owner_offset,
+                            is_secondary: conv.is_secondary,
+                            role: TradeOptionRole::Supply,
+                        },
+                        x_c * qty * tariff_mult * y_raw_i,
+                    ));
+                }
+            }
+        }
+
+        let seat_max = options.iter().map(|(_, v)| *v).fold(0.0_f64, f64::max);
+        let cutoff = (1e-9 * seat_max).max(1e-15);
+        let mut positive: Vec<(TradeOptionLabel, f64)> =
+            options.into_iter().filter(|&(_, v)| v > cutoff).collect();
+        positive.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        min_positive_options_per_seat = min_positive_options_per_seat.min(positive.len());
+        let top3: Vec<TradeOptionLabel> = positive.iter().take(3).map(|&(lbl, _)| lbl).collect();
+        if let Some(&first) = top3.first() {
+            seat_top1.push(first);
+        }
+        seat_top3_d1.push(top3);
+
+        if d2_own.is_empty() {
+            all_have_d2 = false;
+        } else {
+            d2_own.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            seat_d2.push(
+                d2_own
+                    .into_iter()
+                    .map(|(is_sec, _)| is_sec)
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    if min_positive_options_per_seat == usize::MAX {
+        min_positive_options_per_seat = 0;
+    }
+    let unique_d1: HashSet<&[TradeOptionLabel]> = seat_top3_d1.iter().map(Vec::as_slice).collect();
+    let d1_all_seats_distinct = min_positive_options_per_seat >= 3 && unique_d1.len() == n;
+    let unique_top1: HashSet<TradeOptionLabel> = seat_top1.iter().copied().collect();
+    let top1_all_seats_distinct = seat_top1.len() == n && unique_top1.len() == n;
+    let d2_all_seats_distinct = if all_have_d2 {
+        let unique_d2: HashSet<&[bool]> = seat_d2.iter().map(Vec::as_slice).collect();
+        unique_d2.len() == n
+    } else {
+        false
+    };
+
+    Ok(TableTradeOrderings {
+        seat_top3_d1,
+        min_positive_options_per_seat,
+        d1_all_seats_distinct,
+        top1_all_seats_distinct,
+        d2_all_seats_distinct,
+    })
 }
 
 fn is_primal_degenerate(a: &[Vec<f64>], b: &[f64], primal: &[f64]) -> bool {
@@ -1031,7 +1349,7 @@ fn validate_index_bounds(table: &RingTable) -> Result<usize, FeasibilityError> {
 fn validate_config_and_table(
     table: &RingTable,
     config: &GeneratorConfig,
-) -> Result<(), FeasibilityError> {
+) -> Result<Vec<ConverterMarginDiag>, FeasibilityError> {
     if !config.ev_tolerance.is_finite() || config.ev_tolerance <= 0.0 || config.ev_tolerance >= 1.0
     {
         return Err(FeasibilityError::InvalidTable(
@@ -1041,6 +1359,13 @@ fn validate_config_and_table(
     if !config.min_surplus_ratio.is_finite() || config.min_surplus_ratio <= 0.0 {
         return Err(FeasibilityError::InvalidTable(
             "min_surplus_ratio must be strictly positive".to_owned(),
+        ));
+    }
+    if let Some(cap) = config.max_pair_share_cap
+        && (!cap.is_finite() || cap <= 0.0 || cap > 1.0)
+    {
+        return Err(FeasibilityError::InvalidTable(
+            "max_pair_share_cap must lie in (0.0, 1.0]".to_owned(),
         ));
     }
 
@@ -1164,22 +1489,147 @@ fn validate_config_and_table(
         }
     }
 
-    Ok(())
+    // B2.2: validate Syndicate Projects (`1..=N` + `100` Concordat with all `N` refined goods).
+    if table.projects.is_empty() {
+        return Err(FeasibilityError::InvalidTable(
+            "table must define Syndicate Projects".to_owned(),
+        ));
+    }
+    let mut project_ids = HashSet::new();
+    let mut has_concordat = false;
+    for proj in &table.projects {
+        if !project_ids.insert(proj.id) {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "duplicate project id {}",
+                proj.id
+            )));
+        }
+        if proj.required_inputs.is_empty()
+            || !proj.output_project_equity.is_finite()
+            || proj.output_project_equity <= 0.0
+        {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "project {} has invalid inputs or equity reward",
+                proj.id
+            )));
+        }
+        let mut proj_goods = HashSet::new();
+        for &(g, code, qty) in &proj.required_inputs {
+            let g_idx = usize::from(g);
+            if g_idx >= n
+                || code != table.seats[g_idx].refined_code
+                || !qty.is_finite()
+                || qty <= 0.0
+                || !proj_goods.insert(g)
+            {
+                return Err(FeasibilityError::InvalidTable(format!(
+                    "project {} has invalid input ({g}, {code}, {qty})",
+                    proj.id
+                )));
+            }
+        }
+        if proj.id == PROJECT_CONCORDAT_ID {
+            has_concordat = true;
+            if proj_goods.len() != n {
+                return Err(FeasibilityError::InvalidTable(format!(
+                    "project {PROJECT_CONCORDAT_ID} must require all {n} distinct refined goods, found {}",
+                    proj_goods.len()
+                )));
+            }
+        }
+    }
+    if !has_concordat {
+        return Err(FeasibilityError::InvalidTable(format!(
+            "table missing full-ring Concordat project {PROJECT_CONCORDAT_ID}"
+        )));
+    }
+
+    // B2.2 + B1.2 + T5/A7: validate public graded Charter Mandate deck.
+    if table.mandate_deck.len() < n {
+        return Err(FeasibilityError::InvalidTable(format!(
+            "mandate_deck length {} must be at least seat_count {n}",
+            table.mandate_deck.len()
+        )));
+    }
+    let mut card_ids = HashSet::new();
+    for card in &table.mandate_deck {
+        if !card_ids.insert(card.card_id) {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "duplicate mandate card_id {}",
+                card.card_id
+            )));
+        }
+        card.kind.validate_for_seat_count(table.seat_count)?;
+        if card.difficulty_completion_bps > BPS_SCALE {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "mandate card {} completion bps {} exceeds {BPS_SCALE}",
+                card.card_id, card.difficulty_completion_bps
+            )));
+        }
+        if !card.bonus_vp.is_finite()
+            || !(MIN_MANDATE_BONUS_VP..=MAX_MANDATE_BONUS_VP).contains(&card.bonus_vp)
+        {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "mandate card {} bonus_vp {} outside {MIN_MANDATE_BONUS_VP}..={MAX_MANDATE_BONUS_VP}",
+                card.card_id, card.bonus_vp
+            )));
+        }
+        let expected_vp = bonus_vp_for_completion_bps(card.difficulty_completion_bps);
+        if (card.bonus_vp - expected_vp).abs() > 1e-6 {
+            return Err(FeasibilityError::InvalidTable(format!(
+                "mandate card {} bonus_vp {} mismatches graded scale {expected_vp}",
+                card.card_id, card.bonus_vp
+            )));
+        }
+    }
+
+    // B2.1: per-converter positive clearing-price value-added check.
+    let converter_margins = compute_converter_clearing_margins(table)?;
+    for diag in &converter_margins {
+        if !diag.baseline_clearing_margin.is_finite()
+            || !diag.season_clearing_margin.is_finite()
+            || diag.baseline_clearing_margin <= CONVERTER_MARGIN_TOL
+            || diag.season_clearing_margin <= CONVERTER_MARGIN_TOL
+        {
+            if diag.is_secondary {
+                return Err(FeasibilityError::InvalidTable(format!(
+                    "seat {} converter {} failed B2.1 value-added check: secondary converter multipliers push clearing value-added margin below zero (baseline={:.4}, season={:.4})",
+                    diag.owner,
+                    diag.converter_index,
+                    diag.baseline_clearing_margin,
+                    diag.season_clearing_margin
+                )));
+            }
+            return Err(FeasibilityError::InvalidTable(format!(
+                "seat {} converter {} failed B2.1 positive clearing value-added check (baseline={:.4}, season={:.4})",
+                diag.owner,
+                diag.converter_index,
+                diag.baseline_clearing_margin,
+                diag.season_clearing_margin
+            )));
+        }
+    }
+
+    Ok(converter_margins)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{CurrencyCode, GENERATOR_VERSION, SeatCount, SeatSpec};
+    use crate::schema::{
+        ALLOWED_COMMODITY_GLOSSARY, CurrencyCode, GENERATOR_VERSION, HorizonShockKind,
+        MandateObjective, ScheduledShock, SeatCount, SeatSpec, default_mandate_deck_for_table,
+        default_projects_for_seats,
+    };
 
     fn make_symmetric_table(seat_count: SeatCount) -> RingTable {
         let n = seat_count.as_usize();
         let mut seats = Vec::with_capacity(n);
         for i in 0..n {
-            let r_code = CurrencyCode::from_bytes([b'Q', b'R', b'A' + (i as u8)]);
-            let m_code = CurrencyCode::from_bytes([b'Q', b'M', b'A' + (i as u8)]);
+            let r_code = CurrencyCode::from_bytes(ALLOWED_COMMODITY_GLOSSARY[2 * i].0);
+            let m_code = CurrencyCode::from_bytes(ALLOWED_COMMODITY_GLOSSARY[2 * i + 1].0);
             let (Ok(raw_code), Ok(refined_code)) = (r_code, m_code) else {
-                panic!("valid commodity code");
+                panic!("valid allow-listed commodity code");
             };
             seats.push(SeatSpec {
                 seat: i as u8,
@@ -1204,6 +1654,8 @@ mod tests {
                 }],
             });
         }
+        let projects = default_projects_for_seats(&seats);
+        let mandate_deck = default_mandate_deck_for_table(seat_count, &seats);
         RingTable {
             generator_version: GENERATOR_VERSION.to_owned(),
             config: GeneratorConfig::default(),
@@ -1213,6 +1665,8 @@ mod tests {
             numeraire_code: NUMERAIRE_CODE.to_owned(),
             season_turn_window: (24, 28),
             seats,
+            projects,
+            mandate_deck,
             shocks: Vec::new(),
         }
     }
@@ -1227,7 +1681,7 @@ mod tests {
             for sc in SeatCount::ALL {
                 let mut table = make_symmetric_table(sc);
                 table.config = cfg.clone();
-                let Ok(report) = check_feasibility(&table, &cfg) else {
+                let Ok(report) = check_feasibility(&table) else {
                     panic!("symmetric table for {sc:?} / {ev_method:?} must be feasible");
                 };
                 assert_eq!(report.ev_method, ev_method);
@@ -1243,8 +1697,13 @@ mod tests {
                 if ev_method == EvMethod::ShadowPrice {
                     let sum_evs: f64 = report.seat_expected_values.iter().sum();
                     assert!(
+                        (sum_evs - report.season_effective_net_surplus).abs() < 1e-10,
+                        "shadow-price EVs must conserve shadow LP objective: {sum_evs} vs {}",
+                        report.season_effective_net_surplus
+                    );
+                    assert!(
                         (sum_evs - report.net_converter_surplus).abs() < 1e-5,
-                        "shadow-price EVs must conserve grand net surplus: {sum_evs} vs {}",
+                        "on shock-free table shadow LP agrees with baseline net surplus: {sum_evs} vs {}",
                         report.net_converter_surplus
                     );
                 }
@@ -1259,8 +1718,7 @@ mod tests {
             seat.converters[0].inputs =
                 vec![(((i + 1) % 4) as u8, 2.0), (((i + 2) % 4) as u8, 2.0)];
         }
-        let cfg = GeneratorConfig::default();
-        let Ok(report) = check_feasibility(&table, &cfg) else {
+        let Ok(report) = check_feasibility(&table) else {
             panic!("degenerate symmetric N=4 ring must balance dual face symmetrically");
         };
         assert!(report.max_relative_ev_deviation < 1e-9);
@@ -1268,13 +1726,11 @@ mod tests {
 
     #[test]
     fn negative_controls_reject_each_invariant_and_edge_cases() {
-        let cfg = GeneratorConfig::default();
-
         // 0. Non-CRED numeraire rejected.
         let mut t0 = make_symmetric_table(SeatCount::Four);
         t0.numeraire_code = "XRP".to_owned();
         assert!(matches!(
-            check_feasibility(&t0, &cfg),
+            check_feasibility(&t0),
             Err(FeasibilityError::InvalidTable(_))
         ));
 
@@ -1282,22 +1738,22 @@ mod tests {
         let mut t1 = make_symmetric_table(SeatCount::Five);
         t1.seats[0].converters[0].inputs = vec![(0, 2.0), (1, 2.0)];
         assert!(matches!(
-            check_feasibility(&t1, &cfg),
+            check_feasibility(&t1),
             Err(FeasibilityError::PairCoversUpkeep { pair: (0, 1), .. })
         ));
 
-        // 1b. Tiny-capacity secondary autarkic converter below 1e-7 LP coverage still rejected structurally (C3).
+        // 1b. Tiny-capacity secondary autarkic converter (positive margin, < 1e-7 LP coverage) still rejected structurally (C3).
         let mut t_tiny = make_symmetric_table(SeatCount::Five);
         t_tiny.seats[0].converters.push(ConverterSpec {
             owner: 0,
             inputs: vec![(1, 1.0), (0, 1.0)],
             output_good: 0,
-            output_amount: 1e-5,
-            max_runs_per_turn: 1e-4,
+            output_amount: 3.2,
+            max_runs_per_turn: 1e-9,
             is_secondary: true,
         });
         assert!(matches!(
-            check_feasibility(&t_tiny, &cfg),
+            check_feasibility(&t_tiny),
             Err(FeasibilityError::PairCoversUpkeep { pair: (0, 1), .. })
         ));
 
@@ -1307,7 +1763,7 @@ mod tests {
             s.raw_yield_per_turn = 1.0;
         }
         assert!(matches!(
-            check_feasibility(&t2, &cfg),
+            check_feasibility(&t2),
             Err(FeasibilityError::InsufficientSurplus { .. })
         ));
 
@@ -1315,28 +1771,82 @@ mod tests {
         for ev_method in [EvMethod::ShadowPrice, EvMethod::Shapley] {
             let mut t3 = make_symmetric_table(SeatCount::Five);
             t3.seats[0].raw_yield_per_turn = 25.0;
-            let c_ev = GeneratorConfig {
-                ev_method,
-                ..GeneratorConfig::default()
-            };
+            t3.config.ev_method = ev_method;
             assert!(matches!(
-                check_feasibility(&t3, &c_ev),
+                check_feasibility(&t3),
                 Err(FeasibilityError::SeatEvOutOfTolerance { .. })
             ));
         }
 
-        // 4. Small-unit scale invariance (`x1e-12` yield and upkeep, C4).
-        let mut t_small = make_symmetric_table(SeatCount::Five);
-        for s in &mut t_small.seats {
-            s.raw_yield_per_turn *= 1e-12;
-            s.upkeep_amount *= 1e-12;
+        // 4. Dimensionless unit scale invariance (`0.1`, `0.01`, `10.0` in both run-cap and per-run-amount forms, B-1).
+        for scale in [0.1_f64, 0.01, 10.0] {
+            let mut t_scaled = make_symmetric_table(SeatCount::Five);
+            for s in &mut t_scaled.seats {
+                s.raw_yield_per_turn *= scale;
+                s.upkeep_amount *= scale;
+                for c in &mut s.converters {
+                    c.max_runs_per_turn *= scale;
+                }
+            }
+            for p in &mut t_scaled.projects {
+                for input in &mut p.required_inputs {
+                    input.2 *= scale;
+                }
+                p.output_project_equity *= scale;
+            }
+            for card in &mut t_scaled.mandate_deck {
+                match &mut card.kind {
+                    MandateObjective::MinProjectEquity { target } => *target *= scale,
+                    MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= scale,
+                    MandateObjective::MaintainCleanCredit { .. }
+                    | MandateObjective::MinActivePartners { .. } => {}
+                }
+            }
+            assert!(
+                check_feasibility(&t_scaled).is_ok(),
+                "symmetric table failed run-scaled unit invariance at scale={scale}"
+            );
+            t_scaled.config.ev_method = EvMethod::Shapley;
+            assert!(
+                check_feasibility(&t_scaled).is_ok(),
+                "symmetric Shapley table failed run-scaled unit invariance at scale={scale}"
+            );
+
+            let mut t_per_run = make_symmetric_table(SeatCount::Five);
+            for s in &mut t_per_run.seats {
+                s.raw_yield_per_turn *= scale;
+                s.upkeep_amount *= scale;
+                for c in &mut s.converters {
+                    for input in &mut c.inputs {
+                        input.1 *= scale;
+                    }
+                    c.output_amount *= scale;
+                }
+            }
+            for p in &mut t_per_run.projects {
+                for input in &mut p.required_inputs {
+                    input.2 *= scale;
+                }
+                p.output_project_equity *= scale;
+            }
+            for card in &mut t_per_run.mandate_deck {
+                match &mut card.kind {
+                    MandateObjective::MinProjectEquity { target } => *target *= scale,
+                    MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= scale,
+                    MandateObjective::MaintainCleanCredit { .. }
+                    | MandateObjective::MinActivePartners { .. } => {}
+                }
+            }
+            assert!(
+                check_feasibility(&t_per_run).is_ok(),
+                "symmetric table failed per-run-amount unit invariance at scale={scale}"
+            );
+            t_per_run.config.ev_method = EvMethod::Shapley;
+            assert!(
+                check_feasibility(&t_per_run).is_ok(),
+                "symmetric Shapley table failed per-run-amount unit invariance at scale={scale}"
+            );
         }
-        assert!(check_feasibility(&t_small, &cfg).is_ok());
-        let shapley_cfg = GeneratorConfig {
-            ev_method: EvMethod::Shapley,
-            ..GeneratorConfig::default()
-        };
-        assert!(check_feasibility(&t_small, &shapley_cfg).is_ok());
 
         // 5. Public coalition_upkeep_coverage validates malformed indices instead of panicking (C5).
         let mut t_bad = make_symmetric_table(SeatCount::Four);
@@ -1345,5 +1855,355 @@ mod tests {
             coalition_upkeep_coverage(&t_bad, &[0, 1]),
             Err(FeasibilityError::InvalidTable(_))
         ));
+    }
+
+    #[test]
+    fn b21_per_converter_clearing_margin_rejects_negative_value_added_with_secondary_diagnostic() {
+        let mut table = make_symmetric_table(SeatCount::Five);
+        table.seats[0].converters.push(ConverterSpec {
+            owner: 0,
+            inputs: vec![(2, 6.0), (3, 7.0)],
+            output_good: 0,
+            output_amount: 1.0,
+            max_runs_per_turn: 2.0,
+            is_secondary: true,
+        });
+        let Err(err) = check_feasibility(&table) else {
+            panic!("negative-margin secondary must fail");
+        };
+        match err {
+            FeasibilityError::InvalidTable(msg) => {
+                assert!(
+                    msg.contains("secondary converter multipliers"),
+                    "expected secondary diagnostic, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidTable diagnostic, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn b22_project_concordat_all_goods_and_b12_mandate_bounds_are_enforced() {
+        let mut t_proj = make_symmetric_table(SeatCount::Five);
+        let Some(concordat) = t_proj
+            .projects
+            .iter_mut()
+            .find(|p| p.id == PROJECT_CONCORDAT_ID)
+        else {
+            panic!("symmetric table has concordat");
+        };
+        concordat.required_inputs.pop();
+        assert!(matches!(
+            check_feasibility(&t_proj),
+            Err(FeasibilityError::InvalidTable(_))
+        ));
+
+        let mut t_mand = make_symmetric_table(SeatCount::Four);
+        t_mand.mandate_deck[0].kind = MandateObjective::MinActivePartners { min_partners: 3 };
+        assert!(matches!(
+            check_feasibility(&t_mand),
+            Err(FeasibilityError::InvalidTable(_))
+        ));
+    }
+
+    #[test]
+    fn ev_reference_pins_shadow_lp_objective_under_shocks_and_rejects_pair_share_cap_override() {
+        let mut shocked = make_symmetric_table(SeatCount::Five);
+        for s in 0..5 {
+            shocked.shocks.push(ScheduledShock {
+                hint_turn: 2 + (s as u8) * 3,
+                forecast_turn: 3 + (s as u8) * 3,
+                realize_turn: 4 + (s as u8) * 3,
+                target_seat: s as u8,
+                kind: HorizonShockKind::DemandSurge,
+                magnitude: 0.25,
+            });
+        }
+        let Ok(report) = check_feasibility(&shocked) else {
+            panic!("uniform demand surge stays balanced");
+        };
+        let sum_evs: f64 = report.seat_expected_values.iter().sum();
+        let rel_shadow = ((sum_evs - report.season_effective_net_surplus)
+            / report.season_effective_net_surplus)
+            .abs();
+        assert!(
+            rel_shadow < 1e-11,
+            "shadow LP objective conservation failed: rel_gap={rel_shadow}"
+        );
+        assert!(
+            (report.season_effective_net_surplus - report.net_converter_surplus).abs() > 1e-3,
+            "shocked shadow LP reference differs measurably from Turn-1 unshocked baseline"
+        );
+
+        shocked.config.max_pair_share_cap = Some(0.05);
+        assert!(matches!(
+            check_feasibility(&shocked),
+            Err(FeasibilityError::PairShareExceedsCap { .. })
+        ));
+    }
+
+    #[test]
+    fn loaded_table_failing_rollout_gate_is_refused_by_check_feasibility() {
+        let cfg = GeneratorConfig {
+            seat_count: Some(SeatCount::Five),
+            ..GeneratorConfig::default()
+        };
+        let Ok((table, _)) = crate::generator::generate_ring_table(17, &cfg) else {
+            panic!("seed 17 must generate cleanly");
+        };
+        let Ok(json) = serde_json::to_string(&table) else {
+            panic!("table must serialize");
+        };
+        let Ok(mut loaded) = serde_json::from_str::<RingTable>(&json) else {
+            panic!("table must deserialize");
+        };
+        let Some(concordat) = loaded
+            .projects
+            .iter_mut()
+            .find(|p| p.id == PROJECT_CONCORDAT_ID)
+        else {
+            panic!("loaded table must carry Concordat project");
+        };
+        for input in &mut concordat.required_inputs {
+            input.2 = 10_000.0;
+        }
+        let res = check_feasibility(&loaded);
+        assert!(
+            matches!(res, Err(FeasibilityError::RolloutGateFailed(_))),
+            "expected RolloutGateFailed on loaded table, got {res:?}"
+        );
+    }
+
+    fn structural_max_fed_in_bloc_size(table: &RingTable, k: usize) -> usize {
+        let n = table.seat_count.as_usize();
+        let mut max_fed = 0usize;
+        for mask in 1usize..(1usize << n) {
+            if mask.count_ones() as usize != k {
+                continue;
+            }
+            let in_bloc = |idx: usize| (mask & (1usize << idx)) != 0;
+            let active_convs: Vec<&ConverterSpec> = table
+                .seats
+                .iter()
+                .flat_map(|s| s.converters.iter())
+                .filter(|conv| {
+                    in_bloc(usize::from(conv.owner))
+                        && conv.output_amount > 0.0
+                        && conv.max_runs_per_turn > 0.0
+                        && conv
+                            .inputs
+                            .iter()
+                            .all(|&(raw_g, amt)| amt <= 0.0 || in_bloc(usize::from(raw_g)))
+                })
+                .collect();
+            let fed = (0..n)
+                .filter(|&s| {
+                    in_bloc(s)
+                        && table.seats[s].upkeep_amount > 0.0
+                        && active_convs
+                            .iter()
+                            .any(|c| c.output_good == table.seats[s].upkeep_good)
+                })
+                .count();
+            max_fed = max_fed.max(fed);
+        }
+        max_fed
+    }
+
+    #[test]
+    fn generated_tables_enforce_all_design_v2_bloc_bounds() {
+        for sc in SeatCount::ALL {
+            let n = sc.as_usize();
+            let cfg = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            let mut max_1_lp = 0.0_f64;
+            let mut max_2_lp = 0.0_f64;
+            let mut max_3_lp = 0.0_f64;
+            let mut max_4_lp = 0.0_f64;
+            let mut max_3_unw = 0usize;
+            let mut max_4_unw = 0usize;
+
+            for seed in 0u64..600 {
+                let Ok((table, report)) = crate::generator::generate_ring_table(seed, &cfg) else {
+                    panic!("seed {seed} failed for {sc:?}");
+                };
+                let unw1 = structural_max_fed_in_bloc_size(&table, 1);
+                let unw2 = structural_max_fed_in_bloc_size(&table, 2);
+                let unw3 = structural_max_fed_in_bloc_size(&table, 3);
+                assert_eq!(unw1, 0, "N={n} seed={seed} 1-seat unweighted fed > 0");
+                assert_eq!(unw2, 0, "N={n} seed={seed} 2-seat unweighted fed > 0");
+                assert!(
+                    unw3 <= 1,
+                    "N={n} seed={seed} 3-seat bloc fed {unw3} > 1 member"
+                );
+                assert!(report.max_1seat_upkeep_coverage <= 1e-7);
+                assert!(report.max_2seat_upkeep_coverage <= 1e-7);
+
+                let mut upkeeps: Vec<f64> = table.seats.iter().map(|s| s.upkeep_amount).collect();
+                upkeeps.sort_by(f64::total_cmp);
+                let max_one_of_three = upkeeps[n - 1] / (upkeeps[0] + upkeeps[1] + upkeeps[2]);
+                assert!(
+                    report.max_3seat_upkeep_coverage <= max_one_of_three + 1e-6
+                        && report.max_3seat_upkeep_coverage <= (1.0 / 3.0) + 0.006,
+                    "N={n} seed={seed} 3-seat LP coverage {:.6} exceeded 1/3 bound",
+                    report.max_3seat_upkeep_coverage
+                );
+
+                max_1_lp = max_1_lp.max(report.max_1seat_upkeep_coverage);
+                max_2_lp = max_2_lp.max(report.max_2seat_upkeep_coverage);
+                max_3_lp = max_3_lp.max(report.max_3seat_upkeep_coverage);
+                max_3_unw = max_3_unw.max(unw3);
+
+                if n >= 5 {
+                    let unw4 = structural_max_fed_in_bloc_size(&table, 4);
+                    let cov4 = report.max_4seat_upkeep_coverage.unwrap_or(1.0);
+                    max_4_unw = max_4_unw.max(unw4);
+                    max_4_lp = max_4_lp.max(cov4);
+                    let max_two_of_four = (upkeeps[n - 1] + upkeeps[n - 2])
+                        / (upkeeps[0] + upkeeps[1] + upkeeps[n - 2] + upkeeps[n - 1]);
+                    assert!(
+                        unw4 <= 2 && cov4 <= max_two_of_four + 1e-6 && cov4 <= 0.5 + 0.005,
+                        "N={n} seed={seed} 4-seat bloc violated <= 2/4 bound: unweighted_fed={unw4}, lp_coverage={cov4:.4} (bound <= 0.5050)"
+                    );
+                }
+            }
+            println!(
+                "BLOC_BOUNDS N={n} (600 seeds): max_1_lp={max_1_lp:.6} max_2_lp={max_2_lp:.6} max_3_unw={max_3_unw}/3 max_3_lp={max_3_lp:.4} max_4_unw={max_4_unw}/4 max_4_lp={max_4_lp:.4}"
+            );
+        }
+    }
+
+    #[test]
+    fn rollout_gate_is_dimensionless_across_scales_and_per_run_amounts() {
+        for sc in SeatCount::ALL {
+            let cfg = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            for seed in 0u64..25 {
+                let Ok((base_table, base_rep)) = crate::generator::generate_ring_table(seed, &cfg)
+                else {
+                    panic!("seed {seed} failed for {sc:?}");
+                };
+                let base_rollout = compute_rollout_grading(&base_table, &base_rep);
+
+                for scale in [0.1_f64, 0.01, 10.0] {
+                    // Form 1: restate all commodity/project/mandate quantities and converter run caps by `scale`.
+                    let mut run_scaled = base_table.clone();
+                    for s in &mut run_scaled.seats {
+                        s.raw_yield_per_turn *= scale;
+                        s.upkeep_amount *= scale;
+                        for c in &mut s.converters {
+                            c.max_runs_per_turn *= scale;
+                        }
+                    }
+                    for p in &mut run_scaled.projects {
+                        for input in &mut p.required_inputs {
+                            input.2 *= scale;
+                        }
+                        p.output_project_equity *= scale;
+                    }
+                    for card in &mut run_scaled.mandate_deck {
+                        match &mut card.kind {
+                            MandateObjective::MinProjectEquity { target } => *target *= scale,
+                            MandateObjective::MinRefinedVariety { min_each, .. } => {
+                                *min_each *= scale;
+                            }
+                            MandateObjective::MaintainCleanCredit { .. }
+                            | MandateObjective::MinActivePartners { .. } => {}
+                        }
+                    }
+                    let rep_rs = match check_feasibility(&run_scaled) {
+                        Ok(r) => r,
+                        Err(err) => panic!(
+                            "B-1 run-scaled table ({sc:?} seed={seed} scale={scale}) refused: {err}"
+                        ),
+                    };
+                    let roll_rs = compute_rollout_grading(&run_scaled, &rep_rs);
+                    assert_eq!(
+                        roll_rs.per_card_completion_bps, base_rollout.per_card_completion_bps,
+                        "run-scaled mandate completions changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.total_project_batches, base_rollout.total_project_batches,
+                        "run-scaled project batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.concordat_batches, base_rollout.concordat_batches,
+                        "run-scaled concordat batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.distinct_refined_goods_produced,
+                        base_rollout.distinct_refined_goods_produced
+                    );
+                    assert!(
+                        (roll_rs.rollout_trade_concentration.max_pair_share
+                            - base_rollout.rollout_trade_concentration.max_pair_share)
+                            .abs()
+                            < 1e-11
+                    );
+
+                    // Form 2: restate via per-run amounts (`inputs` and `output_amount` scaled, `max_runs_per_turn` held constant).
+                    let mut amt_scaled = base_table.clone();
+                    for s in &mut amt_scaled.seats {
+                        s.raw_yield_per_turn *= scale;
+                        s.upkeep_amount *= scale;
+                        for c in &mut s.converters {
+                            for input in &mut c.inputs {
+                                input.1 *= scale;
+                            }
+                            c.output_amount *= scale;
+                        }
+                    }
+                    for p in &mut amt_scaled.projects {
+                        for input in &mut p.required_inputs {
+                            input.2 *= scale;
+                        }
+                        p.output_project_equity *= scale;
+                    }
+                    for card in &mut amt_scaled.mandate_deck {
+                        match &mut card.kind {
+                            MandateObjective::MinProjectEquity { target } => *target *= scale,
+                            MandateObjective::MinRefinedVariety { min_each, .. } => {
+                                *min_each *= scale;
+                            }
+                            MandateObjective::MaintainCleanCredit { .. }
+                            | MandateObjective::MinActivePartners { .. } => {}
+                        }
+                    }
+                    let rep_as = match check_feasibility(&amt_scaled) {
+                        Ok(r) => r,
+                        Err(err) => panic!(
+                            "B-1 per-run-amount scaled table ({sc:?} seed={seed} scale={scale}) refused: {err}"
+                        ),
+                    };
+                    let roll_as = compute_rollout_grading(&amt_scaled, &rep_as);
+                    assert_eq!(
+                        roll_as.per_card_completion_bps, base_rollout.per_card_completion_bps,
+                        "per-run-amount mandate completions changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.total_project_batches, base_rollout.total_project_batches,
+                        "per-run-amount project batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.concordat_batches, base_rollout.concordat_batches,
+                        "per-run-amount concordat batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.distinct_refined_goods_produced,
+                        base_rollout.distinct_refined_goods_produced
+                    );
+                    assert!(
+                        (roll_as.rollout_trade_concentration.max_pair_share
+                            - base_rollout.rollout_trade_concentration.max_pair_share)
+                            .abs()
+                            < 1e-11
+                    );
+                }
+            }
+        }
     }
 }
