@@ -1025,6 +1025,21 @@ pub fn break_tie_with_beacon(beacon: [u8; 32], domain_tag: &[u8], tied: &[u8]) -
     break_tie_with_turn_beacon(beacon, TableId(0), Turn(0), domain_tag, tied)
 }
 
+/// Derives a deterministic 256-bit final-standings tie-break key for `seat` at terminal `turn`
+/// from `turn_beacon` via RFC 5869 `HKDF-SHA256` (`RngDomain::Tiebreak`, subtag `b"standings|<seat>"`).
+#[must_use]
+pub fn standings_tie_key(
+    turn_beacon: [u8; 32],
+    table_id: TableId,
+    turn: Turn,
+    seat: u8,
+) -> [u8; 32] {
+    let subtag = [
+        b's', b't', b'a', b'n', b'd', b'i', b'n', b'g', b's', b'|', seat,
+    ];
+    expand_turn_stream(turn_beacon, table_id, turn, RngDomain::Tiebreak, &subtag)
+}
+
 /// League of Entropy drand `quicknet` genesis Unix timestamp (`2023-08-23T15:09:27Z`).
 pub const DRAND_QUICKNET_GENESIS_UNIX: u64 = 1_692_803_367;
 
@@ -1150,19 +1165,24 @@ pub fn verify_drand_quicknet_beacon(
     Ok(())
 }
 
-/// Byte length of an RFC 9381 `ECVRF-RISTRETTO255-SHA512` compressed public key (`vrf-r255`).
+/// Byte length of a compressed `ristretto255` public key for the RFC 9381 ECVRF construction
+/// with C2SP's `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not an
+/// IANA-registered suite in RFC 9381).
 pub const EVAL_VRF_PUBKEY_BYTES: usize = 32;
 
-/// Byte length of an RFC 9381 `ECVRF-RISTRETTO255-SHA512` proof `pi_string` (`Gamma || c || s`).
+/// Byte length of a proof `pi_string` (`Gamma || c || s`) for the RFC 9381 ECVRF construction
+/// with C2SP's `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not an
+/// IANA-registered suite in RFC 9381).
 pub const EVAL_VRF_PROOF_BYTES: usize = 80;
 
 /// Sealed 256-bit orchestrator entropy seed for `TableMode::Eval` randomness (`#31` comment,
 /// `2026-11-15` ruling).
 ///
-/// Held strictly by the isolated Eval orchestrator (never derived from the public layout `seed`
-/// and never stored in `SeasonReplayLog`). Redacts raw bytes in `Debug` output.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SealedEvalSeed(#[serde(with = "hex32")] pub [u8; 32]);
+/// Held strictly by the isolated Eval orchestrator (never derived from the public layout `seed`,
+/// never stored in `SeasonReplayLog`, and non-serializable so raw bytes cannot be written in clear).
+/// Redacts raw bytes in `Debug` output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SealedEvalSeed([u8; 32]);
 
 impl fmt::Debug for SealedEvalSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1202,16 +1222,18 @@ impl SealedEvalSeed {
         Ok(vrf_r255::SecretKey::generate(rng))
     }
 
-    /// Returns the 32-byte RFC 9381 `ECVRF-RISTRETTO255-SHA512` public key (`PK_eval`) committed
-    /// in `TableSpec::eval_vrf_pubkey` and `SeasonReplayLog::eval_vrf_pubkey`.
+    /// Returns the 32-byte `ristretto255` VRF public key (`PK_eval`, RFC 9381 ECVRF construction
+    /// with C2SP's `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) committed in
+    /// `TableSpec::eval_vrf_pubkey` and `SeasonReplayLog::eval_vrf_pubkey`.
     pub fn public_key_bytes(&self) -> Result<[u8; EVAL_VRF_PUBKEY_BYTES], EngineError> {
         let sk = self.secret_key()?;
         Ok(vrf_r255::PublicKey::from(sk).to_bytes())
     }
 
     /// Produces the deterministic Turn `turn` `(turn_beacon, vrf_proof)` pair over
-    /// [`eval_vrf_alpha`], where `turn_beacon` is the leading 32 bytes of RFC 9381's 64-byte
-    /// `ECVRF_proof_to_hash` output `beta_t`.
+    /// [`eval_vrf_alpha`], where `turn_beacon` is the leading 32 bytes of the 64-byte
+    /// `ECVRF_proof_to_hash` output `beta_t` under the RFC 9381 ECVRF construction with C2SP's
+    /// `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`).
     pub fn prove_turn(
         &self,
         table_id: TableId,
@@ -1248,7 +1270,8 @@ pub fn eval_vrf_alpha(table_id: TableId, turn: Turn) -> [u8; 33] {
     alpha
 }
 
-/// Validates `eval_vrf_pubkey` (`validate_key = TRUE`, RFC 9381 §5.4.5).
+/// Validates `eval_vrf_pubkey` (`validate_key = TRUE` per the RFC 9381 §5.4.5 ECVRF construction
+/// over C2SP's `ristretto255` ciphersuite).
 pub fn validate_eval_vrf_pubkey(
     eval_vrf_pubkey: [u8; EVAL_VRF_PUBKEY_BYTES],
 ) -> Result<(), EngineError> {
@@ -1260,8 +1283,9 @@ pub fn validate_eval_vrf_pubkey(
     Ok(())
 }
 
-/// Verifies an `EVAL_VRF_PROOF_BYTES` RFC 9381 `ECVRF-RISTRETTO255-SHA512` proof against
-/// `eval_vrf_pubkey` for `(table_id, turn)` and extracts the unique 32-byte `turn_beacon`.
+/// Verifies an `EVAL_VRF_PROOF_BYTES` proof under the RFC 9381 ECVRF construction with C2SP's
+/// `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not registered in RFC 9381)
+/// against `eval_vrf_pubkey` for `(table_id, turn)` and extracts the unique 32-byte `turn_beacon`.
 pub fn verify_and_extract_eval_vrf_beacon(
     eval_vrf_pubkey: [u8; EVAL_VRF_PUBKEY_BYTES],
     table_id: TableId,

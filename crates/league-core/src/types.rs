@@ -74,24 +74,29 @@ pub const CLOSING_ROLL_WINDOW_LEN: usize = (HARD_TURN_CAP - CLOSING_ROLL_START_T
 pub const DEFAULT_CLOSING_HAZARD_BPS: [Bps; CLOSING_ROLL_WINDOW_LEN] =
     [3_500; CLOSING_ROLL_WINDOW_LEN];
 
-/// Provisional mandate-point scaling factor `alpha = 0.025` (`250 bps = 2.5%` of table-median
-/// pre-mandate net worth per `1.000` mandate point; `2026-11-15` ruling, Seed-28 Report §6
+/// Provisional mandate-point scaling factor `alpha = 0.025` (`250 bps = 2.5%` of
+/// `max(Med(W), 0.5 * W_0)` per `1.000` mandate point; `2026-11-15` ruling, Seed-28 Report §6
 /// Formula 3, pending playtest calibration).
 pub const DEFAULT_MANDATE_ALPHA_BPS: Bps = 250;
 
-/// Provisional lookback window (`3` turns: `[T-2, T-1, T]`) for terminal TWAP holding marks
-/// (`2026-11-15` ruling, Seed-28 Report §4).
+/// Starting net-worth floor fraction (`5_000 bps = 50.00%` of `W_0`, the table-median starting
+/// net worth) applied inside `max(Med(W), 0.5 * W_0)` when converting mandate points (`Seed-28
+/// Report` §6 Formula 3).
+pub const MANDATE_STARTING_NW_FLOOR_BPS: Bps = 5_000;
+
+/// Provisional lookback window (`3` turns: `[T-2, T-1, T]`) for terminal volume-weighted holding
+/// marks (`2026-11-15` and `2026-11-16` rulings).
 pub const DEFAULT_TWAP_WINDOW_TURNS: u8 = 3;
 
-/// Provisional minimum executed `CRED`-book volume (`500` milli-units = `0.500` units) required in
-/// a turn for that turn's executed VWAP to qualify as a liquid TWAP observation, preventing thin
-/// final-turn micro-trades from painting the close (`Seed-28 Report` §4).
-pub const DEFAULT_TWAP_MIN_TURN_VOLUME: Units = 500;
+/// Provisional minimum per-turn executed volume fraction (`200 bps = 2.00%` of total units of
+/// that good held across all seats at the start of that turn) required in **every** turn of
+/// `[T-2, T-1, T]` for a good to qualify for volume-weighted close marking (`2026-11-16` ruling).
+pub const DEFAULT_TWAP_MIN_TURN_STOCK_BPS: Bps = 200;
 
-/// Minimum number of qualifying liquid trade turns within [`DEFAULT_TWAP_WINDOW_TURNS`] required
-/// to mark a commodity by TWAP rather than executable resting bid-book depth (`2` turns, ensuring a
-/// single last-turn trade never sets the mark).
-pub const DEFAULT_TWAP_MIN_QUALIFYING_TURNS: usize = 2;
+/// Fixed salvage fraction (`5_000 bps = 50.00%` of base value / parity) applied at Season Close
+/// to unsold units above executable non-self resting bid depth when a good does not qualify for
+/// the 3-turn volume-weighted mark (`2026-11-16` ruling).
+pub const UNSOLD_EXCESS_PARITY_BPS: Bps = 5_000;
 
 /// Computes exact expected season length `E[T]` from a per-turn closing hazard schedule over
 /// Turns `24..=31` capped unconditionally at [`HARD_TURN_CAP`] (`Turn 32`).
@@ -164,8 +169,8 @@ const fn default_twap_window_turns() -> u8 {
     DEFAULT_TWAP_WINDOW_TURNS
 }
 
-const fn default_twap_min_turn_volume() -> Units {
-    DEFAULT_TWAP_MIN_TURN_VOLUME
+const fn default_twap_min_turn_stock_bps() -> Bps {
+    DEFAULT_TWAP_MIN_TURN_STOCK_BPS
 }
 
 /// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
@@ -519,7 +524,8 @@ pub enum TableMode {
     /// Live Game Mode: requires `drand_schedule` and drand-signature-bound beacons (`M2`, `#31`).
     Game,
     /// Headless Evaluation Mode: uses sealed 256-bit OS CSPRNG entropy (`SealedEvalSeed`) with
-    /// RFC 9381 `ECVRF-RISTRETTO255-SHA512` proofs in replay logs (`#31` comment, `2026-11-15` ruling).
+    /// proofs under the RFC 9381 ECVRF construction with C2SP's `ristretto255` ciphersuite
+    /// (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not registered in RFC 9381) in replay logs (`#31`).
     Eval,
 }
 
@@ -548,8 +554,8 @@ pub struct TableSpec {
     /// Optional pre-named drand `quicknet` close schedule required for `ExternalDrand` tables (`M2`).
     #[serde(default)]
     pub drand_schedule: Option<DrandSchedule>,
-    /// Optional RFC 9381 `ECVRF-RISTRETTO255-SHA512` public key (`PK_eval`) binding Eval-mode VRF
-    /// randomness proofs (`#31` comment, `2026-11-15` ruling).
+    /// Optional `ristretto255` VRF public key (`PK_eval`, RFC 9381 ECVRF construction with C2SP's
+    /// `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) binding Eval-mode VRF randomness proofs.
     #[serde(default, with = "opt_hex32")]
     pub eval_vrf_pubkey: Option<[u8; 32]>,
     /// Provisional town-import premium multiplier in basis points (`DEFAULT_TOWN_IMPORT_PREMIUM_BPS`).
@@ -559,17 +565,18 @@ pub struct TableSpec {
     /// (`DEFAULT_WORKS_STIPEND_PER_UNIT_CRED`).
     #[serde(default = "default_works_stipend_per_unit_cred")]
     pub works_stipend_per_unit_cred: Units,
-    /// Provisional mandate-point conversion factor `alpha` in bps of table-median net worth
+    /// Provisional mandate-point conversion factor `alpha` in bps of `max(Med(W), 0.5 * W_0)`
     /// (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
     #[serde(default = "default_mandate_alpha_bps")]
     pub mandate_alpha_bps: Bps,
-    /// Provisional terminal TWAP lookback window in turns (`DEFAULT_TWAP_WINDOW_TURNS = 3`).
+    /// Provisional terminal volume-weighted mark lookback window in turns (`DEFAULT_TWAP_WINDOW_TURNS = 3`).
     #[serde(default = "default_twap_window_turns")]
     pub twap_window_turns: u8,
-    /// Provisional minimum turn executed volume (`DEFAULT_TWAP_MIN_TURN_VOLUME = 500`) required for
-    /// a turn to qualify as a liquid TWAP print.
-    #[serde(default = "default_twap_min_turn_volume")]
-    pub twap_min_turn_volume: Units,
+    /// Provisional minimum per-turn traded volume as a basis-point share of start-of-turn table
+    /// stock (`DEFAULT_TWAP_MIN_TURN_STOCK_BPS = 200` = `2.00%`) required in every turn of the
+    /// window for a good to qualify for volume-weighted close marking (`2026-11-16` ruling).
+    #[serde(default = "default_twap_min_turn_stock_bps")]
+    pub twap_min_turn_stock_bps: Bps,
 }
 
 impl TableSpec {
@@ -687,10 +694,11 @@ impl TableSpec {
                 self.twap_window_turns
             )));
         }
-        if self.twap_min_turn_volume <= 0 {
+        if self.twap_min_turn_stock_bps == 0 || i128::from(self.twap_min_turn_stock_bps) > BPS_SCALE
+        {
             return Err(EngineError::InvalidConfig(format!(
-                "twap_min_turn_volume must be positive, got {}",
-                self.twap_min_turn_volume
+                "twap_min_turn_stock_bps must lie in 1..=10_000, got {}",
+                self.twap_min_turn_stock_bps
             )));
         }
         if self.mandate_deck.len() < n {
@@ -794,17 +802,29 @@ impl TableSpec {
         Ok((spec, deal, eval_seed))
     }
 
-    /// Constructs the deterministic Eval-mode canonical `TableSpec` parameterized by public
-    /// layout `seed`, dealing private Turn-1 mandates and Eval VRF keypair from fresh OS CSPRNG
-    /// entropy (`M3`, `#31`).
+    /// Constructs a standalone Eval-mode canonical `TableSpec` parameterized by public layout
+    /// `seed`, dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`) without
+    /// binding an orchestrator VRF keypair (for VRF-bound Eval tables and replay logs, use
+    /// [`TableSpec::standard_eval_chiral_ring_with_setup`]).
     pub fn standard_chiral_ring_with_mandates(
         table_id: TableId,
         seat_count: u8,
         seed: u64,
     ) -> Result<(Self, SealedMandateDeal), EngineError> {
-        let (spec, deal, _eval_seed) =
-            Self::standard_eval_chiral_ring_with_setup(table_id, seat_count, seed)?;
-        Ok((spec, deal))
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) =
+            deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
+        Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            TableMode::Eval,
+            None,
+            None,
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )
     }
 
     /// Constructs the canonical Game-mode `TableSpec` requiring a pre-named `DrandSchedule`
@@ -947,7 +967,7 @@ impl TableSpec {
             works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
             mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
             twap_window_turns: DEFAULT_TWAP_WINDOW_TURNS,
-            twap_min_turn_volume: DEFAULT_TWAP_MIN_TURN_VOLUME,
+            twap_min_turn_stock_bps: DEFAULT_TWAP_MIN_TURN_STOCK_BPS,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))

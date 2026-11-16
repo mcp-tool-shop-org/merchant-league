@@ -30,63 +30,52 @@
   "changes": {
     "fileCounts": {
       "added": 2,
-      "changed": 12,
+      "changed": 10,
       "moved": 0,
-      "parts": 5,
-      "removed": 2
+      "parts": 4,
+      "removed": 0
     },
     "items": [
       {
         "kind": "landing",
-        "sentence": "crates/league-dice/src/lib.rs is now read by crates/league-dice/tests/fu1_no_seed_secret.rs.",
+        "sentence": "CHANGELOG.md is now read by scripts/test-guards.sh.",
         "subjects": [
-          "crates/league-dice/src/lib.rs",
-          "crates/league-dice/tests/fu1_no_seed_secret.rs"
+          "CHANGELOG.md",
+          "scripts/test-guards.sh"
         ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.",
-        "subjects": [
-          "crates/league-relay/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, before `Usage`.",
-        "subjects": [
-          "crates/league-relay/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `validate_vm_host_allowance`, before `Usage`.",
-        "subjects": [
-          "crates/league-relay/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "And 7 more changes to the order of work.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "2 files added, 2 removed and 12 changed content, across 5 parts.",
+        "sentence": "2 files added and 10 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "35cda393691ca1fc62ab0a4d73cb1abb89e34279",
-      "generatedAt": "2026-11-16T07:42:27.478Z"
+      "commit": "0a4103882e125d49b12ba5e4e83c0c24ce3688f1",
+      "generatedAt": "2026-11-16T07:58:22.738Z"
     },
     "unchanged": false
   },
   "changesTogether": [
     {
+      "a": "crates/league-gen/src/feasibility.rs",
+      "b": "crates/league-gen/src/schema.rs",
+      "either": 6,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
+      ],
+      "relation": "inside",
+      "shared": 6
+    },
+    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 17,
+      "either": 19,
       "partLabels": [
         null,
         null
@@ -96,12 +85,42 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 15
+      "shared": 17
+    },
+    {
+      "a": "crates/league-gen/src/feasibility.rs",
+      "b": "crates/league-gen/src/generator.rs",
+      "either": 6,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
+      ],
+      "relation": "inside",
+      "shared": 5
+    },
+    {
+      "a": "crates/league-gen/src/generator.rs",
+      "b": "crates/league-gen/src/schema.rs",
+      "either": 6,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
+      ],
+      "relation": "inside",
+      "shared": 5
     },
     {
       "a": "crates/league-relay/src/cli.rs",
       "b": "crates/league-relay/src/error.rs",
-      "either": 8,
+      "either": 9,
       "partLabels": [
         null,
         null
@@ -119,7 +138,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "0a4103882e125d49b12ba5e4e83c0c24ce3688f1",
+  "commit": "0d332bd4381b6f041d22132473639238e138b59e",
   "defaultBranch": "main",
   "derived": "11 parts, mostly Rust (339 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -346,7 +365,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-16T07:58:22.738Z",
+  "generatedAt": "2026-11-16T14:07:11.889Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",

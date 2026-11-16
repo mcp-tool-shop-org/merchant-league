@@ -506,8 +506,8 @@ impl MandateObjective {
 /// One card in the public Turn-1 graded Charter Mandate deck (`3.0..=8.0 VP` scale per T5 / A7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MandateCardSpec {
-    /// Stable deck slot identifier (`1..=M`).
-    pub card_id: u8,
+    /// Stable deck slot identifier (`1..=M`, widened to `u16` matching [`league_core::GradedMandateCard`]).
+    pub card_id: u16,
     /// Structural win-condition objective.
     pub kind: MandateObjective,
     /// Provisional or rollout-measured completion frequency (`0..=10_000 bps`).
@@ -574,7 +574,7 @@ impl From<league_core::MandateKind> for MandateObjective {
 impl From<league_core::GradedMandateCard> for MandateCardSpec {
     fn from(card: league_core::GradedMandateCard) -> Self {
         Self {
-            card_id: u8::try_from(card.card_id).unwrap_or(u8::MAX),
+            card_id: card.card_id,
             kind: MandateObjective::from(card.kind),
             difficulty_completion_bps: card.difficulty_completion_bps,
             bonus_vp: (card.bonus_equity as f64) / 1_000.0,
@@ -610,7 +610,7 @@ impl MandateCardSpec {
             }
         };
         league_core::GradedMandateCard {
-            card_id: u16::from(self.card_id),
+            card_id: self.card_id,
             kind,
             difficulty_completion_bps: self.difficulty_completion_bps,
             bonus_equity: (self.bonus_vp * 1_000.0).round() as league_core::Units,
@@ -618,15 +618,17 @@ impl MandateCardSpec {
     }
 }
 
-/// Deals `seat_count` distinct [`MandateCardSpec`] indices using [`league_core::deal_mandate_deck_indices`]
-/// (`#32` `B-2`, `B1.3`/`M3`), strictly separate from the public table `seed: u64` and rejecting `[0u8; 32]`.
+/// Deals `seat_count` distinct [`MandateCardSpec`] indices for `table_id` using
+/// [`league_core::deal_mandate_deck_indices`] (`#32` `B-2`, `B1.3`/`M3`), strictly separate from
+/// the public table `seed: u64` and rejecting `[0u8; 32]`.
 pub fn deal_mandate_indices_with_entropy(
+    table_id: league_core::TableId,
     mandate_deck: &[MandateCardSpec],
     seat_count: SeatCount,
     deal_seed: [u8; 32],
 ) -> Result<Vec<usize>, FeasibilityError> {
     league_core::deal_mandate_deck_indices(
-        league_core::TableId(0),
+        table_id,
         seat_count.as_u8(),
         deal_seed,
         mandate_deck.len(),
@@ -1037,7 +1039,7 @@ mod tests {
 
     #[test]
     fn mandate_entropy_deal_rejects_zero_seed_and_deals_distinct_cards() {
-        let deck: Vec<MandateCardSpec> = (1..=8u8)
+        let deck: Vec<MandateCardSpec> = (1..=8u16)
             .map(|id| MandateCardSpec {
                 card_id: id,
                 kind: MandateObjective::MaintainCleanCredit {
@@ -1047,15 +1049,40 @@ mod tests {
                 bonus_vp: bonus_vp_for_completion_bps(5_000),
             })
             .collect();
-        assert!(deal_mandate_indices_with_entropy(&deck, SeatCount::Five, [0u8; 32]).is_err());
+        assert!(
+            deal_mandate_indices_with_entropy(
+                league_core::TableId(42),
+                &deck,
+                SeatCount::Five,
+                [0u8; 32],
+            )
+            .is_err()
+        );
 
-        let Ok(deal) = deal_mandate_indices_with_entropy(&deck, SeatCount::Six, [0xA5u8; 32])
-        else {
+        let Ok(deal) = deal_mandate_indices_with_entropy(
+            league_core::TableId(42),
+            &deck,
+            SeatCount::Six,
+            [0xA5u8; 32],
+        ) else {
             panic!("non-zero 256-bit entropy deals cleanly");
         };
         assert_eq!(deal.len(), 6);
         let uniq: std::collections::BTreeSet<usize> = deal.iter().copied().collect();
         assert_eq!(uniq.len(), 6);
+
+        // C-2: card_id > u8::MAX (e.g. 300) round-trips losslessly without saturating to 255.
+        let wide_core = league_core::GradedMandateCard {
+            card_id: 300,
+            kind: league_core::MandateKind::MaintainCleanCredit {
+                min_tier: league_core::CreditTier::Aaa,
+            },
+            difficulty_completion_bps: 4_000,
+            bonus_equity: 6_000,
+        };
+        let wide_spec = MandateCardSpec::from(wide_core);
+        assert_eq!(wide_spec.card_id, 300);
+        assert_eq!(wide_spec.to_core_card(), wide_core);
     }
 
     #[test]

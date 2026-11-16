@@ -5,13 +5,13 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commit::{MandateKind, MandateReveal, verify_mandate_reveal};
+use crate::commit::{MandateKind, MandateReveal, standings_tie_key, verify_mandate_reveal};
 use crate::contracts::{CheckStatus, CredOffer, EscrowStatus, OfferSide};
 use crate::engine::EngineState;
 use crate::types::{
-    AssetId, BPS_SCALE, Bps, CharterRole, CreditTier, DEFAULT_TWAP_MIN_QUALIFYING_TURNS,
-    EngineError, MAX_MANDATE_BONUS_EQUITY, MIN_MANDATE_BONUS_EQUITY, Seat, TableSpec, UNIT_SCALE,
-    Units, mul_units_parity, scale_bps_signed,
+    AssetId, BPS_SCALE, Bps, CharterRole, CreditTier, EngineError, MANDATE_STARTING_NW_FLOOR_BPS,
+    MAX_MANDATE_BONUS_EQUITY, MIN_MANDATE_BONUS_EQUITY, Seat, TableSpec, Turn, UNIT_SCALE,
+    UNSOLD_EXCESS_PARITY_BPS, Units, half_up_bps, mul_units_parity, scale_bps_signed,
 };
 
 /// Fundamental shadow parities derived deterministically from table converter stoichiometry
@@ -221,14 +221,17 @@ fn bid_executable_by_seller(state: &EngineState, seller: u8, bid: &CredOffer) ->
     }
 }
 
-/// Marks `units` of `good` held by `seat` at Season Close (`Seed-28 Report` §4, `2026-11-15` ruling):
+/// Marks `units` of `good` held by `seat` at Season Close (`2026-11-16` unified close-marking rule):
 ///
-/// 1. **3-turn TWAP** over `[T - twap_window_turns + 1 ..= T]` when at least
-///    [`DEFAULT_TWAP_MIN_QUALIFYING_TURNS`] (`2`) turns in that window recorded executed DEX volume
-///    `>= state.spec.twap_min_turn_volume` (`500` milli-units), so neither a thin-book micro-trade
-///    nor a lone last-turn trade can set the mark.
-/// 2. **Executable resting bid-book depth** otherwise: walks non-self eligible resting `Buy`
-///    offers highest-bid-first up to available bid depth, valuing unfillable excess above depth at `0`.
+/// 1. **3-turn volume-weighted price (`Sigma notional / Sigma units`):** `good` qualifies only when
+///    `state.turn >= window` (`3` turns: `T-2`, `T-1`, `T`) and **every** turn `t` in `[T-2..=T]`
+///    cleared traded volume `>= state.spec.twap_min_turn_stock_bps` (`200 bps = 2.00%`) of the
+///    total units of `good` held across all seats at the start of turn `t`. When `good` qualifies,
+///    all `units` held by `seat` are marked at `Sigma notional / Sigma units` over `[T-2..=T]`.
+/// 2. **Resting bids first, unsold excess at 50% of base value:** when `good` does not qualify,
+///    its trades are ignored completely. Units that executable non-self resting `Buy` bids would
+///    buy are marked highest-bid-first at the bid price, and any remaining excess above resting
+///    bid depth is marked at [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`).
 #[must_use]
 pub fn mark_good_holding_at_close(
     state: &EngineState,
@@ -240,23 +243,46 @@ pub fn mark_good_holding_at_close(
         return 0;
     }
     let window = state.spec.twap_window_turns.max(1);
-    let window_start = state.turn.saturating_sub(window - 1).max(1);
-    let min_vol = state.spec.twap_min_turn_volume;
+    let min_stock_bps = state.spec.twap_min_turn_stock_bps;
 
-    let mut qualifying_vwaps: Vec<Units> = Vec::new();
-    for rec in &state.executed_good_trades {
-        if rec.good == good
-            && rec.turn >= window_start
-            && rec.turn <= state.turn
-            && rec.total_units >= min_vol
-        {
-            qualifying_vwaps.push(rec.vwap_price_cred);
+    if state.turn >= window {
+        let window_start = state.turn - window + 1;
+        let mut all_turns_qualify = true;
+        let mut sum_units: i128 = 0;
+        let mut sum_price_x_units: i128 = 0;
+
+        for t in window_start..=state.turn {
+            let mut turn_units: i128 = 0;
+            let mut turn_price_x_units: i128 = 0;
+            let mut turn_start_stock: Option<Units> = None;
+            for rec in &state.executed_good_trades {
+                if rec.turn == t && rec.good == good {
+                    turn_units += i128::from(rec.total_units.max(0));
+                    turn_price_x_units += rec.total_price_x_units;
+                    if turn_start_stock.is_none() {
+                        turn_start_stock = Some(rec.start_of_turn_stock.max(0));
+                    }
+                }
+            }
+            let Some(stock_start) = turn_start_stock else {
+                all_turns_qualify = false;
+                break;
+            };
+            if turn_units <= 0
+                || turn_units * BPS_SCALE < i128::from(stock_start) * i128::from(min_stock_bps)
+            {
+                all_turns_qualify = false;
+                break;
+            }
+            sum_units += turn_units;
+            sum_price_x_units += turn_price_x_units;
         }
-    }
-    if qualifying_vwaps.len() >= DEFAULT_TWAP_MIN_QUALIFYING_TURNS {
-        let sum_vwap: i128 = qualifying_vwaps.iter().map(|&p| i128::from(p)).sum();
-        let twap_price_cred = (sum_vwap / (qualifying_vwaps.len() as i128)) as Units;
-        return mul_units_parity(units, twap_price_cred);
+
+        if all_turns_qualify && sum_units > 0 {
+            let vwap_price_cred =
+                (sum_price_x_units / sum_units).clamp(0, i128::from(Units::MAX)) as Units;
+            return mul_units_parity(units, vwap_price_cred);
+        }
     }
 
     let mut bids: Vec<&CredOffer> = state
@@ -280,6 +306,13 @@ pub fn mark_good_holding_at_close(
         let slice_cred = mul_units_parity(take, bid.price_per_unit_cred).min(bid.locked_cred);
         proceeds += i128::from(slice_cred);
         rem_units -= take;
+    }
+    if rem_units > 0 {
+        let parity = state.parities.asset_parity(good).max(0);
+        let half_base_proceeds =
+            (i128::from(rem_units) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+                / (i128::from(UNIT_SCALE) * BPS_SCALE);
+        proceeds += half_base_proceeds;
     }
     proceeds.clamp(i64::MIN as i128, i64::MAX as i128) as Units
 }
@@ -384,6 +417,14 @@ pub fn table_median_net_worth(net_worths: &[Units]) -> Units {
     }
 }
 
+/// Computes `W_0`, the table-median starting net worth (`median_j(spec.seats[j].initial_cred)`),
+/// used as the `0.5 * W_0` floor inside Formula 3 mandate scaling (`Seed-28 Report` §6).
+#[must_use]
+pub fn compute_table_median_starting_net_worth(spec: &TableSpec) -> Units {
+    let initial_nws: Vec<Units> = spec.seats.iter().map(|s| s.initial_cred).collect();
+    table_median_net_worth(&initial_nws)
+}
+
 /// Computes `median_j(ProjectEquity_j + FinalMarkedNetAssetEquity_j)` across all seats in `state`.
 #[must_use]
 pub fn compute_table_median_pre_mandate_net_worth(state: &EngineState) -> Units {
@@ -400,8 +441,7 @@ pub fn compute_table_median_pre_mandate_net_worth(state: &EngineState) -> Units 
 }
 
 /// Converts `mandate_points_milli` (`3_000..=8_000` = `3..=8` mandate points) into terminal equity
-/// milli-units as `round_half_up(points * alpha * max(0, table_median_nw))` (`Seed-28 Report` §6
-/// Formula 3, `2026-11-15` ruling).
+/// milli-units against an already-floored `effective_median_nw`.
 #[must_use]
 pub const fn convert_mandate_points_to_equity_with_median(
     mandate_points_milli: Units,
@@ -421,14 +461,34 @@ pub const fn convert_mandate_points_to_equity_with_median(
     }
 }
 
+/// Converts `mandate_points_milli` into terminal equity milli-units per `Seed-28 Report` §6
+/// Formula 3 (`B_i = round_half_up(m_i * alpha * max(Med(W), 0.5 * W_0))`, `A-3`).
+#[must_use]
+pub const fn convert_mandate_points_to_equity_with_floor(
+    mandate_points_milli: Units,
+    table_median_nw: Units,
+    starting_median_nw: Units,
+    alpha_bps: Bps,
+) -> Units {
+    let floor_nw = half_up_bps(starting_median_nw, MANDATE_STARTING_NW_FLOOR_BPS);
+    let effective_nw = if table_median_nw > floor_nw {
+        table_median_nw
+    } else {
+        floor_nw
+    };
+    convert_mandate_points_to_equity_with_median(mandate_points_milli, effective_nw, alpha_bps)
+}
+
 /// Converts a card's mandate point value (`3_000..=8_000` milli-points) into terminal equity units
-/// via `points * alpha * table_median_net_worth` (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
+/// via `points * alpha * max(Med(W), 0.5 * W_0)` (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
 #[must_use]
 pub fn convert_mandate_points_to_equity(mandate_points_milli: Units, state: &EngineState) -> Units {
     let median_nw = compute_table_median_pre_mandate_net_worth(state);
-    convert_mandate_points_to_equity_with_median(
+    let w0 = compute_table_median_starting_net_worth(&state.spec);
+    convert_mandate_points_to_equity_with_floor(
         mandate_points_milli,
         median_nw,
+        w0,
         state.spec.mandate_alpha_bps,
     )
 }
@@ -553,7 +613,8 @@ pub struct FinalScoreboard {
     pub table_id: crate::types::TableId,
     /// Terminal turn number (`24..=32`) when the closing bell sounded.
     pub closed_turn: u8,
-    /// Seat scores sorted descending by `total_equity` (ties broken ascending by `seat`).
+    /// Seat scores sorted descending by `total_equity` (ties broken by the closing turn's HKDF
+    /// `RngDomain::Tiebreak` stream per Decision 1, `B-7`).
     pub standings: Vec<SeatScoreEntry>,
 }
 
@@ -577,6 +638,7 @@ pub fn compute_final_scoreboard(
         .map(|(idx, s)| s.project_equity.saturating_add(marked_equities[idx]))
         .collect();
     let median_nw = table_median_net_worth(&pre_mandate_nws);
+    let starting_median_nw = compute_table_median_starting_net_worth(&state.spec);
 
     let mut standings = Vec::with_capacity(state.seats.len());
     for (idx, seat_state) in state.seats.iter().enumerate() {
@@ -584,9 +646,10 @@ pub fn compute_final_scoreboard(
         let net_asset_equity = marked_equities[idx];
         let mandate_bonus = match verified_mandates[idx] {
             Some(ref reveal) => match evaluate_mandate_points_milli(state, seat, reveal) {
-                Some(pts_milli) => convert_mandate_points_to_equity_with_median(
+                Some(pts_milli) => convert_mandate_points_to_equity_with_floor(
                     pts_milli,
                     median_nw,
+                    starting_median_nw,
                     state.spec.mandate_alpha_bps,
                 ),
                 None => 0,
@@ -610,9 +673,17 @@ pub fn compute_final_scoreboard(
             honor_penalties: seat_state.honor_penalties,
         });
     }
+    let table_id = state.table_id;
+    let closed_turn = Turn(state.turn);
+    let closing_beacon = state.last_turn_beacon;
     standings.sort_by(|a, b| {
         b.total_equity
             .cmp(&a.total_equity)
+            .then_with(|| {
+                standings_tie_key(closing_beacon, table_id, closed_turn, a.seat).cmp(
+                    &standings_tie_key(closing_beacon, table_id, closed_turn, b.seat),
+                )
+            })
             .then_with(|| a.seat.cmp(&b.seat))
     });
     Ok(FinalScoreboard {

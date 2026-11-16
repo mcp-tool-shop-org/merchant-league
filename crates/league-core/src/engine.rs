@@ -74,17 +74,38 @@ pub enum TurnPhase {
     Completed,
 }
 
-/// Volume-weighted executed `CRED` batch clearing price recorded for one commodity in one turn,
-/// feeding terminal 3-turn TWAP marks at Season Close (`Seed-28 Report` §4, `2026-11-15` ruling).
+mod i128_str_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(val: &i128, serializer: S) -> Result<S::Ok, S::Error> {
+        val.to_string().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i128, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<i128>().map_err(serde::de::Error::custom)
+    }
+}
+
+/// Volume-weighted executed `CRED` batch clearing record for one commodity in one turn,
+/// feeding terminal 3-turn volume-weighted marks at Season Close (`2026-11-16` ruling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutedGoodTurnPrice {
     /// Turn on which the batch trades cleared.
     pub turn: u8,
     /// Traded commodity (`Raw(i)` or `Refined(i)`).
     pub good: AssetId,
+    /// Total milli-units of `good` held across all seats at the start of `turn`
+    /// (free balances plus resting `OfferSide::Sell` offers).
+    #[serde(default)]
+    pub start_of_turn_stock: Units,
     /// Gross commodity volume matched across all fills on `turn`.
     pub total_units: Units,
-    /// Volume-weighted average executed clearing price in milli-`CRED` per `1_000` units.
+    /// Exact numerator `sum(fill_units * clearing_price)` across all fills of `good` on `turn`,
+    /// preserving exact multi-turn `Sigma notional / Sigma units` arithmetic.
+    #[serde(default, with = "i128_str_serde")]
+    pub total_price_x_units: i128,
+    /// Single-turn volume-weighted average executed clearing price in milli-`CRED` per `1_000` units.
     pub vwap_price_cred: Units,
 }
 
@@ -195,9 +216,86 @@ pub struct EngineState {
     /// 3-stage Horizon Shocks drawn dynamically from per-turn HKDF `"shocks"` streams (`#31`).
     #[serde(default)]
     pub drawn_shocks: Vec<ScheduledShockSpec>,
-    /// Chronological per-`(turn, good)` executed DEX batch clearing VWAP observations (`Part 7`).
+    /// Chronological per-`(turn, good)` executed DEX batch clearing observations (`2026-11-16` ruling).
     #[serde(default)]
     pub executed_good_trades: Vec<ExecutedGoodTurnPrice>,
+    /// Start-of-turn total table holdings (`0..N` for `Raw(0..N)`, `N..2*N` for `Refined(0..N)`),
+    /// snapshotted when each turn opens in `TalkAndMarket` (`2026-11-16` ruling).
+    #[serde(default)]
+    pub start_of_turn_good_stock: Vec<Units>,
+    /// Latest verified turn beacon swept (`[0u8; 32]` prior to Turn 1 Sweep), used to break exact
+    /// `total_equity` ties on `FinalScoreboard` (`Decision 1`, `B-7`).
+    #[serde(default)]
+    pub last_turn_beacon: [u8; 32],
+}
+
+impl EngineState {
+    /// Computes total units of `good` currently held across all seats (free balances plus resting
+    /// `OfferSide::Sell` order-book inventory).
+    #[must_use]
+    pub fn total_good_held(&self, good: AssetId) -> Units {
+        let n = self.seats.len();
+        let mut total: i128 = 0;
+        match good {
+            AssetId::Cred => {
+                for s in &self.seats {
+                    total += i128::from(s.cred.max(0));
+                }
+            }
+            AssetId::Raw(g) => {
+                let idx = usize::from(g);
+                if idx < n {
+                    for s in &self.seats {
+                        total += i128::from(s.raw[idx].max(0));
+                    }
+                }
+            }
+            AssetId::Refined(m) => {
+                let idx = usize::from(m);
+                if idx < n {
+                    for s in &self.seats {
+                        total += i128::from(s.refined[idx].max(0));
+                    }
+                }
+            }
+        }
+        for offer in self.offers.values() {
+            if offer.side == OfferSide::Sell && offer.good == good && offer.remaining_units > 0 {
+                total += i128::from(offer.remaining_units);
+            }
+        }
+        total.clamp(0, i128::from(Units::MAX)) as Units
+    }
+
+    fn snapshot_good_stock(&self) -> Vec<Units> {
+        let n = self.seats.len() as u8;
+        let mut out = Vec::with_capacity(usize::from(n) * 2);
+        for g in 0..n {
+            out.push(self.total_good_held(AssetId::Raw(g)));
+        }
+        for m in 0..n {
+            out.push(self.total_good_held(AssetId::Refined(m)));
+        }
+        out
+    }
+
+    /// Returns the total units of `good` held across all seats at the start of `self.turn`.
+    #[must_use]
+    pub fn good_stock_at_turn_start(&self, good: AssetId) -> Units {
+        let n = self.seats.len();
+        if self.start_of_turn_good_stock.len() == n * 2 {
+            match good {
+                AssetId::Raw(g) if usize::from(g) < n => {
+                    return self.start_of_turn_good_stock[usize::from(g)];
+                }
+                AssetId::Refined(m) if usize::from(m) < n => {
+                    return self.start_of_turn_good_stock[n + usize::from(m)];
+                }
+                _ => {}
+            }
+        }
+        self.total_good_held(good)
+    }
 }
 
 /// Audited broken-promise record emitted when a seat violates an anchored `IntentPledge`.
@@ -501,6 +599,8 @@ impl TurnEngine {
                 pending_town_import_cred_spent: 0,
                 drawn_shocks: Vec::new(),
                 executed_good_trades: Vec::new(),
+                start_of_turn_good_stock: vec![0; n * 2],
+                last_turn_beacon: [0u8; 32],
             },
         };
         engine.activate_shocks_for_turn(1);
@@ -994,9 +1094,12 @@ impl TurnEngine {
         })
     }
 
-    /// Executes the 8-step deterministic `Sweep` for the current Eval-mode turn using `turn_beacon`.
+    /// Executes the 8-step deterministic `Sweep` for the current standalone Eval-mode turn using
+    /// `turn_beacon`.
     ///
-    /// Refuses `TableMode::Game` tables, which must sweep via [`TurnEngine::sweep_turn_with_drand`].
+    /// Refuses `TableMode::Game` tables (which must sweep via [`TurnEngine::sweep_turn_with_drand`])
+    /// and refuses `TableMode::Eval` tables bound to an `eval_vrf_pubkey` (which must sweep via
+    /// [`TurnEngine::sweep_turn_with_eval_vrf`], `B-3`).
     pub fn sweep_turn(&mut self, turn_beacon: [u8; 32]) -> Result<SweepReceipt, EngineError> {
         if self.state.spec.mode != TableMode::Eval {
             return Err(EngineError::InvalidConfig(
@@ -1004,15 +1107,25 @@ impl TurnEngine {
                     .to_owned(),
             ));
         }
+        if self.state.spec.eval_vrf_pubkey.is_some() {
+            return Err(EngineError::InvalidConfig(
+                "Eval table with eval_vrf_pubkey requires sweep_turn_with_eval_vrf".to_owned(),
+            ));
+        }
         Ok(self.sweep_turn_detailed(turn_beacon)?.0)
     }
 
-    /// Executes the 8-step deterministic `Sweep` for an Eval-mode turn using a beacon derived from
-    /// the independent `beacon_seed` (`Decision 12` & `2026-11-15` addendum).
+    /// Executes the 8-step deterministic `Sweep` for a standalone Eval-mode turn (`eval_vrf_pubkey == None`)
+    /// using a beacon derived from `beacon_seed`. Refuses tables carrying `eval_vrf_pubkey` (`B-3`).
     pub fn sweep_turn_seeded(&mut self, beacon_seed: u64) -> Result<SweepReceipt, EngineError> {
         if self.state.spec.mode != TableMode::Eval {
             return Err(EngineError::InvalidConfig(
                 "sweep_turn_seeded requires TableMode::Eval".to_owned(),
+            ));
+        }
+        if self.state.spec.eval_vrf_pubkey.is_some() {
+            return Err(EngineError::InvalidConfig(
+                "Eval table with eval_vrf_pubkey requires sweep_turn_with_eval_vrf".to_owned(),
             ));
         }
         let beacon = derive_turn_beacon(beacon_seed, self.state.table_id, Turn(self.state.turn));
@@ -1020,8 +1133,8 @@ impl TurnEngine {
     }
 
     /// Executes the 8-step deterministic `Sweep` for an Eval-mode turn by verifying an
-    /// `EVAL_VRF_PROOF_BYTES` RFC 9381 `ECVRF-RISTRETTO255-SHA512` proof against
-    /// `spec.eval_vrf_pubkey` (`#31` comment, `2026-11-15` ruling).
+    /// `EVAL_VRF_PROOF_BYTES` proof (RFC 9381 ECVRF construction with C2SP's `ristretto255`
+    /// ciphersuite, `vrf-r255 0.1.0`) against `spec.eval_vrf_pubkey` (`#31` comment).
     pub fn sweep_turn_with_eval_vrf(
         &mut self,
         vrf_proof: &[u8],
@@ -1098,9 +1211,12 @@ impl TurnEngine {
         }
         let turn = self.state.turn;
         let n = self.state.seats.len();
+        self.state.last_turn_beacon = turn_beacon;
+        let prev_outbound_delivered = self.outbound_delivered_by_seat();
 
         // Step 0: Simultaneously clear Phase 1 resting DEX offers in batch without arrival-order priority.
-        let batch_trades_cleared = self.step0_clear_phase1_offer_batch(turn, turn_beacon)?;
+        let (batch_trades_cleared, batch_filled_seats) =
+            self.step0_clear_phase1_offer_batch(turn, turn_beacon)?;
         let town_import_cred_spent = std::mem::take(&mut self.state.pending_town_import_cred_spent);
 
         // Step 1: Validate reveals, run Regent fallback (non-committers only), track 3-miss AI conversion.
@@ -1108,7 +1224,7 @@ impl TurnEngine {
             non_reveal_seats,
             mut regent_acted_seats,
             mut converted_to_ai,
-            mut active_bundles,
+            active_bundles,
             committed_non_revealers,
         ) = self.step1_validate_reveals_and_regents(turn, n);
 
@@ -1132,25 +1248,44 @@ impl TurnEngine {
         escrows_cancelled_or_forfeited.extend(bond_cancelled);
         let (cred_debt_repaid, repaid_by_seat) =
             self.step2_voluntary_debt_repayment(&active_bundles);
-        let (converter_batches_run, converter_orders_clamped, converter_orders_by_seat) = self
-            .step2_settle_converters(
-                &committed_non_revealers,
-                &mut active_bundles,
-                &mut regent_acted_seats,
-                &mut converted_to_ai,
-            );
+        let (
+            mut converter_batches_run,
+            mut converter_orders_clamped,
+            mut converter_orders_by_seat,
+            seat_converter_batches,
+        ) = self.step2_settle_converters(&active_bundles);
 
         // Step 3: Clear maturing Track-2 CheckCash requests & apply Check bounce downgrades.
-        let (checks_cashed, checks_bounced, cartel_evictions) =
+        let (mut checks_cashed, mut checks_bounced, mut cartel_evictions) =
             self.step3_clear_checks(turn, &active_bundles);
 
-        // Step 4: Burn Tier-3 Syndicate Projects (+ Works CRED stipend) & mint Tier-1 raw extraction yields.
+        // Step 4: Burn Tier-3 Syndicate Projects (+ Works CRED stipend), evaluate C1a idle-seat
+        // Regent takeover (after converters, deliveries, batch fills, and works deliveries are all
+        // known, skipping Turn 1), and mint Tier-1 raw extraction yields.
         let (
             projects_completed,
             project_orders_clamped,
             works_stipend_cred_minted,
             project_orders_by_seat,
-        ) = self.step4_projects_and_yields(turn, &active_bundles);
+            seat_works_batches,
+        ) = self.step4a_project_deliveries(turn, &active_bundles);
+        self.evaluate_c1a_idle_takeover(
+            turn,
+            &committed_non_revealers,
+            &seat_converter_batches,
+            &prev_outbound_delivered,
+            &batch_filled_seats,
+            &seat_works_batches,
+            &mut converter_batches_run,
+            &mut converter_orders_clamped,
+            &mut converter_orders_by_seat,
+            &mut checks_cashed,
+            &mut checks_bounced,
+            &mut cartel_evictions,
+            &mut regent_acted_seats,
+            &mut converted_to_ai,
+        );
+        self.step4b_mint_raw_yields(turn);
 
         // Step 5: Accrue auto-debt interest & collect chiral upkeep (issuing shortfall auto-debt).
         let (total_upkeep_shortfall_debt, upkeep_by_seat) =
@@ -1187,6 +1322,7 @@ impl TurnEngine {
         } else {
             self.state.turn = turn + 1;
             self.activate_shocks_for_turn(turn + 1);
+            self.state.start_of_turn_good_stock = self.state.snapshot_good_stock();
             self.state.phase = TurnPhase::TalkAndMarket;
         }
 
@@ -1464,6 +1600,16 @@ impl TurnEngine {
         Ok(())
     }
 
+    fn outbound_delivered_by_seat(&self) -> Vec<i128> {
+        let mut out = vec![0_i128; self.state.seats.len()];
+        for (&(from, _, _), &amt) in &self.state.delivery_ledger {
+            if let Some(slot) = out.get_mut(usize::from(from)) {
+                *slot += i128::from(amt);
+            }
+        }
+        out
+    }
+
     fn record_delivery(&mut self, from: u8, to: u8, asset: AssetId, net_units: Units) {
         if net_units > 0 {
             let slot = self
@@ -1623,7 +1769,7 @@ impl TurnEngine {
         &mut self,
         turn: u8,
         turn_beacon: [u8; 32],
-    ) -> Result<usize, EngineError> {
+    ) -> Result<(usize, Vec<bool>), EngineError> {
         #[derive(Clone, Copy)]
         struct BatchFill {
             buy_id: u64,
@@ -1642,8 +1788,10 @@ impl TurnEngine {
             .chain((0..n).map(AssetId::Refined))
             .collect();
         let mut trades_cleared = 0usize;
+        let mut batch_filled_seats = vec![false; usize::from(n)];
 
         for good in goods {
+            let start_stock = self.state.good_stock_at_turn_start(good);
             let mut buys: Vec<CredOffer> = Vec::new();
             let mut sells: Vec<CredOffer> = Vec::new();
             for offer in self.state.offers.values() {
@@ -1813,6 +1961,10 @@ impl TurnEngine {
                     let net_commodity = fill.fill_units - ceil_bps_fee(fill.fill_units, tariff_bps);
                     self.adjust_free_balance(fill.buy_maker, good, net_commodity)?;
                     self.record_delivery(fill.sell_maker, fill.buy_maker, good, net_commodity);
+                    if fill.fill_units > 0 {
+                        batch_filled_seats[usize::from(fill.buy_maker)] = true;
+                        batch_filled_seats[usize::from(fill.sell_maker)] = true;
+                    }
                     turn_total_units = turn_total_units.saturating_add(fill.fill_units);
                     turn_notional += i128::from(fill.fill_units) * i128::from(clearing_price);
                     trades_cleared += 1;
@@ -1823,12 +1975,14 @@ impl TurnEngine {
                 self.state.executed_good_trades.push(ExecutedGoodTurnPrice {
                     turn,
                     good,
+                    start_of_turn_stock: start_stock,
                     total_units: turn_total_units,
+                    total_price_x_units: turn_notional,
                     vwap_price_cred,
                 });
             }
         }
-        Ok(trades_cleared)
+        Ok((trades_cleared, batch_filled_seats))
     }
 
     fn handle_cancel_offer(&mut self, seat: u8, offer_id: u64) -> Result<(), EngineError> {
@@ -2681,70 +2835,26 @@ impl TurnEngine {
 
     fn step2_settle_converters(
         &mut self,
-        committed_non_revealers: &[bool],
-        bundles: &mut [SealedOrderBundle],
-        regent_acted_seats: &mut Vec<u8>,
-        converted_to_ai: &mut Vec<u8>,
-    ) -> (usize, usize, Vec<Vec<ConverterOrderPreview>>) {
-        let turn = self.state.turn;
+        bundles: &[SealedOrderBundle],
+    ) -> (usize, usize, Vec<Vec<ConverterOrderPreview>>, Vec<usize>) {
         let mut total_batches = 0usize;
         let mut clamped_orders = 0usize;
         let mut by_seat = Vec::with_capacity(bundles.len());
-        for (s_idx, bundle) in bundles.iter_mut().enumerate() {
-            let (mut seat_batches, seat_clamped, mut previews) =
+        let mut seat_converter_batches = Vec::with_capacity(bundles.len());
+        for (s_idx, bundle) in bundles.iter().enumerate() {
+            let (seat_batches, seat_clamped, previews) =
                 self.execute_seat_converter_runs(s_idx, &bundle.converter_runs);
             clamped_orders += seat_clamped;
-            if seat_batches > 0 {
-                self.state.seats[s_idx].consecutive_zero_production_turns = 0;
-            } else {
-                self.state.seats[s_idx].consecutive_zero_production_turns = self.state.seats[s_idx]
-                    .consecutive_zero_production_turns
-                    .saturating_add(1);
-                let s_u8 = s_idx as u8;
-                if self.state.seats[s_idx].consecutive_zero_production_turns
-                    >= IDLE_MISS_TAKEOVER_TURNS
-                    && !committed_non_revealers[s_idx]
-                {
-                    self.state.seats[s_idx].consecutive_misses = self.state.seats[s_idx]
-                        .consecutive_misses
-                        .max(IDLE_MISS_TAKEOVER_TURNS);
-                    if let Some(doctrine) = self.state.spec.seats[s_idx].regent {
-                        let was_human = self.state.seats[s_idx].identity == SeatIdentity::Human;
-                        if was_human {
-                            self.state.seats[s_idx].identity = SeatIdentity::AiSyndicate;
-                            if !converted_to_ai.contains(&s_u8) {
-                                converted_to_ai.push(s_u8);
-                            }
-                        }
-                        if !regent_acted_seats.contains(&s_u8) {
-                            let regent_bundle =
-                                self.synthesize_regent_bundle(turn, s_u8, &doctrine);
-                            for cid in regent_bundle.check_cashes {
-                                if !bundle.check_cashes.contains(&cid) {
-                                    bundle.check_cashes.push(cid);
-                                }
-                            }
-                            let (r_batches, r_clamped, r_previews) = self
-                                .execute_seat_converter_runs(s_idx, &regent_bundle.converter_runs);
-                            seat_batches += r_batches;
-                            clamped_orders += r_clamped;
-                            previews.extend(r_previews);
-                            if was_human || r_batches > 0 {
-                                regent_acted_seats.push(s_u8);
-                            }
-                            if r_batches > 0 {
-                                self.state.seats[s_idx].consecutive_zero_production_turns = 0;
-                            }
-                        }
-                    }
-                }
-            }
             total_batches += seat_batches;
+            seat_converter_batches.push(seat_batches);
             by_seat.push(previews);
         }
-        regent_acted_seats.sort_unstable();
-        converted_to_ai.sort_unstable();
-        (total_batches, clamped_orders, by_seat)
+        (
+            total_batches,
+            clamped_orders,
+            by_seat,
+            seat_converter_batches,
+        )
     }
 
     fn step3_clear_checks(
@@ -2850,11 +2960,17 @@ impl TurnEngine {
         }
     }
 
-    fn step4_projects_and_yields(
+    fn step4a_project_deliveries(
         &mut self,
         turn: u8,
         bundles: &[SealedOrderBundle],
-    ) -> (usize, usize, Units, Vec<Vec<ProjectOrderPreview>>) {
+    ) -> (
+        usize,
+        usize,
+        Units,
+        Vec<Vec<ProjectOrderPreview>>,
+        Vec<usize>,
+    ) {
         let mut completed = 0usize;
         let mut clamped_orders = 0usize;
         let mut works_stipend_cred_minted: Units = 0;
@@ -2866,9 +2982,11 @@ impl TurnEngine {
             .map(|p| (p.id, p.clone()))
             .collect();
         let mut by_seat = Vec::with_capacity(bundles.len());
+        let mut seat_works_batches = Vec::with_capacity(bundles.len());
 
         for (s_idx, bundle) in bundles.iter().enumerate() {
             let mut previews = Vec::with_capacity(bundle.project_deliveries.len());
+            let mut seat_completed = 0usize;
             for proj_ord in &bundle.project_deliveries {
                 if proj_ord.batches == 0 {
                     previews.push(ProjectOrderPreview {
@@ -2947,11 +3065,114 @@ impl TurnEngine {
                     .project_equity
                     .saturating_add(base_pts.saturating_add(bonus));
                 completed += exec_batches as usize;
+                seat_completed += exec_batches as usize;
             }
+            seat_works_batches.push(seat_completed);
             by_seat.push(previews);
         }
+        (
+            completed,
+            clamped_orders,
+            works_stipend_cred_minted,
+            by_seat,
+            seat_works_batches,
+        )
+    }
 
-        // Mint Turn raw extraction yields with any active SupplyFreeze reduction.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_c1a_idle_takeover(
+        &mut self,
+        turn: u8,
+        committed_non_revealers: &[bool],
+        seat_converter_batches: &[usize],
+        prev_outbound_delivered: &[i128],
+        batch_filled_seats: &[bool],
+        seat_works_batches: &[usize],
+        converter_batches_run: &mut usize,
+        converter_orders_clamped: &mut usize,
+        converter_orders_by_seat: &mut [Vec<ConverterOrderPreview>],
+        checks_cashed: &mut Vec<u64>,
+        checks_bounced: &mut Vec<u64>,
+        cartel_evictions: &mut Vec<u8>,
+        regent_acted_seats: &mut Vec<u8>,
+        converted_to_ai: &mut Vec<u8>,
+    ) {
+        // Turn 1 starts with CRED only (`types.rs:495`) before raw yields are minted at Step 4b,
+        // so seats cannot yet hold foreign converter inputs (`A-2`).
+        if turn < 2 {
+            return;
+        }
+        let post_outbound_delivered = self.outbound_delivered_by_seat();
+        let n = self.state.seats.len();
+        let mut regent_check_bundles = vec![SealedOrderBundle::default(); n];
+        let mut any_regent_checks = false;
+
+        for s_idx in 0..n {
+            let made_delivery = post_outbound_delivered[s_idx] > prev_outbound_delivered[s_idx];
+            let had_batch_fill = batch_filled_seats[s_idx];
+            let had_works_delivery = seat_works_batches[s_idx] > 0;
+            let ran_converter = seat_converter_batches[s_idx] > 0;
+
+            if ran_converter || made_delivery || had_batch_fill || had_works_delivery {
+                self.state.seats[s_idx].consecutive_zero_production_turns = 0;
+                continue;
+            }
+
+            self.state.seats[s_idx].consecutive_zero_production_turns = self.state.seats[s_idx]
+                .consecutive_zero_production_turns
+                .saturating_add(1);
+            let s_u8 = s_idx as u8;
+            if self.state.seats[s_idx].consecutive_zero_production_turns >= IDLE_MISS_TAKEOVER_TURNS
+                && !committed_non_revealers[s_idx]
+            {
+                self.state.seats[s_idx].consecutive_misses = self.state.seats[s_idx]
+                    .consecutive_misses
+                    .max(IDLE_MISS_TAKEOVER_TURNS);
+                if let Some(doctrine) = self.state.spec.seats[s_idx].regent {
+                    let was_human = self.state.seats[s_idx].identity == SeatIdentity::Human;
+                    if was_human {
+                        self.state.seats[s_idx].identity = SeatIdentity::AiSyndicate;
+                        if !converted_to_ai.contains(&s_u8) {
+                            converted_to_ai.push(s_u8);
+                        }
+                    }
+                    if !regent_acted_seats.contains(&s_u8) {
+                        let regent_bundle = self.synthesize_regent_bundle(turn, s_u8, &doctrine);
+                        if !regent_bundle.check_cashes.is_empty() {
+                            regent_check_bundles[s_idx].check_cashes = regent_bundle.check_cashes;
+                            any_regent_checks = true;
+                        }
+                        let (r_batches, r_clamped, r_previews) =
+                            self.execute_seat_converter_runs(s_idx, &regent_bundle.converter_runs);
+                        *converter_batches_run += r_batches;
+                        *converter_orders_clamped += r_clamped;
+                        converter_orders_by_seat[s_idx].extend(r_previews);
+                        if was_human || r_batches > 0 {
+                            regent_acted_seats.push(s_u8);
+                        }
+                        if r_batches > 0 {
+                            self.state.seats[s_idx].consecutive_zero_production_turns = 0;
+                        }
+                    }
+                }
+            }
+        }
+        if any_regent_checks {
+            let (r_cashed, r_bounced, r_evicted) =
+                self.step3_clear_checks(turn, &regent_check_bundles);
+            checks_cashed.extend(r_cashed);
+            checks_bounced.extend(r_bounced);
+            for ev in r_evicted {
+                if !cartel_evictions.contains(&ev) {
+                    cartel_evictions.push(ev);
+                }
+            }
+        }
+        regent_acted_seats.sort_unstable();
+        converted_to_ai.sort_unstable();
+    }
+
+    fn step4b_mint_raw_yields(&mut self, turn: u8) {
         for s_idx in 0..self.state.seats.len() {
             let base_yield = self.state.spec.seats[s_idx].raw_yield_per_turn;
             let freeze_bps = self
@@ -2970,12 +3191,6 @@ impl TurnEngine {
             self.state.seats[s_idx].raw[s_idx] =
                 self.state.seats[s_idx].raw[s_idx].saturating_add(actual_yield);
         }
-        (
-            completed,
-            clamped_orders,
-            works_stipend_cred_minted,
-            by_seat,
-        )
     }
 
     fn step5_collect_upkeep_and_debt(

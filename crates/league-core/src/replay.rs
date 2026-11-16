@@ -51,8 +51,9 @@ mod opt_hex32_pub {
 /// Verification mode for per-turn beacons during [`replay_season`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplayBeaconMode {
-    /// Eval mode with RFC 9381 `ECVRF-RISTRETTO255-SHA512` proofs against `eval_vrf_pubkey`
-    /// (`#31` comment, `2026-11-15` ruling).
+    /// Eval mode with proofs under the RFC 9381 ECVRF construction with C2SP's `ristretto255`
+    /// ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not an IANA-registered suite in RFC 9381)
+    /// verified against `eval_vrf_pubkey` (`#31` comment, `2026-11-15` ruling).
     #[default]
     EvalVrf,
     /// Game mode with League of Entropy drand `quicknet` beacons: requires `spec.drand_schedule`,
@@ -87,7 +88,8 @@ pub struct LoggedTurn {
     /// Optional 48-byte drand `quicknet` BLS12-381 signature required under `ExternalDrand` (`M2`).
     #[serde(default)]
     pub drand_signature: Option<Vec<u8>>,
-    /// Optional 80-byte RFC 9381 `ECVRF-RISTRETTO255-SHA512` proof required under `EvalVrf` (`#31`).
+    /// Optional 80-byte VRF proof (RFC 9381 ECVRF construction with C2SP's `ristretto255`
+    /// ciphersuite, `vrf-r255 0.1.0`) required under `EvalVrf` (`#31`).
     #[serde(default)]
     pub eval_vrf_proof: Option<Vec<u8>>,
     /// 3-stage Horizon Shocks drawn from this turn's HKDF `"shocks"` stream (`#31`).
@@ -106,7 +108,8 @@ pub struct SeasonReplayLog {
     pub seed: u64,
     /// Verification rule applied to each logged turn beacon.
     pub beacon_mode: ReplayBeaconMode,
-    /// Optional 32-byte RFC 9381 `ECVRF-RISTRETTO255-SHA512` public key required in `Eval` mode.
+    /// Optional 32-byte `ristretto255` VRF public key (RFC 9381 ECVRF construction with C2SP's
+    /// `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) required in `Eval` mode.
     #[serde(default, with = "opt_hex32_pub")]
     pub eval_vrf_pubkey: Option<[u8; 32]>,
     /// Sealed OS-entropy Turn-1 mandate deal and per-seat salts bound to `spec.dealt_mandate_commits` (`M3`).

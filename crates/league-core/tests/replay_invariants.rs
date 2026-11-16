@@ -3421,7 +3421,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "f026ac24c52ae8b35183c5d6798c85937b61c5e13b459f1650d58d60d57363c0"
+        "433b9956daf0979d3b20b9093a386ff3978d16f3b1313b4e0b05632732c866b7"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -5175,11 +5175,11 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "6e9f0d8d29f6e1bdb6af7e441bd56bab810f87bfcafa506ae0f40a9549a67a18"
+        "828f303022a3f371df3257edeaf605f110fa762166c07f6348e901048288c4a7"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "18c511f95c6bc2e1c09455a3a93ed6e5d920d260ba18a8d9d3b0aed995419a72"
+        "2fe30b514ebcbd7930001c614ce46c0132e223eb9ced6342069ef08e1b0701b5"
     );
 }
 
@@ -5643,16 +5643,20 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
 #[test]
 fn c1a_three_zero_production_turns_hand_seat_to_regent() {
     let tid = TableId(960);
-    let spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
+    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
+    for s in &mut spec.seats {
+        s.perishable_decay_bps = 0;
+    }
     let mut eng = must_ok(TurnEngine::new(spec), "new");
 
-    // Turn 1: all seats submit valid empty bundles (Seat 0 zero-production turn #1).
+    // Turn 1: seats start with CRED only (`types.rs:495`), so Turn 1 does not count as idle (`A-2`).
     commit_and_reveal_all(&mut eng, tid, 1, vec![SealedOrderBundle::default(); 4]);
     let r1 = must_ok(eng.sweep_turn_seeded(3), "sweep 1");
     assert!(!r1.regent_acted_seats.contains(&0));
     assert!(!r1.converted_to_ai.contains(&0));
+    assert_eq!(eng.state().seats[0].consecutive_zero_production_turns, 0);
 
-    // Turn 2: Seats 1 & 2 deliver Raw(1) & Raw(2) to Seat 0, who submits valid empty bundle (turn #2).
+    // Turn 2: Seats 1 & 2 swap Raw(1) & Raw(2) with Seat 0 (active swap delivery resets counter to 0).
     let mut b2 = vec![SealedOrderBundle::default(); 4];
     for (idx, partner) in [1_u8, 2].into_iter().enumerate() {
         let sw = AtomicSwapProposal {
@@ -5672,19 +5676,32 @@ fn c1a_three_zero_production_turns_hand_seat_to_regent() {
     let r2 = must_ok(eng.sweep_turn_seeded(3), "sweep 2");
     assert!(!r2.regent_acted_seats.contains(&0));
     assert!(!r2.converted_to_ai.contains(&0));
+    assert_eq!(eng.state().seats[0].consecutive_zero_production_turns, 0);
     assert_eq!(eng.state().seats[0].refined[0], 0);
 
-    // Turn 3: Seat 0 submits a valid empty bundle (3rd consecutive zero-production turn) ->
-    // Regent must take over on Turn 3 and convert Seat 0 -> AiSyndicate.
-    commit_and_reveal_all(&mut eng, tid, 3, vec![SealedOrderBundle::default(); 4]);
-    let r3 = must_ok(eng.sweep_turn_seeded(3), "sweep 3");
+    // Turns 3 and 4: Seat 0 submits valid empty bundles with zero converters, zero deliveries,
+    // zero batch fills, and zero works -> consecutive_zero_production_turns hits 1 then 2.
+    for t in [3_u8, 4_u8] {
+        commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        let r = must_ok(eng.sweep_turn_seeded(3), "sweep 3/4");
+        assert!(!r.regent_acted_seats.contains(&0));
+        assert!(!r.converted_to_ai.contains(&0));
+        assert_eq!(
+            eng.state().seats[0].consecutive_zero_production_turns,
+            t - 2
+        );
+    }
+
+    // Turn 5: Seat 0's 3rd consecutive truly idle turn -> Regent takes over and converts Human -> AiSyndicate.
+    commit_and_reveal_all(&mut eng, tid, 5, vec![SealedOrderBundle::default(); 4]);
+    let r5 = must_ok(eng.sweep_turn_seeded(3), "sweep 5");
     assert!(
-        r3.regent_acted_seats.contains(&0),
-        "expected Regent takeover on 3rd consecutive zero-production turn"
+        r5.regent_acted_seats.contains(&0),
+        "expected Regent takeover on 3rd consecutive idle turn"
     );
     assert!(
-        r3.converted_to_ai.contains(&0),
-        "expected Human -> AiSyndicate conversion on 3rd zero-production turn"
+        r5.converted_to_ai.contains(&0),
+        "expected Human -> AiSyndicate conversion on 3rd idle turn"
     );
     assert_eq!(eng.state().seats[0].identity, SeatIdentity::AiSyndicate);
     assert!(eng.state().seats[0].refined[0] > 0);
