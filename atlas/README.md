@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-16 from commit ed70c65 by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit 8a2fb6a by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,13 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-16 (04e720c)
+## What changed since 2026-11-16 (ed70c65)
 
-Nothing structural changed since 2026-11-16; 5 files changed content.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, before `Usage`.
+- In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `validate_vm_host_allowance`, before `Usage`.
+- And 7 more changes to the order of work.
+- 6 files changed content, across 2 parts.
 
 ## What comes in
 
@@ -50,11 +54,8 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 14 of 16 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 15 of 17 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
-- **crates/league-relay/src/lib.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 

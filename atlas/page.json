@@ -29,29 +29,55 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 5,
+      "changed": 6,
       "moved": 0,
       "parts": 2,
       "removed": 0
     },
     "items": [
       {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `default`, before `SecretInForbiddenPlace`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `parse`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/cli.rs, `execute_cli` gained a step, `validate_vm_host_allowance`, before `Usage`.",
+        "subjects": [
+          "crates/league-relay/src/cli.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 7 more changes to the order of work.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-16; 5 files changed content.",
+        "sentence": "6 files changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "04e720c27d2785c40340c03d518075bc500fe466",
-      "generatedAt": "2026-11-16T03:38:49.327Z"
+      "commit": "ed70c650ddc469b1a740c02b2ea6bb96165d797c",
+      "generatedAt": "2026-11-16T04:53:03.456Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 16,
+      "either": 17,
       "partLabels": [
         null,
         null
@@ -61,7 +87,7 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 14
+      "shared": 15
     },
     {
       "a": "crates/league-relay/src/cli.rs",
@@ -77,51 +103,6 @@
       ],
       "relation": "unassigned",
       "shared": 6
-    },
-    {
-      "a": "crates/league-relay/src/cli.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 14,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
-    },
-    {
-      "a": "crates/league-relay/src/error.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 14,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
-    },
-    {
-      "a": "crates/league-relay/src/lib.rs",
-      "b": "crates/league-relay/src/relay.rs",
-      "either": 14,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 7
     }
   ],
   "changesTogetherNote": [
@@ -129,7 +110,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "ed70c650ddc469b1a740c02b2ea6bb96165d797c",
+  "commit": "8a2fb6a1a10648a7421a4caaa007a38d13ac12c2",
   "defaultBranch": "main",
   "derived": "11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -355,7 +336,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-16T04:53:03.456Z",
+  "generatedAt": "2026-11-16T05:58:14.302Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
