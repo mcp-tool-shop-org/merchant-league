@@ -4,9 +4,10 @@
 use std::collections::HashSet;
 
 use league_gen::{
-    EvMethod, FeasibilityError, GENERATOR_VERSION, GeneratorConfig, LpStatus, NUMERAIRE_CODE,
-    PlrChoice, PlrSampler, RingTable, SeatCount, check_feasibility, coalition_upkeep_coverage,
-    compute_hhi, evaluate_ring_table, generate_ring_table, is_denied_currency_code,
+    EvMethod, FeasibilityError, GENERATOR_VERSION, GeneratorConfig, LpStatus, MAX_MANDATE_BONUS_VP,
+    MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, PlrChoice, PlrSampler, RingTable,
+    SeatCount, check_feasibility, coalition_upkeep_coverage, compute_hhi, evaluate_ring_table,
+    generate_ring_table, is_allowed_commodity_code, is_denied_currency_code,
     pair_has_structural_autarky, solve_lp,
 };
 use proptest::prelude::*;
@@ -219,7 +220,7 @@ proptest! {
         };
         prop_assert_eq!(&decoded, &t1);
 
-        let recheck = match check_feasibility(&decoded, &cfg) {
+        let recheck = match check_feasibility(&decoded) {
             Ok(r) => r,
             Err(err) => return Err(TestCaseError::fail(format!("recheck failed: {err}"))),
         };
@@ -233,12 +234,25 @@ proptest! {
             / (sorted_upkeeps[0] + sorted_upkeeps[1] + sorted_upkeeps[2]);
         prop_assert!(r1.max_3seat_upkeep_coverage <= max_one_of_three + 1e-6);
         prop_assert!(r1.max_3seat_upkeep_coverage < 0.40);
+        if sc.as_usize() >= 5 {
+            let un = sorted_upkeeps.len();
+            let max_two_of_four = (sorted_upkeeps[un - 1] + sorted_upkeeps[un - 2])
+                / (sorted_upkeeps[0]
+                    + sorted_upkeeps[1]
+                    + sorted_upkeeps[un - 2]
+                    + sorted_upkeeps[un - 1]);
+            let cov4 = r1.max_4seat_upkeep_coverage.unwrap_or(1.0);
+            prop_assert!(cov4 <= max_two_of_four + 1e-6);
+            prop_assert!(cov4 <= 0.5 + 0.005);
+        }
         prop_assert!(r1.surplus_to_upkeep_ratio >= cfg.min_surplus_ratio - 1e-9);
         prop_assert!(r1.max_relative_ev_deviation <= cfg.ev_tolerance + 1e-9);
 
         let n = sc.as_usize();
         let mut codes = HashSet::new();
         for seat in &t1.seats {
+            prop_assert!(is_allowed_commodity_code(seat.raw_code.as_bytes()));
+            prop_assert!(is_allowed_commodity_code(seat.refined_code.as_bytes()));
             prop_assert!(!is_denied_currency_code(seat.raw_code.as_bytes()));
             prop_assert!(!is_denied_currency_code(seat.refined_code.as_bytes()));
             prop_assert!(codes.insert(seat.raw_code));
@@ -246,9 +260,41 @@ proptest! {
         }
         prop_assert_eq!(codes.len(), 2 * n);
 
+        // B2.2: Project 1..=N pairs + 100 full-ring Concordat and 3..=8 VP mandates.
+        prop_assert_eq!(t1.projects.len(), n + 1);
+        let concordat = t1
+            .projects
+            .iter()
+            .find(|p| p.id == PROJECT_CONCORDAT_ID)
+            .ok_or_else(|| TestCaseError::fail("missing Concordat project"))?;
+        prop_assert_eq!(concordat.required_inputs.len(), n);
+        prop_assert!(t1.mandate_deck.len() >= n);
+        for card in &t1.mandate_deck {
+            prop_assert!(card.kind.validate_for_seat_count(sc).is_ok());
+            prop_assert!(
+                (MIN_MANDATE_BONUS_VP..=MAX_MANDATE_BONUS_VP).contains(&card.bonus_vp)
+            );
+        }
+
+        // B2.1 + #26b + C6: positive converter clearing margins, shadow-LP conservation, pair-share cap.
+        prop_assert!(r1.min_converter_clearing_margin > 0.0);
+        if cfg.ev_method == EvMethod::ShadowPrice {
+            let sum_evs: f64 = r1.seat_expected_values.iter().sum();
+            let rel_shadow = ((sum_evs - r1.season_effective_net_surplus)
+                / r1.season_effective_net_surplus)
+                .abs();
+            prop_assert!(rel_shadow < 1e-11, "shadow LP rel gap={rel_shadow}");
+        }
+        prop_assert!(r1.static_max_pair_share <= sc.default_max_pair_share_cap() + 1e-9);
+
         let ring_metrics = evaluate_ring_table(&t1, &r1);
         prop_assert!(ring_metrics.trade_concentration.hhi < 0.25);
         prop_assert!(ring_metrics.trade_concentration.active_pairs >= n);
+        prop_assert!(
+            ring_metrics.trade_concentration.max_pair_share <= sc.default_max_pair_share_cap() + 1e-9
+        );
+        prop_assert!(ring_metrics.rollout_grading.total_project_batches > 0);
+        prop_assert!(ring_metrics.rollout_grading.concordat_batches > 0);
     }
 
     #[test]
@@ -296,7 +342,7 @@ proptest! {
             }
         }
 
-        let verdict = check_feasibility(&table, &cfg);
+        let verdict = check_feasibility(&table);
         if oracle_any_pair {
             let rejected = matches!(verdict, Err(FeasibilityError::PairCoversUpkeep { .. }));
             prop_assert!(rejected, "expected PairCoversUpkeep, got {verdict:?}");
@@ -326,7 +372,7 @@ proptest! {
         for s in &mut low_yield.seats {
             s.raw_yield_per_turn *= 0.05;
         }
-        let low_res = check_feasibility(&low_yield, &cfg);
+        let low_res = check_feasibility(&low_yield);
         let rejected_surplus = matches!(low_res, Err(FeasibilityError::InsufficientSurplus { .. }));
         prop_assert!(rejected_surplus, "expected InsufficientSurplus, got {low_res:?}");
 
@@ -334,7 +380,7 @@ proptest! {
         let mut asym = table;
         let idx = seat_pick % sc.as_usize();
         asym.seats[idx].raw_yield_per_turn *= 3.0;
-        let asym_res = check_feasibility(&asym, &cfg);
+        let asym_res = check_feasibility(&asym);
         let rejected_ev = matches!(asym_res, Err(FeasibilityError::SeatEvOutOfTolerance { .. }));
         prop_assert!(rejected_ev, "expected SeatEvOutOfTolerance, got {asym_res:?}");
     }
@@ -389,8 +435,12 @@ proptest! {
             prop_assert!(m.hhi >= min_possible - 1e-9);
             prop_assert!(m.hhi <= 1.0 + 1e-9);
             prop_assert!((m.hhi * m.effective_dyads - 1.0).abs() < 1e-9);
+            prop_assert!(m.max_pair_share >= min_possible - 1e-9);
+            prop_assert!(m.max_pair_share <= 1.0 + 1e-9);
+            prop_assert!(m.hhi >= m.max_pair_share * m.max_pair_share - 1e-9);
         } else {
             prop_assert!((m.hhi - 1.0).abs() < 1e-9);
+            prop_assert!((m.max_pair_share - 1.0).abs() < 1e-9);
         }
     }
 
