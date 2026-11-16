@@ -232,9 +232,11 @@ fn build_conformance_engine(
     )
     .map_err(map_core_err)?;
     spec.shocks.clear();
+    spec.works_stipend_per_unit_cred = 0;
     for seat in &mut spec.seats {
         seat.initial_cred = 100 * UNIT_SCALE;
         seat.perishable_decay_bps = 0;
+        seat.regent = None;
     }
     spec.seats[0].raw_yield_per_turn = seat0_raw_yield;
     spec.seats[0].initial_raw_tariff_bps = seat0_raw_tariff_bps;
@@ -352,7 +354,7 @@ pub fn run_core_offer_spend_down() -> Result<(bool, Units, Units), StandAloneErr
         .iter()
         .any(|o| o.outcome == SwapPreviewOutcome::Settled);
 
-    // Seat 1 crosses for 80_000 Raw(0) and receives the full locked 80_000 at 0 bps tariff.
+    // Seat 1 crosses for 80_000 Raw(0) at Sweep Step 0 batch clearing and receives 80_000 at 0 bps tariff.
     let buyer_before = engine.state().seats[1].raw[0];
     engine
         .apply_market_action(MarketAction::PostOffer {
@@ -367,6 +369,7 @@ pub fn run_core_offer_spend_down() -> Result<(bool, Units, Units), StandAloneErr
             },
         })
         .map_err(map_core_err)?;
+    let _ = sweep_engine_turn(&mut engine, &empty, CONFORMANCE_BEACON_SEED + 2)?;
     let buyer_received_on_cross = engine.state().seats[1].raw[0] - buyer_before;
 
     Ok((
@@ -425,6 +428,7 @@ pub fn run_core_tariff_case(
                 },
             })
             .map_err(map_core_err)?;
+        let _ = sweep_engine_turn(&mut engine, &empty, CONFORMANCE_BEACON_SEED + 1)?;
         2
     } else {
         0
@@ -459,13 +463,16 @@ pub fn run_core_tariff_case(
             },
         })
         .map_err(map_core_err)?;
+    let _ = sweep_engine_turn(&mut engine, &empty, CONFORMANCE_BEACON_SEED + 2)?;
 
     let trade_cred = engine.state().seats[usize::from(seller_seat)].cred - seller_cred_before;
     let buyer_net = engine.state().seats[1].raw[0] - buyer_raw_before;
     let tariff_withheld = taker_buy_units - buyer_net;
 
+    let batch_price_cred =
+        ((i128::from(maker_price_cred) + i128::from(taker_limit_price_cred)) / 2) as Units;
     let expected_trade =
-        checked_mul_units_parity(taker_buy_units, maker_price_cred).map_err(map_core_err)?;
+        checked_mul_units_parity(taker_buy_units, batch_price_cred).map_err(map_core_err)?;
     let expected_tariff = ceil_bps_fee(taker_buy_units, tariff_bps);
     if trade_cred != expected_trade || tariff_withheld != expected_tariff {
         return Err(StandAloneError::Build(format!(
@@ -818,6 +825,9 @@ fn run_case_direct_issuer_export<T: Transport>(
     let tariff_bps = 800;
     let (core_trade_cred_milli, core_tariff_milli, core_buyer_net_milli) =
         run_core_tariff_case(tariff_bps, None, 1_000, 1_000, 333, 1_500)?;
+    let difference_summary = format!(
+        "XRPL exempts issuer->holder primary issuance from TransferRate (observed seller cred={seller_cred}, buyer recv={buyer_r0a}) vs league-core TurnEngine ceil_bps_fee={core_tariff_milli} milli, net={core_buyer_net_milli} milli, uniform batch cred={core_trade_cred_milli} milli"
+    );
     Ok(TariffRoundingCase {
         case_name: "direct_issuer_export_exempt".into(),
         currency: code.into(),
@@ -829,7 +839,7 @@ fn run_case_direct_issuer_export<T: Transport>(
         xrpld_buyer_commodity_received: buyer_r0a,
         xrpld_buyer_cred_delta: format!("{buyer_cred_before}->{buyer_cred_after}"),
         xrpld_seller_cred_received: seller_cred,
-        difference_summary: "XRPL exempts issuer->holder primary issuance from TransferRate (0 fee vs league-core TurnEngine ceil_bps_fee=27 milli)".into(),
+        difference_summary,
     })
 }
 
@@ -916,6 +926,9 @@ fn run_case_third_party_headroom<T: Transport>(
     let tariff_bps = 750;
     let (core_trade_cred_milli, core_tariff_milli, core_buyer_net_milli) =
         run_core_tariff_case(tariff_bps, Some(10_811), 1_000, 1_255, 333, 1_502)?;
+    let difference_summary = format!(
+        "XRPL charges TransferRate upward on seller (observed buyer recv={buyer_r0s}, seller cred={seller_cred_after}) while keeping rational CRED quality vs league-core TurnEngine buyer-deducted tariff={core_tariff_milli} milli, net={core_buyer_net_milli} milli, uniform batch cred={core_trade_cred_milli} milli"
+    );
     Ok(TariffRoundingCase {
         case_name: "third_party_headroom_sender_surcharge".into(),
         currency: code.into(),
@@ -927,7 +940,7 @@ fn run_case_third_party_headroom<T: Transport>(
         xrpld_buyer_commodity_received: buyer_r0s,
         xrpld_buyer_cred_delta: format!("{buyer_cred_before}->{buyer_cred_after}"),
         xrpld_seller_cred_received: seller_cred_after,
-        difference_summary: "XRPL charges TransferRate upward on seller (1.075x) while keeping rational CRED quality (sub-milli) vs league-core TurnEngine buyer-deducted ceil_bps_fee and floor mul_units_parity".into(),
+        difference_summary,
     })
 }
 
@@ -1015,6 +1028,9 @@ fn run_case_third_party_balance_capped<T: Transport>(
     let tariff_bps = 833;
     let (core_trade_cred_milli, core_tariff_milli, core_buyer_net_milli) =
         run_core_tariff_case(tariff_bps, Some(1_091), 1_000, 1_000, 1_000, 1_200)?;
+    let difference_summary = format!(
+        "With balance-capped seller ({seller_before}->{seller_after}), XRPL divides across TransferRate (observed buyer recv={buyer_r0t}, seller cred={seller_cred_after}) vs league-core TurnEngine tariff={core_tariff_milli} milli, net={core_buyer_net_milli} milli, uniform batch cred={core_trade_cred_milli} milli; most of the commodity gap is fee direction plus ceil_bps_fee rounding with ~1e-16 from 16-digit mantissa"
+    );
     Ok(TariffRoundingCase {
         case_name: "third_party_balance_capped_sender_surcharge".into(),
         currency: code.into(),
@@ -1026,7 +1042,7 @@ fn run_case_third_party_balance_capped<T: Transport>(
         xrpld_buyer_commodity_received: buyer_r0t,
         xrpld_buyer_cred_delta: format!("{buyer_cred_before}->{buyer_cred_after}"),
         xrpld_seller_cred_received: seller_cred_after,
-        difference_summary: "With exact 1 unit available, XRPL charges 1.0833x TransferRate upward to the balance-capped seller (delivering 1/1.0833=0.923105... vs 1-0.0833=0.9167) while league-core TurnEngine deducts ceil_bps_fee from buyer delivery (1000-84=916 milli, 0.916); ~6.4 milli is fee direction, ~0.7 milli is core ceil rounding, and 16-digit mantissa contributes ~1e-16".into(),
+        difference_summary,
     })
 }
 
@@ -1152,6 +1168,16 @@ pub fn run_preimage_escrow_conformance<T: Transport>(
 
     let core = run_core_preimage_escrow(&secret, &wrong_secret)?;
 
+    let league_core_comparison = format!(
+        "league-core TurnEngine zero_drop_fee={} finish_boundary={} cancel_expiry={}; xrpld observed finish_fee_349={}, finish_valid={}, close_time={} > finish_after={} (the > vs >= boundary of CancelAfter is not measured at the boundary in this run)",
+        core.zero_drop_fee_verified,
+        core.finish_at_boundary_unlocked,
+        core.cancel_at_expiry_allowed,
+        finish_fee_349_result,
+        finish_valid_result,
+        close_time_at_finish,
+        finish_after,
+    );
     Ok(PreimageEscrowReport {
         finish_fee_10_result,
         finish_fee_349_result,
@@ -1170,7 +1196,7 @@ pub fn run_preimage_escrow_conformance<T: Transport>(
         core_cancel_before_expiry_allowed: core.cancel_before_expiry_allowed,
         core_finish_at_or_after_expiry_unlocked: core.finish_at_or_after_expiry_unlocked,
         core_cancel_at_expiry_allowed: core.cancel_at_expiry_allowed,
-        league_core_comparison: "league-core TurnEngine charges 0 drops and checks discrete turn >= finish_after_turn.unwrap_or(1) and turn >= cancel_after_turn; xrpld requires >=350 drops for a 32-byte fulfillment and enforces close_time bounds on FinishAfter and CancelAfter (the > vs >= boundary of CancelAfter is not measured at the boundary in this run)".into(),
+        league_core_comparison,
     })
 }
 
@@ -1553,15 +1579,15 @@ mod tests {
 
         assert_eq!(
             run_core_tariff_case(800, None, 1_000, 1_000, 333, 1_500),
-            Ok((333, 27, 306))
+            Ok((416, 27, 306))
         );
         assert_eq!(
             run_core_tariff_case(750, Some(10_811), 1_000, 1_255, 333, 1_502),
-            Ok((417, 25, 308))
+            Ok((458, 25, 308))
         );
         assert_eq!(
             run_core_tariff_case(833, Some(1_091), 1_000, 1_000, 1_000, 1_200),
-            Ok((1_000, 84, 916))
+            Ok((1_100, 84, 916))
         );
 
         let escrow = match run_core_preimage_escrow(&[0x42u8; 32], &[0x99u8; 32]) {
@@ -1661,6 +1687,23 @@ mod tests {
                 case.case_name,
                 case.xrpld_seller_cred_received
             );
+            assert!(
+                case.difference_summary
+                    .contains(&case.xrpld_seller_cred_received),
+                "r2 N2: difference_summary must format live xrpld cred read {}, got: {}",
+                case.xrpld_seller_cred_received,
+                case.difference_summary
+            );
         }
+        let escrow_rep = match run_preimage_escrow_conformance(&client, &table) {
+            Ok(v) => v,
+            Err(err) => panic!("B3.3 failed: {err}"),
+        };
+        assert!(
+            escrow_rep
+                .league_core_comparison
+                .contains(&escrow_rep.finish_valid_result),
+            "r2 N2: league_core_comparison must format live result"
+        );
     }
 }

@@ -1868,22 +1868,22 @@ mod tests {
     }
 
     #[test]
-    fn golden_v2_4_0_table_serialization_digest_matches_pinned_seed42() {
+    fn golden_v2_4_1_table_serialization_digest_matches_pinned_seed42() {
         let cfg = GeneratorConfig::default();
         let Ok((table, _)) = generate_ring_table(42, &cfg) else {
             panic!("seed 42 generates cleanly");
         };
-        assert_eq!(table.generator_version, "league-gen/v2.4.0");
+        assert_eq!(table.generator_version, "league-gen/v2.4.1");
         let Ok(bytes) = serde_json::to_vec(&table) else {
             panic!("RingTable serializes deterministically");
         };
         let digest = Sha256::digest(&bytes);
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         const EXPECTED_GOLDEN_SHA256: &str =
-            "012f2d9f357c99cef2a9e1ac60eb576c7f46f13c5c801d190789b9dc5fb44184";
+            "7bd0859fc41b599ef78c5b73840bad46a37de2393b386e5c99157c0ffdd12a5f";
         assert_eq!(
             hex, EXPECTED_GOLDEN_SHA256,
-            "v2.4.0 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
+            "v2.4.1 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
         );
     }
 }

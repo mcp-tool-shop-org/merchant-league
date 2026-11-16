@@ -12,8 +12,6 @@
 
 use std::fmt;
 
-use sha2::{Digest, Sha256};
-
 /// Maximum consecutive entropy draws attempted when rejecting all-zero secrets.
 pub const MAX_NONZERO_RETRIES: usize = 8;
 
@@ -77,20 +75,6 @@ impl Secret {
     /// Generates a fresh cryptographic non-zero [`Secret`] from OS entropy (`getrandom`).
     pub fn generate() -> Result<Self, DiceError> {
         Self::generate_with(|buf| getrandom::fill(buf).map_err(|_| DiceError::EntropyUnavailable))
-    }
-
-    /// Deterministically derives a non-zero [`Secret`] from `seed` and domain `context`.
-    #[must_use]
-    pub fn derive_from_seed(seed: u64, context: &[u8]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(b"league-dice/secret/v2");
-        hasher.update(seed.to_le_bytes());
-        hasher.update(context);
-        let mut bytes: [u8; 32] = hasher.finalize().into();
-        if bytes == [0u8; 32] {
-            bytes[0] = 1;
-        }
-        Self(bytes)
     }
 }
 
@@ -163,17 +147,11 @@ mod tests {
         let io_err = Secret::generate_with(|_| Err(DiceError::EntropyUnavailable));
         assert_eq!(io_err, Err(DiceError::EntropyUnavailable));
 
-        // OS entropy generator and deterministic derivation always return non-zero secrets.
+        // OS entropy generator always returns non-zero secrets.
         let Ok(live) = Secret::generate() else {
             panic!("OS entropy generation should succeed");
         };
         assert!(!live.is_degenerate());
-
-        let d1 = Secret::derive_from_seed(42, b"seat-0");
-        let d2 = Secret::derive_from_seed(42, b"seat-1");
-        assert!(!d1.is_degenerate());
-        assert!(!d2.is_degenerate());
-        assert_ne!(d1.0, d2.0);
         assert!(format!("{}", DiceError::DegenerateSecret).contains("all-zero"));
         assert!(format!("{}", DiceError::EntropyUnavailable).contains("entropy"));
     }

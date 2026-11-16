@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+league-core = { path = "../league-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 sha2 = "0.10.9"
 

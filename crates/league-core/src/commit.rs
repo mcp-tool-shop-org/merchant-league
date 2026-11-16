@@ -3,12 +3,15 @@
 
 use std::fmt;
 
+use hkdf::Hkdf;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::types::{
     AssetId, BPS_SCALE, Bps, CharterRole, CreditTier, EngineError, MAX_MANDATE_BONUS_EQUITY,
-    MIN_MANDATE_BONUS_EQUITY, Seat, TableId, Turn, Units,
+    MIN_MANDATE_BONUS_EQUITY, ScheduledShockSpec, Seat, ShockKind, TableId, Turn, Units,
 };
 
 mod hex32 {
@@ -196,6 +199,50 @@ pub struct CharterBidOrder {
     pub bid_cred: Units,
 }
 
+/// Sealed Phase-2 bilateral commodity delivery executed cleanly at Step 2 (`BatchV1_1`
+/// one-way delivery), enabling Seller fulfillment of `BuyerDvpPayment` or `DualEscrowVault`
+/// contracts without requiring Buyer to lock a second payment inside an `AtomicSwapProposal`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ContractDeliveryOrder {
+    /// Receiving buyer seat index.
+    pub counterparty: u8,
+    /// Commodity transferred (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Gross units debited from delivering seat (`> 0`).
+    pub gross_amount: Units,
+    /// Optional shared cartel domain ID waiving export tariffs.
+    pub domain_id: Option<u8>,
+    /// When `Some(id)`, ties delivery atomically to `DualEscrowVault { escrow_id: id }` (`C2`).
+    #[serde(default)]
+    pub dual_escrow_id: Option<u64>,
+}
+
+/// Co-signed dual delivery-versus-payment escrow proposal settled atomically in Step 2 when
+/// both `buyer` and `seller` include identical terms in their revealed bundles (`C2`, `2026-11-15`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DualEscrowProposal {
+    /// Deterministic proposal identifier matching between buyer and seller.
+    pub proposal_id: u64,
+    /// Buyer seat locking `buyer_bond_cred`.
+    pub buyer: u8,
+    /// Seller seat locking `seller_bond_cred`.
+    pub seller: u8,
+    /// Delivered commodity (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Minimum net units required on or before `deadline_turn`.
+    pub required_units: Units,
+    /// Full purchase payment in milli-`CRED` released on delivery.
+    pub payment_cred: Units,
+    /// Buyer locked `CRED` (`1..=payment_cred`).
+    pub buyer_bond_cred: Units,
+    /// Seller performance bond (`1..=payment_cred`), with `buyer_bond_cred + seller_bond_cred <= payment_cred`.
+    pub seller_bond_cred: Units,
+    /// Compliance evaluation deadline (`>= current_turn && <= HARD_TURN_CAP`).
+    pub deadline_turn: u8,
+    /// Optional cartel domain ID for tender tariff relief.
+    pub domain_id: Option<u8>,
+}
+
 /// Simultaneous discretionary actions committed in Phase 2 (`Commit`) and disclosed in `Reveal`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedOrderBundle {
@@ -205,6 +252,12 @@ pub struct SealedOrderBundle {
     pub project_deliveries: Vec<ProjectDeliveryOrder>,
     /// Co-signed atomic bilateral swaps (`tfAllOrNothing`).
     pub atomic_swaps: Vec<AtomicSwapProposal>,
+    /// Direct contractual commodity deliveries for `BuyerDvpPayment` / `DualEscrowVault` (`C2`).
+    #[serde(default)]
+    pub contract_deliveries: Vec<ContractDeliveryOrder>,
+    /// Co-signed dual-escrow DvP contract openings (`C2`).
+    #[serde(default)]
+    pub dual_escrows: Vec<DualEscrowProposal>,
     /// Voluntary repayment toward outstanding `CRED` auto-debt principal.
     pub debt_repayment_cred: Units,
     /// Conditional `TokenEscrow` finish reveals (`EscrowFinish`).
@@ -231,14 +284,14 @@ pub struct OrderReveal {
 pub enum IntentTarget {
     /// Pledge to cast council vote in `office_turn` for `candidate`.
     VoteForSeat {
-        /// Election turn (`4, 8, 12, 16, 20, 24`).
+        /// Election turn (`4, 8, 12, 16, 20, 24, 28, 32`).
         office_turn: u8,
         /// Promised candidate seat (`trade_minister` or `cartel_chair`).
         candidate: u8,
     },
     /// Pledge not to revoke `beneficiary` from `domain_id` on `office_turn`.
     PreserveCartelMembership {
-        /// Election turn (`4, 8, 12, 16, 20, 24`).
+        /// Election turn (`4, 8, 12, 16, 20, 24, 28, 32`).
         office_turn: u8,
         /// Target cartel domain ID.
         domain_id: u8,
@@ -327,7 +380,13 @@ impl MandateKind {
                     )));
                 }
             }
-            Self::MaintainCleanCredit { .. } => {}
+            Self::MaintainCleanCredit { min_tier } => {
+                if !matches!(min_tier, CreditTier::Aaa | CreditTier::Bbb) {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "MaintainCleanCredit min_tier {min_tier:?} must be Aaa or Bbb"
+                    )));
+                }
+            }
             Self::MinActivePartners { min_partners } => {
                 if !(1..=max_threshold).contains(&min_partners) {
                     return Err(EngineError::InvalidConfig(format!(
@@ -373,13 +432,50 @@ pub struct GradedMandateCard {
     pub bonus_equity: Units,
 }
 
-/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3–8 VP` (`3_000..=8_000`).
+/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3_000..=8_000`
+/// milli-points (`3..=8` mandate points), separated from terminal net-worth conversion.
 #[must_use]
-pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
+pub fn bonus_points_milli_for_completion_bps(completion_bps: Bps) -> Units {
     let clamped = i64::from(completion_bps.min(10_000));
     let hard_bps = (BPS_SCALE as i64) - clamped;
     MIN_MANDATE_BONUS_EQUITY
         + ((MAX_MANDATE_BONUS_EQUITY - MIN_MANDATE_BONUS_EQUITY) * hard_bps) / (BPS_SCALE as i64)
+}
+
+/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3–8 VP` (`3_000..=8_000`).
+#[must_use]
+pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
+    bonus_points_milli_for_completion_bps(completion_bps)
+}
+
+impl GradedMandateCard {
+    /// Returns the provisional mandate point value in milli-points (`3_000..=8_000 == 3..=8 pts`),
+    /// kept distinct from terminal net-worth scaling.
+    #[must_use]
+    pub const fn mandate_points_milli(&self) -> Units {
+        self.bonus_equity
+    }
+}
+
+/// Builds a graded mandate deck for `seat_count` (`4..=6`), scaling `MinProjectEquity` targets
+/// against `mean_project_value_milli` (`7.0x`, `12.5x`, `16.5x`) while using canonical default
+/// `[16_000, 28_000, 36_000]` targets via [`default_graded_mandate_deck`].
+#[must_use]
+pub fn graded_mandate_deck_for_mean_project_value(
+    seat_count: u8,
+    mean_project_value_milli: Units,
+) -> Vec<GradedMandateCard> {
+    let targets = if mean_project_value_milli <= 0 {
+        [16_000, 28_000, 36_000]
+    } else {
+        let base = mean_project_value_milli as i128;
+        [
+            ((base * 7_000) / 1_000).max(1_000) as Units,
+            ((base * 12_500) / 1_000).max(2_000) as Units,
+            ((base * 16_500) / 1_000).max(3_000) as Units,
+        ]
+    };
+    build_graded_mandate_deck_with_targets(seat_count, targets)
 }
 
 /// Builds the canonical 8-card graded mandate deck for `seat_count` (`4..=6`), covering all
@@ -391,6 +487,13 @@ pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
 /// playtest calibration replaces them.
 #[must_use]
 pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
+    build_graded_mandate_deck_with_targets(seat_count, [16_000, 28_000, 36_000])
+}
+
+fn build_graded_mandate_deck_with_targets(
+    seat_count: u8,
+    project_targets: [Units; 3],
+) -> Vec<GradedMandateCard> {
     let max_safe = seat_count.saturating_sub(2).max(1);
     let specs = [
         (
@@ -400,7 +503,13 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
             },
             10_000,
         ),
-        (2, MandateKind::MinProjectEquity { target: 16_000 }, 8_000),
+        (
+            2,
+            MandateKind::MinProjectEquity {
+                target: project_targets[0],
+            },
+            8_000,
+        ),
         (
             3,
             MandateKind::MinRefinedVariety {
@@ -431,8 +540,20 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
             },
             2_500,
         ),
-        (7, MandateKind::MinProjectEquity { target: 28_000 }, 1_500),
-        (8, MandateKind::MinProjectEquity { target: 36_000 }, 0),
+        (
+            7,
+            MandateKind::MinProjectEquity {
+                target: project_targets[1],
+            },
+            1_500,
+        ),
+        (
+            8,
+            MandateKind::MinProjectEquity {
+                target: project_targets[2],
+            },
+            0,
+        ),
     ];
     specs
         .into_iter()
@@ -441,7 +562,7 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
                 card_id,
                 kind,
                 difficulty_completion_bps,
-                bonus_equity: bonus_equity_for_completion_bps(difficulty_completion_bps),
+                bonus_equity: bonus_points_milli_for_completion_bps(difficulty_completion_bps),
             },
         )
         .collect()
@@ -518,6 +639,41 @@ pub fn deal_graded_mandates(
     deal_graded_mandates_with_entropy(table_id, seat_count, deal_seed, &seat_salts, deck)
 }
 
+/// Computes the canonical `seat_count` dealt deck indices from `table_id`, `deal_seed`, and
+/// `deck_len` (`league-core/mandate-deal/v2`, reverse Fisher-Yates without replacement).
+///
+/// Single canonical deal permutation shared across `league-core` and `league-gen` (`#32` `B-2`).
+pub fn deal_mandate_deck_indices(
+    table_id: TableId,
+    seat_count: u8,
+    deal_seed: [u8; 32],
+    deck_len: usize,
+) -> Result<Vec<usize>, EngineError> {
+    let n = usize::from(seat_count);
+    if !(4..=6).contains(&seat_count) || deck_len < n {
+        return Err(EngineError::InvalidConfig(format!(
+            "invalid mandate deal config: seat_count={seat_count}, deck_len={deck_len}"
+        )));
+    }
+    if deal_seed == [0u8; 32] {
+        return Err(EngineError::InvalidConfig(
+            "degenerate all-zero mandate deal_seed is forbidden".to_owned(),
+        ));
+    }
+    let mut indices: Vec<usize> = (0..deck_len).collect();
+    for i in (1..indices.len()).rev() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-core/mandate-deal/v2");
+        hasher.update(deal_seed);
+        hasher.update(table_id.0.to_le_bytes());
+        hasher.update(u64::try_from(i).unwrap_or(u64::MAX).to_le_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        let j = width_independent_index(digest, i + 1);
+        indices.swap(i, j);
+    }
+    Ok(indices.into_iter().take(n).collect())
+}
+
 /// Deterministically shuffles `deck` and deals one [`CommitmentHash`] and [`MandateReveal`] per
 /// seat from caller-supplied 256-bit `deal_seed` and per-seat `seat_salts`.
 pub fn deal_graded_mandates_with_entropy(
@@ -528,17 +684,6 @@ pub fn deal_graded_mandates_with_entropy(
     deck: &[GradedMandateCard],
 ) -> Result<(Vec<CommitmentHash>, SealedMandateDeal), EngineError> {
     let n = usize::from(seat_count);
-    if !(4..=6).contains(&seat_count) || deck.len() < n {
-        return Err(EngineError::InvalidConfig(format!(
-            "invalid mandate deal config: seat_count={seat_count}, deck_len={}",
-            deck.len()
-        )));
-    }
-    if deal_seed == [0u8; 32] {
-        return Err(EngineError::InvalidConfig(
-            "degenerate all-zero mandate deal_seed is forbidden".to_owned(),
-        ));
-    }
     if seat_salts.len() != n {
         return Err(EngineError::InvalidConfig(format!(
             "expected {n} mandate seat_salts, got {}",
@@ -556,21 +701,11 @@ pub fn deal_graded_mandates_with_entropy(
         }
         card.kind.validate_for_seat_count(seat_count)?;
     }
-    let mut indices: Vec<usize> = (0..deck.len()).collect();
-    for i in (1..indices.len()).rev() {
-        let mut hasher = Sha256::new();
-        hasher.update(b"league-core/mandate-deal/v2");
-        hasher.update(deal_seed);
-        hasher.update(table_id.0.to_le_bytes());
-        hasher.update(u64::try_from(i).unwrap_or(u64::MAX).to_le_bytes());
-        let digest: [u8; 32] = hasher.finalize().into();
-        let j = width_independent_index(digest, i + 1);
-        indices.swap(i, j);
-    }
+    let dealt_indices = deal_mandate_deck_indices(table_id, seat_count, deal_seed, deck.len())?;
 
     let mut commits = Vec::with_capacity(n);
     let mut reveals = Vec::with_capacity(n);
-    for (seat_idx, &card_idx) in indices.iter().take(n).enumerate() {
+    for (seat_idx, card_idx) in dealt_indices.into_iter().enumerate() {
         let salt = &seat_salts[seat_idx];
         salt.validate().map_err(|err| {
             EngineError::InvalidConfig(format!("invalid salt for seat {seat_idx}: {err}"))
@@ -730,29 +865,179 @@ pub fn derive_turn_beacon(seed: u64, table_id: TableId, turn: Turn) -> [u8; 32] 
     hasher.finalize().into()
 }
 
-/// Maps a 32-byte beacon uniformly into basis points `[0, 10_000)` for stochastic close checks.
+/// Maps a 32-byte stream uniformly into basis points `[0, 10_000)` using rejection across its
+/// four 64-bit little-endian lanes so modulo bias is strictly zero.
 #[must_use]
 pub fn beacon_roll_bps(beacon: [u8; 32]) -> Bps {
+    const UNBIASED_LIMIT: u64 = (u64::MAX / 10_000) * 10_000;
+    for &lane in beacon.as_chunks::<8>().0 {
+        let v = u64::from_le_bytes(lane);
+        if v < UNBIASED_LIMIT {
+            return (v % 10_000) as Bps;
+        }
+    }
     let mut le = [0u8; 8];
     le.copy_from_slice(&beacon[0..8]);
     (u64::from_le_bytes(le) % 10_000) as Bps
 }
 
-/// Deterministically breaks an election plurality tie among `tied` seat indices using `turn_beacon`.
+/// Domain-separated RFC 5869 HKDF stream categories (`#31`, `2026-11-15` ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RngDomain {
+    /// 3-stage Horizon Shock sampling (`"shocks"`).
+    Shocks,
+    /// Stochastic season closing bell roll (`"close_roll"`).
+    CloseRoll,
+    /// Council election plurality tie-breaker (`"tiebreak"`).
+    Tiebreak,
+    /// Phase-1 simultaneous DEX batch tie-breaker (`"batch_tie"`).
+    BatchTie,
+}
+
+impl RngDomain {
+    /// Canonical ASCII label embedded in RFC 5869 `HKDF-Expand` info strings.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Shocks => "shocks",
+            Self::CloseRoll => "close_roll",
+            Self::Tiebreak => "tiebreak",
+            Self::BatchTie => "batch_tie",
+        }
+    }
+}
+
+/// Expands a 32-byte pseudorandom stream from `turn_beacon` via RFC 5869 `HKDF-SHA256`,
+/// domain-separated by `(table_id, domain, turn, subtag)` (`#31`, Seed-28 Report §2).
 #[must_use]
-pub fn break_tie_with_beacon(beacon: [u8; 32], domain_tag: &[u8], tied: &[u8]) -> u8 {
+pub fn expand_turn_stream(
+    turn_beacon: [u8; 32],
+    table_id: TableId,
+    turn: Turn,
+    domain: RngDomain,
+    subtag: &[u8],
+) -> [u8; 32] {
+    let mut salt_hasher = Sha256::new();
+    salt_hasher.update(b"league-core/hkdf-salt/v2|");
+    salt_hasher.update(table_id.0.to_le_bytes());
+    let salt: [u8; 32] = salt_hasher.finalize().into();
+
+    let hk = Hkdf::<Sha256>::new(Some(&salt), &turn_beacon);
+    let mut info = Vec::with_capacity(16 + domain.as_str().len() + subtag.len());
+    info.extend_from_slice(b"v1|");
+    info.extend_from_slice(domain.as_str().as_bytes());
+    info.push(b'|');
+    info.push(turn.0);
+    if !subtag.is_empty() {
+        info.push(b'|');
+        info.extend_from_slice(subtag);
+    }
+
+    let mut okm = [0u8; 32];
+    if hk.expand(&info, &mut okm).is_err() {
+        unreachable!("32-byte HKDF-SHA256 output is always within 255 * 32 limit");
+    }
+    okm
+}
+
+/// Canonical Sweep turns on which a new 3-stage Horizon Shock `(t+1, t+2, t+3)` is drawn from the
+/// turn's HKDF `"shocks"` stream (`#31`, realizing at turns `5, 10, 15, 20 <= 23`).
+pub const DEFAULT_SHOCK_DRAW_TURNS: [u8; 4] = [2, 7, 12, 17];
+
+/// Draws any 3-stage [`ScheduledShockSpec`] triggered at Sweep Step 8 of `turn` from `turn_beacon`
+/// using the domain-separated HKDF `"shocks"` stream (`#31`).
+#[must_use]
+pub fn draw_shocks_for_turn(
+    table_id: TableId,
+    seat_count: u8,
+    turn: Turn,
+    turn_beacon: [u8; 32],
+) -> Vec<ScheduledShockSpec> {
+    if !(4..=6).contains(&seat_count) || !DEFAULT_SHOCK_DRAW_TURNS.contains(&turn.0) {
+        return Vec::new();
+    }
+    let okm = expand_turn_stream(turn_beacon, table_id, turn, RngDomain::Shocks, b"");
+    let mut b0 = [0u8; 8];
+    let mut b1 = [0u8; 8];
+    let mut b2 = [0u8; 8];
+    b0.copy_from_slice(&okm[0..8]);
+    b1.copy_from_slice(&okm[8..16]);
+    b2.copy_from_slice(&okm[16..24]);
+
+    let target_seat = (u64::from_le_bytes(b0) % u64::from(seat_count)) as u8;
+    let kind = match u64::from_le_bytes(b1) % 4 {
+        0 => ShockKind::SupplyFreeze,
+        1 => ShockKind::TariffHoliday,
+        2 => ShockKind::DemandSurge,
+        _ => ShockKind::SpoilageSpike,
+    };
+    let (lo, hi): (u64, u64) = match kind {
+        ShockKind::SupplyFreeze => (1_800, 3_500),
+        ShockKind::TariffHoliday => (5_000, 10_000),
+        ShockKind::DemandSurge | ShockKind::SpoilageSpike => (1_500, 3_000),
+    };
+    let span = hi - lo + 1;
+    let magnitude_bps = (lo + (u64::from_le_bytes(b2) % span)) as Bps;
+
+    vec![ScheduledShockSpec {
+        hint_turn: turn.0 + 1,
+        forecast_turn: turn.0 + 2,
+        realize_turn: turn.0 + 3,
+        target_seat,
+        kind,
+        magnitude_bps,
+    }]
+}
+
+/// Evaluates the stochastic season closing roll (in `0..10_000 bps`) from `turn_beacon` using the
+/// domain-separated HKDF `"close_roll"` stream (`#31`).
+#[must_use]
+pub fn close_roll_bps_from_beacon(turn_beacon: [u8; 32], table_id: TableId, turn: Turn) -> Bps {
+    let okm = expand_turn_stream(turn_beacon, table_id, turn, RngDomain::CloseRoll, b"");
+    beacon_roll_bps(okm)
+}
+
+/// Deterministically breaks an election plurality tie among `tied` seat indices using the
+/// domain-separated HKDF `"tiebreak"` stream for `(table_id, turn, domain_tag)`.
+#[must_use]
+pub fn break_tie_with_turn_beacon(
+    turn_beacon: [u8; 32],
+    table_id: TableId,
+    turn: Turn,
+    domain_tag: &[u8],
+    tied: &[u8],
+) -> u8 {
     match tied {
         [] => 0,
         [only] => *only,
         _ => {
-            let mut hasher = Sha256::new();
-            hasher.update(b"league-core/tie-break/v2");
-            hasher.update(domain_tag);
-            hasher.update(beacon);
-            let digest: [u8; 32] = hasher.finalize().into();
-            tied[width_independent_index(digest, tied.len())]
+            let okm =
+                expand_turn_stream(turn_beacon, table_id, turn, RngDomain::Tiebreak, domain_tag);
+            tied[width_independent_index(okm, tied.len())]
         }
     }
+}
+
+/// Deterministically breaks an election plurality tie among `tied` seat indices using `beacon`
+/// expanded via RFC 5869 HKDF (`RngDomain::Tiebreak`).
+#[must_use]
+pub fn break_tie_with_beacon(beacon: [u8; 32], domain_tag: &[u8], tied: &[u8]) -> u8 {
+    break_tie_with_turn_beacon(beacon, TableId(0), Turn(0), domain_tag, tied)
+}
+
+/// Derives a deterministic 256-bit final-standings tie-break key for `seat` at terminal `turn`
+/// from `turn_beacon` via RFC 5869 `HKDF-SHA256` (`RngDomain::Tiebreak`, subtag `b"standings|<seat>"`).
+#[must_use]
+pub fn standings_tie_key(
+    turn_beacon: [u8; 32],
+    table_id: TableId,
+    turn: Turn,
+    seat: u8,
+) -> [u8; 32] {
+    let subtag = [
+        b's', b't', b'a', b'n', b'd', b'i', b'n', b'g', b's', b'|', seat,
+    ];
+    expand_turn_stream(turn_beacon, table_id, turn, RngDomain::Tiebreak, &subtag)
 }
 
 /// League of Entropy drand `quicknet` genesis Unix timestamp (`2023-08-23T15:09:27Z`).
@@ -874,6 +1159,180 @@ pub fn verify_drand_quicknet_beacon(
     if derived != expected_beacon {
         return Err(EngineError::InvalidOrder(format!(
             "turn {} turn_beacon does not equal SHA-256(drand_signature)",
+            turn.0
+        )));
+    }
+    Ok(())
+}
+
+/// Byte length of a compressed `ristretto255` public key for the RFC 9381 ECVRF construction
+/// with C2SP's `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not an
+/// IANA-registered suite in RFC 9381).
+pub const EVAL_VRF_PUBKEY_BYTES: usize = 32;
+
+/// Byte length of a proof `pi_string` (`Gamma || c || s`) for the RFC 9381 ECVRF construction
+/// with C2SP's `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not an
+/// IANA-registered suite in RFC 9381).
+pub const EVAL_VRF_PROOF_BYTES: usize = 80;
+
+/// Sealed 256-bit orchestrator entropy seed for `TableMode::Eval` randomness (`#31` comment,
+/// `2026-11-15` ruling).
+///
+/// Held strictly by the isolated Eval orchestrator (never derived from the public layout `seed`,
+/// never stored in `SeasonReplayLog`, and non-serializable so raw bytes cannot be written in clear).
+/// Redacts raw bytes in `Debug` output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SealedEvalSeed([u8; 32]);
+
+impl fmt::Debug for SealedEvalSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SealedEvalSeed(<hidden>)")
+    }
+}
+
+impl SealedEvalSeed {
+    /// Returns `true` when all 32 bytes are zero.
+    #[must_use]
+    pub fn is_degenerate(&self) -> bool {
+        self.0 == [0u8; 32]
+    }
+
+    /// Wraps caller-supplied 256-bit entropy after rejecting `[0u8; 32]`.
+    pub fn try_from_bytes(bytes: [u8; 32]) -> Result<Self, EngineError> {
+        if bytes == [0u8; 32] {
+            return Err(EngineError::InvalidConfig(
+                "degenerate all-zero SealedEvalSeed is forbidden".to_owned(),
+            ));
+        }
+        Ok(Self(bytes))
+    }
+
+    /// Draws fresh non-zero 256-bit Eval entropy from OS CSPRNG (`getrandom`).
+    pub fn generate() -> Result<Self, EngineError> {
+        Ok(Self(draw_nonzero_256_bits()?))
+    }
+
+    fn secret_key(&self) -> Result<vrf_r255::SecretKey, EngineError> {
+        if self.is_degenerate() {
+            return Err(EngineError::InvalidConfig(
+                "degenerate all-zero SealedEvalSeed is forbidden".to_owned(),
+            ));
+        }
+        let rng = ChaCha20Rng::from_seed(self.0);
+        Ok(vrf_r255::SecretKey::generate(rng))
+    }
+
+    /// Returns the 32-byte `ristretto255` VRF public key (`PK_eval`, RFC 9381 ECVRF construction
+    /// with C2SP's `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) committed in
+    /// `TableSpec::eval_vrf_pubkey` and `SeasonReplayLog::eval_vrf_pubkey`.
+    pub fn public_key_bytes(&self) -> Result<[u8; EVAL_VRF_PUBKEY_BYTES], EngineError> {
+        let sk = self.secret_key()?;
+        Ok(vrf_r255::PublicKey::from(sk).to_bytes())
+    }
+
+    /// Produces the deterministic Turn `turn` `(turn_beacon, vrf_proof)` pair over
+    /// [`eval_vrf_alpha`], where `turn_beacon` is the leading 32 bytes of the 64-byte
+    /// `ECVRF_proof_to_hash` output `beta_t` under the RFC 9381 ECVRF construction with C2SP's
+    /// `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`).
+    pub fn prove_turn(
+        &self,
+        table_id: TableId,
+        turn: Turn,
+    ) -> Result<([u8; 32], [u8; EVAL_VRF_PROOF_BYTES]), EngineError> {
+        if turn.0 == 0 {
+            return Err(EngineError::InvalidOrder(
+                "Eval VRF turn must be >= 1".to_owned(),
+            ));
+        }
+        let sk = self.secret_key()?;
+        let pk = vrf_r255::PublicKey::from(sk);
+        let alpha = eval_vrf_alpha(table_id, turn);
+        let proof = sk.prove(&alpha);
+        let proof_bytes = proof.to_bytes();
+        let Some(beta) = Option::<[u8; 64]>::from(pk.verify(&alpha, &proof)) else {
+            return Err(EngineError::InvalidOrder(
+                "internal Eval VRF self-verification failed".to_owned(),
+            ));
+        };
+        let mut beacon = [0u8; 32];
+        beacon.copy_from_slice(&beta[..32]);
+        Ok((beacon, proof_bytes))
+    }
+}
+
+/// Canonical domain-separated VRF input message `alpha_t` for `(table_id, turn)`.
+#[must_use]
+pub fn eval_vrf_alpha(table_id: TableId, turn: Turn) -> [u8; 33] {
+    let mut alpha = [0u8; 33];
+    alpha[..24].copy_from_slice(b"league-core/eval-vrf/v1|");
+    alpha[24..32].copy_from_slice(&table_id.0.to_le_bytes());
+    alpha[32] = turn.0;
+    alpha
+}
+
+/// Validates `eval_vrf_pubkey` (`validate_key = TRUE` per the RFC 9381 §5.4.5 ECVRF construction
+/// over C2SP's `ristretto255` ciphersuite).
+pub fn validate_eval_vrf_pubkey(
+    eval_vrf_pubkey: [u8; EVAL_VRF_PUBKEY_BYTES],
+) -> Result<(), EngineError> {
+    if vrf_r255::PublicKey::from_bytes(eval_vrf_pubkey).is_none() {
+        return Err(EngineError::InvalidConfig(
+            "invalid or identity Eval VRF ristretto255 public key".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Verifies an `EVAL_VRF_PROOF_BYTES` proof under the RFC 9381 ECVRF construction with C2SP's
+/// `ristretto255` ciphersuite (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not registered in RFC 9381)
+/// against `eval_vrf_pubkey` for `(table_id, turn)` and extracts the unique 32-byte `turn_beacon`.
+pub fn verify_and_extract_eval_vrf_beacon(
+    eval_vrf_pubkey: [u8; EVAL_VRF_PUBKEY_BYTES],
+    table_id: TableId,
+    turn: Turn,
+    vrf_proof: &[u8],
+) -> Result<[u8; 32], EngineError> {
+    if turn.0 == 0 {
+        return Err(EngineError::InvalidOrder(
+            "Eval VRF turn must be >= 1".to_owned(),
+        ));
+    }
+    let pk = vrf_r255::PublicKey::from_bytes(eval_vrf_pubkey).ok_or_else(|| {
+        EngineError::InvalidConfig("invalid Eval VRF ristretto255 public key".to_owned())
+    })?;
+    let proof_arr: [u8; EVAL_VRF_PROOF_BYTES] = vrf_proof.try_into().map_err(|_| {
+        EngineError::InvalidOrder(format!(
+            "Eval VRF proof must be {EVAL_VRF_PROOF_BYTES} bytes, got {}",
+            vrf_proof.len()
+        ))
+    })?;
+    let proof = vrf_r255::Proof::from_bytes(proof_arr).ok_or_else(|| {
+        EngineError::InvalidOrder("malformed or non-canonical Eval VRF proof".to_owned())
+    })?;
+    let alpha = eval_vrf_alpha(table_id, turn);
+    let beta: [u8; 64] = Option::from(pk.verify(&alpha, &proof)).ok_or_else(|| {
+        EngineError::InvalidOrder(format!(
+            "turn {} Eval VRF proof failed verification against eval_vrf_pubkey",
+            turn.0
+        ))
+    })?;
+    let mut beacon = [0u8; 32];
+    beacon.copy_from_slice(&beta[..32]);
+    Ok(beacon)
+}
+
+/// Verifies an Eval-mode VRF proof and confirms the derived beacon equals `expected_beacon`.
+pub fn verify_eval_vrf_beacon(
+    eval_vrf_pubkey: [u8; EVAL_VRF_PUBKEY_BYTES],
+    table_id: TableId,
+    turn: Turn,
+    vrf_proof: &[u8],
+    expected_beacon: [u8; 32],
+) -> Result<(), EngineError> {
+    let derived = verify_and_extract_eval_vrf_beacon(eval_vrf_pubkey, table_id, turn, vrf_proof)?;
+    if derived != expected_beacon {
+        return Err(EngineError::InvalidOrder(format!(
+            "turn {} turn_beacon does not match verified Eval VRF proof output",
             turn.0
         )));
     }

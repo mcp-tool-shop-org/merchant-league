@@ -103,7 +103,7 @@ fn standalone_xrpld_live_harness() -> Result<(), Box<dyn std::error::Error>> {
         let c0 = &report.partial_fill_tariff.cases[0];
         assert_eq!(c0.currency, "R0A");
         assert_eq!(c0.tariff_bps, 800);
-        assert_eq!(c0.core_trade_cred_milli, 333);
+        assert_eq!(c0.core_trade_cred_milli, 416);
         assert_eq!(c0.core_tariff_milli, 27);
         assert_eq!(c0.core_buyer_net_milli, 306);
         assert_eq!(c0.xrpld_seller_commodity_delta, "0->-0.333");
@@ -114,7 +114,7 @@ fn standalone_xrpld_live_harness() -> Result<(), Box<dyn std::error::Error>> {
         let c1 = &report.partial_fill_tariff.cases[1];
         assert_eq!(c1.currency, "R0S");
         assert_eq!(c1.tariff_bps, 750);
-        assert_eq!(c1.core_trade_cred_milli, 417);
+        assert_eq!(c1.core_trade_cred_milli, 458);
         assert_eq!(c1.core_tariff_milli, 25);
         assert_eq!(c1.core_buyer_net_milli, 308);
         assert_eq!(c1.xrpld_seller_commodity_delta, "10->9.642025");
@@ -125,7 +125,7 @@ fn standalone_xrpld_live_harness() -> Result<(), Box<dyn std::error::Error>> {
         let c2 = &report.partial_fill_tariff.cases[2];
         assert_eq!(c2.currency, "R0T");
         assert_eq!(c2.tariff_bps, 833);
-        assert_eq!(c2.core_trade_cred_milli, 1_000);
+        assert_eq!(c2.core_trade_cred_milli, 1_100);
         assert_eq!(c2.core_tariff_milli, 84);
         assert_eq!(c2.core_buyer_net_milli, 916);
         assert_eq!(c2.xrpld_seller_commodity_delta, "1->0");

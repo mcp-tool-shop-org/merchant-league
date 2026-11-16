@@ -3,10 +3,9 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
-pub const GENERATOR_VERSION: &str = "league-gen/v2.4.0";
+pub const GENERATOR_VERSION: &str = "league-gen/v2.4.1";
 
 /// Fixed ledger numeraire currency code specified by `docs/design-v2.md` §1.2.
 pub const NUMERAIRE_CODE: &str = "CRED";
@@ -507,8 +506,8 @@ impl MandateObjective {
 /// One card in the public Turn-1 graded Charter Mandate deck (`3.0..=8.0 VP` scale per T5 / A7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MandateCardSpec {
-    /// Stable deck slot identifier (`1..=M`).
-    pub card_id: u8,
+    /// Stable deck slot identifier (`1..=M`, widened to `u16` matching [`league_core::GradedMandateCard`]).
+    pub card_id: u16,
     /// Structural win-condition objective.
     pub kind: MandateObjective,
     /// Provisional or rollout-measured completion frequency (`0..=10_000 bps`).
@@ -518,61 +517,123 @@ pub struct MandateCardSpec {
 }
 
 /// Maps empirical/structural completion frequency (`0..=10_000 bps`) monotonically onto
-/// `[MIN_MANDATE_BONUS_VP, MAX_MANDATE_BONUS_VP]` (`3.0..=8.0 VP`, exact milli-VP grid matching
-/// `league-core::bonus_equity_for_completion_bps`).
+/// `[MIN_MANDATE_BONUS_VP, MAX_MANDATE_BONUS_VP]` (`3.0..=8.0 VP`), delegating directly to
+/// [`league_core::bonus_points_milli_for_completion_bps`] (`#32` `B-2`).
 #[must_use]
 pub fn bonus_vp_for_completion_bps(completion_bps: u16) -> f64 {
-    let clamped = i64::from(completion_bps.min(BPS_SCALE));
-    let hard_bps = i64::from(BPS_SCALE) - clamped;
-    let milli_vp = 3_000_i64 + (5_000_i64 * hard_bps) / i64::from(BPS_SCALE);
-    (milli_vp as f64) / 1_000.0
+    (league_core::bonus_points_milli_for_completion_bps(completion_bps) as f64) / 1_000.0
 }
 
-/// Deals `seat_count` distinct [`MandateCardSpec`]s using external 256-bit `deal_seed` entropy
-/// (`B1.3`/`M3`), strictly separate from the public table `seed: u64` and rejecting `[0u8; 32]`.
+impl From<league_core::CreditTier> for CreditRatingTier {
+    fn from(tier: league_core::CreditTier) -> Self {
+        match tier {
+            league_core::CreditTier::Aaa => Self::Aaa,
+            league_core::CreditTier::Bbb => Self::Bbb,
+            league_core::CreditTier::B => Self::B,
+            league_core::CreditTier::D => Self::D,
+        }
+    }
+}
+
+impl From<CreditRatingTier> for league_core::CreditTier {
+    fn from(tier: CreditRatingTier) -> Self {
+        match tier {
+            CreditRatingTier::Aaa => Self::Aaa,
+            CreditRatingTier::Bbb => Self::Bbb,
+            CreditRatingTier::B => Self::B,
+            CreditRatingTier::D => Self::D,
+        }
+    }
+}
+
+impl From<league_core::MandateKind> for MandateObjective {
+    fn from(kind: league_core::MandateKind) -> Self {
+        match kind {
+            league_core::MandateKind::MinProjectEquity { target } => Self::MinProjectEquity {
+                target: (target as f64) / 1_000.0,
+            },
+            league_core::MandateKind::MinRefinedVariety {
+                distinct_goods,
+                min_each,
+            } => Self::MinRefinedVariety {
+                distinct_goods,
+                min_each: (min_each as f64) / 1_000.0,
+            },
+            league_core::MandateKind::MaintainCleanCredit { min_tier } => {
+                Self::MaintainCleanCredit {
+                    min_tier: CreditRatingTier::from(min_tier),
+                }
+            }
+            league_core::MandateKind::MinActivePartners { min_partners } => {
+                Self::MinActivePartners { min_partners }
+            }
+        }
+    }
+}
+
+impl From<league_core::GradedMandateCard> for MandateCardSpec {
+    fn from(card: league_core::GradedMandateCard) -> Self {
+        Self {
+            card_id: card.card_id,
+            kind: MandateObjective::from(card.kind),
+            difficulty_completion_bps: card.difficulty_completion_bps,
+            bonus_vp: (card.bonus_equity as f64) / 1_000.0,
+        }
+    }
+}
+
+impl MandateCardSpec {
+    /// Converts this schema card back into [`league_core::GradedMandateCard`] on the exact
+    /// milli-unit integer grid (`#32` `B-2`).
+    #[must_use]
+    pub fn to_core_card(&self) -> league_core::GradedMandateCard {
+        let kind = match self.kind {
+            MandateObjective::MinProjectEquity { target } => {
+                league_core::MandateKind::MinProjectEquity {
+                    target: (target * 1_000.0).round() as league_core::Units,
+                }
+            }
+            MandateObjective::MinRefinedVariety {
+                distinct_goods,
+                min_each,
+            } => league_core::MandateKind::MinRefinedVariety {
+                distinct_goods,
+                min_each: (min_each * 1_000.0).round() as league_core::Units,
+            },
+            MandateObjective::MaintainCleanCredit { min_tier } => {
+                league_core::MandateKind::MaintainCleanCredit {
+                    min_tier: league_core::CreditTier::from(min_tier),
+                }
+            }
+            MandateObjective::MinActivePartners { min_partners } => {
+                league_core::MandateKind::MinActivePartners { min_partners }
+            }
+        };
+        league_core::GradedMandateCard {
+            card_id: self.card_id,
+            kind,
+            difficulty_completion_bps: self.difficulty_completion_bps,
+            bonus_equity: (self.bonus_vp * 1_000.0).round() as league_core::Units,
+        }
+    }
+}
+
+/// Deals `seat_count` distinct [`MandateCardSpec`] indices for `table_id` using
+/// [`league_core::deal_mandate_deck_indices`] (`#32` `B-2`, `B1.3`/`M3`), strictly separate from
+/// the public table `seed: u64` and rejecting `[0u8; 32]`.
 pub fn deal_mandate_indices_with_entropy(
+    table_id: league_core::TableId,
     mandate_deck: &[MandateCardSpec],
     seat_count: SeatCount,
     deal_seed: [u8; 32],
 ) -> Result<Vec<usize>, FeasibilityError> {
-    if deal_seed == [0u8; 32] {
-        return Err(FeasibilityError::InvalidTable(
-            "mandate deal_seed must be non-zero 256-bit entropy".to_owned(),
-        ));
-    }
-    let n = seat_count.as_usize();
-    if mandate_deck.len() < n {
-        return Err(FeasibilityError::InvalidTable(format!(
-            "mandate_deck length {} is smaller than seat_count {n}",
-            mandate_deck.len()
-        )));
-    }
-    let mut order: Vec<usize> = (0..mandate_deck.len()).collect();
-    for i in 0..n {
-        let remaining = order.len() - i;
-        let bound = remaining as u64;
-        let limit = u64::MAX - (u64::MAX % bound);
-        let mut counter = 0u64;
-        let offset = loop {
-            let mut hasher = Sha256::new();
-            hasher.update(b"MLV2|MANDATE_DEAL|");
-            hasher.update(deal_seed);
-            hasher.update((i as u64).to_le_bytes());
-            hasher.update(counter.to_le_bytes());
-            let digest = hasher.finalize();
-            let word = u64::from_le_bytes([
-                digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6],
-                digest[7],
-            ]);
-            if word < limit {
-                break (word % bound) as usize;
-            }
-            counter = counter.wrapping_add(1);
-        };
-        order.swap(i, i + offset);
-    }
-    order.truncate(n);
-    Ok(order)
+    league_core::deal_mandate_deck_indices(
+        table_id,
+        seat_count.as_u8(),
+        deal_seed,
+        mandate_deck.len(),
+    )
+    .map_err(|err| FeasibilityError::InvalidTable(err.to_string()))
 }
 
 fn round3_schema(v: f64) -> f64 {
@@ -616,90 +677,23 @@ pub fn default_projects_for_seats(seats: &[SeatSpec]) -> Vec<ProjectSpec> {
 }
 
 /// Builds the canonical 8-card Turn-1 public graded Charter Mandate deck (`3.0..=8.0 VP` scale
-/// per `T5`/`A7`), strictly enforcing B1.2's `1..=seat_count - 2` bounds on `distinct_goods`
-/// and `min_partners`.
-///
-/// The `difficulty_completion_bps` values remain provisional structural weights; empirical rollout
-/// completion is measured in [`crate::RolloutGradingReport`], and full VP calibration from test
-/// games stays queued per the Director's ruling (`T5`).
+/// per `T5`/`A7`), delegating directly to [`league_core::graded_mandate_deck_for_mean_project_value`]
+/// so `league-gen` and `league-core` share a single mandate deck source (`#32` `B-2`).
 #[must_use]
 pub fn default_mandate_deck_for_table(
     seat_count: SeatCount,
     seats: &[SeatSpec],
 ) -> Vec<MandateCardSpec> {
-    let n = seats.len().max(1);
-    let mean_proj = seats.iter().map(|s| s.refined_project_value).sum::<f64>() / (n as f64);
-    let max_safe = seat_count.as_u8().saturating_sub(2).max(1);
-    let specs = [
-        (
-            1,
-            MandateObjective::MaintainCleanCredit {
-                min_tier: CreditRatingTier::Bbb,
-            },
-            10_000,
-        ),
-        (
-            2,
-            MandateObjective::MinProjectEquity {
-                target: round3_schema(mean_proj * 7.0),
-            },
-            8_000,
-        ),
-        (
-            3,
-            MandateObjective::MinRefinedVariety {
-                distinct_goods: max_safe.min(2),
-                min_each: 1.5,
-            },
-            7_000,
-        ),
-        (
-            4,
-            MandateObjective::MinActivePartners {
-                min_partners: max_safe,
-            },
-            6_000,
-        ),
-        (
-            5,
-            MandateObjective::MaintainCleanCredit {
-                min_tier: CreditRatingTier::Aaa,
-            },
-            4_000,
-        ),
-        (
-            6,
-            MandateObjective::MinRefinedVariety {
-                distinct_goods: max_safe,
-                min_each: 3.0,
-            },
-            2_500,
-        ),
-        (
-            7,
-            MandateObjective::MinProjectEquity {
-                target: round3_schema(mean_proj * 12.5),
-            },
-            1_500,
-        ),
-        (
-            8,
-            MandateObjective::MinProjectEquity {
-                target: round3_schema(mean_proj * 16.5),
-            },
-            0,
-        ),
-    ];
-    specs
+    let mean_milli = if seats.is_empty() {
+        0
+    } else {
+        let sum: f64 = seats.iter().map(|s| s.refined_project_value).sum();
+        let mean = sum / (seats.len() as f64);
+        ((mean * (league_core::UNIT_SCALE as f64)).round() as league_core::Units).max(1)
+    };
+    league_core::graded_mandate_deck_for_mean_project_value(seat_count.as_u8(), mean_milli)
         .into_iter()
-        .map(
-            |(card_id, kind, difficulty_completion_bps)| MandateCardSpec {
-                card_id,
-                kind,
-                difficulty_completion_bps,
-                bonus_vp: bonus_vp_for_completion_bps(difficulty_completion_bps),
-            },
-        )
+        .map(MandateCardSpec::from)
         .collect()
 }
 
@@ -1045,7 +1039,7 @@ mod tests {
 
     #[test]
     fn mandate_entropy_deal_rejects_zero_seed_and_deals_distinct_cards() {
-        let deck: Vec<MandateCardSpec> = (1..=8u8)
+        let deck: Vec<MandateCardSpec> = (1..=8u16)
             .map(|id| MandateCardSpec {
                 card_id: id,
                 kind: MandateObjective::MaintainCleanCredit {
@@ -1055,15 +1049,40 @@ mod tests {
                 bonus_vp: bonus_vp_for_completion_bps(5_000),
             })
             .collect();
-        assert!(deal_mandate_indices_with_entropy(&deck, SeatCount::Five, [0u8; 32]).is_err());
+        assert!(
+            deal_mandate_indices_with_entropy(
+                league_core::TableId(42),
+                &deck,
+                SeatCount::Five,
+                [0u8; 32],
+            )
+            .is_err()
+        );
 
-        let Ok(deal) = deal_mandate_indices_with_entropy(&deck, SeatCount::Six, [0xA5u8; 32])
-        else {
+        let Ok(deal) = deal_mandate_indices_with_entropy(
+            league_core::TableId(42),
+            &deck,
+            SeatCount::Six,
+            [0xA5u8; 32],
+        ) else {
             panic!("non-zero 256-bit entropy deals cleanly");
         };
         assert_eq!(deal.len(), 6);
         let uniq: std::collections::BTreeSet<usize> = deal.iter().copied().collect();
         assert_eq!(uniq.len(), 6);
+
+        // C-2: card_id > u8::MAX (e.g. 300) round-trips losslessly without saturating to 255.
+        let wide_core = league_core::GradedMandateCard {
+            card_id: 300,
+            kind: league_core::MandateKind::MaintainCleanCredit {
+                min_tier: league_core::CreditTier::Aaa,
+            },
+            difficulty_completion_bps: 4_000,
+            bonus_equity: 6_000,
+        };
+        let wide_spec = MandateCardSpec::from(wide_core);
+        assert_eq!(wide_spec.card_id, 300);
+        assert_eq!(wide_spec.to_core_card(), wide_core);
     }
 
     #[test]
