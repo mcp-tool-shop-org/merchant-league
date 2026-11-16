@@ -728,16 +728,30 @@ fn nfkc_and_strip_marks(raw: &str) -> String {
         .collect()
 }
 
-/// Return `true` iff `c` is one of the six ruled visible token separators (`P43-B1`, `P43-C1`):
-/// ASCII space `U+0020`, `\t`, `\n`, `\r`, NBSP `U+00A0`, or ideographic space `U+3000`.
+/// Return `true` iff `c` is one of the 11 ruled visible or line-break token separators
+/// (`P43-B1`, `P43-C1`, `P44-C2`): ASCII space `U+0020`, `\t` (`U+0009`), `\n` (`U+000A`), `VT`
+/// (`U+000B`), `FF` (`U+000C`), `\r` (`U+000D`), `NEL` (`U+0085`), NBSP `U+00A0`, `LINE SEPARATOR`
+/// (`U+2028`), `PARAGRAPH SEPARATOR` (`U+2029`), or ideographic space `U+3000`.
 ///
-/// Every other Unicode `White_Space` code point (such as hair space `U+200A`, thin space `U+2009`,
-/// `U+2000..=U+200A`, `U+202F`, `U+205F`, Ogham `U+1680`, `VT` `U+000B`, `FF` `U+000C`, `NEL`
-/// `U+0085`, and `U+2028`/`U+2029`) does NOT split tokens and is stripped inside the token like
-/// punctuation (`P43-B1`). Splitting happens BEFORE NFKC so NFKC `<compat> 0020` decompositions
-/// of `U+2000..=U+200A` / `U+202F` / `U+205F` never create token boundaries.
+/// Every other Unicode `White_Space` code point (all 14 remaining: Ogham `U+1680`, `U+2000..=U+200A`
+/// including hair space `U+200A` and thin space `U+2009`, `U+202F`, and `U+205F`) does NOT split
+/// tokens and is stripped inside the token like punctuation (`P43-B1`, `P44-C2`). Splitting happens
+/// BEFORE NFKC so NFKC `<compat> 0020` decompositions of `U+2000..=U+200A` / `U+202F` / `U+205F`
+/// never create token boundaries.
 fn is_visible_token_whitespace(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{00A0}' | '\u{3000}')
+    matches!(
+        c,
+        ' ' | '\t'
+            | '\n'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\r'
+            | '\u{0085}'
+            | '\u{00A0}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{3000}'
+    )
 }
 
 /// Hand-built single-character Latin fold table **inspired by** UTS #39 confusables (`C-19`, `C-22`),
@@ -905,18 +919,23 @@ fn fold_token_letters(raw_token: &str, leet: bool) -> String {
 /// Return `true` if `raw` contains `"note"` (or `pad_key`, default `"notes"`) in any visible-
 /// whitespace-delimited token (or rejoined run of single-letter tokens) after stripping within-
 /// token non-letter separators under Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired
-/// and ASCII leet folds (`P43-B1`, `P43-B2`, `P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
+/// and ASCII leet folds (`P44-B1`, `P44-B2`, `P44-C2`, `P43-B1`, `P43-B2`, `P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
 ///
-/// DO NOT RELAX (`P42-B1` & `P43-B1`/`P43-B2`, Publisher rulings 2026-11-16):
-/// - Split `raw` ONLY on the six visible whitespace separators (`' '`, `\t`, `\n`, `\r`, NBSP
-///   `U+00A0`, and ideographic space `U+3000`); every other Unicode `White_Space` code point (such
-///   as hair space `U+200A`) is removed inside the token like punctuation (`P43-B1`, `P43-C1`).
+/// DO NOT RELAX (`P42-B1`, `P43-B1`/`P43-B2`, & `P44-B1`/`P44-B2`/`P44-C2`, Publisher rulings 2026-11-16):
+/// - Split `raw` ONLY on the 11 visible/line-break whitespace separators (`' '`, `\t`, `\n`,
+///   `VT` `U+000B`, `FF` `U+000C`, `\r`, `NEL` `U+0085`, NBSP `U+00A0`, `U+2028`, `U+2029`, and
+///   ideographic space `U+3000`); every other Unicode `White_Space` code point (all 14 remaining,
+///   such as hair space `U+200A`) is removed inside the token like punctuation (`P43-B1`, `P44-C2`).
 /// - Within each token, strip punctuation, digits (when `!leet`), and other non-letter separators
 ///   while counting CJK and other `char::is_alphabetic` characters as letters (`P41-C2`).
+/// - Skip any token whose folded form is empty (`folded_tok.is_empty()` — punctuation-only or
+///   digit-only) so it neither joins nor breaks an active single-letter run (`P44-B1`, refusing
+///   `n - o - t - e`, `n , o , t , e`, `n _ o _ t _ e`, `n · o · t · e`, `n 1 o 2 t 3 e`).
 /// - Rejoin consecutive tokens whose folded form is **exactly one letter** (`chars().count() == 1`)
-///   into one token before checking (`P43-B2`, refusing `n o t e`, `n o t e s`, `N O T E S`, while
-///   keeping `"I am"`, `"a b c"`, `"A to Z"`, and multi-letter splits `"Do not exceed"`, `"no tea"`,
-///   `"no tes"`, `"not es"` accepted).
+///   into one token and check it both when followed by a multi-letter word (`P44-B2`, `"Please n o t e this"`)
+///   and at end-of-input (`P43-B2`, refusing `n o t e`, `n o t e s`, `N O T E S`, while keeping
+///   `"I am"`, `"a b c"`, `"A to Z"`, `"a - b"`, `"I - am"`, and multi-letter splits `"Do not exceed"`,
+///   `"no tea"`, `"no tes"`, `"not es"` accepted).
 /// - Do NOT narrow further (e.g. to exact-match or word-equality, or dropping single-letter rejoin)
 ///   and do NOT widen rejoining to multi-letter tokens; `"scratchpad"` (`C-23`) is NOT narrowed.
 pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
@@ -929,6 +948,9 @@ pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
         let mut single_run = String::new();
         for &raw_tok in &raw_tokens {
             let folded_tok = fold_token_letters(raw_tok, leet);
+            if folded_tok.is_empty() {
+                continue;
+            }
             if folded_tok.chars().count() == 1 {
                 single_run.push_str(&folded_tok);
             } else {

@@ -22241,12 +22241,16 @@ fn fix10_p43_b1_c1_c3_visible_whitespace_sweep_nbsp_ideographic_pins_and_digit_d
     ];
     assert_eq!(discovered_ws, expected_all_ws);
 
-    let visible_separators: &[char] = &['\u{0020}', '\t', '\n', '\r', '\u{00A0}', '\u{3000}'];
+    let visible_separators: &[char] = &[
+        '\u{0020}', '\t', '\n', '\u{000B}', '\u{000C}', '\r', '\u{0085}', '\u{00A0}', '\u{2028}',
+        '\u{2029}', '\u{3000}',
+    ];
+    assert_eq!(visible_separators.len(), 11);
 
     // Sweep all 25 Unicode 18.0.0 `White_Space` code points:
     for (idx, &cp) in discovered_ws.iter().enumerate() {
         if visible_separators.contains(&cp) {
-            // The 6 visible separators keep `Do<sep>not<sep>exceed` passing everywhere:
+            // The 11 visible/line-break separators keep `Do<sep>not<sep>exceed` passing everywhere:
             let ok_phrase = format!("Do{cp}not{cp}exceed");
             let ok_schema = json!({
                 "type": "object",
@@ -22280,6 +22284,7 @@ fn fix10_p43_b1_c1_c3_visible_whitespace_sweep_nbsp_ideographic_pins_and_digit_d
                     "timeout_secs": 1.0,
                     "max_gpu_secs_per_call": 1.5,
                     "reasoning": {
+                        "effort": "medium",
                         "chat_template_kwargs": {"hint": ok_phrase},
                         "exclude_from_transcript": true
                     }
@@ -22332,9 +22337,14 @@ fn fix10_p43_b1_c1_c3_visible_whitespace_sweep_nbsp_ideographic_pins_and_digit_d
                     .contains("cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'")
             );
         } else {
-            // Every other White_Space code point (all 19 of them) is stripped inside the token,
-            // so `no<cp>tes` and `n<cp>o<cp>t<cp>e<cp>s` are REFUSED with 0 HTTP and 0 `/tokenize`:
-            for bad_ws_tok in [format!("no{cp}tes"), format!("n{cp}o{cp}t{cp}e{cp}s")] {
+            // Every other White_Space code point (all 14 of them) is stripped inside the token,
+            // so `no<cp>tes`, `n<cp>o<cp>t<cp>e<cp>s`, AND `Do<cp>not<cp>exceed` (`"donotexceed"`,
+            // `P44-C1`) are REFUSED with 0 HTTP and 0 `/tokenize`:
+            for bad_ws_tok in [
+                format!("no{cp}tes"),
+                format!("n{cp}o{cp}t{cp}e{cp}s"),
+                format!("Do{cp}not{cp}exceed"),
+            ] {
                 let s_prose = json!({
                     "type": "object",
                     "properties": {
@@ -23104,6 +23114,266 @@ fn fix10_p43_b3_prebook_check_subcommand_checks_seats_kwargs_wrapper_schema_and_
         assert!(
             parse_args(&bad_args).is_err(),
             "expected CLI error for {bad_args:?}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn fix11_p44_b1_b2_c2_skip_empty_tokens_mid_flush_pin_and_linebreak_separators() -> TestResult {
+    let tmp = TempDir::new()?;
+    let clean_wrapper = tmp.path().join("clean_wrap.md");
+    fs::write(&clean_wrapper, "CLEAN BRIEF FOR PREBOOK CHECK")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_refusal = tmp.path().join("seats_refusal.json");
+    write_local_seats_file(
+        &seats_refusal,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // --- 1. `P44-B1` (empty-folded punctuation/digit tokens neither join nor break a single-letter run)
+    //     & `P44-B2` (mid-input flush when a multi-letter word follows a single-letter run) ---
+    let must_refuse_b1_b2 = [
+        // P44-B1 card cases:
+        "n - o - t - e",
+        "n , o , t , e",
+        "n _ o _ t _ e",
+        "n \u{00B7} o \u{00B7} t \u{00B7} e",
+        "n 1 o 2 t 3 e",
+        // P44-B1 extra variants:
+        "n - o - t - e - s",
+        "N - O - T - E - S",
+        "n - 0 - 7 - 3",
+        // P44-B2 mid-input flush pins (disabling the mid-input flush check MUST fail these):
+        "Please n o t e this",
+        "Keep a n o t e here",
+        "n o t e here",
+        "Please n - o - t - e this",
+    ];
+
+    for (idx, bad) in must_refuse_b1_b2.into_iter().enumerate() {
+        // Schema prose positions (`description`, `title`, `examples`, `default`, `enum`, `const`, `$comment`),
+        // `schema.name`, root property name, and nested property name:
+        for s_bad in [
+            json!({"type": "object", "properties": {"orders": {"type": "string", "description": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "title": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "examples": [bad]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "default": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "enum": ["stay", bad]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "const": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "$comment": bad}, "notes": {"type": "string"}}}),
+            json!({"name": bad, "schema": {"type": "object", "properties": {"orders": {"type": "array"}}}}),
+            json!({"type": "object", "properties": {bad: {"type": "string"}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "object", "properties": {bad: {"type": "string"}}}, "notes": {"type": "string"}}}),
+        ] {
+            let Err(e_s) = ResponseFormatConfig::from_json_str(&s_bad.to_string(), None) else {
+                return Err(
+                    format!("DO-NOT-RELAX P44-B1/B2: '{bad}' must be refused in schema").into(),
+                );
+            };
+            assert!(
+                e_s.to_string()
+                    .contains("outside top-level 'properties.notes'")
+                    || e_s
+                        .to_string()
+                        .contains("cannot name confusable 'notes' variant"),
+                "expected note-specific refusal for '{bad}', got: {e_s}"
+            );
+        }
+
+        // `chat_template_kwargs` value AND key:
+        for kw_json in [json!({"style": bad}), json!({bad: "plain"})] {
+            let bad_seats = json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": kw_json,
+                        "exclude_from_transcript": true
+                    }
+                }]
+            });
+            let Err(e_kw) = SeatFile::from_json_str(&bad_seats.to_string(), None) else {
+                return Err(format!("P44-B1/B2 '{bad}' in kwargs must be refused").into());
+            };
+            assert!(
+                e_kw.to_string()
+                    .contains("cannot mention 'notes' or 'note'"),
+                "unexpected kwargs error for '{bad}': {e_kw}"
+            );
+        }
+
+        // `--wrapper` via `turn` against live loopback server (asserting 0 HTTP and 0 `/tokenize`):
+        let bad_wrap = tmp.path().join(format!("fix11_bad_wrap_{idx}.md"));
+        fs::write(&bad_wrap, bad)?;
+        let g = tmp.path().join(format!("g_fix11_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        assert_eq!(
+            execute_cli(
+                [
+                    "turn",
+                    "--game-dir",
+                    g.to_str().ok_or("utf8")?,
+                    "--day",
+                    "01",
+                    "--round",
+                    "talk",
+                    "--seats",
+                    seats_refusal.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    bad_wrap.to_str().ok_or("utf8")?,
+                    "--no-scratchpad",
+                    "--cap-gpu-secs",
+                    "10.0",
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1
+        );
+        assert!(String::from_utf8_lossy(&err_out).contains("cannot mention 'notes' or 'note'"));
+        assert!(!g.join("relay/setup.json").exists());
+        assert!(!g.join("relay/calls.jsonl").exists());
+    }
+
+    // Explicit card requirement (`P44-B1`): `league-relay prebook-check` with `seats.json` whose seat
+    // has `"style": "n - o - t - e"` in `chat_template_kwargs` MUST exit non-zero:
+    let bad_style_seats = tmp.path().join("bad_style_seats.json");
+    fs::write(
+        &bad_style_seats,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:8000",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 10.0,
+                "max_gpu_secs_per_call": 15.0,
+                "reasoning": {
+                    "effort": "medium",
+                    "chat_template_kwargs": {"style": "n - o - t - e"},
+                    "exclude_from_transcript": true
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+    let mut pb_out = Vec::new();
+    let mut pb_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                bad_style_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                clean_wrapper.to_str().ok_or("utf8")?,
+            ],
+            |_| None,
+            &mut pb_out,
+            &mut pb_err,
+        ),
+        1
+    );
+    assert!(String::from_utf8_lossy(&pb_err).contains("cannot mention 'notes' or 'note'"));
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
+
+    // --- 2. `P44-B1` & `P44-C2` must-pass phrases ---
+    for ok_phrase in [
+        "a - b",
+        "x, y",
+        "I - am",
+        "1 2 3",
+        "Do not\u{000B}exceed",
+        "Do not\u{000C}exceed",
+        "Do not\u{0085}exceed",
+        "Do not\u{2028}exceed",
+        "Do not\u{2029}exceed",
+    ] {
+        let s_ok = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": ok_phrase,
+                    "title": ok_phrase,
+                    "examples": [ok_phrase],
+                    "default": ok_phrase
+                },
+                "notes": {"type": "string"}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s_ok.to_string(), None).is_ok(),
+            "P44-B1/C2 '{ok_phrase:?}' must pass in schema prose"
+        );
+        let ok_seats_p = tmp.path().join("fix11_ok_seats.json");
+        let ok_wrap_p = tmp.path().join("fix11_ok_wrap.md");
+        let ok_schema_p = tmp.path().join("fix11_ok_schema.json");
+        fs::write(
+            &ok_seats_p,
+            json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": {"style": ok_phrase},
+                        "exclude_from_transcript": true
+                    }
+                }]
+            })
+            .to_string(),
+        )?;
+        fs::write(&ok_wrap_p, ok_phrase)?;
+        fs::write(&ok_schema_p, s_ok.to_string())?;
+        pb_out.clear();
+        pb_err.clear();
+        assert_eq!(
+            execute_cli(
+                [
+                    "prebook-check",
+                    "--seats",
+                    ok_seats_p.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    ok_wrap_p.to_str().ok_or("utf8")?,
+                    "--response-schema",
+                    ok_schema_p.to_str().ok_or("utf8")?,
+                ],
+                |_| None,
+                &mut pb_out,
+                &mut pb_err,
+            ),
+            0,
+            "P44-B1/C2 '{ok_phrase:?}' failed prebook-check: {}",
+            String::from_utf8_lossy(&pb_err)
         );
     }
 
