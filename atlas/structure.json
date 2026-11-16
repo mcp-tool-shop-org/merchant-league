@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "05db19680797539eea1ecc155578b1fcfb1004325cefa703eef4dede17871cd9",
+          "hash": "955fd0a84d48bd66c7d688246488c1694ae1603e3d1f651e7171c071a0027509",
           "path": "docs/design-v2.md"
         },
         {
@@ -997,25 +997,25 @@
             {
               "in": "seat_index",
               "kind": "err",
-              "line": 207
+              "line": 217
             },
             {
               "in": "coalition_reach",
               "kind": "err",
-              "line": 396
+              "line": 431
             },
             {
               "in": "coalition_reach",
               "kind": "err",
-              "line": 402
+              "line": 437
             },
             {
               "in": "coalition_reach",
               "kind": "err",
-              "line": 407
+              "line": 442
             }
           ],
-          "hash": "1d7c487666d87ec10b18b454dd6e0d62896d8234fe3333e5186e9482faff48ed",
+          "hash": "f25e6bd5bd2809b709d70594ba2b3e1d50e304261c643239205926569f2076af",
           "importsFiles": [
             "crates/league-core/src/contracts.rs",
             "crates/league-core/src/engine.rs",
@@ -1042,39 +1042,39 @@
               "line": 178
             },
             {
-              "in": "replay_season_inner",
+              "in": "from_json_slice",
               "kind": "err",
-              "line": 234
+              "line": 186
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 240
+              "line": 242
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 247
+              "line": 248
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 253
+              "line": 255
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 263
+              "line": 261
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 274
+              "line": 271
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 285
+              "line": 282
             },
             {
               "in": "replay_season_inner",
@@ -1084,90 +1084,95 @@
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 298
+              "line": 301
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 307
+              "line": 306
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 312
+              "line": 315
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 322
+              "line": 320
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 336
+              "line": 330
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 352
+              "line": 344
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 359
+              "line": 360
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 368
+              "line": 367
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 374
+              "line": 376
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 380
+              "line": 382
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 395
+              "line": 388
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 401
+              "line": 403
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 407
+              "line": 409
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 413
+              "line": 415
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 419
+              "line": 421
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 442
+              "line": 427
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 491
+              "line": 450
+            },
+            {
+              "in": "replay_season_inner",
+              "kind": "err",
+              "line": 499
             }
           ],
-          "hash": "96442558d6bddacee88999b2e242564a6f9081d45155e1ee831d08d8d6421fd2",
+          "hash": "538496160a26f3b1499eb8007b1708f96596b3ddaab111e0886f39b08aaf36c0",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1400,7 +1405,7 @@
           "testsInside": true
         },
         {
-          "hash": "c24cc500701b22c352310a953cd271d8edeb13617742dbeb06688729befac9d5",
+          "hash": "2a1e3a70d8a84b9c12fd1fccd8cce77d1594e93276ec2ad906989c647d3337f0",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1409,7 +1414,7 @@
           "testsInside": true
         },
         {
-          "hash": "fe2ebfb5252f16a8a807817508d566a40487ca5de51dcc2dcd3fa269d37b35e7",
+          "hash": "af2159ba0f558c436196e5474c11c25f24055e1052ea465f6681d730376a98e3",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2899,7 +2904,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "3a4bee6dfefbd52b9b3112e9a0aad2d845346118398e9caa2760f3667bc46a2b",
+          "hash": "02e550ef6327e8ee9a8c9b590037173be1054092eb07671607d89eebe0eb440a",
           "path": "CHANGELOG.md"
         },
         {
@@ -3628,7 +3633,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "3d2906fcd5db0f4b7a2ec5ab97a807278028c244",
+    "commit": "d09f3056c70a199e797061f8e895c2888d0dff9d",
     "tracked": 502
   },
   "landings": [

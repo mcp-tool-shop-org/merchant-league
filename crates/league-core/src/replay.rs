@@ -173,6 +173,14 @@ impl ReplayRecord {
             EngineError::InvalidConfig(format!("replay record section does not parse: {err}"))
         })?;
         if let Some(section) = &extra.state_predicates
+            && section.version != STATE_PREDICATE_SECTION_VERSION
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "replay record section version {} is not the version this code reads ({})",
+                section.version, STATE_PREDICATE_SECTION_VERSION
+            )));
+        }
+        if let Some(section) = &extra.state_predicates
             && section.table_id != log.spec.table_id
         {
             return Err(EngineError::InvalidConfig(format!(

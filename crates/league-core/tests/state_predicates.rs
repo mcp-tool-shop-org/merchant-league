@@ -6,10 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use league_core::{
     ActiveCharter, ActiveShock, AssetId, AtomicSwapProposal, CartelDomain, CharterBidOrder,
-    CharterRole, CheckProposal, CheckStatus, CommitmentHash, ConverterRunOrder, CouncilPlatform,
-    CouncilVoteBallot, CredOffer, CreditCheck, CreditTier, EngineState, EscrowStatus,
-    HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal, OfferSide, OrderReveal, RegentDoctrine,
-    ReplayBeaconMode, ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed,
+    CharterRole, CheckProposal, CheckStatus, CommitmentHash, ContractDeliveryOrder,
+    ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CredOffer, CreditCheck, CreditTier,
+    DualEscrowProposal, EngineState, EscrowFinishUnlock, EscrowStatus, HARD_TURN_CAP, LoggedTurn,
+    MarketAction, OfferProposal, OfferSide, OrderReveal, PreimageSecret, ProjectDeliveryOrder,
+    RegentDoctrine, ReplayBeaconMode, ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed,
     SealedMandateDeal, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, SeatStatePredicates,
     ShockKind, StatePredicateSection, TableId, TableMode, TableSpec, TokenEscrowVault, Turn,
     TurnEngine, TurnPhase, Units, attach_state_predicates, coalition_reach,
@@ -285,6 +286,21 @@ fn hand_worked_scarcity_and_tariffs() {
     assert_eq!(by_good[&AssetId::Refined(2)].open_book_tariff_bps, 600);
     assert_eq!(by_good[&AssetId::Raw(1)].open_book_tariff_bps, 0);
     assert_eq!(by_good[&AssetId::Refined(1)].open_book_tariff_bps, 0);
+    // Table-wide holdings (busy_state: raw[g] = 1_000 (g + 1) + 37 s, refined[g] =
+    // 500 ((g + s) % 3)), free plus resting sells:
+    // Raw(1): 4 * 2_000 + 37 * (0 + 1 + 2 + 3) = 8_222.
+    // Raw(0): 4 * 1_000 + 222 + seat 0's 2_500 on its open-book sell = 6_722.
+    // Raw(2): 4 * 3_000 + 222 + seat 1's 1_200 on its domain-book sell = 13_422.
+    // Refined(0): 0 + 500 + 1_000 + 0 = 1_500.
+    assert_eq!(by_good[&AssetId::Raw(1)].table_units_held, 8_222);
+    assert_eq!(by_good[&AssetId::Raw(0)].table_units_held, 6_722);
+    assert_eq!(by_good[&AssetId::Raw(2)].table_units_held, 13_422);
+    assert_eq!(by_good[&AssetId::Refined(0)].table_units_held, 1_500);
+    // The domain book is counted apart from the open book.
+    assert_eq!(by_good[&AssetId::Raw(2)].domain_book_units_offered, 1_200);
+    assert_eq!(by_good[&AssetId::Raw(2)].open_book_units_offered, 0);
+    assert_eq!(by_good[&AssetId::Raw(0)].domain_book_units_offered, 0);
+    assert_eq!(by_good[&AssetId::Refined(0)].domain_book_units_bid, 0);
 }
 
 #[test]
@@ -767,21 +783,61 @@ fn private_variants(
     out.push(("unrevealed turn commitment", v));
 
     let mut v = st.clone();
-    let mut bundle = SealedOrderBundle::default();
-    bundle.converter_runs.push(ConverterRunOrder {
-        recipe_idx: 0,
-        runs: 4,
-    });
-    bundle.debt_repayment_cred = 200;
-    bundle.check_cashes.push(3);
-    bundle.council_vote = Some(CouncilVoteBallot {
-        trade_minister: other,
-        cartel_chair: other,
-    });
-    bundle.charter_bids.push(CharterBidOrder {
-        role: CharterRole::OracleAuditor,
-        bid_cred: 300,
-    });
+    // Every field the sealed bundle carries, none left at its default.
+    let partner = if other == 1 { 2 } else { 1 };
+    let bundle = SealedOrderBundle {
+        converter_runs: vec![ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 4,
+        }],
+        project_deliveries: vec![ProjectDeliveryOrder {
+            project_id: 1,
+            batches: 2,
+        }],
+        atomic_swaps: vec![AtomicSwapProposal {
+            swap_id: 900 + u64::from(other),
+            maker: other,
+            taker: partner,
+            maker_asset: AssetId::Raw(other),
+            maker_amount: 1_000,
+            taker_asset: AssetId::Cred,
+            taker_amount: 1_300,
+            domain_id: None,
+        }],
+        contract_deliveries: vec![ContractDeliveryOrder {
+            counterparty: partner,
+            good: AssetId::Refined(other),
+            gross_amount: 700,
+            domain_id: Some(0),
+            dual_escrow_id: Some(41),
+        }],
+        dual_escrows: vec![DualEscrowProposal {
+            proposal_id: 41,
+            buyer: partner,
+            seller: other,
+            good: AssetId::Refined(other),
+            required_units: 700,
+            payment_cred: 1_400,
+            buyer_bond_cred: 300,
+            seller_bond_cred: 200,
+            deadline_turn: 12,
+            domain_id: Some(0),
+        }],
+        debt_repayment_cred: 200,
+        escrow_finishes: vec![EscrowFinishUnlock {
+            escrow_id: 5,
+            preimage: Some(PreimageSecret([0x3c ^ other; 32])),
+        }],
+        check_cashes: vec![3],
+        council_vote: Some(CouncilVoteBallot {
+            trade_minister: other,
+            cartel_chair: other,
+        }),
+        charter_bids: vec![CharterBidOrder {
+            role: CharterRole::OracleAuditor,
+            bid_cred: 300,
+        }],
+    };
     v.turn_reveals.insert(
         other,
         OrderReveal {
@@ -832,7 +888,8 @@ fn no_predicate_reads_another_seats_private_data() {
             };
             assert!(h.units_marked_by_bids > 0, "n={n}: no bid walk on {good:?}");
         }
-        for other in [1_u8, 2, 3] {
+        // Every other seat, `1..n`.
+        for other in 1..n {
             for (vname, variant) in private_variants(&st, &deal, other) {
                 assert_ne!(json(&variant), json(&st), "{vname} must change the state");
                 for (pname, f) in predicates {
@@ -840,6 +897,75 @@ fn no_predicate_reads_another_seats_private_data() {
                         f(&variant, Seat(0)),
                         f(&st, Seat(0)),
                         "n={n}: {pname} changed with seat {other}'s {vname}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The public set (`docs/design-v2.md` §2, "What One Seat May Know About Another"): another seat's
+/// free balances and a cartel-domain offer DO change the scarcity predicate's table-wide fields,
+/// and those reads leave the private set out: on top of the public change, every private variant
+/// still changes nothing.
+#[test]
+fn public_balances_and_domain_offers_reach_the_table_wide_fields() {
+    let field = |st: &EngineState, good: AssetId| {
+        let goods = must(scarcity_and_tariffs(st, Seat(0)), "p3");
+        let Some(g) = goods.into_iter().find(|g| g.good == good) else {
+            panic!("good")
+        };
+        g
+    };
+    for n in [4_u8, 5, 6] {
+        let (st, deal) = privacy_state(n);
+        // Another seat's free balances.
+        let mut richer = st.clone();
+        richer.seats[2].raw[1] += 3_000;
+        richer.seats[3].refined[0] += 400;
+        richer.seats[2].cred += 9_999;
+        richer.seats[3].cred_debt += 77;
+        let before = field(&st, AssetId::Raw(1));
+        let after = field(&richer, AssetId::Raw(1));
+        assert_eq!(after.table_units_held, before.table_units_held + 3_000);
+        assert_eq!(
+            field(&richer, AssetId::Refined(0)).table_units_held,
+            field(&st, AssetId::Refined(0)).table_units_held + 400
+        );
+        // Not read by the predicates that use only the asking seat's own state or the rules.
+        assert_eq!(p1(&richer, Seat(0)), p1(&st, Seat(0)));
+        assert_eq!(p2(&richer, Seat(0)), p2(&st, Seat(0)));
+        assert_eq!(p4(&richer, Seat(0)), p4(&st, Seat(0)));
+
+        // A domain-book offer, by a seat outside the asking seat's reach (domain 0 is {1, 2}).
+        let mut domain = st.clone();
+        domain.offers.insert(
+            77,
+            CredOffer {
+                offer_id: 77,
+                maker: 2,
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                remaining_units: 640,
+                price_per_unit_cred: 1_200,
+                locked_cred: 768,
+                domain_id: Some(0),
+                is_hybrid: false,
+                created_turn: 8,
+            },
+        );
+        let d = field(&domain, AssetId::Raw(1));
+        assert_eq!(d.domain_book_units_bid, before.domain_book_units_bid + 640);
+        assert_eq!(d.open_book_units_bid, before.open_book_units_bid);
+
+        // On top of the public changes, the private set still changes nothing anywhere.
+        for public in [&richer, &domain] {
+            for other in 1..n {
+                for (vname, variant) in private_variants(public, &deal, other) {
+                    assert_eq!(
+                        all(&variant, Seat(0)),
+                        all(public, Seat(0)),
+                        "n={n}: seat {other}'s {vname} changed the struct"
                     );
                 }
             }
@@ -940,16 +1066,22 @@ fn domain_bids_count_in_the_mark_only_when_executable() {
     with_bid.offers.insert(99, domain_bid(false));
 
     // Not executable: seat 0 is not in domain 0 ({1, 2}), holds no broker charter, bid not hybrid.
-    for (pname, f) in [
-        ("p1", p1 as Predicate),
-        ("p2", p2),
-        ("p3", p3),
-        ("p4", p4),
-        ("p5", p5),
-        ("struct", all),
-    ] {
+    // The mark and the predicates that do not count offers are unchanged; the scarcity predicate
+    // counts the bid in its domain-book total only, since domain books are public by rule
+    // (`docs/design-v2.md` §2, "What One Seat May Know About Another").
+    for (pname, f) in [("p1", p1 as Predicate), ("p2", p2), ("p4", p4), ("p5", p5)] {
         assert_eq!(f(&with_bid, Seat(0)), f(&base, Seat(0)), "{pname}");
     }
+    let raw0 = |st: &EngineState| {
+        let goods = must(scarcity_and_tariffs(st, Seat(0)), "p3");
+        let Some(g) = goods.into_iter().find(|g| g.good == AssetId::Raw(0)) else {
+            panic!("Raw(0)")
+        };
+        g
+    };
+    let (b, w) = (raw0(&base), raw0(&with_bid));
+    assert_eq!(w.domain_book_units_bid, b.domain_book_units_bid + 500);
+    assert_eq!(w.open_book_units_bid, b.open_book_units_bid);
 
     // Executable, three ways. Mark: 500 at 750 (> 500 * 1_750 / 2_000 = 437) plus 3_000 at the
     // floor (3_000 * 1_750 / 2_000 = 2_625) = 3_375.
@@ -1465,4 +1597,13 @@ fn replay_record_refuses_a_section_for_another_table() {
         panic!("a section for another table must be refused")
     };
     assert!(err.to_string().contains("table_id"));
+    // A section version this code does not read is refused, by name.
+    if let Some(section) = record.state_predicates.as_mut() {
+        section.table_id = log.spec.table_id;
+        section.version = league_core::STATE_PREDICATE_SECTION_VERSION + 1;
+    }
+    let Err(err) = ReplayRecord::from_json_slice(&json(&record)) else {
+        panic!("an unknown section version must be refused")
+    };
+    assert!(err.to_string().contains("version"));
 }
