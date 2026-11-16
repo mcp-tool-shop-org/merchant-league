@@ -4,12 +4,45 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::commit::{
-    CommitmentHash, DrandSchedule, GradedMandateCard, RevealSalt, SealedMandateDeal,
-    deal_graded_mandates, deal_graded_mandates_with_entropy, default_graded_mandate_deck,
+    CommitmentHash, DrandSchedule, GradedMandateCard, RevealSalt, SealedEvalSeed,
+    SealedMandateDeal, deal_graded_mandates, deal_graded_mandates_with_entropy,
+    default_graded_mandate_deck, validate_eval_vrf_pubkey,
 };
+
+mod opt_hex32 {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<[u8; 32]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(bytes) => serializer.serialize_some(&hex::encode(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<[u8; 32]>, D::Error> {
+        let opt = Option::<String>::deserialize(deserializer)?;
+        match opt {
+            None => Ok(None),
+            Some(s) => {
+                let decoded = hex::decode(&s).map_err(serde::de::Error::custom)?;
+                if decoded.len() != 32 {
+                    return Err(serde::de::Error::custom("expected 32 hex-encoded bytes"));
+                }
+                let mut out = [0u8; 32];
+                out.copy_from_slice(&decoded);
+                Ok(Some(out))
+            }
+        }
+    }
+}
 
 /// Integer milli-unit quantity (`1_000 == 1.000` unit of `CRED`, commodity, or equity).
 pub type Units = i64;
@@ -26,8 +59,65 @@ pub const BPS_SCALE: i128 = 10_000;
 /// Maximum political commodity export tariff (`35.00%` = `3_500 bps`).
 pub const MAX_TARIFF_BPS: Bps = 3_500;
 
-/// Default closing bell hazard probabilities (in bps) for turns `24..=27`.
-pub const DEFAULT_CLOSING_HAZARD_BPS: [Bps; 4] = [2_000, 3_500, 5_500, 8_000];
+/// First turn on which the stochastic season closing bell roll runs (`Turn 24`; Turns `1..=23` stay open).
+pub const CLOSING_ROLL_START_TURN: u8 = 24;
+
+/// Hard terminal turn cap (`Turn 32`, `2026-11-15` ruling; unconditional close at Sweep Step 8).
+pub const HARD_TURN_CAP: u8 = 32;
+
+/// Number of stochastic closing-roll turns (`24..=31`, `8` turns before [`HARD_TURN_CAP`]).
+pub const CLOSING_ROLL_WINDOW_LEN: usize = (HARD_TURN_CAP - CLOSING_ROLL_START_TURN) as usize;
+
+/// Provisional per-turn closing bell hazard probabilities (in bps) for turns `24..=31`
+/// (`35.00%` per turn -> expected season length `~25.80` turns and `~3.19%` cap arrival at Turn 32;
+/// `2026-11-15` ruling, Seed-28 Report §4, pending playtest calibration).
+pub const DEFAULT_CLOSING_HAZARD_BPS: [Bps; CLOSING_ROLL_WINDOW_LEN] =
+    [3_500; CLOSING_ROLL_WINDOW_LEN];
+
+/// Provisional mandate-point scaling factor `alpha = 0.025` (`250 bps = 2.5%` of table-median
+/// pre-mandate net worth per `1.000` mandate point; `2026-11-15` ruling, Seed-28 Report §6
+/// Formula 3, pending playtest calibration).
+pub const DEFAULT_MANDATE_ALPHA_BPS: Bps = 250;
+
+/// Provisional lookback window (`3` turns: `[T-2, T-1, T]`) for terminal TWAP holding marks
+/// (`2026-11-15` ruling, Seed-28 Report §4).
+pub const DEFAULT_TWAP_WINDOW_TURNS: u8 = 3;
+
+/// Provisional minimum executed `CRED`-book volume (`500` milli-units = `0.500` units) required in
+/// a turn for that turn's executed VWAP to qualify as a liquid TWAP observation, preventing thin
+/// final-turn micro-trades from painting the close (`Seed-28 Report` §4).
+pub const DEFAULT_TWAP_MIN_TURN_VOLUME: Units = 500;
+
+/// Minimum number of qualifying liquid trade turns within [`DEFAULT_TWAP_WINDOW_TURNS`] required
+/// to mark a commodity by TWAP rather than executable resting bid-book depth (`2` turns, ensuring a
+/// single last-turn trade never sets the mark).
+pub const DEFAULT_TWAP_MIN_QUALIFYING_TURNS: usize = 2;
+
+/// Computes exact expected season length `E[T]` from a per-turn closing hazard schedule over
+/// Turns `24..=31` capped unconditionally at [`HARD_TURN_CAP`] (`Turn 32`).
+#[must_use]
+pub fn expected_season_length_turns(hazard_bps: &[Bps; CLOSING_ROLL_WINDOW_LEN]) -> f64 {
+    let mut survival = 1.0_f64;
+    let mut expected = f64::from(CLOSING_ROLL_START_TURN);
+    for &hz in hazard_bps {
+        let p_stop = (f64::from(hz) / (BPS_SCALE as f64)).clamp(0.0, 1.0);
+        survival *= 1.0 - p_stop;
+        expected += survival;
+    }
+    expected
+}
+
+/// Computes exact probability `P(T == HARD_TURN_CAP)` of reaching the hard cap Turn 32 without an
+/// earlier stochastic close across Turns `24..=31`.
+#[must_use]
+pub fn cap_reach_probability(hazard_bps: &[Bps; CLOSING_ROLL_WINDOW_LEN]) -> f64 {
+    let mut survival = 1.0_f64;
+    for &hz in hazard_bps {
+        let p_stop = (f64::from(hz) / (BPS_SCALE as f64)).clamp(0.0, 1.0);
+        survival *= 1.0 - p_stop;
+    }
+    survival
+}
 
 /// Default PBRS discount factor `gamma = 0.95` (`9_500 bps`).
 pub const DEFAULT_PBRS_GAMMA_BPS: Bps = 9_500;
@@ -64,6 +154,18 @@ const fn default_town_import_premium_bps() -> Bps {
 
 const fn default_works_stipend_per_unit_cred() -> Units {
     DEFAULT_WORKS_STIPEND_PER_UNIT_CRED
+}
+
+const fn default_mandate_alpha_bps() -> Bps {
+    DEFAULT_MANDATE_ALPHA_BPS
+}
+
+const fn default_twap_window_turns() -> u8 {
+    DEFAULT_TWAP_WINDOW_TURNS
+}
+
+const fn default_twap_min_turn_volume() -> Units {
+    DEFAULT_TWAP_MIN_TURN_VOLUME
 }
 
 /// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
@@ -215,7 +317,7 @@ pub struct MarketDay(pub u16);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SeasonId(pub u32);
 
-/// A simultaneous turn index within a season (`1..=28`).
+/// A simultaneous turn index within a season (`1..=32`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Turn(pub u8);
 
@@ -300,7 +402,7 @@ pub struct RegentDoctrine {
     pub auto_cash_due_claims: bool,
 }
 
-/// Rotating institutional charter auctioned every 6 turns (`Turns 6, 12, 18, 24`).
+/// Rotating institutional charter auctioned every 6 turns (`Turns 6, 12, 18, 24, 30`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CharterRole {
     /// Holds `tfHybrid` bridging privilege across cartel domains and open books.
@@ -414,10 +516,10 @@ pub struct SeatConfig {
 /// Execution mode recorded on [`TableSpec`] and [`crate::SeasonReplayLog`] (`2026-11-15` ruling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TableMode {
-    /// Live Game Mode: requires `drand_schedule` and drand-signature-bound beacons (`M2`).
+    /// Live Game Mode: requires `drand_schedule` and drand-signature-bound beacons (`M2`, `#31`).
     Game,
-    /// Headless Evaluation Mode: uses deterministic seeded beacons (`Decision 12`), resting on
-    /// `M3`'s separation between the turn beacon seed and OS-entropy mandate deals.
+    /// Headless Evaluation Mode: uses sealed 256-bit OS CSPRNG entropy (`SealedEvalSeed`) with
+    /// RFC 9381 `ECVRF-RISTRETTO255-SHA512` proofs in replay logs (`#31` comment, `2026-11-15` ruling).
     Eval,
 }
 
@@ -434,17 +536,22 @@ pub struct TableSpec {
     pub seats: Vec<SeatConfig>,
     /// Available Tier-3 Syndicate Project sinks.
     pub projects: Vec<ProjectRecipe>,
-    /// Pre-scheduled 3-stage `OracleSet` horizon shocks.
+    /// Optional fixture-only 3-stage `OracleSet` shocks (must be empty in `TableMode::Game` and
+    /// on standard/replayed tables, where shocks draw dynamically from per-turn HKDF beacons).
     pub shocks: Vec<ScheduledShockSpec>,
-    /// Stochastic season closing hazards (in bps) evaluated on Turns `24, 25, 26, 27`.
-    pub closing_hazard_bps: [Bps; 4],
-    /// Public graded Turn-1 mandate deck defining valid cards and `3–8 VP` bank bonuses (`T5`).
+    /// Stochastic season closing hazards (in bps) evaluated on Turns `24..=31` before hard cap `32`.
+    pub closing_hazard_bps: [Bps; CLOSING_ROLL_WINDOW_LEN],
+    /// Public graded Turn-1 mandate deck defining valid cards and `3–8` point bonuses (`T5`).
     pub mandate_deck: Vec<GradedMandateCard>,
     /// Pre-dealt Turn-1 mandate commitments indexed by seat (`0..seat_count`).
     pub dealt_mandate_commits: Vec<CommitmentHash>,
     /// Optional pre-named drand `quicknet` close schedule required for `ExternalDrand` tables (`M2`).
     #[serde(default)]
     pub drand_schedule: Option<DrandSchedule>,
+    /// Optional RFC 9381 `ECVRF-RISTRETTO255-SHA512` public key (`PK_eval`) binding Eval-mode VRF
+    /// randomness proofs (`#31` comment, `2026-11-15` ruling).
+    #[serde(default, with = "opt_hex32")]
+    pub eval_vrf_pubkey: Option<[u8; 32]>,
     /// Provisional town-import premium multiplier in basis points (`DEFAULT_TOWN_IMPORT_PREMIUM_BPS`).
     #[serde(default = "default_town_import_premium_bps")]
     pub town_import_premium_bps: Bps,
@@ -452,6 +559,17 @@ pub struct TableSpec {
     /// (`DEFAULT_WORKS_STIPEND_PER_UNIT_CRED`).
     #[serde(default = "default_works_stipend_per_unit_cred")]
     pub works_stipend_per_unit_cred: Units,
+    /// Provisional mandate-point conversion factor `alpha` in bps of table-median net worth
+    /// (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
+    #[serde(default = "default_mandate_alpha_bps")]
+    pub mandate_alpha_bps: Bps,
+    /// Provisional terminal TWAP lookback window in turns (`DEFAULT_TWAP_WINDOW_TURNS = 3`).
+    #[serde(default = "default_twap_window_turns")]
+    pub twap_window_turns: u8,
+    /// Provisional minimum turn executed volume (`DEFAULT_TWAP_MIN_TURN_VOLUME = 500`) required for
+    /// a turn to qualify as a liquid TWAP print.
+    #[serde(default = "default_twap_min_turn_volume")]
+    pub twap_min_turn_volume: Units,
 }
 
 impl TableSpec {
@@ -537,12 +655,43 @@ impl TableSpec {
                     ));
                 };
                 schedule.validate()?;
+                if !self.shocks.is_empty() {
+                    return Err(EngineError::InvalidConfig(
+                        "Game mode TableSpec forbids pre-seeded shocks; shocks must draw from logged drand beacons".to_owned(),
+                    ));
+                }
+                if self.eval_vrf_pubkey.is_some() {
+                    return Err(EngineError::InvalidConfig(
+                        "Game mode TableSpec must not carry eval_vrf_pubkey".to_owned(),
+                    ));
+                }
             }
             TableMode::Eval => {
                 if let Some(schedule) = self.drand_schedule {
                     schedule.validate()?;
                 }
+                if let Some(pk) = self.eval_vrf_pubkey {
+                    validate_eval_vrf_pubkey(pk)?;
+                }
             }
+        }
+        if self.mandate_alpha_bps == 0 || i128::from(self.mandate_alpha_bps) > BPS_SCALE {
+            return Err(EngineError::InvalidConfig(format!(
+                "mandate_alpha_bps must lie in 1..=10_000, got {}",
+                self.mandate_alpha_bps
+            )));
+        }
+        if self.twap_window_turns == 0 || self.twap_window_turns > HARD_TURN_CAP {
+            return Err(EngineError::InvalidConfig(format!(
+                "twap_window_turns must lie in 1..={HARD_TURN_CAP}, got {}",
+                self.twap_window_turns
+            )));
+        }
+        if self.twap_min_turn_volume <= 0 {
+            return Err(EngineError::InvalidConfig(format!(
+                "twap_min_turn_volume must be positive, got {}",
+                self.twap_min_turn_volume
+            )));
         }
         if self.mandate_deck.len() < n {
             return Err(EngineError::InvalidConfig(format!(
@@ -585,30 +734,81 @@ impl TableSpec {
         Ok(())
     }
 
-    /// Constructs the deterministic Eval-mode canonical `TableSpec` parameterized by public
-    /// layout `seed`, dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
-    pub fn standard_chiral_ring_with_mandates(
+    /// Constructs the canonical Eval-mode `TableSpec` together with both sealed orchestrator
+    /// artifacts: private Turn-1 mandates (`SealedMandateDeal`) and fresh 256-bit Eval randomness
+    /// (`SealedEvalSeed`), both drawn from OS CSPRNG entropy and independent of `seed` (`#31`).
+    pub fn standard_eval_chiral_ring_with_setup(
         table_id: TableId,
         seat_count: u8,
         seed: u64,
-    ) -> Result<(Self, SealedMandateDeal), EngineError> {
+    ) -> Result<(Self, SealedMandateDeal, SealedEvalSeed), EngineError> {
         let mandate_deck = default_graded_mandate_deck(seat_count);
         let (dealt_mandate_commits, sealed_deal) =
             deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
-        Self::build_chiral_ring_spec_with_deal(
+        let eval_seed = SealedEvalSeed::generate()?;
+        let eval_pk = eval_seed.public_key_bytes()?;
+        let (spec, deal) = Self::build_chiral_ring_spec_with_deal(
             table_id,
             TableMode::Eval,
             None,
+            Some(eval_pk),
             seat_count,
             seed,
             mandate_deck,
             dealt_mandate_commits,
             sealed_deal,
-        )
+        )?;
+        Ok((spec, deal, eval_seed))
+    }
+
+    /// Constructs the canonical Eval-mode `TableSpec` from caller-supplied 256-bit `deal_seed`,
+    /// per-seat `seat_salts`, and 256-bit `eval_seed` for reproducible Eval test fixtures.
+    pub fn standard_eval_chiral_ring_with_explicit_setup(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[RevealSalt],
+        eval_seed: SealedEvalSeed,
+    ) -> Result<(Self, SealedMandateDeal, SealedEvalSeed), EngineError> {
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) = deal_graded_mandates_with_entropy(
+            table_id,
+            seat_count,
+            deal_seed,
+            seat_salts,
+            &mandate_deck,
+        )?;
+        let eval_pk = eval_seed.public_key_bytes()?;
+        let (spec, deal) = Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            TableMode::Eval,
+            None,
+            Some(eval_pk),
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )?;
+        Ok((spec, deal, eval_seed))
+    }
+
+    /// Constructs the deterministic Eval-mode canonical `TableSpec` parameterized by public
+    /// layout `seed`, dealing private Turn-1 mandates and Eval VRF keypair from fresh OS CSPRNG
+    /// entropy (`M3`, `#31`).
+    pub fn standard_chiral_ring_with_mandates(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+    ) -> Result<(Self, SealedMandateDeal), EngineError> {
+        let (spec, deal, _eval_seed) =
+            Self::standard_eval_chiral_ring_with_setup(table_id, seat_count, seed)?;
+        Ok((spec, deal))
     }
 
     /// Constructs the canonical Game-mode `TableSpec` requiring a pre-named `DrandSchedule`
-    /// (`M2`), dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
+    /// (`M2`, `#31`), dealing private Turn-1 mandates from fresh OS CSPRNG entropy (`M3`).
     pub fn standard_game_chiral_ring_with_mandates(
         table_id: TableId,
         seat_count: u8,
@@ -622,6 +822,7 @@ impl TableSpec {
             table_id,
             TableMode::Game,
             Some(drand_schedule),
+            None,
             seat_count,
             seed,
             mandate_deck,
@@ -652,6 +853,7 @@ impl TableSpec {
             table_id,
             TableMode::Eval,
             None,
+            None,
             seat_count,
             seed,
             mandate_deck,
@@ -665,6 +867,7 @@ impl TableSpec {
         table_id: TableId,
         mode: TableMode,
         drand_schedule: Option<DrandSchedule>,
+        eval_vrf_pubkey: Option<[u8; 32]>,
         seat_count: u8,
         seed: u64,
         mandate_deck: Vec<GradedMandateCard>,
@@ -728,54 +931,23 @@ impl TableSpec {
             equity_points: (seat_count as Units) * 1_400,
         });
 
-        let shocks = vec![
-            ScheduledShockSpec {
-                hint_turn: 3,
-                forecast_turn: 4,
-                realize_turn: 5,
-                target_seat: (seed % u64::from(seat_count)) as u8,
-                kind: ShockKind::SupplyFreeze,
-                magnitude_bps: 2_500,
-            },
-            ScheduledShockSpec {
-                hint_turn: 8,
-                forecast_turn: 9,
-                realize_turn: 10,
-                target_seat: ((seed + 1) % u64::from(seat_count)) as u8,
-                kind: ShockKind::TariffHoliday,
-                magnitude_bps: 10_000,
-            },
-            ScheduledShockSpec {
-                hint_turn: 13,
-                forecast_turn: 14,
-                realize_turn: 15,
-                target_seat: ((seed + 2) % u64::from(seat_count)) as u8,
-                kind: ShockKind::DemandSurge,
-                magnitude_bps: 2_000,
-            },
-            ScheduledShockSpec {
-                hint_turn: 18,
-                forecast_turn: 19,
-                realize_turn: 20,
-                target_seat: ((seed + 3) % u64::from(seat_count)) as u8,
-                kind: ShockKind::SpoilageSpike,
-                magnitude_bps: 2_000,
-            },
-        ];
-
         let spec = Self {
             table_id,
             mode,
             seat_count,
             seats,
             projects,
-            shocks,
+            shocks: Vec::new(),
             closing_hazard_bps: DEFAULT_CLOSING_HAZARD_BPS,
             mandate_deck,
             dealt_mandate_commits,
             drand_schedule,
+            eval_vrf_pubkey,
             town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
             works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
+            mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
+            twap_window_turns: DEFAULT_TWAP_WINDOW_TURNS,
+            twap_min_turn_volume: DEFAULT_TWAP_MIN_TURN_VOLUME,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))

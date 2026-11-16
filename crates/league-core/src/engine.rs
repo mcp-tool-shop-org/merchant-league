@@ -9,10 +9,12 @@ use sha2::{Digest, Sha256};
 use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform,
     CouncilVoteBallot, DualEscrowProposal, EscrowFinishUnlock, IntentPledge, IntentTarget,
-    MandateReveal, OrderReveal, RevealSalt, SealedOrderBundle, beacon_roll_bps,
-    break_tie_with_beacon, compute_order_commitment, derive_drand_beacon, derive_turn_beacon,
-    raw_zero_preimage_condition_hash, verify_drand_quicknet_beacon, verify_mandate_reveal,
-    verify_order_reveal, verify_preimage_condition,
+    MandateReveal, OrderReveal, RevealSalt, RngDomain, SealedOrderBundle,
+    break_tie_with_turn_beacon, close_roll_bps_from_beacon, compute_order_commitment,
+    derive_drand_beacon, derive_turn_beacon, draw_shocks_for_turn, expand_turn_stream,
+    raw_zero_preimage_condition_hash, verify_and_extract_eval_vrf_beacon,
+    verify_drand_quicknet_beacon, verify_mandate_reveal, verify_order_reveal,
+    verify_preimage_condition,
 };
 use crate::contracts::{
     ActiveCharter, BondSettlementMode, BondSpec, CartelDomain, CheckStatus, CredOffer, CreditCheck,
@@ -24,11 +26,11 @@ use crate::scoring::{
     compute_potential,
 };
 use crate::types::{
-    ActiveShock, AssetId, Bps, CharterRole, CreditTier, DEFAULT_PBRS_GAMMA_BPS, EngineError,
-    IDLE_MISS_TAKEOVER_TURNS, MAX_TARIFF_BPS, ScheduledShockSpec, Seat, SeatIdentity, ShockKind,
-    TableId, TableMode, TableSpec, Turn, Units, ceil_bps_fee, ceil_units_parity,
-    checked_ceil_units_parity, checked_mul_units_parity, floor_bps_part, half_up_bps,
-    mul_units_parity, town_import_cost_cred,
+    ActiveShock, AssetId, Bps, CLOSING_ROLL_START_TURN, CharterRole, CreditTier,
+    DEFAULT_PBRS_GAMMA_BPS, EngineError, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, MAX_TARIFF_BPS,
+    ScheduledShockSpec, Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, Units,
+    ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
+    floor_bps_part, half_up_bps, mul_units_parity, town_import_cost_cred,
 };
 
 type PoliticsOutcome = (Option<(u8, u8)>, Vec<(CharterRole, u8)>, Units);
@@ -66,10 +68,24 @@ pub enum TurnPhase {
     Commit,
     /// Reveal gate: seats submit plaintext bundles + salts matching Phase 2 commitments.
     Reveal,
-    /// Closing bell sounded on Turn `24..=28`; waiting for Turn-1 Private Mandate reveals.
+    /// Closing bell sounded on Turn `24..=32`; waiting for Turn-1 Private Mandate reveals.
     AwaitingMandateReveal,
     /// Season finalized cleanly; [`FinalScoreboard`] computed.
     Completed,
+}
+
+/// Volume-weighted executed `CRED` batch clearing price recorded for one commodity in one turn,
+/// feeding terminal 3-turn TWAP marks at Season Close (`Seed-28 Report` §4, `2026-11-15` ruling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutedGoodTurnPrice {
+    /// Turn on which the batch trades cleared.
+    pub turn: u8,
+    /// Traded commodity (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Gross commodity volume matched across all fills on `turn`.
+    pub total_units: Units,
+    /// Volume-weighted average executed clearing price in milli-`CRED` per `1_000` units.
+    pub vwap_price_cred: Units,
 }
 
 /// Per-seat mutable ledger-mirror state maintained deterministically across turns.
@@ -117,7 +133,7 @@ pub struct SeatState {
 pub struct EngineState {
     /// Table identifier.
     pub table_id: TableId,
-    /// Current turn index (`1..=28`).
+    /// Current turn index (`1..=32`).
     pub turn: u8,
     /// Current turn phase or terminal close state.
     pub phase: TurnPhase,
@@ -171,11 +187,17 @@ pub struct EngineState {
     pub turn_reveals: BTreeMap<u8, OrderReveal>,
     /// Previous step PBRS potentials `Psi_i(s_t)` for step-wise reward deltas.
     pub last_potentials: Vec<Units>,
-    /// Latest beacon roll basis points on Closing Bell evaluation (turns `24..=28`).
+    /// Latest beacon roll basis points on Closing Bell evaluation (turns `24..=31`).
     pub last_closing_roll_bps: Option<Bps>,
     /// Accumulator of `CRED` spent on Phase-1 `TownImport` orders during the current turn (`C1`).
     #[serde(default)]
     pub pending_town_import_cred_spent: Units,
+    /// 3-stage Horizon Shocks drawn dynamically from per-turn HKDF `"shocks"` streams (`#31`).
+    #[serde(default)]
+    pub drawn_shocks: Vec<ScheduledShockSpec>,
+    /// Chronological per-`(turn, good)` executed DEX batch clearing VWAP observations (`Part 7`).
+    #[serde(default)]
+    pub executed_good_trades: Vec<ExecutedGoodTurnPrice>,
 }
 
 /// Audited broken-promise record emitted when a seat violates an anchored `IntentPledge`.
@@ -247,6 +269,9 @@ pub struct SweepReceipt {
     pub public_forecasts: Vec<ShockForecastEvent>,
     /// Newly activated realized shocks enacted for `turn` (`realize_turn == turn`).
     pub newly_activated_shocks: Vec<ActiveShock>,
+    /// 3-stage Horizon Shocks newly sampled from this turn's HKDF `"shocks"` stream (`#31`).
+    #[serde(default)]
+    pub newly_drawn_shocks: Vec<ScheduledShockSpec>,
     /// Total voluntary `CRED` auto-debt repaid in Step 2.
     pub cred_debt_repaid: Units,
     /// Total `CRED` burned by Syndicate Charter auctions in Step 7.
@@ -474,6 +499,8 @@ impl TurnEngine {
                 last_potentials: Vec::new(),
                 last_closing_roll_bps: None,
                 pending_town_import_cred_spent: 0,
+                drawn_shocks: Vec::new(),
+                executed_good_trades: Vec::new(),
             },
         };
         engine.activate_shocks_for_turn(1);
@@ -515,6 +542,7 @@ impl TurnEngine {
             .spec
             .shocks
             .iter()
+            .chain(self.state.drawn_shocks.iter())
             .copied()
             .filter(|s| s.hint_turn <= self.state.turn && self.state.turn < s.forecast_turn)
             .collect())
@@ -650,7 +678,7 @@ impl TurnEngine {
                     } => {
                         self.ensure_seat(candidate)?;
                         if office_turn < self.state.turn
-                            || office_turn > 28
+                            || office_turn > HARD_TURN_CAP
                             || !office_turn.is_multiple_of(4)
                         {
                             return Err(EngineError::InvalidOrder(format!(
@@ -665,7 +693,7 @@ impl TurnEngine {
                     } => {
                         self.ensure_seat(beneficiary)?;
                         if office_turn < self.state.turn
-                            || office_turn > 28
+                            || office_turn > HARD_TURN_CAP
                             || !office_turn.is_multiple_of(4)
                         {
                             return Err(EngineError::InvalidOrder(format!(
@@ -991,6 +1019,37 @@ impl TurnEngine {
         self.sweep_turn(beacon)
     }
 
+    /// Executes the 8-step deterministic `Sweep` for an Eval-mode turn by verifying an
+    /// `EVAL_VRF_PROOF_BYTES` RFC 9381 `ECVRF-RISTRETTO255-SHA512` proof against
+    /// `spec.eval_vrf_pubkey` (`#31` comment, `2026-11-15` ruling).
+    pub fn sweep_turn_with_eval_vrf(
+        &mut self,
+        vrf_proof: &[u8],
+    ) -> Result<SweepReceipt, EngineError> {
+        if self.state.spec.mode != TableMode::Eval {
+            return Err(EngineError::InvalidConfig(
+                "sweep_turn_with_eval_vrf requires TableMode::Eval".to_owned(),
+            ));
+        }
+        if self.state.phase != TurnPhase::Reveal {
+            return Err(EngineError::InvalidPhase(
+                "sweep_turn_with_eval_vrf requires Reveal phase".to_owned(),
+            ));
+        }
+        let Some(eval_pk) = self.state.spec.eval_vrf_pubkey else {
+            return Err(EngineError::InvalidConfig(
+                "sweep_turn_with_eval_vrf requires TableSpec::eval_vrf_pubkey".to_owned(),
+            ));
+        };
+        let beacon = verify_and_extract_eval_vrf_beacon(
+            eval_pk,
+            self.state.table_id,
+            Turn(self.state.turn),
+            vrf_proof,
+        )?;
+        Ok(self.sweep_turn_detailed(beacon)?.0)
+    }
+
     /// Executes the 8-step deterministic `Sweep` for a Game-mode turn using an `ExternalDrand`
     /// `quicknet` round and 48-byte signature validated against `spec.drand_schedule` (`M2`).
     ///
@@ -1105,8 +1164,8 @@ impl TurnEngine {
         let (elected_officers, charters_awarded, charter_cred_burned) = self
             .step7_politics_and_charters(turn, turn_beacon, &active_bundles, &mut broken_promises);
 
-        // Step 8: Advance Horizon Shocks and evaluate stochastic close roll (Turns 24..=28).
-        let (public_forecasts, newly_activated_shocks, season_closed) =
+        // Step 8: Advance Horizon Shocks and evaluate stochastic close roll (Turns 24..=32).
+        let (newly_drawn_shocks, public_forecasts, newly_activated_shocks, season_closed) =
             self.step8_shocks_and_close(turn, turn_beacon);
 
         // Compute dense PBRS deltas using updated post-Sweep potentials.
@@ -1154,6 +1213,7 @@ impl TurnEngine {
             charters_awarded,
             public_forecasts,
             newly_activated_shocks,
+            newly_drawn_shocks,
             cred_debt_repaid,
             charter_cred_burned,
             town_import_cred_spent,
@@ -1291,7 +1351,7 @@ impl TurnEngine {
                 || de.seller_bond_cred <= 0
                 || !combined_within_cap
                 || de.deadline_turn < self.state.turn
-                || de.deadline_turn > 28
+                || de.deadline_turn > HARD_TURN_CAP
             {
                 return Err(EngineError::InvalidOrder(
                     "invalid or over-capped DualEscrowProposal (combined bond must stay <= 100% of payment_cred)".to_owned(),
@@ -1511,15 +1571,13 @@ impl TurnEngine {
     }
 
     fn batch_tie_key(
+        table_id: TableId,
         turn_beacon: &[u8; 32],
         turn: u8,
         good: AssetId,
         side: OfferSide,
         maker: u8,
     ) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(b"league-core/batch-tie/v1");
-        hasher.update(turn_beacon);
         let (gk, gi) = match good {
             AssetId::Cred => (0u8, 0u8),
             AssetId::Raw(g) => (1u8, g),
@@ -1529,8 +1587,13 @@ impl TurnEngine {
             OfferSide::Buy => 0u8,
             OfferSide::Sell => 1u8,
         };
-        hasher.update([turn, gk, gi, sb, maker]);
-        hasher.finalize().into()
+        expand_turn_stream(
+            *turn_beacon,
+            table_id,
+            Turn(turn),
+            RngDomain::BatchTie,
+            &[gk, gi, sb, maker],
+        )
     }
 
     fn offers_pair_compatible(&self, buy: &CredOffer, sell: &CredOffer) -> bool {
@@ -1603,14 +1666,28 @@ impl TurnEngine {
                 continue;
             }
 
-            // Arrival-order invariant sorting: price priority, then beacon tie-break across distinct makers.
+            // Arrival-order invariant sorting: price priority, then HKDF batch_tie tie-break across distinct makers.
+            let table_id = self.state.table_id;
             buys.sort_by(|a, b| {
                 b.price_per_unit_cred
                     .cmp(&a.price_per_unit_cred)
                     .then_with(|| {
-                        Self::batch_tie_key(&turn_beacon, turn, good, OfferSide::Buy, a.maker).cmp(
-                            &Self::batch_tie_key(&turn_beacon, turn, good, OfferSide::Buy, b.maker),
+                        Self::batch_tie_key(
+                            table_id,
+                            &turn_beacon,
+                            turn,
+                            good,
+                            OfferSide::Buy,
+                            a.maker,
                         )
+                        .cmp(&Self::batch_tie_key(
+                            table_id,
+                            &turn_beacon,
+                            turn,
+                            good,
+                            OfferSide::Buy,
+                            b.maker,
+                        ))
                     })
                     .then_with(|| a.maker.cmp(&b.maker))
                     .then_with(|| b.remaining_units.cmp(&a.remaining_units))
@@ -1623,15 +1700,22 @@ impl TurnEngine {
                 a.price_per_unit_cred
                     .cmp(&b.price_per_unit_cred)
                     .then_with(|| {
-                        Self::batch_tie_key(&turn_beacon, turn, good, OfferSide::Sell, a.maker).cmp(
-                            &Self::batch_tie_key(
-                                &turn_beacon,
-                                turn,
-                                good,
-                                OfferSide::Sell,
-                                b.maker,
-                            ),
+                        Self::batch_tie_key(
+                            table_id,
+                            &turn_beacon,
+                            turn,
+                            good,
+                            OfferSide::Sell,
+                            a.maker,
                         )
+                        .cmp(&Self::batch_tie_key(
+                            table_id,
+                            &turn_beacon,
+                            turn,
+                            good,
+                            OfferSide::Sell,
+                            b.maker,
+                        ))
                     })
                     .then_with(|| a.maker.cmp(&b.maker))
                     .then_with(|| b.remaining_units.cmp(&a.remaining_units))
@@ -1672,6 +1756,8 @@ impl TurnEngine {
                 }
             }
 
+            let mut turn_total_units: Units = 0;
+            let mut turn_notional: i128 = 0;
             for fills in by_dom.into_values() {
                 let max_sell = fills.iter().map(|f| f.sell_limit).max().unwrap_or(0);
                 let min_buy = fills.iter().map(|f| f.buy_limit).min().unwrap_or(max_sell);
@@ -1727,8 +1813,19 @@ impl TurnEngine {
                     let net_commodity = fill.fill_units - ceil_bps_fee(fill.fill_units, tariff_bps);
                     self.adjust_free_balance(fill.buy_maker, good, net_commodity)?;
                     self.record_delivery(fill.sell_maker, fill.buy_maker, good, net_commodity);
+                    turn_total_units = turn_total_units.saturating_add(fill.fill_units);
+                    turn_notional += i128::from(fill.fill_units) * i128::from(clearing_price);
                     trades_cleared += 1;
                 }
+            }
+            if turn_total_units > 0 {
+                let vwap_price_cred = (turn_notional / i128::from(turn_total_units)) as Units;
+                self.state.executed_good_trades.push(ExecutedGoodTurnPrice {
+                    turn,
+                    good,
+                    total_units: turn_total_units,
+                    vwap_price_cred,
+                });
             }
         }
         Ok(trades_cleared)
@@ -2063,7 +2160,7 @@ impl TurnEngine {
                     && prop.seller_bond_cred > 0
                     && cap_ok
                     && prop.deadline_turn >= turn
-                    && prop.deadline_turn <= 28
+                    && prop.deadline_turn <= HARD_TURN_CAP
                 {
                     signers_map.entry(prop.clone()).or_default().insert(s);
                 }
@@ -3034,12 +3131,16 @@ impl TurnEngine {
                 &tm_votes,
                 self.state.trade_minister,
                 turn_beacon,
+                self.state.table_id,
+                Turn(turn),
                 b"trade_minister",
             );
             let (cc, cc_won_vote) = pick_plurality_winner_with_beacon(
                 &cc_votes,
                 self.state.cartel_chair,
                 turn_beacon,
+                self.state.table_id,
+                Turn(turn),
                 b"cartel_chair",
             );
             self.state.trade_minister = tm;
@@ -3199,7 +3300,13 @@ impl TurnEngine {
     }
 
     fn activate_shocks_for_turn(&mut self, turn: u8) {
-        for shock in &self.state.spec.shocks {
+        for shock in self
+            .state
+            .spec
+            .shocks
+            .iter()
+            .chain(self.state.drawn_shocks.iter())
+        {
             if shock.realize_turn == turn {
                 let dur = match shock.kind {
                     ShockKind::DemandSurge => 2,
@@ -3221,10 +3328,34 @@ impl TurnEngine {
         &mut self,
         turn: u8,
         turn_beacon: [u8; 32],
-    ) -> (Vec<ShockForecastEvent>, Vec<ActiveShock>, bool) {
+    ) -> (
+        Vec<ScheduledShockSpec>,
+        Vec<ShockForecastEvent>,
+        Vec<ActiveShock>,
+        bool,
+    ) {
+        let newly_drawn = if self.state.spec.shocks.is_empty() {
+            let drawn = draw_shocks_for_turn(
+                self.state.table_id,
+                self.state.spec.seat_count,
+                Turn(turn),
+                turn_beacon,
+            );
+            self.state.drawn_shocks.extend(drawn.iter().copied());
+            drawn
+        } else {
+            Vec::new()
+        };
+
         let mut public_forecasts = Vec::new();
         let mut newly_activated = Vec::new();
-        for shock in &self.state.spec.shocks {
+        for shock in self
+            .state
+            .spec
+            .shocks
+            .iter()
+            .chain(self.state.drawn_shocks.iter())
+        {
             if shock.forecast_turn == turn {
                 public_forecasts.push(ShockForecastEvent {
                     target_seat: shock.target_seat,
@@ -3257,18 +3388,23 @@ impl TurnEngine {
             }
         }
 
-        let season_closed = if turn >= 28 {
+        let season_closed = if turn >= HARD_TURN_CAP {
             self.state.last_closing_roll_bps = None;
             true
-        } else if (24..=27).contains(&turn) {
-            let roll = beacon_roll_bps(turn_beacon);
+        } else if (CLOSING_ROLL_START_TURN..HARD_TURN_CAP).contains(&turn) {
+            let roll = close_roll_bps_from_beacon(turn_beacon, self.state.table_id, Turn(turn));
             self.state.last_closing_roll_bps = Some(roll);
-            roll < self.state.spec.closing_hazard_bps[usize::from(turn - 24)]
+            roll < self.state.spec.closing_hazard_bps[usize::from(turn - CLOSING_ROLL_START_TURN)]
         } else {
             self.state.last_closing_roll_bps = None;
             false
         };
-        (public_forecasts, newly_activated, season_closed)
+        (
+            newly_drawn,
+            public_forecasts,
+            newly_activated,
+            season_closed,
+        )
     }
 }
 
@@ -3276,6 +3412,8 @@ fn pick_plurality_winner_with_beacon(
     votes: &[u32],
     incumbent: u8,
     turn_beacon: [u8; 32],
+    table_id: TableId,
+    turn: Turn,
     domain_tag: &[u8],
 ) -> (u8, bool) {
     let max_votes = votes.iter().copied().max().unwrap_or(0);
@@ -3287,7 +3425,10 @@ fn pick_plurality_winner_with_beacon(
         .enumerate()
         .filter_map(|(idx, &v)| (v == max_votes).then_some(idx as u8))
         .collect();
-    (break_tie_with_beacon(turn_beacon, domain_tag, &tied), true)
+    (
+        break_tie_with_turn_beacon(turn_beacon, table_id, turn, domain_tag, &tied),
+        true,
+    )
 }
 
 #[cfg(test)]

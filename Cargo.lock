@@ -508,6 +508,7 @@ dependencies = [
  "curve25519-dalek-derive",
  "digest",
  "fiat-crypto",
+ "rand_core 0.6.4",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -630,6 +631,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+ "subtle",
 ]
 
 [[package]]
@@ -1113,6 +1115,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hkdf"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+dependencies = [
+ "hmac",
+]
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1521,9 +1541,12 @@ version = "0.0.0"
 dependencies = [
  "getrandom 0.3.4",
  "hex",
+ "hkdf",
+ "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "sha2",
+ "vrf-r255",
 ]
 
 [[package]]
@@ -1531,7 +1554,6 @@ name = "league-dice"
 version = "0.0.0"
 dependencies = [
  "getrandom 0.3.4",
- "sha2",
 ]
 
 [[package]]
@@ -3618,6 +3640,18 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vrf-r255"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec2e7c083cc7b8fc3f6a4bc68f92af0e4ec0ec83b2d8a912eeced0aafa7a8379"
+dependencies = [
+ "curve25519-dalek",
+ "rand_core 0.6.4",
+ "sha2",
+ "subtle",
+]
 
 [[package]]
 name = "vtparse"

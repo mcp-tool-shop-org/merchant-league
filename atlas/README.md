@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-16 from commit eb2ea0f by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit 35cda39 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (337 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-16 (0b8aada)
+## What changed since 2026-11-16 (eb2ea0f)
 
-Nothing structural changed since 2026-11-16; 9 files changed content.
+Nothing structural changed since 2026-11-16; 13 files changed content.
 
 ## What comes in
 
@@ -50,11 +50,8 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 11 of 11 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 15 of 17 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 11 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
