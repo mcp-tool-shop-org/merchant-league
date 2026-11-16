@@ -376,7 +376,15 @@ pub fn parse_docker_port(stdout: &str) -> Result<u16, StandAloneError> {
 }
 
 struct HostContainerFileLock {
-    _file: std::fs::File,
+    file: std::fs::File,
+}
+
+impl Drop for HostContainerFileLock {
+    fn drop(&mut self) {
+        // Explicitly unlock before closing the fd so a concurrent `fork()` before `execve()` in
+        // another thread cannot keep the kernel open-file-description `flock` alive past `Drop`.
+        let _ = self.file.unlock();
+    }
 }
 
 impl HostContainerFileLock {
@@ -402,7 +410,7 @@ impl HostContainerFileLock {
                 ))
             })?;
         match file.try_lock() {
-            Ok(()) => Ok(Self { _file: file }),
+            Ok(()) => Ok(Self { file }),
             Err(_) => Err(StandAloneError::NotStandAlone(NotStandAlone::new(format!(
                 "refusing concurrent launch: another process holds {STANDALONE_LOCKFILE_NAME}"
             )))),
@@ -1398,9 +1406,13 @@ mod tests {
             runner.commands().is_empty(),
             "refusal under host lockfile must happen before any docker ps/run"
         );
+        let _ = file.unlock();
         drop(file);
 
         // Also confirm an unexpired `created` container is treated as active rather than swept.
+        let Ok(tmp_created) = tempfile::NamedTempFile::new() else {
+            panic!("temp lockfile for created-state check failed");
+        };
         let runner_created = Rc::new(FakeDockerRunner::new(vec![ok_cmd(
             "active-creating\tcreated\t5000\n",
         )]));
@@ -1409,7 +1421,7 @@ mod tests {
             Rc::clone(&runner_created),
             standalone_info_connector,
             2_000,
-            &lock_path,
+            tmp_created.path(),
         );
         assert!(matches!(
             created_res,

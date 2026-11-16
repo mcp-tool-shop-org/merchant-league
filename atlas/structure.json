@@ -2522,95 +2522,95 @@
             {
               "in": "try_acquire",
               "kind": "match-err",
-              "line": 406
+              "line": 414
             },
             {
               "in": "try_acquire",
               "kind": "err",
-              "line": 406
+              "line": 414
             },
             {
               "in": "start_with_runner_and_lock_at",
               "kind": "match-err",
-              "line": 492
+              "line": 500
             },
             {
               "in": "start_with_runner_and_lock_at",
               "kind": "err",
-              "line": 499
+              "line": 507
             },
             {
               "in": "start_with_runner_and_lock_at",
               "kind": "err",
-              "line": 508
+              "line": 516
             },
             {
               "in": "start_with_runner_and_lock_at",
               "kind": "match-err",
-              "line": 524
+              "line": 532
             },
             {
               "in": "start_with_runner_and_lock_at",
               "kind": "err",
-              "line": 545
+              "line": 553
             },
             {
               "in": "teardown",
               "kind": "err",
-              "line": 576
+              "line": 584
             },
             {
               "in": "sweep_and_check_existing_containers",
               "kind": "err",
-              "line": 621
+              "line": 629
             },
             {
               "in": "sweep_and_check_existing_containers",
               "kind": "err",
-              "line": 651
+              "line": 659
             },
             {
               "in": "sweep_and_check_existing_containers",
               "kind": "err",
-              "line": 658
+              "line": 666
             },
             {
               "in": "ensure_pinned_image",
               "kind": "err",
-              "line": 690
+              "line": 698
             },
             {
               "in": "wait_until_ready",
               "kind": "err",
-              "line": 719
+              "line": 727
             },
             {
               "in": "wait_until_ready",
               "kind": "match-err",
-              "line": 731
+              "line": 739
             },
             {
               "in": "wait_until_ready",
               "kind": "err",
-              "line": 731
+              "line": 739
             },
             {
               "in": "wait_until_ready",
               "kind": "match-err",
-              "line": 732
+              "line": 740
             },
             {
               "in": "wait_until_ready",
               "kind": "err",
-              "line": 734
+              "line": 742
             },
             {
               "in": "parse_memory_limit_mb",
               "kind": "err",
-              "line": 757
+              "line": 765
             }
           ],
-          "hash": "a87b42acdddde404976c826b5077e4acc932ff86ec6010ead5c0e50ff7976c0f",
+          "hash": "8d3f8d18ee8b44ee8cec03418105831ce4ef85474472dd7e25f8f6c1b928ddcc",
           "importsFiles": [
             "crates/league-ledger/src/client.rs",
             "crates/league-standalone/src/client.rs",
@@ -3533,7 +3533,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "0d332bd4381b6f041d22132473639238e138b59e",
+    "commit": "b4f6ec4bc6b380ac2788df1a7441430be57bff41",
     "tracked": 500
   },
   "landings": [
