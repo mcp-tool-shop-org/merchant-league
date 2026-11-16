@@ -222,8 +222,8 @@ fn bid_executable_by_seller(state: &EngineState, seller: u8, bid: &CredOffer) ->
 }
 
 /// Computes `floor(units * parity * UNSOLD_EXCESS_PARITY_BPS / (UNIT_SCALE * BPS_SCALE))`
-/// (`50%` of fixed base value / `parity` for `units`), shared between per-slice bid-walk floors
-/// and uncovered leftover excess at Season Close.
+/// (`50%` of fixed base value / `parity` for `units`), applied once to all pooled non-winning and
+/// uncovered units at Season Close.
 #[must_use]
 fn half_base_value_for_units(units: Units, parity: Units) -> Units {
     if units <= 0 || parity <= 0 {
@@ -238,13 +238,17 @@ fn half_base_value_for_units(units: Units, parity: Units) -> Units {
 ///
 /// 1. **Trade prices do not count:** no traded price, volume, window, or qualification test enters
 ///    the close mark.
-/// 2. **Standing bids first, floored at `50%` of base value:** units that executable non-self
-///    resting `Buy` bids would buy are walked highest-bid-first (`offer_id` ascending on price
-///    ties; `seat`'s own bids skipped), and each covered slice of `take` units is worth
-///    `max(min(take * bid_price, locked_cred), take * 50% of base value)` (including slices cut
-///    down by `locked_cred`).
-/// 3. **The rest at `50%` of base value:** remaining uncovered units are valued at
-///    [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`).
+/// 2. **Standing bids first, compared against the unrounded `50%` floor:** units that executable
+///    non-self resting `Buy` bids would buy are walked highest-bid-first (`offer_id` ascending on
+///    price ties; `seat`'s own bids skipped). A slice of `take` units whose `bid_cred`
+///    (`min(take * bid_price, locked_cred)`) strictly exceeds the unrounded `50%` base floor
+///    (`bid_cred * UNIT_SCALE * BPS_SCALE > take * parity * UNSOLD_EXCESS_PARITY_BPS`) adds
+///    `bid_cred`; any slice that does not beat that unrounded floor adds nothing during the walk
+///    and instead joins the pooled floored unit count.
+/// 3. **One pooled `50%` floor over the rest:** all non-winning bid slices and remaining uncovered
+///    units are pooled together and valued once via [`half_base_value_for_units`] at
+///    [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`), so a holding with no
+///    winning bid marks identically to a holding with no bids at all.
 ///
 /// Note: each holder is valued against the full executable resting bid depth independently (so a
 /// single resting bid can lift multiple holders); this is a known, accepted residual.
@@ -271,19 +275,28 @@ pub fn mark_good_holding_at_close(
     });
 
     let mut rem_units = units;
+    let mut floored_units: i128 = 0;
     let mut proceeds: i128 = 0;
+    let scale = i128::from(UNIT_SCALE) * BPS_SCALE;
     for bid in bids {
         if rem_units <= 0 {
             break;
         }
         let take = rem_units.min(bid.remaining_units);
         let bid_cred = mul_units_parity(take, bid.price_per_unit_cred).min(bid.locked_cred);
-        let floor_cred = half_base_value_for_units(take, parity);
-        proceeds += i128::from(bid_cred.max(floor_cred));
+        if i128::from(bid_cred) * scale
+            > i128::from(take) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS)
+        {
+            proceeds += i128::from(bid_cred);
+        } else {
+            floored_units += i128::from(take);
+        }
         rem_units -= take;
     }
-    if rem_units > 0 {
-        proceeds += i128::from(half_base_value_for_units(rem_units, parity));
+    let pooled_floor_units =
+        (floored_units + i128::from(rem_units.max(0))).clamp(0, i128::from(Units::MAX)) as Units;
+    if pooled_floor_units > 0 {
+        proceeds += i128::from(half_base_value_for_units(pooled_floor_units, parity));
     }
     proceeds.clamp(i64::MIN as i128, i64::MAX as i128) as Units
 }

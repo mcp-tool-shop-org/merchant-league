@@ -85,8 +85,8 @@ pub const DEFAULT_MANDATE_ALPHA_BPS: Bps = 250;
 pub const MANDATE_STARTING_NW_FLOOR_BPS: Bps = 5_000;
 
 /// Fixed base-value floor and salvage fraction (`5_000 bps = 50.00%` of fixed base value / parity)
-/// applied at Season Close both as the per-slice minimum on bid-covered units and as the mark on
-/// remaining uncovered leftover units (`2026-11-16` Director ruling).
+/// applied once at Season Close over all pooled non-winning bid slices and uncovered leftover units
+/// (`2026-11-16` Director ruling).
 pub const UNSOLD_EXCESS_PARITY_BPS: Bps = 5_000;
 
 /// Computes exact expected season length `E[T]` from a per-turn closing hazard schedule over

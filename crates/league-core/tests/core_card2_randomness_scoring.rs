@@ -2621,3 +2621,583 @@ fn b7_final_standings_ties_break_by_beacon_not_seat_index() {
     );
     assert_eq!(board_1.standings[1].seat, 0);
 }
+
+fn n4_generated_converted_table_spec(initial_cred: Units) -> TableSpec {
+    use league_core::{
+        ConverterRecipe, DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
+        ProjectRecipe, SeatConfig, graded_mandate_deck_for_mean_project_value,
+    };
+
+    let tid = TableId(804);
+    let seats = vec![
+        SeatConfig {
+            seat: 0,
+            identity: SeatIdentity::AiSyndicate,
+            initial_cred,
+            raw_yield_per_turn: 10_361,
+            refined_project_value: 2_157,
+            upkeep_good: 3,
+            upkeep_amount: 1_705,
+            initial_raw_tariff_bps: 1_550,
+            initial_refined_tariff_bps: 1_623,
+            perishable_decay_bps: 1_900,
+            regent: None,
+            converters: vec![
+                ConverterRecipe {
+                    owner: 0,
+                    inputs: vec![(1, 2_400), (2, 1_843)],
+                    output_good: 0,
+                    output_amount: 3_266,
+                    max_runs_per_turn: 2,
+                    is_secondary: false,
+                },
+                ConverterRecipe {
+                    owner: 0,
+                    inputs: vec![(2, 1_246), (3, 3_722)],
+                    output_good: 0,
+                    output_amount: 2_755,
+                    max_runs_per_turn: 5,
+                    is_secondary: true,
+                },
+            ],
+        },
+        SeatConfig {
+            seat: 1,
+            identity: SeatIdentity::AiSyndicate,
+            initial_cred,
+            raw_yield_per_turn: 10_289,
+            refined_project_value: 2_170,
+            upkeep_good: 0,
+            upkeep_amount: 1_692,
+            initial_raw_tariff_bps: 1_562,
+            initial_refined_tariff_bps: 1_615,
+            perishable_decay_bps: 2_259,
+            regent: None,
+            converters: vec![
+                ConverterRecipe {
+                    owner: 1,
+                    inputs: vec![(2, 1_253), (3, 2_889)],
+                    output_good: 1,
+                    output_amount: 3_191,
+                    max_runs_per_turn: 2,
+                    is_secondary: false,
+                },
+                ConverterRecipe {
+                    owner: 1,
+                    inputs: vec![(3, 1_557), (0, 3_355)],
+                    output_good: 1,
+                    output_amount: 2_727,
+                    max_runs_per_turn: 5,
+                    is_secondary: true,
+                },
+            ],
+        },
+        SeatConfig {
+            seat: 2,
+            identity: SeatIdentity::AiSyndicate,
+            initial_cred,
+            raw_yield_per_turn: 10_320,
+            refined_project_value: 2_162,
+            upkeep_good: 1,
+            upkeep_amount: 1_695,
+            initial_raw_tariff_bps: 1_618,
+            initial_refined_tariff_bps: 1_985,
+            perishable_decay_bps: 2_304,
+            regent: None,
+            converters: vec![
+                ConverterRecipe {
+                    owner: 2,
+                    inputs: vec![(3, 1_866), (0, 2_366)],
+                    output_good: 2,
+                    output_amount: 3_256,
+                    max_runs_per_turn: 2,
+                    is_secondary: false,
+                },
+                ConverterRecipe {
+                    owner: 2,
+                    inputs: vec![(0, 1_433), (1, 3_505)],
+                    output_good: 2,
+                    output_amount: 2_729,
+                    max_runs_per_turn: 5,
+                    is_secondary: true,
+                },
+            ],
+        },
+        SeatConfig {
+            seat: 3,
+            identity: SeatIdentity::AiSyndicate,
+            initial_cred,
+            raw_yield_per_turn: 10_443,
+            refined_project_value: 2_159,
+            upkeep_good: 2,
+            upkeep_amount: 1_698,
+            initial_raw_tariff_bps: 1_615,
+            initial_refined_tariff_bps: 1_845,
+            perishable_decay_bps: 2_418,
+            regent: None,
+            converters: vec![
+                ConverterRecipe {
+                    owner: 3,
+                    inputs: vec![(0, 2_574), (1, 1_598)],
+                    output_good: 3,
+                    output_amount: 3_221,
+                    max_runs_per_turn: 2,
+                    is_secondary: false,
+                },
+                ConverterRecipe {
+                    owner: 3,
+                    inputs: vec![(1, 1_825), (2, 3_040)],
+                    output_good: 3,
+                    output_amount: 2_694,
+                    max_runs_per_turn: 5,
+                    is_secondary: true,
+                },
+            ],
+        },
+    ];
+    let projects = vec![
+        ProjectRecipe {
+            id: 1,
+            inputs: vec![(0, 1_000), (1, 1_000)],
+            equity_points: 4_543,
+        },
+        ProjectRecipe {
+            id: 2,
+            inputs: vec![(1, 1_000), (2, 1_000)],
+            equity_points: 4_549,
+        },
+        ProjectRecipe {
+            id: 3,
+            inputs: vec![(2, 1_000), (3, 1_000)],
+            equity_points: 4_537,
+        },
+        ProjectRecipe {
+            id: 4,
+            inputs: vec![(3, 1_000), (0, 1_000)],
+            equity_points: 4_532,
+        },
+        ProjectRecipe {
+            id: 100,
+            inputs: vec![(0, 1_000), (1, 1_000), (2, 1_000), (3, 1_000)],
+            equity_points: 9_945,
+        },
+    ];
+    let mean_proj = (seats.iter().map(|s| s.refined_project_value).sum::<Units>() + 2) / 4;
+    assert_eq!(mean_proj, 2_162);
+    let mandate_deck = graded_mandate_deck_for_mean_project_value(4, mean_proj);
+    let salts: Vec<RevealSalt> = (0..4).map(|s| RevealSalt([0x41 + s; 32])).collect();
+    let (dealt_mandate_commits, _) =
+        deal_graded_mandates_with_entropy(tid, 4, [0x77; 32], &salts, &mandate_deck)
+            .must("deal 804");
+
+    TableSpec {
+        table_id: tid,
+        mode: TableMode::Eval,
+        seat_count: 4,
+        seats,
+        projects,
+        shocks: vec![ScheduledShockSpec {
+            hint_turn: 1,
+            forecast_turn: 2,
+            realize_turn: 3,
+            target_seat: 3,
+            kind: ShockKind::TariffHoliday,
+            magnitude_bps: 100,
+        }],
+        closing_hazard_bps: [10_000; CLOSING_ROLL_WINDOW_LEN],
+        mandate_deck,
+        dealt_mandate_commits,
+        drand_schedule: None,
+        eval_vrf_pubkey: None,
+        town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
+        works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
+        mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
+    }
+}
+
+#[test]
+fn pr40_fix3_pooled_floor_dust_wall_worst_slice_0_006_units_and_nonround_bids() {
+    let denom = i128::from(UNIT_SCALE) * BPS_SCALE;
+
+    // -------------------------------------------------------------------------
+    // 1. Non-round holding (`39.917` units = `39_917` milli-units) with `3,000`
+    //    buy offers of `0.001` unit at `1` milli-CRED/unit (`TableId(631)`):
+    //    Seat 0 sells `200_083` of its `240_000` Raw(0) on Turn 22 so Seat 0
+    //    holds exact `39_917` milli-units (`39.917` units) at Turn-24 close.
+    //    Baseline mark: `floor(39_917 * 1_750 * 5_000 / 10_000_000) = 34_927`.
+    // -------------------------------------------------------------------------
+    {
+        let tid = TableId(631);
+        let mut sp = TableSpec::standard_chiral_ring(tid, 4, 5).must("spec 631");
+        sp.closing_hazard_bps = [10_000; CLOSING_ROLL_WINDOW_LEN];
+        sp.shocks = vec![ScheduledShockSpec {
+            hint_turn: 1,
+            forecast_turn: 2,
+            realize_turn: 3,
+            target_seat: 3,
+            kind: ShockKind::TariffHoliday,
+            magnitude_bps: 100,
+        }];
+        for s in &mut sp.seats {
+            s.initial_cred = 350_000;
+            s.perishable_decay_bps = 0;
+            s.regent = None;
+        }
+        let run_39917 = |dust_bids: usize| -> (Units, FinalScoreboard) {
+            let mut eng = TurnEngine::new(sp.clone()).must("eng 631");
+            for t in 1..=24_u8 {
+                if t == 23 {
+                    // Seat 0 holds `220_000` entering Turn 23, sells `200_083` (`-> 19_917`), and
+                    // receives `+10_000` in T23 Step 4b + `+10_000` in T24 Step 4b = `39_917`.
+                    eng.apply_market_action(MarketAction::PostOffer {
+                        seat: 1,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: 200_083,
+                            price_per_unit_cred: 1_400,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("631 buy");
+                    eng.apply_market_action(MarketAction::PostOffer {
+                        seat: 0,
+                        order: OfferProposal {
+                            side: OfferSide::Sell,
+                            good: AssetId::Raw(0),
+                            amount: 200_083,
+                            price_per_unit_cred: 1_400,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("631 sell");
+                }
+                if t == 24 {
+                    for _ in 0..dust_bids {
+                        eng.apply_market_action(MarketAction::PostOffer {
+                            seat: 3,
+                            order: OfferProposal {
+                                side: OfferSide::Buy,
+                                good: AssetId::Raw(0),
+                                amount: 1,
+                                price_per_unit_cred: 1,
+                                domain_id: None,
+                                is_hybrid: false,
+                            },
+                        })
+                        .must("631 dust bid");
+                    }
+                }
+                if step_empty_turn(&mut eng, tid, t, 5) {
+                    break;
+                }
+            }
+            assert_eq!(eng.state().seats[0].raw[0], 39_917);
+            let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), 39_917);
+            (mk, eng.finalize_season().must("fin 631"))
+        };
+        let (mk_base, b_base) = run_39917(0);
+        let (mk_3k, b_3k) = run_39917(3_000);
+        assert_eq!(mk_base, 34_927);
+        assert_eq!(mk_3k, mk_base);
+        let s0_base = b_base.standings.iter().find(|e| e.seat == 0).must("s0");
+        let s0_3k = b_3k.standings.iter().find(|e| e.seat == 0).must("s0 3k");
+        let s3_base = b_base.standings.iter().find(|e| e.seat == 3).must("s3");
+        let s3_3k = b_3k.standings.iter().find(|e| e.seat == 3).must("s3 3k");
+        assert_eq!(s0_3k.net_asset_equity, s0_base.net_asset_equity);
+        assert_eq!(s0_3k.total_equity, s0_base.total_equity);
+        assert_eq!(s3_3k.net_asset_equity, s3_base.net_asset_equity);
+        assert_eq!(s3_3k.total_equity, s3_base.total_equity);
+    }
+
+    // -------------------------------------------------------------------------
+    // 2 & 3 & 4a. Review's exact generated `N = 4` table (`TableId(804)`,
+    //             `Raw(0)` parity = `1_664`, `s0_hold = 43_892` = `43.892` u):
+    //   - (2) `15,000` offers of `0.001` u @ `1` milli-CRED on Turn 24:
+    //         Seat 0 == baseline (`-92,382`, rank 1), bidder Seat 3 == baseline.
+    //   - (3) Worst slice size over `0.001..=2.000` units (`1..=2_000` milli-units)
+    //         at `parity = 1_664`: `6` milli-units (`0.006` units), where exact
+    //         unrounded `50%` floor is `6 * 832 / 1_000 = 4.992` milli-CRED so
+    //         the old per-slice floor (`4`) lost `0.992` milli-CRED per slice
+    //         (`9_920_000 / 10_000_000`, `1,984` milli-CRED across `2,000` offers).
+    //         Posting `2,000` offers of `0.006` units at `831` milli-CRED/unit
+    //         (just under `50%` of base = `832`): Seat 0 == baseline, bidder == baseline.
+    //   - (4a) Non-round lowball half-holding (`21.947` units = `21_947` milli-units
+    //          @ `1` milli-CRED) and non-round honest `40%`-of-base bid (`17.557`
+    //          units = `17_557` milli-units @ `665` milli-CRED, where both slices
+    //          lost `-1` milli-CRED under Fix 2's per-slice rounding):
+    //          Seat 0 == baseline, bidder == baseline.
+    // -------------------------------------------------------------------------
+    {
+        let spec_804 = n4_generated_converted_table_spec(15_000);
+        let tid = spec_804.table_id;
+        let step_804 = |eng: &mut TurnEngine, t: u8| -> bool {
+            eng.advance_to_commit().must("adv commit 804");
+            let mut revs = Vec::with_capacity(4);
+            for s in 0..4_u8 {
+                let rev = OrderReveal {
+                    bundle: SealedOrderBundle::default(),
+                    salt: RevealSalt([t.wrapping_add(s).max(1); 32]),
+                };
+                let c = compute_order_commitment(tid, Turn(t), Seat(s), &rev).must("commit 804");
+                eng.submit_order_commitment(Seat(s), c)
+                    .must("sub commit 804");
+                revs.push((s, rev));
+            }
+            eng.advance_to_reveal().must("adv reveal 804");
+            for (s, rev) in revs {
+                eng.submit_order_reveal(Seat(s), rev).must("sub reveal 804");
+            }
+            eng.sweep_turn(derive_turn_beacon(42, tid, Turn(t)))
+                .must("sweep 804")
+                .season_closed
+        };
+
+        let run_804_with_t24_bids =
+            |offers: &[(u8, Units, Units)]| -> (Units, Units, FinalScoreboard) {
+                let mut eng = TurnEngine::new(spec_804.clone()).must("eng 804");
+                for t in 1..=24_u8 {
+                    if t == 24 {
+                        for &(maker, amount, price_per_unit_cred) in offers {
+                            eng.apply_market_action(MarketAction::PostOffer {
+                                seat: maker,
+                                order: OfferProposal {
+                                    side: OfferSide::Buy,
+                                    good: AssetId::Raw(0),
+                                    amount,
+                                    price_per_unit_cred,
+                                    domain_id: None,
+                                    is_hybrid: false,
+                                },
+                            })
+                            .must("post offer 804");
+                        }
+                    }
+                    if step_804(&mut eng, t) {
+                        break;
+                    }
+                }
+                let parity = eng.state().parities.asset_parity(AssetId::Raw(0));
+                let hold = eng.state().seats[0].raw[0];
+                let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), hold);
+                (parity, mk, eng.finalize_season().must("fin 804"))
+            };
+
+        let (parity_804, base_mk_804, board_base_804) = run_804_with_t24_bids(&[]);
+        assert_eq!(parity_804, 1_664);
+        assert_eq!(base_mk_804, 36_518);
+        assert_eq!(
+            board_base_804.standings[0].seat, 0,
+            "Seat 0 starts at rank 1"
+        );
+        let s0_base = board_base_804
+            .standings
+            .iter()
+            .find(|e| e.seat == 0)
+            .must("s0 base");
+        let s3_base = board_base_804
+            .standings
+            .iter()
+            .find(|e| e.seat == 3)
+            .must("s3 base");
+        assert_eq!(s0_base.net_asset_equity, -92_382);
+
+        // (2) 15,000 offers of 0.001 unit @ 1 milli-CRED/unit from Seat 3.
+        let dust_15k: Vec<(u8, Units, Units)> = vec![(3, 1, 1); 15_000];
+        let (_, mk_15k, board_15k) = run_804_with_t24_bids(&dust_15k);
+        assert_eq!(mk_15k, base_mk_804);
+        assert_eq!(board_15k.standings[0].seat, 0, "Seat 0 must remain rank 1");
+        let s0_15k = board_15k
+            .standings
+            .iter()
+            .find(|e| e.seat == 0)
+            .must("s0 15k");
+        let s3_15k = board_15k
+            .standings
+            .iter()
+            .find(|e| e.seat == 3)
+            .must("s3 15k");
+        assert_eq!(s0_15k.net_asset_equity, s0_base.net_asset_equity);
+        assert_eq!(s0_15k.total_equity, s0_base.total_equity);
+        assert_eq!(s3_15k.net_asset_equity, s3_base.net_asset_equity);
+        assert_eq!(s3_15k.total_equity, s3_base.total_equity);
+
+        // (3) Find worst slice size in `0.001..=2.000` units (`1..=2_000` milli-units)
+        //     for `parity = 1_664` under the old per-slice floor:
+        //     `take = 6` (`0.006` units) loses `9_920_000 / 10_000_000 = 0.992` milli-CRED/slice.
+        let mut worst_take: Units = 1;
+        let mut max_rem_num: i128 = -1;
+        for take in 1_i64..=2_000 {
+            let rem_num =
+                (i128::from(take) * i128::from(parity_804) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+                    % denom;
+            if rem_num > max_rem_num {
+                max_rem_num = rem_num;
+                worst_take = take;
+            }
+        }
+        assert_eq!(
+            worst_take, 6,
+            "worst slice at parity 1,664 is 0.006 units (6 milli-units)"
+        );
+        assert_eq!(
+            max_rem_num, 9_920_000,
+            "old code lost 0.992 milli-CRED per 0.006-unit slice"
+        );
+        let half_base_px_804 = (parity_804 * UNSOLD_EXCESS_PARITY_BPS as i64) / 10_000;
+        assert_eq!(half_base_px_804, 832);
+        let just_under_half_px = half_base_px_804 - 1; // 831 milli-CRED/unit
+        let worst_2k: Vec<(u8, Units, Units)> = vec![(3, worst_take, just_under_half_px); 2_000];
+        let (_, mk_worst, board_worst) = run_804_with_t24_bids(&worst_2k);
+        assert_eq!(mk_worst, base_mk_804);
+        let s0_w = board_worst
+            .standings
+            .iter()
+            .find(|e| e.seat == 0)
+            .must("s0 w");
+        let s3_w = board_worst
+            .standings
+            .iter()
+            .find(|e| e.seat == 3)
+            .must("s3 w");
+        assert_eq!(s0_w.net_asset_equity, s0_base.net_asset_equity);
+        assert_eq!(s0_w.total_equity, s0_base.total_equity);
+        assert_eq!(s3_w.net_asset_equity, s3_base.net_asset_equity);
+        assert_eq!(s3_w.total_equity, s3_base.total_equity);
+
+        // (4a) Non-round half-holding lowball (`21_947` milli-units @ `1`) and
+        //      non-round honest `40%`-of-base (`17_557` milli-units @ `665`) on `TableId(804)`.
+        //      Note: `(21_947 * 832) % 1_000 = 904 > 144` and `(17_557 * 832) % 1_000 = 424 > 144`,
+        //      so BOTH lost `-1` milli-CRED under Fix 2's per-slice rounding!
+        for (amt, px) in [(21_947_i64, 1_i64), (17_557_i64, (parity_804 * 40) / 100)] {
+            let (_, mk_nr, b_nr) = run_804_with_t24_bids(&[(3, amt, px)]);
+            assert_eq!(mk_nr, base_mk_804);
+            let s0_nr = b_nr.standings.iter().find(|e| e.seat == 0).must("s0 nr");
+            let s3_nr = b_nr.standings.iter().find(|e| e.seat == 3).must("s3 nr");
+            assert_eq!(s0_nr.net_asset_equity, s0_base.net_asset_equity);
+            assert_eq!(s0_nr.total_equity, s0_base.total_equity);
+            assert_eq!(s3_nr.net_asset_equity, s3_base.net_asset_equity);
+            assert_eq!(s3_nr.total_equity, s3_base.total_equity);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 4b, 5, & 6 on `TableId(620)` (`parity = 1_750`, non-round `s0_hold = 39_812`,
+    // `base_mark = floor(39_812 * 875 / 1_000) = 34_835`, `s0_base_eq = -90_864`):
+    // -------------------------------------------------------------------------
+    {
+        let tid = TableId(620);
+        let mut base_spec = TableSpec::standard_chiral_ring(tid, 4, 5).must("spec 620 fix3");
+        base_spec.closing_hazard_bps = [10_000; CLOSING_ROLL_WINDOW_LEN];
+        base_spec.shocks = vec![ScheduledShockSpec {
+            hint_turn: 1,
+            forecast_turn: 2,
+            realize_turn: 3,
+            target_seat: 3,
+            kind: ShockKind::TariffHoliday,
+            magnitude_bps: 100,
+        }];
+        for s in &mut base_spec.seats {
+            s.initial_cred = 15_000;
+            s.regent = None;
+        }
+        let run_620 = |offers: &[(u8, Units, Units)]| -> (Units, Units, FinalScoreboard) {
+            let mut eng = TurnEngine::new(base_spec.clone()).must("eng 620 fix3");
+            for t in 1..=24_u8 {
+                if t == 24 {
+                    for &(maker, amount, price_per_unit_cred) in offers {
+                        eng.apply_market_action(MarketAction::PostOffer {
+                            seat: maker,
+                            order: OfferProposal {
+                                side: OfferSide::Buy,
+                                good: AssetId::Raw(0),
+                                amount,
+                                price_per_unit_cred,
+                                domain_id: None,
+                                is_hybrid: false,
+                            },
+                        })
+                        .must("post 620 fix3");
+                    }
+                }
+                let _ = commit_and_reveal_bundles(
+                    &mut eng,
+                    tid,
+                    t,
+                    vec![SealedOrderBundle::default(); 4],
+                );
+                if eng
+                    .sweep_turn(derive_turn_beacon(5, tid, Turn(t)))
+                    .must("sweep 620 fix3")
+                    .season_closed
+                {
+                    break;
+                }
+            }
+            let hold = eng.state().seats[0].raw[0];
+            let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), hold);
+            (hold, mk, eng.finalize_season().must("fin 620 fix3"))
+        };
+
+        let (hold_base, mk_base, b_base) = run_620(&[]);
+        assert_eq!(hold_base, 39_812);
+        assert_eq!(mk_base, 34_835);
+        let s0_base = b_base.standings.iter().find(|e| e.seat == 0).must("s0");
+        let s1_base = b_base.standings.iter().find(|e| e.seat == 1).must("s1");
+        let s3_base = b_base.standings.iter().find(|e| e.seat == 3).must("s3");
+        assert_eq!(s0_base.net_asset_equity, -90_864);
+
+        // (4b) Non-round half-holding lowball (`19.907` units = `19_907` milli-units @ `1`)
+        //      and non-round honest `40%`-of-base (`15.927` units = `15_927` milli-units @ `700`):
+        //      both had `(take * 875) % 1_000 == 625 > 500` (losing `-1` milli-CRED under Fix 2).
+        for (amt, px) in [(19_907_i64, 1_i64), (15_927_i64, 700_i64)] {
+            let (_, mk_nr, b_nr) = run_620(&[(3, amt, px)]);
+            assert_eq!(mk_nr, mk_base);
+            let s0_nr = b_nr.standings.iter().find(|e| e.seat == 0).must("s0 nr");
+            let s3_nr = b_nr.standings.iter().find(|e| e.seat == 3).must("s3 nr");
+            assert_eq!(s0_nr.net_asset_equity, s0_base.net_asset_equity);
+            assert_eq!(s3_nr.net_asset_equity, s3_base.net_asset_equity);
+        }
+
+        // (5) Mix: 1 bid above the floor for non-round `7.333` units (`7_333` milli-units)
+        //     @ `1_200` milli-CRED/unit PLUS `1,000` dust bids of `0.001` unit @ `1` milli-CRED:
+        //     - Winning bid slice (`take = 7_333`):
+        //         `bid_cred = floor(7_333 * 1_200 / 1_000) = 8_799` milli-CRED
+        //         (`8_799 * 10_000_000 = 87_990_000_000 > 7_333 * 8_750_000 = 64_163_750_000`).
+        //     - `1,000` dust bids (`1_000 * 1` milli-unit): `bid_cred = 0` -> `floored_units = 1_000`.
+        //     - Uncovered remainder: `rem_units = 39_812 - 7_333 - 1_000 = 31_479`.
+        //     - Pooled floor over all other units (`1_000 + 31_479 = 32_479` milli-units):
+        //         `floor(32_479 * 1_750 * 5_000 / 10_000_000) = floor(28_419_125 / 1_000) = 28_419`.
+        //     - Exact total mark = `8_799 + 28_419 = 37_218` (`+2_383` over `34_835` baseline,
+        //       so `s0_eq = -90_864 + 2_383 = -88_481`; Fix 2 per-slice gave `36_343`, `-875` lower).
+        let mut mix_offers = Vec::with_capacity(1_001);
+        mix_offers.push((1_u8, 7_333_i64, 1_200_i64));
+        mix_offers.extend(std::iter::repeat_n((3_u8, 1_i64, 1_i64), 1_000));
+        let (_, mk_mix, b_mix) = run_620(&mix_offers);
+        assert_eq!(mk_mix, 37_218);
+        let s0_mix = b_mix.standings.iter().find(|e| e.seat == 0).must("s0 mix");
+        let s3_mix = b_mix.standings.iter().find(|e| e.seat == 3).must("s3 mix");
+        assert_eq!(s0_mix.net_asset_equity, -88_481);
+        assert_eq!(s0_mix.net_asset_equity - s0_base.net_asset_equity, 2_383);
+        assert_eq!(s3_mix.net_asset_equity, s3_base.net_asset_equity);
+
+        // (6) Exact unrounded-floor tie: `take = 8` milli-units (`0.008` units) @ `price = 875`:
+        //     `bid_cred = floor(8 * 875 / 1_000) = 7` (`locked_cred = 7`), so:
+        //       LHS = `7 * 1_000 * 10_000 = 70_000_000`
+        //       RHS = `8 * 1_750 * 5_000  = 70_000_000` (`LHS == RHS`!).
+        //     Because comparison is strict `>`, it counts as floored (`floored_units += 8`),
+        //     and total mark (`34_835`) and equity (`-90_864`) equal baseline!
+        let lhs_tie = 7_i128 * denom;
+        let rhs_tie = 8_i128 * 1_750 * i128::from(UNSOLD_EXCESS_PARITY_BPS);
+        assert_eq!(lhs_tie, rhs_tie);
+        let (_, mk_tie, b_tie) = run_620(&[(1, 8, 875)]);
+        assert_eq!(mk_tie, mk_base);
+        let s0_tie = b_tie.standings.iter().find(|e| e.seat == 0).must("s0 tie");
+        let s1_tie = b_tie.standings.iter().find(|e| e.seat == 1).must("s1 tie");
+        assert_eq!(s0_tie.net_asset_equity, s0_base.net_asset_equity);
+        assert_eq!(s0_tie.total_equity, s0_base.total_equity);
+        assert_eq!(s1_tie.net_asset_equity, s1_base.net_asset_equity);
+    }
+}

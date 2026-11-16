@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "1590f8f792a9189162e4cb28f4270f97a537246d695cb9e8ba875111bd5c8b24",
+          "hash": "24a4622fa4ea6a42662553d737f41204c3831352c3cf38520a815d1842dd98a8",
           "path": "docs/design-v2.md"
         },
         {
@@ -1135,10 +1135,10 @@
             {
               "in": "compute_final_scoreboard",
               "kind": "err",
-              "line": 599
+              "line": 612
             }
           ],
-          "hash": "aa04113b9f5d2a601685a0974359f67a1a4a0f391573a46afd9f13bd480e300a",
+          "hash": "d60e8f40c816728f6bc7ebcd313840631f541cd1bc361d4c0a2337a8813e1faa",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1318,14 +1318,14 @@
               "line": 1005
             }
           ],
-          "hash": "4eff43cf0f1b623b99a3bee86368037bac1e26b84afaa8f3d531be635bb08dd1",
+          "hash": "d9b2e9e6fe5f25414fcb5608308d3c7bf4ed0dc86d545929a5ed65c2207ad55a",
           "importsFiles": [
             "crates/league-core/src/commit.rs"
           ],
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "291fcde5f9afcbc3bf1e7b97c0f2dd5f3296791a820afa8992a5d86dfaabab77",
+          "hash": "586f345902ad4144ab61e08ef85058734cc56a2444d61bc89bf5845026ff973a",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2794,7 +2794,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "5adf489c1068073c0e81c231092875565bc8d0fa24a8d7a9f04bdffd650dc8bf",
+          "hash": "6f07448d087135f6a31c47168430ae6a17a9efbf9e10d87d3b0db379d2166245",
           "path": "CHANGELOG.md"
         },
         {
@@ -3523,7 +3523,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "3c08a7c2ba5cf19a621bb65f27a1f9612630b896",
+    "commit": "1b54ef6b3b731b155b4477b849477a55304cfb6d",
     "tracked": 500
   },
   "landings": [
