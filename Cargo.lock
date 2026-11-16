@@ -1563,6 +1563,7 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "hex",
+ "icu_normalizer",
  "league-relay",
  "same-file",
  "serde",

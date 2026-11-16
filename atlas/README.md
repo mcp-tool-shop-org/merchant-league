@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit d97301c by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit 0b8aada by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (f3e1d5d)
+## What changed since 2026-11-15 (d97301c)
 
-Nothing structural changed since 2026-11-15; 2 files changed content.
+Nothing structural changed since 2026-11-15; 7 files changed content.
 
 ## What comes in
 
@@ -50,11 +50,11 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 10 of 10 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 11 of 11 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 10 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 10 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 10 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 11 commits.
+- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -90,11 +90,11 @@ People write .github/, docs/ and the repository root. Nothing in the files this 
 
 ## Where to start
 
-crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/seats.rs → crates/league-relay/src/error.rs
+crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/seats.rs → crates/league-relay/src/relay.rs → crates/league-relay/src/transport.rs
 
 Read those in order to follow one run of league-relay end to end. This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.
 
-Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/relay.rs.
+Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/src/error.rs.
 
 ## What this map cannot see
 
