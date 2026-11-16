@@ -13,6 +13,10 @@ use crate::commit::{
 };
 use crate::contracts::MarketAction;
 use crate::engine::{SweepReceipt, TurnEngine, TurnPhase};
+use crate::predicates::{
+    STATE_PREDICATE_SECTION_VERSION, SeatStatePredicates, SeatSweepOutcome, StatePredicateSection,
+    TurnPredicateRecord, compute_seat_state_predicates,
+};
 use crate::scoring::FinalScoreboard;
 use crate::types::{EngineError, ScheduledShockSpec, Seat, TableMode, TableSpec, Turn};
 
@@ -133,9 +137,99 @@ pub struct ReplayOutcome {
     pub scoreboard: FinalScoreboard,
 }
 
+/// A replay record: the [`SeasonReplayLog`] plus the optional, additive state-predicate section.
+///
+/// The log's fields serialize at the top level exactly as a bare [`SeasonReplayLog`] does, and the
+/// section is one extra key written only when present, so a record without it is byte-identical to
+/// the bare log and a reader of the bare log ignores the section.
+///
+/// Read a record back with [`ReplayRecord::from_json_slice`] (serde's `flatten` cannot deserialize
+/// the log's integer-keyed maps, so the record is read as the bare log plus the one extra key).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReplayRecord {
+    /// The replay log, unchanged.
+    #[serde(flatten)]
+    pub log: SeasonReplayLog,
+    /// State predicates derived from replaying `log` ([`attach_state_predicates`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_predicates: Option<StatePredicateSection>,
+}
+
+/// The one key a [`ReplayRecord`] adds to a bare log, read on its own.
+#[derive(Deserialize)]
+struct SectionOnly {
+    #[serde(default)]
+    state_predicates: Option<StatePredicateSection>,
+}
+
+impl ReplayRecord {
+    /// Reads a record written as JSON: the bare log (unknown keys ignored, as any reader of the bare
+    /// log does) plus the optional section. A bare log reads as a record without a section.
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        let log: SeasonReplayLog = serde_json::from_slice(bytes).map_err(|err| {
+            EngineError::InvalidConfig(format!("replay record log does not parse: {err}"))
+        })?;
+        let extra: SectionOnly = serde_json::from_slice(bytes).map_err(|err| {
+            EngineError::InvalidConfig(format!("replay record section does not parse: {err}"))
+        })?;
+        if let Some(section) = &extra.state_predicates
+            && section.table_id != log.spec.table_id
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "replay record section table_id {} does not match the log's table_id {}",
+                section.table_id.0, log.spec.table_id.0
+            )));
+        }
+        Ok(Self {
+            log,
+            state_predicates: extra.state_predicates,
+        })
+    }
+}
+
 /// Replays an entire season deterministically from `log`, verifying every phase transition,
 /// cryptographic commitment, 8-step Sweep, closing bell roll, and final scoreboard.
 pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
+    replay_season_inner(log, None)
+}
+
+/// [`replay_season`], also deriving the state-predicate section: every seat's predicates at the
+/// start of every turn, each Sweep's per-seat outcome, and every seat's predicates at the close.
+///
+/// Deriving the section reads the engine state and changes nothing: the returned
+/// [`ReplayOutcome`] equals [`replay_season`]'s for the same log.
+pub fn replay_season_with_state_predicates(
+    log: &SeasonReplayLog,
+) -> Result<(ReplayOutcome, StatePredicateSection), EngineError> {
+    let mut section = StatePredicateSection {
+        version: STATE_PREDICATE_SECTION_VERSION,
+        table_id: log.spec.table_id,
+        turns: Vec::with_capacity(log.turns.len()),
+        at_close: Vec::new(),
+    };
+    let outcome = replay_season_inner(log, Some(&mut section))?;
+    Ok((outcome, section))
+}
+
+/// Replays `log` and returns it as a [`ReplayRecord`] carrying the state-predicate section.
+pub fn attach_state_predicates(log: &SeasonReplayLog) -> Result<ReplayRecord, EngineError> {
+    let (_, section) = replay_season_with_state_predicates(log)?;
+    Ok(ReplayRecord {
+        log: log.clone(),
+        state_predicates: Some(section),
+    })
+}
+
+fn all_seat_predicates(engine: &TurnEngine) -> Result<Vec<SeatStatePredicates>, EngineError> {
+    (0..engine.state().spec.seat_count)
+        .map(|s| compute_seat_state_predicates(engine.state(), Seat(s)))
+        .collect()
+}
+
+fn replay_season_inner(
+    log: &SeasonReplayLog,
+    mut section: Option<&mut StatePredicateSection>,
+) -> Result<ReplayOutcome, EngineError> {
     if log.mode != log.spec.mode {
         return Err(EngineError::InvalidConfig(format!(
             "replay log mode {:?} does not match TableSpec mode {:?}",
@@ -351,6 +445,10 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
             )));
         }
 
+        let at_turn_start = match section {
+            Some(_) => Some(all_seat_predicates(&engine)?),
+            None => None,
+        };
         for action in &logged.market_actions {
             let _ = engine.apply_market_action(action.clone());
         }
@@ -362,10 +460,29 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
         for (&seat_idx, reveal) in &logged.reveals {
             engine.submit_order_reveal(Seat(seat_idx), reveal.clone())?;
         }
-        let receipt = match verified_source {
-            TurnSource::Drand(round, sig) => engine.sweep_turn_with_drand(round, sig)?,
-            TurnSource::EvalVrf(proof) => engine.sweep_turn_with_eval_vrf(proof)?,
+        let (receipt, details) = match verified_source {
+            TurnSource::Drand(round, sig) => engine.sweep_turn_with_drand_detailed(round, sig)?,
+            TurnSource::EvalVrf(proof) => engine.sweep_turn_with_eval_vrf_detailed(proof)?,
         };
+        if let (Some(sec), Some(at_turn_start)) = (section.as_deref_mut(), at_turn_start) {
+            let sweep = details
+                .upkeep_by_seat
+                .iter()
+                .zip(&details.spoilage_by_seat)
+                .enumerate()
+                .map(|(s_idx, (upkeep, &spoiled))| SeatSweepOutcome {
+                    seat: s_idx as u8,
+                    upkeep_shortfall_units: upkeep.upkeep_required - upkeep.paid_with_refined,
+                    shortfall_debt_added: upkeep.new_shortfall_debt,
+                    spoiled_units: spoiled,
+                })
+                .collect();
+            sec.turns.push(TurnPredicateRecord {
+                turn: logged.turn,
+                at_turn_start,
+                sweep,
+            });
+        }
         state_digests.push(receipt.post_state_digest);
         receipts.push(receipt);
     }
@@ -374,6 +491,10 @@ pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError
         return Err(EngineError::SeasonEnded(
             "replay log ended before stochastic or Turn-32 close occurred".to_owned(),
         ));
+    }
+
+    if let Some(sec) = section {
+        sec.at_close = all_seat_predicates(&engine)?;
     }
 
     for (s_idx, rev_opt) in log.mandate_reveals.iter().enumerate() {

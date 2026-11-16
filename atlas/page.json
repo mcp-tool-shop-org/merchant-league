@@ -29,22 +29,22 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 7,
+      "added": 2,
+      "changed": 6,
       "moved": 0,
-      "parts": 3,
+      "parts": 2,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-16; 7 files changed content.",
+        "sentence": "Nothing structural changed since 2026-11-16; 2 files added and 6 changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "688ea06dcfdcce72bde747743dac7f6882a8fc7d",
-      "generatedAt": "2026-11-16T17:59:08.913Z"
+      "commit": "010950870a9c60db0981925d2d9fa129e4958399",
+      "generatedAt": "2026-11-16T18:42:47.762Z"
     },
     "unchanged": true
   },
@@ -130,9 +130,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "010950870a9c60db0981925d2d9fa129e4958399",
+  "commit": "3d2906fcd5db0f4b7a2ec5ab97a807278028c244",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (339 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (341 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -151,7 +151,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 9
+          "files": 11
         },
         {
           "boundary": "league-dice",
@@ -215,7 +215,7 @@
         "crates/league-tui/"
       ],
       "runsCount": 23,
-      "runsMore": 29,
+      "runsMore": 30,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -357,7 +357,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-16T18:42:47.762Z",
+  "generatedAt": "2026-11-16T20:21:50.157Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
@@ -405,9 +405,9 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 39,
+  "testFiles": 40,
   "testedBy": {
-    "league-core": 6,
+    "league-core": 7,
     "league-dice": 2,
     "league-gen": 8,
     "league-ledger": 7,

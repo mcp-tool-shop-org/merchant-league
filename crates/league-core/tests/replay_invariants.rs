@@ -29,7 +29,7 @@ use league_core::{
     convert_mandate_points_to_equity, deal_graded_mandates, deal_graded_mandates_with_entropy,
     default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
     drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
-    mul_units_parity, replay_season, scale_bps_signed, town_import_cost_cred,
+    mul_units_parity, replay_season, scale_bps_signed, standings_tie_key, town_import_cost_cred,
     verify_drand_quicknet_beacon, verify_order_reveal, verify_preimage_condition,
     verify_sealed_mandate_deal, width_independent_index,
 };
@@ -80,9 +80,25 @@ fn run_scripted_full_season(
     seed: u64,
 ) -> (SeasonReplayLog, FinalScoreboard, Vec<[u8; 32]>) {
     let table_id = TableId(500 + u64::from(seat_count) * 10 + seed);
+    // Fixed fixture entropy per (seat_count, seed), so the season is the same on every run.
+    let tag = seat_count.wrapping_mul(16).wrapping_add(seed as u8);
+    let salts: Vec<RevealSalt> = (0..seat_count)
+        .map(|s| RevealSalt([tag ^ (0x40 + s); 32]))
+        .collect();
+    let fixture_eval_seed = must_ok(
+        SealedEvalSeed::try_from_bytes([tag ^ 0xA7; 32]),
+        "fixture eval seed",
+    );
     let (spec, sealed_deal, eval_seed) = must_ok(
-        TableSpec::standard_eval_chiral_ring_with_setup(table_id, seat_count, seed),
-        "standard_eval_chiral_ring_with_setup",
+        TableSpec::standard_eval_chiral_ring_with_explicit_setup(
+            table_id,
+            seat_count,
+            seed,
+            [tag ^ 0x5D; 32],
+            &salts,
+            fixture_eval_seed,
+        ),
+        "standard_eval_chiral_ring_with_explicit_setup",
     );
     let eval_pk = spec.eval_vrf_pubkey;
     let n = usize::from(seat_count);
@@ -398,10 +414,23 @@ fn deterministic_full_seasons_4_5_6_seats_and_json_replay_match_bit_for_bit() {
         assert_eq!(out_a.scoreboard, live_board);
         assert_eq!(out_a.scoreboard.standings.len(), usize::from(seats));
 
-        // Verify standings sort order: descending total_equity, ties ascending by seat.
+        // Verify standings sort order: descending total_equity, with exact ties broken by the
+        // closing turn's beacon `"tiebreak"` stream (`standings_tie_key`, `scoring.rs`), then seat.
+        let closing_beacon = must_ok(
+            log.turns
+                .last()
+                .map(|t| t.turn_beacon)
+                .ok_or("closing turn"),
+            "closing beacon",
+        );
+        let closed_turn = Turn(out_a.scoreboard.closed_turn);
+        let tie_key =
+            |seat: u8| standings_tie_key(closing_beacon, log.spec.table_id, closed_turn, seat);
         for pair in out_a.scoreboard.standings.windows(2) {
             let cmp_ok = pair[0].total_equity > pair[1].total_equity
-                || (pair[0].total_equity == pair[1].total_equity && pair[0].seat < pair[1].seat);
+                || (pair[0].total_equity == pair[1].total_equity
+                    && (tie_key(pair[0].seat), pair[0].seat)
+                        < (tie_key(pair[1].seat), pair[1].seat));
             assert!(cmp_ok);
         }
     }

@@ -8,6 +8,7 @@
 pub mod commit;
 pub mod contracts;
 pub mod engine;
+pub mod predicates;
 pub mod replay;
 pub mod scoring;
 pub mod types;
@@ -42,7 +43,20 @@ pub use engine::{
     SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepReceipt,
     TurnEngine, TurnPhase,
 };
-pub use replay::{LoggedTurn, ReplayBeaconMode, ReplayOutcome, SeasonReplayLog, replay_season};
+pub use predicates::{
+    CoalitionReach, GoodScarcity, HoldingMark, ProjectCover, ProjectInputCover, RecipeCover,
+    STATE_PREDICATE_SECTION_VERSION, STATE_PREDICATES_VERSION, SeasonEndAndMarks,
+    SeatSeasonMetrics, SeatStatePredicates, SeatSweepOutcome, SpoilageAndConversion,
+    StatePredicateSection, TurnPredicateRecord, UpkeepAndDebt, all_coalitions_reach,
+    coalition_reach, compute_season_metrics, compute_seat_state_predicates,
+    covered_with_own_offers_but_short_turns, held_enough_but_short_turns, scarcity_and_tariffs,
+    season_end_and_marks, spoilage_and_conversion, spoiled_units_over_season,
+    stranded_stock_at_close, upkeep_and_debt,
+};
+pub use replay::{
+    LoggedTurn, ReplayBeaconMode, ReplayOutcome, ReplayRecord, SeasonReplayLog,
+    attach_state_predicates, replay_season, replay_season_with_state_predicates,
+};
 pub use scoring::{
     FinalScoreboard, FundamentalParities, SeatScoreEntry, compute_final_marked_net_asset_equity,
     compute_final_scoreboard, compute_net_asset_equity, compute_pbrs_reward, compute_potential,
