@@ -4,11 +4,12 @@
 use std::collections::HashSet;
 
 use league_gen::{
-    EvMethod, FeasibilityError, GENERATOR_VERSION, GeneratorConfig, LpStatus, MAX_MANDATE_BONUS_VP,
-    MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, PlrChoice, PlrSampler, RingTable,
-    SeatCount, check_feasibility, coalition_upkeep_coverage, compute_hhi, evaluate_ring_table,
-    generate_ring_table, is_allowed_commodity_code, is_denied_currency_code,
-    pair_has_structural_autarky, solve_lp,
+    EvMethod, FeasibilityError, GENERATOR_VERSION, GenError, GeneratorConfig, LpStatus,
+    MAX_MANDATE_BONUS_VP, MIN_MANDATE_BONUS_VP, NUMERAIRE_CODE, PROJECT_CONCORDAT_ID, PlrChoice,
+    PlrSampler, RingTable, SEED_POOL_TABLE, SeatCount, SeedPool, TablePurpose, check_feasibility,
+    coalition_upkeep_coverage, compute_hhi, evaluate_ring_table, generate_ring_table,
+    generate_ring_table_for_purpose, is_allowed_commodity_code, is_denied_currency_code,
+    pair_has_structural_autarky, seed_pool, solve_lp,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{RngAlgorithm, RngSeed};
@@ -446,14 +447,16 @@ proptest! {
 
     #[test]
     fn plr_respects_capacity_and_tracks_enrolled_seeds(
-        rng_seed in 0u64..100_000,
+        rng_seed in 10_000u64..100_000,
         scores in prop::collection::vec(0u16..1000, 1..24),
     ) {
         let mut plr = PlrSampler::new(rng_seed, 4, 0.25, 0.75, 0.7);
         let mut enrolled = HashSet::new();
         for (idx, s) in scores.into_iter().enumerate() {
             let candidate = rng_seed.wrapping_add((idx as u64) + 1);
-            plr.record_score(candidate, f64::from(s));
+            if plr.record_score(candidate, f64::from(s)).is_err() {
+                unreachable!("train-pool candidate seed must be accepted");
+            }
             enrolled.insert(candidate);
             prop_assert!(plr.len() <= 4);
         }
@@ -462,6 +465,107 @@ proptest! {
                 PlrChoice::Replay(seed) => prop_assert!(enrolled.contains(&seed)),
                 PlrChoice::Fresh(_) => {}
             }
+        }
+    }
+
+    #[test]
+    fn every_u64_maps_to_one_seed_pool_and_pool_check_precedes_config(
+        seed in prop_oneof![
+            any::<u64>(),
+            0u64..3_000_000,
+            ((1u64 << 63) - 2)..=((1u64 << 63) + 2),
+        ],
+    ) {
+        let pool = seed_pool(seed);
+        let matching_ranges: Vec<SeedPool> = SEED_POOL_TABLE
+            .iter()
+            .filter_map(|&(lo, hi, p)| (seed >= lo && seed <= hi).then_some(p))
+            .collect();
+        if matching_ranges.is_empty() {
+            prop_assert_eq!(pool, SeedPool::Unassigned);
+        } else {
+            prop_assert_eq!(matching_ranges.len(), 1);
+            prop_assert_eq!(pool, matching_ranges[0]);
+        }
+
+        // Pool validation runs before `GeneratorConfig` validation: an invalid `max_attempts: 0`
+        // config still fails with `SeedPoolMismatch` on a wrong purpose, and reaches `InvalidConfig`
+        // once the pool matches its purpose (without generating a table).
+        let invalid_cfg = GeneratorConfig {
+            max_attempts: 0,
+            ..GeneratorConfig::default()
+        };
+        let wrong_purpose = if pool == SeedPool::Dev {
+            TablePurpose::Train
+        } else {
+            TablePurpose::Dev
+        };
+        let Err(GenError::SeedPoolMismatch(mismatch)) =
+            generate_ring_table_for_purpose(seed, wrong_purpose, &invalid_cfg)
+        else {
+            prop_assert!(false, "wrong purpose must fail with SeedPoolMismatch before config check");
+            unreachable!();
+        };
+        prop_assert_eq!(mismatch.seed_pool(), pool);
+
+        let matching_purpose = match pool {
+            SeedPool::Dev => Some(TablePurpose::Dev),
+            SeedPool::Train => Some(TablePurpose::Train),
+            SeedPool::Probe => Some(TablePurpose::Probe),
+            SeedPool::HeldOut => Some(TablePurpose::HeldOut),
+            SeedPool::Sealed => Some(TablePurpose::Sealed),
+            SeedPool::Unassigned => None,
+        };
+        if let Some(purpose) = matching_purpose {
+            let Err(GenError::InvalidConfig(_)) =
+                generate_ring_table_for_purpose(seed, purpose, &invalid_cfg)
+            else {
+                prop_assert!(false, "matching purpose must pass pool gate and hit InvalidConfig");
+                unreachable!();
+            };
+        }
+    }
+}
+
+#[test]
+fn public_api_refuses_deserializing_sealed_seed_in_clear_and_redacts_constructed_errors() {
+    use league_gen::{RecordedLayoutSeed, SEALED_SEED_MAX, SEALED_SEED_MIN, sealed_seed_sha256};
+
+    for made_up_sealed in [SEALED_SEED_MIN, SEALED_SEED_MAX] {
+        let expected_digest = sealed_seed_sha256(made_up_sealed);
+        let dec = made_up_sealed.to_string();
+        let hex_lo = format!("{made_up_sealed:x}");
+        let hex_hi = format!("{made_up_sealed:X}");
+
+        let raw_json = format!(r#"{{"clear":{made_up_sealed}}}"#);
+        let Err(serde_err) = serde_json::from_str::<RecordedLayoutSeed>(&raw_json) else {
+            panic!("public API must refuse deserializing sealed-range seed into clear variant");
+        };
+        let serde_msg = serde_err.to_string();
+        assert!(serde_msg.contains("SEALED_SEED_IN_CLEAR"));
+        assert!(serde_msg.contains(&expected_digest));
+        assert!(
+            !serde_msg.contains(&dec)
+                && !serde_msg.contains(&hex_lo)
+                && !serde_msg.contains(&hex_hi)
+        );
+
+        let recorded = RecordedLayoutSeed::from_seed(made_up_sealed);
+        assert_eq!(recorded.clear_seed(), None);
+        assert_eq!(recorded.sealed_sha256(), Some(expected_digest.as_str()));
+
+        let mismatch = GenError::seed_pool_mismatch(made_up_sealed, TablePurpose::Dev);
+        let tl_err = GenError::training_logged_mismatch(made_up_sealed, TablePurpose::Sealed);
+        for text in [
+            mismatch.to_string(),
+            format!("{mismatch:?}"),
+            format!("{mismatch:#?}"),
+            tl_err.to_string(),
+            format!("{tl_err:?}"),
+            format!("{tl_err:#?}"),
+        ] {
+            assert!(text.contains(&expected_digest));
+            assert!(!text.contains(&dec) && !text.contains(&hex_lo) && !text.contains(&hex_hi));
         }
     }
 }
