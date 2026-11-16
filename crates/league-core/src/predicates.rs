@@ -2,16 +2,19 @@
 //! for the replay log and the paper-test metrics.
 //!
 //! Every predicate is a pure function of the engine state's public parts plus the asking seat's own
-//! holdings. Each number comes from the engine's own rule code (the Sweep helpers in
+//! state. Each number comes from the engine's own rule code (the Sweep helpers in
 //! [`crate::engine`] and the close mark in [`crate::scoring`]), never from a second copy of a rule.
+//!
+//! **What is public, by rule** (`docs/design-v2.md` §2, "What One Seat May Know About Another"): every seat's free
+//! balances (raw, refined, `CRED`, auto-debt) and credit tier, and every resting offer, cartel-domain
+//! books included. Private: mandate cards and their commitments until revealed, negotiation text,
+//! committed-but-unrevealed orders, unpublished randomness and private notes.
 //!
 //! **What a predicate reads, and never reads.** It reads the table rules (`TableSpec`: the ring,
 //! recipes, projects, closing hazards), the fundamental parities, realized active shocks, tariffs,
-//! cartel domains, charters, resting offers, credit tiers and the asking seat's own balances. It
-//! never reads another seat's mandate card or mandate commitment, any seat's sealed or
-//! committed-but-unrevealed turn orders, drawn shocks not yet realized, beacons or seeds, or another
-//! seat's free balances (whether those are public is not settled by the rules; see
-//! [`scarcity_and_tariffs`]).
+//! cartel domains, charters, resting offers, seats' balances and credit tiers. It never reads a
+//! mandate card or mandate commitment, any seat's sealed or committed-but-unrevealed turn orders,
+//! drawn shocks not yet realized, or beacons and seeds.
 //!
 //! **No predicate recommends anything.** The outputs are state descriptions only: no move, price,
 //! quantity to trade or partner. Field names are code identifiers and are never shown to a seat.
@@ -30,7 +33,7 @@ use crate::types::{
 };
 
 /// Version of [`SeatStatePredicates`]; bumped whenever a field's meaning or layout changes.
-pub const STATE_PREDICATES_VERSION: u32 = 1;
+pub const STATE_PREDICATES_VERSION: u32 = 2;
 
 /// Basis points at which a closing hazard makes the close certain (`roll < 10_000` always holds).
 const CERTAIN_CLOSE_HAZARD_BPS: Bps = 10_000;
@@ -100,10 +103,17 @@ pub struct GoodScarcity {
     pub producer_seat: u8,
     /// Units the asking seat holds free.
     pub own_units: Units,
+    /// Units all seats hold of it: free balances plus units on their resting `Sell` offers (the
+    /// stock the close rule marks), summed over the table.
+    pub table_units_held: Units,
     /// Units on resting open-book `Sell` offers, all makers.
     pub open_book_units_offered: Units,
     /// Units on resting open-book `Buy` offers, all makers.
     pub open_book_units_bid: Units,
+    /// Units on resting `Sell` offers in cartel-domain books, all domains and makers.
+    pub domain_book_units_offered: Units,
+    /// Units on resting `Buy` offers in cartel-domain books, all domains and makers.
+    pub domain_book_units_bid: Units,
     /// Seats whose converter recipes take it (raw goods) or whose upkeep is it (refined goods).
     pub seats_needing: u8,
     /// Export tariff (bps) in force on an open-book transfer of it this turn.
@@ -210,7 +220,9 @@ fn seat_index(state: &EngineState, seat: Seat) -> Result<usize, EngineError> {
 }
 
 /// Predicate 1: upkeep owed, held, the shortfall, the debt it adds at this turn's Sweep and the
-/// interest rate at the seat's credit tier, via the Sweep's own `settle_upkeep`.
+/// interest rate at the seat's credit tier, via the Sweep's own `settle_upkeep`. Reads only the
+/// asking seat's own balances, offers and tier, and the table rules (all public by rule,
+/// `docs/design-v2.md` §2, "What One Seat May Know About Another").
 pub fn upkeep_and_debt(state: &EngineState, seat: Seat) -> Result<UpkeepAndDebt, EngineError> {
     let idx = seat_index(state, seat)?;
     let cfg = &state.spec.seats[idx];
@@ -245,6 +257,8 @@ pub fn upkeep_and_debt(state: &EngineState, seat: Seat) -> Result<UpkeepAndDebt,
 /// Predicate 2: raw units that spoil at this turn's Sweep if nothing changes (no converter runs,
 /// trades, fills, deliveries or Regent action), workshop capacity left, and full batches each
 /// recipe's held inputs cover. Uses the Sweep's own yield, decay-rate and input-clamp helpers.
+/// Reads only the asking seat's own balances and offers, the table rules and realized shocks (all
+/// public by rule, `docs/design-v2.md` §2, "What One Seat May Know About Another").
 pub fn spoilage_and_conversion(
     state: &EngineState,
     seat: Seat,
@@ -308,12 +322,12 @@ pub fn spoilage_and_conversion(
     })
 }
 
-/// Predicate 3: for each good, the asking seat's own holding, the units on public resting
-/// open-book offers, how many seats' recipes or upkeep need it, and the open-book tariff in force.
+/// Predicate 3: for each good, the asking seat's own holding, the table-wide holdings of all seats,
+/// the units on resting offers (open book and cartel-domain books counted apart), how many seats'
+/// recipes or upkeep need it, and the open-book tariff in force.
 ///
-/// Other seats' free balances are **not** read: the rules do not say whether they are public, so
-/// only what is certainly public enters (the ring, the recipes, tariffs and open-book offers).
-/// Domain-book offers are left out for the same reason.
+/// Every input is public by rule (`docs/design-v2.md` §2, "What One Seat May Know About Another"): seats' free balances
+/// and resting offers, domain books included, plus the ring, the recipes and the tariffs.
 pub fn scarcity_and_tariffs(
     state: &EngineState,
     seat: Seat,
@@ -324,6 +338,9 @@ pub fn scarcity_and_tariffs(
     let goods = (0..n)
         .map(|g| AssetId::Raw(g as u8))
         .chain((0..n).map(|g| AssetId::Refined(g as u8)));
+    let stocks: Vec<(Vec<Units>, Vec<Units>)> = (0..state.seats.len())
+        .map(|s| seat_close_stock(state, s as u8))
+        .collect();
     let mut out = Vec::with_capacity(2 * n);
     for good in goods {
         let (producer, own_units, seats_needing) = match good {
@@ -353,23 +370,40 @@ pub fn scarcity_and_tariffs(
             ),
             AssetId::Cred => continue,
         };
-        let mut offered: Units = 0;
-        let mut bid: Units = 0;
+        let (mut offered, mut bid, mut domain_offered, mut domain_bid): (
+            Units,
+            Units,
+            Units,
+            Units,
+        ) = (0, 0, 0, 0);
         for offer in state.offers.values() {
-            if offer.good != good || offer.domain_id.is_some() || offer.remaining_units <= 0 {
+            if offer.good != good || offer.remaining_units <= 0 {
                 continue;
             }
-            match offer.side {
-                OfferSide::Sell => offered = offered.saturating_add(offer.remaining_units),
-                OfferSide::Buy => bid = bid.saturating_add(offer.remaining_units),
-            }
+            let slot = match (offer.side, offer.domain_id.is_some()) {
+                (OfferSide::Sell, false) => &mut offered,
+                (OfferSide::Buy, false) => &mut bid,
+                (OfferSide::Sell, true) => &mut domain_offered,
+                (OfferSide::Buy, true) => &mut domain_bid,
+            };
+            *slot = slot.saturating_add(offer.remaining_units);
         }
         out.push(GoodScarcity {
             good,
             producer_seat: producer,
             own_units,
+            table_units_held: stocks.iter().fold(0, |acc: Units, (raw, refined)| {
+                let held = match good {
+                    AssetId::Raw(g) => raw.get(usize::from(g)),
+                    AssetId::Refined(g) => refined.get(usize::from(g)),
+                    AssetId::Cred => None,
+                };
+                acc.saturating_add(held.copied().unwrap_or(0))
+            }),
             open_book_units_offered: offered,
             open_book_units_bid: bid,
+            domain_book_units_offered: domain_offered,
+            domain_book_units_bid: domain_bid,
             seats_needing: u8::try_from(seats_needing).unwrap_or(u8::MAX),
             open_book_tariff_bps: effective_transfer_tariff_bps(
                 state, good, None, producer, seat.0,
@@ -381,7 +415,8 @@ pub fn scarcity_and_tariffs(
 
 /// Predicate 4: for the named set `members` (`2..=N-1` distinct seats including `seat`), which of
 /// its members' upkeep goods some member's recipe makes from raw goods members extract, and which
-/// not. Reads only the ring and the recipes; it says what the rules allow, not what seats will do.
+/// not. Reads only the ring and the recipes (public table rules, `docs/design-v2.md` §2, "What One Seat May Know About Another");
+/// it says what the rules allow, not what seats will do.
 pub fn coalition_reach(
     state: &EngineState,
     seat: Seat,
@@ -473,6 +508,9 @@ fn turns_until_close(state: &EngineState, pred: impl Fn(Bps) -> bool) -> u8 {
 /// marked by the close-marking rule as if the season closed now (via the rule's own code), and each
 /// project bundle against the seat's refined holdings.
 ///
+/// Every input is public by rule (`docs/design-v2.md` §2, "What One Seat May Know About Another"): the seat's own
+/// stock, and other seats' resting bids, credit tiers, wash freezes, domains and charters.
+///
 /// **Which bids the marks read.** Exactly the resting bids the close rule's own filter
 /// (`bid_executable_by_seller` in `scoring.rs`) lets the asking seat sell into: a resting `Buy` on
 /// the good with units left, made by another seat whose wash freeze has ended; on the open book any
@@ -480,7 +518,8 @@ fn turns_until_close(state: &EngineState, pred: impl Fn(Bps) -> bool) -> u8 {
 /// the asking seat is a domain member with such a tier (and the maker is a member or the bid is a
 /// hybrid bid from a maker holding an active Clearinghouse Broker charter), or the asking seat holds
 /// an active Clearinghouse Broker charter, or the bid is a hybrid bid from a maker holding one. A
-/// domain bid outside those cases is never read and changes nothing here.
+/// domain bid outside those cases is never read and changes nothing here. Since cartel-domain books
+/// are public by the same rule, reading the executable domain bids is simply the close rule applied.
 pub fn season_end_and_marks(
     state: &EngineState,
     seat: Seat,
@@ -592,7 +631,7 @@ pub fn compute_seat_state_predicates(
 }
 
 /// Version of [`StatePredicateSection`]; bumped whenever a field's meaning or layout changes.
-pub const STATE_PREDICATE_SECTION_VERSION: u32 = 1;
+pub const STATE_PREDICATE_SECTION_VERSION: u32 = 2;
 
 /// What one seat's Sweep actually did, as the engine's own Sweep reported it (not a prediction).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -708,10 +747,12 @@ pub fn held_enough_but_short_turns(section: &StatePredicateSection, seat: u8) ->
     })
 }
 
-/// Metric 1b: the turns on which `seat`'s Sweep left an upkeep shortfall although, at the start of
-/// that turn, its free units of the upkeep good plus the units on its own resting `Sell` offers of it
-/// covered the upkeep (predicate 1), so cancelling its own offer would have covered it. Includes
-/// every turn of [`held_enough_but_short_turns`] that the free units alone cover.
+/// Metric 1b: the turns on which, at the start of the turn, `seat`'s free units of its upkeep good
+/// plus the units on its own resting `Sell` offers of it were at least the upkeep owed (predicate
+/// 1), and the Sweep still left an upkeep shortfall. It records those two facts only: it does not
+/// say the shortfall was avoidable, since another seat can fill the resting sell (or cash a due
+/// check on that good) in the same turn before the seat could cancel. Includes every turn of
+/// [`held_enough_but_short_turns`] that the free units alone cover.
 #[must_use]
 pub fn covered_with_own_offers_but_short_turns(
     section: &StatePredicateSection,

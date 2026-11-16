@@ -29,7 +29,7 @@ use league_core::{
     convert_mandate_points_to_equity, deal_graded_mandates, deal_graded_mandates_with_entropy,
     default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
     drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
-    mul_units_parity, replay_season, scale_bps_signed, standings_tie_key, town_import_cost_cred,
+    mul_units_parity, replay_season, scale_bps_signed, town_import_cost_cred,
     verify_drand_quicknet_beacon, verify_order_reveal, verify_preimage_condition,
     verify_sealed_mandate_deal, width_independent_index,
 };
@@ -414,24 +414,13 @@ fn deterministic_full_seasons_4_5_6_seats_and_json_replay_match_bit_for_bit() {
         assert_eq!(out_a.scoreboard, live_board);
         assert_eq!(out_a.scoreboard.standings.len(), usize::from(seats));
 
-        // Verify standings sort order: descending total_equity, with exact ties broken by the
-        // closing turn's beacon `"tiebreak"` stream (`standings_tie_key`, `scoring.rs`), then seat.
-        let closing_beacon = must_ok(
-            log.turns
-                .last()
-                .map(|t| t.turn_beacon)
-                .ok_or("closing turn"),
-            "closing beacon",
-        );
-        let closed_turn = Turn(out_a.scoreboard.closed_turn);
-        let tie_key =
-            |seat: u8| standings_tie_key(closing_beacon, log.spec.table_id, closed_turn, seat);
+        // Verify standings sort order: strictly descending total_equity. These fixed fixtures
+        // produce no exact tie, so a tie here would mean the fixtures changed; the tie path itself
+        // (closing-beacon `standings_tie_key`, then seat) is pinned by
+        // `b7_final_standings_ties_break_by_beacon_not_seat_index` in
+        // `core_card2_randomness_scoring.rs`.
         for pair in out_a.scoreboard.standings.windows(2) {
-            let cmp_ok = pair[0].total_equity > pair[1].total_equity
-                || (pair[0].total_equity == pair[1].total_equity
-                    && (tie_key(pair[0].seat), pair[0].seat)
-                        < (tie_key(pair[1].seat), pair[1].seat));
-            assert!(cmp_ok);
+            assert!(pair[0].total_equity > pair[1].total_equity);
         }
     }
 }
