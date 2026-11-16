@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-16 from commit ed70c65 by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit 6eddf37 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-16 (04e720c)
+## What changed since 2026-11-15 (a71b2bc)
 
-Nothing structural changed since 2026-11-16; 5 files changed content.
+Nothing structural changed since 2026-11-15; 16 files changed content.
 
 ## What comes in
 
@@ -50,15 +50,15 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 14 of 16 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
-- **crates/league-relay/src/lib.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 14 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 9 of 9 commits.
+- **crates/league-gen/src/feasibility.rs** and **crates/league-gen/src/schema.rs** changed together in 6 of 6 commits, inside the league-gen part.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 7 commits.
+- **crates/league-gen/src/feasibility.rs** and **crates/league-gen/src/generator.rs** changed together in 5 of 6 commits, inside the league-gen part.
+- **crates/league-gen/src/generator.rs** and **crates/league-gen/src/schema.rs** changed together in 5 of 6 commits, inside the league-gen part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 0 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
