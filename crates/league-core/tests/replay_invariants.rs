@@ -3421,7 +3421,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "433b9956daf0979d3b20b9093a386ff3978d16f3b1313b4e0b05632732c866b7"
+        "93607848db8c4b6b161a399fc83bc9a4308d9e2a2296032cb16e3defedc37344"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -5175,11 +5175,11 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "828f303022a3f371df3257edeaf605f110fa762166c07f6348e901048288c4a7"
+        "9d37f093626f58ddcf38009fd54da54ddae088e32de8d57f9b18aed007ae7c6b"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "2fe30b514ebcbd7930001c614ce46c0132e223eb9ced6342069ef08e1b0701b5"
+        "c4ae0140539806dac34796c02d5477425b18e7c2f929865208f9d0644cf1c23d"
     );
 }
 

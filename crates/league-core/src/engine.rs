@@ -74,41 +74,6 @@ pub enum TurnPhase {
     Completed,
 }
 
-mod i128_str_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(val: &i128, serializer: S) -> Result<S::Ok, S::Error> {
-        val.to_string().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i128, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse::<i128>().map_err(serde::de::Error::custom)
-    }
-}
-
-/// Volume-weighted executed `CRED` batch clearing record for one commodity in one turn,
-/// feeding terminal 3-turn volume-weighted marks at Season Close (`2026-11-16` ruling).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutedGoodTurnPrice {
-    /// Turn on which the batch trades cleared.
-    pub turn: u8,
-    /// Traded commodity (`Raw(i)` or `Refined(i)`).
-    pub good: AssetId,
-    /// Total milli-units of `good` held across all seats at the start of `turn`
-    /// (free balances plus resting `OfferSide::Sell` offers).
-    #[serde(default)]
-    pub start_of_turn_stock: Units,
-    /// Gross commodity volume matched across all fills on `turn`.
-    pub total_units: Units,
-    /// Exact numerator `sum(fill_units * clearing_price)` across all fills of `good` on `turn`,
-    /// preserving exact multi-turn `Sigma notional / Sigma units` arithmetic.
-    #[serde(default, with = "i128_str_serde")]
-    pub total_price_x_units: i128,
-    /// Single-turn volume-weighted average executed clearing price in milli-`CRED` per `1_000` units.
-    pub vwap_price_cred: Units,
-}
-
 /// Per-seat mutable ledger-mirror state maintained deterministically across turns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatState {
@@ -216,86 +181,10 @@ pub struct EngineState {
     /// 3-stage Horizon Shocks drawn dynamically from per-turn HKDF `"shocks"` streams (`#31`).
     #[serde(default)]
     pub drawn_shocks: Vec<ScheduledShockSpec>,
-    /// Chronological per-`(turn, good)` executed DEX batch clearing observations (`2026-11-16` ruling).
-    #[serde(default)]
-    pub executed_good_trades: Vec<ExecutedGoodTurnPrice>,
-    /// Start-of-turn total table holdings (`0..N` for `Raw(0..N)`, `N..2*N` for `Refined(0..N)`),
-    /// snapshotted when each turn opens in `TalkAndMarket` (`2026-11-16` ruling).
-    #[serde(default)]
-    pub start_of_turn_good_stock: Vec<Units>,
     /// Latest verified turn beacon swept (`[0u8; 32]` prior to Turn 1 Sweep), used to break exact
     /// `total_equity` ties on `FinalScoreboard` (`Decision 1`, `B-7`).
     #[serde(default)]
     pub last_turn_beacon: [u8; 32],
-}
-
-impl EngineState {
-    /// Computes total units of `good` currently held across all seats (free balances plus resting
-    /// `OfferSide::Sell` order-book inventory).
-    #[must_use]
-    pub fn total_good_held(&self, good: AssetId) -> Units {
-        let n = self.seats.len();
-        let mut total: i128 = 0;
-        match good {
-            AssetId::Cred => {
-                for s in &self.seats {
-                    total += i128::from(s.cred.max(0));
-                }
-            }
-            AssetId::Raw(g) => {
-                let idx = usize::from(g);
-                if idx < n {
-                    for s in &self.seats {
-                        total += i128::from(s.raw[idx].max(0));
-                    }
-                }
-            }
-            AssetId::Refined(m) => {
-                let idx = usize::from(m);
-                if idx < n {
-                    for s in &self.seats {
-                        total += i128::from(s.refined[idx].max(0));
-                    }
-                }
-            }
-        }
-        for offer in self.offers.values() {
-            if offer.side == OfferSide::Sell && offer.good == good && offer.remaining_units > 0 {
-                total += i128::from(offer.remaining_units);
-            }
-        }
-        total.clamp(0, i128::from(Units::MAX)) as Units
-    }
-
-    fn snapshot_good_stock(&self) -> Vec<Units> {
-        let n = self.seats.len() as u8;
-        let mut out = Vec::with_capacity(usize::from(n) * 2);
-        for g in 0..n {
-            out.push(self.total_good_held(AssetId::Raw(g)));
-        }
-        for m in 0..n {
-            out.push(self.total_good_held(AssetId::Refined(m)));
-        }
-        out
-    }
-
-    /// Returns the total units of `good` held across all seats at the start of `self.turn`.
-    #[must_use]
-    pub fn good_stock_at_turn_start(&self, good: AssetId) -> Units {
-        let n = self.seats.len();
-        if self.start_of_turn_good_stock.len() == n * 2 {
-            match good {
-                AssetId::Raw(g) if usize::from(g) < n => {
-                    return self.start_of_turn_good_stock[usize::from(g)];
-                }
-                AssetId::Refined(m) if usize::from(m) < n => {
-                    return self.start_of_turn_good_stock[n + usize::from(m)];
-                }
-                _ => {}
-            }
-        }
-        self.total_good_held(good)
-    }
 }
 
 /// Audited broken-promise record emitted when a seat violates an anchored `IntentPledge`.
@@ -598,8 +487,6 @@ impl TurnEngine {
                 last_closing_roll_bps: None,
                 pending_town_import_cred_spent: 0,
                 drawn_shocks: Vec::new(),
-                executed_good_trades: Vec::new(),
-                start_of_turn_good_stock: vec![0; n * 2],
                 last_turn_beacon: [0u8; 32],
             },
         };
@@ -1322,7 +1209,6 @@ impl TurnEngine {
         } else {
             self.state.turn = turn + 1;
             self.activate_shocks_for_turn(turn + 1);
-            self.state.start_of_turn_good_stock = self.state.snapshot_good_stock();
             self.state.phase = TurnPhase::TalkAndMarket;
         }
 
@@ -1791,7 +1677,6 @@ impl TurnEngine {
         let mut batch_filled_seats = vec![false; usize::from(n)];
 
         for good in goods {
-            let start_stock = self.state.good_stock_at_turn_start(good);
             let mut buys: Vec<CredOffer> = Vec::new();
             let mut sells: Vec<CredOffer> = Vec::new();
             for offer in self.state.offers.values() {
@@ -1904,8 +1789,6 @@ impl TurnEngine {
                 }
             }
 
-            let mut turn_total_units: Units = 0;
-            let mut turn_notional: i128 = 0;
             for fills in by_dom.into_values() {
                 let max_sell = fills.iter().map(|f| f.sell_limit).max().unwrap_or(0);
                 let min_buy = fills.iter().map(|f| f.buy_limit).min().unwrap_or(max_sell);
@@ -1965,21 +1848,8 @@ impl TurnEngine {
                         batch_filled_seats[usize::from(fill.buy_maker)] = true;
                         batch_filled_seats[usize::from(fill.sell_maker)] = true;
                     }
-                    turn_total_units = turn_total_units.saturating_add(fill.fill_units);
-                    turn_notional += i128::from(fill.fill_units) * i128::from(clearing_price);
                     trades_cleared += 1;
                 }
-            }
-            if turn_total_units > 0 {
-                let vwap_price_cred = (turn_notional / i128::from(turn_total_units)) as Units;
-                self.state.executed_good_trades.push(ExecutedGoodTurnPrice {
-                    turn,
-                    good,
-                    start_of_turn_stock: start_stock,
-                    total_units: turn_total_units,
-                    total_price_x_units: turn_notional,
-                    vwap_price_cred,
-                });
             }
         }
         Ok((trades_cleared, batch_filled_seats))

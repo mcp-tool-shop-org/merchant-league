@@ -38,9 +38,9 @@ pub use contracts::{
 };
 pub use engine::{
     BrokenPromiseRecord, BundlePreview, CheckOrderPreview, CheckPreviewOutcome,
-    ConverterOrderPreview, EngineState, EscrowOrderPreview, ExecutedGoodTurnPrice,
-    ProjectOrderPreview, SeatState, SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview,
-    SwapPreviewOutcome, SweepReceipt, TurnEngine, TurnPhase,
+    ConverterOrderPreview, EngineState, EscrowOrderPreview, ProjectOrderPreview, SeatState,
+    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepReceipt,
+    TurnEngine, TurnPhase,
 };
 pub use replay::{LoggedTurn, ReplayBeaconMode, ReplayOutcome, SeasonReplayLog, replay_season};
 pub use scoring::{
@@ -55,7 +55,6 @@ pub use types::{
     ActiveShock, AssetId, BPS_SCALE, Bps, CLOSING_ROLL_START_TURN, CLOSING_ROLL_WINDOW_LEN,
     CharterRole, ConverterRecipe, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
     DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_PBRS_GAMMA_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
-    DEFAULT_TWAP_MIN_TURN_STOCK_BPS, DEFAULT_TWAP_WINDOW_TURNS,
     DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, EngineError, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS,
     MANDATE_STARTING_NW_FLOOR_BPS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
     MIN_MANDATE_BONUS_EQUITY, MarketDay, ProjectRecipe, RegentDoctrine, ScheduledShockSpec,

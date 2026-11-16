@@ -84,18 +84,9 @@ pub const DEFAULT_MANDATE_ALPHA_BPS: Bps = 250;
 /// Report` §6 Formula 3).
 pub const MANDATE_STARTING_NW_FLOOR_BPS: Bps = 5_000;
 
-/// Provisional lookback window (`3` turns: `[T-2, T-1, T]`) for terminal volume-weighted holding
-/// marks (`2026-11-15` and `2026-11-16` rulings).
-pub const DEFAULT_TWAP_WINDOW_TURNS: u8 = 3;
-
-/// Provisional minimum per-turn executed volume fraction (`200 bps = 2.00%` of total units of
-/// that good held across all seats at the start of that turn) required in **every** turn of
-/// `[T-2, T-1, T]` for a good to qualify for volume-weighted close marking (`2026-11-16` ruling).
-pub const DEFAULT_TWAP_MIN_TURN_STOCK_BPS: Bps = 200;
-
-/// Fixed salvage fraction (`5_000 bps = 50.00%` of base value / parity) applied at Season Close
-/// to unsold units above executable non-self resting bid depth when a good does not qualify for
-/// the 3-turn volume-weighted mark (`2026-11-16` ruling).
+/// Fixed base-value floor and salvage fraction (`5_000 bps = 50.00%` of fixed base value / parity)
+/// applied at Season Close both as the per-slice minimum on bid-covered units and as the mark on
+/// remaining uncovered leftover units (`2026-11-16` Director ruling).
 pub const UNSOLD_EXCESS_PARITY_BPS: Bps = 5_000;
 
 /// Computes exact expected season length `E[T]` from a per-turn closing hazard schedule over
@@ -163,14 +154,6 @@ const fn default_works_stipend_per_unit_cred() -> Units {
 
 const fn default_mandate_alpha_bps() -> Bps {
     DEFAULT_MANDATE_ALPHA_BPS
-}
-
-const fn default_twap_window_turns() -> u8 {
-    DEFAULT_TWAP_WINDOW_TURNS
-}
-
-const fn default_twap_min_turn_stock_bps() -> Bps {
-    DEFAULT_TWAP_MIN_TURN_STOCK_BPS
 }
 
 /// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
@@ -569,14 +552,6 @@ pub struct TableSpec {
     /// (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
     #[serde(default = "default_mandate_alpha_bps")]
     pub mandate_alpha_bps: Bps,
-    /// Provisional terminal volume-weighted mark lookback window in turns (`DEFAULT_TWAP_WINDOW_TURNS = 3`).
-    #[serde(default = "default_twap_window_turns")]
-    pub twap_window_turns: u8,
-    /// Provisional minimum per-turn traded volume as a basis-point share of start-of-turn table
-    /// stock (`DEFAULT_TWAP_MIN_TURN_STOCK_BPS = 200` = `2.00%`) required in every turn of the
-    /// window for a good to qualify for volume-weighted close marking (`2026-11-16` ruling).
-    #[serde(default = "default_twap_min_turn_stock_bps")]
-    pub twap_min_turn_stock_bps: Bps,
 }
 
 impl TableSpec {
@@ -686,19 +661,6 @@ impl TableSpec {
             return Err(EngineError::InvalidConfig(format!(
                 "mandate_alpha_bps must lie in 1..=10_000, got {}",
                 self.mandate_alpha_bps
-            )));
-        }
-        if self.twap_window_turns == 0 || self.twap_window_turns > HARD_TURN_CAP {
-            return Err(EngineError::InvalidConfig(format!(
-                "twap_window_turns must lie in 1..={HARD_TURN_CAP}, got {}",
-                self.twap_window_turns
-            )));
-        }
-        if self.twap_min_turn_stock_bps == 0 || i128::from(self.twap_min_turn_stock_bps) > BPS_SCALE
-        {
-            return Err(EngineError::InvalidConfig(format!(
-                "twap_min_turn_stock_bps must lie in 1..=10_000, got {}",
-                self.twap_min_turn_stock_bps
             )));
         }
         if self.mandate_deck.len() < n {
@@ -966,8 +928,6 @@ impl TableSpec {
             town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
             works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
             mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
-            twap_window_turns: DEFAULT_TWAP_WINDOW_TURNS,
-            twap_min_turn_stock_bps: DEFAULT_TWAP_MIN_TURN_STOCK_BPS,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))

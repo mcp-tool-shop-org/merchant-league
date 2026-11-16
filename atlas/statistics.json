@@ -134,7 +134,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-standalone",
-      "qualifyingSourceCommits": 2,
+      "qualifyingSourceCommits": 3,
       "rebaseline": null
     },
     {
@@ -235,8 +235,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 55,
-        "lines": 1093,
+        "commits": 56,
+        "lines": 1104,
         "path": "atlas/README.md"
       },
       {
@@ -245,18 +245,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 55,
-        "lines": 3632,
+        "commits": 56,
+        "lines": 3690,
         "path": "atlas/page.json"
       },
       {
-        "commits": 55,
-        "lines": 16053,
+        "commits": 56,
+        "lines": 16198,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 55,
-        "lines": 42763,
+        "commits": 56,
+        "lines": 42803,
         "path": "atlas/structure.json"
       },
       {
@@ -520,8 +520,8 @@
         "path": "crates/league-standalone/src/conformance.rs"
       },
       {
-        "commits": 2,
-        "lines": 1422,
+        "commits": 3,
+        "lines": 1440,
         "path": "crates/league-standalone/src/docker.rs"
       },
       {
@@ -2730,79 +2730,79 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-16T14:27:53.070Z",
+  "generatedAt": "2026-11-16T15:50:56.234Z",
   "generatedFrom": {
-    "commit": "b4f6ec4bc6b380ac2788df1a7441430be57bff41"
+    "commit": "3c08a7c2ba5cf19a621bb65f27a1f9612630b896"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 45,
+      "either": 46,
       "shared": 25,
-      "strength": 0.555556
+      "strength": 0.543478
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 45,
+      "either": 46,
       "shared": 25,
-      "strength": 0.555556
+      "strength": 0.543478
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 45,
+      "either": 46,
       "shared": 25,
-      "strength": 0.555556
+      "strength": 0.543478
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 45,
+      "either": 46,
       "shared": 25,
-      "strength": 0.555556
+      "strength": 0.543478
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 36,
-      "shared": 36,
+      "either": 37,
+      "shared": 37,
       "strength": 1
     },
     {
@@ -2907,16 +2907,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-16T09:08:48-05:00",
+    "headDate": "2026-11-16T09:28:22-05:00",
     "inScopeFiles": 505,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 56,
+    "qualifyingCommits": 57,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-20T14:08:48.000Z",
+    "since": "2026-05-20T14:28:22.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

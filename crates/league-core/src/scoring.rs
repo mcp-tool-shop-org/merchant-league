@@ -221,17 +221,33 @@ fn bid_executable_by_seller(state: &EngineState, seller: u8, bid: &CredOffer) ->
     }
 }
 
-/// Marks `units` of `good` held by `seat` at Season Close (`2026-11-16` unified close-marking rule):
+/// Computes `floor(units * parity * UNSOLD_EXCESS_PARITY_BPS / (UNIT_SCALE * BPS_SCALE))`
+/// (`50%` of fixed base value / `parity` for `units`), shared between per-slice bid-walk floors
+/// and uncovered leftover excess at Season Close.
+#[must_use]
+fn half_base_value_for_units(units: Units, parity: Units) -> Units {
+    if units <= 0 || parity <= 0 {
+        return 0;
+    }
+    let raw = (i128::from(units) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+        / (i128::from(UNIT_SCALE) * BPS_SCALE);
+    raw.clamp(0, i128::from(Units::MAX)) as Units
+}
+
+/// Marks `units` of `good` held by `seat` at Season Close (`2026-11-16` final close-marking rule):
 ///
-/// 1. **3-turn volume-weighted price (`Sigma notional / Sigma units`):** `good` qualifies only when
-///    `state.turn >= window` (`3` turns: `T-2`, `T-1`, `T`) and **every** turn `t` in `[T-2..=T]`
-///    cleared traded volume `>= state.spec.twap_min_turn_stock_bps` (`200 bps = 2.00%`) of the
-///    total units of `good` held across all seats at the start of turn `t`. When `good` qualifies,
-///    all `units` held by `seat` are marked at `Sigma notional / Sigma units` over `[T-2..=T]`.
-/// 2. **Resting bids first, unsold excess at 50% of base value:** when `good` does not qualify,
-///    its trades are ignored completely. Units that executable non-self resting `Buy` bids would
-///    buy are marked highest-bid-first at the bid price, and any remaining excess above resting
-///    bid depth is marked at [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`).
+/// 1. **Trade prices do not count:** no traded price, volume, window, or qualification test enters
+///    the close mark.
+/// 2. **Standing bids first, floored at `50%` of base value:** units that executable non-self
+///    resting `Buy` bids would buy are walked highest-bid-first (`offer_id` ascending on price
+///    ties; `seat`'s own bids skipped), and each covered slice of `take` units is worth
+///    `max(min(take * bid_price, locked_cred), take * 50% of base value)` (including slices cut
+///    down by `locked_cred`).
+/// 3. **The rest at `50%` of base value:** remaining uncovered units are valued at
+///    [`UNSOLD_EXCESS_PARITY_BPS`] (`50%`) of fixed base value (`parity`).
+///
+/// Note: each holder is valued against the full executable resting bid depth independently (so a
+/// single resting bid can lift multiple holders); this is a known, accepted residual.
 #[must_use]
 pub fn mark_good_holding_at_close(
     state: &EngineState,
@@ -242,49 +258,7 @@ pub fn mark_good_holding_at_close(
     if units <= 0 {
         return 0;
     }
-    let window = state.spec.twap_window_turns.max(1);
-    let min_stock_bps = state.spec.twap_min_turn_stock_bps;
-
-    if state.turn >= window {
-        let window_start = state.turn - window + 1;
-        let mut all_turns_qualify = true;
-        let mut sum_units: i128 = 0;
-        let mut sum_price_x_units: i128 = 0;
-
-        for t in window_start..=state.turn {
-            let mut turn_units: i128 = 0;
-            let mut turn_price_x_units: i128 = 0;
-            let mut turn_start_stock: Option<Units> = None;
-            for rec in &state.executed_good_trades {
-                if rec.turn == t && rec.good == good {
-                    turn_units += i128::from(rec.total_units.max(0));
-                    turn_price_x_units += rec.total_price_x_units;
-                    if turn_start_stock.is_none() {
-                        turn_start_stock = Some(rec.start_of_turn_stock.max(0));
-                    }
-                }
-            }
-            let Some(stock_start) = turn_start_stock else {
-                all_turns_qualify = false;
-                break;
-            };
-            if turn_units <= 0
-                || turn_units * BPS_SCALE < i128::from(stock_start) * i128::from(min_stock_bps)
-            {
-                all_turns_qualify = false;
-                break;
-            }
-            sum_units += turn_units;
-            sum_price_x_units += turn_price_x_units;
-        }
-
-        if all_turns_qualify && sum_units > 0 {
-            let vwap_price_cred =
-                (sum_price_x_units / sum_units).clamp(0, i128::from(Units::MAX)) as Units;
-            return mul_units_parity(units, vwap_price_cred);
-        }
-    }
-
+    let parity = state.parities.asset_parity(good).max(0);
     let mut bids: Vec<&CredOffer> = state
         .offers
         .values()
@@ -303,23 +277,21 @@ pub fn mark_good_holding_at_close(
             break;
         }
         let take = rem_units.min(bid.remaining_units);
-        let slice_cred = mul_units_parity(take, bid.price_per_unit_cred).min(bid.locked_cred);
-        proceeds += i128::from(slice_cred);
+        let bid_cred = mul_units_parity(take, bid.price_per_unit_cred).min(bid.locked_cred);
+        let floor_cred = half_base_value_for_units(take, parity);
+        proceeds += i128::from(bid_cred.max(floor_cred));
         rem_units -= take;
     }
     if rem_units > 0 {
-        let parity = state.parities.asset_parity(good).max(0);
-        let half_base_proceeds =
-            (i128::from(rem_units) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
-                / (i128::from(UNIT_SCALE) * BPS_SCALE);
-        proceeds += half_base_proceeds;
+        proceeds += i128::from(half_base_value_for_units(rem_units, parity));
     }
     proceeds.clamp(i64::MIN as i128, i64::MAX as i128) as Units
 }
 
-/// Computes `seat`'s terminal marked Net Asset Equity at Season Close (`2026-11-15` ruling),
-/// valuing commodity holdings by [`mark_good_holding_at_close`] (3-turn TWAP or executable resting
-/// bid depth, never last trade) while keeping `CRED`, escrows, debt, and open check liabilities exact.
+/// Computes `seat`'s terminal marked Net Asset Equity at Season Close (`2026-11-16` ruling),
+/// valuing commodity holdings by [`mark_good_holding_at_close`] (executable non-self standing bids
+/// floored at `50%` of base value first, and remaining units at `50%` of base value; trade prices
+/// never enter) while keeping `CRED`, escrows, debt, and open check liabilities exact.
 #[must_use]
 pub fn compute_final_marked_net_asset_equity(state: &EngineState, seat: u8) -> Units {
     let idx = usize::from(seat);
@@ -588,7 +560,7 @@ pub struct SeatScoreEntry {
     pub seat: u8,
     /// Irreversible Project Equity points burned via Tier-3 Syndicate Projects.
     pub project_equity: Units,
-    /// Terminal marked Net Asset Equity `Phi_i(T)` (3-turn TWAP or executable resting bid depth).
+    /// Terminal marked Net Asset Equity `Phi_i(T)` (standing bids floored at `50%` of base value, rest at `50%` of base value).
     pub net_asset_equity: Units,
     /// Awarded Turn-1 Private Mandate bonus (`0` if unrevealed, invalid hash, or unmet).
     pub mandate_bonus: Units,

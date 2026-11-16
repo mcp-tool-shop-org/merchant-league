@@ -1,10 +1,10 @@
-//! Integration tests and seeded-season measurements for Core Card 2 + PR #40 Fix 1:
+//! Integration tests and seeded-season measurements for Core Card 2 + PR #40 Fixes 1 & 2:
 //! - Part 1: Game-mode randomness (#31) from pre-named drand beacons + per-use HKDF streams
 //! - Part 2: Eval-mode randomness (#31 comment) from sealed OS CSPRNG VRF seed + C2SP ristretto255 ECVRF proofs (`B-3`, `B-5`, `C-3`)
 //! - Part 4: Mandate point conversion (`points * alpha * max(Med(W), 0.5 * W_0)`, `N = 4, 5, 6`, `A-3`)
 //! - Part 5: Seeded-season mandate variance share (`Var(B)/Var(S)`) & leader flip rate (`>= 200` seasons/N)
 //! - Part 6: Hard cap at Turn 32 + `35%` closing hazard table (`E[T]`, `P(T == 32)`)
-//! - Part 7: Unified close-marking rule (`A-1` + `B-6`: 3-turn `>= 2%`-stock VWAP `Sigma notional / Sigma units`, else resting bids + `50%` base value on excess)
+//! - Part 7: Final close-marking rule (Fix 2: trade prices do not count; standing bids first floored at `50%` of base value; rest at `50%` of base value)
 //! - Fix 1 `A-2` (`C1a` active-trading exemption + Turn-1 skip) and `B-7` (final-standings beacon tie-break)
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,23 +12,22 @@ use std::collections::{BTreeMap, BTreeSet};
 use sha2::{Digest, Sha256};
 
 use league_core::{
-    AssetId, AtomicSwapProposal, CLOSING_ROLL_START_TURN, CLOSING_ROLL_WINDOW_LEN, CharterBidOrder,
-    CharterRole, CheckProposal, CommitmentHash, ConverterRunOrder, CouncilPlatform,
-    CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_MANDATE_ALPHA_BPS,
-    DEFAULT_SHOCK_DRAW_TURNS, DEFAULT_TWAP_MIN_TURN_STOCK_BPS, DEFAULT_TWAP_WINDOW_TURNS,
-    DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError,
-    EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP, LoggedTurn,
-    MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
-    OrderReveal, PreimageSecret, ProjectDeliveryOrder, ReplayBeaconMode, RevealSalt, RngDomain,
-    ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity,
-    ShockKind, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
-    UNSOLD_EXCESS_PARITY_BPS, Units, cap_reach_probability, close_roll_bps_from_beacon,
-    compute_mandate_commitment, compute_order_commitment, compute_preimage_condition,
-    compute_table_median_starting_net_worth, convert_mandate_points_to_equity_with_floor,
-    convert_mandate_points_to_equity_with_median, deal_graded_mandates_with_entropy,
-    derive_drand_beacon, derive_turn_beacon, draw_shocks_for_turn, expand_turn_stream,
-    expected_season_length_turns, mark_good_holding_at_close, replay_season, standings_tie_key,
-    table_median_net_worth,
+    AssetId, AtomicSwapProposal, BPS_SCALE, CLOSING_ROLL_START_TURN, CLOSING_ROLL_WINDOW_LEN,
+    CharterBidOrder, CharterRole, CheckProposal, CommitmentHash, ConverterRunOrder,
+    CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
+    DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_SHOCK_DRAW_TURNS, DRAND_QUICKNET_GENESIS_UNIX,
+    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError, EscrowFinishUnlock, EscrowProposal,
+    FinalScoreboard, HARD_TURN_CAP, LoggedTurn, MANDATE_STARTING_NW_FLOOR_BPS, MandateKind,
+    MarketAction, OfferProposal, OfferSide, OrderReveal, PreimageSecret, ProjectDeliveryOrder,
+    ReplayBeaconMode, RevealSalt, RngDomain, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle,
+    SeasonReplayLog, Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn,
+    TurnEngine, TurnPhase, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units, cap_reach_probability,
+    close_roll_bps_from_beacon, compute_mandate_commitment, compute_order_commitment,
+    compute_preimage_condition, compute_table_median_starting_net_worth,
+    convert_mandate_points_to_equity_with_floor, convert_mandate_points_to_equity_with_median,
+    deal_graded_mandates_with_entropy, derive_drand_beacon, derive_turn_beacon,
+    draw_shocks_for_turn, expand_turn_stream, expected_season_length_turns,
+    mark_good_holding_at_close, replay_season, standings_tie_key, table_median_net_worth,
 };
 
 trait MustGet<T> {
@@ -1325,13 +1324,11 @@ fn season_end_enforces_turn_32_hard_cap_and_35pct_hazard_table() {
 }
 
 #[test]
-fn final_marks_use_3turn_twap_or_executable_bid_depth_ignoring_thin_last_turn_spike() {
-    assert_eq!(DEFAULT_TWAP_WINDOW_TURNS, 3);
-    assert_eq!(DEFAULT_TWAP_MIN_TURN_STOCK_BPS, 200);
+fn final_marks_use_standing_bids_with_50pct_floor_and_ignore_all_trades() {
     assert_eq!(UNSOLD_EXCESS_PARITY_BPS, 5_000);
 
-    // Case A: Non-qualifying good with resting bids + self-bid (`TableId(607)`).
-    // Units covered by non-self resting bids mark at bid price (`5_000` @ `1_200` = `6_000`),
+    // Case A: Good with resting bid above floor + self-bid (`TableId(607)`).
+    // Units covered by non-self resting bids above 50% of base value mark at bid price (`5_000` @ `1_200` = `6_000`),
     // self-bids are ignored, and the remaining `235_000` unsold units above bid depth mark at
     // 50% of fixed base value (`parity = 1_750` -> `875` per unit -> `205_625` milli-CRED).
     let tid = TableId(607);
@@ -1592,7 +1589,7 @@ fn final_marks_use_3turn_twap_or_executable_bid_depth_ignoring_thin_last_turn_sp
         (s0_units, s0_holding_mark, s0_eq)
     };
 
-    println!("\n=== A-1 CASE B SPIKE MATRIX (TableId 608, N=4, seed=5) ===");
+    println!("\n=== A-1 CASE B SPIKE MATRIX (TableId 608, N=4) ===");
     for turn_22_trade in [true, false] {
         let (base_units, base_mark, base_eq) = run_case_b(turn_22_trade, None);
         println!(
@@ -1628,16 +1625,12 @@ fn final_marks_use_3turn_twap_or_executable_bid_depth_ignoring_thin_last_turn_sp
         }
     }
 
-    // Qualifying 3-turn case (`A-1`): all three turns 22, 23, 24 clear >= 2% of start-of-turn stock
-    // of Raw(0) (`>= 4_200`, `>= 4_400`, `>= 4_600` milli-units), so Raw(0) qualifies and its mark
-    // equals exact `Sigma notional / Sigma units` across Turns 22..=24 (NOT the unweighted mean of
-    // per-turn prices!).
-    // Turn 22: 6_000 @ 1_200 -> notional 7_200_000
-    // Turn 23: 10_000 @ 1_500 -> notional 15_000_000
-    // Turn 24: 8_000 @ 2_100 -> notional 16_800_000
-    // Sigma notional = 39_000_000; Sigma units = 24_000 -> exact VWAP = 1_625 (unweighted mean = 1_600).
+    // Rewritten Fix-1 3-turn heavy-volume trade case (`TableId(609)`): Turns 22, 23, 24 all clear
+    // >= 2% of table stock (`6_000 @ 1_200`, `10_000 @ 1_500`, `8_000 @ 2_100`). Under Fix 2's
+    // final close-marking rule, trade prices never enter the close mark: Seat 0's 240.000 units
+    // with no standing bids mark strictly at 50% of base value (`210_000`), not `390_000`.
     let tid_qual = TableId(609);
-    let mut sp_qual = spec;
+    let mut sp_qual = spec.clone();
     sp_qual.table_id = tid_qual;
     sp_qual.seats[1].initial_cred = 200 * UNIT_SCALE;
     sp_qual.seats[2].initial_cred = 200 * UNIT_SCALE;
@@ -1649,6 +1642,21 @@ fn final_marks_use_3turn_twap_or_executable_bid_depth_ignoring_thin_last_turn_sp
         kind: ShockKind::TariffHoliday,
         magnitude_bps: 100,
     }];
+    let mut e_qual_base = TurnEngine::new(sp_qual.clone()).must("qual base eng");
+    for t in 1..=24_u8 {
+        if step_empty_turn(&mut e_qual_base, tid_qual, t, 5) {
+            break;
+        }
+    }
+    let s0_qual_base_eq = e_qual_base
+        .finalize_season()
+        .must("qual base fin")
+        .standings
+        .iter()
+        .find(|x| x.seat == 0)
+        .must("seat 0")
+        .net_asset_equity;
+
     let mut e_qual = TurnEngine::new(sp_qual).must("qual eng");
     for t in 1..=24_u8 {
         let trade_spec = match t {
@@ -1701,10 +1709,734 @@ fn final_marks_use_3turn_twap_or_executable_bid_depth_ignoring_thin_last_turn_sp
     assert_eq!(s0_qual_units, 240_000);
     let qual_mark = mark_good_holding_at_close(e_qual.state(), 0, AssetId::Raw(0), s0_qual_units);
     assert_eq!(
-        qual_mark,
-        240 * 1_625,
-        "A-1: qualifying 3-turn VWAP must equal Sigma notional / Sigma units (1_625 * 240 = 390_000), not unweighted turn mean (1_600 * 240 = 384_000)"
+        qual_mark, 210_000,
+        "Fix 2: 3-turn heavy trade volume must be ignored completely (50% base * 240 = 210_000)"
     );
+    let s0_qual_eq = e_qual
+        .finalize_season()
+        .must("qual fin")
+        .standings
+        .iter()
+        .find(|x| x.seat == 0)
+        .must("seat 0")
+        .net_asset_equity;
+    assert_eq!(s0_qual_eq, s0_qual_base_eq);
+}
+
+#[test]
+fn pr40_fix2_close_marking_attack_and_bid_matrix_matches_director_rule() {
+    let half_base = |units: Units, parity: Units| -> Units {
+        ((i128::from(units) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS))
+            / (i128::from(UNIT_SCALE) * BPS_SCALE)) as Units
+    };
+
+    // Shared 4-seat chiral ring fixture (`TableId(620)`) with real perishable spoilage (`20%`/turn),
+    // real export tariffs (`8%` raw / `6%` refined), `15.000 CRED` initial capital, closing at Turn 24.
+    let tid = TableId(620);
+    let mut base_spec = TableSpec::standard_chiral_ring(tid, 4, 5).must("spec 620");
+    base_spec.closing_hazard_bps = [10_000; CLOSING_ROLL_WINDOW_LEN];
+    base_spec.shocks = vec![ScheduledShockSpec {
+        hint_turn: 1,
+        forecast_turn: 2,
+        realize_turn: 3,
+        target_seat: 3,
+        kind: ShockKind::TariffHoliday,
+        magnitude_bps: 100,
+    }];
+    for s in &mut base_spec.seats {
+        s.initial_cred = 15_000;
+        s.regent = None;
+    }
+
+    let step_t = |eng: &mut TurnEngine, t: u8| -> league_core::SweepReceipt {
+        let _ = commit_and_reveal_bundles(eng, tid, t, vec![SealedOrderBundle::default(); 4]);
+        eng.sweep_turn(derive_turn_beacon(5, tid, Turn(t)))
+            .must("sweep 620")
+    };
+    let total_good_stock = |eng: &TurnEngine, good: AssetId| -> Units {
+        let idx = match good {
+            AssetId::Raw(g) => usize::from(g),
+            _ => panic!("expected Raw"),
+        };
+        let free: Units = eng.state().seats.iter().map(|s| s.raw[idx].max(0)).sum();
+        let resting: Units = eng
+            .state()
+            .offers
+            .values()
+            .filter(|o| o.side == OfferSide::Sell && o.good == good && o.remaining_units > 0)
+            .map(|o| o.remaining_units)
+            .sum();
+        free + resting
+    };
+
+    // Baseline (no attack, no bids).
+    let mut eng_base = TurnEngine::new(base_spec.clone()).must("eng_base");
+    let parity_raw0 = eng_base.state().parities.asset_parity(AssetId::Raw(0));
+    let parity_raw2 = eng_base.state().parities.asset_parity(AssetId::Raw(2));
+    assert_eq!(parity_raw0, 1_750);
+    assert_eq!(parity_raw2, 1_750);
+    for t in 1..=24_u8 {
+        let r = step_t(&mut eng_base, t);
+        if r.season_closed {
+            break;
+        }
+    }
+    let s0_hold_base = eng_base.state().seats[0].raw[0];
+    let s2_hold_base = eng_base.state().seats[2].raw[2];
+    let s2_cred_base = eng_base.state().seats[2].cred;
+    let s2_debt_base = eng_base.state().seats[2].cred_debt;
+    let board_base = eng_base.finalize_season().must("fin base");
+    let seat_eq = |b: &FinalScoreboard, seat: u8| -> Units {
+        b.standings
+            .iter()
+            .find(|e| e.seat == seat)
+            .must("seat")
+            .net_asset_equity
+    };
+    let s0_base_eq = seat_eq(&board_base, 0);
+    let s1_base_eq = seat_eq(&board_base, 1);
+    let s2_base_eq = seat_eq(&board_base, 2);
+    let s3_base_eq = seat_eq(&board_base, 3);
+
+    println!(
+        "\n=== PR40 FIX2 ITEM-3 CLOSE-MARKING MATRIX (TableId 620, N=4, parity=1,750, initial_cred=15,000) ==="
+    );
+
+    // 1 & 2. Wash up & Wash down: Seats 2 and 3 ping-pong >= 2% of table's Raw(0) stock on T=22, 23, 24.
+    for (case_name, upward) in [
+        ("1. Wash up (2<->3 >=2% stock T22..T24, max px)", true),
+        ("2. Wash down (2<->3 >=2% stock T22..T24, 1 milli)", false),
+    ] {
+        let mut eng = TurnEngine::new(base_spec.clone()).must("wash eng");
+        let mut chosen_px = 1_i64;
+        for t in 1..=24_u8 {
+            if (22..=24).contains(&t) {
+                let (seller, buyer) = if t % 2 == 0 {
+                    (2_u8, 3_u8)
+                } else {
+                    (3_u8, 2_u8)
+                };
+                let stock = total_good_stock(&eng, AssetId::Raw(0));
+                let q = (((i128::from(stock) * 200 + 9_999) / 10_000) as Units).max(1);
+                let have = eng.state().seats[usize::from(seller)].raw[0];
+                if have < q {
+                    eng.apply_market_action(MarketAction::TownImport {
+                        seat: seller,
+                        good: AssetId::Raw(0),
+                        amount: q - have,
+                    })
+                    .must("wash import");
+                }
+                if t == 22 {
+                    chosen_px = if upward {
+                        let usable =
+                            (eng.state().seats[usize::from(buyer)].cred - 2_500).max(1_000);
+                        ((i128::from(usable) * 1_000) / i128::from(q + 200)) as Units
+                    } else {
+                        1
+                    };
+                }
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: buyer,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("wash buy");
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: seller,
+                    order: OfferProposal {
+                        side: OfferSide::Sell,
+                        good: AssetId::Raw(0),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("wash sell");
+            }
+            let r = step_t(&mut eng, t);
+            if (22..=24).contains(&t) {
+                assert_eq!(r.batch_trades_cleared, 1, "wash trade must clear on T={t}");
+            }
+            if r.season_closed {
+                break;
+            }
+        }
+        let b = eng.finalize_season().must("fin wash");
+        let s0_eq = seat_eq(&b, 0);
+        println!(
+            "{case_name:<52} | seat=0 | eq={s0_eq:>8} | base={s0_base_eq:>8} | delta={:+}",
+            s0_eq - s0_base_eq
+        );
+        assert_eq!(
+            s0_eq, s0_base_eq,
+            "{case_name}: Seat 0 equity must equal baseline"
+        );
+    }
+
+    // 3. 3-seat ring: 2 -> 3 -> 1 -> 2 on T=22, 23, 24 at highest price all three can pay.
+    {
+        let mut eng = TurnEngine::new(base_spec.clone()).must("ring3 eng");
+        let mut chosen_px = 1_i64;
+        for t in 1..=24_u8 {
+            if (22..=24).contains(&t) {
+                let (seller, buyer) = match t {
+                    22 => (2_u8, 3_u8),
+                    23 => (3_u8, 1_u8),
+                    _ => (1_u8, 2_u8),
+                };
+                let stock = total_good_stock(&eng, AssetId::Raw(0));
+                let q = (((i128::from(stock) * 200 + 9_999) / 10_000) as Units).max(1);
+                let have = eng.state().seats[usize::from(seller)].raw[0];
+                if have < q {
+                    eng.apply_market_action(MarketAction::TownImport {
+                        seat: seller,
+                        good: AssetId::Raw(0),
+                        amount: q - have,
+                    })
+                    .must("ring3 import");
+                }
+                if t == 22 {
+                    let min_cred = [1_usize, 2, 3]
+                        .into_iter()
+                        .map(|i| eng.state().seats[i].cred)
+                        .min()
+                        .unwrap_or(1_000);
+                    let usable = (min_cred - 3_500).max(1_000);
+                    chosen_px = ((i128::from(usable) * 1_000) / i128::from(q + 200)) as Units;
+                }
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: buyer,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("ring3 buy");
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: seller,
+                    order: OfferProposal {
+                        side: OfferSide::Sell,
+                        good: AssetId::Raw(0),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("ring3 sell");
+            }
+            let r = step_t(&mut eng, t);
+            if (22..=24).contains(&t) {
+                assert_eq!(
+                    r.batch_trades_cleared, 1,
+                    "3-seat ring trade must clear on T={t}"
+                );
+            }
+            if r.season_closed {
+                break;
+            }
+        }
+        let b = eng.finalize_season().must("fin ring3");
+        let s0_eq = seat_eq(&b, 0);
+        println!(
+            "{:<52} | seat=0 | eq={s0_eq:>8} | base={s0_base_eq:>8} | delta={:+}",
+            "3. 3-seat ring (2->3->1->2 T22..T24, up)",
+            s0_eq - s0_base_eq
+        );
+        assert_eq!(
+            s0_eq, s0_base_eq,
+            "3-seat ring: Seat 0 equity must equal baseline"
+        );
+    }
+
+    // 4. Self-pump: Seats 2 and 3 wash Seat 2's own Raw(2) upward across T=22, 23, 24.
+    // Verify Raw(2)'s mark is strictly 50% of base value (zero mark lift) and Seat 2's equity
+    // delta equals the exact CRED transferred from Seat 3 minus imports/spoilage/tariff on the
+    // traded parcel (and pair sum s2_delta + s3_delta < 0).
+    {
+        let mut eng = TurnEngine::new(base_spec.clone()).must("self-pump eng");
+        let mut chosen_px = 1_i64;
+        let mut s2_import_cred = 0_i64;
+        let mut s3_import_cred = 0_i64;
+        let mut s2_net_trade_cred = 0_i64;
+        for t in 1..=24_u8 {
+            if (22..=24).contains(&t) {
+                let (seller, buyer) = if t % 2 == 0 {
+                    (2_u8, 3_u8)
+                } else {
+                    (3_u8, 2_u8)
+                };
+                let stock = total_good_stock(&eng, AssetId::Raw(2));
+                let q = (((i128::from(stock) * 200 + 9_999) / 10_000) as Units).max(1);
+                let have = eng.state().seats[usize::from(seller)].raw[2];
+                if have < q {
+                    let before = eng.state().seats[usize::from(seller)].cred;
+                    eng.apply_market_action(MarketAction::TownImport {
+                        seat: seller,
+                        good: AssetId::Raw(2),
+                        amount: q - have,
+                    })
+                    .must("self-pump import");
+                    let paid = before - eng.state().seats[usize::from(seller)].cred;
+                    if seller == 2 {
+                        s2_import_cred += paid;
+                    } else {
+                        s3_import_cred += paid;
+                    }
+                }
+                if t == 22 {
+                    let s3_usable = (eng.state().seats[3].cred - 2_000).max(1_000);
+                    chosen_px = ((i128::from(s3_usable) * 1_000) / i128::from(q + 200)) as Units;
+                }
+                let s2_cred_pre = eng.state().seats[2].cred;
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: buyer,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(2),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("self-pump buy");
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: seller,
+                    order: OfferProposal {
+                        side: OfferSide::Sell,
+                        good: AssetId::Raw(2),
+                        amount: q,
+                        price_per_unit_cred: chosen_px,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("self-pump sell");
+                let r = step_t(&mut eng, t);
+                assert_eq!(
+                    r.batch_trades_cleared, 1,
+                    "self-pump trade must clear on T={t}"
+                );
+                s2_net_trade_cred += eng.state().seats[2].cred - s2_cred_pre;
+                if r.season_closed {
+                    break;
+                }
+            } else {
+                let r = step_t(&mut eng, t);
+                if r.season_closed {
+                    break;
+                }
+            }
+        }
+        let s2_hold = eng.state().seats[2].raw[2];
+        let s2_raw2_mark = mark_good_holding_at_close(eng.state(), 2, AssetId::Raw(2), s2_hold);
+        assert_eq!(
+            s2_raw2_mark,
+            half_base(s2_hold, parity_raw2),
+            "Self-pump must get zero mark inflation: Raw(2) marks strictly at 50% of base value"
+        );
+        let s2_cred_end = eng.state().seats[2].cred;
+        let s2_debt_end = eng.state().seats[2].cred_debt;
+        let b = eng.finalize_season().must("fin self-pump");
+        let s2_eq = seat_eq(&b, 2);
+        let s3_eq = seat_eq(&b, 3);
+        let s2_delta = s2_eq - s2_base_eq;
+        let s3_delta = s3_eq - s3_base_eq;
+        let cred_delta = (s2_cred_end - s2_cred_base) - (s2_debt_end - s2_debt_base);
+        let inv_floor_delta =
+            half_base(s2_hold, parity_raw2) - half_base(s2_hold_base, parity_raw2);
+        println!(
+            "{:<52} | seat=2 | eq={s2_eq:>8} | base={s2_base_eq:>8} | delta={s2_delta:+} (s2_net_cred={s2_net_trade_cred:+}, s2_imports={s2_import_cred}, s2_inv_50pct={inv_floor_delta:+}, partner_s3_delta={s3_delta:+}, s3_imports={s3_import_cred})",
+            "4. Self-pump (2<->3 Raw(2) T22..T24, up)"
+        );
+        assert_eq!(
+            s2_cred_end - s2_cred_base,
+            s2_net_trade_cred - s2_import_cred
+        );
+        assert_eq!(s2_delta, cred_delta + inv_floor_delta);
+        assert!(s2_delta <= s2_net_trade_cred - s2_import_cred);
+        assert!(
+            s2_delta + s3_delta < 0,
+            "pair net equity must be negative (pure transfer + import/tariff/spoilage loss): s2={s2_delta}, s3={s3_delta}"
+        );
+        // Pin exact deterministic self-pump transfer figures.
+        assert_eq!(s2_net_trade_cred, 10_420);
+        assert_eq!(s2_import_cred, 0);
+        assert_eq!(s3_import_cred, 827);
+        assert_eq!(inv_floor_delta, -504);
+        assert_eq!(s2_delta, 9_916);
+        assert_eq!(s3_delta, -10_734);
+    }
+
+    // 5a & 5b. Lowball bid at 1 milli-CRED/unit on Turn 24:
+    // (a) for less than Seat 0's holding (`10_000` milli-units < `s0_hold_base = 39_915`)
+    // (b) for 100 times total stock that exists (`100 * total_stock`)
+    for (label, mult_100x) in [
+        ("5a. Lowball bid @ 1 milli (< s0 holding: 10.000 u)", false),
+        ("5b. Lowball bid @ 1 milli (100x total stock)", true),
+    ] {
+        let mut sp_lb = base_spec.clone();
+        if mult_100x {
+            // Ensure Seat 3 has enough liquid CRED to post 100x total stock @ 1 milli-CRED/unit;
+            // compute baseline with identical Seat-3 starting CRED for exact bidder comparison.
+            sp_lb.seats[3].initial_cred = 50_000;
+        }
+        let mut eng_lb_base = TurnEngine::new(sp_lb.clone()).must("lb base");
+        for t in 1..=24_u8 {
+            if step_t(&mut eng_lb_base, t).season_closed {
+                break;
+            }
+        }
+        let b_lb_base = eng_lb_base.finalize_season().must("fin lb base");
+        let s0_lb_base = seat_eq(&b_lb_base, 0);
+        let s3_lb_base = seat_eq(&b_lb_base, 3);
+
+        let mut eng_lb = TurnEngine::new(sp_lb).must("lb eng");
+        for t in 1..=24_u8 {
+            if t == 24 {
+                let stock = total_good_stock(&eng_lb, AssetId::Raw(0));
+                let amt = if mult_100x { stock * 100 } else { 10_000 };
+                assert!(
+                    !mult_100x && amt < eng_lb.state().seats[0].raw[0] || mult_100x,
+                    "5a bid must be strictly below Seat 0's holding"
+                );
+                eng_lb
+                    .apply_market_action(MarketAction::PostOffer {
+                        seat: 3,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: amt,
+                            price_per_unit_cred: 1,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("post lowball bid");
+            }
+            if step_t(&mut eng_lb, t).season_closed {
+                break;
+            }
+        }
+        let b_lb = eng_lb.finalize_season().must("fin lb");
+        let s0_eq = seat_eq(&b_lb, 0);
+        let s3_eq = seat_eq(&b_lb, 3);
+        println!(
+            "{label:<52} | seat=0 | eq={s0_eq:>8} | base={s0_lb_base:>8} | delta={:+} (bidder s3: {s3_eq} vs {s3_lb_base}, delta={:+})",
+            s0_eq - s0_lb_base,
+            s3_eq - s3_lb_base
+        );
+        assert_eq!(
+            s0_eq, s0_lb_base,
+            "{label}: Seat 0 equity must equal baseline"
+        );
+        assert_eq!(
+            s3_eq, s3_lb_base,
+            "{label}: bidder equity must equal baseline"
+        );
+    }
+
+    // 6. Honest low bid: bid at 40% of base value (`700` milli-CRED/unit vs `1_750` base) for part
+    //    of Seat 0's holding (`10_000` milli-units < `s0_hold_base`).
+    {
+        let mut eng = TurnEngine::new(base_spec.clone()).must("honest low eng");
+        let bid_40pct = (parity_raw0 * 40) / 100;
+        assert_eq!(bid_40pct, 700);
+        for t in 1..=24_u8 {
+            if t == 24 {
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: 10_000,
+                        price_per_unit_cred: bid_40pct,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("honest 40% bid");
+            }
+            if step_t(&mut eng, t).season_closed {
+                break;
+            }
+        }
+        let b = eng.finalize_season().must("fin honest low");
+        let s0_eq = seat_eq(&b, 0);
+        let s1_eq = seat_eq(&b, 1);
+        println!(
+            "{:<52} | seat=0 | eq={s0_eq:>8} | base={s0_base_eq:>8} | delta={:+} (bidder s1 delta={:+})",
+            "6. Honest low bid (10.000 u @ 40% base = 700)",
+            s0_eq - s0_base_eq,
+            s1_eq - s1_base_eq
+        );
+        assert_eq!(
+            s0_eq, s0_base_eq,
+            "Honest 40% bid: Seat 0 equity must equal baseline"
+        );
+        assert_eq!(
+            s1_eq, s1_base_eq,
+            "Honest 40% bid: bidder equity must equal baseline"
+        );
+    }
+
+    // 7a & 7b. High bid above base value:
+    // (a) `0.001` unit (`1` milli-unit) @ `15,000,000` (`locked_cred = 15,000`)
+    // (b) `10.000` units (`10,000` milli-units) @ `3,000` (`locked_cred = 30,000`, Seat 1 initial_cred = 35,000)
+    {
+        // 7a: 0.001 unit (`1` milli-unit) @ `15_000_000` (`locked_cred = 15_000`).
+        let mut eng_7a = TurnEngine::new(base_spec.clone()).must("7a eng");
+        for t in 1..=24_u8 {
+            if t == 24 {
+                eng_7a
+                    .apply_market_action(MarketAction::PostOffer {
+                        seat: 1,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: 1,
+                            price_per_unit_cred: 15_000_000,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("7a high bid");
+            }
+            if step_t(&mut eng_7a, t).season_closed {
+                break;
+            }
+        }
+        let locked_7a = eng_7a
+            .state()
+            .offers
+            .values()
+            .next()
+            .must("offer 7a")
+            .locked_cred;
+        assert_eq!(locked_7a, 15_000);
+        let b_7a = eng_7a.finalize_season().must("fin 7a");
+        let s0_eq_7a = seat_eq(&b_7a, 0);
+        let lift_7a = s0_eq_7a - s0_base_eq;
+        // On s0_hold_base = 39_915 (`parity = 1_750`): `half_base(39_915) = 34_925` (rem 625) and
+        // `half_base(39_914) = 34_924` (rem 750), so `15_000 + 34_924 - 34_925 = 14_999` (`<= 15_000`),
+        // and on `240_001` units `half_base(240_001) == half_base(240_000) == 210_000`, giving exact `15_000`.
+        let expected_mark_7a = 15_000 + half_base(s0_hold_base - 1, parity_raw0);
+        assert_eq!(
+            lift_7a,
+            expected_mark_7a - half_base(s0_hold_base, parity_raw0)
+        );
+        assert_eq!(lift_7a, 14_999);
+        assert!(lift_7a <= locked_7a);
+        println!(
+            "{:<52} | seat=0 | eq={s0_eq_7a:>8} | base={s0_base_eq:>8} | delta={lift_7a:+} (locked_cred={locked_7a})",
+            "7a. High bid (0.001 u @ 15,000,000, lock 15,000)"
+        );
+
+        // 7b: 10.000 units (`10_000` milli-units) @ `3_000` (`locked_cred = 30_000`).
+        let mut sp_7b = base_spec.clone();
+        sp_7b.seats[1].initial_cred = 35_000;
+        let mut eng_7b_base = TurnEngine::new(sp_7b.clone()).must("7b base");
+        for t in 1..=24_u8 {
+            if step_t(&mut eng_7b_base, t).season_closed {
+                break;
+            }
+        }
+        let s0_7b_base = seat_eq(&eng_7b_base.finalize_season().must("fin 7b base"), 0);
+
+        let mut eng_7b = TurnEngine::new(sp_7b).must("7b eng");
+        for t in 1..=24_u8 {
+            if t == 24 {
+                eng_7b
+                    .apply_market_action(MarketAction::PostOffer {
+                        seat: 1,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: 10_000,
+                            price_per_unit_cred: 3_000,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("7b high bid");
+            }
+            if step_t(&mut eng_7b, t).season_closed {
+                break;
+            }
+        }
+        let locked_7b = eng_7b
+            .state()
+            .offers
+            .values()
+            .next()
+            .must("offer 7b")
+            .locked_cred;
+        assert_eq!(locked_7b, 30_000);
+        let b_7b = eng_7b.finalize_season().must("fin 7b");
+        let s0_eq_7b = seat_eq(&b_7b, 0);
+        let lift_7b = s0_eq_7b - s0_7b_base;
+        // Exact formula: min(10.000 * 3_000, 30_000) - 10.000 * 875 = 30_000 - 8_750 = +21_250 <= 30_000.
+        assert_eq!(lift_7b, 30_000 - half_base(10_000, parity_raw0));
+        assert_eq!(lift_7b, 21_250);
+        assert!(lift_7b <= locked_7b);
+        println!(
+            "{:<52} | seat=0 | eq={s0_eq_7b:>8} | base={s0_7b_base:>8} | delta={lift_7b:+} (locked_cred={locked_7b})",
+            "7b. High bid (10.000 u @ 3,000, lock 30,000)"
+        );
+
+        // Must-2 locked_cred slice-floor check: when `locked_cred` cuts a slice below `take * 50% of base`,
+        // the slice is still floored at `take * 50% of base` (never below).
+        let mut st_cut = eng_7b.state().clone();
+        let oid = *st_cut.offers.keys().next().must("oid");
+        st_cut.offers.get_mut(&oid).must("mut offer").locked_cred = 1_000; // < 8_750 floor for 10.000 u
+        let mark_cut_below = mark_good_holding_at_close(&st_cut, 0, AssetId::Raw(0), 240_000);
+        assert_eq!(
+            mark_cut_below, 210_000,
+            "locked_cred cut below 50% base must floor at 210_000"
+        );
+        st_cut.offers.get_mut(&oid).must("mut offer").locked_cred = 20_000; // between 8_750 and 30_000
+        let mark_cut_above = mark_good_holding_at_close(&st_cut, 0, AssetId::Raw(0), 240_000);
+        assert_eq!(
+            mark_cut_above - 210_000,
+            20_000 - 8_750,
+            "locked_cred cap above floor must lift by min(take*px, locked_cred) - take*50% base = 11_250"
+        );
+    }
+
+    // 8. Pulling all bids on 239 units (`perishable_decay_bps = 0`, 1.000 unit sold on Turn 23 -> 239.000 units):
+    //    239 units with no bids == 209_125 == pulling every bid on Turn 24.
+    {
+        let mut sp_239 = base_spec.clone();
+        for s in &mut sp_239.seats {
+            s.initial_cred = 50_000;
+            s.perishable_decay_bps = 0;
+        }
+        let run_239 = |post_and_pull_bids: bool| -> (Units, Units) {
+            let mut e = TurnEngine::new(sp_239.clone()).must("239 eng");
+            let mut ids = Vec::new();
+            for t in 1..=24_u8 {
+                if t == 22 {
+                    e.apply_market_action(MarketAction::PostOffer {
+                        seat: 1,
+                        order: OfferProposal {
+                            side: OfferSide::Buy,
+                            good: AssetId::Raw(0),
+                            amount: 1_000,
+                            price_per_unit_cred: 1_400,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("239 t22 buy");
+                    e.apply_market_action(MarketAction::PostOffer {
+                        seat: 0,
+                        order: OfferProposal {
+                            side: OfferSide::Sell,
+                            good: AssetId::Raw(0),
+                            amount: 1_000,
+                            price_per_unit_cred: 1_400,
+                            domain_id: None,
+                            is_hybrid: false,
+                        },
+                    })
+                    .must("239 t22 sell");
+                }
+                if t == 23 && post_and_pull_bids {
+                    for (buyer, amt, px) in [(2_u8, 10_000, 1_800), (3_u8, 15_000, 1_600)] {
+                        let next_id = e.state().next_offer_id;
+                        e.apply_market_action(MarketAction::PostOffer {
+                            seat: buyer,
+                            order: OfferProposal {
+                                side: OfferSide::Buy,
+                                good: AssetId::Raw(0),
+                                amount: amt,
+                                price_per_unit_cred: px,
+                                domain_id: None,
+                                is_hybrid: false,
+                            },
+                        })
+                        .must("post resting bid");
+                        ids.push((buyer, next_id));
+                    }
+                }
+                if t == 24 && post_and_pull_bids {
+                    for &(buyer, oid) in &ids {
+                        e.apply_market_action(MarketAction::CancelOffer {
+                            seat: buyer,
+                            offer_id: oid,
+                        })
+                        .must("cancel resting bid t24");
+                    }
+                }
+                if step_t(&mut e, t).season_closed {
+                    break;
+                }
+            }
+            assert_eq!(e.state().seats[0].raw[0], 239_000);
+            let mk = mark_good_holding_at_close(e.state(), 0, AssetId::Raw(0), 239_000);
+            let eq = seat_eq(&e.finalize_season().must("fin 239"), 0);
+            (mk, eq)
+        };
+        let (mk_nobids, eq_nobids) = run_239(false);
+        let (mk_pulled, eq_pulled) = run_239(true);
+        assert_eq!(mk_nobids, 209_125);
+        assert_eq!(mk_pulled, 209_125);
+        assert_eq!(eq_pulled, eq_nobids);
+        println!(
+            "{:<52} | seat=0 | eq={eq_pulled:>8} | base={eq_nobids:>8} | delta={:+} (mark={mk_pulled} == 0.5*1750*239)",
+            "8. Pulling all bids on T24 (239.000 u)",
+            eq_pulled - eq_nobids
+        );
+    }
+
+    // 9. A real bid above the floor (`1_200 > 875`) for part of Seat 0's holding (`10.000` units):
+    //    covered `10.000` units at `1_200` (`12_000`), remaining `s0_hold_base - 10_000` at `50%` base.
+    {
+        let mut eng = TurnEngine::new(base_spec).must("real bid eng");
+        for t in 1..=24_u8 {
+            if t == 24 {
+                eng.apply_market_action(MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Raw(0),
+                        amount: 10_000,
+                        price_per_unit_cred: 1_200,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                })
+                .must("real bid 1200");
+            }
+            if step_t(&mut eng, t).season_closed {
+                break;
+            }
+        }
+        let mk = mark_good_holding_at_close(eng.state(), 0, AssetId::Raw(0), s0_hold_base);
+        let expected_mk = 12_000 + half_base(s0_hold_base - 10_000, parity_raw0);
+        assert_eq!(mk, expected_mk);
+        let s0_eq = seat_eq(&eng.finalize_season().must("fin real bid"), 0);
+        let lift = s0_eq - s0_base_eq;
+        assert_eq!(lift, 12_000 - half_base(10_000, parity_raw0));
+        assert_eq!(lift, 3_250);
+        println!(
+            "{:<52} | seat=0 | eq={s0_eq:>8} | base={s0_base_eq:>8} | delta={lift:+} (10.000 u @ 1,200 + rest @ 875)",
+            "9. Real bid above floor (10.000 u @ 1,200)"
+        );
+    }
 }
 
 #[test]
