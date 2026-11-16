@@ -16,9 +16,10 @@ use crate::transport::{
 };
 use crate::wording::{
     ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_sanitized_scratchpad_section,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt,
-    split_negotiation_sections, strip_thinking_tags, wording_slot,
+    MAX_SCRATCHPAD_TOKENS, escape_default_ignorable_code_points, extract_scratchpad_update,
+    format_sanitized_scratchpad_section, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt, split_negotiation_sections,
+    strip_thinking_tags, wording_slot,
 };
 use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
@@ -437,7 +438,6 @@ impl ResponseFormatConfig {
             }
         }
 
-        let root_uses_ref = root_composition_uses_ref(schema_obj);
         let root_rule = SubschemaRule {
             pad_key: &pad_key,
             forbid_notes: true,
@@ -445,12 +445,12 @@ impl ResponseFormatConfig {
         };
         let nested_prop_rule = SubschemaRule {
             pad_key: &pad_key,
-            forbid_notes: has_pad_prop,
+            forbid_notes: true,
             forbid_ref: has_pad_prop,
         };
         let defs_rule = SubschemaRule {
             pad_key: &pad_key,
-            forbid_notes: has_pad_prop || root_uses_ref,
+            forbid_notes: true,
             forbid_ref: has_pad_prop,
         };
 
@@ -646,13 +646,6 @@ fn is_valid_ascii_property_name(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn is_plain_lower_ascii_ident(key: &str) -> bool {
-    !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c == '_' || c == '-')
-}
-
 /// Return the first Unicode 18.0.0 `Default_Ignorable_Code_Point` (`icu_properties` `2.4.0`
 /// compiled data from `icu_properties_data` `2.4.0`, `PropertyBinaryDefaultIgnorableCodePointV1`)
 /// present in `s`, if any (`P39-B3`).
@@ -845,44 +838,11 @@ fn fold_confusable_ascii_char(c: char) -> Option<(char, bool)> {
     fold_confusable_latin_char(first, false)
 }
 
-fn confusable_compact_and_words_pass(
-    normalized: &str,
-    fold_ascii_leet_digits: bool,
-) -> (String, Vec<String>) {
-    let mut compact = String::with_capacity(normalized.len());
-    let mut words: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut prev_was_lower = false;
-
-    for c in normalized.chars() {
-        if is_ignorable_confusable_mark(c) {
-            continue;
-        }
-        if is_confusable_separator(c, fold_ascii_leet_digits) {
-            if !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
-            }
-            prev_was_lower = false;
-            continue;
-        }
-        if let Some((folded, was_upper)) = fold_confusable_latin_char(c, fold_ascii_leet_digits) {
-            if was_upper && prev_was_lower && !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
-            }
-            compact.push(folded);
-            cur.push(folded);
-            prev_was_lower = !was_upper && folded.is_ascii_alphabetic();
-        }
-    }
-    if !cur.is_empty() {
-        words.push(cur);
-    }
-    (compact, words)
-}
-
 /// Return `true` if `raw` contains `"scratch"` followed by `"pad"` with only non-letters
 /// (punctuation, brackets, spaces, digits, underscore, hyphen, or symbols) between them after
-/// Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet folds (`C-19`, `C-20`, `C-23`).
+/// Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet folds
+/// (`C-19`, `C-20`, `C-23`, `P41-C2`, `P41-C3`). Non-Latin letters (such as CJK ideographs)
+/// satisfy `char::is_alphabetic` and count as letters, not separators (`P41-C2`).
 pub(crate) fn text_contains_scratchpad_confusable(raw: &str) -> bool {
     let normalized = nfkc_and_strip_marks(raw);
     for leet in [false, true] {
@@ -895,7 +855,7 @@ pub(crate) fn text_contains_scratchpad_confusable(raw: &str) -> bool {
                 continue;
             }
             if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
-                && folded.is_ascii_alphabetic()
+                && folded.is_alphabetic()
             {
                 letters_only.push(folded);
             }
@@ -911,57 +871,46 @@ fn is_confusable_with_scratchpad(raw: &str) -> bool {
     text_contains_scratchpad_confusable(raw)
 }
 
-fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
+/// Return `true` if `raw` contains `"note"` (or `pad_key`, default `"notes"`) with only
+/// non-letters between its letters after Unicode 18.0.0 NFKC/NFKD plus our hand-built
+/// UTS #39-inspired and ASCII leet folds (`P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
+///
+/// DO NOT RELAX (`P41-B1`, Publisher ruling 2026-11-15): any model-visible identifier or prose
+/// whose folded compact letter stream contains `"note"` — including `notepad`, `notebook`,
+/// `keynote`, `noted`, `denote`, `footnote`, and split forms such as `no,tes`, `(no)(tes)`,
+/// `not.es`, and `no tes` — is refused. Non-Latin letters (such as CJK ideographs) satisfy
+/// `char::is_alphabetic` and count as letters, not separators (`P41-C2`).
+pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
     let pad_lower = pad_key.to_ascii_lowercase();
     let normalized = nfkc_and_strip_marks(raw);
     for leet in [false, true] {
-        let (compact, words) = confusable_compact_and_words_pass(&normalized, leet);
-        if compact == pad_lower
-            || compact == "note"
-            || compact.contains(&pad_lower)
-            || words.iter().any(|w| w == &pad_lower || w == "note")
-        {
+        let mut letters_only = String::with_capacity(normalized.len());
+        for c in normalized.chars() {
+            if is_ignorable_confusable_mark(c) {
+                continue;
+            }
+            if !leet && c.is_ascii_digit() {
+                continue;
+            }
+            if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+                && folded.is_alphabetic()
+            {
+                letters_only.push(folded);
+            }
+        }
+        if letters_only.contains("note") || letters_only.contains(&pad_lower) {
             return true;
         }
     }
     false
 }
 
+fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
+    text_contains_note_confusable(raw, pad_key)
+}
+
 fn text_contains_notes_confusable(text: &str, pad_key: &str) -> bool {
-    let pad_lower = pad_key.to_ascii_lowercase();
-    let normalized = nfkc_and_strip_marks(text);
-    for leet in [false, true] {
-        let mut single_run = String::new();
-        for raw_tok in normalized.split(|c: char| {
-            c.is_whitespace() || (c.is_ascii_punctuation() && c != '_' && c != '-')
-        }) {
-            let trimmed_tok =
-                raw_tok.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
-            if trimmed_tok.is_empty() {
-                continue;
-            }
-            let (compact, words) = confusable_compact_and_words_pass(trimmed_tok, leet);
-            if compact == pad_lower
-                || compact == "note"
-                || compact.contains(&pad_lower)
-                || words.iter().any(|w| w == &pad_lower || w == "note")
-            {
-                return true;
-            }
-            if compact.chars().count() == 1 {
-                single_run.push_str(&compact);
-                if single_run == pad_lower
-                    || single_run == "note"
-                    || single_run.contains(&pad_lower)
-                {
-                    return true;
-                }
-            } else {
-                single_run.clear();
-            }
-        }
-    }
-    false
+    text_contains_note_confusable(text, pad_key)
 }
 
 fn validate_model_visible_schema_text(
@@ -1025,65 +974,12 @@ fn check_schema_identifier(
             "{location} cannot name case-variant '{key}'; rename it to exact lowercase '{pad_key}'"
         )));
     }
-    let has_non_lower_ascii = !is_plain_lower_ascii_ident(key);
-    if (forbid_notes || has_non_lower_ascii) && is_confusable_with_notes(key, pad_key) {
+    if forbid_notes && is_confusable_with_notes(key, pad_key) {
         return Err(RelayError::Usage(format!(
             "{location} cannot name confusable '{key}' outside top-level 'properties.{pad_key}'"
         )));
     }
     Ok(())
-}
-
-fn root_composition_uses_ref(schema_obj: &serde_json::Map<String, serde_json::Value>) -> bool {
-    if schema_obj.contains_key("$ref") {
-        return true;
-    }
-    for key in [
-        "allOf",
-        "anyOf",
-        "oneOf",
-        "not",
-        "if",
-        "then",
-        "else",
-        "dependentSchemas",
-    ] {
-        if let Some(sub) = schema_obj.get(key)
-            && value_contains_root_ref(sub)
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn value_contains_root_ref(val: &serde_json::Value) -> bool {
-    match val {
-        serde_json::Value::Array(arr) => arr.iter().any(value_contains_root_ref),
-        serde_json::Value::Object(map) => {
-            if map.contains_key("$ref") {
-                return true;
-            }
-            for (k, v) in map {
-                if !matches!(
-                    k.as_str(),
-                    "properties"
-                        | "items"
-                        | "prefixItems"
-                        | "additionalItems"
-                        | "unevaluatedItems"
-                        | "contains"
-                        | "$defs"
-                        | "definitions"
-                ) && value_contains_root_ref(v)
-                {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => false,
-    }
 }
 
 fn percent_decode_lossy(raw: &str) -> String {
@@ -1601,7 +1497,8 @@ fn pattern_names_forbidden_identifier(pattern: &str, rule: SubschemaRule<'_>) ->
     }
     if rule.forbid_notes
         && (is_confusable_with_notes(pattern, rule.pad_key)
-            || pattern_targets_word(pattern, rule.pad_key, 3))
+            || pattern_targets_word(pattern, rule.pad_key, 3)
+            || pattern_targets_word(pattern, "note", 3))
     {
         return true;
     }
@@ -1620,7 +1517,7 @@ fn validate_pattern_properties(
     };
     let child_rule = SubschemaRule {
         pad_key: rule.pad_key,
-        forbid_notes: rule.forbid_ref,
+        forbid_notes: true,
         forbid_ref: rule.forbid_ref,
     };
     for (pat, sub_v) in pat_map {
@@ -1702,7 +1599,7 @@ fn validate_subschema(
                 && !map.contains_key("$ref");
             let nested_child_rule = SubschemaRule {
                 pad_key: rule.pad_key,
-                forbid_notes: rule.forbid_ref,
+                forbid_notes: true,
                 forbid_ref: rule.forbid_ref,
             };
 
@@ -4597,12 +4494,21 @@ pub fn run_turn(
                     redaction_key,
                 )));
             }
+            let pad_key = wording_slot("scratchpad_schema_key");
             if text_contains_scratchpad_confusable(&effective_wrapper) {
                 return Err(RelayError::Usage(redact_secrets(
                     &format!(
-                        "seat '{}' --wrapper cannot contain legacy or confusable 'scratchpad' text; use '{}'",
+                        "seat '{}' --wrapper cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'",
                         seat.guild,
-                        wording_slot("scratchpad_schema_key")
+                    ),
+                    redaction_key,
+                )));
+            }
+            if text_contains_note_confusable(&effective_wrapper, &pad_key) {
+                return Err(RelayError::Usage(redact_secrets(
+                    &format!(
+                        "seat '{}' --wrapper cannot mention '{pad_key}' or 'note' (reserved for pinned '{pad_key}' wording)",
+                        seat.guild,
                     ),
                     redaction_key,
                 )));
@@ -4826,7 +4732,7 @@ fn run_single_automated_seat(
     }
 
     let raw_block = match fs::read_to_string(&to_seat_path) {
-        Ok(text) => text,
+        Ok(text) => escape_default_ignorable_code_points(&text),
         Err(e) => {
             return SeatOutcome::SeatError {
                 detail: io_err(&to_seat_path, e, redaction_key).to_string(),
