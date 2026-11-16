@@ -16473,30 +16473,17 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const REQUIRED_WORDING_RENDER_PATHS: &[&str] = &[
-    "fallback_batna_and_zero_whispers",
-    "empty_messages_omits_whispers_header",
-    "notes_section_empty",
-    "whisper_with_intent_header",
-    "notes_section_nonempty_hazard_escaped",
-    "whisper_without_intent_header",
-    "whisper_truncated",
-    "wrapper_trailing_single_newline",
-    "wrapper_trailing_double_newline",
-    "wrapper_empty_with_notes",
-    "seat_keeping_notes_schema",
-    "seat_without_notes_schema_stripped",
-    "openrouter_snapshot_seat_no_notes",
-    "full_mode_multi_turn_replay",
-    "emc_mode_older_reply_excerpts",
-];
+const MIN_COMMITTED_HISTORY_ROWS: usize = 3;
+const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
-fn compute_history_row_chain_digest(prev_chain: u128, row: &ArmRenderHistoryRow) -> u128 {
+fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
     let mut buf: Vec<u8> = Vec::with_capacity(512);
-    buf.extend_from_slice(&prev_chain.to_le_bytes());
+    buf.extend_from_slice(&(row.arm.len() as u64).to_le_bytes());
     buf.extend_from_slice(row.arm.as_bytes());
     buf.push(0xFF);
+    buf.extend_from_slice(&(row.path_digests.len() as u64).to_le_bytes());
     for &(path_name, path_digest) in row.path_digests {
+        buf.extend_from_slice(&(path_name.len() as u64).to_le_bytes());
         buf.extend_from_slice(path_name.as_bytes());
         buf.push(b'=');
         buf.extend_from_slice(&path_digest.to_le_bytes());
@@ -16624,79 +16611,206 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r5",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x3b8b052dce1c0bf9daf6c018bd91d4bc,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+        ],
+    },
 ];
 
 const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_neutral_2026_11_15_r4",
-        0x49265e1f81dd2bb033d2f36fdc8250c0,
+        0x5c2edb6225103f3fb2a78550409fa119,
     ),
     (
         "v2_neutral_2026_11_15_r5",
-        0x36270b62444a97e9dec608a24616f079,
+        0xfd6faee98e00eb23c93d4a8812384c34,
+    ),
+    (
+        "v2_neutral_2026_11_15_r5",
+        0xa365a6b3f0a217bf5cfe085c7348d0ba,
     ),
 ];
 
 fn verify_arm_render_path_history(
     history: &[ArmRenderHistoryRow],
-    sealed_prefix: &[(&str, u128)],
+    sealed_rows: &[(&str, u128)],
     active_arm: &str,
     live_wire_bodies: &[(&str, String)],
 ) -> Result<(), String> {
     if history.is_empty() {
         return Err("ARM_RENDER_PATH_HISTORY cannot be empty".to_owned());
     }
-    if history.len() < sealed_prefix.len() {
+    if history.len() < MIN_COMMITTED_HISTORY_ROWS {
         return Err(format!(
-            "ARM_RENDER_PATH_HISTORY shrank from at least {} sealed rows to {} (past rows are append-only and may never be removed)",
-            sealed_prefix.len(),
+            "ARM_RENDER_PATH_HISTORY shrank from at least {MIN_COMMITTED_HISTORY_ROWS} committed rows to {} (past rows are append-only and may never be removed)",
             history.len()
         ));
     }
+    if history.len() != sealed_rows.len() {
+        return Err(format!(
+            "ARM_RENDER_PATH_HISTORY has {} rows, but SEALED_IMMUTABLE_HISTORY_ROWS has {} seals (every row, including the newest row, must be sealed)",
+            history.len(),
+            sealed_rows.len()
+        ));
+    }
+    if history[0].arm != GENESIS_HISTORY_ARM {
+        return Err(format!(
+            "genesis history row 0 arm changed from '{GENESIS_HISTORY_ARM}' to '{}' (past rows may never be removed or reordered)",
+            history[0].arm
+        ));
+    }
 
-    let mut seen_arms: std::collections::HashSet<&str> =
+    let mut superseded_arms: std::collections::HashSet<&str> =
         std::collections::HashSet::with_capacity(history.len());
-    let mut chain = 0u128;
     for (row_idx, row) in history.iter().enumerate() {
         if row.arm.trim().is_empty() {
             return Err(format!("history row {row_idx} has an empty arm string"));
         }
-        if !seen_arms.insert(row.arm) {
+        if row.path_digests.is_empty() {
             return Err(format!(
-                "history row {row_idx} reuses past arm string '{}' (each wording arm must have a unique label)",
+                "history row {row_idx} ('{}') has an empty path_digests set",
                 row.arm
             ));
         }
-        if row.path_digests.len() != REQUIRED_WORDING_RENDER_PATHS.len() {
+        let mut seen_row_paths: std::collections::HashSet<&str> =
+            std::collections::HashSet::with_capacity(row.path_digests.len());
+        for &(p_name, _) in row.path_digests {
+            if p_name.trim().is_empty() {
+                return Err(format!(
+                    "history row {row_idx} ('{}') has an empty render-path name",
+                    row.arm
+                ));
+            }
+            if !seen_row_paths.insert(p_name) {
+                return Err(format!(
+                    "history row {row_idx} ('{}') duplicates render path '{p_name}'",
+                    row.arm
+                ));
+            }
+        }
+
+        if row_idx > 0 {
+            let prev = &history[row_idx - 1];
+            for &(prev_path, prev_digest) in prev.path_digests {
+                let Some(&(_, cur_digest)) =
+                    row.path_digests.iter().find(|&&(n, _)| n == prev_path)
+                else {
+                    return Err(format!(
+                        "history row {row_idx} ('{}') dropped previously guarded render path '{prev_path}'",
+                        row.arm
+                    ));
+                };
+                if row.arm == prev.arm && cur_digest != prev_digest {
+                    return Err(format!(
+                        "history row {row_idx} reuses past arm string '{}' while changing digest for path '{prev_path}' (bump ACTIVE_WORDING_ARM for any shown-text change)",
+                        row.arm
+                    ));
+                }
+            }
+            if row.arm == prev.arm {
+                if row.path_digests.len() <= prev.path_digests.len() {
+                    return Err(format!(
+                        "history row {row_idx} reuses past arm string '{}' without adding any new render path (each wording arm must have a unique label unless strictly widening path coverage with identical digests)",
+                        row.arm
+                    ));
+                }
+            } else {
+                superseded_arms.insert(prev.arm);
+                if superseded_arms.contains(row.arm) {
+                    return Err(format!(
+                        "history row {row_idx} reuses past arm string '{}' (each wording arm must have a unique label)",
+                        row.arm
+                    ));
+                }
+            }
+        }
+
+        let (expected_arm, expected_seal) = sealed_rows[row_idx];
+        if row.arm != expected_arm {
             return Err(format!(
-                "history row '{}' has {} render-path digests, expected {}",
-                row.arm,
-                row.path_digests.len(),
-                REQUIRED_WORDING_RENDER_PATHS.len()
+                "sealed history row {row_idx} arm changed from '{expected_arm}' to '{}' (rows may never be edited or reordered)",
+                row.arm
             ));
         }
-        for (p_idx, &(p_name, _)) in row.path_digests.iter().enumerate() {
-            if p_name != REQUIRED_WORDING_RENDER_PATHS[p_idx] {
-                return Err(format!(
-                    "history row '{}' path {p_idx} is '{p_name}', expected '{}'",
-                    row.arm, REQUIRED_WORDING_RENDER_PATHS[p_idx]
-                ));
-            }
-        }
-        chain = compute_history_row_chain_digest(chain, row);
-        if let Some(&(expected_arm, expected_chain)) = sealed_prefix.get(row_idx) {
-            if row.arm != expected_arm {
-                return Err(format!(
-                    "sealed history row {row_idx} arm changed from '{expected_arm}' to '{}' (past rows may never be edited or reordered)",
-                    row.arm
-                ));
-            }
-            if chain != expected_chain {
-                return Err(format!(
-                    "sealed history row {row_idx} ('{}') was edited in place (append a new arm row instead of editing past digests)",
-                    row.arm
-                ));
-            }
+        let actual_seal = compute_history_row_seal(row);
+        if actual_seal != expected_seal {
+            return Err(format!(
+                "sealed history row {row_idx} ('{}') was edited in place (expected seal {expected_seal:#034x}, got {actual_seal:#034x}; append a new row instead of editing sealed rows)",
+                row.arm
+            ));
         }
     }
 
@@ -16709,23 +16823,33 @@ fn verify_arm_render_path_history(
             current_row.arm
         ));
     }
-    if live_wire_bodies.len() != REQUIRED_WORDING_RENDER_PATHS.len() {
-        return Err(format!(
-            "live fixture rendered {} paths, expected {}",
-            live_wire_bodies.len(),
-            REQUIRED_WORDING_RENDER_PATHS.len()
-        ));
-    }
-    for (idx, ((live_name, live_body), &(pinned_name, pinned_digest))) in live_wire_bodies
-        .iter()
-        .zip(current_row.path_digests.iter())
-        .enumerate()
-    {
-        if *live_name != pinned_name {
+    let mut live_by_name: std::collections::HashMap<&str, &str> =
+        std::collections::HashMap::with_capacity(live_wire_bodies.len());
+    for (live_name, live_body) in live_wire_bodies {
+        if live_by_name
+            .insert(*live_name, live_body.as_str())
+            .is_some()
+        {
             return Err(format!(
-                "live render path {idx} is '{live_name}', expected '{pinned_name}'"
+                "live fixture rendered duplicate path '{live_name}'"
             ));
         }
+    }
+    if live_by_name.len() != current_row.path_digests.len() {
+        return Err(format!(
+            "live fixture rendered {} paths, but newest history row '{}' seals {} paths",
+            live_by_name.len(),
+            current_row.arm,
+            current_row.path_digests.len()
+        ));
+    }
+    for &(pinned_name, pinned_digest) in current_row.path_digests {
+        let Some(&live_body) = live_by_name.get(pinned_name) else {
+            return Err(format!(
+                "newest history row '{}' expects render path '{pinned_name}', which was not rendered by the fixture",
+                current_row.arm
+            ));
+        };
         let actual_digest = fnv1a_128_digest(live_body.as_bytes());
         if actual_digest != pinned_digest {
             return Err(format!(
@@ -17502,6 +17626,590 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
     }))?;
     let r37_composite_digest = fnv1a_128_digest(r37_composite.as_bytes());
 
+    // --- Group F (`P39-B1` U1): hazard hex-escaping in whispers and EMC older-reply excerpts ---
+    let mut haz_steps = vec![MockHttpStep::Json {
+        status: 200,
+        delay: Duration::from_millis(1),
+        body: local_completion_body(
+            r#"{"orders":["hold_salt"],"notes":""}"#,
+            "Qwen/Qwen3-14B",
+            20,
+            8,
+            None,
+            None,
+        ),
+    }];
+    for idx in 1..=7 {
+        let reply_text = if idx == 1 {
+            "EMC_HAZARD <bid> \u{FF1C}ore\u{FF1E} \u{202E}rev\u{202C} \u{2066}iso\u{2069}"
+                .to_owned()
+        } else {
+            format!("EMC_HAZ_OK_{idx}")
+        };
+        haz_steps.push(MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(&reply_text, "Qwen/Qwen3-14B", 12, 6, None, None),
+        });
+    }
+    let srv_haz =
+        LoopbackOpenAiServer::start_with_tokenizer(haz_steps, TokenizeBehavior::WordCount)?;
+    let seats_haz_whisper = tmp.path().join("seats_haz_whisper.json");
+    fs::write(
+        &seats_haz_whisper,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv_haz.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "file"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_haz_w = tmp.path().join("g_haz_w");
+    write_to_seat(&g_haz_w, "01", "talk", "Saltworks", "HAZARD WHISPER TURN")?;
+    fs::write(
+        g_haz_w.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+        json!({
+            "batna": "Keep 3 salt; 0 VP.",
+            "whispers": [{
+                "from_guild": "Weavers",
+                "intent_header": {"tag": "<cloth>\u{202E}"},
+                "body": "Swap <2> salt \u{FF1C}now\u{FF1E} \u{061C}\u{200E}\u{200F}\u{2028}\u{2029}\u{202A}x\u{202E}\u{2066}y\u{2069}"
+            }]
+        })
+        .to_string(),
+    )?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_haz_w.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_haz_whisper.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_no_nl.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema_path.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let seats_haz_emc = tmp.path().join("seats_haz_emc.json");
+    write_local_seats_file(
+        &seats_haz_emc,
+        "Saltworks",
+        &srv_haz.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    let g_haz_emc = tmp.path().join("g_haz_emc");
+    for (idx, (d, r)) in [
+        ("01", "talk"),
+        ("01", "act"),
+        ("02", "talk"),
+        ("02", "act"),
+        ("03", "talk"),
+        ("03", "act"),
+        ("04", "talk"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_to_seat(
+            &g_haz_emc,
+            d,
+            r,
+            "Saltworks",
+            &format!("HAZ_EMC_PROMPT_{}", idx + 1),
+        )?;
+        let mut args = vec![
+            "turn",
+            "--game-dir",
+            g_haz_emc.to_str().ok_or("utf8")?,
+            "--day",
+            d,
+            "--round",
+            r,
+            "--seats",
+            seats_haz_emc.to_str().ok_or("utf8")?,
+            "--memory-mode",
+            "emc",
+            "--cap-gpu-secs",
+            "20.0",
+        ];
+        if idx == 0 {
+            args.push("--wrapper");
+            args.push(wrapper_no_nl.to_str().ok_or("utf8")?);
+        }
+        assert_eq!(execute_cli(args, |_| None, &mut out, &mut err_out), 0);
+    }
+    let haz_reqs = srv_haz.recorded_requests()?;
+    assert_eq!(haz_reqs.len(), 8);
+    let whisper_and_emc_hazard_body = format!("{}\n{}", haz_reqs[0].body, haz_reqs[7].body);
+
+    // --- Group G (`P39-B1` U2): CRLF wrapper ending in `\r\n\r\n` (`relay.rs` `prepend_wrapper`) ---
+    let wrapper_two_crlf = tmp.path().join("wrapper_two_crlf.md");
+    fs::write(&wrapper_two_crlf, b"WRAPPER_TWO_CRLF\r\n\r\n")?;
+    let srv_crlf = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                r#"{"orders":["hold_salt"],"notes":""}"#,
+                "Qwen/Qwen3-14B",
+                16,
+                8,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_crlf = tmp.path().join("seats_crlf.json");
+    write_local_seats_file(
+        &seats_crlf,
+        "Saltworks",
+        &srv_crlf.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    let g_crlf = tmp.path().join("g_crlf");
+    write_to_seat(&g_crlf, "01", "talk", "Saltworks", "CRLF WRAPPER TURN")?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_crlf.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_crlf.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_two_crlf.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema_path.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let crlf_reqs = srv_crlf.recorded_requests()?;
+    assert_eq!(crlf_reqs.len(), 1);
+
+    // --- Group H (`P39-B1` U3a): local reasoning wire strings across all 4 local efforts + kwargs + include_reasoning ---
+    let srv_reas_local = LoopbackOpenAiServer::start_with_tokenizer(
+        (0..4)
+            .map(|_| MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("REAS_OK", "Qwen/Qwen3-14B", 10, 4, Some(2), None),
+            })
+            .collect(),
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_reas_local = tmp.path().join("seats_reas_local.json");
+    fs::write(
+        &seats_reas_local,
+        json!({
+            "scratchpad": false,
+            "seats": [
+                {
+                    "guild": "Alder",
+                    "backend": "local",
+                    "base_url": srv_reas_local.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "none",
+                        "chat_template_kwargs": {"enable_thinking": false},
+                        "exclude_from_transcript": false
+                    }
+                },
+                {
+                    "guild": "Birch",
+                    "backend": "local",
+                    "base_url": srv_reas_local.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "low",
+                        "budget_tokens": 128,
+                        "chat_template_kwargs": {"thinking": true, "style": "brief"},
+                        "exclude_from_transcript": true
+                    }
+                },
+                {
+                    "guild": "Cedar",
+                    "backend": "local",
+                    "base_url": srv_reas_local.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "budget_tokens": 256,
+                        "exclude_from_transcript": true
+                    }
+                },
+                {
+                    "guild": "Dogwood",
+                    "backend": "local",
+                    "base_url": srv_reas_local.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "high",
+                        "budget_tokens": 512,
+                        "exclude_from_transcript": false
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_reas_local = tmp.path().join("g_reas_local");
+    for (guild, tag) in [
+        ("Alder", "SEAT_ALDER"),
+        ("Birch", "SEAT_BIRCH"),
+        ("Cedar", "SEAT_CEDAR"),
+        ("Dogwood", "SEAT_DOGWOOD"),
+    ] {
+        write_to_seat(&g_reas_local, "01", "talk", guild, tag)?;
+    }
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_reas_local.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_reas_local.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_no_nl.to_str().ok_or("utf8")?,
+                "--no-scratchpad",
+                "--cap-gpu-secs",
+                "20.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let mut reas_local_bodies: Vec<String> = srv_reas_local
+        .recorded_requests()?
+        .into_iter()
+        .map(|r| r.body)
+        .collect();
+    assert_eq!(reas_local_bodies.len(), 4);
+    reas_local_bodies.sort();
+    let reasoning_wire_local_body = reas_local_bodies.join("\n");
+
+    // --- Group I (`P39-B1` U3b): OpenRouter reasoning wire strings (`minimal`, `xhigh`, `max`, `max_tokens`, `exclude`) ---
+    let seats_reas_or = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Elm",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-4o-mini-2024-07-18",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05,
+                    "reasoning": {
+                        "effort": "minimal",
+                        "budget_tokens": 64,
+                        "exclude_from_transcript": true
+                    }
+                },
+                {
+                    "guild": "Fir",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-4o-mini-2024-07-18",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05,
+                    "reasoning": {
+                        "effort": "xhigh",
+                        "budget_tokens": 1024,
+                        "exclude_from_transcript": false
+                    }
+                },
+                {
+                    "guild": "Grove",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-4o-mini-2024-07-18",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05,
+                    "reasoning": {
+                        "effort": "max",
+                        "exclude_from_transcript": true
+                    }
+                }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let g_reas_or = tmp.path().join("g_reas_or");
+    for (guild, tag) in [
+        ("Elm", "SEAT_ELM"),
+        ("Fir", "SEAT_FIR"),
+        ("Grove", "SEAT_GROVE"),
+    ] {
+        write_to_seat(&g_reas_or, "01", "talk", guild, tag)?;
+    }
+    let or_ok_body = json!({
+        "model": "openai/gpt-4o-mini-2024-07-18",
+        "choices": [{"message": {"content": "OR_REAS_OK"}}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16, "cost": 0.001}
+    })
+    .to_string();
+    let tx_reas_or = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: or_ok_body.clone(),
+        }),
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: or_ok_body.clone(),
+        }),
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: or_ok_body,
+        }),
+    ]);
+    let s_reas_or = run_turn(
+        &TurnConfig::new(
+            g_reas_or,
+            "01".to_owned(),
+            Round::Talk,
+            seats_reas_or,
+            Some(wrapper_no_nl.clone()),
+            false,
+            Some(1.0),
+        ),
+        &tx_reas_or,
+        None,
+    )?;
+    assert!(s_reas_or.all_clean());
+    let mut reas_or_bodies = tx_reas_or.bodies()?;
+    assert_eq!(reas_or_bodies.len(), 3);
+    reas_or_bodies.sort();
+    let reasoning_wire_openrouter_body = reas_or_bodies.join("\n");
+
+    // --- Group J (`P39-B1` U4): `strip_thinking_tags` on `full` and `emc` replays ---
+    let mut think_steps = vec![
+        MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                "<think>\nHidden chain.\n</think>\nSTRIPPED_FULL_REPLY_1",
+                "Qwen/Qwen3-14B",
+                14,
+                8,
+                Some(4),
+                None,
+            ),
+        },
+        MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                "STRIPPED_FULL_REPLY_2",
+                "Qwen/Qwen3-14B",
+                18,
+                6,
+                None,
+                None,
+            ),
+        },
+    ];
+    for idx in 1..=7 {
+        let reply_text = if idx == 1 {
+            "PRE_<think>secret</think>MID_<think>unclosed_tail".to_owned()
+        } else {
+            format!("THINK_EMC_OK_{idx}")
+        };
+        think_steps.push(MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(&reply_text, "Qwen/Qwen3-14B", 10, 5, None, None),
+        });
+    }
+    let srv_think =
+        LoopbackOpenAiServer::start_with_tokenizer(think_steps, TokenizeBehavior::WordCount)?;
+    let seats_think = tmp.path().join("seats_think.json");
+    fs::write(
+        &seats_think,
+        json!({
+            "scratchpad": false,
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": srv_think.base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5,
+                "reasoning": {
+                    "chat_template_kwargs": {"thinking": true},
+                    "exclude_from_transcript": true
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+    let g_think_full = tmp.path().join("g_think_full");
+    write_to_seat(&g_think_full, "01", "talk", "Saltworks", "THINK_FULL_1")?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_think_full.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_think.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_no_nl.to_str().ok_or("utf8")?,
+                "--memory-mode",
+                "full",
+                "--no-scratchpad",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    write_to_seat(&g_think_full, "01", "act", "Saltworks", "THINK_FULL_2")?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_think_full.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_think.to_str().ok_or("utf8")?,
+                "--memory-mode",
+                "full",
+                "--no-scratchpad",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let g_think_emc = tmp.path().join("g_think_emc");
+    for (idx, (d, r)) in [
+        ("01", "talk"),
+        ("01", "act"),
+        ("02", "talk"),
+        ("02", "act"),
+        ("03", "talk"),
+        ("03", "act"),
+        ("04", "talk"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_to_seat(
+            &g_think_emc,
+            d,
+            r,
+            "Saltworks",
+            &format!("THINK_EMC_{}", idx + 1),
+        )?;
+        let mut args = vec![
+            "turn",
+            "--game-dir",
+            g_think_emc.to_str().ok_or("utf8")?,
+            "--day",
+            d,
+            "--round",
+            r,
+            "--seats",
+            seats_think.to_str().ok_or("utf8")?,
+            "--memory-mode",
+            "emc",
+            "--no-scratchpad",
+            "--cap-gpu-secs",
+            "20.0",
+        ];
+        if idx == 0 {
+            args.push("--wrapper");
+            args.push(wrapper_no_nl.to_str().ok_or("utf8")?);
+        }
+        assert_eq!(execute_cli(args, |_| None, &mut out, &mut err_out), 0);
+    }
+    let think_reqs = srv_think.recorded_requests()?;
+    assert_eq!(think_reqs.len(), 9);
+    let think_tag_stripping_body = format!("{}\n{}", think_reqs[1].body, think_reqs[8].body);
+
     let paths: Vec<(&'static str, String)> = vec![
         (
             "fallback_batna_and_zero_whispers",
@@ -17536,6 +18244,14 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
         ("openrouter_snapshot_seat_no_notes", or_reqs[0].clone()),
         ("full_mode_multi_turn_replay", full_reqs[1].body.clone()),
         ("emc_mode_older_reply_excerpts", emc_reqs[6].body.clone()),
+        (
+            "whisper_and_emc_hazard_hex_escaping",
+            whisper_and_emc_hazard_body,
+        ),
+        ("wrapper_trailing_double_crlf", crlf_reqs[0].body.clone()),
+        ("reasoning_wire_local", reasoning_wire_local_body),
+        ("reasoning_wire_openrouter", reasoning_wire_openrouter_body),
+        ("think_tag_stripping_replay", think_tag_stripping_body),
     ];
 
     Ok((paths, r37_composite_digest))
@@ -17705,8 +18421,8 @@ fn fix6_p37_b1_each_render_path_one_char_mutation_fails_guard() -> TestResult {
     assert!(
         mutated_guard_err(
             "seat_without_notes_schema_stripped",
-            "\"content\":\"NO_NOTES_WRAPPER\"",
-            "\"content\":\"NO_NOTES_WRAPPER \""
+            "\"required\":[\"orders\"]",
+            "\"required\": [\"orders\"]"
         )?
         .contains("seat_without_notes_schema_stripped")
     );
@@ -17721,8 +18437,8 @@ fn fix6_p37_b1_each_render_path_one_char_mutation_fails_guard() -> TestResult {
     assert!(
         mutated_guard_err(
             "full_mode_multi_turn_replay",
-            "\"content\":\"FULL_TURN_1_REPLY\"",
-            "\"content\":\"FULL_TURN_1_REPLY \""
+            "\"role\":\"assistant\",\"content\":",
+            "\"role\":\"assistant\", \"content\":"
         )?
         .contains("full_mode_multi_turn_replay")
     );
@@ -17775,6 +18491,7 @@ fn fix6_c21_append_only_arm_history_rejects_past_edit_removal_unchanged_arm_and_
             path_digests: leaked_edited_r4,
         },
         ARM_RENDER_PATH_HISTORY[1],
+        ARM_RENDER_PATH_HISTORY[2],
     ];
     let Err(err_edited) = verify_arm_render_path_history(
         &edited_past_history,
@@ -17799,18 +18516,29 @@ fn fix6_c21_append_only_arm_history_rejects_past_edit_removal_unchanged_arm_and_
     };
     assert!(err_unchanged_arm.contains("whisper_without_intent_header"));
 
-    // 4. Appending a new row that reuses a past arm string (`r4` or `r5`) fails:
+    // 4. Appending a new row that reuses a past arm string (`r4`) fails:
+    let reused_r4_row = ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r4",
+        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+    };
     let reused_arm_history = [
         ARM_RENDER_PATH_HISTORY[0],
         ARM_RENDER_PATH_HISTORY[1],
-        ArmRenderHistoryRow {
-            arm: "v2_neutral_2026_11_15_r4",
-            path_digests: ARM_RENDER_PATH_HISTORY[1].path_digests,
-        },
+        ARM_RENDER_PATH_HISTORY[2],
+        reused_r4_row,
+    ];
+    let reused_seals = [
+        SEALED_IMMUTABLE_HISTORY_ROWS[0],
+        SEALED_IMMUTABLE_HISTORY_ROWS[1],
+        SEALED_IMMUTABLE_HISTORY_ROWS[2],
+        (
+            "v2_neutral_2026_11_15_r4",
+            compute_history_row_seal(&reused_r4_row),
+        ),
     ];
     let Err(err_reused) = verify_arm_render_path_history(
         &reused_arm_history,
-        SEALED_IMMUTABLE_HISTORY_ROWS,
+        &reused_seals,
         "v2_neutral_2026_11_15_r4",
         &live_paths,
     ) else {
@@ -18376,5 +19104,850 @@ fn fix6_c19_c20_c18_nfkc_confusables_all_positions_scratchpad_text_and_conservat
         String::from_utf8_lossy(&err_out)
     );
 
+    Ok(())
+}
+
+// ============================================================================
+// Fix 7 (`P39-B2`, `P39-B1`, `P39-B3`, `C-22`..`C-25`)
+// ============================================================================
+
+#[test]
+fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestResult {
+    let (live_paths, _) = render_all_wording_guard_paths()?;
+    assert_eq!(ARM_RENDER_PATH_HISTORY.len(), 3);
+    assert_eq!(
+        SEALED_IMMUTABLE_HISTORY_ROWS.len(),
+        ARM_RENDER_PATH_HISTORY.len()
+    );
+    assert_eq!(ARM_RENDER_PATH_HISTORY[0].path_digests.len(), 15);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[1].path_digests.len(), 15);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[2].path_digests.len(), 20);
+    assert_eq!(
+        &ARM_RENDER_PATH_HISTORY[2].path_digests[..15],
+        ARM_RENDER_PATH_HISTORY[1].path_digests,
+        "all 15 pre-existing render-path digests must remain identical under r5"
+    );
+
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        ACTIVE_WORDING_ARM,
+        &live_paths,
+    )?;
+
+    // 1. Editing ANY row (row 0, row 1, AND newest row 2) fails its per-row seal:
+    for edit_row_idx in 0..ARM_RENDER_PATH_HISTORY.len() {
+        let mut cloned_history = ARM_RENDER_PATH_HISTORY.to_vec();
+        let mut mutated_digests = cloned_history[edit_row_idx].path_digests.to_vec();
+        let last_p = mutated_digests.len() - 1;
+        mutated_digests[last_p].1 ^= 1;
+        cloned_history[edit_row_idx] = ArmRenderHistoryRow {
+            arm: cloned_history[edit_row_idx].arm,
+            path_digests: Box::leak(mutated_digests.into_boxed_slice()),
+        };
+        let Err(err_edit) = verify_arm_render_path_history(
+            &cloned_history,
+            SEALED_IMMUTABLE_HISTORY_ROWS,
+            ACTIVE_WORDING_ARM,
+            &live_paths,
+        ) else {
+            return Err(format!("editing row {edit_row_idx} in place must fail").into());
+        };
+        assert!(
+            err_edit.contains(&format!("sealed history row {edit_row_idx}"))
+                && err_edit.contains("edited in place"),
+            "unexpected error for row {edit_row_idx}: {err_edit}"
+        );
+    }
+
+    // 2. Appending a new row WITHOUT sealing it (`Opus V7`) fails immediately:
+    let mut unsealed_history = ARM_RENDER_PATH_HISTORY.to_vec();
+    unsealed_history.push(ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r6",
+        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+    });
+    let Err(err_unsealed) = verify_arm_render_path_history(
+        &unsealed_history,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        "v2_neutral_2026_11_15_r6",
+        &live_paths,
+    ) else {
+        return Err("unsealed newest row must fail".into());
+    };
+    assert!(err_unsealed.contains("every row, including the newest row, must be sealed"));
+
+    // 3. Removing a row fails (both removing from history alone and removing row + seal together):
+    let Err(err_rm_one) = verify_arm_render_path_history(
+        &ARM_RENDER_PATH_HISTORY[..2],
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        ACTIVE_WORDING_ARM,
+        &live_paths[..15],
+    ) else {
+        return Err("removing newest row must fail".into());
+    };
+    assert!(err_rm_one.contains("shrank"));
+
+    let Err(err_rm_both) = verify_arm_render_path_history(
+        &ARM_RENDER_PATH_HISTORY[1..],
+        &SEALED_IMMUTABLE_HISTORY_ROWS[1..],
+        ACTIVE_WORDING_ARM,
+        &live_paths,
+    ) else {
+        return Err("removing genesis row + seal must fail".into());
+    };
+    assert!(err_rm_both.contains("shrank"));
+
+    // 4. Appending a new row with an extra path passes, while older rows' seals stay bit-identical:
+    let extra_body = "{\"synthetic\":\"extra_render_path_v1\"}".to_owned();
+    let extra_digest = fnv1a_128_digest(extra_body.as_bytes());
+    let mut extended_digests = ARM_RENDER_PATH_HISTORY[2].path_digests.to_vec();
+    extended_digests.push(("synthetic_extra_render_path", extra_digest));
+    let new_row = ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r6",
+        path_digests: Box::leak(extended_digests.into_boxed_slice()),
+    };
+    let new_row_seal = compute_history_row_seal(&new_row);
+    let mut extended_history = ARM_RENDER_PATH_HISTORY.to_vec();
+    extended_history.push(new_row);
+    let mut extended_seals = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
+    extended_seals.push(("v2_neutral_2026_11_15_r6", new_row_seal));
+    assert_eq!(extended_seals[0], SEALED_IMMUTABLE_HISTORY_ROWS[0]);
+    assert_eq!(extended_seals[1], SEALED_IMMUTABLE_HISTORY_ROWS[1]);
+    assert_eq!(extended_seals[2], SEALED_IMMUTABLE_HISTORY_ROWS[2]);
+    assert_eq!(
+        compute_history_row_seal(&extended_history[0]),
+        SEALED_IMMUTABLE_HISTORY_ROWS[0].1
+    );
+    assert_eq!(
+        compute_history_row_seal(&extended_history[1]),
+        SEALED_IMMUTABLE_HISTORY_ROWS[1].1
+    );
+    assert_eq!(
+        compute_history_row_seal(&extended_history[2]),
+        SEALED_IMMUTABLE_HISTORY_ROWS[2].1
+    );
+    let mut extended_live = live_paths.clone();
+    extended_live.push(("synthetic_extra_render_path", extra_body));
+    verify_arm_render_path_history(
+        &extended_history,
+        &extended_seals,
+        "v2_neutral_2026_11_15_r6",
+        &extended_live,
+    )?;
+
+    // 5. Reusing an arm string fails:
+    // (a) Reusing superseded arm `r4` even with an extra path and valid seal:
+    let reused_past_row = ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r4",
+        path_digests: new_row.path_digests,
+    };
+    let mut bad_hist_past = ARM_RENDER_PATH_HISTORY.to_vec();
+    bad_hist_past.push(reused_past_row);
+    let mut bad_seals_past = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
+    bad_seals_past.push((
+        "v2_neutral_2026_11_15_r4",
+        compute_history_row_seal(&reused_past_row),
+    ));
+    let Err(err_reuse_past) = verify_arm_render_path_history(
+        &bad_hist_past,
+        &bad_seals_past,
+        "v2_neutral_2026_11_15_r4",
+        &extended_live,
+    ) else {
+        return Err("reusing superseded arm r4 must fail".into());
+    };
+    assert!(err_reuse_past.contains("reuses past arm string"));
+
+    // (b) Reusing current arm `r5` with the same path set (`V4b`):
+    let reused_same_row = ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r5",
+        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+    };
+    let mut bad_hist_same = ARM_RENDER_PATH_HISTORY.to_vec();
+    bad_hist_same.push(reused_same_row);
+    let mut bad_seals_same = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
+    bad_seals_same.push((
+        "v2_neutral_2026_11_15_r5",
+        compute_history_row_seal(&reused_same_row),
+    ));
+    let Err(err_reuse_same) = verify_arm_render_path_history(
+        &bad_hist_same,
+        &bad_seals_same,
+        "v2_neutral_2026_11_15_r5",
+        &live_paths,
+    ) else {
+        return Err("reusing current arm without adding new paths must fail".into());
+    };
+    assert!(err_reuse_same.contains("reuses past arm string"));
+
+    // (c) Reusing current arm `r5` with an extra path while altering an existing path's digest:
+    let mut altered_ext = new_row.path_digests.to_vec();
+    altered_ext[0].1 ^= 1;
+    let reused_altered_row = ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r5",
+        path_digests: Box::leak(altered_ext.into_boxed_slice()),
+    };
+    let mut bad_hist_alt = ARM_RENDER_PATH_HISTORY.to_vec();
+    bad_hist_alt.push(reused_altered_row);
+    let mut bad_seals_alt = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
+    bad_seals_alt.push((
+        "v2_neutral_2026_11_15_r5",
+        compute_history_row_seal(&reused_altered_row),
+    ));
+    let Err(err_reuse_alt) = verify_arm_render_path_history(
+        &bad_hist_alt,
+        &bad_seals_alt,
+        "v2_neutral_2026_11_15_r5",
+        &extended_live,
+    ) else {
+        return Err("reusing current arm while changing an existing path digest must fail".into());
+    };
+    assert!(err_reuse_alt.contains("reuses past arm string"));
+
+    Ok(())
+}
+
+#[test]
+fn fix7_p39_b1_new_render_paths_equal_existing_r5_digests_and_fail_on_mutation() -> TestResult {
+    const PINNED_R37_COMPOSITE_DIGEST: u128 = 0x4804_ba6e_dc7d_07e0_60b6_70b5_2a39_2680;
+    let (live_paths, r37_digest) = render_all_wording_guard_paths()?;
+    assert_eq!(r37_digest, PINNED_R37_COMPOSITE_DIGEST);
+
+    for (idx, &(pinned_name, pinned_r5_digest)) in
+        ARM_RENDER_PATH_HISTORY[1].path_digests.iter().enumerate()
+    {
+        let (live_name, ref live_body) = live_paths[idx];
+        assert_eq!(live_name, pinned_name);
+        assert_eq!(
+            fnv1a_128_digest(live_body.as_bytes()),
+            pinned_r5_digest,
+            "existing path '{pinned_name}' digest must equal r5 row 1"
+        );
+    }
+
+    let mutated_guard_err =
+        |path_name: &'static str, needle: &str, mutated_needle: &str| -> Result<String, String> {
+            let mut cloned = live_paths.clone();
+            let entry = cloned
+                .iter_mut()
+                .find(|(n, _)| *n == path_name)
+                .ok_or_else(|| format!("missing path {path_name}"))?;
+            entry.1 = apply_exact_one_char_mutation(&entry.1, needle, mutated_needle)?;
+            match verify_arm_render_path_history(
+                ARM_RENDER_PATH_HISTORY,
+                SEALED_IMMUTABLE_HISTORY_ROWS,
+                ACTIVE_WORDING_ARM,
+                &cloned,
+            ) {
+                Err(err) => Ok(err),
+                Ok(()) => Err(format!("expected guard failure on path '{path_name}'")),
+            }
+        };
+
+    // 1. `whisper_and_emc_hazard_hex_escaping` (`wording.rs:546` `\u{:04x}` -> `\u{:04X}`):
+    assert!(
+        mutated_guard_err(
+            "whisper_and_emc_hazard_hex_escaping",
+            "\\\\u003ccloth\\\\u003e",
+            "\\\\u003Ccloth\\\\u003e"
+        )?
+        .contains("whisper_and_emc_hazard_hex_escaping")
+    );
+    assert!(
+        mutated_guard_err(
+            "whisper_and_emc_hazard_hex_escaping",
+            "EMC_HAZARD \\\\u003cbid\\\\u003e",
+            "EMC_HAZARD \\\\u003Cbid\\\\u003e"
+        )?
+        .contains("whisper_and_emc_hazard_hex_escaping")
+    );
+
+    // 2. `wrapper_trailing_double_crlf` (`relay.rs` `prepend_wrapper` `ends_with("\r\n\r\n")`):
+    assert!(
+        mutated_guard_err(
+            "wrapper_trailing_double_crlf",
+            "WRAPPER_TWO_CRLF\\r\\n\\r\\nYour notes",
+            "WRAPPER_TWO_CRLF\\r\\n\\r\\n Your notes"
+        )?
+        .contains("wrapper_trailing_double_crlf")
+    );
+
+    // 3a. `reasoning_wire_local` (`seats.rs:105-113` `none`/`low`/`medium`/`high` + `relay.rs:4996-5017`):
+    for (needle, mutated) in [
+        (
+            "\"reasoning_effort\":\"none\"",
+            "\"reasoning_effort\":\"non\"",
+        ),
+        (
+            "\"reasoning_effort\":\"low\"",
+            "\"reasoning_effort\":\"lo\"",
+        ),
+        (
+            "\"reasoning_effort\":\"medium\"",
+            "\"reasoning_effort\":\"mediu\"",
+        ),
+        (
+            "\"reasoning_effort\":\"high\"",
+            "\"reasoning_effort\":\"hig\"",
+        ),
+        (
+            "\"thinking_token_budget\":128",
+            "\"thinking_token_budget\": 128",
+        ),
+        (
+            "\"chat_template_kwargs\":{\"enable_thinking\":false}",
+            "\"chat_template_kwargs\": {\"enable_thinking\":false}",
+        ),
+        (
+            "\"thinking_token_budget\":256,\"include_reasoning\":false",
+            "\"thinking_token_budget\":256, \"include_reasoning\":false",
+        ),
+    ] {
+        assert!(
+            mutated_guard_err("reasoning_wire_local", needle, mutated)?
+                .contains("reasoning_wire_local")
+        );
+    }
+
+    // 3b. `reasoning_wire_openrouter` (`seats.rs:108,112,113` `minimal`/`xhigh`/`max` + `relay.rs:4985-4990`):
+    for (needle, mutated) in [
+        ("\"effort\":\"minimal\"", "\"effort\":\"minima\""),
+        ("\"effort\":\"xhigh\"", "\"effort\":\"xhig\""),
+        ("\"effort\":\"max\"", "\"effort\":\"ma\""),
+        (
+            "\"max_tokens\":64,\"exclude\":true",
+            "\"max_tokens\":64, \"exclude\":true",
+        ),
+        (
+            "\"max_tokens\":1024,\"exclude\":false",
+            "\"max_tokens\":1024, \"exclude\":false",
+        ),
+    ] {
+        assert!(
+            mutated_guard_err("reasoning_wire_openrouter", needle, mutated)?
+                .contains("reasoning_wire_openrouter")
+        );
+    }
+
+    // 4. `think_tag_stripping_replay` (`wording.rs:779-801` `strip_thinking_tags` in `full` and `emc`):
+    assert!(
+        mutated_guard_err(
+            "think_tag_stripping_replay",
+            "\"role\":\"assistant\",\"content\":\"STRIPPED_FULL_REPLY_1\"",
+            "\"role\":\"assistant\",\"content\":\" STRIPPED_FULL_REPLY_1\""
+        )?
+        .contains("think_tag_stripping_replay")
+    );
+    assert!(
+        mutated_guard_err(
+            "think_tag_stripping_replay",
+            "\\\"reply_excerpt\\\":\\\"PRE_MID_\\\"",
+            "\\\"reply_excerpt\\\":\\\"PRE_MID_ \\\""
+        )?
+        .contains("think_tag_stripping_replay")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn fix7_p39_b3_refuses_default_ignorable_code_points_everywhere() -> TestResult {
+    let tmp = TempDir::new()?;
+    let clean_wrapper = tmp.path().join("clean_wrapper.md");
+    fs::write(&clean_wrapper, "CLEAN SYSTEM WRAPPER")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_ok = tmp.path().join("seats_ok.json");
+    write_local_seats_file(
+        &seats_ok,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // Tag-encoded "scratchpad" (U+E0073 U+E0063 U+E0072 U+E0061 U+E0074 U+E0063 U+E0068 U+E0070 U+E0061 U+E0064):
+    let tag_scratchpad = "\u{E0073}\u{E0063}\u{E0072}\u{E0061}\u{E0074}\u{E0063}\u{E0068}\u{E0070}\u{E0061}\u{E0064}";
+    let samples: &[(&str, &str)] = &[
+        (
+            "review_live_tag_scratchpad",
+            &format!("Use your {tag_scratchpad} to plan"),
+        ),
+        ("tag_block_u_e0074", "ord\u{E0074}ers"),
+        ("tag_block_u_e0001", "ord\u{E0001}ers"),
+        ("variation_selector_u_fe00", "ord\u{FE00}ers"),
+        ("variation_selector_supp_u_e0100", "ord\u{E0100}ers"),
+        ("shorthand_format_u_1bca0", "ord\u{1BCA0}ers"),
+        ("shorthand_format_u_1bca3", "ord\u{1BCA3}ers"),
+        ("mongolian_fvs_u_180b", "ord\u{180B}ers"),
+        ("mongolian_mvs_u_180f", "ord\u{180F}ers"),
+        ("zwsp_u_200b", "ord\u{200B}ers"),
+        ("zwj_u_200d", "ord\u{200D}ers"),
+        ("word_joiner_u_2060", "ord\u{2060}ers"),
+        ("zwnbsp_u_feff", "ord\u{FEFF}ers"),
+        ("soft_hyphen_u_00ad", "ord\u{00AD}ers"),
+        ("cgj_u_034f", "ord\u{034F}ers"),
+        ("alm_u_061c", "ord\u{061C}ers"),
+    ];
+
+    for (idx, &(label, sample)) in samples.iter().enumerate() {
+        let mut prop_map = serde_json::Map::new();
+        prop_map.insert("orders".to_owned(), json!({"type": "array"}));
+        prop_map.insert(sample.to_owned(), json!({"type": "string"}));
+        let mut defs_map = serde_json::Map::new();
+        defs_map.insert(sample.to_owned(), json!({"type": "string"}));
+
+        let schema_cases: Vec<(&str, Json)> = vec![
+            (
+                "property_key",
+                json!({"type": "object", "properties": serde_json::Value::Object(prop_map)}),
+            ),
+            (
+                "required_entry",
+                json!({"type": "object", "required": ["orders", sample], "properties": {"orders": {"type": "array"}}}),
+            ),
+            (
+                "$defs_key",
+                json!({"type": "object", "properties": {"orders": {"type": "array"}}, "$defs": serde_json::Value::Object(defs_map.clone())}),
+            ),
+            (
+                "definitions_key",
+                json!({"type": "object", "properties": {"orders": {"type": "array"}}, "definitions": serde_json::Value::Object(defs_map)}),
+            ),
+            (
+                "description",
+                json!({"type": "object", "properties": {"orders": {"type": "array", "description": sample}, "notes": {"type": "string"}}}),
+            ),
+            (
+                "enum",
+                json!({"type": "object", "properties": {"orders": {"type": "string", "enum": [sample]}}}),
+            ),
+            (
+                "const",
+                json!({"type": "object", "properties": {"orders": {"type": "string", "const": sample}}}),
+            ),
+            (
+                "title",
+                json!({"type": "object", "properties": {"orders": {"type": "string", "title": sample}}}),
+            ),
+            (
+                "examples",
+                json!({"type": "object", "properties": {"orders": {"type": "string", "examples": [sample]}}}),
+            ),
+            (
+                "default",
+                json!({"type": "object", "properties": {"orders": {"type": "string", "default": sample}}}),
+            ),
+            (
+                "schema_name",
+                json!({"name": sample, "schema": {"type": "object", "properties": {"orders": {"type": "array"}}}}),
+            ),
+            (
+                "top_description",
+                json!({"type": "object", "description": sample, "properties": {"orders": {"type": "array"}}}),
+            ),
+            (
+                "notes_description",
+                json!({"type": "object", "properties": {"orders": {"type": "array"}, "notes": {"type": "string", "description": sample}}}),
+            ),
+            (
+                "$ref",
+                json!({"type": "object", "properties": {"orders": {"$ref": format!("#/$defs/{sample}")}}}),
+            ),
+        ];
+
+        for (pos, bad_schema) in schema_cases {
+            let Err(err) = ResponseFormatConfig::from_json_str(&bad_schema.to_string(), None)
+            else {
+                return Err(
+                    format!("P39-B3 '{label}' in '{pos}' must be refused: {bad_schema}").into(),
+                );
+            };
+            assert!(
+                matches!(err, RelayError::Usage(_))
+                    && err.to_string().contains("Default_Ignorable_Code_Point"),
+                "P39-B3 '{label}' in '{pos}' must fail with Default_Ignorable_Code_Point, got: {err}"
+            );
+        }
+
+        // `chat_template_kwargs` key and string value:
+        for bad_kwargs in [json!({sample: true}), json!({"mode": sample})] {
+            let bad_seats_json = json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "chat_template_kwargs": bad_kwargs,
+                        "exclude_from_transcript": true
+                    }
+                }]
+            });
+            let Err(seat_err) = SeatFile::from_json_str(&bad_seats_json.to_string(), None) else {
+                return Err(
+                    format!("P39-B3 '{label}' in chat_template_kwargs must be refused").into(),
+                );
+            };
+            assert!(
+                seat_err
+                    .to_string()
+                    .contains("Default_Ignorable_Code_Point")
+            );
+        }
+
+        // CLI end-to-end checks (schema `orders.description`, `--wrapper`, and `chat_template_kwargs`):
+        let bad_schema_file = tmp.path().join(format!("p39_b3_schema_{idx}.json"));
+        fs::write(
+            &bad_schema_file,
+            json!({
+                "type": "object",
+                "properties": {
+                    "orders": {"type": "array", "description": sample, "items": {"type": "string"}},
+                    "notes": {"type": "string"}
+                }
+            })
+            .to_string(),
+        )?;
+        let g_schema = tmp.path().join(format!("g_p39_b3_schema_{idx}"));
+        write_to_seat(&g_schema, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        let code_s = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_schema.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_ok.to_str().ok_or("utf8")?,
+                "--wrapper",
+                clean_wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                bad_schema_file.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code_s, 1, "CLI schema refusal failed for '{label}'");
+        assert!(
+            String::from_utf8_lossy(&err_out).contains("Default_Ignorable_Code_Point"),
+            "CLI stderr missing Default_Ignorable_Code_Point for '{label}': {}",
+            String::from_utf8_lossy(&err_out)
+        );
+        assert!(!g_schema.join("relay/setup.json").exists());
+        assert!(!g_schema.join("relay/calls.jsonl").exists());
+
+        let bad_wrapper_file = tmp.path().join(format!("p39_b3_wrap_{idx}.md"));
+        fs::write(&bad_wrapper_file, format!("Game brief: {sample}"))?;
+        let g_wrap = tmp.path().join(format!("g_p39_b3_wrap_{idx}"));
+        write_to_seat(&g_wrap, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        out.clear();
+        err_out.clear();
+        let code_w = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_wrap.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_ok.to_str().ok_or("utf8")?,
+                "--wrapper",
+                bad_wrapper_file.to_str().ok_or("utf8")?,
+                "--no-scratchpad",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code_w, 1, "CLI wrapper refusal failed for '{label}'");
+        assert!(String::from_utf8_lossy(&err_out).contains("Default_Ignorable_Code_Point"));
+        assert!(!g_wrap.join("relay/setup.json").exists());
+        assert!(!g_wrap.join("relay/calls.jsonl").exists());
+
+        let bad_seats_file = tmp.path().join(format!("p39_b3_seats_{idx}.json"));
+        fs::write(
+            &bad_seats_file,
+            json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "chat_template_kwargs": {"mode": sample},
+                        "exclude_from_transcript": true
+                    }
+                }]
+            })
+            .to_string(),
+        )?;
+        let g_kw = tmp.path().join(format!("g_p39_b3_kw_{idx}"));
+        write_to_seat(&g_kw, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        out.clear();
+        err_out.clear();
+        let code_kw = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_kw.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                bad_seats_file.to_str().ok_or("utf8")?,
+                "--wrapper",
+                clean_wrapper.to_str().ok_or("utf8")?,
+                "--no-scratchpad",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code_kw, 1, "CLI kwargs refusal failed for '{label}'");
+        assert!(String::from_utf8_lossy(&err_out).contains("Default_Ignorable_Code_Point"));
+        assert!(!g_kw.join("relay/setup.json").exists());
+        assert!(!g_kw.join("relay/calls.jsonl").exists());
+    }
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
+    Ok(())
+}
+
+#[test]
+fn fix7_c23_c24_c25_scratch_pad_separators_strict_note_prose_and_mixed_case_nested() -> TestResult {
+    let tmp = TempDir::new()?;
+    let clean_wrapper = tmp.path().join("clean_wrapper.md");
+    fs::write(&clean_wrapper, "CLEAN GAME BRIEF")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_ok = tmp.path().join("seats_ok.json");
+    write_local_seats_file(
+        &seats_ok,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // --- 1. C-23: "scratch" + "pad" refused across any non-letter separator ---
+    for (idx, sep_variant) in [
+        "scratch,pad",
+        "(scratch)(pad)",
+        "scratch pad",
+        "scratch_pad",
+        "scratch-pad",
+        "scratch1pad",
+        "\"scratch\" \"pad\"",
+        "[scratch]:[pad]",
+        "5cr47ch,p4d",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for bad_schema in [
+            json!({"type": "object", "properties": {"orders": {"type": "array", "description": sep_variant}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "enum": [sep_variant]}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "const": sep_variant}}}),
+            json!({"type": "object", "required": ["orders", sep_variant], "properties": {"orders": {"type": "array"}}}),
+        ] {
+            let Err(err) = ResponseFormatConfig::from_json_str(&bad_schema.to_string(), None)
+            else {
+                return Err(format!("C-23 '{sep_variant}' must be refused: {bad_schema}").into());
+            };
+            assert!(err.to_string().contains("scratchpad"));
+        }
+
+        let bad_wrap = tmp.path().join(format!("c23_wrap_{idx}.md"));
+        fs::write(&bad_wrap, format!("Brief: {sep_variant}"))?;
+        let g = tmp.path().join(format!("g_c23_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        assert_eq!(
+            execute_cli(
+                [
+                    "turn",
+                    "--game-dir",
+                    g.to_str().ok_or("utf8")?,
+                    "--day",
+                    "01",
+                    "--round",
+                    "talk",
+                    "--seats",
+                    seats_ok.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    bad_wrap.to_str().ok_or("utf8")?,
+                    "--no-scratchpad",
+                    "--cap-gpu-secs",
+                    "10.0",
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1
+        );
+        assert!(!g.join("relay/setup.json").exists());
+        assert!(!g.join("relay/calls.jsonl").exists());
+    }
+
+    // Letters between "scratch" and "pad", or standalone `pad`/`scratch`/`scratch_score`, still pass:
+    let allowed_c23_schema = json!({
+        "type": "object",
+        "properties": {
+            "pad": {"type": "string", "description": "Scratch the offer, then pad your reserve."},
+            "scratch": {"type": "string"},
+            "scratch_score": {"type": "integer"},
+            "notes": {"type": "string"}
+        }
+    });
+    assert!(ResponseFormatConfig::from_json_str(&allowed_c23_schema.to_string(), None).is_ok());
+
+    // --- 2. C-24: strict refusal of "note" in model-visible schema text, with exact CLI error pin ---
+    let take_note_schema_file = tmp.path().join("c24_take_note.json");
+    fs::write(
+        &take_note_schema_file,
+        json!({
+            "type": "object",
+            "properties": {
+                "orders": {"type": "array", "description": "Take note of the offer", "items": {"type": "string"}},
+                "notes": {"type": "string"}
+            }
+        })
+        .to_string(),
+    )?;
+    let g_c24 = tmp.path().join("g_c24");
+    write_to_seat(&g_c24, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_c24.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_ok.to_str().ok_or("utf8")?,
+                "--wrapper",
+                clean_wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                take_note_schema_file.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        1
+    );
+    let c24_stderr = String::from_utf8_lossy(&err_out);
+    assert!(
+        c24_stderr.contains(
+            "error: invalid arguments: response_format 'schema.properties.orders.description' cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'"
+        ),
+        "unexpected C-24 stderr: {c24_stderr}"
+    );
+    assert!(!g_c24.join("relay/setup.json").exists());
+    assert!(!g_c24.join("relay/calls.jsonl").exists());
+
+    for bad_c24_text in [
+        "Take note of the offer",
+        "This denotes the bid",
+        "Vote yes or no on 2 notes",
+        "Check (note) before acting",
+    ] {
+        let s = json!({
+            "type": "object",
+            "properties": {
+                "orders": {"type": "string", "description": bad_c24_text}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s.to_string(), None).is_err(),
+            "C-24 text '{bad_c24_text}' must remain refused"
+        );
+    }
+    for ok_c24_text in [
+        "The notary seals the deal",
+        "Notice: offers expire",
+        "Pay 1 or 0 ore",
+        "Offer 5 to A, 3 to B",
+    ] {
+        let s = json!({
+            "type": "object",
+            "properties": {
+                "orders": {"type": "string", "description": ok_c24_text},
+                "notes": {"type": "string"}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s.to_string(), None).is_ok(),
+            "ordinary game prose '{ok_c24_text}' must pass"
+        );
+    }
+
+    // --- 3. C-25: mixed-case nested names (`notesCount`, `noteTaking`) refused even without top-level `notes` ---
+    for mixed_nested in ["notesCount", "noteTaking"] {
+        let mut sub_props = serde_json::Map::new();
+        sub_props.insert(mixed_nested.to_owned(), json!({"type": "integer"}));
+        let bad_nested = json!({
+            "type": "object",
+            "properties": {
+                "orders": {
+                    "type": "object",
+                    "properties": serde_json::Value::Object(sub_props)
+                }
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&bad_nested.to_string(), None).is_err(),
+            "C-25: mixed-case nested '{mixed_nested}' in a no-notes schema must remain refused"
+        );
+    }
+    let ok_lower_nested = json!({
+        "type": "object",
+        "properties": {
+            "orders": {
+                "type": "object",
+                "properties": {
+                    "credit_notes": {"type": "string"},
+                    "notes": {"type": "string"}
+                }
+            }
+        }
+    });
+    assert!(ResponseFormatConfig::from_json_str(&ok_lower_nested.to_string(), None).is_ok());
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
     Ok(())
 }

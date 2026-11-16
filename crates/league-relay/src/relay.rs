@@ -238,6 +238,7 @@ impl ResponseFormatConfig {
         let pad_key = wording_slot("scratchpad_schema_key");
         let pinned_pad_desc = wording_slot("scratchpad_schema_description");
 
+        reject_default_ignorable_code_point(&name, "response_format schema 'name'")?;
         if name.is_empty()
             || !name
                 .chars()
@@ -262,10 +263,18 @@ impl ResponseFormatConfig {
             ));
         };
         for top_key in schema_obj.keys() {
+            reject_default_ignorable_code_point(
+                top_key,
+                &format!("response_format 'schema.{top_key}' keyword"),
+            )?;
             reject_forbidden_ref_or_anchor_keyword(top_key, &format!("schema.{top_key}"))?;
         }
         for unpinned_top_key in ["description", "title", "examples"] {
-            if schema_obj.contains_key(unpinned_top_key) {
+            if let Some(top_v) = schema_obj.get(unpinned_top_key) {
+                reject_default_ignorable_in_value(
+                    top_v,
+                    &format!("response_format 'schema.{unpinned_top_key}'"),
+                )?;
                 return Err(RelayError::Usage(format!(
                     "response_format top-level schema cannot carry unpinned '{unpinned_top_key}'"
                 )));
@@ -298,6 +307,10 @@ impl ResponseFormatConfig {
                     )));
                 };
                 for key in pad_obj.keys() {
+                    reject_default_ignorable_code_point(
+                        key,
+                        &format!("response_format 'schema.properties.{pad_key}' keyword"),
+                    )?;
                     reject_forbidden_ref_or_anchor_keyword(
                         key,
                         &format!("schema.properties.{pad_key}.{key}"),
@@ -307,6 +320,12 @@ impl ResponseFormatConfig {
                             "response_format schema property '{pad_key}' cannot carry unpinned keyword '{key}' (only 'type' and 'description' are permitted; token cap is enforced via MAX_SCRATCHPAD_TOKENS)"
                         )));
                     }
+                }
+                if let Some(serde_json::Value::String(t_s)) = pad_obj.get("type") {
+                    reject_default_ignorable_code_point(
+                        t_s,
+                        &format!("response_format 'schema.properties.{pad_key}.type'"),
+                    )?;
                 }
                 if pad_obj.get("type").and_then(|v| v.as_str()) != Some("string") {
                     return Err(RelayError::Usage(format!(
@@ -321,7 +340,11 @@ impl ResponseFormatConfig {
                         );
                     }
                     Some(serde_json::Value::String(existing)) if existing == &pinned_pad_desc => {}
-                    Some(serde_json::Value::String(_)) => {
+                    Some(serde_json::Value::String(existing)) => {
+                        reject_default_ignorable_code_point(
+                            existing,
+                            &format!("response_format 'schema.properties.{pad_key}.description'"),
+                        )?;
                         return Err(RelayError::Usage(format!(
                             "response_format '{pad_key}' description must omit 'description' (populated from MODEL_FACING_WORDING) or match the pinned wording slot 'scratchpad_schema_description'"
                         )));
@@ -630,39 +653,80 @@ fn is_plain_lower_ascii_ident(key: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c == '_' || c == '-')
 }
 
+/// Return the first Unicode 18.0.0 `Default_Ignorable_Code_Point` (`icu_properties` `2.4.0`
+/// compiled data from `icu_properties_data` `2.4.0`, `PropertyBinaryDefaultIgnorableCodePointV1`)
+/// present in `s`, if any (`P39-B3`).
+///
+/// Covers the tag block (`U+E0000..=U+E007F`), Variation Selectors (`U+FE00..=U+FE0F`) and
+/// Variation Selectors Supplement (`U+E0100..=U+E01EF`, plus unassigned default-ignorables in
+/// `U+E0000..=U+E0FFF`), Shorthand Format Controls (`U+1BCA0..=U+1BCA3`), Mongolian Free
+/// Variation Selectors and Vowel Separator (`U+180B..=U+180F`), zero-width/bidi/format characters
+/// (`U+00AD`, `U+034F`, `U+061C`, `U+200B..=U+200F`, `U+202A..=U+202E`, `U+2060..=U+206F`,
+/// `U+FEFF`), Hangul/Khmer fillers (`U+115F..=U+1160`, `U+17B4..=U+17B5`, `U+3164`, `U+FFA0`),
+/// musical beam/slur controls (`U+1D173..=U+1D17A`), and `U+FFF0..=U+FFF8`.
+pub(crate) fn find_default_ignorable_code_point(s: &str) -> Option<char> {
+    let set =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
+    s.chars().find(|&c| set.contains(c))
+}
+
+fn reject_default_ignorable_code_point(s: &str, location: &str) -> Result<(), RelayError> {
+    if let Some(cp) = find_default_ignorable_code_point(s) {
+        return Err(RelayError::Usage(format!(
+            "{location} cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+            cp as u32
+        )));
+    }
+    Ok(())
+}
+
+fn reject_default_ignorable_in_value(
+    val: &serde_json::Value,
+    location: &str,
+) -> Result<(), RelayError> {
+    match val {
+        serde_json::Value::String(s) => reject_default_ignorable_code_point(s, location),
+        serde_json::Value::Array(arr) => {
+            for (idx, item) in arr.iter().enumerate() {
+                reject_default_ignorable_in_value(item, &format!("{location}[{idx}]"))?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                reject_default_ignorable_code_point(k, location)?;
+                reject_default_ignorable_in_value(v, &format!("{location}.{k}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn is_ignorable_confusable_mark(c: char) -> bool {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
     c.is_control()
+        || default_ignorable.contains(c)
         || matches!(
             c,
-            '\u{00AD}'
-                | '\u{0300}'..='\u{036F}'
-                | '\u{061C}'
-                | '\u{115F}'
-                | '\u{1160}'
-                | '\u{17B4}'
-                | '\u{17B5}'
-                | '\u{180B}'..='\u{180E}'
+            '\u{0300}'..='\u{036F}'
                 | '\u{1AB0}'..='\u{1AFF}'
                 | '\u{1DC0}'..='\u{1DFF}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{206F}'
                 | '\u{20D0}'..='\u{20FF}'
-                | '\u{FE00}'..='\u{FE0F}'
                 | '\u{FE20}'..='\u{FE2F}'
-                | '\u{FEFF}'
-                | '\u{FFA0}'
         )
 }
 
 fn is_confusable_separator(c: char, fold_ascii_leet_digits: bool) -> bool {
     c.is_whitespace()
-        || matches!(c, '_' | '-' | '.' | '/' | ':')
+        || c.is_ascii_punctuation()
+        || (!c.is_alphanumeric() && !is_ignorable_confusable_mark(c))
         || (!fold_ascii_leet_digits && c.is_ascii_digit())
 }
 
-/// Normalize `raw` via Unicode UAX #15 NFKC (`icu_normalizer` `2.4.0`), then decompose via NFKD
-/// and strip combining/ignorable marks (`C-19`).
+/// Normalize `raw` via Unicode 18.0.0 UAX #15 NFKC (`icu_normalizer` `2.4.0`), then decompose via
+/// NFKD and strip combining/ignorable marks (`C-19`).
 fn nfkc_and_strip_marks(raw: &str) -> String {
     let nfkc = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc();
     let nfkd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfkd();
@@ -671,11 +735,19 @@ fn nfkc_and_strip_marks(raw: &str) -> String {
         .collect()
 }
 
-/// Vetted single-character Latin skeleton mapping derived from Unicode Technical Standard #39
-/// (`confusables.txt`) across Latin small-caps/IPA/Extended, Cyrillic (including `ԁ`/`Ԁ` `U+0501`/`U+0500`
-/// and `һ` `U+04BB`), Greek/Coptic, Armenian (including `օ`/`Օ` `U+0585`/`U+0555`), Cherokee, and Hebrew,
+/// Hand-built single-character Latin fold table **inspired by** UTS #39 confusables (`C-19`, `C-22`),
 /// paired with optional ASCII leet digit folding (`0->o`, `1->i`, `3->e`, `4->a`, `5->s`, `7->t`, `8->b`).
-fn fold_uts39_latin_skeleton_char(c: char, fold_ascii_leet_digits: bool) -> Option<(char, bool)> {
+///
+/// Alongside direct UTS #39 homoglyphs (`օ`/`Օ` `U+0585`/`U+0555`, `ԁ`/`Ԁ` `U+0501`/`U+0500`,
+/// `һ` `U+04BB`, `ϲ`/`Ϲ`, `հ`, `а`, `ᴏ`, `ס`, `ꜱ`, `\u{017F}`, Cherokee `Ꭺ`..`Ꮓ`, Greek `Η`/`Ν`/`Ρ`/`Τ`/`Χ`/`Υ`/`Ζ`),
+/// this table includes extra visual mappings that lean conservatively toward refusal (`C-22`):
+/// - Latin small-caps (`ᴀ`, `ʙ`, `ᴄ`, `ᴅ`, `ᴇ`, `ꜰ`, `ɢ`, `ʜ`, `ɪ`, `ᴊ`, `ᴋ`, `ʟ`, `ᴍ`, `ɴ`, `ᴘ`, `ꞯ`, `ʀ`, `ᴛ`, `ᴜ`, `ᴠ`, `ᴡ`, `ʏ`, `ᴢ`);
+/// - IPA and Latin-Extended stroke/hook/ligature letters (`ɑ`, `ɒ`, `æ`, `Ƅ`, `ɓ`, `ƀ`, `ƈ`, `ȼ`, `ɔ`, `đ`, `ɗ`, `ɖ`, `ɛ`, `ǝ`, `ə`, `ɇ`, `ƒ`, `ɡ`, `ǥ`, `ħ`, `ɦ`, `ɨ`, `ɩ`, `ʝ`, `ƙ`, `ł`, `ɫ`, `ɬ`, `ɭ`, `ɱ`, `ɲ`, `ɳ`, `ŋ`, `ø`, `ɵ`, `ơ`, `ƥ`, `ʠ`, `ɾ`, `ɽ`, `ɍ`, `ʂ`, `ß`, `ŧ`, `ƭ`, `ʈ`, `ʉ`, `ư`, `ʊ`, `ʋ`, `ɏ`, `ƶ`, `ʐ`);
+/// - Cross-script visual look-alikes mapped directly to ASCII `a`–`z` (`ו` `U+05D5` -> `'i'` vs UTS #39 `'l'`,
+///   `ь` `U+044C` -> `'b'` vs `'ƅ'`, `п` `U+043F` -> `'n'` vs `'π'`, plus `ӑ`, `б`, `ҫ`, `ё`, `є`, `ҽ`, `ғ`, `ґ`, `ћ`, `ї`,
+///   `ќ`, `қ`, `м`, `т`, `ҭ`, `ѳ`, `ө`, `ү`, `ұ`, `ҳ`, `α`, `β`, `δ`, `ε`, `ϵ`, `κ`, `μ`, `η`, `σ`, `ς`, `τ`, `υ`, `χ`, `ζ`,
+///   `ց`, `ի`, `լ`, `ո`, `ռ`, `ք`, `ր`, `ս`, `Ꮥ`, `Ꮤ`, `Ᏺ`).
+fn fold_confusable_latin_char(c: char, fold_ascii_leet_digits: bool) -> Option<(char, bool)> {
     if is_ignorable_confusable_mark(c) || is_confusable_separator(c, fold_ascii_leet_digits) {
         return None;
     }
@@ -770,7 +842,7 @@ fn fold_uts39_latin_skeleton_char(c: char, fold_ascii_leet_digits: bool) -> Opti
 fn fold_confusable_ascii_char(c: char) -> Option<(char, bool)> {
     let normalized = nfkc_and_strip_marks(&c.to_string());
     let first = normalized.chars().next()?;
-    fold_uts39_latin_skeleton_char(first, false)
+    fold_confusable_latin_char(first, false)
 }
 
 fn confusable_compact_and_words_pass(
@@ -793,8 +865,7 @@ fn confusable_compact_and_words_pass(
             prev_was_lower = false;
             continue;
         }
-        if let Some((folded, was_upper)) = fold_uts39_latin_skeleton_char(c, fold_ascii_leet_digits)
-        {
+        if let Some((folded, was_upper)) = fold_confusable_latin_char(c, fold_ascii_leet_digits) {
             if was_upper && prev_was_lower && !cur.is_empty() {
                 words.push(std::mem::take(&mut cur));
             }
@@ -809,15 +880,35 @@ fn confusable_compact_and_words_pass(
     (compact, words)
 }
 
-fn is_confusable_with_scratchpad(raw: &str) -> bool {
+/// Return `true` if `raw` contains `"scratch"` followed by `"pad"` with only non-letters
+/// (punctuation, brackets, spaces, digits, underscore, hyphen, or symbols) between them after
+/// Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet folds (`C-19`, `C-20`, `C-23`).
+pub(crate) fn text_contains_scratchpad_confusable(raw: &str) -> bool {
     let normalized = nfkc_and_strip_marks(raw);
     for leet in [false, true] {
-        let (compact, _) = confusable_compact_and_words_pass(&normalized, leet);
-        if compact.contains("scratchpad") {
+        let mut letters_only = String::with_capacity(normalized.len());
+        for c in normalized.chars() {
+            if is_ignorable_confusable_mark(c) {
+                continue;
+            }
+            if !leet && c.is_ascii_digit() {
+                continue;
+            }
+            if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+                && folded.is_ascii_alphabetic()
+            {
+                letters_only.push(folded);
+            }
+        }
+        if letters_only.contains("scratchpad") {
             return true;
         }
     }
     false
+}
+
+fn is_confusable_with_scratchpad(raw: &str) -> bool {
+    text_contains_scratchpad_confusable(raw)
 }
 
 fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
@@ -836,46 +927,14 @@ fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
     false
 }
 
-/// Return `true` if `text` (prose, enum, const, wrapper, or `chat_template_kwargs`) contains
-/// `"scratchpad"` after NFKC + UTS #39 confusables + leet folding (`C-19`, `C-20`).
-pub(crate) fn text_contains_scratchpad_confusable(text: &str) -> bool {
-    let normalized = nfkc_and_strip_marks(text);
-    for leet in [false, true] {
-        let tokens: Vec<String> = normalized
-            .split_whitespace()
-            .map(|tok| confusable_compact_and_words_pass(tok, leet).0)
-            .filter(|s| !s.is_empty())
-            .collect();
-        if tokens.iter().any(|t| t.contains("scratchpad")) {
-            return true;
-        }
-        for pair in tokens.windows(2) {
-            let joined = format!("{}{}", pair[0], pair[1]);
-            if joined.contains("scratchpad") {
-                return true;
-            }
-        }
-        let mut single_run = String::new();
-        for tok in &tokens {
-            if tok.chars().count() == 1 {
-                single_run.push_str(tok);
-                if single_run.contains("scratchpad") {
-                    return true;
-                }
-            } else {
-                single_run.clear();
-            }
-        }
-    }
-    false
-}
-
 fn text_contains_notes_confusable(text: &str, pad_key: &str) -> bool {
     let pad_lower = pad_key.to_ascii_lowercase();
     let normalized = nfkc_and_strip_marks(text);
     for leet in [false, true] {
         let mut single_run = String::new();
-        for raw_tok in normalized.split_whitespace() {
+        for raw_tok in normalized.split(|c: char| {
+            c.is_whitespace() || (c.is_ascii_punctuation() && c != '_' && c != '-')
+        }) {
             let trimmed_tok =
                 raw_tok.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
             if trimmed_tok.is_empty() {
@@ -910,6 +969,7 @@ fn validate_model_visible_schema_text(
     path: &str,
     pad_key: &str,
 ) -> Result<(), RelayError> {
+    reject_default_ignorable_code_point(text, &format!("response_format '{path}'"))?;
     if text_contains_scratchpad_confusable(text) {
         return Err(RelayError::Usage(format!(
             "response_format '{path}' cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'"
@@ -946,6 +1006,7 @@ fn check_schema_identifier(
     allow_exact_pad_key: bool,
     location: &str,
 ) -> Result<(), RelayError> {
+    reject_default_ignorable_code_point(key, location)?;
     if is_confusable_with_scratchpad(key) {
         return Err(RelayError::Usage(format!(
             "{location} cannot name legacy or confusable 'scratchpad' field '{key}'; rename it to '{pad_key}'"
@@ -1068,7 +1129,9 @@ fn validate_ref_value(
             "response_format '{path}' must be a non-empty string"
         )));
     }
+    reject_default_ignorable_code_point(ref_str, &format!("response_format '{path}'"))?;
     let decoded = percent_decode_lossy(ref_str);
+    reject_default_ignorable_code_point(&decoded, &format!("response_format '{path}'"))?;
     for candidate in [ref_str, decoded.as_str()] {
         for seg in candidate.split('/') {
             if is_confusable_with_scratchpad(seg) {
@@ -1561,6 +1624,7 @@ fn validate_pattern_properties(
         forbid_ref: rule.forbid_ref,
     };
     for (pat, sub_v) in pat_map {
+        reject_default_ignorable_code_point(pat, &format!("response_format '{path}' pattern"))?;
         if pattern_names_forbidden_identifier(pat, rule) {
             return Err(RelayError::Usage(format!(
                 "response_format '{path}' pattern '{pat}' cannot name '{}' outside top-level 'properties.{}'",
@@ -4524,6 +4588,15 @@ pub fn run_turn(
                     guild: seat.guild.clone(),
                 });
             };
+            if let Some(cp) = find_default_ignorable_code_point(&effective_wrapper) {
+                return Err(RelayError::Usage(redact_secrets(
+                    &format!(
+                        "seat '{}' --wrapper cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                        seat.guild, cp as u32
+                    ),
+                    redaction_key,
+                )));
+            }
             if text_contains_scratchpad_confusable(&effective_wrapper) {
                 return Err(RelayError::Usage(redact_secrets(
                     &format!(

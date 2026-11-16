@@ -1564,6 +1564,7 @@ dependencies = [
  "chrono",
  "hex",
  "icu_normalizer",
+ "icu_properties",
  "league-relay",
  "same-file",
  "serde",

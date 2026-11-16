@@ -37,13 +37,13 @@
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-15; 7 files changed content.",
+        "sentence": "Nothing structural changed since 2026-11-16; 7 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "d97301c91aa3c5d83e68b92a6b059ca86e198f7f",
-      "generatedAt": "2026-11-15T23:41:56.763Z"
+      "commit": "0b8aada6bb2556d60b76219ff2aa95848b989553",
+      "generatedAt": "2026-11-16T00:39:58.363Z"
     },
     "unchanged": true
   },
@@ -51,7 +51,7 @@
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 11,
+      "either": 12,
       "partLabels": [
         null,
         null
@@ -61,7 +61,7 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 11
+      "shared": 12
     },
     {
       "a": "crates/league-relay/src/cli.rs",
@@ -81,7 +81,7 @@
     {
       "a": "crates/league-relay/src/cli.rs",
       "b": "crates/league-relay/src/relay.rs",
-      "either": 11,
+      "either": 12,
       "partLabels": [
         null,
         null
@@ -96,7 +96,7 @@
     {
       "a": "crates/league-relay/src/cli.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 11,
+      "either": 12,
       "partLabels": [
         null,
         null
@@ -111,7 +111,7 @@
     {
       "a": "crates/league-relay/src/error.rs",
       "b": "crates/league-relay/src/relay.rs",
-      "either": 11,
+      "either": 12,
       "partLabels": [
         null,
         null
@@ -129,7 +129,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 2 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "0b8aada6bb2556d60b76219ff2aa95848b989553",
+  "commit": "cc19aa93b3a36ce6a303b7248ce75d0a7fe83e33",
   "defaultBranch": "main",
   "derived": "11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -355,7 +355,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-16T00:39:58.363Z",
+  "generatedAt": "2026-11-16T01:53:21.785Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",

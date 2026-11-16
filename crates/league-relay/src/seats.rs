@@ -580,17 +580,29 @@ fn validate_seat_reasoning(guild: &str, r: &SeatReasoningConfig) -> Result<(), R
                     "seat '{guild}' chat_template_kwargs key must be non-empty"
                 )));
             }
+            if let Some(cp) = crate::relay::find_default_ignorable_code_point(k) {
+                return Err(RelayError::SeatConfig(format!(
+                    "seat '{guild}' chat_template_kwargs key cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                    cp as u32
+                )));
+            }
             if crate::relay::text_contains_scratchpad_confusable(k) {
                 return Err(RelayError::SeatConfig(format!(
                     "seat '{guild}' chat_template_kwargs key '{k}' cannot contain legacy or confusable 'scratchpad' text"
                 )));
             }
-            if let Some(s) = v.as_str()
-                && crate::relay::text_contains_scratchpad_confusable(s)
-            {
-                return Err(RelayError::SeatConfig(format!(
-                    "seat '{guild}' chat_template_kwargs '{k}' value cannot contain legacy or confusable 'scratchpad' text"
-                )));
+            if let Some(s) = v.as_str() {
+                if let Some(cp) = crate::relay::find_default_ignorable_code_point(s) {
+                    return Err(RelayError::SeatConfig(format!(
+                        "seat '{guild}' chat_template_kwargs '{k}' value cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                        cp as u32
+                    )));
+                }
+                if crate::relay::text_contains_scratchpad_confusable(s) {
+                    return Err(RelayError::SeatConfig(format!(
+                        "seat '{guild}' chat_template_kwargs '{k}' value cannot contain legacy or confusable 'scratchpad' text"
+                    )));
+                }
             }
             let valid_primitive =
                 v.is_boolean() || v.as_f64().is_some_and(f64::is_finite) || v.is_string();
