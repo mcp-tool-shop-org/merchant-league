@@ -234,6 +234,17 @@ proptest! {
             / (sorted_upkeeps[0] + sorted_upkeeps[1] + sorted_upkeeps[2]);
         prop_assert!(r1.max_3seat_upkeep_coverage <= max_one_of_three + 1e-6);
         prop_assert!(r1.max_3seat_upkeep_coverage < 0.40);
+        if sc.as_usize() >= 5 {
+            let un = sorted_upkeeps.len();
+            let max_two_of_four = (sorted_upkeeps[un - 1] + sorted_upkeeps[un - 2])
+                / (sorted_upkeeps[0]
+                    + sorted_upkeeps[1]
+                    + sorted_upkeeps[un - 2]
+                    + sorted_upkeeps[un - 1]);
+            let cov4 = r1.max_4seat_upkeep_coverage.unwrap_or(1.0);
+            prop_assert!(cov4 <= max_two_of_four + 1e-6);
+            prop_assert!(cov4 <= 0.5 + 0.005);
+        }
         prop_assert!(r1.surplus_to_upkeep_ratio >= cfg.min_surplus_ratio - 1e-9);
         prop_assert!(r1.max_relative_ev_deviation <= cfg.ev_tolerance + 1e-9);
 

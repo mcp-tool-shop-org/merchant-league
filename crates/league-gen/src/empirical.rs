@@ -72,7 +72,7 @@ pub struct HhiMetrics {
 pub fn compute_hhi(pair_volumes: &[f64]) -> HhiMetrics {
     let total_pairs = pair_volumes.len();
     let total_vol: f64 = pair_volumes.iter().copied().filter(|&v| v > 0.0).sum();
-    if total_pairs == 0 || total_vol <= 1e-12 {
+    if total_pairs == 0 || total_vol <= 0.0 || !total_vol.is_finite() {
         return HhiMetrics {
             total_pairs,
             active_pairs: 0,
@@ -82,11 +82,12 @@ pub fn compute_hhi(pair_volumes: &[f64]) -> HhiMetrics {
         };
     }
 
+    let active_cutoff = 1e-12 * total_vol;
     let mut active_pairs = 0usize;
     let mut hhi = 0.0_f64;
     let mut max_share = 0.0_f64;
     for &vol in pair_volumes {
-        if vol > 1e-12 {
+        if vol > active_cutoff {
             active_pairs += 1;
             let share = vol / total_vol;
             if share > max_share {
@@ -392,12 +393,20 @@ pub(crate) fn compute_ring_lp_pair_volumes(
     }
 
     // Flatten converter specs in exact order matching `optimal_converter_runs`.
+    let mean_upkeep: f64 = table
+        .seats
+        .iter()
+        .take(n)
+        .map(|s| s.upkeep_amount)
+        .sum::<f64>()
+        / (n.max(1) as f64);
+    let min_output_tol = 1e-12 * mean_upkeep.max(f64::MIN_POSITIVE);
     let mut conv_idx = 0usize;
     for seat in &table.seats {
         for conv in &seat.converters {
             let runs = optimal_converter_runs.get(conv_idx).copied().unwrap_or(0.0);
             conv_idx += 1;
-            if runs <= 1e-12 {
+            if runs <= 0.0 || runs * conv.output_amount <= min_output_tol {
                 continue;
             }
             let owner = usize::from(conv.owner);
@@ -438,7 +447,7 @@ pub(crate) fn compute_ring_lp_pair_volumes(
 #[must_use]
 pub(crate) fn top_pair_share(n: usize, pair_volumes: &[f64]) -> ((u8, u8), f64) {
     let total: f64 = pair_volumes.iter().copied().filter(|&v| v > 0.0).sum();
-    if n < 2 || pair_volumes.is_empty() || total <= 1e-12 {
+    if n < 2 || pair_volumes.is_empty() || total <= 0.0 || !total.is_finite() {
         return ((0, 1), 0.0);
     }
     let mut best_pair = (0u8, 1u8);
@@ -460,28 +469,76 @@ const ROLLOUT_EPISODES: usize = 8;
 const ROLLOUT_TURNS: u8 = 26;
 const MAX_SEATS: usize = 6;
 
-/// Runs a scripted proxy rollout across deterministic 26-turn episodes inside `league-gen` (`B2.2`)
-/// to grade Syndicate Project completion, full-ring Concordat activity, per-card mandate
-/// difficulty, and rollout pair shares. This is a self-contained proxy heuristic, not `league-core`'s
-/// `TurnEngine`.
+/// Runs a dimensionless scripted proxy rollout across deterministic 26-turn episodes inside
+/// `league-gen` (`B2.2`, `B-1`) to grade Syndicate Project completion, full-ring Concordat
+/// activity, per-card mandate difficulty, and rollout pair shares.
+///
+/// Normalizes raw, refined, project-value, project-equity, and per-converter batch-run quantities
+/// unconditionally by table means/stoichiometries so restating a [`RingTable`] in any positive unit
+/// system (either scaling `max_runs_per_turn` or scaling per-run `inputs`/`output_amount`) yields
+/// an identical rollout grading report and verdict. This is a self-contained proxy heuristic, not
+/// `league-core`'s `TurnEngine`.
 #[must_use]
 pub fn compute_rollout_grading(
     table: &RingTable,
     report: &FeasibilityReport,
 ) -> RolloutGradingReport {
     let n = table.seat_count.as_usize().min(MAX_SEATS);
+    let denom = n.max(1) as f64;
+    let mean_yield = table
+        .seats
+        .iter()
+        .take(n)
+        .map(|s| s.raw_yield_per_turn)
+        .sum::<f64>()
+        / denom;
     let mean_upkeep = table
         .seats
         .iter()
         .take(n)
         .map(|s| s.upkeep_amount)
         .sum::<f64>()
-        / (n.max(1) as f64);
-    let q_scale = if mean_upkeep > 0.0 && !(1e-3..=1e6).contains(&mean_upkeep) {
+        / denom;
+    let mean_proj_val = table
+        .seats
+        .iter()
+        .take(n)
+        .map(|s| s.refined_project_value)
+        .sum::<f64>()
+        / denom;
+    let mean_proj_eq = if table.projects.is_empty() {
+        0.0
+    } else {
+        table
+            .projects
+            .iter()
+            .map(|p| p.output_project_equity)
+            .sum::<f64>()
+            / (table.projects.len() as f64)
+    };
+
+    // Unconditional characteristic unit scales (`~1.0` on nominal generated tables).
+    let r_unit = if mean_yield > 0.0 && mean_yield.is_finite() {
+        mean_yield / 10.5
+    } else {
+        1.0
+    };
+    let m_unit = if mean_upkeep > 0.0 && mean_upkeep.is_finite() {
         mean_upkeep / 2.0
     } else {
         1.0
     };
+    let v_unit = if mean_proj_val > 0.0 && mean_proj_val.is_finite() {
+        mean_proj_val / 2.2
+    } else {
+        1.0
+    };
+    let eq_unit = if mean_proj_eq > 0.0 && mean_proj_eq.is_finite() {
+        mean_proj_eq
+    } else {
+        1.0
+    };
+
     let deck_len = table.mandate_deck.len();
     let total_pairs = table.seat_count.pair_count();
     let mut pair_volumes = vec![0.0_f64; total_pairs];
@@ -496,6 +553,7 @@ pub fn compute_rollout_grading(
     let mut stream = SeedStream::new(table.seed, b"MLV2|ROLLOUT_GRADING");
 
     for ep in 0..ROLLOUT_EPISODES {
+        // Dimensionless inventories: `raw_inv` in `r_unit`, `ref_owned` in `m_unit`, `project_equity` in `eq_unit`.
         let mut raw_inv = [0.0_f64; MAX_SEATS];
         let mut ref_owned = [[0.0_f64; MAX_SEATS]; MAX_SEATS];
         let mut project_equity = [0.0_f64; MAX_SEATS];
@@ -544,37 +602,51 @@ pub fn compute_rollout_grading(
                 }
             }
 
-            // 1. Raw extraction (including occasional low-yield dip for credit-stress realism).
+            // 1. Raw extraction (normalized by `r_unit`).
             for s in 0..n {
                 let pulse = if ((ep + usize::from(turn) + s) % 9) == 0 {
                     0.78
                 } else {
                     1.0
                 };
-                raw_inv[s] +=
-                    table.seats[s].raw_yield_per_turn * yield_mult[s] * seat_cadence[s] * pulse;
+                raw_inv[s] += (table.seats[s].raw_yield_per_turn / r_unit)
+                    * yield_mult[s]
+                    * seat_cadence[s]
+                    * pulse;
             }
 
-            // 2. Chiral raw imports & converter batch execution.
+            // 2. Chiral raw imports & converter batch execution (normalized by per-converter `run_unit`).
             let mut c_cursor = 0usize;
             for owner in 0..n {
                 for conv in &table.seats[owner].converters {
                     let base_run = conv_base_runs.get(c_cursor).copied().unwrap_or(0.0);
                     c_cursor += 1;
-                    let target_run = if conv.is_secondary {
-                        if base_run > 1e-6 * q_scale || yield_mult.iter().any(|&y| y < 0.99) {
-                            base_run.max(0.35 * q_scale) * seat_cadence[owner]
+                    let in_sum: f64 = conv
+                        .inputs
+                        .iter()
+                        .filter(|&&(_, amt)| amt > 0.0 && amt.is_finite())
+                        .map(|&(_, amt)| amt)
+                        .sum();
+                    if in_sum <= 0.0 || conv.output_amount <= 0.0 {
+                        continue;
+                    }
+                    let run_unit = (4.0 * r_unit) / in_sum;
+                    let base_run_norm = base_run / run_unit;
+                    let max_runs_norm = conv.max_runs_per_turn / run_unit;
+                    let target_run_norm = if conv.is_secondary {
+                        if base_run_norm > 1e-6 || yield_mult.iter().any(|&y| y < 0.99) {
+                            base_run_norm.max(0.35) * seat_cadence[owner]
                         } else {
                             0.0
                         }
                     } else {
-                        base_run * seat_cadence[owner]
+                        base_run_norm * seat_cadence[owner]
                     };
-                    let mut affordable = target_run.min(conv.max_runs_per_turn);
+                    let mut affordable_norm = target_run_norm.min(max_runs_norm);
                     for &(raw_g, amt) in &conv.inputs {
                         let k = usize::from(raw_g);
                         if k >= n || amt <= 0.0 {
-                            affordable = 0.0;
+                            affordable_norm = 0.0;
                             continue;
                         }
                         let mult = if k == owner {
@@ -582,12 +654,13 @@ pub fn compute_rollout_grading(
                         } else {
                             1.0 + table.seats[k].raw_export_tariff * tariff_mult[k]
                         };
-                        let cap_k = raw_inv[k] / (amt * mult);
-                        if cap_k < affordable {
-                            affordable = cap_k;
+                        let in_norm = (4.0 * amt) / in_sum;
+                        let cap_k_norm = raw_inv[k] / (in_norm * mult);
+                        if cap_k_norm < affordable_norm {
+                            affordable_norm = cap_k_norm;
                         }
                     }
-                    if affordable > 1e-6 * q_scale {
+                    if affordable_norm > 1e-6 {
                         for &(raw_g, amt) in &conv.inputs {
                             let k = usize::from(raw_g);
                             if k >= n || amt <= 0.0 {
@@ -598,25 +671,28 @@ pub fn compute_rollout_grading(
                             } else {
                                 1.0 + table.seats[k].raw_export_tariff * tariff_mult[k]
                             };
-                            let shipped = affordable * amt * mult;
-                            raw_inv[k] = (raw_inv[k] - shipped).max(0.0);
+                            let in_norm = (4.0 * amt) / in_sum;
+                            let shipped_norm = affordable_norm * in_norm * mult;
+                            raw_inv[k] = (raw_inv[k] - shipped_norm).max(0.0);
                             if k != owner {
                                 partners_mask[owner] |= 1u8 << k;
                                 partners_mask[k] |= 1u8 << owner;
                                 let pidx = unordered_pair_index(n, owner, k);
                                 if pidx < pair_volumes.len() {
-                                    pair_volumes[pidx] +=
-                                        affordable * amt * table.seats[k].refined_project_value;
+                                    pair_volumes[pidx] += affordable_norm
+                                        * in_norm
+                                        * (table.seats[k].refined_project_value / v_unit);
                                 }
                             }
                         }
-                        ref_owned[owner][owner] += affordable * conv.output_amount;
+                        let out_norm = (conv.output_amount * run_unit) / m_unit;
+                        ref_owned[owner][owner] += affordable_norm * out_norm;
                         goods_produced_mask |= 1u8 << owner;
                     }
                 }
             }
 
-            // 3. Mandatory neighbor upkeep settlement (`M_{(s+n-1)%n}` -> `s`).
+            // 3. Mandatory neighbor upkeep settlement (`M_{(s+n-1)%n}` -> `s`, normalized by `m_unit`).
             for s in 0..n {
                 let prod = usize::from(table.seats[s].upkeep_good);
                 if prod >= n {
@@ -627,16 +703,17 @@ pub fn compute_rollout_grading(
                 } else {
                     1.0 + table.seats[prod].refined_export_tariff * tariff_mult[prod]
                 };
-                let needed_gross = table.seats[s].upkeep_amount * mult;
-                if ref_owned[prod][prod] + 1e-9 * q_scale >= needed_gross {
-                    ref_owned[prod][prod] = (ref_owned[prod][prod] - needed_gross).max(0.0);
+                let upkeep_norm = table.seats[s].upkeep_amount / m_unit;
+                let needed_gross_norm = upkeep_norm * mult;
+                if ref_owned[prod][prod] + 1e-9 >= needed_gross_norm {
+                    ref_owned[prod][prod] = (ref_owned[prod][prod] - needed_gross_norm).max(0.0);
                     if prod != s {
                         partners_mask[s] |= 1u8 << prod;
                         partners_mask[prod] |= 1u8 << s;
                         let pidx = unordered_pair_index(n, s, prod);
                         if pidx < pair_volumes.len() {
-                            pair_volumes[pidx] += table.seats[s].upkeep_amount
-                                * table.seats[prod].refined_project_value;
+                            pair_volumes[pidx] +=
+                                upkeep_norm * (table.seats[prod].refined_project_value / v_unit);
                         }
                     }
                 } else {
@@ -644,7 +721,7 @@ pub fn compute_rollout_grading(
                 }
             }
 
-            // 4. Multilateral refined swaps for variety mandates & Tier-3 projects.
+            // 4. Multilateral refined swaps for variety mandates & Tier-3 projects (in `m_unit`).
             if diversify_refined_barter && (turn % 2) == 0 {
                 let hop = 1 + ((ep + usize::from(turn)) % (n.saturating_sub(1).max(1)));
                 for s in 0..n {
@@ -652,20 +729,21 @@ pub fn compute_rollout_grading(
                     if partner == s {
                         continue;
                     }
-                    let swap_qty = (ref_owned[s][s].min(ref_owned[partner][partner]) * 0.20)
-                        .min(0.85 * q_scale);
-                    if swap_qty > 0.05 * q_scale {
-                        ref_owned[s][s] -= swap_qty;
-                        ref_owned[partner][partner] -= swap_qty;
-                        ref_owned[s][partner] += swap_qty;
-                        ref_owned[partner][s] += swap_qty;
+                    let swap_qty_norm =
+                        (ref_owned[s][s].min(ref_owned[partner][partner]) * 0.20).min(0.85);
+                    if swap_qty_norm > 0.05 {
+                        ref_owned[s][s] -= swap_qty_norm;
+                        ref_owned[partner][partner] -= swap_qty_norm;
+                        ref_owned[s][partner] += swap_qty_norm;
+                        ref_owned[partner][s] += swap_qty_norm;
                         partners_mask[s] |= 1u8 << partner;
                         partners_mask[partner] |= 1u8 << s;
                         let pidx = unordered_pair_index(n, s, partner);
                         if pidx < pair_volumes.len() {
-                            pair_volumes[pidx] += swap_qty
-                                * (table.seats[s].refined_project_value
-                                    + table.seats[partner].refined_project_value);
+                            pair_volumes[pidx] += swap_qty_norm
+                                * ((table.seats[s].refined_project_value
+                                    + table.seats[partner].refined_project_value)
+                                    / v_unit);
                         }
                     }
                 }
@@ -676,19 +754,20 @@ pub fn compute_rollout_grading(
                 && prefer_concordat
                 && (turn % 3) == 0
                 && concordat.required_inputs.iter().all(|&(g, _, qty)| {
-                    usize::from(g) < n && ref_owned[usize::from(g)][usize::from(g)] >= qty
+                    usize::from(g) < n && ref_owned[usize::from(g)][usize::from(g)] >= qty / m_unit
                 })
             {
                 let mut boost_sum = 0.0_f64;
                 for &(g, _, qty) in &concordat.required_inputs {
                     let gi = usize::from(g);
-                    ref_owned[gi][gi] -= qty;
+                    ref_owned[gi][gi] -= qty / m_unit;
                     boost_sum += proj_mult[gi];
                 }
                 let mean_boost = boost_sum / (n as f64);
-                let per_seat_eq = (concordat.output_project_equity * mean_boost) / (n as f64);
+                let per_seat_eq_norm =
+                    ((concordat.output_project_equity / eq_unit) * mean_boost) / (n as f64);
                 for s in 0..n {
-                    project_equity[s] += per_seat_eq * seat_project_propensity[s];
+                    project_equity[s] += per_seat_eq_norm * seat_project_propensity[s];
                 }
                 concordat_batches += 1;
                 total_project_batches += 1;
@@ -701,22 +780,25 @@ pub fn compute_rollout_grading(
                     }
                     let can_run = proj.required_inputs.iter().all(|&(g, _, qty)| {
                         let gi = usize::from(g);
-                        gi < n && ref_owned[gi][gi] >= qty && seat_project_propensity[gi] > 0.40
+                        gi < n
+                            && ref_owned[gi][gi] >= qty / m_unit
+                            && seat_project_propensity[gi] > 0.40
                     });
                     if can_run {
                         let k_parts = proj.required_inputs.len() as f64;
                         let mut avg_boost = 0.0_f64;
                         for &(g, _, qty) in &proj.required_inputs {
                             let gi = usize::from(g);
-                            ref_owned[gi][gi] -= qty;
+                            ref_owned[gi][gi] -= qty / m_unit;
                             avg_boost += proj_mult[gi];
                         }
-                        let share_eq =
-                            (proj.output_project_equity * (avg_boost / k_parts)) / k_parts;
+                        let share_eq_norm = ((proj.output_project_equity / eq_unit)
+                            * (avg_boost / k_parts))
+                            / k_parts;
                         for &(g, _, _) in &proj.required_inputs {
                             let gi = usize::from(g);
                             project_equity[gi] +=
-                                share_eq * (0.65 + 0.35 * seat_project_propensity[gi]);
+                                share_eq_norm * (0.65 + 0.35 * seat_project_propensity[gi]);
                         }
                         total_project_batches += 1;
                     }
@@ -730,7 +812,7 @@ pub fn compute_rollout_grading(
             }
         }
 
-        // Terminal Turn-26 Mandate grading across all N seats.
+        // Terminal Turn-26 Mandate grading across all N seats (normalized by `eq_unit` and `m_unit`).
         for s in 0..n {
             let tier = match credit_defaults[s] {
                 0 => CreditRatingTier::Aaa,
@@ -741,12 +823,15 @@ pub fn compute_rollout_grading(
             let distinct_partners = partners_mask[s].count_ones() as u8;
             for (c_idx, card) in table.mandate_deck.iter().enumerate() {
                 let met = match card.kind {
-                    MandateObjective::MinProjectEquity { target } => project_equity[s] >= target,
+                    MandateObjective::MinProjectEquity { target } => {
+                        project_equity[s] >= target / eq_unit
+                    }
                     MandateObjective::MinRefinedVariety {
                         distinct_goods,
                         min_each,
                     } => {
-                        let count = (0..n).filter(|&g| ref_owned[s][g] >= min_each).count();
+                        let min_each_norm = min_each / m_unit;
+                        let count = (0..n).filter(|&g| ref_owned[s][g] >= min_each_norm).count();
                         count >= usize::from(distinct_goods)
                     }
                     MandateObjective::MaintainCleanCredit { min_tier } => tier <= min_tier,

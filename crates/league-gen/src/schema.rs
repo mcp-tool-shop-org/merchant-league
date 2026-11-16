@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
-pub const GENERATOR_VERSION: &str = "league-gen/v2.3.0";
+pub const GENERATOR_VERSION: &str = "league-gen/v2.4.0";
 
 /// Fixed ledger numeraire currency code specified by `docs/design-v2.md` §1.2.
 pub const NUMERAIRE_CODE: &str = "CRED";
@@ -743,9 +743,11 @@ pub struct GeneratorConfig {
     /// provisional, calibrate in playtest 1 — `docs/design-v2.md` §1.5 requires a positive margin).
     pub min_surplus_ratio: f64,
     /// Whether 4-, 5-, and 6-seat tables attach binding primary workshops paired with cyclic
-    /// secondary cross-converters (`(R_{i+2}, R_{i+3}) -> M_i` on 4p; binding `(R_{i+1}, R_{i+3})`
-    /// plus clearing `(R_{i+2}, R_{i+4})` on 5p and 6p; `true` per `docs/design-v2.md` §1.3 & §1.5
-    /// and the 2026-11-15 G1 item 2 ruling; provisional calibration, calibrate in playtest 1).
+    /// secondary cross-converters (`(R_{i+2}, R_{i+3}) -> M_i` on 4p; binding 3-input
+    /// `(R_{i+1}, R_{i+2}, R_{i+3})` plus clearing `(R_{i+2}, R_{i+4})` on 5p so every 4-seat bloc
+    /// covers at most 2/4 upkeep; binding `(R_{i+1}, R_{i+3})` plus clearing `(R_{i+2}, R_{i+4})`
+    /// on 6p; `true` per `docs/design-v2.md` §1.3 & §1.5 and the 2026-11-15 rulings; provisional
+    /// calibration, calibrate in playtest 1).
     pub enable_secondary_converters: bool,
     /// Upper bound on initial baseline export `TransferRate` tariffs (`0.20` = 20% from
     /// `docs/design-v2.md` §1.5 item 3 "0%–20% initial baseline", under the §5.1 35% cap).

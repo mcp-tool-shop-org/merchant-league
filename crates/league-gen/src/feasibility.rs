@@ -1778,29 +1778,75 @@ mod tests {
             ));
         }
 
-        // 4. Small-unit scale invariance (`x1e-12` yield, upkeep, projects, and mandates, C4).
-        let mut t_small = make_symmetric_table(SeatCount::Five);
-        for s in &mut t_small.seats {
-            s.raw_yield_per_turn *= 1e-12;
-            s.upkeep_amount *= 1e-12;
-        }
-        for p in &mut t_small.projects {
-            for input in &mut p.required_inputs {
-                input.2 *= 1e-12;
+        // 4. Dimensionless unit scale invariance (`0.1`, `0.01`, `10.0` in both run-cap and per-run-amount forms, B-1).
+        for scale in [0.1_f64, 0.01, 10.0] {
+            let mut t_scaled = make_symmetric_table(SeatCount::Five);
+            for s in &mut t_scaled.seats {
+                s.raw_yield_per_turn *= scale;
+                s.upkeep_amount *= scale;
+                for c in &mut s.converters {
+                    c.max_runs_per_turn *= scale;
+                }
             }
-            p.output_project_equity *= 1e-12;
-        }
-        for card in &mut t_small.mandate_deck {
-            match &mut card.kind {
-                MandateObjective::MinProjectEquity { target } => *target *= 1e-12,
-                MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= 1e-12,
-                MandateObjective::MaintainCleanCredit { .. }
-                | MandateObjective::MinActivePartners { .. } => {}
+            for p in &mut t_scaled.projects {
+                for input in &mut p.required_inputs {
+                    input.2 *= scale;
+                }
+                p.output_project_equity *= scale;
             }
+            for card in &mut t_scaled.mandate_deck {
+                match &mut card.kind {
+                    MandateObjective::MinProjectEquity { target } => *target *= scale,
+                    MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= scale,
+                    MandateObjective::MaintainCleanCredit { .. }
+                    | MandateObjective::MinActivePartners { .. } => {}
+                }
+            }
+            assert!(
+                check_feasibility(&t_scaled).is_ok(),
+                "symmetric table failed run-scaled unit invariance at scale={scale}"
+            );
+            t_scaled.config.ev_method = EvMethod::Shapley;
+            assert!(
+                check_feasibility(&t_scaled).is_ok(),
+                "symmetric Shapley table failed run-scaled unit invariance at scale={scale}"
+            );
+
+            let mut t_per_run = make_symmetric_table(SeatCount::Five);
+            for s in &mut t_per_run.seats {
+                s.raw_yield_per_turn *= scale;
+                s.upkeep_amount *= scale;
+                for c in &mut s.converters {
+                    for input in &mut c.inputs {
+                        input.1 *= scale;
+                    }
+                    c.output_amount *= scale;
+                }
+            }
+            for p in &mut t_per_run.projects {
+                for input in &mut p.required_inputs {
+                    input.2 *= scale;
+                }
+                p.output_project_equity *= scale;
+            }
+            for card in &mut t_per_run.mandate_deck {
+                match &mut card.kind {
+                    MandateObjective::MinProjectEquity { target } => *target *= scale,
+                    MandateObjective::MinRefinedVariety { min_each, .. } => *min_each *= scale,
+                    MandateObjective::MaintainCleanCredit { .. }
+                    | MandateObjective::MinActivePartners { .. } => {}
+                }
+            }
+            assert!(
+                check_feasibility(&t_per_run).is_ok(),
+                "symmetric table failed per-run-amount unit invariance at scale={scale}"
+            );
+            t_per_run.config.ev_method = EvMethod::Shapley;
+            assert!(
+                check_feasibility(&t_per_run).is_ok(),
+                "symmetric Shapley table failed per-run-amount unit invariance at scale={scale}"
+            );
         }
-        assert!(check_feasibility(&t_small).is_ok());
-        t_small.config.ev_method = EvMethod::Shapley;
-        assert!(check_feasibility(&t_small).is_ok());
 
         // 5. Public coalition_upkeep_coverage validates malformed indices instead of panicking (C5).
         let mut t_bad = make_symmetric_table(SeatCount::Four);
@@ -1926,5 +1972,238 @@ mod tests {
             matches!(res, Err(FeasibilityError::RolloutGateFailed(_))),
             "expected RolloutGateFailed on loaded table, got {res:?}"
         );
+    }
+
+    fn structural_max_fed_in_bloc_size(table: &RingTable, k: usize) -> usize {
+        let n = table.seat_count.as_usize();
+        let mut max_fed = 0usize;
+        for mask in 1usize..(1usize << n) {
+            if mask.count_ones() as usize != k {
+                continue;
+            }
+            let in_bloc = |idx: usize| (mask & (1usize << idx)) != 0;
+            let active_convs: Vec<&ConverterSpec> = table
+                .seats
+                .iter()
+                .flat_map(|s| s.converters.iter())
+                .filter(|conv| {
+                    in_bloc(usize::from(conv.owner))
+                        && conv.output_amount > 0.0
+                        && conv.max_runs_per_turn > 0.0
+                        && conv
+                            .inputs
+                            .iter()
+                            .all(|&(raw_g, amt)| amt <= 0.0 || in_bloc(usize::from(raw_g)))
+                })
+                .collect();
+            let fed = (0..n)
+                .filter(|&s| {
+                    in_bloc(s)
+                        && table.seats[s].upkeep_amount > 0.0
+                        && active_convs
+                            .iter()
+                            .any(|c| c.output_good == table.seats[s].upkeep_good)
+                })
+                .count();
+            max_fed = max_fed.max(fed);
+        }
+        max_fed
+    }
+
+    #[test]
+    fn generated_tables_enforce_all_design_v2_bloc_bounds() {
+        for sc in SeatCount::ALL {
+            let n = sc.as_usize();
+            let cfg = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            let mut max_1_lp = 0.0_f64;
+            let mut max_2_lp = 0.0_f64;
+            let mut max_3_lp = 0.0_f64;
+            let mut max_4_lp = 0.0_f64;
+            let mut max_3_unw = 0usize;
+            let mut max_4_unw = 0usize;
+
+            for seed in 0u64..600 {
+                let Ok((table, report)) = crate::generator::generate_ring_table(seed, &cfg) else {
+                    panic!("seed {seed} failed for {sc:?}");
+                };
+                let unw1 = structural_max_fed_in_bloc_size(&table, 1);
+                let unw2 = structural_max_fed_in_bloc_size(&table, 2);
+                let unw3 = structural_max_fed_in_bloc_size(&table, 3);
+                assert_eq!(unw1, 0, "N={n} seed={seed} 1-seat unweighted fed > 0");
+                assert_eq!(unw2, 0, "N={n} seed={seed} 2-seat unweighted fed > 0");
+                assert!(
+                    unw3 <= 1,
+                    "N={n} seed={seed} 3-seat bloc fed {unw3} > 1 member"
+                );
+                assert!(report.max_1seat_upkeep_coverage <= 1e-7);
+                assert!(report.max_2seat_upkeep_coverage <= 1e-7);
+
+                let mut upkeeps: Vec<f64> = table.seats.iter().map(|s| s.upkeep_amount).collect();
+                upkeeps.sort_by(f64::total_cmp);
+                let max_one_of_three = upkeeps[n - 1] / (upkeeps[0] + upkeeps[1] + upkeeps[2]);
+                assert!(
+                    report.max_3seat_upkeep_coverage <= max_one_of_three + 1e-6
+                        && report.max_3seat_upkeep_coverage <= (1.0 / 3.0) + 0.006,
+                    "N={n} seed={seed} 3-seat LP coverage {:.6} exceeded 1/3 bound",
+                    report.max_3seat_upkeep_coverage
+                );
+
+                max_1_lp = max_1_lp.max(report.max_1seat_upkeep_coverage);
+                max_2_lp = max_2_lp.max(report.max_2seat_upkeep_coverage);
+                max_3_lp = max_3_lp.max(report.max_3seat_upkeep_coverage);
+                max_3_unw = max_3_unw.max(unw3);
+
+                if n >= 5 {
+                    let unw4 = structural_max_fed_in_bloc_size(&table, 4);
+                    let cov4 = report.max_4seat_upkeep_coverage.unwrap_or(1.0);
+                    max_4_unw = max_4_unw.max(unw4);
+                    max_4_lp = max_4_lp.max(cov4);
+                    let max_two_of_four = (upkeeps[n - 1] + upkeeps[n - 2])
+                        / (upkeeps[0] + upkeeps[1] + upkeeps[n - 2] + upkeeps[n - 1]);
+                    assert!(
+                        unw4 <= 2 && cov4 <= max_two_of_four + 1e-6 && cov4 <= 0.5 + 0.005,
+                        "N={n} seed={seed} 4-seat bloc violated <= 2/4 bound: unweighted_fed={unw4}, lp_coverage={cov4:.4} (bound <= 0.5050)"
+                    );
+                }
+            }
+            println!(
+                "BLOC_BOUNDS N={n} (600 seeds): max_1_lp={max_1_lp:.6} max_2_lp={max_2_lp:.6} max_3_unw={max_3_unw}/3 max_3_lp={max_3_lp:.4} max_4_unw={max_4_unw}/4 max_4_lp={max_4_lp:.4}"
+            );
+        }
+    }
+
+    #[test]
+    fn rollout_gate_is_dimensionless_across_scales_and_per_run_amounts() {
+        for sc in SeatCount::ALL {
+            let cfg = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            for seed in 0u64..25 {
+                let Ok((base_table, base_rep)) = crate::generator::generate_ring_table(seed, &cfg)
+                else {
+                    panic!("seed {seed} failed for {sc:?}");
+                };
+                let base_rollout = compute_rollout_grading(&base_table, &base_rep);
+
+                for scale in [0.1_f64, 0.01, 10.0] {
+                    // Form 1: restate all commodity/project/mandate quantities and converter run caps by `scale`.
+                    let mut run_scaled = base_table.clone();
+                    for s in &mut run_scaled.seats {
+                        s.raw_yield_per_turn *= scale;
+                        s.upkeep_amount *= scale;
+                        for c in &mut s.converters {
+                            c.max_runs_per_turn *= scale;
+                        }
+                    }
+                    for p in &mut run_scaled.projects {
+                        for input in &mut p.required_inputs {
+                            input.2 *= scale;
+                        }
+                        p.output_project_equity *= scale;
+                    }
+                    for card in &mut run_scaled.mandate_deck {
+                        match &mut card.kind {
+                            MandateObjective::MinProjectEquity { target } => *target *= scale,
+                            MandateObjective::MinRefinedVariety { min_each, .. } => {
+                                *min_each *= scale;
+                            }
+                            MandateObjective::MaintainCleanCredit { .. }
+                            | MandateObjective::MinActivePartners { .. } => {}
+                        }
+                    }
+                    let rep_rs = match check_feasibility(&run_scaled) {
+                        Ok(r) => r,
+                        Err(err) => panic!(
+                            "B-1 run-scaled table ({sc:?} seed={seed} scale={scale}) refused: {err}"
+                        ),
+                    };
+                    let roll_rs = compute_rollout_grading(&run_scaled, &rep_rs);
+                    assert_eq!(
+                        roll_rs.per_card_completion_bps, base_rollout.per_card_completion_bps,
+                        "run-scaled mandate completions changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.total_project_batches, base_rollout.total_project_batches,
+                        "run-scaled project batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.concordat_batches, base_rollout.concordat_batches,
+                        "run-scaled concordat batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_rs.distinct_refined_goods_produced,
+                        base_rollout.distinct_refined_goods_produced
+                    );
+                    assert!(
+                        (roll_rs.rollout_trade_concentration.max_pair_share
+                            - base_rollout.rollout_trade_concentration.max_pair_share)
+                            .abs()
+                            < 1e-11
+                    );
+
+                    // Form 2: restate via per-run amounts (`inputs` and `output_amount` scaled, `max_runs_per_turn` held constant).
+                    let mut amt_scaled = base_table.clone();
+                    for s in &mut amt_scaled.seats {
+                        s.raw_yield_per_turn *= scale;
+                        s.upkeep_amount *= scale;
+                        for c in &mut s.converters {
+                            for input in &mut c.inputs {
+                                input.1 *= scale;
+                            }
+                            c.output_amount *= scale;
+                        }
+                    }
+                    for p in &mut amt_scaled.projects {
+                        for input in &mut p.required_inputs {
+                            input.2 *= scale;
+                        }
+                        p.output_project_equity *= scale;
+                    }
+                    for card in &mut amt_scaled.mandate_deck {
+                        match &mut card.kind {
+                            MandateObjective::MinProjectEquity { target } => *target *= scale,
+                            MandateObjective::MinRefinedVariety { min_each, .. } => {
+                                *min_each *= scale;
+                            }
+                            MandateObjective::MaintainCleanCredit { .. }
+                            | MandateObjective::MinActivePartners { .. } => {}
+                        }
+                    }
+                    let rep_as = match check_feasibility(&amt_scaled) {
+                        Ok(r) => r,
+                        Err(err) => panic!(
+                            "B-1 per-run-amount scaled table ({sc:?} seed={seed} scale={scale}) refused: {err}"
+                        ),
+                    };
+                    let roll_as = compute_rollout_grading(&amt_scaled, &rep_as);
+                    assert_eq!(
+                        roll_as.per_card_completion_bps, base_rollout.per_card_completion_bps,
+                        "per-run-amount mandate completions changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.total_project_batches, base_rollout.total_project_batches,
+                        "per-run-amount project batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.concordat_batches, base_rollout.concordat_batches,
+                        "per-run-amount concordat batches changed at {sc:?} seed={seed} scale={scale}"
+                    );
+                    assert_eq!(
+                        roll_as.distinct_refined_goods_produced,
+                        base_rollout.distinct_refined_goods_produced
+                    );
+                    assert!(
+                        (roll_as.rollout_trade_concentration.max_pair_share
+                            - base_rollout.rollout_trade_concentration.max_pair_share)
+                            .abs()
+                            < 1e-11
+                    );
+                }
+            }
+        }
     }
 }
