@@ -469,7 +469,13 @@ proptest! {
     }
 
     #[test]
-    fn every_u64_maps_to_one_seed_pool_independently_of_config(seed in any::<u64>()) {
+    fn every_u64_maps_to_one_seed_pool_and_pool_check_precedes_config(
+        seed in prop_oneof![
+            any::<u64>(),
+            0u64..3_000_000,
+            ((1u64 << 63) - 2)..=((1u64 << 63) + 2),
+        ],
+    ) {
         let pool = seed_pool(seed);
         let matching_ranges: Vec<SeedPool> = SEED_POOL_TABLE
             .iter()
@@ -482,28 +488,84 @@ proptest! {
             prop_assert_eq!(pool, matching_ranges[0]);
         }
 
-        // Pool membership is a function of `seed` alone, never `SeatCount` or `GeneratorConfig`.
+        // Pool validation runs before `GeneratorConfig` validation: an invalid `max_attempts: 0`
+        // config still fails with `SeedPoolMismatch` on a wrong purpose, and reaches `InvalidConfig`
+        // once the pool matches its purpose (without generating a table).
+        let invalid_cfg = GeneratorConfig {
+            max_attempts: 0,
+            ..GeneratorConfig::default()
+        };
         let wrong_purpose = if pool == SeedPool::Dev {
             TablePurpose::Train
         } else {
             TablePurpose::Dev
         };
-        for seat_count in [None, Some(SeatCount::Four), Some(SeatCount::Five), Some(SeatCount::Six)] {
-            for ev_method in [EvMethod::ShadowPrice, EvMethod::Shapley] {
-                let cfg = GeneratorConfig {
-                    seat_count,
-                    ev_method,
-                    max_attempts: 1,
-                    ..GeneratorConfig::default()
-                };
-                let Err(GenError::SeedPoolMismatch { seed_pool: reported_pool, .. }) =
-                    generate_ring_table_for_purpose(seed, wrong_purpose, &cfg)
-                else {
-                    prop_assert!(false, "wrong purpose must report SeedPoolMismatch");
-                    unreachable!();
-                };
-                prop_assert_eq!(reported_pool, pool);
-            }
+        let Err(GenError::SeedPoolMismatch(mismatch)) =
+            generate_ring_table_for_purpose(seed, wrong_purpose, &invalid_cfg)
+        else {
+            prop_assert!(false, "wrong purpose must fail with SeedPoolMismatch before config check");
+            unreachable!();
+        };
+        prop_assert_eq!(mismatch.seed_pool(), pool);
+
+        let matching_purpose = match pool {
+            SeedPool::Dev => Some(TablePurpose::Dev),
+            SeedPool::Train => Some(TablePurpose::Train),
+            SeedPool::Probe => Some(TablePurpose::Probe),
+            SeedPool::HeldOut => Some(TablePurpose::HeldOut),
+            SeedPool::Sealed => Some(TablePurpose::Sealed),
+            SeedPool::Unassigned => None,
+        };
+        if let Some(purpose) = matching_purpose {
+            let Err(GenError::InvalidConfig(_)) =
+                generate_ring_table_for_purpose(seed, purpose, &invalid_cfg)
+            else {
+                prop_assert!(false, "matching purpose must pass pool gate and hit InvalidConfig");
+                unreachable!();
+            };
+        }
+    }
+}
+
+#[test]
+fn public_api_refuses_deserializing_sealed_seed_in_clear_and_redacts_constructed_errors() {
+    use league_gen::{RecordedLayoutSeed, SEALED_SEED_MAX, SEALED_SEED_MIN, sealed_seed_sha256};
+
+    for made_up_sealed in [SEALED_SEED_MIN, SEALED_SEED_MAX] {
+        let expected_digest = sealed_seed_sha256(made_up_sealed);
+        let dec = made_up_sealed.to_string();
+        let hex_lo = format!("{made_up_sealed:x}");
+        let hex_hi = format!("{made_up_sealed:X}");
+
+        let raw_json = format!(r#"{{"clear":{made_up_sealed}}}"#);
+        let Err(serde_err) = serde_json::from_str::<RecordedLayoutSeed>(&raw_json) else {
+            panic!("public API must refuse deserializing sealed-range seed into clear variant");
+        };
+        let serde_msg = serde_err.to_string();
+        assert!(serde_msg.contains("SEALED_SEED_IN_CLEAR"));
+        assert!(serde_msg.contains(&expected_digest));
+        assert!(
+            !serde_msg.contains(&dec)
+                && !serde_msg.contains(&hex_lo)
+                && !serde_msg.contains(&hex_hi)
+        );
+
+        let recorded = RecordedLayoutSeed::from_seed(made_up_sealed);
+        assert_eq!(recorded.clear_seed(), None);
+        assert_eq!(recorded.sealed_sha256(), Some(expected_digest.as_str()));
+
+        let mismatch = GenError::seed_pool_mismatch(made_up_sealed, TablePurpose::Dev);
+        let tl_err = GenError::training_logged_mismatch(made_up_sealed, TablePurpose::Sealed);
+        for text in [
+            mismatch.to_string(),
+            format!("{mismatch:?}"),
+            format!("{mismatch:#?}"),
+            tl_err.to_string(),
+            format!("{tl_err:?}"),
+            format!("{tl_err:#?}"),
+        ] {
+            assert!(text.contains(&expected_digest));
+            assert!(!text.contains(&dec) && !text.contains(&hex_lo) && !text.contains(&hex_hi));
         }
     }
 }

@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::feasibility::{FeasibilityReport, check_feasibility};
 use crate::rng::SeedStream;
 use crate::schema::{
-    ALLOWED_COMMODITY_GLOSSARY, ConverterSpec, CurrencyCode, FeasibilityError, GENERATOR_VERSION,
-    GameTableRecord, GenError, GeneratorConfig, HorizonShockKind, MAX_ATTEMPTS_CAP, NUMERAIRE_CODE,
-    RingTable, ScheduledShock, SeatCount, SeatSpec, SeedPool, TRAIN_SEED_MAX, TRAIN_SEED_MIN,
-    TablePurpose, TableSetupOptions, default_mandate_deck_for_table, default_projects_for_seats,
-    seed_pool,
+    ALLOWED_COMMODITY_GLOSSARY, CheckedRingTable, ConverterSpec, CurrencyCode, FeasibilityError,
+    GENERATOR_VERSION, GameTableRecord, GenError, GeneratorConfig, HorizonShockKind,
+    MAX_ATTEMPTS_CAP, NUMERAIRE_CODE, RingTable, ScheduledShock, SealedRingTable, SeatCount,
+    SeatSpec, SeedPool, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose, TableSetupOptions,
+    default_mandate_deck_for_table, default_projects_for_seats, seed_pool,
 };
 
 /// Stochastic season close turn window `(24, 28)` from `docs/design-v2.md` §6.2.
@@ -209,12 +209,13 @@ pub fn generate_ring_table(
 /// Generates a feasible [`RingTable`] for `purpose` with `training_logged = false`, checking
 /// [`seed_pool`] first and returning [`GenError::SeedPoolMismatch`] (`SEED_POOL_MISMATCH`) when
 /// `seed` does not belong to `purpose`'s pool (including [`SeedPool::Unassigned`]), then calling
-/// [`generate_ring_table`] unchanged and emitting a checked [`GameTableRecord`].
+/// [`generate_ring_table`] unchanged and returning `(CheckedRingTable, FeasibilityReport, GameTableRecord)`
+/// (wrapping `TablePurpose::Sealed` tables inside [`SealedRingTable`]).
 pub fn generate_ring_table_for_purpose(
     seed: u64,
     purpose: TablePurpose,
     config: &GeneratorConfig,
-) -> Result<(RingTable, FeasibilityReport, GameTableRecord), GenError> {
+) -> Result<(CheckedRingTable, FeasibilityReport, GameTableRecord), GenError> {
     generate_ring_table_for_setup(
         seed,
         TableSetupOptions {
@@ -227,27 +228,20 @@ pub fn generate_ring_table_for_purpose(
 
 /// Checked game-table setup entry point enforcing both [`seed_pool`] (`SEED_POOL_MISMATCH`) and
 /// the `training_logged` policy (`TRAINING_LOGGED_MISMATCH` unless `options.purpose == TablePurpose::Train`),
-/// then delegating to [`generate_ring_table`] unchanged and returning the generated [`RingTable`],
-/// [`FeasibilityReport`], and [`GameTableRecord`].
+/// then delegating to [`generate_ring_table`] unchanged and returning [`CheckedRingTable`]
+/// ([`CheckedRingTable::Clear`] for non-`sealed` purposes, [`CheckedRingTable::Sealed`] for
+/// [`TablePurpose::Sealed`]), [`FeasibilityReport`], and [`GameTableRecord`].
 pub fn generate_ring_table_for_setup(
     seed: u64,
     options: TableSetupOptions,
     config: &GeneratorConfig,
-) -> Result<(RingTable, FeasibilityReport, GameTableRecord), GenError> {
+) -> Result<(CheckedRingTable, FeasibilityReport, GameTableRecord), GenError> {
     let actual_pool = seed_pool(seed);
     if actual_pool != options.purpose.expected_pool() {
-        return Err(GenError::seed_pool_mismatch(
-            seed,
-            actual_pool,
-            options.purpose,
-        ));
+        return Err(GenError::seed_pool_mismatch(seed, options.purpose));
     }
     if options.training_logged && options.purpose != TablePurpose::Train {
-        return Err(GenError::training_logged_mismatch(
-            seed,
-            actual_pool,
-            options.purpose,
-        ));
+        return Err(GenError::training_logged_mismatch(seed, options.purpose));
     }
     let (table, report) = generate_ring_table(seed, config)?;
     let record = GameTableRecord::new_checked(
@@ -257,7 +251,12 @@ pub fn generate_ring_table_for_setup(
         table.generator_version.clone(),
         options.training_logged,
     );
-    Ok((table, report, record))
+    let checked_table = if actual_pool == SeedPool::Sealed {
+        CheckedRingTable::Sealed(SealedRingTable::new(table))
+    } else {
+        CheckedRingTable::Clear(table)
+    };
+    Ok((checked_table, report, record))
 }
 
 fn validate_generator_config(config: &GeneratorConfig) -> Result<(), GenError> {
@@ -714,11 +713,7 @@ impl PlrEntry {
     pub fn new(seed: u64, score: f64, last_seen_step: u64) -> Result<Self, GenError> {
         let pool = seed_pool(seed);
         if pool != SeedPool::Train {
-            return Err(GenError::seed_pool_mismatch(
-                seed,
-                pool,
-                TablePurpose::Train,
-            ));
+            return Err(GenError::seed_pool_mismatch(seed, TablePurpose::Train));
         }
         let clean_score = if score.is_finite() {
             score.max(0.0)
@@ -2045,10 +2040,21 @@ mod tests {
                 let Ok((raw_table, raw_report)) = generate_ring_table(boundary_seed, &cfg) else {
                     panic!("raw generator failed on boundary seed");
                 };
-                assert_eq!(checked_table, raw_table);
+                if purpose == TablePurpose::Sealed {
+                    assert_eq!(checked_table.clear_table(), None);
+                    assert_eq!(
+                        checked_table
+                            .sealed_table()
+                            .map(SealedRingTable::unseal_table_with_clear_seed),
+                        Some(&raw_table)
+                    );
+                } else {
+                    assert_eq!(checked_table.clear_table(), Some(&raw_table));
+                    assert_eq!(checked_table.sealed_table(), None);
+                }
                 assert_eq!(checked_report, raw_report);
                 assert_eq!(record.pool(), purpose.expected_pool());
-                assert_eq!(record.seat_count(), checked_table.seat_count);
+                assert_eq!(record.seat_count(), checked_table.seat_count());
                 assert_eq!(record.generator_version(), GENERATOR_VERSION);
                 assert!(!record.training_logged());
             }
@@ -2072,12 +2078,9 @@ mod tests {
                     panic!("mismatched pool must be refused");
                 };
                 assert!(matches!(
-                    err,
-                    GenError::SeedPoolMismatch {
-                        seed_pool: actual,
-                        purpose: requested,
-                        ..
-                    } if actual == sample_pool && requested == purpose
+                    &err,
+                    GenError::SeedPoolMismatch(mismatch)
+                        if mismatch.seed_pool() == sample_pool && mismatch.purpose() == purpose
                 ));
                 let msg = err.to_string();
                 assert!(msg.contains("SEED_POOL_MISMATCH"));
@@ -2132,12 +2135,10 @@ mod tests {
                 panic!("non-train seed must be refused by PlrSampler::record_score");
             };
             assert!(matches!(
-                err,
-                GenError::SeedPoolMismatch {
-                    seed_pool,
-                    purpose: TablePurpose::Train,
-                    ..
-                } if seed_pool == expected_pool
+                &err,
+                GenError::SeedPoolMismatch(mismatch)
+                    if mismatch.seed_pool() == expected_pool
+                        && mismatch.purpose() == TablePurpose::Train
             ));
             let msg = err.to_string();
             assert!(msg.contains("SEED_POOL_MISMATCH"));
@@ -2178,10 +2179,10 @@ mod tests {
         else {
             panic!("default dev setup must accept seed 42");
         };
-        assert_eq!(dev_record.layout_seed(), &RecordedLayoutSeed::Clear(42));
+        assert_eq!(dev_record.layout_seed(), &RecordedLayoutSeed::from_seed(42));
         assert_eq!(dev_record.clear_layout_seed(), Some(42));
         assert_eq!(dev_record.sealed_seed_sha256(), None);
-        assert_eq!(dev_record.seat_count(), dev_table.seat_count);
+        assert_eq!(dev_record.seat_count(), dev_table.seat_count());
         assert_eq!(dev_record.pool(), SeedPool::Dev);
         assert_eq!(dev_record.generator_version(), GENERATOR_VERSION);
         assert!(!dev_record.training_logged());
@@ -2224,7 +2225,7 @@ mod tests {
             ) else {
                 panic!("training_logged = true must be refused outside train");
             };
-            assert!(matches!(err, GenError::TrainingLoggedMismatch { .. }));
+            assert!(matches!(err, GenError::TrainingLoggedMismatch(_)));
             assert!(err.to_string().contains("TRAINING_LOGGED_MISMATCH"));
             if non_train_purpose == TablePurpose::Sealed {
                 let disp = err.to_string();
@@ -2252,7 +2253,7 @@ mod tests {
             panic!("sealed purpose must accept made-up sealed-range value");
         };
         assert_eq!(sealed_record.pool(), SeedPool::Sealed);
-        assert_eq!(sealed_record.seat_count(), sealed_table.seat_count);
+        assert_eq!(sealed_record.seat_count(), sealed_table.seat_count());
         assert_eq!(sealed_record.generator_version(), GENERATOR_VERSION);
         assert!(!sealed_record.training_logged());
         assert_eq!(sealed_record.clear_layout_seed(), None);
@@ -2317,6 +2318,112 @@ mod tests {
                     && !dbg.contains(&forbidden_hex_hi),
                 "SEED_POOL_MISMATCH Debug leaked raw sealed-range seed"
             );
+        }
+    }
+
+    #[test]
+    fn sealed_purpose_return_value_and_refusals_never_expose_clear_seed() {
+        use crate::schema::{SEALED_SEED_MAX, SEALED_SEED_MIN, sealed_seed_sha256};
+
+        let cfg = GeneratorConfig::default();
+        for made_up_sealed in [SEALED_SEED_MIN, SEALED_SEED_MAX] {
+            let expected_hash = sealed_seed_sha256(made_up_sealed);
+            let forbidden_dec = made_up_sealed.to_string();
+            let forbidden_hex_lo = format!("{made_up_sealed:x}");
+            let forbidden_hex_hi = format!("{made_up_sealed:X}");
+
+            let full_res =
+                generate_ring_table_for_purpose(made_up_sealed, TablePurpose::Sealed, &cfg);
+            let res_dbg_compact = format!("{full_res:?}");
+            let res_dbg_pretty = format!("{full_res:#?}");
+
+            let Ok(ok_tuple) = full_res else {
+                panic!("sealed purpose must accept made-up sealed boundary value");
+            };
+            let ok_dbg_compact = format!("{ok_tuple:?}");
+            let ok_dbg_pretty = format!("{ok_tuple:#?}");
+
+            let (checked_table, report, record) = ok_tuple;
+            assert!(checked_table.clear_table().is_none());
+            let Some(sealed_wrapper) = checked_table.sealed_table() else {
+                panic!("sealed purpose must return CheckedRingTable::Sealed");
+            };
+            assert_eq!(sealed_wrapper.pool(), SeedPool::Sealed);
+            assert_eq!(sealed_wrapper.sealed_seed_sha256(), expected_hash);
+            // Inner RingTable.seed remains intact in memory (byte-identical to raw generation).
+            let Ok((raw_table, _)) = generate_ring_table(made_up_sealed, &cfg) else {
+                panic!("raw generation must succeed on boundary value");
+            };
+            assert_eq!(sealed_wrapper.unseal_table_with_clear_seed(), &raw_table);
+            assert_eq!(
+                sealed_wrapper.unseal_table_with_clear_seed().seed,
+                made_up_sealed
+            );
+
+            let Ok(report_json) = serde_json::to_string(&report) else {
+                panic!("serialize FeasibilityReport");
+            };
+            let Ok(record_json) = serde_json::to_string(&record) else {
+                panic!("serialize GameTableRecord");
+            };
+
+            for (label, text) in [
+                ("Result compact Debug", res_dbg_compact.as_str()),
+                ("Result pretty Debug", res_dbg_pretty.as_str()),
+                ("Ok compact Debug", ok_dbg_compact.as_str()),
+                ("Ok pretty Debug", ok_dbg_pretty.as_str()),
+                ("FeasibilityReport JSON", report_json.as_str()),
+                ("GameTableRecord JSON", record_json.as_str()),
+            ] {
+                assert!(
+                    !text.contains(&forbidden_dec)
+                        && !text.contains(&forbidden_hex_lo)
+                        && !text.contains(&forbidden_hex_hi),
+                    "{label} exposed clear sealed-range seed"
+                );
+            }
+            assert!(ok_dbg_compact.contains("sealed") && ok_dbg_compact.contains(&expected_hash));
+            assert!(ok_dbg_pretty.contains("sealed") && ok_dbg_pretty.contains(&expected_hash));
+            assert!(record_json.contains("\"pool\":\"sealed\""));
+            assert!(record_json.contains(&expected_hash));
+
+            let owned_inner = checked_table.into_clear_table();
+            assert!(owned_inner.is_none());
+
+            for other_purpose in [
+                TablePurpose::Dev,
+                TablePurpose::Train,
+                TablePurpose::Probe,
+                TablePurpose::HeldOut,
+            ] {
+                let err_res = generate_ring_table_for_purpose(made_up_sealed, other_purpose, &cfg);
+                let err_res_dbg = format!("{err_res:?}");
+                let err_res_pretty = format!("{err_res:#?}");
+                let Err(err) = err_res else {
+                    panic!("non-sealed purpose must refuse sealed-range seed");
+                };
+                let err_disp = err.to_string();
+                let err_dbg = format!("{err:?}");
+                let err_pretty = format!("{err:#?}");
+
+                for (label, text) in [
+                    ("Err Result compact Debug", err_res_dbg.as_str()),
+                    ("Err Result pretty Debug", err_res_pretty.as_str()),
+                    ("GenError Display", err_disp.as_str()),
+                    ("GenError compact Debug", err_dbg.as_str()),
+                    ("GenError pretty Debug", err_pretty.as_str()),
+                ] {
+                    assert!(
+                        !text.contains(&forbidden_dec)
+                            && !text.contains(&forbidden_hex_lo)
+                            && !text.contains(&forbidden_hex_hi),
+                        "{label} exposed clear sealed-range seed"
+                    );
+                }
+                assert!(err_disp.contains("SEED_POOL_MISMATCH"));
+                assert!(err_disp.contains("sealed") && err_disp.contains(&expected_hash));
+                assert!(err_disp.contains(other_purpose.as_str()));
+            }
         }
     }
 }

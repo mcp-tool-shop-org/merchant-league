@@ -63,15 +63,17 @@ pub use mandates::{
 };
 pub use rng::SeedStream;
 pub use schema::{
-    ALLOWED_COMMODITY_GLOSSARY, BPS_SCALE, ConverterSpec, CreditRatingTier, CurrencyCode,
-    DENIED_CURRENCY_CODES, DEV_SEED_MAX, DEV_SEED_MIN, EvMethod, FeasibilityError,
+    ALLOWED_COMMODITY_GLOSSARY, BPS_SCALE, CheckedRingTable, ConverterSpec, CreditRatingTier,
+    CurrencyCode, DENIED_CURRENCY_CODES, DEV_SEED_MAX, DEV_SEED_MIN, EvMethod, FeasibilityError,
     GENERATOR_VERSION, GameTableRecord, GenError, GeneratorConfig, HELD_OUT_SEED_MAX,
     HELD_OUT_SEED_MIN, HorizonShockKind, MAX_ATTEMPTS_CAP, MAX_MANDATE_BONUS_VP,
     MIN_MANDATE_BONUS_VP, MandateCardSpec, MandateObjective, NUMERAIRE_CODE, PROBE_SEED_MAX,
-    PROBE_SEED_MIN, PROJECT_CONCORDAT_ID, ProjectSpec, RecordedLayoutSeed, RingTable,
-    SEALED_SEED_MAX, SEALED_SEED_MIN, SEED_POOL_TABLE, ScheduledShock, SeatCount, SeatSpec,
-    SeedPool, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose, TableSetupOptions,
-    bonus_vp_for_completion_bps, commodity_glossary_word, deal_mandate_indices_with_entropy,
-    default_mandate_deck_for_table, default_projects_for_seats, is_allowed_commodity_code,
-    is_denied_currency_code, sealed_seed_sha256, seed_pool,
+    PROBE_SEED_MIN, PROJECT_CONCORDAT_ID, ProjectSpec, RESERVED_PROBE_HELD_OUT_TEST_SEEDS,
+    RecordedLayoutSeed, RecordedLayoutSeedError, RingTable, SEALED_SEED_MAX, SEALED_SEED_MIN,
+    SEED_POOL_TABLE, ScheduledShock, SealedRingTable, SeatCount, SeatSpec, SeedPool,
+    SeedPoolMismatchError, TRAIN_SEED_MAX, TRAIN_SEED_MIN, TablePurpose, TableSetupOptions,
+    TrainingLoggedMismatchError, bonus_vp_for_completion_bps, commodity_glossary_word,
+    deal_mandate_indices_with_entropy, default_mandate_deck_for_table, default_projects_for_seats,
+    is_allowed_commodity_code, is_denied_currency_code, is_reserved_test_seed, sealed_seed_sha256,
+    seed_pool,
 };
