@@ -16473,7 +16473,7 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const MIN_COMMITTED_HISTORY_ROWS: usize = 3;
+const MIN_COMMITTED_HISTORY_ROWS: usize = 4;
 const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
 fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
@@ -16687,8 +16687,97 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    // Row 3 (`P41-B2` widening row under `v2_neutral_2026_11_15_r5`, verified byte-identical against `main` `73cac808`):
+    ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r5",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x3b8b052dce1c0bf9daf6c018bd91d4bc,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+            (
+                "emc_excerpt_160_char_clip",
+                0xe7f8ace5cdc194668aeb07b653ad050f,
+            ),
+            (
+                "whisper_partial_word_truncation",
+                0x93d6b1a5a1fabbb05d2b3da069674a69,
+            ),
+        ],
+    },
 ];
 
+// `P41-C4` review note: an in-tree test can verify every row against `SEALED_IMMUTABLE_HISTORY_ROWS`
+// and enforce monotonic path sets and unique arm transitions, but cannot stop an edit that rewrites
+// both a past row and its seal constant together. Reviewers must compare `ARM_RENDER_PATH_HISTORY`
+// and `SEALED_IMMUTABLE_HISTORY_ROWS` against `git` history (`git diff main -- .../relay_integration.rs`).
 const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_neutral_2026_11_15_r4",
@@ -16701,6 +16790,10 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_neutral_2026_11_15_r5",
         0xa365a6b3f0a217bf5cfe085c7348d0ba,
+    ),
+    (
+        "v2_neutral_2026_11_15_r5",
+        0xe52f006eeb28ce34d6627e513fd36525,
     ),
 ];
 
@@ -18210,6 +18303,167 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
     assert_eq!(think_reqs.len(), 9);
     let think_tag_stripping_body = format!("{}\n{}", think_reqs[1].body, think_reqs[8].body);
 
+    // --- Group K (`P41-B2` E1): `emc` older-reply excerpt clipped at `EMC_OLDER_REPLY_EXCERPT_CHARS` (160 chars, `relay.rs:4779`) ---
+    let long_emc_turn1_reply = format!(
+        "EMC_CLIP_TURN1_START_{}_PAST_160_TAIL_MUST_BE_CLIPPED_OUT",
+        "0123456789".repeat(15)
+    );
+    assert!(long_emc_turn1_reply.chars().count() > 200);
+    let mut emc_clip_steps = Vec::with_capacity(7);
+    for idx in 1..=7 {
+        let reply_text = if idx == 1 {
+            long_emc_turn1_reply.clone()
+        } else {
+            format!("EMC_CLIP_SHORT_{idx}")
+        };
+        emc_clip_steps.push(MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(&reply_text, "Qwen/Qwen3-14B", 10, 5, None, None),
+        });
+    }
+    let srv_emc_clip =
+        LoopbackOpenAiServer::start_with_tokenizer(emc_clip_steps, TokenizeBehavior::WordCount)?;
+    let seats_emc_clip = tmp.path().join("seats_emc_clip.json");
+    write_local_seats_file(
+        &seats_emc_clip,
+        "Saltworks",
+        &srv_emc_clip.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    let g_emc_clip = tmp.path().join("g_emc_clip");
+    for (idx, (d, r)) in [
+        ("01", "talk"),
+        ("01", "act"),
+        ("02", "talk"),
+        ("02", "act"),
+        ("03", "talk"),
+        ("03", "act"),
+        ("04", "talk"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_to_seat(
+            &g_emc_clip,
+            d,
+            r,
+            "Saltworks",
+            &format!("EMC_CLIP_PROMPT_{}", idx + 1),
+        )?;
+        let mut args = vec![
+            "turn",
+            "--game-dir",
+            g_emc_clip.to_str().ok_or("utf8")?,
+            "--day",
+            d,
+            "--round",
+            r,
+            "--seats",
+            seats_emc_clip.to_str().ok_or("utf8")?,
+            "--memory-mode",
+            "emc",
+            "--cap-gpu-secs",
+            "20.0",
+        ];
+        if idx == 0 {
+            args.push("--wrapper");
+            args.push(wrapper_no_nl.to_str().ok_or("utf8")?);
+        }
+        assert_eq!(execute_cli(args, |_| None, &mut out, &mut err_out), 0);
+    }
+    let emc_clip_reqs = srv_emc_clip.recorded_requests()?;
+    assert_eq!(emc_clip_reqs.len(), 7);
+
+    // --- Group L (`P41-B2` T1): whisper cut inside a word (`wording.rs:379` `if !partial.is_empty()`) ---
+    let srv_partial_w = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                r#"{"orders":["hold_salt"],"notes":""}"#,
+                "Qwen/Qwen3-14B",
+                20,
+                8,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_partial_w = tmp.path().join("seats_partial_w.json");
+    fs::write(
+        &seats_partial_w,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv_partial_w.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "file"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_partial_w = tmp.path().join("g_partial_w");
+    write_to_seat(
+        &g_partial_w,
+        "01",
+        "talk",
+        "Saltworks",
+        "PARTIAL WORD WHISPER TURN",
+    )?;
+    let mid_word_whisper_body = format!("LEADWORD {}", "abcdefghij".repeat(185));
+    fs::write(
+        g_partial_w.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+        serde_json::to_string(&NegotiationInputs {
+            batna: "Keep 3 salt; 0 VP.".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Weavers".to_owned(),
+                intent_header: None,
+                body: mid_word_whisper_body,
+            }],
+        })?,
+    )?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_partial_w.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_partial_w.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_no_nl.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema_path.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let partial_w_reqs = srv_partial_w.recorded_requests()?;
+    assert_eq!(partial_w_reqs.len(), 1);
+
     let paths: Vec<(&'static str, String)> = vec![
         (
             "fallback_batna_and_zero_whispers",
@@ -18252,6 +18506,11 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
         ("reasoning_wire_local", reasoning_wire_local_body),
         ("reasoning_wire_openrouter", reasoning_wire_openrouter_body),
         ("think_tag_stripping_replay", think_tag_stripping_body),
+        ("emc_excerpt_160_char_clip", emc_clip_reqs[6].body.clone()),
+        (
+            "whisper_partial_word_truncation",
+            partial_w_reqs[0].body.clone(),
+        ),
     ];
 
     Ok((paths, r37_composite_digest))
@@ -18485,14 +18744,11 @@ fn fix6_c21_append_only_arm_history_rejects_past_edit_removal_unchanged_arm_and_
     edited_r4_digests[0].1 ^= 1;
     let leaked_edited_r4: &'static [(&'static str, u128)] =
         Box::leak(edited_r4_digests.into_boxed_slice());
-    let edited_past_history = [
-        ArmRenderHistoryRow {
-            arm: ARM_RENDER_PATH_HISTORY[0].arm,
-            path_digests: leaked_edited_r4,
-        },
-        ARM_RENDER_PATH_HISTORY[1],
-        ARM_RENDER_PATH_HISTORY[2],
-    ];
+    let mut edited_past_history = ARM_RENDER_PATH_HISTORY.to_vec();
+    edited_past_history[0] = ArmRenderHistoryRow {
+        arm: ARM_RENDER_PATH_HISTORY[0].arm,
+        path_digests: leaked_edited_r4,
+    };
     let Err(err_edited) = verify_arm_render_path_history(
         &edited_past_history,
         SEALED_IMMUTABLE_HISTORY_ROWS,
@@ -18517,25 +18773,18 @@ fn fix6_c21_append_only_arm_history_rejects_past_edit_removal_unchanged_arm_and_
     assert!(err_unchanged_arm.contains("whisper_without_intent_header"));
 
     // 4. Appending a new row that reuses a past arm string (`r4`) fails:
+    let cur_last = ARM_RENDER_PATH_HISTORY.last().ok_or("empty history")?;
     let reused_r4_row = ArmRenderHistoryRow {
         arm: "v2_neutral_2026_11_15_r4",
-        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+        path_digests: cur_last.path_digests,
     };
-    let reused_arm_history = [
-        ARM_RENDER_PATH_HISTORY[0],
-        ARM_RENDER_PATH_HISTORY[1],
-        ARM_RENDER_PATH_HISTORY[2],
-        reused_r4_row,
-    ];
-    let reused_seals = [
-        SEALED_IMMUTABLE_HISTORY_ROWS[0],
-        SEALED_IMMUTABLE_HISTORY_ROWS[1],
-        SEALED_IMMUTABLE_HISTORY_ROWS[2],
-        (
-            "v2_neutral_2026_11_15_r4",
-            compute_history_row_seal(&reused_r4_row),
-        ),
-    ];
+    let mut reused_arm_history = ARM_RENDER_PATH_HISTORY.to_vec();
+    reused_arm_history.push(reused_r4_row);
+    let mut reused_seals = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
+    reused_seals.push((
+        "v2_neutral_2026_11_15_r4",
+        compute_history_row_seal(&reused_r4_row),
+    ));
     let Err(err_reused) = verify_arm_render_path_history(
         &reused_arm_history,
         &reused_seals,
@@ -18550,7 +18799,7 @@ fn fix6_c21_append_only_arm_history_rejects_past_edit_removal_unchanged_arm_and_
     let Err(err_missing_new_row) = verify_arm_render_path_history(
         ARM_RENDER_PATH_HISTORY,
         SEALED_IMMUTABLE_HISTORY_ROWS,
-        "v2_neutral_2026_11_15_r6",
+        "v2_neutral_2026_11_15_r99",
         &live_paths,
     ) else {
         return Err("bumping arm without appending row must fail".into());
@@ -19114,7 +19363,7 @@ fn fix6_c19_c20_c18_nfkc_confusables_all_positions_scratchpad_text_and_conservat
 #[test]
 fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestResult {
     let (live_paths, _) = render_all_wording_guard_paths()?;
-    assert_eq!(ARM_RENDER_PATH_HISTORY.len(), 3);
+    assert!(ARM_RENDER_PATH_HISTORY.len() >= MIN_COMMITTED_HISTORY_ROWS);
     assert_eq!(
         SEALED_IMMUTABLE_HISTORY_ROWS.len(),
         ARM_RENDER_PATH_HISTORY.len()
@@ -19122,10 +19371,16 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
     assert_eq!(ARM_RENDER_PATH_HISTORY[0].path_digests.len(), 15);
     assert_eq!(ARM_RENDER_PATH_HISTORY[1].path_digests.len(), 15);
     assert_eq!(ARM_RENDER_PATH_HISTORY[2].path_digests.len(), 20);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[3].path_digests.len(), 22);
     assert_eq!(
         &ARM_RENDER_PATH_HISTORY[2].path_digests[..15],
         ARM_RENDER_PATH_HISTORY[1].path_digests,
         "all 15 pre-existing render-path digests must remain identical under r5"
+    );
+    assert_eq!(
+        &ARM_RENDER_PATH_HISTORY[3].path_digests[..20],
+        ARM_RENDER_PATH_HISTORY[2].path_digests,
+        "all 20 Row-2 render-path digests must remain identical in Row 3 under r5"
     );
 
     verify_arm_render_path_history(
@@ -19135,7 +19390,7 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
         &live_paths,
     )?;
 
-    // 1. Editing ANY row (row 0, row 1, AND newest row 2) fails its per-row seal:
+    // 1. Editing ANY row (including the newest row) fails its per-row seal:
     for edit_row_idx in 0..ARM_RENDER_PATH_HISTORY.len() {
         let mut cloned_history = ARM_RENDER_PATH_HISTORY.to_vec();
         let mut mutated_digests = cloned_history[edit_row_idx].path_digests.to_vec();
@@ -19160,16 +19415,18 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
         );
     }
 
+    let newest_row = ARM_RENDER_PATH_HISTORY.last().ok_or("empty history")?;
+
     // 2. Appending a new row WITHOUT sealing it (`Opus V7`) fails immediately:
     let mut unsealed_history = ARM_RENDER_PATH_HISTORY.to_vec();
     unsealed_history.push(ArmRenderHistoryRow {
-        arm: "v2_neutral_2026_11_15_r6",
-        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+        arm: "v2_neutral_2026_11_15_r99",
+        path_digests: newest_row.path_digests,
     });
     let Err(err_unsealed) = verify_arm_render_path_history(
         &unsealed_history,
         SEALED_IMMUTABLE_HISTORY_ROWS,
-        "v2_neutral_2026_11_15_r6",
+        "v2_neutral_2026_11_15_r99",
         &live_paths,
     ) else {
         return Err("unsealed newest row must fail".into());
@@ -19177,11 +19434,12 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
     assert!(err_unsealed.contains("every row, including the newest row, must be sealed"));
 
     // 3. Removing a row fails (both removing from history alone and removing row + seal together):
+    let prev_len = ARM_RENDER_PATH_HISTORY.len() - 1;
     let Err(err_rm_one) = verify_arm_render_path_history(
-        &ARM_RENDER_PATH_HISTORY[..2],
+        &ARM_RENDER_PATH_HISTORY[..prev_len],
         SEALED_IMMUTABLE_HISTORY_ROWS,
         ACTIVE_WORDING_ARM,
-        &live_paths[..15],
+        &live_paths,
     ) else {
         return Err("removing newest row must fail".into());
     };
@@ -19200,38 +19458,30 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
     // 4. Appending a new row with an extra path passes, while older rows' seals stay bit-identical:
     let extra_body = "{\"synthetic\":\"extra_render_path_v1\"}".to_owned();
     let extra_digest = fnv1a_128_digest(extra_body.as_bytes());
-    let mut extended_digests = ARM_RENDER_PATH_HISTORY[2].path_digests.to_vec();
+    let mut extended_digests = newest_row.path_digests.to_vec();
     extended_digests.push(("synthetic_extra_render_path", extra_digest));
     let new_row = ArmRenderHistoryRow {
-        arm: "v2_neutral_2026_11_15_r6",
+        arm: "v2_neutral_2026_11_15_r99",
         path_digests: Box::leak(extended_digests.into_boxed_slice()),
     };
     let new_row_seal = compute_history_row_seal(&new_row);
     let mut extended_history = ARM_RENDER_PATH_HISTORY.to_vec();
     extended_history.push(new_row);
     let mut extended_seals = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
-    extended_seals.push(("v2_neutral_2026_11_15_r6", new_row_seal));
-    assert_eq!(extended_seals[0], SEALED_IMMUTABLE_HISTORY_ROWS[0]);
-    assert_eq!(extended_seals[1], SEALED_IMMUTABLE_HISTORY_ROWS[1]);
-    assert_eq!(extended_seals[2], SEALED_IMMUTABLE_HISTORY_ROWS[2]);
-    assert_eq!(
-        compute_history_row_seal(&extended_history[0]),
-        SEALED_IMMUTABLE_HISTORY_ROWS[0].1
-    );
-    assert_eq!(
-        compute_history_row_seal(&extended_history[1]),
-        SEALED_IMMUTABLE_HISTORY_ROWS[1].1
-    );
-    assert_eq!(
-        compute_history_row_seal(&extended_history[2]),
-        SEALED_IMMUTABLE_HISTORY_ROWS[2].1
-    );
+    extended_seals.push(("v2_neutral_2026_11_15_r99", new_row_seal));
+    for idx in 0..SEALED_IMMUTABLE_HISTORY_ROWS.len() {
+        assert_eq!(extended_seals[idx], SEALED_IMMUTABLE_HISTORY_ROWS[idx]);
+        assert_eq!(
+            compute_history_row_seal(&extended_history[idx]),
+            SEALED_IMMUTABLE_HISTORY_ROWS[idx].1
+        );
+    }
     let mut extended_live = live_paths.clone();
     extended_live.push(("synthetic_extra_render_path", extra_body));
     verify_arm_render_path_history(
         &extended_history,
         &extended_seals,
-        "v2_neutral_2026_11_15_r6",
+        "v2_neutral_2026_11_15_r99",
         &extended_live,
     )?;
 
@@ -19258,46 +19508,46 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
     };
     assert!(err_reuse_past.contains("reuses past arm string"));
 
-    // (b) Reusing current arm `r5` with the same path set (`V4b`):
+    // (b) Reusing current arm without adding new paths (`V4b`):
     let reused_same_row = ArmRenderHistoryRow {
-        arm: "v2_neutral_2026_11_15_r5",
-        path_digests: ARM_RENDER_PATH_HISTORY[2].path_digests,
+        arm: ACTIVE_WORDING_ARM,
+        path_digests: newest_row.path_digests,
     };
     let mut bad_hist_same = ARM_RENDER_PATH_HISTORY.to_vec();
     bad_hist_same.push(reused_same_row);
     let mut bad_seals_same = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
     bad_seals_same.push((
-        "v2_neutral_2026_11_15_r5",
+        ACTIVE_WORDING_ARM,
         compute_history_row_seal(&reused_same_row),
     ));
     let Err(err_reuse_same) = verify_arm_render_path_history(
         &bad_hist_same,
         &bad_seals_same,
-        "v2_neutral_2026_11_15_r5",
+        ACTIVE_WORDING_ARM,
         &live_paths,
     ) else {
         return Err("reusing current arm without adding new paths must fail".into());
     };
     assert!(err_reuse_same.contains("reuses past arm string"));
 
-    // (c) Reusing current arm `r5` with an extra path while altering an existing path's digest:
+    // (c) Reusing current arm with an extra path while altering an existing path's digest:
     let mut altered_ext = new_row.path_digests.to_vec();
     altered_ext[0].1 ^= 1;
     let reused_altered_row = ArmRenderHistoryRow {
-        arm: "v2_neutral_2026_11_15_r5",
+        arm: ACTIVE_WORDING_ARM,
         path_digests: Box::leak(altered_ext.into_boxed_slice()),
     };
     let mut bad_hist_alt = ARM_RENDER_PATH_HISTORY.to_vec();
     bad_hist_alt.push(reused_altered_row);
     let mut bad_seals_alt = SEALED_IMMUTABLE_HISTORY_ROWS.to_vec();
     bad_seals_alt.push((
-        "v2_neutral_2026_11_15_r5",
+        ACTIVE_WORDING_ARM,
         compute_history_row_seal(&reused_altered_row),
     ));
     let Err(err_reuse_alt) = verify_arm_render_path_history(
         &bad_hist_alt,
         &bad_seals_alt,
-        "v2_neutral_2026_11_15_r5",
+        ACTIVE_WORDING_ARM,
         &extended_live,
     ) else {
         return Err("reusing current arm while changing an existing path digest must fail".into());
@@ -19949,5 +20199,82 @@ fn fix7_c23_c24_c25_scratch_pad_separators_strict_note_prose_and_mixed_case_nest
 
     assert_eq!(srv.request_count()?, 0);
     assert_eq!(srv.tokenize_requests()?.len(), 0);
+    Ok(())
+}
+
+// ============================================================================
+// Fix 8 (`P41-B1`, `P41-B2`, `P41-C1`..`P41-C5`)
+// ============================================================================
+
+#[test]
+fn fix8_p41_b2_emc_clip_and_partial_whisper_widening_row_under_r5() -> TestResult {
+    let (live_paths, _) = render_all_wording_guard_paths()?;
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        ACTIVE_WORDING_ARM,
+        &live_paths,
+    )?;
+
+    // E1 (`emc_excerpt_160_char_clip`): Turn 1 reply > 160 chars is clipped to 160 chars (`...012345678`),
+    // omitting `_PAST_160_TAIL_MUST_BE_CLIPPED_OUT`:
+    let emc_clip_body = &live_paths
+        .iter()
+        .find(|(n, _)| *n == "emc_excerpt_160_char_clip")
+        .ok_or("missing emc_excerpt_160_char_clip")?
+        .1;
+    assert!(!emc_clip_body.contains("PAST_160_TAIL_MUST_BE_CLIPPED_OUT"));
+    assert!(emc_clip_body.contains("012345678\\\"}"));
+    assert!(!emc_clip_body.contains("0123456789_PAST"));
+
+    // T1 (`whisper_partial_word_truncation`): Whisper cut mid-word retains the partial second word
+    // up to the 1,800-char budget with `"truncated":true`:
+    let partial_w_body = &live_paths
+        .iter()
+        .find(|(n, _)| *n == "whisper_partial_word_truncation")
+        .ok_or("missing whisper_partial_word_truncation")?
+        .1;
+    assert!(partial_w_body.contains("LEADWORD abcdefghij"));
+    assert!(partial_w_body.contains("abcdefghi\\\",\\\"truncated\\\":true}"));
+
+    let mutated_guard_err =
+        |path_name: &'static str, needle: &str, mutated_needle: &str| -> Result<String, String> {
+            let mut cloned = live_paths.clone();
+            let entry = cloned
+                .iter_mut()
+                .find(|(n, _)| *n == path_name)
+                .ok_or_else(|| format!("missing path {path_name}"))?;
+            entry.1 = apply_exact_one_char_mutation(&entry.1, needle, mutated_needle)?;
+            match verify_arm_render_path_history(
+                ARM_RENDER_PATH_HISTORY,
+                SEALED_IMMUTABLE_HISTORY_ROWS,
+                ACTIVE_WORDING_ARM,
+                &cloned,
+            ) {
+                Err(err) => Ok(err),
+                Ok(()) => Err(format!("expected guard failure on path '{path_name}'")),
+            }
+        };
+
+    // 1-char mutation on E1 (`160` -> `159` clipped chars):
+    assert!(
+        mutated_guard_err(
+            "emc_excerpt_160_char_clip",
+            "0123456789012345678\\\"}",
+            "012345678901234567\\\"}"
+        )?
+        .contains("emc_excerpt_160_char_clip")
+    );
+
+    // 1-char mutation on T1 (1,789-char partial word -> 1,788-char partial word):
+    assert!(
+        mutated_guard_err(
+            "whisper_partial_word_truncation",
+            "abcdefghi\\\",\\\"truncated\\\":true}",
+            "abcdefgh\\\",\\\"truncated\\\":true}"
+        )?
+        .contains("whisper_partial_word_truncation")
+    );
+
     Ok(())
 }
