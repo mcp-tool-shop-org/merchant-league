@@ -294,6 +294,38 @@ Both modes share the exact same:
 | 6 | Epistemic Calibration | Out-of-context Belief Brier / ECE + Ledger Claim Hallucination % | Brier `< 0.22`; claim hallucinations `< 3%` | Claim hallucinations `> 10%`: noisy state serialization in prompts |
 | 7 | Drift & Inference Cost | Agent Stability Index (ASI), XRPL `tem`/`tec` retry rate, Net Equity per unit of inference budget | ASI $\ge 0.80$ through Turn 32; invalid tx `< 2%` | ASI `< 0.75` or late bankrupt bids: context rot requiring tighter compaction |
 
+### 7.4 Layout Seed Pools and Generator-Version Hygiene
+
+Once a policy trains on a chiral table layout or a designer tunes rules against that seed, the seed can no longer serve as an uncontaminated evaluation benchmark. `league-gen` partitions the `u64` layout-seed space into six disjoint, inclusive categories via a single boundary table (`SEED_POOL_TABLE`) and classifier (`seed_pool(seed)`), independent of seat count (`N in {4, 5, 6}`) or `GeneratorConfig`:
+
+| Pool | Layout Seeds (Inclusive) | Intended Role |
+|---|---|---|
+| `dev` | `0 – 9,999` | Generator gates, code reviews, rule calibration, stubs, and exploratory playtests while rules are still evolving |
+| `train` | `10,000 – 999,999` | Training-logged games; `PlrSampler` (`PlrEntry`) accepts and proposes seeds strictly within this range |
+| `probe` | `1,000,000 – 1,099,999` | No-gradient forward-pass diagnostic checks during training |
+| `held_out` | `2,000,000 – 2,099,999` | Counted evaluation of a frozen trained policy or finalized rule change |
+| `sealed` | `2^63 – 2^64−1` | Final check against an out-of-repo 256-seed set; runs only when table purpose is `sealed` |
+| `unassigned` | Every other `u64` | Reserved gap space; refused for every table purpose |
+
+- **Checked Setup, Logging & Redaction (`league-gen`):** Game setups call `generate_ring_table_for_setup` (or `generate_ring_table_for_purpose`, defaulting to `purpose = dev`, `training_logged = false`), which verifies `seed_pool(seed)` before invoking `generate_ring_table`, refuses any mismatch or `unassigned` seed with `SEED_POOL_MISMATCH`, refuses `training_logged = true` outside `purpose = train` with `TRAINING_LOGGED_MISMATCH`, and returns `(CheckedRingTable, FeasibilityReport, GameTableRecord)`. What `league-gen` enforces today: `GameTableRecord` (`RecordedLayoutSeed`, which also rejects clear `sealed`-range values on deserialization) and every `GenError` refusal store, format (`Debug`/`Display`), and serialize only `"sealed"` and the lowercase hex SHA-256 of `seed.to_be_bytes()`; for `TablePurpose::Sealed`, the unmodified `RingTable` (whose in-memory `RingTable.seed` retains the clear `u64` required by table consumers) is returned strictly inside `CheckedRingTable::Sealed(SealedRingTable)`, which omits `Serialize`, replaces `seed` with `"sealed"` and `SHA-256(seed.to_be_bytes())` in `Debug`, and exposes the inner `RingTable` only through `unseal_table_with_clear_seed` / `into_unsealed_table_with_clear_seed`. What remains the future table bootstrap's duty (tracked as an open issue): never formatting, logging, or serializing an unsealed `RingTable`, rejecting `is_reserved_test_seed(seed)` when scheduling real games, and closing `league-core`'s `SeasonReplayLog` (`crates/league-core/src/replay.rs`), which still records the layout `seed` in clear — **no real `sealed` game may run before that issue is closed**.
+- **Benchmark & Version Separation:**
+  - A `held_out` seed is **never** used to choose or tune a model checkpoint, prompt, or game rule; selection decisions use `dev` or `probe` runs, and `held_out` scores an already-frozen candidate.
+  - Results produced under different `GENERATOR_VERSION` strings are **never** pooled into one combined evaluation or training summary.
+- **Rule for Tests and Gates:**
+  - Unit tests, property sweeps, and generator gates call raw `generate_ring_table` with `dev`-pool seeds (`0 – 9,999`) only.
+  - A test may use `train`-pool seeds (`10,000 – 999,999`) only when exercising `train`-pool logic (such as `PlrSampler`) or where an existing test already did so prior to seed-pool enforcement.
+  - Seeds in `probe`, `held_out`, and the `sealed` range never appear in tests **except the reserved test values in the table below** (plus non-generating `seed_pool` / refusal checks), and the future table bootstrap must call `is_reserved_test_seed` and never schedule a reserved value for a real game; actual out-of-repo sealed seeds are never placed in code, tests, logs, or docs.
+- **Documented Exceptions, Reserved Test Values, and Pre-Existing `train`-Range Test Seeds:**
+
+| Seed / Formula | Location | Pool(s) & Disposition |
+|---|---|---|
+| Reserved test values: `probe` first & last (`1,000,000`, `1,099,999`), `held_out` first & last (`2,000,000`, `2,099,999`), and made-up `sealed`-range values `2^63`, `2^64−1`, and `2^63` with `42` set (`RESERVED_PROBE_HELD_OUT_TEST_SEEDS`, `is_reserved_test_seed`) | `crates/league-gen/src/schema.rs`, `crates/league-gen/src/generator.rs`, `crates/league-gen/tests/properties.rs` | Reserved strictly for boundary, wrapper, and redaction tests (`2^63`, `2^64−1`, and `2^63` with `42` set were checked out-of-repo and none is in the sealed set); the future bootstrap must never schedule any reserved value for a real game |
+| Base `20_261_115` with `200` trials: base XOR per-seat-count 64-bit masks stepped by `t` times the 64-bit golden-ratio increment (`t in 0..200`) | `crates/league-gen/src/empirical.rs` (`measure_lockin_and_hhi`, `run_ring_ensemble`, and unit test at `:1132`) | Documented exception calling unchecked `generate_ring_table` (verified out-of-repo against the 256-seed sealed set **only** for base `20,261,115` with `200` trials; any other base or count is not covered and new callers must use `dev` seeds; never written by value) |
+| Literal date seed `20_261_115` | `crates/league-gen/src/generator.rs`, `crates/league-gen/src/mandates.rs`, `crates/league-gen/src/empirical.rs` | Documented exception in `unassigned` (unchanged historical test fixture) |
+| `31337` | `crates/league-gen/src/mandates.rs` | Pre-existing `train`-pool seed in generated-table mandate sweep (unchanged) |
+| `10,000 – 24,999` (upper slice of `0..25,000`) | `crates/league-gen/tests/properties.rs:188` | Pre-existing `train`-pool slice in determinism/feasibility property test (unchanged) |
+| `27_431` and `season_idx * 131 + 17` (`17..=26,086`) | `crates/league-core/tests/replay_invariants.rs`, `crates/league-core/tests/core_card2_randomness_scoring.rs` | Pre-existing `league-core` replay/season PRNG seeds spanning `dev` and `train` (unchanged) |
+
 ---
 
 ## 8. XRPL Features and Live Mainnet Amendment Status

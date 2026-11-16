@@ -922,6 +922,13 @@ pub fn evaluate_ring_table(table: &RingTable, report: &FeasibilityReport) -> Rin
 
 /// Runs `trials` seeded evaluations measuring random-endowment lock-in rates alongside
 /// ring-generator feasibility rejection rates and 1-turn static-model HHIs.
+///
+/// # Seed-Pool Scope
+/// Only the fixed benchmark call `measure_lockin_and_hhi(20_261_115, 200)` (`empirical.rs` unit
+/// test) is covered by the documented `docs/design-v2.md` §7.4 seed-pool exception whose derived
+/// ensemble seeds were checked out-of-repo against the sealed set. Any other `seed` base or
+/// `trials` count is not covered by that check; new tests and benchmarks must not invoke this
+/// function with other `(seed, trials)` pairs and must use `dev`-pool layout seeds (`0..=9_999`).
 #[must_use]
 pub fn measure_lockin_and_hhi(seed: u64, trials: usize) -> EmpiricalComparison {
     let count = trials.max(1);
@@ -1025,6 +1032,12 @@ fn run_ring_ensemble(seed: u64, trials: usize, seat_count: SeatCount) -> Ensembl
     let mut total_rejected = 0usize;
     let mut total_sampled = 0usize;
 
+    // Documented seed-pool exception (`docs/design-v2.md` §7.4): `measure_lockin_and_hhi` XORs its
+    // base seed with three fixed per-seat-count 64-bit masks and steps `sub_seed` by `t` times the
+    // 64-bit golden-ratio increment before calling unchecked `generate_ring_table`. Only the single
+    // call with base `20_261_115` and `200` trials (`empirical.rs` unit test) was checked
+    // out-of-repo against the sealed set; any other base or trial count is not covered and new
+    // callers must use `dev`-pool seeds instead.
     for t in 0..trials {
         let sub_seed = seed.wrapping_add((t as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
         if let Ok((table, report)) = generate_ring_table(sub_seed, &cfg) {
