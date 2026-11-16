@@ -1538,6 +1538,7 @@ dependencies = [
 name = "league-gen"
 version = "0.0.0"
 dependencies = [
+ "league-core",
  "proptest",
  "serde",
  "serde_json",

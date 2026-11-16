@@ -1,20 +1,23 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-15 from commit d97301c by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit 0b8aada by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-11 parts, mostly Rust (336 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+11 parts, mostly Rust (337 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (f3e1d5d)
+## What changed since 2026-11-15 (d97301c)
 
-Nothing structural changed since 2026-11-15; 2 files changed content.
+- league-gen now imports league-core.
+- CI now also runs crates/league-gen/src/mandates.rs.
+- crates/league-core/ is now also read by crates/league-gen/Cargo.toml.
+- 1 file added and 16 changed content, across 5 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 26 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 27 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
 4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
@@ -23,7 +26,7 @@ Nothing structural changed since 2026-11-15; 2 files changed content.
 
 ## What happens through CI
 
-1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, 4 files in league-core, crates/league-dice/ in league-dice, 7 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 8 files in 4 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs scripts/check-copy.sh, scripts/check-testnet-only.sh and scripts/test-guards.sh in scripts, 4 files in league-core, crates/league-dice/ in league-dice, 8 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 8 files in 4 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 
 ## Who reads the results
 
@@ -43,18 +46,18 @@ CI writes nothing in the files this map could read; 1 file could not be.
 
 ## What breaks what
 
+- **league-core** is imported by 2 parts (league-gen, league-standalone) and sits on the path of 1 door.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
-- **league-core** is imported by 1 part (league-standalone) and sits on the path of 1 door.
 
 scripts holds only shell files, which this map does not read, so what uses it cannot be seen.
 
 ## What tends to change together
 
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 10 of 10 commits.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 11 of 11 commits.
 - **crates/league-relay/src/cli.rs** and **crates/league-relay/src/error.rs** changed together in 6 of 8 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 10 commits.
-- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 10 commits.
-- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 10 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
+- **crates/league-relay/src/cli.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 7 of 11 commits.
+- **crates/league-relay/src/error.rs** and **crates/league-relay/src/relay.rs** changed together in 7 of 11 commits.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -86,7 +89,7 @@ Nothing in the files this map could read writes to a tracked place; 1 file could
 
 ## Hand-authored
 
-People write .github/, docs/ and the repository root. Nothing in the files this map could read writes to them; 1 file could not be.
+People write .github/, docs/ and the repository root; 1 write with a path built at run time may land here.
 
 ## Where to start
 
@@ -99,7 +102,9 @@ Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/s
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
+- 1 write uses a path built at run time and is not named here.
 - 4 writes and 3 reads go to a path their caller passes, not to this repository.
+- 1 write goes to a temporary directory, not to this repository.
 - 371 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 368 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
 

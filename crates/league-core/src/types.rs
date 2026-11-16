@@ -38,6 +38,64 @@ pub const MIN_MANDATE_BONUS_EQUITY: Units = 3 * UNIT_SCALE;
 /// Maximum Turn-1 Private Mandate bank bonus (`8.000 VP`).
 pub const MAX_MANDATE_BONUS_EQUITY: Units = 8 * UNIT_SCALE;
 
+/// Consecutive missed-commit or zero-production turns before the Standing Regent takes over
+/// a seat and converts `SeatIdentity::Human -> AiSyndicate` (`C1`, `2026-11-15`).
+pub const IDLE_MISS_TAKEOVER_TURNS: u8 = 3;
+
+/// Provisional Authority town-import premium multiplier (`22_500 bps` = `2.25x` fundamental
+/// shadow parity; `C1`, `2026-11-15`, pending Playtest 1 calibration).
+///
+/// Priced inside the `2.2x–2.5x` reference band and strictly above maximum `35%` bilateral export
+/// tariffs (`1.35x` parity), so importing from Authority loses margin versus trading with peers
+/// while preventing an idle supplier from freezing a converter or Syndicate Project.
+pub const DEFAULT_TOWN_IMPORT_PREMIUM_BPS: Bps = 22_500;
+
+/// Provisional working-capital `CRED` stipend recycled per `1_000` milli-units (`1.000` unit) of
+/// Refined commodity burned into a Tier-3 Syndicate Project (`0.350 CRED`/unit; `C3`, `2026-11-15`,
+/// pending Playtest 1 calibration).
+///
+/// Offsets secular `CRED` sinks (Charter auctions, auto-debt repayments, town imports) without
+/// giving leftover `CRED` any standalone Patronage or Project VP bonus.
+pub const DEFAULT_WORKS_STIPEND_PER_UNIT_CRED: Units = 350;
+
+const fn default_town_import_premium_bps() -> Bps {
+    DEFAULT_TOWN_IMPORT_PREMIUM_BPS
+}
+
+const fn default_works_stipend_per_unit_cred() -> Units {
+    DEFAULT_WORKS_STIPEND_PER_UNIT_CRED
+}
+
+/// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
+/// `TownImport` orders (`>= 1 CRED`), rejecting non-positive quantities or non-premium rates (`<= 1.0x`).
+pub fn town_import_cost_cred(
+    amount: Units,
+    asset_parity: Units,
+    premium_bps: Bps,
+) -> Result<Units, EngineError> {
+    if amount <= 0 || asset_parity <= 0 {
+        return Err(EngineError::InvalidOrder(
+            "town import amount and parity must be positive".to_owned(),
+        ));
+    }
+    if i128::from(premium_bps) <= BPS_SCALE {
+        return Err(EngineError::InvalidConfig(format!(
+            "town_import_premium_bps must exceed 10_000 (1.0x), got {premium_bps}"
+        )));
+    }
+    let den = (UNIT_SCALE as i128) * BPS_SCALE;
+    let num = (amount as i128)
+        .checked_mul(asset_parity as i128)
+        .and_then(|v| v.checked_mul(i128::from(premium_bps)))
+        .ok_or_else(|| EngineError::InvalidOrder("town import cost overflow".to_owned()))?;
+    let cost = num
+        .checked_add(den - 1)
+        .map(|v| v / den)
+        .ok_or_else(|| EngineError::InvalidOrder("town import cost overflow".to_owned()))?;
+    Units::try_from(cost.max(1))
+        .map_err(|_| EngineError::InvalidOrder("town import cost exceeds i64".to_owned()))
+}
+
 const fn clamp_i128_to_units(value: i128) -> Units {
     if value > Units::MAX as i128 {
         Units::MAX
@@ -387,6 +445,13 @@ pub struct TableSpec {
     /// Optional pre-named drand `quicknet` close schedule required for `ExternalDrand` tables (`M2`).
     #[serde(default)]
     pub drand_schedule: Option<DrandSchedule>,
+    /// Provisional town-import premium multiplier in basis points (`DEFAULT_TOWN_IMPORT_PREMIUM_BPS`).
+    #[serde(default = "default_town_import_premium_bps")]
+    pub town_import_premium_bps: Bps,
+    /// Provisional `CRED` stipend per `1_000` milli-units of refined goods delivered to Works
+    /// (`DEFAULT_WORKS_STIPEND_PER_UNIT_CRED`).
+    #[serde(default = "default_works_stipend_per_unit_cred")]
+    pub works_stipend_per_unit_cred: Units,
 }
 
 impl TableSpec {
@@ -498,6 +563,24 @@ impl TableSpec {
                 )));
             }
             card.kind.validate_for_seat_count(self.seat_count)?;
+        }
+        if i128::from(self.town_import_premium_bps) <= BPS_SCALE {
+            return Err(EngineError::InvalidConfig(format!(
+                "town_import_premium_bps must exceed 10_000 (1.0x), got {}",
+                self.town_import_premium_bps
+            )));
+        }
+        let min_ref_val = self
+            .seats
+            .iter()
+            .map(|s| s.refined_project_value)
+            .min()
+            .unwrap_or(0);
+        if self.works_stipend_per_unit_cred < 0 || self.works_stipend_per_unit_cred >= min_ref_val {
+            return Err(EngineError::InvalidConfig(format!(
+                "works_stipend_per_unit_cred {} must lie in 0..{min_ref_val}",
+                self.works_stipend_per_unit_cred
+            )));
         }
         Ok(())
     }
@@ -691,6 +774,8 @@ impl TableSpec {
             mandate_deck,
             dealt_mandate_commits,
             drand_schedule,
+            town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
+            works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))

@@ -1,6 +1,8 @@
 //! Single-container Docker lifecycle for stand-alone `xrpld` under Publisher bounds.
 
+use std::fs::OpenOptions;
 use std::io::Read as _;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +41,7 @@ const POST_KILL_WAIT_BOUND: Duration = Duration::from_millis(250);
 const NORMAL_DRAIN_BOUND: Duration = Duration::from_millis(500);
 const CONTAINER_EXPIRES_FORMAT: &str =
     "{{.ID}}\t{{.State}}\t{{.Label \"merchant-league.expires_at\"}}";
+const STANDALONE_LOCKFILE_NAME: &str = "merchant-league-standalone-xrpld.lock";
 
 /// Captured subprocess exit status and UTF-8 outputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,6 +375,41 @@ pub fn parse_docker_port(stdout: &str) -> Result<u16, StandAloneError> {
     ))))
 }
 
+struct HostContainerFileLock {
+    _file: std::fs::File,
+}
+
+impl HostContainerFileLock {
+    fn try_acquire(lock_path: &Path) -> Result<Self, StandAloneError> {
+        if let Some(parent) = lock_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|_| {
+                StandAloneError::Transport(format!(
+                    "failed to prepare host lock directory for {STANDALONE_LOCKFILE_NAME}"
+                ))
+            })?;
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)
+            .map_err(|_| {
+                StandAloneError::Transport(format!(
+                    "failed to open host lockfile {STANDALONE_LOCKFILE_NAME}"
+                ))
+            })?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(_) => Err(StandAloneError::NotStandAlone(NotStandAlone::new(format!(
+                "refusing concurrent launch: another process holds {STANDALONE_LOCKFILE_NAME}"
+            )))),
+        }
+    }
+}
+
 /// Guarded handle to a single running stand-alone `xrpld` container.
 ///
 /// Dropping the handle (or calling [`Self::teardown`]) always executes `docker rm -f`.
@@ -380,6 +418,7 @@ pub struct StandAloneContainer<R: CommandRunner = OsDockerRunner, T: Transport =
     client: StandAlone<T>,
     container_name: String,
     removed: bool,
+    _host_lock: HostContainerFileLock,
     _guard: MutexGuard<'static, ()>,
 }
 
@@ -416,10 +455,27 @@ impl<R: CommandRunner, T: Transport> StandAloneContainer<R, T> {
     where
         C: Fn(&str) -> Result<StandAlone<T>, StandAloneError>,
     {
+        let default_lock = std::env::temp_dir().join(STANDALONE_LOCKFILE_NAME);
+        Self::start_with_runner_and_lock_at(spec, runner, connector, now_unix_secs, &default_lock)
+    }
+
+    /// Start a container holding both the in-process mutex and an explicit host lockfile path
+    /// across sweep, launch, and teardown (`F1` TOCTOU prevention).
+    pub fn start_with_runner_and_lock_at<C>(
+        spec: DockerSpec,
+        runner: R,
+        connector: C,
+        now_unix_secs: u64,
+        lock_path: &Path,
+    ) -> Result<Self, StandAloneError>
+    where
+        C: Fn(&str) -> Result<StandAlone<T>, StandAloneError>,
+    {
         spec.validate()?;
         let guard = ACTIVE_CONTAINER_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        let host_lock = HostContainerFileLock::try_acquire(lock_path)?;
 
         sweep_and_check_existing_containers(&runner, &spec, now_unix_secs)?;
         ensure_pinned_image(&runner, &spec)?;
@@ -462,6 +518,7 @@ impl<R: CommandRunner, T: Transport> StandAloneContainer<R, T> {
                 client,
                 container_name,
                 removed: false,
+                _host_lock: host_lock,
                 _guard: guard,
             }),
             Err(err) => {
@@ -583,7 +640,10 @@ fn sweep_and_check_existing_containers<R: CommandRunner>(
             .parse::<u64>()
             .ok()
             .is_some_and(|exp| exp <= now_unix_secs);
-        if !state.eq_ignore_ascii_case("running") || expired {
+        let active_state = state.eq_ignore_ascii_case("running")
+            || state.eq_ignore_ascii_case("created")
+            || state.eq_ignore_ascii_case("restarting");
+        if !active_state || expired {
             let rm_out = runner
                 .run("docker", &["rm", "-f", id], Duration::from_secs(15))
                 .map_err(StandAloneError::Transport)?;
@@ -1305,5 +1365,56 @@ mod tests {
             elapsed < Duration::from_secs(2),
             "timeout + bounded pipe drain took {elapsed:?} (expected < 2s)"
         );
+    }
+
+    #[test]
+    fn f1_cross_lock_refuses_concurrent_container_launch() {
+        let Ok(tmp) = tempfile::NamedTempFile::new() else {
+            panic!("temp lockfile failed");
+        };
+        let lock_path = tmp.path().to_path_buf();
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path);
+        let Ok(file) = holder else {
+            panic!("open lockfile failed");
+        };
+        assert!(file.try_lock().is_ok(), "external lock acquire failed");
+
+        let runner = Rc::new(FakeDockerRunner::new(vec![ok_cmd("")]));
+        let res = StandAloneContainer::start_with_runner_and_lock_at(
+            DockerSpec::default(),
+            Rc::clone(&runner),
+            standalone_info_connector,
+            2_000,
+            &lock_path,
+        );
+        assert!(
+            matches!(res, Err(StandAloneError::NotStandAlone(_))),
+            "expected NotStandAlone while external handle holds host lockfile"
+        );
+        assert!(
+            runner.commands().is_empty(),
+            "refusal under host lockfile must happen before any docker ps/run"
+        );
+        drop(file);
+
+        // Also confirm an unexpired `created` container is treated as active rather than swept.
+        let runner_created = Rc::new(FakeDockerRunner::new(vec![ok_cmd(
+            "active-creating\tcreated\t5000\n",
+        )]));
+        let created_res = StandAloneContainer::start_with_runner_and_lock_at(
+            DockerSpec::default(),
+            Rc::clone(&runner_created),
+            standalone_info_connector,
+            2_000,
+            &lock_path,
+        );
+        assert!(matches!(
+            created_res,
+            Err(StandAloneError::NotStandAlone(_))
+        ));
+        assert_eq!(runner_created.commands().len(), 1);
     }
 }

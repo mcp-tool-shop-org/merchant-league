@@ -79,12 +79,25 @@ pub enum EscrowStatus {
     Cancelled,
 }
 
+/// Settlement rule governing a [`BondSpec`] attached to a `TokenEscrowVault`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BondSettlementMode {
+    /// Legacy unilateral seller bond: seller locks `amount_cred`, recovers it at `deadline_turn`
+    /// upon delivery, or forfeits to buyer (`destination`) on shortfall.
+    #[default]
+    SellerPerformanceBond,
+    /// Self-liquidating Buyer delivery-versus-payment escrow (`C2`, `2026-11-15`): buyer locks
+    /// `100%` of payment `CRED` naming seller (`destination`) as `obligor`; released immediately to
+    /// seller on delivery or refunded to buyer at `deadline_turn` shortfall without a `200%` lock.
+    BuyerDvpPayment,
+}
+
 /// Steward-refereed physical delivery bond attached to a `TokenEscrow` collateral vault.
 ///
 /// Replayed deterministically from cumulative recorded bilateral deliveries without discretion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BondSpec {
-    /// Obligated delivering seat (`sender` of the bond collateral).
+    /// Obligated delivering seat (`sender` for seller bonds, `destination` for `BuyerDvpPayment`).
     pub obligor: u8,
     /// Counterparty entitled to receive `required_units` of `good`.
     pub beneficiary: u8,
@@ -96,6 +109,45 @@ pub struct BondSpec {
     pub baseline_delivered: Units,
     /// Turn at which Steward evaluates compliance at Sweep Step 2.
     pub deadline_turn: u8,
+    /// Settlement mode (`SellerPerformanceBond` vs self-liquidating `BuyerDvpPayment`).
+    #[serde(default)]
+    pub mode: BondSettlementMode,
+}
+
+/// Co-signed dual delivery-versus-payment escrow created atomically when both `buyer` and
+/// `seller` sign identical terms (`C2`, `2026-11-15`).
+///
+/// Buyer locks `buyer_bond_cred <= payment_cred` (`100%` full prepay or earnest `< 100%`), and
+/// Seller locks `seller_bond_cred <= payment_cred` with combined lock strictly `< 200%` of
+/// `payment_cred`. Compliant delivery releases `payment_cred + seller_bond_cred` to Seller
+/// immediately; Seller non-delivery forfeits `seller_bond_cred` to Buyer; Buyer non-payment on
+/// tender forfeits `buyer_bond_cred` to Seller while leaving Seller's commodity untouched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DualEscrowVault {
+    /// Deterministic table-assigned escrow ID shared with `TokenEscrowVault` IDs (`1..`).
+    pub escrow_id: u64,
+    /// Co-signing buyer seat locking `buyer_bond_cred`.
+    pub buyer: u8,
+    /// Co-signing seller seat locking `seller_bond_cred`.
+    pub seller: u8,
+    /// Promised physical commodity (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Minimum incremental net units required by `deadline_turn`.
+    pub required_units: Units,
+    /// Full purchase payment in milli-`CRED` released to `seller` upon delivery.
+    pub payment_cred: Units,
+    /// Upfront `CRED` locked by `buyer` (`1..=payment_cred`).
+    pub buyer_bond_cred: Units,
+    /// Upfront performance bond locked by `seller`.
+    pub seller_bond_cred: Units,
+    /// Baseline bilateral `(seller, buyer, good)` deliveries recorded at creation.
+    pub baseline_delivered: Units,
+    /// Compliance evaluation deadline turn (`<= 28`).
+    pub deadline_turn: u8,
+    /// Optional shared cartel `DomainID` waiving bilateral export tariffs.
+    pub domain_id: Option<u8>,
+    /// Current lifecycle state.
+    pub status: EscrowStatus,
 }
 
 /// Track-1 collateralized conditional `TokenEscrow` vault (`XLS-85`, non-perishable `CRED` only).
@@ -194,12 +246,15 @@ pub struct EscrowProposal {
 /// Client parameters for attaching a deterministic Steward delivery bond to a `TokenEscrow`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BondProposal {
-    /// Commodity or asset that `sender` must deliver to `destination`.
+    /// Commodity or asset that the obligor must deliver to the beneficiary.
     pub good: AssetId,
     /// Incremental delivered units required on or before `deadline_turn`.
     pub required_units: Units,
     /// Evaluation turn (`< cancel_after_turn`).
     pub deadline_turn: u8,
+    /// Settlement mode (`SellerPerformanceBond` default, or `BuyerDvpPayment` under C2).
+    #[serde(default)]
+    pub mode: BondSettlementMode,
 }
 
 /// Limit order submission payload for `MarketAction::PostOffer`.
@@ -285,6 +340,17 @@ pub enum MarketAction {
         seat: u8,
         /// Public platform enacted without requiring a Turn-`4n` ballot if `seat` wins.
         platform: CouncilPlatform,
+    },
+    /// Emergency fallback purchase directly from Authority at `town_import_premium_bps`
+    /// (`C1`, `2026-11-15`), letting a seat keep a converter or project unblocked if a peer
+    /// idles or withholds supply.
+    TownImport {
+        /// Purchasing seat index.
+        seat: u8,
+        /// Commodity purchased (`Raw(i)` or `Refined(i)`; never `Cred`).
+        good: AssetId,
+        /// Quantity in milli-units (`> 0`).
+        amount: Units,
     },
 }
 

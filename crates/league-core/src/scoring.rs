@@ -129,6 +129,16 @@ pub fn compute_net_asset_equity(state: &EngineState, seat: u8) -> Units {
             equity += escrow.amount_cred as i128;
         }
     }
+    for dual in state.dual_escrows.values() {
+        if dual.status == EscrowStatus::Locked {
+            if dual.buyer == seat {
+                equity += dual.buyer_bond_cred as i128;
+            }
+            if dual.seller == seat {
+                equity += dual.seller_bond_cred as i128;
+            }
+        }
+    }
 
     for g in 0..n {
         let raw_units = total_raw[g].clamp(i64::MIN as i128, i64::MAX as i128) as Units;
@@ -165,6 +175,16 @@ pub const fn compute_pbrs_reward(
     gamma_bps: Bps,
 ) -> i64 {
     scale_bps_signed(next_potential, gamma_bps).saturating_sub(prev_potential)
+}
+
+/// Converts a card's provisional mandate point value (`3_000..=8_000` milli-points) into
+/// terminal equity units (`1:1` in Card 1; later Card 2 scales by table-median net worth).
+#[must_use]
+pub const fn convert_mandate_points_to_equity(
+    mandate_points_milli: Units,
+    _state: &EngineState,
+) -> Units {
+    mandate_points_milli
 }
 
 /// Evaluates whether `seat` satisfied its revealed Turn-1 Private Charter Mandate and returns
@@ -244,7 +264,10 @@ pub fn evaluate_mandate_bonus(
         }
     };
     if ok {
-        (true, card.bonus_equity)
+        (
+            true,
+            convert_mandate_points_to_equity(card.mandate_points_milli(), state),
+        )
     } else {
         (false, 0)
     }

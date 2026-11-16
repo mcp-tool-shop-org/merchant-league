@@ -26,6 +26,7 @@ pub mod empirical;
 pub mod feasibility;
 pub mod generator;
 pub mod lp;
+pub mod mandates;
 pub mod rng;
 pub mod schema;
 
@@ -40,6 +41,12 @@ pub use feasibility::{
 };
 pub use generator::{PlrChoice, PlrEntry, PlrSampler, generate_ring_table};
 pub use lp::{LpError, LpSolution, LpStatus, solve_lp};
+pub use mandates::{
+    CreditTier, GradedMandateCard, MandateKind, deal_graded_mandates,
+    deal_graded_mandates_with_entropy, deal_mandate_deck_indices, deal_mandates_for_ring_table,
+    default_graded_mandate_deck, graded_mandate_deck_for_mean_project_value,
+    mandate_deck_for_ring_table, mean_project_value_milli,
+};
 pub use rng::SeedStream;
 pub use schema::{
     ConverterSpec, CurrencyCode, DENIED_CURRENCY_CODES, EvMethod, FeasibilityError,

@@ -6,28 +6,29 @@
 use std::collections::BTreeMap;
 
 use league_core::{
-    ActiveCharter, AssetId, AtomicSwapProposal, BPS_SCALE, BondProposal, BundlePreview,
-    CharterBidOrder, CharterRole, CheckOrderPreview, CheckPreviewOutcome, CheckProposal,
-    CheckStatus, CommitmentHash, ConverterOrderPreview, ConverterRecipe, ConverterRunOrder,
-    CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
-    DEFAULT_PBRS_GAMMA_BPS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS,
-    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError, EngineState, EscrowFinishUnlock,
-    EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities, GradedMandateCard,
-    IntentPledge, IntentTarget, LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY,
-    MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction,
-    OfferProposal, OfferSide, OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder,
-    ProjectOrderPreview, ProjectRecipe, RegentDoctrine, ReplayBeaconMode, RevealSalt,
-    SealedOrderBundle, SeasonReplayLog, Seat, ShockKind, SwapPreviewOutcome, TableId, TableMode,
-    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, bonus_equity_for_completion_bps,
-    break_tie_with_beacon, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
-    checked_mul_units_parity, compute_final_scoreboard, compute_mandate_commitment,
-    compute_net_asset_equity, compute_order_commitment, compute_pbrs_reward, compute_potential,
-    compute_preimage_condition, deal_graded_mandates, deal_graded_mandates_with_entropy,
-    default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
-    drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
-    mul_units_parity, replay_season, scale_bps_signed, verify_drand_quicknet_beacon,
-    verify_order_reveal, verify_preimage_condition, verify_sealed_mandate_deal,
-    width_independent_index,
+    ActiveCharter, AssetId, AtomicSwapProposal, BPS_SCALE, BondProposal, BondSettlementMode,
+    BundlePreview, CharterBidOrder, CharterRole, CheckOrderPreview, CheckPreviewOutcome,
+    CheckProposal, CheckStatus, CommitmentHash, ContractDeliveryOrder, ConverterOrderPreview,
+    ConverterRecipe, ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CreditTier,
+    DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_PBRS_GAMMA_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
+    DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS,
+    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, DualEscrowProposal, EngineError, EngineState,
+    EscrowFinishUnlock, EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities,
+    GradedMandateCard, IDLE_MISS_TAKEOVER_TURNS, IntentPledge, IntentTarget, LoggedTurn,
+    MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY,
+    MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide, OrderReveal,
+    PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview, ProjectRecipe,
+    RegentDoctrine, ReplayBeaconMode, RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat,
+    SeatIdentity, ShockKind, SwapPreviewOutcome, TableId, TableMode, TableSpec, Turn, TurnEngine,
+    TurnPhase, UNIT_SCALE, Units, bonus_equity_for_completion_bps, break_tie_with_beacon,
+    ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
+    compute_final_scoreboard, compute_mandate_commitment, compute_net_asset_equity,
+    compute_order_commitment, compute_pbrs_reward, compute_potential, compute_preimage_condition,
+    deal_graded_mandates, deal_graded_mandates_with_entropy, default_graded_mandate_deck,
+    derive_drand_beacon, derive_turn_beacon, drand_quicknet_round_for_close,
+    evaluate_mandate_bonus, floor_bps_part, half_up_bps, mul_units_parity, replay_season,
+    scale_bps_signed, town_import_cost_cred, verify_drand_quicknet_beacon, verify_order_reveal,
+    verify_preimage_condition, verify_sealed_mandate_deal, width_independent_index,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -631,6 +632,7 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
                     good: AssetId::Raw(1),
                     required_units: 1_000,
                     deadline_turn: 3,
+                    mode: BondSettlementMode::SellerPerformanceBond,
                 }),
             },
         }),
@@ -1103,6 +1105,9 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
     let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
     spec.seats[0].initial_cred = 50_000;
     spec.seats[1].initial_cred = 50_000;
+    for seat in &mut spec.seats {
+        seat.regent = None;
+    }
     let mut engine = must_ok(TurnEngine::new(spec), "new");
     commit_and_reveal_all(&mut engine, tid, 1, vec![SealedOrderBundle::default(); 4]);
     must_ok(
@@ -1110,8 +1115,14 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
         "sweep 1",
     );
 
-    let pot_before_0 = compute_potential(engine.state(), 0);
-    let pot_before_1 = compute_potential(engine.state(), 1);
+    let mut eng_idle = engine.clone();
+    commit_and_reveal_all(&mut eng_idle, tid, 2, vec![SealedOrderBundle::default(); 4]);
+    must_ok(
+        eng_idle.sweep_turn(derive_turn_beacon(3, tid, Turn(2))),
+        "sweep 2 idle",
+    );
+    let pot_before_0 = compute_potential(eng_idle.state(), 0);
+    let pot_before_1 = compute_potential(eng_idle.state(), 1);
     let sum_before = pot_before_0 + pot_before_1;
 
     must_ok(
@@ -1147,7 +1158,7 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
             seat: 1,
             order: OfferProposal {
                 side: OfferSide::Sell,
-                good: AssetId::Raw(0),
+                good: AssetId::Raw(1),
                 amount: 1_800,
                 price_per_unit_cred: 1_500,
                 domain_id: None,
@@ -1161,7 +1172,7 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
             seat: 0,
             order: OfferProposal {
                 side: OfferSide::Buy,
-                good: AssetId::Raw(0),
+                good: AssetId::Raw(1),
                 amount: 1_800,
                 price_per_unit_cred: 1_500,
                 domain_id: None,
@@ -1170,22 +1181,23 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
         }),
         "wash buy back",
     );
+    commit_and_reveal_all(&mut engine, tid, 2, vec![SealedOrderBundle::default(); 4]);
+    let rec_wash = must_ok(
+        engine.sweep_turn(derive_turn_beacon(3, tid, Turn(2))),
+        "sweep 2 wash",
+    );
+    assert_eq!(rec_wash.batch_trades_cleared, 2);
 
     let pot_after_0 = compute_potential(engine.state(), 0);
     let pot_after_1 = compute_potential(engine.state(), 1);
     let sum_after = pot_after_0 + pot_after_1;
     assert!(sum_after < sum_before);
 
-    let f_undiscounted = compute_pbrs_reward(pot_before_0, pot_after_0, 10_000)
-        + compute_pbrs_reward(pot_before_1, pot_after_1, 10_000);
-    let f_discounted = compute_pbrs_reward(pot_before_0, pot_after_0, DEFAULT_PBRS_GAMMA_BPS)
-        + compute_pbrs_reward(pot_before_1, pot_after_1, DEFAULT_PBRS_GAMMA_BPS);
+    let f_undiscounted = compute_pbrs_reward(sum_before, sum_after, 10_000);
+    let f_discounted = compute_pbrs_reward(0, sum_after, DEFAULT_PBRS_GAMMA_BPS)
+        - compute_pbrs_reward(0, sum_before, DEFAULT_PBRS_GAMMA_BPS);
     assert!(f_undiscounted < 0);
-    assert!(
-        f_discounted
-            < compute_pbrs_reward(pot_before_0, pot_before_0, DEFAULT_PBRS_GAMMA_BPS)
-                + compute_pbrs_reward(pot_before_1, pot_before_1, DEFAULT_PBRS_GAMMA_BPS)
-    );
+    assert!(f_discounted < 0);
 
     // 2) Inside zero-tariff cartel Domain 0 (founded on Turn 4): circular AtomicSwap on Turn 5 creates zero equity surplus (sum <= 0).
     let mut clean_eng = must_ok(
@@ -1858,7 +1870,19 @@ fn dex_overflow_reproducer_and_cred_conservation_property() {
             .filter(|e| e.status == league_core::EscrowStatus::Locked)
             .map(|e| e.amount_cred)
             .sum();
-        free + locked_offers + locked_escrows + cum_repaid + cum_burned
+        let locked_dual: i64 = eng
+            .state()
+            .dual_escrows
+            .values()
+            .filter(|e| e.status == league_core::EscrowStatus::Locked)
+            .map(|e| e.buyer_bond_cred + e.seller_bond_cred)
+            .sum();
+        free + locked_offers
+            + locked_escrows
+            + locked_dual
+            + eng.state().pending_town_import_cred_spent
+            + cum_repaid
+            + cum_burned
     }
 
     for seed in 1..=8_u64 {
@@ -1992,8 +2016,8 @@ fn dex_overflow_reproducer_and_cred_conservation_property() {
                 eng.sweep_turn(derive_turn_beacon(seed, tid, Turn(t))),
                 "sweep",
             );
-            cum_repaid += receipt.cred_debt_repaid;
-            cum_burned += receipt.charter_cred_burned;
+            cum_repaid += receipt.cred_debt_repaid + receipt.town_import_cred_spent;
+            cum_burned += receipt.charter_cred_burned - receipt.works_stipend_cred_minted;
             assert_eq!(
                 total_cred_accounted(&eng, cum_repaid, cum_burned),
                 initial_total
@@ -2051,6 +2075,7 @@ fn invalid_assets_rejected_and_engine_is_panic_free_under_adversarial_inputs() {
                     good: AssetId::Raw(99),
                     required_units: 100,
                     deadline_turn: 2,
+                    mode: BondSettlementMode::SellerPerformanceBond,
                 }),
             },
         }),
@@ -2216,6 +2241,7 @@ fn invalid_assets_rejected_and_engine_is_panic_free_under_adversarial_inputs() {
                         good: asset,
                         required_units: amt,
                         deadline_turn: 2,
+                        mode: BondSettlementMode::SellerPerformanceBond,
                     }),
                 },
             },
@@ -2490,8 +2516,8 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
         order: OfferProposal {
             side: OfferSide::Buy,
             good: AssetId::Raw(1),
-            amount: 3,
-            price_per_unit_cred: 1,
+            amount: 1_001,
+            price_per_unit_cred: 1_000,
             domain_id: None,
             is_hybrid: false,
         },
@@ -2505,7 +2531,7 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
     assert_eq!(eng.state().offers.len(), 3);
     assert!(eng.state().delivery_ledger.is_empty());
 
-    // 2. Assert exact state_digest() invariance on Err across ALL 9 MarketAction variants.
+    // 2. Assert exact state_digest() invariance on Err across ALL 10 MarketAction variants.
     let too_many_domains = (0..=(MAX_CARTEL_DOMAINS as u8)).map(|d| (d, 0)).collect();
     let refused_variants = [
         partial_buy.clone(),
@@ -2569,6 +2595,11 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
                 cartel_admissions: too_many_domains,
                 cartel_revocations: Vec::new(),
             },
+        },
+        MarketAction::TownImport {
+            seat: 0,
+            good: AssetId::Raw(1),
+            amount: 2_000,
         },
     ];
     for action in refused_variants {
@@ -3315,7 +3346,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "ae4acb1e98a623cbbf540425faebf1346331853033c3dfc325d2f63b020f777d"
+        "a18f8aa6b2f0ac5a3181249b0c87609e7e42bc9105db5c76fa9d336116e6f662"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -3343,6 +3374,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
                     good: AssetId::Raw(1),
                     required_units: 1_000,
                     deadline_turn: 2,
+                    mode: BondSettlementMode::SellerPerformanceBond,
                 }),
             },
         }),
@@ -4562,7 +4594,19 @@ fn table_cred_total(eng: &TurnEngine, total_repaid: Units, total_burned: Units) 
         .filter(|e| e.status == EscrowStatus::Locked)
         .map(|e| e.amount_cred)
         .sum();
-    free + offer_locked + escrow_locked + total_repaid + total_burned
+    let dual_locked: Units = eng
+        .state()
+        .dual_escrows
+        .values()
+        .filter(|e| e.status == EscrowStatus::Locked)
+        .map(|e| e.buyer_bond_cred + e.seller_bond_cred)
+        .sum();
+    free + offer_locked
+        + escrow_locked
+        + dual_locked
+        + eng.state().pending_town_import_cred_spent
+        + total_repaid
+        + total_burned
 }
 
 #[test]
@@ -4677,6 +4721,7 @@ fn f5_f6_random_multi_table_cred_conservation_and_panic_free_sweep_property() {
                                     good: AssetId::Raw(seat),
                                     required_units: 500,
                                     deadline_turn: t.saturating_add(1),
+                                    mode: BondSettlementMode::SellerPerformanceBond,
                                 }),
                             },
                         }
@@ -4849,8 +4894,8 @@ fn f5_f6_random_multi_table_cred_conservation_and_panic_free_sweep_property() {
             let beacon = derive_turn_beacon(table_idx + 1, tid, Turn(t));
             let rec = must_ok(eng.sweep_turn(beacon), "sweep never panics or errors");
             total_turns_swept += 1;
-            total_repaid += rec.cred_debt_repaid;
-            total_burned += rec.charter_cred_burned;
+            total_repaid += rec.cred_debt_repaid + rec.town_import_cred_spent;
+            total_burned += rec.charter_cred_burned - rec.works_stipend_cred_minted;
             assert_eq!(
                 table_cred_total(&eng, total_repaid, total_burned),
                 initial_cred
@@ -4996,11 +5041,11 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "0c0b0f7defa45787509e78aa3af222f6a79e9ae2cb0613b155bcefbe9fab82a2"
+        "309f37700c0f5496780168c325b7241e262fece62aa6504ffabd734795173eeb"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "bf1e101e8a300169c805685d4506904a848e143cc9296b309f8c36c8cf5fb76d"
+        "e74dde24eefef6e596f9c4d2b9ccd430f5a6efa2180445b889247c8be8951fe9"
     );
 }
 
@@ -5421,4 +5466,895 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         replay_season(&eval_with_drand),
         Err(EngineError::InvalidOrder(_))
     ));
+}
+
+#[test]
+fn c1a_three_zero_production_turns_hand_seat_to_regent() {
+    let tid = TableId(960);
+    let spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 3), "spec");
+    let mut eng = must_ok(TurnEngine::new(spec), "new");
+
+    // Turn 1: all seats submit valid empty bundles (Seat 0 zero-production turn #1).
+    commit_and_reveal_all(&mut eng, tid, 1, vec![SealedOrderBundle::default(); 4]);
+    let r1 = must_ok(eng.sweep_turn_seeded(3), "sweep 1");
+    assert!(!r1.regent_acted_seats.contains(&0));
+    assert!(!r1.converted_to_ai.contains(&0));
+
+    // Turn 2: Seats 1 & 2 deliver Raw(1) & Raw(2) to Seat 0, who submits valid empty bundle (turn #2).
+    let mut b2 = vec![SealedOrderBundle::default(); 4];
+    for (idx, partner) in [1_u8, 2].into_iter().enumerate() {
+        let sw = AtomicSwapProposal {
+            swap_id: 9600 + idx as u64,
+            maker: partner,
+            taker: 0,
+            maker_asset: AssetId::Raw(partner),
+            maker_amount: 6_000,
+            taker_asset: AssetId::Cred,
+            taker_amount: 200,
+            domain_id: None,
+        };
+        b2[0].atomic_swaps.push(sw.clone());
+        b2[usize::from(partner)].atomic_swaps.push(sw);
+    }
+    commit_and_reveal_all(&mut eng, tid, 2, b2);
+    let r2 = must_ok(eng.sweep_turn_seeded(3), "sweep 2");
+    assert!(!r2.regent_acted_seats.contains(&0));
+    assert!(!r2.converted_to_ai.contains(&0));
+    assert_eq!(eng.state().seats[0].refined[0], 0);
+
+    // Turn 3: Seat 0 submits a valid empty bundle (3rd consecutive zero-production turn) ->
+    // Regent must take over on Turn 3 and convert Seat 0 -> AiSyndicate.
+    commit_and_reveal_all(&mut eng, tid, 3, vec![SealedOrderBundle::default(); 4]);
+    let r3 = must_ok(eng.sweep_turn_seeded(3), "sweep 3");
+    assert!(
+        r3.regent_acted_seats.contains(&0),
+        "expected Regent takeover on 3rd consecutive zero-production turn"
+    );
+    assert!(
+        r3.converted_to_ai.contains(&0),
+        "expected Human -> AiSyndicate conversion on 3rd zero-production turn"
+    );
+    assert_eq!(eng.state().seats[0].identity, SeatIdentity::AiSyndicate);
+    assert!(eng.state().seats[0].refined[0] > 0);
+}
+
+#[test]
+fn c4_phase1_batch_clearing_is_arrival_order_invariant_and_beacon_tie_broken() {
+    let tid = TableId(961);
+    let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, 4, 7), "spec");
+    for seat in &mut spec.seats {
+        seat.regent = None;
+        seat.perishable_decay_bps = 0;
+        seat.initial_raw_tariff_bps = 0;
+    }
+    let mut base_eng = must_ok(TurnEngine::new(spec), "new");
+    commit_and_reveal_all(&mut base_eng, tid, 1, vec![SealedOrderBundle::default(); 4]);
+    must_ok(base_eng.sweep_turn_seeded(7), "sweep 1");
+
+    // Same two crossing orders submitted in opposite arrival orders:
+    // Order A: Seat 0 buys 1_000 Raw(1) up to 1_500 CRED/unit.
+    // Order B: Seat 1 sells 1_000 Raw(1) down to 1_000 CRED/unit.
+    let buy_0 = MarketAction::PostOffer {
+        seat: 0,
+        order: OfferProposal {
+            side: OfferSide::Buy,
+            good: AssetId::Raw(1),
+            amount: 1_000,
+            price_per_unit_cred: 1_500,
+            domain_id: None,
+            is_hybrid: false,
+        },
+    };
+    let sell_1 = MarketAction::PostOffer {
+        seat: 1,
+        order: OfferProposal {
+            side: OfferSide::Sell,
+            good: AssetId::Raw(1),
+            amount: 1_000,
+            price_per_unit_cred: 1_000,
+            domain_id: None,
+            is_hybrid: false,
+        },
+    };
+
+    let mut eng_ab = base_eng.clone();
+    must_ok(eng_ab.apply_market_action(buy_0.clone()), "ab buy");
+    must_ok(eng_ab.apply_market_action(sell_1.clone()), "ab sell");
+    commit_and_reveal_all(&mut eng_ab, tid, 2, vec![SealedOrderBundle::default(); 4]);
+    let r_ab = must_ok(eng_ab.sweep_turn_seeded(7), "sweep ab");
+
+    let mut eng_ba = base_eng;
+    must_ok(eng_ba.apply_market_action(sell_1), "ba sell");
+    must_ok(eng_ba.apply_market_action(buy_0), "ba buy");
+    commit_and_reveal_all(&mut eng_ba, tid, 2, vec![SealedOrderBundle::default(); 4]);
+    let r_ba = must_ok(eng_ba.sweep_turn_seeded(7), "sweep ba");
+
+    assert_eq!(
+        eng_ab.state().seats[1].cred,
+        eng_ba.state().seats[1].cred,
+        "seller CRED must be arrival-order invariant under batch clearing"
+    );
+    assert_eq!(r_ab.post_state_digest, r_ba.post_state_digest);
+    // Uniform midpoint clearing price = (1_000 + 1_500) / 2 = 1_250 CRED/unit -> 1_250 CRED traded.
+    assert_eq!(eng_ab.state().seats[0].raw[1], 1_000);
+    assert_eq!(eng_ab.state().seats[0].cred, 15_200 - 1_250);
+    assert_eq!(eng_ab.state().seats[1].cred, 15_200 + 1_250);
+}
+
+#[test]
+fn b2_single_mandate_deck_rejects_low_credit_tiers() {
+    for tier in [CreditTier::B, CreditTier::D] {
+        assert!(
+            MandateKind::MaintainCleanCredit { min_tier: tier }
+                .validate_for_seat_count(4)
+                .is_err(),
+            "MaintainCleanCredit below Bbb ({tier:?}) must be rejected"
+        );
+    }
+    for tier in [CreditTier::Aaa, CreditTier::Bbb] {
+        assert!(
+            MandateKind::MaintainCleanCredit { min_tier: tier }
+                .validate_for_seat_count(4)
+                .is_ok()
+        );
+    }
+}
+
+#[test]
+fn c1b_town_import_fallback_runs_works_when_supplier_idles_and_pays_premium() {
+    let (mut spec, _deal) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(TableId(960), 4, 1),
+        "spec",
+    );
+    spec.seats[0].initial_cred = 20_000;
+    let mut engine = must_ok(TurnEngine::new(spec.clone()), "engine");
+
+    // Seat 0 needs Raw(1) and Raw(2) (2_000 each) for primary converter -> Refined(0),
+    // and Refined(1) (1_000) + Refined(0) (1_000) to test fallback purchase.
+    // Suppliers idle; Seat 0 uses TownImport at the configured premium (22_500 bps = 2.25x).
+    assert_eq!(
+        spec.town_import_premium_bps,
+        DEFAULT_TOWN_IMPORT_PREMIUM_BPS
+    );
+    let raw1_parity = engine.state().parities.asset_parity(AssetId::Raw(1));
+    let expected_cost_each = must_ok(
+        town_import_cost_cred(2_000, raw1_parity, DEFAULT_TOWN_IMPORT_PREMIUM_BPS),
+        "town import cost",
+    );
+    assert_eq!(expected_cost_each, 7_875);
+
+    assert!(
+        engine
+            .apply_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Cred,
+                amount: 1_000,
+            })
+            .is_err(),
+        "TownImport must reject Cred as target asset"
+    );
+    assert!(
+        engine
+            .apply_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Raw(1),
+                amount: 0,
+            })
+            .is_err(),
+        "TownImport must reject non-positive amount"
+    );
+
+    // Note Seat 0 starts with 15_000+ CRED so buying both costs 15_750 unless we test 1_000 each first;
+    // actually let's test 1_000 Raw(1) + 1_000 Raw(2) if 15_750 > initial_cred, or test two tables/seats.
+    // Wait: Seat 0 starts with 15_100 CRED (spread_mod=1 -> 15_100), so let's import 1_000 each cleanly!
+    // No — converter requires 2_000 each! Let's import 1_000 by Seat 0 + top up or use Seat 0 buying 2_000 Raw(1)
+    // and let Seat 1 Transfer / Buy? Wait: let's check cred cost of 2_000: 7_875 * 2 = 15_750 > 15_100!
+    // Instead, give Seat 0 a 2_000 CRED gift via escrow/swap OR have Seat 0 start with initial_cred or custom spec!
+    let cred_before = engine.state().seats[0].cred;
+    must_ok(
+        engine.apply_market_action(MarketAction::TownImport {
+            seat: 0,
+            good: AssetId::Raw(1),
+            amount: 2_000,
+        }),
+        "town import raw 1",
+    );
+    must_ok(
+        engine.apply_market_action(MarketAction::TownImport {
+            seat: 0,
+            good: AssetId::Raw(2),
+            amount: 2_000,
+        }),
+        "town import raw 2",
+    );
+    assert_eq!(
+        cred_before - engine.state().seats[0].cred,
+        2 * expected_cost_each
+    );
+    assert_eq!(engine.state().seats[0].raw[1], 2_000);
+    assert_eq!(engine.state().seats[0].raw[2], 2_000);
+
+    // Seat 0 can now convert those town-imported raw inputs into Refined(0) on Turn 1.
+    let mut bundles = vec![SealedOrderBundle::default(); 4];
+    bundles[0].converter_runs.push(ConverterRunOrder {
+        recipe_idx: 0,
+        runs: 1,
+    });
+    commit_and_reveal_all(&mut engine, TableId(960), 1, bundles);
+    let receipt = must_ok(engine.sweep_turn_seeded(1), "sweep turn 1");
+    assert_eq!(receipt.town_import_cred_spent, 2 * expected_cost_each);
+    assert_eq!(engine.state().seats[0].refined[0], 3_500);
+}
+
+#[test]
+fn c2_buyer_dvp_and_cosigned_dual_escrow_delivery_defaults_and_lock_cap() {
+    let (spec, _deal) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(TableId(961), 4, 1),
+        "spec",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec), "engine");
+    // Turn 1: disable Regents by clearing regent configs on a clean copy or simply act cleanly
+    // with explicit SealedOrderBundles. Give Seat 1 some Raw(1) -> already has 0, so yield on Turn 1 gives 10_000.
+    // First test BuyerDvpPayment delivery (deadline Turn 2) & default (deadline Turn 3).
+    let buyer_cred_t1 = engine.state().seats[0].cred;
+    must_ok(
+        engine.apply_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 4,
+                condition_hash: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Raw(1),
+                    required_units: 1_000,
+                    deadline_turn: 2,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            },
+        }),
+        "create BuyerDvpPayment escrow 1",
+    );
+    must_ok(
+        engine.apply_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 5,
+                condition_hash: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Raw(1),
+                    required_units: 1_000,
+                    deadline_turn: 3,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            },
+        }),
+        "create BuyerDvpPayment escrow 2",
+    );
+    assert_eq!(buyer_cred_t1 - engine.state().seats[0].cred, 2_000);
+
+    // Reject DualEscrowProposal exceeding <= 100% combined lock (buyer + seller > payment_cred).
+    let mut bad_bundle_0 = SealedOrderBundle::default();
+    bad_bundle_0.dual_escrows.push(DualEscrowProposal {
+        proposal_id: 9001,
+        buyer: 0,
+        seller: 1,
+        good: AssetId::Raw(1),
+        required_units: 500,
+        payment_cred: 1_000,
+        buyer_bond_cred: 600,
+        seller_bond_cred: 500, // 600 + 500 = 1_100 > 1_000 (exceeds 100% combined cap)
+        deadline_turn: 3,
+        domain_id: None,
+    });
+    commit_and_reveal_all(
+        &mut engine,
+        TableId(961),
+        1,
+        vec![
+            SealedOrderBundle::default(),
+            SealedOrderBundle::default(),
+            SealedOrderBundle::default(),
+            SealedOrderBundle::default(),
+        ],
+    );
+    must_ok(engine.sweep_turn_seeded(1), "sweep turn 1");
+
+    // Advance to Reveal on Turn 2 with an over-capped dual escrow -> must return InvalidOrder.
+    must_ok(engine.advance_to_commit(), "commit t2");
+    must_ok(
+        engine.submit_order_commitment(
+            Seat(0),
+            must_ok(
+                compute_order_commitment(
+                    TableId(961),
+                    Turn(2),
+                    Seat(0),
+                    &OrderReveal {
+                        bundle: bad_bundle_0.clone(),
+                        salt: RevealSalt([0x11; 32]),
+                    },
+                ),
+                "ch0",
+            ),
+        ),
+        "c0",
+    );
+    must_ok(
+        engine.submit_order_commitment(
+            Seat(1),
+            must_ok(
+                compute_order_commitment(
+                    TableId(961),
+                    Turn(2),
+                    Seat(1),
+                    &OrderReveal {
+                        bundle: bad_bundle_0.clone(),
+                        salt: RevealSalt([0x12; 32]),
+                    },
+                ),
+                "ch1",
+            ),
+        ),
+        "c1",
+    );
+    must_ok(engine.advance_to_reveal(), "reveal t2");
+    assert!(
+        matches!(
+            engine.submit_order_reveal(
+                Seat(0),
+                OrderReveal {
+                    bundle: bad_bundle_0,
+                    salt: RevealSalt([0x11; 32]),
+                },
+            ),
+            Err(EngineError::InvalidOrder(_))
+        ),
+        "co-signed DualEscrow exceeding 100% combined lock cap must be rejected"
+    );
+
+    // Build fresh Turn 2 engine where Seat 1 delivers 1_000 Raw(1) -> frees BuyerDvpPayment #1 on Turn 2,
+    // plus opens a valid 50%/50% co-signed DualEscrow (#77, 1_000 total lock = 500 buyer + 500 seller <= 1_000),
+    // and then leaves BuyerDvpPayment #2 unfulfilled so #2 refunds to Buyer on Turn 3 (no seller windfall).
+    let (spec2, _) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(TableId(962), 4, 1),
+        "spec2",
+    );
+    let mut eng2 = must_ok(TurnEngine::new(spec2), "eng2");
+    must_ok(
+        eng2.apply_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 4,
+                condition_hash: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Raw(1),
+                    required_units: 1_000,
+                    deadline_turn: 2,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            },
+        }),
+        "dvp 1",
+    );
+    must_ok(
+        eng2.apply_market_action(MarketAction::CreateEscrow {
+            seat: 0,
+            escrow: EscrowProposal {
+                destination: 1,
+                asset: AssetId::Cred,
+                amount: 1_000,
+                finish_after_turn: None,
+                cancel_after_turn: 5,
+                condition_hash: None,
+                bond: Some(BondProposal {
+                    good: AssetId::Raw(1),
+                    required_units: 2_500,
+                    deadline_turn: 3,
+                    mode: BondSettlementMode::BuyerDvpPayment,
+                }),
+            },
+        }),
+        "dvp 2",
+    );
+    commit_and_reveal_all(
+        &mut eng2,
+        TableId(962),
+        1,
+        vec![SealedOrderBundle::default(); 4],
+    );
+    must_ok(eng2.sweep_turn_seeded(1), "sweep t1 eng2");
+
+    // Turn 2: Seat 1 delivers 1_012 net Raw(1) fulfilling dvp 1 (1_000) while leaving dvp 2 (2_500)
+    // and newly opened DualEscrow 77 (2_500) unfulfilled.
+    let dual_77 = DualEscrowProposal {
+        proposal_id: 77,
+        buyer: 0,
+        seller: 1,
+        good: AssetId::Raw(1),
+        required_units: 2_500,
+        payment_cred: 1_000,
+        buyer_bond_cred: 500,
+        seller_bond_cred: 500,
+        deadline_turn: 3,
+        domain_id: None,
+    };
+    let seller_cred_before_t2 = eng2.state().seats[1].cred;
+    let mut t2_bundles = vec![SealedOrderBundle::default(); 4];
+    t2_bundles[0].dual_escrows.push(dual_77.clone());
+    t2_bundles[1].dual_escrows.push(dual_77);
+    t2_bundles[1]
+        .contract_deliveries
+        .push(ContractDeliveryOrder {
+            counterparty: 0,
+            good: AssetId::Raw(1),
+            gross_amount: 1_100, // net after 800 bps raw tariff = 1_100 - 88 = 1_012 >= 1_000 required
+            domain_id: None,
+            dual_escrow_id: None,
+        });
+    commit_and_reveal_all(&mut eng2, TableId(962), 2, t2_bundles);
+    must_ok(eng2.sweep_turn_seeded(2), "sweep t2 eng2");
+
+    // Verify BuyerDvpPayment #1 released 1_000 CRED to Seat 1 while Seat 1 locked 500 CRED for DualEscrow 77.
+    assert_eq!(
+        eng2.state().seats[1].cred,
+        seller_cred_before_t2 + 1_000 - 500,
+        "Seller should receive 1_000 CRED DvP payment on delivery and lock 500 CRED for DualEscrow 77"
+    );
+    assert_eq!(eng2.state().dual_escrows.len(), 1);
+
+    // Turn 3: Seller does NOT deliver for DvP #2 or DualEscrow 77 -> BOTH default on Turn 3 sweep!
+    let buyer_cred_before_t3 = eng2.state().seats[0].cred;
+    commit_and_reveal_all(
+        &mut eng2,
+        TableId(962),
+        3,
+        vec![SealedOrderBundle::default(); 4],
+    );
+    let r3 = must_ok(eng2.sweep_turn_seeded(3), "sweep t3 eng2");
+    assert!(!r3.escrows_cancelled_or_forfeited.is_empty());
+    assert!(
+        eng2.state().seats[1].bond_breaches >= 1,
+        "defaulted Seller on DvP/DualEscrow must record bond breach"
+    );
+    // Buyer receives back dvp #2 payment (1_000) + DualEscrow 77 buyer_bond_cred (500) + forfeited seller_bond_cred (500) = 2_000!
+    assert_eq!(
+        eng2.state().seats[0].cred,
+        buyer_cred_before_t3 + 2_000,
+        "Buyer must recover unfunded DvP #2 plus both DualEscrow bonds on seller default"
+    );
+
+    // Turn 4: Co-signed DualEscrow (#78, 50% + 50% = 100% combined lock) WITH successful Seller ContractDeliveryOrder.
+    let expected_eid_78 = eng2.state().next_escrow_id;
+    let dual_78 = DualEscrowProposal {
+        proposal_id: 78,
+        buyer: 0,
+        seller: 1,
+        good: AssetId::Raw(1),
+        required_units: 1_000,
+        payment_cred: 1_000,
+        buyer_bond_cred: 500,
+        seller_bond_cred: 500,
+        deadline_turn: 4,
+        domain_id: None,
+    };
+    let buyer_cred_t4 = eng2.state().seats[0].cred;
+    let seller_cred_t4 = eng2.state().seats[1].cred;
+    let mut t4_bundles = vec![SealedOrderBundle::default(); 4];
+    t4_bundles[0].dual_escrows.push(dual_78.clone());
+    t4_bundles[1].dual_escrows.push(dual_78);
+    t4_bundles[1]
+        .contract_deliveries
+        .push(ContractDeliveryOrder {
+            counterparty: 0,
+            good: AssetId::Raw(1),
+            gross_amount: 1_100, // after 800 bps raw tariff = 1_100 - 88 = 1_012 >= 1_000 required
+            domain_id: None,
+            dual_escrow_id: Some(expected_eid_78),
+        });
+    commit_and_reveal_all(&mut eng2, TableId(962), 4, t4_bundles);
+    let r4 = must_ok(eng2.sweep_turn_seeded(4), "sweep t4 eng2");
+    assert!(r4.escrows_finished.contains(&expected_eid_78));
+    assert_eq!(
+        eng2.state().dual_escrows[&expected_eid_78].status,
+        EscrowStatus::Finished
+    );
+    assert_eq!(eng2.state().seats[0].cred, buyer_cred_t4 - 1_000);
+    assert_eq!(eng2.state().seats[1].cred, seller_cred_t4 + 1_000);
+
+    // Buyer default test: Buyer locks 500 bond on DualEscrow (payment=1_000), leaving only 200 free CRED (< 500 top-up);
+    // Seller attempts ContractDeliveryOrder tied to the DualEscrow -> Buyer defaults, forfeiting 500 buyer_bond_cred to Seller
+    // while Seller keeps its commodity!
+    let (mut spec3, _) = must_ok(
+        TableSpec::standard_chiral_ring_with_mandates(TableId(966), 4, 1),
+        "spec3",
+    );
+    spec3.seats[0].initial_cred = 700;
+    let mut eng3 = must_ok(TurnEngine::new(spec3), "eng3");
+    commit_and_reveal_all(
+        &mut eng3,
+        TableId(966),
+        1,
+        vec![SealedOrderBundle::default(); 4],
+    );
+    must_ok(eng3.sweep_turn_seeded(1), "sweep t1 eng3");
+
+    let expected_eid_88 = eng3.state().next_escrow_id;
+    let dual_88 = DualEscrowProposal {
+        proposal_id: 88,
+        buyer: 0,
+        seller: 1,
+        good: AssetId::Raw(1),
+        required_units: 1_000,
+        payment_cred: 1_000,
+        buyer_bond_cred: 500,
+        seller_bond_cred: 500,
+        deadline_turn: 2,
+        domain_id: None,
+    };
+    let seller_raw1_before = eng3.state().seats[1].raw[1];
+    let seller_cred_before_def = eng3.state().seats[1].cred;
+    let mut b_def = vec![SealedOrderBundle::default(); 4];
+    b_def[0].dual_escrows.push(dual_88.clone());
+    b_def[1].dual_escrows.push(dual_88);
+    b_def[1].contract_deliveries.push(ContractDeliveryOrder {
+        counterparty: 0,
+        good: AssetId::Raw(1),
+        gross_amount: 1_100,
+        domain_id: None,
+        dual_escrow_id: Some(expected_eid_88),
+    });
+    commit_and_reveal_all(&mut eng3, TableId(966), 2, b_def);
+    let r_def = must_ok(eng3.sweep_turn_seeded(2), "sweep buyer default");
+    assert!(
+        r_def
+            .escrows_cancelled_or_forfeited
+            .contains(&expected_eid_88)
+    );
+    assert_eq!(
+        eng3.state().dual_escrows[&expected_eid_88].status,
+        EscrowStatus::Cancelled
+    );
+    assert_eq!(eng3.state().seats[0].bond_breaches, 1);
+    assert_eq!(eng3.state().seats[1].cred, seller_cred_before_def + 500);
+    // Seller retained its Raw(1) (buyer received 0 Raw(1); after 20% Turn-2 spoilage on 8_000 + 10_000 = 14_400):
+    assert_eq!(seller_raw1_before, 8_000);
+    assert_eq!(eng3.state().seats[0].raw[1], 0);
+    assert_eq!(eng3.state().seats[1].raw[1], 14_400);
+}
+
+#[test]
+fn c3_works_stipend_reduces_season_cred_drain_without_scoring_coin_vp() {
+    // Full 24..=28 turn seeded seasons (seed = 27) comparing stipend = 0 vs DEFAULT (350).
+    let table_id = TableId(963);
+    let deal_seed = [0x55; 32];
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x70 + i; 32])).collect();
+    let (mut spec_zero, _deal_zero) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(table_id, 4, 27, deal_seed, &salts),
+        "spec zero",
+    );
+    spec_zero.works_stipend_per_unit_cred = 0;
+
+    let (spec_stip, _) = must_ok(
+        TableSpec::standard_chiral_ring_with_explicit_deal(table_id, 4, 27, deal_seed, &salts),
+        "spec stip",
+    );
+    assert_eq!(
+        spec_stip.works_stipend_per_unit_cred,
+        DEFAULT_WORKS_STIPEND_PER_UNIT_CRED
+    );
+
+    let run_season_drain = |spec: TableSpec| -> (i64, i64, i64, Units, Units) {
+        let initial_cred: i64 = spec.seats.iter().map(|s| s.initial_cred).sum();
+        let mut eng = must_ok(TurnEngine::new(spec), "engine");
+        for s in 0..4u8 {
+            let c = eng.state().spec.dealt_mandate_commits[usize::from(s)];
+            must_ok(eng.submit_mandate_commitment(Seat(s), c), "mc");
+        }
+        let mut minted_total = 0i64;
+        for t in 1..=28u8 {
+            if eng.state().phase != TurnPhase::TalkAndMarket {
+                break;
+            }
+            let mut bundles = vec![SealedOrderBundle::default(); 4];
+            // Circulate raw goods around the 4-seat chiral ring via atomic swaps so every seat
+            // can run converters, then trade adjacent refined goods to deliver Works projects.
+            if t >= 2 {
+                for i in 0..4u8 {
+                    let next1 = (i + 1) % 4;
+                    let sw = AtomicSwapProposal {
+                        swap_id: u64::from(t) * 100 + u64::from(i),
+                        maker: i,
+                        taker: next1,
+                        maker_asset: AssetId::Raw(i),
+                        maker_amount: 2_500,
+                        taker_asset: AssetId::Raw(next1),
+                        taker_amount: 2_500,
+                        domain_id: None,
+                    };
+                    if eng.state().seats[usize::from(i)].raw[usize::from(i)] >= 7_500
+                        && eng.state().seats[usize::from(next1)].raw[usize::from(next1)] >= 7_500
+                    {
+                        bundles[usize::from(i)].atomic_swaps.push(sw.clone());
+                        bundles[usize::from(next1)].atomic_swaps.push(sw);
+                    }
+                    let next2 = (i + 2) % 4;
+                    if i < 2 {
+                        let sw2 = AtomicSwapProposal {
+                            swap_id: u64::from(t) * 100 + 20 + u64::from(i),
+                            maker: i,
+                            taker: next2,
+                            maker_asset: AssetId::Raw(i),
+                            maker_amount: 2_500,
+                            taker_asset: AssetId::Raw(next2),
+                            taker_amount: 2_500,
+                            domain_id: None,
+                        };
+                        if eng.state().seats[usize::from(i)].raw[usize::from(i)] >= 7_500
+                            && eng.state().seats[usize::from(next2)].raw[usize::from(next2)]
+                                >= 7_500
+                        {
+                            bundles[usize::from(i)].atomic_swaps.push(sw2.clone());
+                            bundles[usize::from(next2)].atomic_swaps.push(sw2);
+                        }
+                    }
+                }
+            }
+            for bundle in &mut bundles {
+                bundle.converter_runs.push(ConverterRunOrder {
+                    recipe_idx: 0,
+                    runs: 1,
+                });
+            }
+            if t >= 3 {
+                // Deliver refined swap (0 <-> 1 for Project 1; 2 <-> 3 for Project 3) and deliver projects.
+                for (lead, partner, proj_id) in [(0_u8, 1_u8, 1_u16), (2_u8, 3_u8, 3_u16)] {
+                    if eng.state().seats[usize::from(partner)].refined[usize::from(partner)]
+                        >= 1_200
+                        && eng.state().seats[usize::from(lead)].refined[usize::from(lead)] >= 2_200
+                    {
+                        let rsw = AtomicSwapProposal {
+                            swap_id: u64::from(t) * 100 + 50 + u64::from(lead),
+                            maker: partner,
+                            taker: lead,
+                            maker_asset: AssetId::Refined(partner),
+                            maker_amount: 1_200,
+                            taker_asset: AssetId::Refined(lead),
+                            taker_amount: 1_200,
+                            domain_id: None,
+                        };
+                        bundles[usize::from(partner)].atomic_swaps.push(rsw.clone());
+                        bundles[usize::from(lead)].atomic_swaps.push(rsw);
+                        bundles[usize::from(lead)]
+                            .project_deliveries
+                            .push(ProjectDeliveryOrder {
+                                project_id: proj_id,
+                                batches: 1,
+                            });
+                    }
+                }
+            }
+            if t % 6 == 0 {
+                // Charter bids drain circulating CRED on turns 6, 12, 18, 24 (recreating seed-27 drain).
+                let roles = [
+                    CharterRole::OracleAuditor,
+                    CharterRole::ClearinghouseBroker,
+                    CharterRole::CustomsInspector,
+                ];
+                for s in 0..3usize {
+                    let bid = 3_600.min(eng.state().seats[s].cred);
+                    if bid > 0 {
+                        bundles[s].charter_bids.push(CharterBidOrder {
+                            role: roles[s],
+                            bid_cred: bid,
+                        });
+                    }
+                }
+            }
+            commit_and_reveal_all(&mut eng, table_id, t, bundles);
+            let rec = must_ok(eng.sweep_turn_seeded(u64::from(t)), "sweep");
+            minted_total += rec.works_stipend_cred_minted;
+        }
+        let end_cred: i64 = eng.state().seats.iter().map(|s| s.cred).sum();
+        let drain_bps = ((initial_cred - end_cred) * 10_000) / initial_cred;
+        let total_vp: Units = eng.state().seats.iter().map(|s| s.project_equity).sum();
+        (initial_cred, end_cred, drain_bps, minted_total, total_vp)
+    };
+
+    let (init_cred, end_before, drain_before_bps, minted_before, season_vp_before) =
+        run_season_drain(spec_zero);
+    let (_, end_after, drain_after_bps, minted_after, season_vp_after) =
+        run_season_drain(spec_stip);
+    println!(
+        "C3_CRED_DRAIN: initial_cred={init_cred} end_cred_before={end_before} drain_before_bps={drain_before_bps} end_cred_after={end_after} drain_after_bps={drain_after_bps} stipend_minted={minted_after}"
+    );
+    assert_eq!(minted_before, 0);
+    assert!(minted_after > 0, "Works deliveries must mint CRED stipend");
+    assert!(
+        drain_before_bps >= 5_000,
+        "un-stipended season must reproduce heavy CRED drain ({drain_before_bps} bps)"
+    );
+    assert!(
+        drain_after_bps < drain_before_bps,
+        "Works stipend must reduce season CRED drain ({drain_after_bps} vs {drain_before_bps} bps)"
+    );
+    assert_eq!(
+        season_vp_before, season_vp_after,
+        "Works CRED stipend must never award extra Project VP"
+    );
+
+    // Also verify controlled exact stipend arithmetic (2_000 refined units * 350 / 1_000 = 700 CRED).
+    let run_controlled_works = |stipend_per_unit: Units| -> (i64, Units, Units) {
+        let tid = TableId(964);
+        let (mut sp, _dl) = must_ok(
+            TableSpec::standard_chiral_ring_with_explicit_deal(tid, 4, 3, deal_seed, &salts),
+            "sp",
+        );
+        sp.works_stipend_per_unit_cred = stipend_per_unit;
+        let initial_cred: i64 = sp.seats.iter().map(|s| s.initial_cred).sum();
+        let mut eng = must_ok(TurnEngine::new(sp), "eng");
+        must_ok(
+            eng.apply_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Refined(0),
+                amount: 1_000,
+            }),
+            "ti r0",
+        );
+        must_ok(
+            eng.apply_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Refined(1),
+                amount: 1_000,
+            }),
+            "ti r1",
+        );
+        let mut b = vec![SealedOrderBundle::default(); 4];
+        b[0].project_deliveries.push(ProjectDeliveryOrder {
+            project_id: 1,
+            batches: 1,
+        });
+        commit_and_reveal_all(&mut eng, tid, 1, b);
+        let rec = must_ok(eng.sweep_turn_seeded(1), "sw 1");
+        let end_cred: i64 = eng.state().seats.iter().map(|s| s.cred).sum();
+        (
+            initial_cred - end_cred,
+            rec.works_stipend_cred_minted,
+            eng.state().seats[0].project_equity,
+        )
+    };
+    let (ctrl_drain_0, ctrl_mint_0, ctrl_vp_0) = run_controlled_works(0);
+    let (ctrl_drain_def, ctrl_mint_def, ctrl_vp_def) =
+        run_controlled_works(DEFAULT_WORKS_STIPEND_PER_UNIT_CRED);
+    assert_eq!(ctrl_mint_0, 0);
+    assert_eq!(ctrl_mint_def, 700);
+    assert_eq!(ctrl_drain_0 - ctrl_drain_def, 700);
+    assert_eq!(ctrl_vp_0, ctrl_vp_def);
+}
+
+#[test]
+fn c4_batch_clearing_beacon_tie_break_on_oversubscribed_level() {
+    // One Seller offers 1_000 units of Raw(0) at ask 1_100.
+    // Two Buyers (Seat 1 and Seat 2) bid at identical limit 1_300 for 1_000 each (oversubscribed 2:1).
+    let mut winners = std::collections::BTreeSet::new();
+    for seed in 0..16u64 {
+        let mut seat1_first = false;
+        let mut seat2_first = false;
+        for reverse_arrival in [false, true] {
+            let (mut spec, _) = must_ok(
+                TableSpec::standard_chiral_ring_with_mandates(TableId(965), 4, seed),
+                "spec",
+            );
+            for s in &mut spec.seats {
+                s.initial_raw_tariff_bps = 0;
+                s.raw_yield_per_turn = 10_000;
+                s.perishable_decay_bps = 0;
+                s.regent = None;
+            }
+            let mut engine = must_ok(TurnEngine::new(spec), "engine");
+            commit_and_reveal_all(
+                &mut engine,
+                TableId(965),
+                1,
+                vec![SealedOrderBundle::default(); 4],
+            );
+            must_ok(engine.sweep_turn_seeded(seed), "sweep 1");
+
+            // Turn 2: Sell 1_000 Raw(0) at 1_100; Seat 1 & Seat 2 both Buy 1_000 at 1_300.
+            let sell_0 = MarketAction::PostOffer {
+                seat: 0,
+                order: OfferProposal {
+                    side: OfferSide::Sell,
+                    good: AssetId::Raw(0),
+                    amount: 1_000,
+                    price_per_unit_cred: 1_100,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            };
+            let buy_1 = MarketAction::PostOffer {
+                seat: 1,
+                order: OfferProposal {
+                    side: OfferSide::Buy,
+                    good: AssetId::Raw(0),
+                    amount: 1_000,
+                    price_per_unit_cred: 1_300,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            };
+            let buy_2 = MarketAction::PostOffer {
+                seat: 2,
+                order: OfferProposal {
+                    side: OfferSide::Buy,
+                    good: AssetId::Raw(0),
+                    amount: 1_000,
+                    price_per_unit_cred: 1_300,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            };
+            must_ok(engine.apply_market_action(sell_0), "sell_0");
+            if reverse_arrival {
+                must_ok(engine.apply_market_action(buy_2), "buy_2");
+                must_ok(engine.apply_market_action(buy_1), "buy_1");
+            } else {
+                must_ok(engine.apply_market_action(buy_1), "buy_1");
+                must_ok(engine.apply_market_action(buy_2), "buy_2");
+            }
+            commit_and_reveal_all(
+                &mut engine,
+                TableId(965),
+                2,
+                vec![SealedOrderBundle::default(); 4],
+            );
+            must_ok(engine.sweep_turn_seeded(seed), "sweep 2");
+            let w = if engine.state().seats[1].raw[0] == 1_000 {
+                assert_eq!(engine.state().seats[2].raw[0], 0);
+                if !reverse_arrival {
+                    seat1_first = true;
+                }
+                1u8
+            } else {
+                assert_eq!(engine.state().seats[2].raw[0], 1_000);
+                if !reverse_arrival {
+                    seat2_first = true;
+                }
+                2u8
+            };
+            winners.insert((reverse_arrival, seed, w));
+        }
+        let w_fwd = must_ok(
+            winners.iter().find(|x| !x.0 && x.1 == seed).ok_or("fwd"),
+            "fwd",
+        )
+        .2;
+        let w_rev = must_ok(
+            winners.iter().find(|x| x.0 && x.1 == seed).ok_or("rev"),
+            "rev",
+        )
+        .2;
+        assert_eq!(
+            w_fwd, w_rev,
+            "tied buyer winner on seed {seed} must be arrival-order invariant"
+        );
+        let _ = (seat1_first, seat2_first);
+    }
+    let distinct_winners: std::collections::BTreeSet<u8> = winners.iter().map(|x| x.2).collect();
+    assert_eq!(
+        distinct_winners.len(),
+        2,
+        "beacon tie-break across seeds must select both Seat 1 and Seat 2"
+    );
+    assert_eq!(IDLE_MISS_TAKEOVER_TURNS, 3);
 }

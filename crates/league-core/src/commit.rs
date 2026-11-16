@@ -196,6 +196,50 @@ pub struct CharterBidOrder {
     pub bid_cred: Units,
 }
 
+/// Sealed Phase-2 bilateral commodity delivery executed cleanly at Step 2 (`BatchV1_1`
+/// one-way delivery), enabling Seller fulfillment of `BuyerDvpPayment` or `DualEscrowVault`
+/// contracts without requiring Buyer to lock a second payment inside an `AtomicSwapProposal`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ContractDeliveryOrder {
+    /// Receiving buyer seat index.
+    pub counterparty: u8,
+    /// Commodity transferred (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Gross units debited from delivering seat (`> 0`).
+    pub gross_amount: Units,
+    /// Optional shared cartel domain ID waiving export tariffs.
+    pub domain_id: Option<u8>,
+    /// When `Some(id)`, ties delivery atomically to `DualEscrowVault { escrow_id: id }` (`C2`).
+    #[serde(default)]
+    pub dual_escrow_id: Option<u64>,
+}
+
+/// Co-signed dual delivery-versus-payment escrow proposal settled atomically in Step 2 when
+/// both `buyer` and `seller` include identical terms in their revealed bundles (`C2`, `2026-11-15`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DualEscrowProposal {
+    /// Deterministic proposal identifier matching between buyer and seller.
+    pub proposal_id: u64,
+    /// Buyer seat locking `buyer_bond_cred`.
+    pub buyer: u8,
+    /// Seller seat locking `seller_bond_cred`.
+    pub seller: u8,
+    /// Delivered commodity (`Raw(i)` or `Refined(i)`).
+    pub good: AssetId,
+    /// Minimum net units required on or before `deadline_turn`.
+    pub required_units: Units,
+    /// Full purchase payment in milli-`CRED` released on delivery.
+    pub payment_cred: Units,
+    /// Buyer locked `CRED` (`1..=payment_cred`).
+    pub buyer_bond_cred: Units,
+    /// Seller performance bond (`1..=payment_cred`), with `buyer_bond_cred + seller_bond_cred <= payment_cred`.
+    pub seller_bond_cred: Units,
+    /// Compliance evaluation deadline (`>= current_turn && <= 28`).
+    pub deadline_turn: u8,
+    /// Optional cartel domain ID for tender tariff relief.
+    pub domain_id: Option<u8>,
+}
+
 /// Simultaneous discretionary actions committed in Phase 2 (`Commit`) and disclosed in `Reveal`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedOrderBundle {
@@ -205,6 +249,12 @@ pub struct SealedOrderBundle {
     pub project_deliveries: Vec<ProjectDeliveryOrder>,
     /// Co-signed atomic bilateral swaps (`tfAllOrNothing`).
     pub atomic_swaps: Vec<AtomicSwapProposal>,
+    /// Direct contractual commodity deliveries for `BuyerDvpPayment` / `DualEscrowVault` (`C2`).
+    #[serde(default)]
+    pub contract_deliveries: Vec<ContractDeliveryOrder>,
+    /// Co-signed dual-escrow DvP contract openings (`C2`).
+    #[serde(default)]
+    pub dual_escrows: Vec<DualEscrowProposal>,
     /// Voluntary repayment toward outstanding `CRED` auto-debt principal.
     pub debt_repayment_cred: Units,
     /// Conditional `TokenEscrow` finish reveals (`EscrowFinish`).
@@ -327,7 +377,13 @@ impl MandateKind {
                     )));
                 }
             }
-            Self::MaintainCleanCredit { .. } => {}
+            Self::MaintainCleanCredit { min_tier } => {
+                if !matches!(min_tier, CreditTier::Aaa | CreditTier::Bbb) {
+                    return Err(EngineError::InvalidConfig(format!(
+                        "MaintainCleanCredit min_tier {min_tier:?} must be Aaa or Bbb"
+                    )));
+                }
+            }
             Self::MinActivePartners { min_partners } => {
                 if !(1..=max_threshold).contains(&min_partners) {
                     return Err(EngineError::InvalidConfig(format!(
@@ -373,13 +429,50 @@ pub struct GradedMandateCard {
     pub bonus_equity: Units,
 }
 
-/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3–8 VP` (`3_000..=8_000`).
+/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3_000..=8_000`
+/// milli-points (`3..=8` mandate points), separated from terminal net-worth conversion.
 #[must_use]
-pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
+pub fn bonus_points_milli_for_completion_bps(completion_bps: Bps) -> Units {
     let clamped = i64::from(completion_bps.min(10_000));
     let hard_bps = (BPS_SCALE as i64) - clamped;
     MIN_MANDATE_BONUS_EQUITY
         + ((MAX_MANDATE_BONUS_EQUITY - MIN_MANDATE_BONUS_EQUITY) * hard_bps) / (BPS_SCALE as i64)
+}
+
+/// Maps empirical completion rate (`0..=10_000 bps`) monotonically into `3–8 VP` (`3_000..=8_000`).
+#[must_use]
+pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
+    bonus_points_milli_for_completion_bps(completion_bps)
+}
+
+impl GradedMandateCard {
+    /// Returns the provisional mandate point value in milli-points (`3_000..=8_000 == 3..=8 pts`),
+    /// kept distinct from terminal net-worth scaling.
+    #[must_use]
+    pub const fn mandate_points_milli(&self) -> Units {
+        self.bonus_equity
+    }
+}
+
+/// Builds a graded mandate deck for `seat_count` (`4..=6`), scaling `MinProjectEquity` targets
+/// against `mean_project_value_milli` (`7.0x`, `12.5x`, `16.5x`) while using canonical default
+/// `[16_000, 28_000, 36_000]` targets via [`default_graded_mandate_deck`].
+#[must_use]
+pub fn graded_mandate_deck_for_mean_project_value(
+    seat_count: u8,
+    mean_project_value_milli: Units,
+) -> Vec<GradedMandateCard> {
+    let targets = if mean_project_value_milli <= 0 {
+        [16_000, 28_000, 36_000]
+    } else {
+        let base = mean_project_value_milli as i128;
+        [
+            ((base * 7_000) / 1_000).max(1_000) as Units,
+            ((base * 12_500) / 1_000).max(2_000) as Units,
+            ((base * 16_500) / 1_000).max(3_000) as Units,
+        ]
+    };
+    build_graded_mandate_deck_with_targets(seat_count, targets)
 }
 
 /// Builds the canonical 8-card graded mandate deck for `seat_count` (`4..=6`), covering all
@@ -391,6 +484,13 @@ pub fn bonus_equity_for_completion_bps(completion_bps: Bps) -> Units {
 /// playtest calibration replaces them.
 #[must_use]
 pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
+    build_graded_mandate_deck_with_targets(seat_count, [16_000, 28_000, 36_000])
+}
+
+fn build_graded_mandate_deck_with_targets(
+    seat_count: u8,
+    project_targets: [Units; 3],
+) -> Vec<GradedMandateCard> {
     let max_safe = seat_count.saturating_sub(2).max(1);
     let specs = [
         (
@@ -400,7 +500,13 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
             },
             10_000,
         ),
-        (2, MandateKind::MinProjectEquity { target: 16_000 }, 8_000),
+        (
+            2,
+            MandateKind::MinProjectEquity {
+                target: project_targets[0],
+            },
+            8_000,
+        ),
         (
             3,
             MandateKind::MinRefinedVariety {
@@ -431,8 +537,20 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
             },
             2_500,
         ),
-        (7, MandateKind::MinProjectEquity { target: 28_000 }, 1_500),
-        (8, MandateKind::MinProjectEquity { target: 36_000 }, 0),
+        (
+            7,
+            MandateKind::MinProjectEquity {
+                target: project_targets[1],
+            },
+            1_500,
+        ),
+        (
+            8,
+            MandateKind::MinProjectEquity {
+                target: project_targets[2],
+            },
+            0,
+        ),
     ];
     specs
         .into_iter()
@@ -441,7 +559,7 @@ pub fn default_graded_mandate_deck(seat_count: u8) -> Vec<GradedMandateCard> {
                 card_id,
                 kind,
                 difficulty_completion_bps,
-                bonus_equity: bonus_equity_for_completion_bps(difficulty_completion_bps),
+                bonus_equity: bonus_points_milli_for_completion_bps(difficulty_completion_bps),
             },
         )
         .collect()
@@ -518,6 +636,41 @@ pub fn deal_graded_mandates(
     deal_graded_mandates_with_entropy(table_id, seat_count, deal_seed, &seat_salts, deck)
 }
 
+/// Computes the canonical `seat_count` dealt deck indices from `table_id`, `deal_seed`, and
+/// `deck_len` (`league-core/mandate-deal/v2`, reverse Fisher-Yates without replacement).
+///
+/// Single canonical deal permutation shared across `league-core` and `league-gen` (`#32` `B-2`).
+pub fn deal_mandate_deck_indices(
+    table_id: TableId,
+    seat_count: u8,
+    deal_seed: [u8; 32],
+    deck_len: usize,
+) -> Result<Vec<usize>, EngineError> {
+    let n = usize::from(seat_count);
+    if !(4..=6).contains(&seat_count) || deck_len < n {
+        return Err(EngineError::InvalidConfig(format!(
+            "invalid mandate deal config: seat_count={seat_count}, deck_len={deck_len}"
+        )));
+    }
+    if deal_seed == [0u8; 32] {
+        return Err(EngineError::InvalidConfig(
+            "degenerate all-zero mandate deal_seed is forbidden".to_owned(),
+        ));
+    }
+    let mut indices: Vec<usize> = (0..deck_len).collect();
+    for i in (1..indices.len()).rev() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-core/mandate-deal/v2");
+        hasher.update(deal_seed);
+        hasher.update(table_id.0.to_le_bytes());
+        hasher.update(u64::try_from(i).unwrap_or(u64::MAX).to_le_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        let j = width_independent_index(digest, i + 1);
+        indices.swap(i, j);
+    }
+    Ok(indices.into_iter().take(n).collect())
+}
+
 /// Deterministically shuffles `deck` and deals one [`CommitmentHash`] and [`MandateReveal`] per
 /// seat from caller-supplied 256-bit `deal_seed` and per-seat `seat_salts`.
 pub fn deal_graded_mandates_with_entropy(
@@ -528,17 +681,6 @@ pub fn deal_graded_mandates_with_entropy(
     deck: &[GradedMandateCard],
 ) -> Result<(Vec<CommitmentHash>, SealedMandateDeal), EngineError> {
     let n = usize::from(seat_count);
-    if !(4..=6).contains(&seat_count) || deck.len() < n {
-        return Err(EngineError::InvalidConfig(format!(
-            "invalid mandate deal config: seat_count={seat_count}, deck_len={}",
-            deck.len()
-        )));
-    }
-    if deal_seed == [0u8; 32] {
-        return Err(EngineError::InvalidConfig(
-            "degenerate all-zero mandate deal_seed is forbidden".to_owned(),
-        ));
-    }
     if seat_salts.len() != n {
         return Err(EngineError::InvalidConfig(format!(
             "expected {n} mandate seat_salts, got {}",
@@ -556,21 +698,11 @@ pub fn deal_graded_mandates_with_entropy(
         }
         card.kind.validate_for_seat_count(seat_count)?;
     }
-    let mut indices: Vec<usize> = (0..deck.len()).collect();
-    for i in (1..indices.len()).rev() {
-        let mut hasher = Sha256::new();
-        hasher.update(b"league-core/mandate-deal/v2");
-        hasher.update(deal_seed);
-        hasher.update(table_id.0.to_le_bytes());
-        hasher.update(u64::try_from(i).unwrap_or(u64::MAX).to_le_bytes());
-        let digest: [u8; 32] = hasher.finalize().into();
-        let j = width_independent_index(digest, i + 1);
-        indices.swap(i, j);
-    }
+    let dealt_indices = deal_mandate_deck_indices(table_id, seat_count, deal_seed, deck.len())?;
 
     let mut commits = Vec::with_capacity(n);
     let mut reveals = Vec::with_capacity(n);
-    for (seat_idx, &card_idx) in indices.iter().take(n).enumerate() {
+    for (seat_idx, card_idx) in dealt_indices.into_iter().enumerate() {
         let salt = &seat_salts[seat_idx];
         salt.validate().map_err(|err| {
             EngineError::InvalidConfig(format!("invalid salt for seat {seat_idx}: {err}"))
