@@ -32,7 +32,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "955fd0a84d48bd66c7d688246488c1694ae1603e3d1f651e7171c071a0027509",
+          "hash": "ed351114cd293ef122e92809704c9fa84eadc55444932cba34406be505a5f627",
           "path": "docs/design-v2.md"
         },
         {
@@ -1538,7 +1538,7 @@
               "line": 899
             }
           ],
-          "hash": "dc90a78de7a6024cc929fe2c5245c738442d2e1f8fadb2ff75355ba67cb47ae6",
+          "hash": "be24f32625981c21d6b6b80a1b889fdb293b874604514cea7a042749d96f3dce",
           "importsFiles": [
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/generator.rs",
@@ -1564,187 +1564,157 @@
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 122
+              "line": 124
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 130
+              "line": 132
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 147
+              "line": 149
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 165
+              "line": 174
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 177
+              "line": 182
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 190
+              "line": 195
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 203
+              "line": 208
             },
             {
               "in": "check_feasibility",
               "kind": "err",
-              "line": 218
+              "line": 223
+            },
+            {
+              "in": "enforce_shapley_guard",
+              "kind": "err",
+              "line": 293
+            },
+            {
+              "in": "enforce_shapley_guard",
+              "kind": "err",
+              "line": 303
             },
             {
               "in": "pair_has_structural_autarky",
               "kind": "err",
-              "line": 327
+              "line": 385
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 366
+              "line": 424
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 482
+              "line": 540
             },
             {
               "in": "coalition_upkeep_coverage",
               "kind": "err",
-              "line": 485
+              "line": 543
             },
             {
               "in": "solve_shadow_price_details",
               "kind": "err",
-              "line": 655
+              "line": 713
             },
             {
               "in": "solve_shadow_price_details",
               "kind": "err",
-              "line": 662
+              "line": 720
             },
             {
               "in": "select_balanced_optimal_dual",
               "kind": "match-err",
-              "line": 911
+              "line": 969
             },
             {
               "in": "solve_grand_surplus",
               "kind": "err",
-              "line": 1051
+              "line": 1109
             },
             {
               "in": "solve_grand_surplus",
               "kind": "err",
-              "line": 1056
+              "line": 1114
             },
             {
               "in": "evaluate_coalition_net_equity",
               "kind": "err",
-              "line": 1226
+              "line": 1284
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1319
+              "line": 1377
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1326
+              "line": 1384
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1333
+              "line": 1391
             },
             {
               "in": "validate_index_bounds",
               "kind": "err",
-              "line": 1339
+              "line": 1397
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1355
+              "line": 1413
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1360
+              "line": 1418
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1367
+              "line": 1425
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1374
+              "line": 1432
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1380
+              "line": 1438
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1386
+              "line": 1444
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1394
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1400
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1406
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1412
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1422
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1429
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1437
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1442
-            },
-            {
-              "in": "validate_config_and_table",
-              "kind": "err",
-              "line": 1448
+              "line": 1452
             },
             {
               "in": "validate_config_and_table",
@@ -1754,80 +1724,120 @@
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1469
+              "line": 1464
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1486
+              "line": 1470
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1494
+              "line": 1480
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1502
+              "line": 1487
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1511
+              "line": 1495
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1525
+              "line": 1500
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1534
+              "line": 1506
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1542
+              "line": 1516
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1549
+              "line": 1527
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1557
+              "line": 1544
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1564
+              "line": 1552
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1572
+              "line": 1560
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1579
+              "line": 1569
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1595
+              "line": 1583
             },
             {
               "in": "validate_config_and_table",
               "kind": "err",
-              "line": 1603
+              "line": 1592
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1600
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1607
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1615
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1622
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1630
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1637
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1653
+            },
+            {
+              "in": "validate_config_and_table",
+              "kind": "err",
+              "line": 1661
             }
           ],
-          "hash": "6b8f53a8c52399db74be9a3457d95dd2fe27a556cefcf8fc2d655acb04540403",
+          "hash": "0f0cd3cfd25a1e7579b07944e3ca07e2c58433b7f06ed92982038b035242f0ca",
           "importOrder": [
             "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/lp.rs",
@@ -1853,65 +1863,65 @@
             {
               "in": "generate_ring_table",
               "kind": "match-err",
-              "line": 199
+              "line": 200
             },
             {
               "in": "generate_ring_table",
               "kind": "err",
-              "line": 203
+              "line": 204
             },
             {
               "in": "generate_ring_table_for_setup",
               "kind": "err",
-              "line": 241
+              "line": 242
             },
             {
               "in": "generate_ring_table_for_setup",
               "kind": "err",
-              "line": 244
+              "line": 245
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 264
+              "line": 265
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 270
+              "line": 271
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 275
+              "line": 276
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 280
+              "line": 281
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 287
+              "line": 288
             },
             {
               "in": "validate_generator_config",
               "kind": "err",
-              "line": 298
+              "line": 299
             },
             {
               "in": "sample_unique_codes",
               "kind": "err",
-              "line": 620
+              "line": 621
             },
             {
               "in": "new",
               "kind": "err",
-              "line": 716
+              "line": 717
             }
           ],
-          "hash": "ba68cf1924476180836ee13fb215613fedacd880f8d7ad353eda542c49ab6fec",
+          "hash": "23b56e987535ed4c7f83847e10db01ece8081451c051ea4b0ebf0ec61b4fa6a9",
           "importsFiles": [
             "crates/league-gen/src/feasibility.rs",
             "crates/league-gen/src/rng.rs",
@@ -1921,7 +1931,7 @@
           "testsInside": true
         },
         {
-          "hash": "b16be2e1eeae8bb94501732d6d6bf360a0a2697a22edccf36eb4f86caeb1cad6",
+          "hash": "044febbbadb5a8bd074d4eaeab893a472f71ed25af24cd8ee1ef52c549db99a5",
           "importsFiles": [
             "crates/league-gen/src/empirical.rs",
             "crates/league-gen/src/feasibility.rs",
@@ -2045,60 +2055,60 @@
             {
               "in": "try_from",
               "kind": "err",
-              "line": 295
+              "line": 301
             },
             {
               "in": "try_from",
               "kind": "err",
-              "line": 307
+              "line": 313
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 684
+              "line": 693
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 689
+              "line": 698
             },
             {
               "in": "from_bytes",
               "kind": "err",
-              "line": 695
+              "line": 704
             },
             {
               "in": "try_from",
               "kind": "err",
-              "line": 740
+              "line": 749
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 891
+              "line": 900
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 901
+              "line": 910
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 906
+              "line": 915
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 913
+              "line": 922
             },
             {
               "in": "validate_for_seat_count",
               "kind": "err",
-              "line": 920
+              "line": 929
             }
           ],
-          "hash": "e20d4497ad6f7c4d156d113996810cbf136387128afdcdba32ec285ac4b4567f",
+          "hash": "25c9e3ce81b5a518712a3026520ddc083fc95d3469cda1b7d1200c5e0f0f4bbf",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2904,7 +2914,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "02e550ef6327e8ee9a8c9b590037173be1054092eb07671607d89eebe0eb440a",
+          "hash": "45814e22eca29f1d093a053b0158cb5a9ad7802fe0d9d92aef9dec635fcec017",
           "path": "CHANGELOG.md"
         },
         {
@@ -3633,7 +3643,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d09f3056c70a199e797061f8e895c2888d0dff9d",
+    "commit": "a46e51cc18cabf705ec86cc729e704a3c92fa2ed",
     "tracked": 502
   },
   "landings": [
