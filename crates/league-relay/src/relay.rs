@@ -240,6 +240,15 @@ impl ResponseFormatConfig {
         let pinned_pad_desc = wording_slot("scratchpad_schema_description");
 
         reject_default_ignorable_code_point(&name, "response_format schema 'name'")?;
+        if !name.is_empty() && name != wording_slot("default_schema_name") {
+            check_schema_identifier(
+                &name,
+                &pad_key,
+                true,
+                false,
+                "response_format schema 'name'",
+            )?;
+        }
         if name.is_empty()
             || !name
                 .chars()
@@ -248,15 +257,6 @@ impl ResponseFormatConfig {
             return Err(RelayError::Usage(
                 "response_format schema 'name' must match [A-Za-z0-9_-]+".to_owned(),
             ));
-        }
-        if name != wording_slot("default_schema_name") {
-            check_schema_identifier(
-                &name,
-                &pad_key,
-                true,
-                false,
-                "response_format schema 'name'",
-            )?;
         }
         let Some(schema_obj) = schema.as_object_mut() else {
             return Err(RelayError::Usage(
@@ -728,6 +728,19 @@ fn nfkc_and_strip_marks(raw: &str) -> String {
         .collect()
 }
 
+/// Normalize `raw` via Unicode 18.0.0 UAX #15 NFKC/NFKD (`icu_normalizer` `2.4.0`), mapping all
+/// Unicode `White_Space` (`char::is_whitespace`, including `\n`, `\r`, `\t`, NBSP, and ideographic
+/// space) to `' '` before stripping non-whitespace combining/ignorable/control marks (`P42-B1`).
+fn nfkc_and_strip_marks_preserving_whitespace(raw: &str) -> String {
+    let nfkc = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc();
+    let nfkd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfkd();
+    let pre_ws = raw.chars().map(|c| if c.is_whitespace() { ' ' } else { c });
+    nfkd.normalize_iter(nfkc.normalize_iter(pre_ws))
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|&c| c == ' ' || !is_ignorable_confusable_mark(c))
+        .collect()
+}
+
 /// Hand-built single-character Latin fold table **inspired by** UTS #39 confusables (`C-19`, `C-22`),
 /// paired with optional ASCII leet digit folding (`0->o`, `1->i`, `3->e`, `4->a`, `5->s`, `7->t`, `8->b`).
 ///
@@ -871,35 +884,42 @@ fn is_confusable_with_scratchpad(raw: &str) -> bool {
     text_contains_scratchpad_confusable(raw)
 }
 
-/// Return `true` if `raw` contains `"note"` (or `pad_key`, default `"notes"`) with only
-/// non-letters between its letters after Unicode 18.0.0 NFKC/NFKD plus our hand-built
-/// UTS #39-inspired and ASCII leet folds (`P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
+/// Return `true` if any whitespace-separated token of `raw` contains `"note"` (or `pad_key`,
+/// default `"notes"`) after removing punctuation and other non-letter separators within that
+/// token under Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet
+/// folds (`P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
 ///
-/// DO NOT RELAX (`P41-B1`, Publisher ruling 2026-11-15): any model-visible identifier or prose
-/// whose folded compact letter stream contains `"note"` — including `notepad`, `notebook`,
-/// `keynote`, `noted`, `denote`, `footnote`, and split forms such as `no,tes`, `(no)(tes)`,
-/// `not.es`, and `no tes` — is refused. Non-Latin letters (such as CJK ideographs) satisfy
-/// `char::is_alphabetic` and count as letters, not separators (`P41-C2`).
+/// DO NOT RELAX (`P42-B1`, Publisher ruling 2026-11-16):
+/// - Split folded text into whitespace-separated tokens; within each token, strip punctuation and
+///   other non-letter separators while counting CJK and other non-Latin alphabetic characters
+///   (`char::is_alphabetic`) as letters (`P41-C2`), then refuse if the token contains `"note"`.
+/// - Refuses `no,tes`, `not.es`, `(no)(tes)`, `notepad`, `keynote`, `"Take note"`, `notebook`,
+///   `noted`, `denote`, and `footnote`; accepts cross-word English such as `"Do not exceed"`,
+///   `"not enough"`, `"can not end"`, `"no tea"`, and `"piano technique"`.
+/// - Do NOT narrow further (e.g. to exact-match or word-equality) and do NOT widen back to
+///   cross-word; `"scratchpad"` (`text_contains_scratchpad_confusable`) is NOT narrowed (`C-23`).
 pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
     let pad_lower = pad_key.to_ascii_lowercase();
-    let normalized = nfkc_and_strip_marks(raw);
-    for leet in [false, true] {
-        let mut letters_only = String::with_capacity(normalized.len());
-        for c in normalized.chars() {
-            if is_ignorable_confusable_mark(c) {
-                continue;
+    let normalized = nfkc_and_strip_marks_preserving_whitespace(raw);
+    for token in normalized.split_whitespace() {
+        for leet in [false, true] {
+            let mut letters_only = String::with_capacity(token.len());
+            for c in token.chars() {
+                if is_ignorable_confusable_mark(c) {
+                    continue;
+                }
+                if !leet && c.is_ascii_digit() {
+                    continue;
+                }
+                if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+                    && folded.is_alphabetic()
+                {
+                    letters_only.push(folded);
+                }
             }
-            if !leet && c.is_ascii_digit() {
-                continue;
+            if letters_only.contains("note") || letters_only.contains(&pad_lower) {
+                return true;
             }
-            if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
-                && folded.is_alphabetic()
-            {
-                letters_only.push(folded);
-            }
-        }
-        if letters_only.contains("note") || letters_only.contains(&pad_lower) {
-            return true;
         }
     }
     false
