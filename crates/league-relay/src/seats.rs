@@ -574,11 +574,46 @@ fn validate_seat_reasoning(guild: &str, r: &SeatReasoningConfig) -> Result<(), R
         }
     }
     if let Some(kwargs) = &r.chat_template_kwargs {
+        let pad_key = crate::wording::wording_slot("scratchpad_schema_key");
         for (k, v) in kwargs {
             if k.trim().is_empty() {
                 return Err(RelayError::SeatConfig(format!(
                     "seat '{guild}' chat_template_kwargs key must be non-empty"
                 )));
+            }
+            if let Some(cp) = crate::relay::find_default_ignorable_code_point(k) {
+                return Err(RelayError::SeatConfig(format!(
+                    "seat '{guild}' chat_template_kwargs key cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                    cp as u32
+                )));
+            }
+            if crate::relay::text_contains_scratchpad_confusable(k) {
+                return Err(RelayError::SeatConfig(format!(
+                    "seat '{guild}' chat_template_kwargs key '{k}' cannot contain legacy or confusable 'scratchpad' text"
+                )));
+            }
+            if crate::relay::text_contains_note_confusable(k, &pad_key) {
+                return Err(RelayError::SeatConfig(format!(
+                    "seat '{guild}' chat_template_kwargs key '{k}' cannot mention '{pad_key}' or 'note'"
+                )));
+            }
+            if let Some(s) = v.as_str() {
+                if let Some(cp) = crate::relay::find_default_ignorable_code_point(s) {
+                    return Err(RelayError::SeatConfig(format!(
+                        "seat '{guild}' chat_template_kwargs '{k}' value cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                        cp as u32
+                    )));
+                }
+                if crate::relay::text_contains_scratchpad_confusable(s) {
+                    return Err(RelayError::SeatConfig(format!(
+                        "seat '{guild}' chat_template_kwargs '{k}' value cannot contain legacy or confusable 'scratchpad' text"
+                    )));
+                }
+                if crate::relay::text_contains_note_confusable(s, &pad_key) {
+                    return Err(RelayError::SeatConfig(format!(
+                        "seat '{guild}' chat_template_kwargs '{k}' value cannot mention '{pad_key}' or 'note'"
+                    )));
+                }
             }
             let valid_primitive =
                 v.is_boolean() || v.as_f64().is_some_and(f64::is_finite) || v.is_string();

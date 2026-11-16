@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 
 /// Active named arm for all model-facing labels and instructions in `league-relay`.
-pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r4";
+pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r6";
 
 /// Maximum whitespace-delimited words permitted across `intent_header` + `body`
 /// in one inter-seat message (`B4.4`, `A-5`).
@@ -319,8 +319,9 @@ pub fn cap_words_and_chars(raw: &str, max_words: usize, max_chars: usize) -> (St
 fn json_escaped_char_len(c: char) -> usize {
     if matches!(c, '"' | '\\' | '\x08' | '\x0c' | '\n' | '\r' | '\t') {
         2
-    } else if (c as u32) < 0x20 || is_dangerous_prompt_char(c) {
-        6
+    } else if (c as u32) < 0x20 || is_dangerous_prompt_char(c) || is_default_ignorable_code_point(c)
+    {
+        6 * c.len_utf16()
     } else {
         1
     }
@@ -393,10 +394,10 @@ fn cap_untrusted_string_with_quote_budget(
         return None;
     }
 
-    debug_assert_eq!(
-        json_escape_untrusted_str(&out).chars().count(),
-        escaped_chars
-    );
+    // Guard note (`P42-C1`): do not `debug_assert_eq!` `escaped_chars` here; escape-path and
+    // `6 * c.len_utf16()` budget mutations (`DI_WHISPER`, `DI_LEN`/`DI_LEN1`, `DI_SURR`) are
+    // caught in both debug and `--release` builds by `ARM_RENDER_PATH_HISTORY` digest comparison
+    // (`seat_text_default_ignorable_escaped` and `whisper_supplementary_di_budget_truncation`).
     Some((out, word_count, escaped_chars, was_trunc))
 }
 
@@ -539,11 +540,44 @@ fn is_dangerous_prompt_char(c: char) -> bool {
     )
 }
 
+pub(crate) fn is_default_ignorable_code_point(c: char) -> bool {
+    icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>()
+        .contains(c)
+}
+
+fn push_hex_escaped_char(out: &mut String, c: char) {
+    let mut utf16 = [0u16; 2];
+    for unit in c.encode_utf16(&mut utf16) {
+        use std::fmt::Write as _;
+        let _ = write!(out, "\\u{unit:04x}");
+    }
+}
+
+/// Visibly `\uXXXX`-escape every Unicode 18.0.0 `Default_Ignorable_Code_Point` (`P41-C5`,
+/// via `icu_properties` `2.4.0` compiled data; supplementary code points use RFC 8259 UTF-16
+/// `\uXXXX\uXXXX` pairs) in per-turn untrusted text (`batna` and `to-seat` turn files) without
+/// refusing the turn.
+pub fn escape_default_ignorable_code_points(raw: &str) -> String {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if default_ignorable.contains(c) {
+            push_hex_escaped_char(&mut out, c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn escape_json_encoded_prompt_hazards(encoded: &str) -> String {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
     let mut out = String::with_capacity(encoded.len());
     for c in encoded.chars() {
-        if is_dangerous_prompt_char(c) {
-            out.push_str(&format!("\\u{:04x}", c as u32));
+        if is_dangerous_prompt_char(c) || default_ignorable.contains(c) {
+            push_hex_escaped_char(&mut out, c);
         } else {
             out.push(c);
         }
@@ -552,9 +586,10 @@ fn escape_json_encoded_prompt_hazards(encoded: &str) -> String {
 }
 
 /// JSON-escape an untrusted string per RFC 8259 while also escaping ASCII/full-width
-/// angle brackets (`<`, `>`, `＜`, `＞`), JS line separators (`U+2028`, `U+2029`), and
+/// angle brackets (`<`, `>`, `＜`, `＞`), JS line separators (`U+2028`, `U+2029`),
 /// Unicode bidirectional override/isolate controls (`U+061C`, `U+200E..U+200F`,
-/// `U+202A..U+202E`, `U+2066..U+2069`) (`C-5`).
+/// `U+202A..U+202E`, `U+2066..U+2069`), and all Unicode 18.0.0 `Default_Ignorable_Code_Point`
+/// characters (`C-5`, `P41-C5`).
 pub fn json_escape_untrusted_str(raw: &str) -> String {
     let encoded = serde_json::to_string(raw).unwrap_or_else(|_| "\"\"".to_owned());
     escape_json_encoded_prompt_hazards(&encoded)
@@ -653,7 +688,8 @@ pub fn split_negotiation_sections(
             "negotiation inputs require a non-empty 'batna' fallback line".to_owned(),
         ));
     }
-    let fallback_sec = format!("{}\n{batna_trimmed}", wording_slot("fallback_header"));
+    let batna_escaped = escape_default_ignorable_code_points(batna_trimmed);
+    let fallback_sec = format!("{}\n{batna_escaped}", wording_slot("fallback_header"));
     if inputs.whispers.is_empty() {
         return Ok((fallback_sec, String::new()));
     }
@@ -723,13 +759,16 @@ pub fn load_negotiation_inputs_if_present(
     Ok(Some(parsed))
 }
 
-/// Neutralize angle brackets, bidi/line-separator controls, and `===` section markers
-/// inside a saved scratchpad before rendering it into the next turn's prompt (`C-5`).
+/// Neutralize angle brackets, bidi/line-separator controls, Unicode 18.0.0
+/// `Default_Ignorable_Code_Point` characters, and `===` section markers inside a saved
+/// scratchpad before rendering it into the next turn's prompt (`C-5`, `P41-C5`).
 pub fn sanitize_scratchpad_for_prompt(raw: &str) -> String {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
     let mut escaped = String::with_capacity(raw.len());
     for c in raw.chars() {
-        if is_dangerous_prompt_char(c) {
-            escaped.push_str(&format!("\\u{:04x}", c as u32));
+        if is_dangerous_prompt_char(c) || default_ignorable.contains(c) {
+            push_hex_escaped_char(&mut escaped, c);
         } else {
             escaped.push(c);
         }
@@ -793,6 +832,10 @@ pub fn strip_thinking_tags(raw: &str) -> String {
             }
             None => {
                 // Unclosed `<think>` consumed the entire output budget.
+                // Guard note (`P41-C1`): in `ARM_RENDER_PATH_HISTORY` (`think_tag_stripping_replay`),
+                // this branch is exercised via a trimmed `emc` older-reply excerpt (`relay.rs`
+                // `.trim()`), so any non-whitespace change fails the arm guard while trailing
+                // whitespace on an unclosed `<think>` prefix is trimmed in that excerpt.
                 return out;
             }
         }

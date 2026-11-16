@@ -30,6 +30,8 @@ pub enum RelayError {
     Io(String),
     /// Existing `calls.jsonl` or transcript JSONL was malformed.
     CorruptLog(String),
+    /// `<game-dir>/relay/setup.json` was written under an earlier relay schema or wording arm (`C-17`).
+    IncompatibleSetup(String),
     /// Another `league-relay turn` already holds `<game-dir>/relay/turn.lock`, or `turn.lock` was deleted/replaced mid-turn.
     TurnLocked {
         /// Redacted path to `<game-dir>/relay/turn.lock`.
@@ -68,6 +70,7 @@ impl fmt::Display for RelayError {
             RelayError::SeatConfig(msg) => write!(f, "invalid seat file: {msg}"),
             RelayError::Io(msg) => write!(f, "file error: {msg}"),
             RelayError::CorruptLog(msg) => write!(f, "corrupt relay log: {msg}"),
+            RelayError::IncompatibleSetup(msg) => write!(f, "incompatible game setup: {msg}"),
             RelayError::TurnLocked { lock_path, holder } => match holder {
                 Some(h) if h.starts_with("compromised:") => {
                     let detail = h.trim_start_matches("compromised:").trim();
