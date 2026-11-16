@@ -319,7 +319,7 @@ Once a policy trains on a chiral table layout or a designer tunes rules against 
 
 | Seed / Formula | Location | Pool(s) & Disposition |
 |---|---|---|
-| Base seed XOR per-seat-count 64-bit masks stepped by `t * 0x9E37_79B9_7F4A_7C15` (`t in 0..trials`) | `crates/league-gen/src/empirical.rs` (`measure_lockin_and_hhi`, `run_ring_ensemble`, and unit test) | Documented exception calling unchecked `generate_ring_table` (`unassigned` and `sealed`-range steps, verified out-of-repo to be disjoint from the 256-seed sealed set; never written by value) |
+| Base seed XOR per-seat-count 64-bit masks stepped by `t` times the 64-bit golden-ratio increment (`t in 0..trials`) | `crates/league-gen/src/empirical.rs` (`measure_lockin_and_hhi`, `run_ring_ensemble`, and unit test) | Documented exception calling unchecked `generate_ring_table` (`unassigned` and `sealed`-range steps, verified out-of-repo to be disjoint from the 256-seed sealed set; never written by value) |
 | Literal date seed `20_261_115` | `crates/league-gen/src/generator.rs`, `crates/league-gen/src/mandates.rs`, `crates/league-gen/src/empirical.rs` | Documented exception in `unassigned` (unchanged historical test fixture) |
 | `31337` | `crates/league-gen/src/mandates.rs` | Pre-existing `train`-pool seed in generated-table mandate sweep (unchanged) |
 | `10,000 – 24,999` (upper slice of `0..25,000`) | `crates/league-gen/tests/properties.rs:187` | Pre-existing `train`-pool slice in determinism/feasibility property test (unchanged) |
