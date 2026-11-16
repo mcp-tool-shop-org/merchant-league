@@ -394,10 +394,13 @@ fn cap_untrusted_string_with_quote_budget(
         return None;
     }
 
-    // Guard note (`P42-C1`): do not `debug_assert_eq!` `escaped_chars` here; escape-path and
-    // `6 * c.len_utf16()` budget mutations (`DI_WHISPER`, `DI_LEN`/`DI_LEN1`, `DI_SURR`) are
-    // caught in both debug and `--release` builds by `ARM_RENDER_PATH_HISTORY` digest comparison
-    // (`seat_text_default_ignorable_escaped` and `whisper_supplementary_di_budget_truncation`).
+    // Guard note (`P42-C1`, `P43-C2`): keep this debug invariant on every call while Row 5's
+    // `ARM_RENDER_PATH_HISTORY` digests (`seat_text_default_ignorable_escaped` and
+    // `whisper_supplementary_di_budget_truncation`) guard the escaped length in `--release` too.
+    debug_assert_eq!(
+        json_escape_untrusted_str(&out).chars().count(),
+        escaped_chars
+    );
     Some((out, word_count, escaped_chars, was_trunc))
 }
 

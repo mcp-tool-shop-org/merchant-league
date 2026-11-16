@@ -728,17 +728,30 @@ fn nfkc_and_strip_marks(raw: &str) -> String {
         .collect()
 }
 
-/// Normalize `raw` via Unicode 18.0.0 UAX #15 NFKC/NFKD (`icu_normalizer` `2.4.0`), mapping all
-/// Unicode `White_Space` (`char::is_whitespace`, including `\n`, `\r`, `\t`, NBSP, and ideographic
-/// space) to `' '` before stripping non-whitespace combining/ignorable/control marks (`P42-B1`).
-fn nfkc_and_strip_marks_preserving_whitespace(raw: &str) -> String {
-    let nfkc = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc();
-    let nfkd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfkd();
-    let pre_ws = raw.chars().map(|c| if c.is_whitespace() { ' ' } else { c });
-    nfkd.normalize_iter(nfkc.normalize_iter(pre_ws))
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .filter(|&c| c == ' ' || !is_ignorable_confusable_mark(c))
-        .collect()
+/// Return `true` iff `c` is one of the 11 ruled visible or line-break token separators
+/// (`P43-B1`, `P43-C1`, `P44-C2`): ASCII space `U+0020`, `\t` (`U+0009`), `\n` (`U+000A`), `VT`
+/// (`U+000B`), `FF` (`U+000C`), `\r` (`U+000D`), `NEL` (`U+0085`), NBSP `U+00A0`, `LINE SEPARATOR`
+/// (`U+2028`), `PARAGRAPH SEPARATOR` (`U+2029`), or ideographic space `U+3000`.
+///
+/// Every other Unicode `White_Space` code point (all 14 remaining: Ogham `U+1680`, `U+2000..=U+200A`
+/// including hair space `U+200A` and thin space `U+2009`, `U+202F`, and `U+205F`) does NOT split
+/// tokens and is stripped inside the token like punctuation (`P43-B1`, `P44-C2`). Splitting happens
+/// BEFORE NFKC so NFKC `<compat> 0020` decompositions of `U+2000..=U+200A` / `U+202F` / `U+205F`
+/// never create token boundaries.
+fn is_visible_token_whitespace(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '\t'
+            | '\n'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\r'
+            | '\u{0085}'
+            | '\u{00A0}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{3000}'
+    )
 }
 
 /// Hand-built single-character Latin fold table **inspired by** UTS #39 confusables (`C-19`, `C-22`),
@@ -884,42 +897,78 @@ fn is_confusable_with_scratchpad(raw: &str) -> bool {
     text_contains_scratchpad_confusable(raw)
 }
 
-/// Return `true` if any whitespace-separated token of `raw` contains `"note"` (or `pad_key`,
-/// default `"notes"`) after removing punctuation and other non-letter separators within that
-/// token under Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet
-/// folds (`P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
+fn fold_token_letters(raw_token: &str, leet: bool) -> String {
+    let normalized = nfkc_and_strip_marks(raw_token);
+    let mut letters_only = String::with_capacity(normalized.len());
+    for c in normalized.chars() {
+        if is_ignorable_confusable_mark(c) {
+            continue;
+        }
+        if !leet && c.is_ascii_digit() {
+            continue;
+        }
+        if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+            && folded.is_alphabetic()
+        {
+            letters_only.push(folded);
+        }
+    }
+    letters_only
+}
+
+/// Return `true` if `raw` contains `"note"` (or `pad_key`, default `"notes"`) in any visible-
+/// whitespace-delimited token (or rejoined run of single-letter tokens) after stripping within-
+/// token non-letter separators under Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired
+/// and ASCII leet folds (`P44-B1`, `P44-B2`, `P44-C2`, `P43-B1`, `P43-B2`, `P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
 ///
-/// DO NOT RELAX (`P42-B1`, Publisher ruling 2026-11-16):
-/// - Split folded text into whitespace-separated tokens; within each token, strip punctuation and
-///   other non-letter separators while counting CJK and other non-Latin alphabetic characters
-///   (`char::is_alphabetic`) as letters (`P41-C2`), then refuse if the token contains `"note"`.
-/// - Refuses `no,tes`, `not.es`, `(no)(tes)`, `notepad`, `keynote`, `"Take note"`, `notebook`,
-///   `noted`, `denote`, and `footnote`; accepts cross-word English such as `"Do not exceed"`,
-///   `"not enough"`, `"can not end"`, `"no tea"`, and `"piano technique"`.
-/// - Do NOT narrow further (e.g. to exact-match or word-equality) and do NOT widen back to
-///   cross-word; `"scratchpad"` (`text_contains_scratchpad_confusable`) is NOT narrowed (`C-23`).
+/// DO NOT RELAX (`P42-B1`, `P43-B1`/`P43-B2`, & `P44-B1`/`P44-B2`/`P44-C2`, Publisher rulings 2026-11-16):
+/// - Split `raw` ONLY on the 11 visible/line-break whitespace separators (`' '`, `\t`, `\n`,
+///   `VT` `U+000B`, `FF` `U+000C`, `\r`, `NEL` `U+0085`, NBSP `U+00A0`, `U+2028`, `U+2029`, and
+///   ideographic space `U+3000`); every other Unicode `White_Space` code point (all 14 remaining,
+///   such as hair space `U+200A`) is removed inside the token like punctuation (`P43-B1`, `P44-C2`).
+/// - Within each token, strip punctuation, digits (when `!leet`), and other non-letter separators
+///   while counting CJK and other `char::is_alphabetic` characters as letters (`P41-C2`).
+/// - Skip any token whose folded form is empty (`folded_tok.is_empty()` — punctuation-only or
+///   digit-only) so it neither joins nor breaks an active single-letter run (`P44-B1`, refusing
+///   `n - o - t - e`, `n , o , t , e`, `n _ o _ t _ e`, `n · o · t · e`, `n 1 o 2 t 3 e`).
+/// - Rejoin consecutive tokens whose folded form is **exactly one letter** (`chars().count() == 1`)
+///   into one token and check it both when followed by a multi-letter word (`P44-B2`, `"Please n o t e this"`)
+///   and at end-of-input (`P43-B2`, refusing `n o t e`, `n o t e s`, `N O T E S`, while keeping
+///   `"I am"`, `"a b c"`, `"A to Z"`, `"a - b"`, `"I - am"`, and multi-letter splits `"Do not exceed"`,
+///   `"no tea"`, `"no tes"`, `"not es"` accepted).
+/// - Do NOT narrow further (e.g. to exact-match or word-equality, or dropping single-letter rejoin)
+///   and do NOT widen rejoining to multi-letter tokens; `"scratchpad"` (`C-23`) is NOT narrowed.
 pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
     let pad_lower = pad_key.to_ascii_lowercase();
-    let normalized = nfkc_and_strip_marks_preserving_whitespace(raw);
-    for token in normalized.split_whitespace() {
-        for leet in [false, true] {
-            let mut letters_only = String::with_capacity(token.len());
-            for c in token.chars() {
-                if is_ignorable_confusable_mark(c) {
-                    continue;
+    let raw_tokens: Vec<&str> = raw
+        .split(is_visible_token_whitespace)
+        .filter(|s| !s.is_empty())
+        .collect();
+    for leet in [false, true] {
+        let mut single_run = String::new();
+        for &raw_tok in &raw_tokens {
+            let folded_tok = fold_token_letters(raw_tok, leet);
+            if folded_tok.is_empty() {
+                continue;
+            }
+            if folded_tok.chars().count() == 1 {
+                single_run.push_str(&folded_tok);
+            } else {
+                if !single_run.is_empty() {
+                    if single_run.contains("note") || single_run.contains(&pad_lower) {
+                        return true;
+                    }
+                    single_run.clear();
                 }
-                if !leet && c.is_ascii_digit() {
-                    continue;
-                }
-                if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
-                    && folded.is_alphabetic()
-                {
-                    letters_only.push(folded);
+                if folded_tok.contains("note") || folded_tok.contains(&pad_lower) {
+                    return true;
                 }
             }
-            if letters_only.contains("note") || letters_only.contains(&pad_lower) {
-                return true;
-            }
+        }
+        if !single_run.is_empty()
+            && (single_run.contains("note") || single_run.contains(&pad_lower))
+        {
+            return true;
         }
     }
     false
@@ -4389,6 +4438,40 @@ struct AutomatedSeatView<'a> {
     reasoning: Option<&'a SeatReasoningConfig>,
 }
 
+fn validate_wrapper_text_for_label(
+    raw_wrapper: &str,
+    label: &str,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    if let Some(cp) = find_default_ignorable_code_point(raw_wrapper) {
+        return Err(RelayError::Usage(redact_secrets(
+            &format!(
+                "{label} cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                cp as u32
+            ),
+            redaction_key,
+        )));
+    }
+    let pad_key = wording_slot("scratchpad_schema_key");
+    if text_contains_scratchpad_confusable(raw_wrapper) {
+        return Err(RelayError::Usage(redact_secrets(
+            &format!(
+                "{label} cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'"
+            ),
+            redaction_key,
+        )));
+    }
+    if text_contains_note_confusable(raw_wrapper, &pad_key) {
+        return Err(RelayError::Usage(redact_secrets(
+            &format!(
+                "{label} cannot mention '{pad_key}' or 'note' (reserved for pinned '{pad_key}' wording)"
+            ),
+            redaction_key,
+        )));
+    }
+    Ok(())
+}
+
 /// Run one turn across all configured seats.
 ///
 /// Automated seats (`local` or `openrouter`) execute concurrently; a failure or
@@ -4479,6 +4562,13 @@ pub fn run_turn(
         None => None,
     };
 
+    if !config.seats.has_local_seat()
+        && !config.seats.has_openrouter_seat()
+        && let Some(ref raw_wrap) = wrapper_text
+    {
+        validate_wrapper_text_for_label(raw_wrap, "--wrapper", redaction_key)?;
+    }
+
     let mut seat_wrappers: Vec<(String, String)> = Vec::new();
     for seat in &config.seats.seats {
         if matches!(
@@ -4505,34 +4595,11 @@ pub fn run_turn(
                     guild: seat.guild.clone(),
                 });
             };
-            if let Some(cp) = find_default_ignorable_code_point(&effective_wrapper) {
-                return Err(RelayError::Usage(redact_secrets(
-                    &format!(
-                        "seat '{}' --wrapper cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
-                        seat.guild, cp as u32
-                    ),
-                    redaction_key,
-                )));
-            }
-            let pad_key = wording_slot("scratchpad_schema_key");
-            if text_contains_scratchpad_confusable(&effective_wrapper) {
-                return Err(RelayError::Usage(redact_secrets(
-                    &format!(
-                        "seat '{}' --wrapper cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'",
-                        seat.guild,
-                    ),
-                    redaction_key,
-                )));
-            }
-            if text_contains_note_confusable(&effective_wrapper, &pad_key) {
-                return Err(RelayError::Usage(redact_secrets(
-                    &format!(
-                        "seat '{}' --wrapper cannot mention '{pad_key}' or 'note' (reserved for pinned '{pad_key}' wording)",
-                        seat.guild,
-                    ),
-                    redaction_key,
-                )));
-            }
+            validate_wrapper_text_for_label(
+                &effective_wrapper,
+                &format!("seat '{}' --wrapper", seat.guild),
+                redaction_key,
+            )?;
             seat_wrappers.push((seat.guild.clone(), effective_wrapper));
         }
     }

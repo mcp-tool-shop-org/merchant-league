@@ -5,10 +5,10 @@
 
 use crate::error::RelayError;
 use crate::relay::{
-    MemoryMode, ResponseFormatConfig, Round, TurnConfig, TurnSummary, run_turn, validate_day,
-    validate_scratchpad_setup,
+    GameSetupRecord, MemoryMode, ResponseFormatConfig, Round, SeatOutcome, TurnConfig, TurnSummary,
+    run_turn, validate_day, validate_scratchpad_setup,
 };
-use crate::seats::{SeatFile, validate_vm_host_allowance};
+use crate::seats::{SeatBackend, SeatFile, validate_vm_host_allowance};
 use crate::secret::{
     ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
     MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, redact_secrets,
@@ -18,14 +18,18 @@ use crate::transport::{
     LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
     UreqTransport,
 };
+use crate::wording::wording_slot;
+use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Usage text printed for `--help`.
 pub const USAGE_TEXT: &str = "\
 Usage:
   league-relay turn --game-dir <dir> --day <DD> --round <talk|act> --seats <file> [options]
+  league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <path>] [options]
 
 Options:
   --wrapper <path>           System wrapper markdown sent as role='system' (required on turn 1)
@@ -50,6 +54,27 @@ pub enum CliCommand {
     Help,
     /// Execute one `turn`.
     Turn(TurnArgs),
+    /// Run a self-contained offline mock `turn` in a fresh temporary game directory (`P43-B3`).
+    PrebookCheck(PrebookCheckArgs),
+}
+
+/// Parsed arguments for `league-relay prebook-check` (`P43-B3`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebookCheckArgs {
+    /// `--seats <file>`
+    pub seats_path: PathBuf,
+    /// `--wrapper <path>`
+    pub wrapper_path: PathBuf,
+    /// `--response-schema <path>`
+    pub response_schema_path: Option<PathBuf>,
+    /// `--memory-mode <snapshot|emc|full>`
+    pub memory_mode: MemoryMode,
+    /// `--scratchpad` / `--no-scratchpad`
+    pub scratchpad_requested: Option<bool>,
+    /// `--mixed-scratchpad-arm`
+    pub mixed_scratchpad_arm: bool,
+    /// `--allow-vm-host <host>`
+    pub allowed_vm_hosts: Vec<String>,
 }
 
 /// Parsed arguments for `league-relay turn`.
@@ -112,6 +137,9 @@ where
     if tokens.len() == 1 && matches!(tokens[0].as_str(), "-h" | "--help" | "help") {
         return Ok(CliCommand::Help);
     }
+    if tokens[0] == "prebook-check" {
+        return parse_prebook_check_args(&tokens, redaction_key);
+    }
     if tokens[0] != "turn" {
         let first_flag = tokens[0].split('=').next().unwrap_or(&tokens[0]);
         if is_forbidden_key_flag(first_flag) || looks_like_cli_secret(&tokens[0]) {
@@ -121,7 +149,7 @@ where
             ));
         }
         return Err(RelayError::Usage(
-            "unknown subcommand (expected 'turn' or '--help')".to_owned(),
+            "unknown subcommand (expected 'turn', 'prebook-check', or '--help')".to_owned(),
         ));
     }
 
@@ -440,7 +468,7 @@ where
     let redact_ref = redaction_keys.first();
 
     match run_cli_inner(args, &env_key, any_forbidden_local_key, redact_ref, stdout) {
-        Ok(Some(summary)) => {
+        Ok(CliRunOutcome::Turn(summary)) => {
             let rendered = redact_secrets_multi_with_limit(
                 &summary.format_paths_and_hashes(),
                 &redaction_keys,
@@ -449,7 +477,8 @@ where
             let _ = write!(stdout, "{rendered}");
             if summary.all_clean() { 0 } else { 2 }
         }
-        Ok(None) => 0,
+        Ok(CliRunOutcome::PrebookOk | CliRunOutcome::Help) => 0,
+        Ok(CliRunOutcome::PrebookSeatFailed) => 2,
         Err(e) => {
             let (exit_code, scan_limit) = match &e {
                 RelayError::UnrecordedCharge { .. } => (3, MAX_UNRECORDED_CHARGE_SCAN_BYTES),
@@ -466,13 +495,543 @@ where
     }
 }
 
+enum CliRunOutcome {
+    Help,
+    Turn(TurnSummary),
+    PrebookOk,
+    PrebookSeatFailed,
+}
+
+fn parse_prebook_check_args(
+    tokens: &[String],
+    redaction_key: Option<&ApiKey>,
+) -> Result<CliCommand, RelayError> {
+    let mut seats_path: Option<PathBuf> = None;
+    let mut wrapper_path: Option<PathBuf> = None;
+    let mut response_schema_path: Option<PathBuf> = None;
+    let mut memory_mode = MemoryMode::default();
+    let mut scratchpad_requested: Option<bool> = None;
+    let mut mixed_scratchpad_arm = false;
+    let mut allowed_vm_hosts: Vec<String> = Vec::new();
+
+    let mut idx = 1;
+    while idx < tokens.len() {
+        let raw_arg = &tokens[idx];
+        if matches!(raw_arg.as_str(), "-h" | "--help") {
+            return Ok(CliCommand::Help);
+        }
+        let (flag, inline_val) = match raw_arg.split_once('=') {
+            Some((f, v)) => (f, Some(v)),
+            None => (raw_arg.as_str(), None),
+        };
+        if is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_arg) {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
+                    .to_owned(),
+            ));
+        }
+        match flag {
+            "--seats" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                seats_path = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--wrapper" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                wrapper_path = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--response-schema" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                response_schema_path = Some(PathBuf::from(val));
+                idx += step;
+            }
+            "--memory-mode" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                memory_mode = MemoryMode::parse(val)?;
+                idx += step;
+            }
+            "--scratchpad" => {
+                let req = match inline_val {
+                    None | Some("true") => true,
+                    Some("false") => false,
+                    Some(_) => {
+                        return Err(RelayError::Usage(
+                            "--scratchpad takes no value (or '=true' / '=false')".to_owned(),
+                        ));
+                    }
+                };
+                if scratchpad_requested.is_some_and(|prev| prev != req) {
+                    return Err(RelayError::Usage(
+                        "--scratchpad and --no-scratchpad cannot be used together".to_owned(),
+                    ));
+                }
+                scratchpad_requested = Some(req);
+                idx += 1;
+            }
+            "--no-scratchpad" => {
+                if inline_val.is_some() {
+                    return Err(RelayError::Usage(
+                        "--no-scratchpad takes no value".to_owned(),
+                    ));
+                }
+                if scratchpad_requested == Some(true) {
+                    return Err(RelayError::Usage(
+                        "--scratchpad and --no-scratchpad cannot be used together".to_owned(),
+                    ));
+                }
+                scratchpad_requested = Some(false);
+                idx += 1;
+            }
+            "--mixed-scratchpad-arm" => {
+                if inline_val.is_some() {
+                    return Err(RelayError::Usage(
+                        "--mixed-scratchpad-arm takes no value".to_owned(),
+                    ));
+                }
+                mixed_scratchpad_arm = true;
+                idx += 1;
+            }
+            "--allow-vm-host" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                let normalized = validate_vm_host_allowance(val)?;
+                if !allowed_vm_hosts.contains(&normalized) {
+                    allowed_vm_hosts.push(normalized);
+                }
+                idx += step;
+            }
+            "--live" => {
+                return Err(RelayError::Usage(
+                    "prebook-check runs offline against mock transport only; omit --live"
+                        .to_owned(),
+                ));
+            }
+            other => {
+                if !other.starts_with('-') {
+                    return Err(RelayError::Usage(
+                        "unexpected positional argument (all options require a '--flag')"
+                            .to_owned(),
+                    ));
+                }
+                return Err(RelayError::Usage(format!(
+                    "unknown option '{}'",
+                    sanitize_flag_name(other, redaction_key)
+                )));
+            }
+        }
+    }
+
+    Ok(CliCommand::PrebookCheck(PrebookCheckArgs {
+        seats_path: seats_path
+            .ok_or_else(|| RelayError::Usage("missing required --seats <file>".to_owned()))?,
+        wrapper_path: wrapper_path
+            .ok_or_else(|| RelayError::Usage("missing required --wrapper <path>".to_owned()))?,
+        response_schema_path,
+        memory_mode,
+        scratchpad_requested,
+        mixed_scratchpad_arm,
+        allowed_vm_hosts,
+    }))
+}
+
+struct TempPrebookDir {
+    root: PathBuf,
+}
+
+impl TempPrebookDir {
+    fn create() -> Result<Self, RelayError> {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let base = std::env::temp_dir();
+        let pid = std::process::id();
+        for _ in 0..1024 {
+            let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let candidate = base.join(format!("league-relay-prebook-{pid}-{seq}"));
+            match fs::create_dir(&candidate) {
+                Ok(()) => return Ok(Self { root: candidate }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(RelayError::Io(format!(
+                        "could not create temporary prebook-check dir {}: {e}",
+                        candidate.display()
+                    )));
+                }
+            }
+        }
+        Err(RelayError::Io(
+            "could not allocate unique temporary prebook-check directory".to_owned(),
+        ))
+    }
+}
+
+impl Drop for TempPrebookDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn resolve_local_schema_ref<'a>(
+    root_schema: &'a serde_json::Value,
+    ref_str: &str,
+) -> Option<&'a serde_json::Value> {
+    let pointer = ref_str.strip_prefix('#')?;
+    root_schema.pointer(pointer)
+}
+
+fn synthesize_mock_value_for_schema(
+    schema: &serde_json::Value,
+    root_schema: &serde_json::Value,
+    pad_key: &str,
+    is_root_pad_field: bool,
+    depth: usize,
+) -> serde_json::Value {
+    if is_root_pad_field || depth > 16 {
+        return serde_json::Value::String(String::new());
+    }
+    let Some(obj) = schema.as_object() else {
+        return serde_json::json!({});
+    };
+    if let Some(ref_s) = obj.get("$ref").and_then(|v| v.as_str())
+        && let Some(target) = resolve_local_schema_ref(root_schema, ref_s)
+    {
+        return synthesize_mock_value_for_schema(target, root_schema, pad_key, false, depth + 1);
+    }
+    if let Some(c) = obj.get("const") {
+        return c.clone();
+    }
+    if let Some(arr) = obj.get("enum").and_then(|v| v.as_array())
+        && let Some(first) = arr.first()
+    {
+        return first.clone();
+    }
+    for branch_kw in ["anyOf", "oneOf"] {
+        if let Some(arr) = obj.get(branch_kw).and_then(|v| v.as_array())
+            && let Some(first) = arr.first()
+        {
+            return synthesize_mock_value_for_schema(first, root_schema, pad_key, false, depth + 1);
+        }
+    }
+    let ty = obj.get("type").and_then(|v| v.as_str());
+    if ty == Some("object")
+        || (ty.is_none() && (obj.contains_key("properties") || obj.contains_key("required")))
+    {
+        let mut out_map = serde_json::Map::new();
+        let props_opt = obj.get("properties").and_then(|v| v.as_object());
+        if let Some(req_arr) = obj.get("required").and_then(|v| v.as_array()) {
+            for req_k in req_arr.iter().filter_map(|v| v.as_str()) {
+                let is_pad = depth == 0 && req_k == pad_key;
+                let sub = props_opt
+                    .and_then(|p| p.get(req_k))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({"type": "string"}));
+                out_map.insert(
+                    req_k.to_owned(),
+                    synthesize_mock_value_for_schema(&sub, root_schema, pad_key, is_pad, depth + 1),
+                );
+            }
+        }
+        return serde_json::Value::Object(out_map);
+    }
+    match ty {
+        Some("array") => serde_json::Value::Array(Vec::new()),
+        Some("string") => serde_json::Value::String("ok".to_owned()),
+        Some("integer") => serde_json::json!(0),
+        Some("number") => serde_json::json!(0.0),
+        Some("boolean") => serde_json::Value::Bool(false),
+        Some("null") => serde_json::Value::Null,
+        _ => serde_json::json!({}),
+    }
+}
+
+fn build_prebook_mock_responses_json(response_format: Option<&ResponseFormatConfig>) -> String {
+    let pad_key = wording_slot("scratchpad_schema_key");
+    let pinned_pad_desc = wording_slot("scratchpad_schema_description");
+    let make_rule = |when_contains: &str, content: String| {
+        serde_json::json!({
+            "when_contains": when_contains,
+            "status": 200,
+            "response": {
+                "id": "prebook-mock-1",
+                "model": "prebook-mock",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": content
+                    }
+                }],
+                "usage": {
+                    "prompt_tokens": 16,
+                    "completion_tokens": 8,
+                    "total_tokens": 24,
+                    "cost": 0.0
+                }
+            }
+        })
+    };
+    let rules = match response_format {
+        Some(rf) if rf.schema_has_scratchpad_property() => {
+            let with_pad =
+                synthesize_mock_value_for_schema(&rf.schema, &rf.schema, &pad_key, false, 0)
+                    .to_string();
+            let stripped = rf.without_scratchpad_property();
+            let without_pad = synthesize_mock_value_for_schema(
+                &stripped.schema,
+                &stripped.schema,
+                &pad_key,
+                false,
+                0,
+            )
+            .to_string();
+            vec![
+                make_rule(&pinned_pad_desc, with_pad),
+                make_rule("", without_pad),
+            ]
+        }
+        Some(rf) => {
+            let content =
+                synthesize_mock_value_for_schema(&rf.schema, &rf.schema, &pad_key, false, 0)
+                    .to_string();
+            vec![make_rule("", content)]
+        }
+        None => vec![make_rule("", "PREBOOK_MOCK_OK\n".to_owned())],
+    };
+    serde_json::json!({ "rules": rules }).to_string()
+}
+
+fn infer_prebook_vm_hosts(seats_path: &std::path::Path) -> Vec<String> {
+    let Ok(raw) = fs::read_to_string(seats_path) else {
+        return Vec::new();
+    };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Vec::new();
+    };
+    let entries = if let Some(arr) = val.as_array() {
+        arr.as_slice()
+    } else if let Some(arr) = val.get("seats").and_then(|s| s.as_array()) {
+        arr.as_slice()
+    } else {
+        return Vec::new();
+    };
+    let mut hosts = Vec::new();
+    for entry in entries {
+        if entry.get("backend").and_then(|b| b.as_str()) != Some("local") {
+            continue;
+        }
+        let Some(base_url) = entry.get("base_url").and_then(|u| u.as_str()) else {
+            continue;
+        };
+        let trimmed = base_url.trim();
+        let Some(after_scheme) = trimmed
+            .strip_prefix("http://")
+            .or_else(|| trimmed.strip_prefix("https://"))
+        else {
+            continue;
+        };
+        let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+        let host_part = if let Some(rest) = authority.strip_prefix('[') {
+            rest.split(']').next().unwrap_or("")
+        } else {
+            authority.split(':').next().unwrap_or("")
+        };
+        if let Ok(ip) = host_part.parse::<std::net::IpAddr>() {
+            let is_private_or_ula = match ip {
+                std::net::IpAddr::V4(v4) => v4.is_private(),
+                std::net::IpAddr::V6(v6) => {
+                    v6.to_ipv4_mapped().is_none()
+                        && !v6.is_unicast_link_local()
+                        && v6.is_unique_local()
+                }
+            };
+            if is_private_or_ula
+                && let Ok(norm) = validate_vm_host_allowance(host_part)
+                && !hosts.contains(&norm)
+            {
+                hosts.push(norm);
+            }
+        }
+    }
+    hosts
+}
+
+fn run_prebook_check(
+    args: PrebookCheckArgs,
+    any_forbidden_local_key: bool,
+    redact_ref: Option<&ApiKey>,
+    stdout: &mut dyn Write,
+) -> Result<CliRunOutcome, RelayError> {
+    if any_forbidden_local_key {
+        return Err(RelayError::SecretInForbiddenPlace(
+            "prebook-check refuses API keys; unset OPENROUTER_API_KEY, OPENAI_API_KEY, VLLM_API_KEY, and LOCAL_API_KEY".to_owned(),
+        ));
+    }
+
+    let effective_vm_hosts = if args.allowed_vm_hosts.is_empty() {
+        infer_prebook_vm_hosts(&args.seats_path)
+    } else {
+        args.allowed_vm_hosts.clone()
+    };
+
+    let seats =
+        SeatFile::load_with_allowed_hosts(&args.seats_path, redact_ref, &effective_vm_hosts)?;
+    let response_format = match &args.response_schema_path {
+        Some(path) => Some(ResponseFormatConfig::load(path, redact_ref)?),
+        None => None,
+    };
+
+    let temp = TempPrebookDir::create()?;
+    let game_dir = temp.root.join("game");
+    let to_seat_dir = game_dir.join("to-seat");
+    let mock_dir = temp.root.join("mock");
+    fs::create_dir_all(&to_seat_dir).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not create {}: {e}", to_seat_dir.display()),
+            redact_ref,
+        ))
+    })?;
+    fs::create_dir_all(&mock_dir).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not create {}: {e}", mock_dir.display()),
+            redact_ref,
+        ))
+    })?;
+
+    for seat in &seats.seats {
+        let seat_in = to_seat_dir.join(format!("day-01-talk-{}.md", seat.guild));
+        fs::write(&seat_in, "PREBOOK CHECK PUBLIC STATE\n").map_err(|e| {
+            RelayError::Io(redact_secrets(
+                &format!("could not write {}: {e}", seat_in.display()),
+                redact_ref,
+            ))
+        })?;
+    }
+
+    let responses_path = mock_dir.join("responses.json");
+    fs::write(
+        &responses_path,
+        build_prebook_mock_responses_json(response_format.as_ref()),
+    )
+    .map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not write {}: {e}", responses_path.display()),
+            redact_ref,
+        ))
+    })?;
+
+    let (cap_credits, cap_gpu_secs) = if seats.has_local_seat() {
+        let sum_gpu: f64 = seats
+            .seats
+            .iter()
+            .filter_map(|s| match &s.backend {
+                SeatBackend::Local(l) => Some(l.max_gpu_secs_per_call),
+                _ => None,
+            })
+            .sum();
+        (None, Some(sum_gpu * 2.0 + 60.0))
+    } else if seats.has_openrouter_seat() {
+        let sum_cred: f64 = seats
+            .seats
+            .iter()
+            .filter_map(|s| match &s.backend {
+                SeatBackend::Openrouter(o) => Some(o.max_cost_per_call),
+                _ => None,
+            })
+            .sum();
+        (Some(sum_cred * 2.0 + 10.0), None)
+    } else {
+        (None, None)
+    };
+
+    let cfg = TurnConfig::new(
+        game_dir.clone(),
+        "01".to_owned(),
+        Round::Talk,
+        seats.clone(),
+        Some(args.wrapper_path),
+        false,
+        cap_credits,
+    )
+    .with_memory_mode(args.memory_mode)
+    .with_cap_gpu_secs(cap_gpu_secs)
+    .with_response_format(response_format)
+    .with_scratchpad(args.scratchpad_requested)
+    .with_mixed_scratchpad_arm(seats.mixed_scratchpad_arm || args.mixed_scratchpad_arm)
+    .with_allowed_vm_hosts(effective_vm_hosts);
+
+    validate_scratchpad_setup(&cfg)?;
+
+    let summary = if seats.has_local_seat() || seats.has_openrouter_seat() {
+        let mock_transport = MockDirTransport::load_with_key(&mock_dir, redact_ref)?;
+        run_turn(&cfg, &mock_transport, redact_ref)?
+    } else {
+        run_turn(&cfg, &NoopManualTransport, redact_ref)?
+    };
+
+    let setup_raw = fs::read_to_string(game_dir.join("relay/setup.json")).map_err(|e| {
+        RelayError::Io(redact_secrets(
+            &format!("could not read setup.json after prebook-check: {e}"),
+            redact_ref,
+        ))
+    })?;
+    let setup: GameSetupRecord = serde_json::from_str(&setup_raw).map_err(|e| {
+        RelayError::CorruptLog(redact_secrets(
+            &format!("invalid setup.json after prebook-check: {e}"),
+            redact_ref,
+        ))
+    })?;
+
+    for (seat_spec, report) in seats.seats.iter().zip(summary.reports.iter()) {
+        let backend_label = match seat_spec.backend {
+            SeatBackend::Local(_) => "local",
+            SeatBackend::Openrouter(_) => "openrouter",
+            SeatBackend::File { .. } => "file",
+        };
+        match &report.outcome {
+            SeatOutcome::Delivered { attempts, .. } => {
+                let _ = writeln!(
+                    stdout,
+                    "prebook-check: seat={} backend={backend_label} outcome=OK attempts={attempts}",
+                    report.guild
+                );
+            }
+            SeatOutcome::RelayedByHand => {
+                let _ = writeln!(
+                    stdout,
+                    "prebook-check: seat={} backend={backend_label} outcome=FILE_MANUAL",
+                    report.guild
+                );
+            }
+            _ => {
+                let _ = writeln!(
+                    stdout,
+                    "prebook-check: seat={} backend={backend_label} outcome=FAILED",
+                    report.guild
+                );
+            }
+        }
+    }
+
+    if summary.all_clean() {
+        let _ = writeln!(
+            stdout,
+            "prebook-check: OK seats={} wording_arm={} memory_mode={} scratchpad=\"{}\" non_pinned_strings={}",
+            seats.seats.len(),
+            setup.wording_arm,
+            setup.memory_mode,
+            setup.scratchpad,
+            setup.non_pinned_model_facing_strings.len()
+        );
+        Ok(CliRunOutcome::PrebookOk)
+    } else {
+        Ok(CliRunOutcome::PrebookSeatFailed)
+    }
+}
+
 fn run_cli_inner<I, S>(
     args: I,
     env_key: &Result<ApiKey, RelayError>,
     any_forbidden_local_key: bool,
     redact_ref: Option<&ApiKey>,
     stdout: &mut dyn Write,
-) -> Result<Option<TurnSummary>, RelayError>
+) -> Result<CliRunOutcome, RelayError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
@@ -480,7 +1039,10 @@ where
     let turn_args = match parse_args_with_key(args, redact_ref)? {
         CliCommand::Help => {
             let _ = write!(stdout, "{USAGE_TEXT}");
-            return Ok(None);
+            return Ok(CliRunOutcome::Help);
+        }
+        CliCommand::PrebookCheck(p) => {
+            return run_prebook_check(p, any_forbidden_local_key, redact_ref, stdout);
         }
         CliCommand::Turn(t) => t,
     };
@@ -545,5 +1107,5 @@ where
     } else {
         run_turn(&base_cfg, &NoopManualTransport, redact_ref)?
     };
-    Ok(Some(summary))
+    Ok(CliRunOutcome::Turn(summary))
 }

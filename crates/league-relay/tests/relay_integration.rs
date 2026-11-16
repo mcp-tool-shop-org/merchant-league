@@ -9934,7 +9934,7 @@ fn part1_b4_1_c5_system_wrapper_snapshot_scratchpad_emc_and_setup_record() -> Te
     ])?;
     match parsed_cmd {
         CliCommand::Turn(args) => assert_eq!(args.memory_mode, MemoryMode::Snapshot),
-        CliCommand::Help => return Err("expected Turn".into()),
+        CliCommand::PrebookCheck(_) | CliCommand::Help => return Err("expected Turn".into()),
     }
 
     // --- 1. Default Snapshot mode + 500-token scratchpad persistence & cap (with response schema per R2-B3) ---
@@ -10898,7 +10898,7 @@ fn part1_cli_schema_local_validation_and_cost_over_estimate_branches() -> TestRe
                     Some(Path::new("schema.json"))
                 );
             }
-            CliCommand::Help => return Err("expected Turn".into()),
+            CliCommand::PrebookCheck(_) | CliCommand::Help => return Err("expected Turn".into()),
         }
     }
     assert!(
@@ -19443,6 +19443,7 @@ fn fix6_p37_b2_refuses_dynamic_ref_recursive_ref_and_anchors_everywhere() -> Tes
         json!({"type": "object", "properties": {"orders": {"type": "array"}}, "dependentSchemas": 7}),
         json!({"type": "object", "properties": {"orders": {"$defs": 7}}}),
         json!({"type": "object", "properties": {"orders": {"dependentSchemas": 7}}}),
+        json!({"type": "object", "properties": {"orders": {"type": "string", "description": "Write in n o t e s"}}}),
         json!({"type": "object", "properties": {"orders": {"type": "string", "description": "Write in n,o,t,e,s"}}}),
         json!({"type": "object", "properties": {"orders": {"type": "string", "description": "ΗΝΡΤΧΥΖϹՕԀՏՍᎪᏴᏟᎠᎬᏂᎥᎫᏦᎷᏢᎡᏚᎢᏙᎳᏲᏃ 1478 scratchpad"}}}),
     ] {
@@ -22187,6 +22188,1192 @@ fn fix9_p42_c1_di_escape_and_length_mutations_fail_via_arm_digest_comparison() -
                 "rendered text for path '{path_name}' changed under unchanged ACTIVE_WORDING_ARM '{ACTIVE_WORDING_ARM}'"
             )),
             "unexpected guard error: {err}"
+        );
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Fix 10 (`P43-B1`, `P43-B2`, `P43-B3`, `P43-C1`..`P43-C3`)
+// ============================================================================
+
+#[test]
+fn fix10_p43_b1_c1_c3_visible_whitespace_sweep_nbsp_ideographic_pins_and_digit_drop() -> TestResult
+{
+    let tmp = TempDir::new()?;
+    let clean_wrapper = tmp.path().join("clean_wrapper.md");
+    fs::write(&clean_wrapper, "CLEAN GAME BRIEF")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_refusal = tmp.path().join("seats_refusal.json");
+    write_local_seats_file(
+        &seats_refusal,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // Enumerate every Unicode 18.0.0 `White_Space` scalar value via `icu_properties` `2.4.0`
+    // compiled data and cross-check against `char::is_whitespace` and the complete 25-entry list:
+    let ws_set = icu_properties::CodePointSetData::new::<icu_properties::props::WhiteSpace>();
+    let mut discovered_ws: Vec<char> = Vec::new();
+    for cp in 0u32..=0x10FFFF {
+        let Some(c) = char::from_u32(cp) else {
+            continue;
+        };
+        let in_icu = ws_set.contains(c);
+        assert_eq!(
+            in_icu,
+            c.is_whitespace(),
+            "icu_properties WhiteSpace and char::is_whitespace disagreed at U+{cp:04X}"
+        );
+        if in_icu {
+            discovered_ws.push(c);
+        }
+    }
+    let expected_all_ws: &[char] = &[
+        '\u{0009}', '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0020}', '\u{0085}',
+        '\u{00A0}', '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}',
+        '\u{2005}', '\u{2006}', '\u{2007}', '\u{2008}', '\u{2009}', '\u{200A}', '\u{2028}',
+        '\u{2029}', '\u{202F}', '\u{205F}', '\u{3000}',
+    ];
+    assert_eq!(discovered_ws, expected_all_ws);
+
+    let visible_separators: &[char] = &[
+        '\u{0020}', '\t', '\n', '\u{000B}', '\u{000C}', '\r', '\u{0085}', '\u{00A0}', '\u{2028}',
+        '\u{2029}', '\u{3000}',
+    ];
+    assert_eq!(visible_separators.len(), 11);
+
+    // Sweep all 25 Unicode 18.0.0 `White_Space` code points:
+    for (idx, &cp) in discovered_ws.iter().enumerate() {
+        if visible_separators.contains(&cp) {
+            // The 11 visible/line-break separators keep `Do<sep>not<sep>exceed` passing everywhere:
+            let ok_phrase = format!("Do{cp}not{cp}exceed");
+            let ok_schema = json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["orders"],
+                "properties": {
+                    "orders": {
+                        "type": "string",
+                        "description": ok_phrase,
+                        "title": ok_phrase,
+                        "examples": [ok_phrase],
+                        "default": ok_phrase,
+                        "$comment": ok_phrase
+                    },
+                    "notes": {"type": "string"}
+                }
+            });
+            assert!(
+                ResponseFormatConfig::from_json_str(&ok_schema.to_string(), None).is_ok(),
+                "P43-B1: visible separator U+{:04X} must keep 'Do<sep>not<sep>exceed' passing",
+                cp as u32
+            );
+            let ok_seats_json = json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": {"hint": ok_phrase},
+                        "exclude_from_transcript": true
+                    }
+                }]
+            });
+            let ok_seats_file = tmp.path().join(format!("ws_ok_seats_{idx}.json"));
+            fs::write(&ok_seats_file, ok_seats_json.to_string())?;
+            let ok_wrap_file = tmp.path().join(format!("ws_ok_wrap_{idx}.md"));
+            fs::write(&ok_wrap_file, &ok_phrase)?;
+            let ok_schema_file = tmp.path().join(format!("ws_ok_schema_{idx}.json"));
+            fs::write(&ok_schema_file, ok_schema.to_string())?;
+            let mut out = Vec::new();
+            let mut err_out = Vec::new();
+            assert_eq!(
+                execute_cli(
+                    [
+                        "prebook-check",
+                        "--seats",
+                        ok_seats_file.to_str().ok_or("utf8")?,
+                        "--wrapper",
+                        ok_wrap_file.to_str().ok_or("utf8")?,
+                        "--response-schema",
+                        ok_schema_file.to_str().ok_or("utf8")?,
+                    ],
+                    |_| None,
+                    &mut out,
+                    &mut err_out,
+                ),
+                0,
+                "P43-B1: visible separator U+{:04X} must pass prebook-check; stderr: {}",
+                cp as u32,
+                String::from_utf8_lossy(&err_out)
+            );
+
+            // And `Take<sep>note` is still refused across all 6 visible separators:
+            let bad_take_note = format!("Take{cp}note");
+            let bad_s = json!({
+                "type": "object",
+                "properties": {
+                    "orders": {"type": "string", "description": bad_take_note},
+                    "notes": {"type": "string"}
+                }
+            });
+            let Err(err_tn) = ResponseFormatConfig::from_json_str(&bad_s.to_string(), None) else {
+                return Err(format!("Take<U+{:04X}>note must be refused", cp as u32).into());
+            };
+            assert!(
+                err_tn
+                    .to_string()
+                    .contains("cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'")
+            );
+        } else {
+            // Every other White_Space code point (all 14 of them) is stripped inside the token,
+            // so `no<cp>tes`, `n<cp>o<cp>t<cp>e<cp>s`, AND `Do<cp>not<cp>exceed` (`"donotexceed"`,
+            // `P44-C1`) are REFUSED with 0 HTTP and 0 `/tokenize`:
+            for bad_ws_tok in [
+                format!("no{cp}tes"),
+                format!("n{cp}o{cp}t{cp}e{cp}s"),
+                format!("Do{cp}not{cp}exceed"),
+            ] {
+                let s_prose = json!({
+                    "type": "object",
+                    "properties": {
+                        "orders": {"type": "string", "description": bad_ws_tok},
+                        "notes": {"type": "string"}
+                    }
+                });
+                let Err(e_prose) = ResponseFormatConfig::from_json_str(&s_prose.to_string(), None)
+                else {
+                    return Err(format!(
+                        "P43-B1: non-visible White_Space U+{:04X} in '{bad_ws_tok:?}' must be refused",
+                        cp as u32
+                    )
+                    .into());
+                };
+                assert!(
+                    e_prose
+                        .to_string()
+                        .contains("cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'"),
+                    "unexpected error for U+{:04X}: {e_prose}",
+                    cp as u32
+                );
+
+                let s_name = json!({
+                    "name": bad_ws_tok,
+                    "schema": {"type": "object", "properties": {"orders": {"type": "array"}}}
+                });
+                let Err(e_name) = ResponseFormatConfig::from_json_str(&s_name.to_string(), None)
+                else {
+                    return Err(format!(
+                        "P43-B1: U+{:04X} in schema.name must be refused",
+                        cp as u32
+                    )
+                    .into());
+                };
+                assert!(
+                    e_name
+                        .to_string()
+                        .contains("outside top-level 'properties.notes'")
+                );
+
+                let bad_kw_seats = json!({
+                    "seats": [{
+                        "guild": "Saltworks",
+                        "backend": "local",
+                        "base_url": srv.base_url,
+                        "model": "Qwen/Qwen3-14B",
+                        "temperature": 0.2,
+                        "max_output_tokens": 128,
+                        "timeout_secs": 1.0,
+                        "max_gpu_secs_per_call": 1.5,
+                        "reasoning": {
+                            "chat_template_kwargs": {"mode": bad_ws_tok},
+                            "exclude_from_transcript": true
+                        }
+                    }]
+                });
+                let Err(e_kw) = SeatFile::from_json_str(&bad_kw_seats.to_string(), None) else {
+                    return Err(
+                        format!("P43-B1: U+{:04X} in kwargs must be refused", cp as u32).into(),
+                    );
+                };
+                assert!(
+                    e_kw.to_string()
+                        .contains("cannot mention 'notes' or 'note'")
+                );
+            }
+
+            // End-to-end CLI `turn` refusal for `no<cp>tes` in `--wrapper` (0 HTTP, 0 `/tokenize`):
+            let bad_wrap = tmp.path().join(format!("ws_bad_wrap_{idx}.md"));
+            fs::write(&bad_wrap, format!("Brief: no{cp}tes"))?;
+            let g_bad = tmp.path().join(format!("g_ws_bad_{idx}"));
+            write_to_seat(&g_bad, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+            let mut out = Vec::new();
+            let mut err_out = Vec::new();
+            assert_eq!(
+                execute_cli(
+                    [
+                        "turn",
+                        "--game-dir",
+                        g_bad.to_str().ok_or("utf8")?,
+                        "--day",
+                        "01",
+                        "--round",
+                        "talk",
+                        "--seats",
+                        seats_refusal.to_str().ok_or("utf8")?,
+                        "--wrapper",
+                        bad_wrap.to_str().ok_or("utf8")?,
+                        "--no-scratchpad",
+                        "--cap-gpu-secs",
+                        "10.0",
+                    ],
+                    |_| None,
+                    &mut out,
+                    &mut err_out,
+                ),
+                1,
+                "P43-B1 CLI must refuse no<U+{:04X}>tes in --wrapper",
+                cp as u32
+            );
+            assert!(
+                String::from_utf8_lossy(&err_out).contains("cannot mention 'notes' or 'note'"),
+                "expected note-specific CLI refusal for U+{:04X}",
+                cp as u32
+            );
+            assert!(!g_bad.join("relay/setup.json").exists());
+            assert!(!g_bad.join("relay/calls.jsonl").exists());
+        }
+    }
+
+    // --- `P43-C1` explicit pin: NBSP U+00A0 (`Do\u{00A0}not\u{00A0}exceed`) and fullwidth + U+3000
+    //     (`Ｄｏ　ｎｏｔ　ｅｘｃｅｅｄ`) MUST pass so `B1_NBSPJOIN` fails ---
+    for c1_phrase in [
+        "Do\u{00A0}not\u{00A0}exceed",
+        "Ｄｏ\u{3000}ｎｏｔ\u{3000}ｅｘｃｅｅｄ",
+    ] {
+        let s = json!({
+            "type": "object",
+            "properties": {
+                "orders": {"type": "string", "description": c1_phrase},
+                "notes": {"type": "string"}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s.to_string(), None).is_ok(),
+            "P43-C1 pin: '{c1_phrase}' must be accepted"
+        );
+    }
+
+    // --- `P43-C3`: digits are dropped inside tokens on the non-leet pass (`no1tes` refused) ---
+    let s_digit = json!({
+        "type": "object",
+        "properties": {
+            "orders": {"type": "string", "description": "no1tes"},
+            "notes": {"type": "string"}
+        }
+    });
+    let Err(e_digit) = ResponseFormatConfig::from_json_str(&s_digit.to_string(), None) else {
+        return Err("P43-C3: 'no1tes' must be refused".into());
+    };
+    assert!(e_digit.to_string().contains(
+        "cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'"
+    ));
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
+    Ok(())
+}
+
+#[test]
+fn fix10_p43_b2_single_letter_run_rejoin_and_multi_letter_split_limit_pins() -> TestResult {
+    let tmp = TempDir::new()?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_refusal = tmp.path().join("seats_refusal.json");
+    write_local_seats_file(
+        &seats_refusal,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // --- 1. DO-NOT-RELAX (`P43-B2`): consecutive single-letter tokens rejoining into `*note*` are REFUSED
+    //     (removing single-letter rejoining MUST fail this block) ---
+    for (idx, bad_spaced) in [
+        "n o t e",
+        "n o t e s",
+        "N O T E S",
+        "Write in n o t e s",
+        "k e y n o t e",
+        "n. o. t. e. s.",
+        "n\tn\no\rt\u{00A0}e\u{3000}s",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for s_bad in [
+            json!({"type": "object", "properties": {"orders": {"type": "string", "description": bad_spaced}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "enum": ["ok", bad_spaced]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "const": bad_spaced}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "title": bad_spaced}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "examples": [bad_spaced]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "default": bad_spaced}, "notes": {"type": "string"}}}),
+            json!({"name": bad_spaced, "schema": {"type": "object", "properties": {"orders": {"type": "array"}}}}),
+        ] {
+            let Err(err) = ResponseFormatConfig::from_json_str(&s_bad.to_string(), None) else {
+                return Err(format!("DO-NOT-RELAX P43-B2: '{bad_spaced}' must be refused").into());
+            };
+            assert!(
+                err.to_string()
+                    .contains("outside top-level 'properties.notes'"),
+                "expected note-specific error for '{bad_spaced}', got: {err}"
+            );
+        }
+
+        let bad_seats = json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": srv.base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5,
+                "reasoning": {
+                    "chat_template_kwargs": {"mode": bad_spaced},
+                    "exclude_from_transcript": true
+                }
+            }]
+        });
+        let Err(kw_err) = SeatFile::from_json_str(&bad_seats.to_string(), None) else {
+            return Err(format!("P43-B2 '{bad_spaced}' in kwargs must be refused").into());
+        };
+        assert!(
+            kw_err
+                .to_string()
+                .contains("cannot mention 'notes' or 'note'")
+        );
+
+        let bad_wrap = tmp.path().join(format!("b2_wrap_{idx}.md"));
+        fs::write(&bad_wrap, bad_spaced)?;
+        let g = tmp.path().join(format!("g_b2_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        assert_eq!(
+            execute_cli(
+                [
+                    "turn",
+                    "--game-dir",
+                    g.to_str().ok_or("utf8")?,
+                    "--day",
+                    "01",
+                    "--round",
+                    "talk",
+                    "--seats",
+                    seats_refusal.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    bad_wrap.to_str().ok_or("utf8")?,
+                    "--no-scratchpad",
+                    "--cap-gpu-secs",
+                    "10.0",
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1
+        );
+        assert!(String::from_utf8_lossy(&err_out).contains("cannot mention 'notes' or 'note'"));
+    }
+
+    // `s c r a t c h p a d` remains refused under `C-23`:
+    let sp_s = json!({
+        "type": "object",
+        "properties": {
+            "orders": {"type": "string", "description": "s c r a t c h p a d"},
+            "notes": {"type": "string"}
+        }
+    });
+    let Err(sp_e) = ResponseFormatConfig::from_json_str(&sp_s.to_string(), None) else {
+        return Err("s c r a t c h p a d must be refused".into());
+    };
+    assert!(sp_e.to_string().contains("scratchpad"));
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
+
+    // --- 2. Must pass (`P43-B2` single-letter runs that don't spell a banned word + Fix-9 phrases
+    //     + documented multi-letter split limit `no tes` / `not es` / `no te` so widening rejoining
+    //     beyond 1-letter tokens to `<= 2` or `<= 3` letters MUST fail this block) ---
+    for ok_phrase in [
+        // Harmless single-letter runs:
+        "I am",
+        "a b c",
+        "x y",
+        "A to Z",
+        "n o t enough",
+        // Fix-9 must-pass set:
+        "Do not exceed",
+        "not enough",
+        "can not end",
+        "no tea",
+        "piano technique",
+        "monotone",
+        "another",
+        "nothing",
+        "knot",
+        "nominate",
+        "into each",
+        "go to town",
+        // DO-NOT-WIDEN multi-letter split limit (`P43-B2`, >=2-letter tokens stay separate):
+        "no tes",
+        "not es",
+        "no te",
+    ] {
+        let s_ok = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": ok_phrase,
+                    "title": ok_phrase,
+                    "examples": [ok_phrase],
+                    "default": ok_phrase
+                },
+                "notes": {"type": "string"}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s_ok.to_string(), None).is_ok(),
+            "DO-NOT-WIDEN P43-B2: '{ok_phrase}' must pass in schema prose"
+        );
+        let ok_seats = json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:8000",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5,
+                "reasoning": {
+                    "chat_template_kwargs": {"hint": ok_phrase},
+                    "exclude_from_transcript": true
+                }
+            }]
+        });
+        let seats_p = tmp.path().join("b2_ok_seats.json");
+        let wrap_p = tmp.path().join("b2_ok_wrap.md");
+        let schema_p = tmp.path().join("b2_ok_schema.json");
+        fs::write(&seats_p, ok_seats.to_string())?;
+        fs::write(&wrap_p, ok_phrase)?;
+        fs::write(&schema_p, s_ok.to_string())?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        assert_eq!(
+            execute_cli(
+                [
+                    "prebook-check",
+                    "--seats",
+                    seats_p.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    wrap_p.to_str().ok_or("utf8")?,
+                    "--response-schema",
+                    schema_p.to_str().ok_or("utf8")?,
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            0,
+            "DO-NOT-WIDEN P43-B2: prebook-check on '{ok_phrase}' must exit 0; stderr: {}",
+            String::from_utf8_lossy(&err_out)
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn fix10_p43_b3_prebook_check_subcommand_checks_seats_kwargs_wrapper_schema_and_fresh_dir()
+-> TestResult {
+    let tmp = TempDir::new()?;
+    let repo_brief = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/paper-test/brief.md");
+    assert!(repo_brief.is_file());
+
+    // 1. Multi-seat playtest `seats.json` (2 `local` seats with `chat_template_kwargs` + `--allow-vm-host`,
+    //    plus 1 `file` seat) + rich note-keeping schema + `docs/paper-test/brief.md`, run TWICE in a row
+    //    to prove `prebook-check` creates a fresh game dir each run without colliding:
+    let seats_playtest = tmp.path().join("playtest_seats.json");
+    fs::write(
+        &seats_playtest,
+        json!({
+            "mixed_scratchpad_arm": true,
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 30.0,
+                    "max_gpu_secs_per_call": 35.0,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": {
+                            "enable_thinking": true,
+                            "mode_prompt": "Do not exceed two convert batches."
+                        },
+                        "exclude_from_transcript": true
+                    }
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "local",
+                    "base_url": "http://10.20.0.5:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 30.0,
+                    "max_gpu_secs_per_call": 35.0,
+                    "scratchpad": false
+                },
+                {
+                    "guild": "Smiths",
+                    "backend": "file",
+                    "model": "claude-sonnet-5-5"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let rich_schema = tmp.path().join("playtest_schema.json");
+    fs::write(
+        &rich_schema,
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders", "travel", "batches", "ratio", "ready", "tag", "branch", "detail"],
+            "properties": {
+                "orders": {"type": "array", "description": "Do not exceed three offers.", "items": {"type": "string"}},
+                "travel": {"type": "string", "enum": ["stay", "Varn", "Ostra"]},
+                "batches": {"type": "integer"},
+                "ratio": {"type": "number"},
+                "ready": {"type": "boolean"},
+                "tag": {"type": "string", "const": "act_v1"},
+                "branch": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "detail": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["memo"],
+                    "properties": {"memo": {"type": "string"}}
+                },
+                "notes": {"type": "string"}
+            }
+        })
+        .to_string(),
+    )?;
+
+    for run_idx in [1, 2] {
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        let cli_args: Vec<&str> = if run_idx == 1 {
+            vec![
+                "prebook-check",
+                "--seats",
+                seats_playtest.to_str().ok_or("utf8")?,
+                "--wrapper",
+                repo_brief.to_str().ok_or("utf8")?,
+                "--response-schema",
+                rich_schema.to_str().ok_or("utf8")?,
+            ]
+        } else {
+            vec![
+                "prebook-check",
+                "--seats",
+                seats_playtest.to_str().ok_or("utf8")?,
+                "--wrapper",
+                repo_brief.to_str().ok_or("utf8")?,
+                "--response-schema",
+                rich_schema.to_str().ok_or("utf8")?,
+                "--mixed-scratchpad-arm",
+                "--allow-vm-host",
+                "10.20.0.5",
+            ]
+        };
+        assert_eq!(
+            execute_cli(cli_args, |_| None, &mut out, &mut err_out,),
+            0,
+            "prebook-check run {run_idx} failed: {}",
+            String::from_utf8_lossy(&err_out)
+        );
+        let stdout_s = String::from_utf8_lossy(&out);
+        assert!(
+            stdout_s.contains("prebook-check: seat=Saltworks backend=local outcome=OK attempts=1")
+        );
+        assert!(
+            stdout_s.contains("prebook-check: seat=Weavers backend=local outcome=OK attempts=1")
+        );
+        assert!(stdout_s.contains("prebook-check: seat=Smiths backend=file outcome=FILE_MANUAL"));
+        assert!(
+            stdout_s.contains("prebook-check: OK seats=3 wording_arm=v2_neutral_2026_11_15_r6")
+        );
+    }
+
+    // 2. Also cover OpenRouter seats, `file`-only seats, schema-less runs, and `$defs`+`$ref` no-notes schemas:
+    let or_seats = tmp.path().join("or_seats.json");
+    fs::write(
+        &or_seats,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.5,
+                "max_output_tokens": 256,
+                "timeout_secs": 30.0,
+                "max_cost_per_call": 0.05
+            }]
+        })
+        .to_string(),
+    )?;
+    let ref_schema = tmp.path().join("ref_schema.json");
+    fs::write(
+        &ref_schema,
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["order", "empty_val"],
+            "properties": {
+                "order": {"$ref": "#/$defs/OrderItem"},
+                "empty_val": {"type": "null"}
+            },
+            "$defs": {
+                "OrderItem": {
+                    "type": "object",
+                    "required": ["good"],
+                    "properties": {"good": {"type": "string"}}
+                }
+            }
+        })
+        .to_string(),
+    )?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                or_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                repo_brief.to_str().ok_or("utf8")?,
+                "--response-schema",
+                ref_schema.to_str().ok_or("utf8")?,
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0,
+        "or prebook-check stderr: {}",
+        String::from_utf8_lossy(&err_out)
+    );
+    assert!(String::from_utf8_lossy(&out).contains("backend=openrouter outcome=OK"));
+
+    let file_only_seats = tmp.path().join("file_seats.json");
+    fs::write(
+        &file_only_seats,
+        json!({"seats": [{"guild": "Saltworks", "backend": "file"}]}).to_string(),
+    )?;
+    out.clear();
+    err_out.clear();
+    assert_eq!(
+        execute_cli(
+            ["prebook-check", "--seats=x", "--help",],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    out.clear();
+    err_out.clear();
+    assert_eq!(
+        execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                file_only_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                repo_brief.to_str().ok_or("utf8")?,
+                "--memory-mode",
+                "emc",
+                "--no-scratchpad",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+
+    // 3. Negative controls:
+    // (a) Wrapper containing `Take note` (including with `file`-only seats and `local` seats) exits 1:
+    let bad_wrap = tmp.path().join("take_note_wrap.md");
+    fs::write(&bad_wrap, "Take note of the prices.")?;
+    for seats_neg in [&seats_playtest, &file_only_seats] {
+        out.clear();
+        err_out.clear();
+        assert_eq!(
+            execute_cli(
+                [
+                    "prebook-check",
+                    "--seats",
+                    seats_neg.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    bad_wrap.to_str().ok_or("utf8")?,
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1
+        );
+        assert!(
+            String::from_utf8_lossy(&err_out).contains("cannot mention 'notes' or 'note'"),
+            "expected note error on Take note wrapper: {}",
+            String::from_utf8_lossy(&err_out)
+        );
+    }
+
+    // (b) `seats.json` whose `chat_template_kwargs` contains a banned string (`Take note`, `no\u{200A}tes`,
+    //     `n o t e s`, or `scratch pad`) exits 1:
+    for bad_kw_str in ["Take note", "no\u{200A}tes", "n o t e s", "scratch pad"] {
+        let bad_seats_kw = tmp.path().join("bad_seats_kw.json");
+        fs::write(
+            &bad_seats_kw,
+            json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 256,
+                    "timeout_secs": 10.0,
+                    "max_gpu_secs_per_call": 15.0,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": {"system_extra": bad_kw_str},
+                        "exclude_from_transcript": true
+                    }
+                }]
+            })
+            .to_string(),
+        )?;
+        out.clear();
+        err_out.clear();
+        assert_eq!(
+            execute_cli(
+                [
+                    "prebook-check",
+                    "--seats",
+                    bad_seats_kw.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    repo_brief.to_str().ok_or("utf8")?,
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1,
+            "prebook-check must refuse bad chat_template_kwargs '{bad_kw_str}'"
+        );
+        let kw_stderr = String::from_utf8_lossy(&err_out);
+        assert!(
+            kw_stderr.contains("cannot mention 'notes' or 'note'")
+                || kw_stderr.contains("scratchpad"),
+            "unexpected kwargs refusal stderr: {kw_stderr}"
+        );
+    }
+
+    // (c) Key in environment, `--live`, key flag, missing required flags, or unknown flag all exit 1:
+    out.clear();
+    err_out.clear();
+    assert_eq!(
+        execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                or_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                repo_brief.to_str().ok_or("utf8")?,
+            ],
+            |k| {
+                if k == "OPENROUTER_API_KEY" {
+                    Some("sk-or-v1-planted-test-key-123456".to_owned())
+                } else {
+                    None
+                }
+            },
+            &mut out,
+            &mut err_out,
+        ),
+        1
+    );
+    assert!(String::from_utf8_lossy(&err_out).contains("prebook-check refuses API keys"));
+
+    for bad_args in [
+        vec!["prebook-check"],
+        vec!["prebook-check", "--seats", "s.json"],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--live",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--api-key=foo",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--scratchpad",
+            "--no-scratchpad",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--scratchpad=maybe",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--no-scratchpad=1",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--mixed-scratchpad-arm=1",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "positional",
+        ],
+        vec![
+            "prebook-check",
+            "--seats",
+            "s.json",
+            "--wrapper",
+            "w.md",
+            "--unknown-opt",
+        ],
+    ] {
+        assert!(
+            parse_args(&bad_args).is_err(),
+            "expected CLI error for {bad_args:?}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn fix11_p44_b1_b2_c2_skip_empty_tokens_mid_flush_pin_and_linebreak_separators() -> TestResult {
+    let tmp = TempDir::new()?;
+    let clean_wrapper = tmp.path().join("clean_wrap.md");
+    fs::write(&clean_wrapper, "CLEAN BRIEF FOR PREBOOK CHECK")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    let seats_refusal = tmp.path().join("seats_refusal.json");
+    write_local_seats_file(
+        &seats_refusal,
+        "Saltworks",
+        &srv.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+
+    // --- 1. `P44-B1` (empty-folded punctuation/digit tokens neither join nor break a single-letter run)
+    //     & `P44-B2` (mid-input flush when a multi-letter word follows a single-letter run) ---
+    let must_refuse_b1_b2 = [
+        // P44-B1 card cases:
+        "n - o - t - e",
+        "n , o , t , e",
+        "n _ o _ t _ e",
+        "n \u{00B7} o \u{00B7} t \u{00B7} e",
+        "n 1 o 2 t 3 e",
+        // P44-B1 extra variants:
+        "n - o - t - e - s",
+        "N - O - T - E - S",
+        "n - 0 - 7 - 3",
+        // P44-B2 mid-input flush pins (disabling the mid-input flush check MUST fail these):
+        "Please n o t e this",
+        "Keep a n o t e here",
+        "n o t e here",
+        "Please n - o - t - e this",
+    ];
+
+    for (idx, bad) in must_refuse_b1_b2.into_iter().enumerate() {
+        // Schema prose positions (`description`, `title`, `examples`, `default`, `enum`, `const`, `$comment`),
+        // `schema.name`, root property name, and nested property name:
+        for s_bad in [
+            json!({"type": "object", "properties": {"orders": {"type": "string", "description": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "title": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "examples": [bad]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "default": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "enum": ["stay", bad]}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "const": bad}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "string", "$comment": bad}, "notes": {"type": "string"}}}),
+            json!({"name": bad, "schema": {"type": "object", "properties": {"orders": {"type": "array"}}}}),
+            json!({"type": "object", "properties": {bad: {"type": "string"}, "notes": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"orders": {"type": "object", "properties": {bad: {"type": "string"}}}, "notes": {"type": "string"}}}),
+        ] {
+            let Err(e_s) = ResponseFormatConfig::from_json_str(&s_bad.to_string(), None) else {
+                return Err(
+                    format!("DO-NOT-RELAX P44-B1/B2: '{bad}' must be refused in schema").into(),
+                );
+            };
+            assert!(
+                e_s.to_string()
+                    .contains("outside top-level 'properties.notes'")
+                    || e_s
+                        .to_string()
+                        .contains("cannot name confusable 'notes' variant"),
+                "expected note-specific refusal for '{bad}', got: {e_s}"
+            );
+        }
+
+        // `chat_template_kwargs` value AND key:
+        for kw_json in [json!({"style": bad}), json!({bad: "plain"})] {
+            let bad_seats = json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": kw_json,
+                        "exclude_from_transcript": true
+                    }
+                }]
+            });
+            let Err(e_kw) = SeatFile::from_json_str(&bad_seats.to_string(), None) else {
+                return Err(format!("P44-B1/B2 '{bad}' in kwargs must be refused").into());
+            };
+            assert!(
+                e_kw.to_string()
+                    .contains("cannot mention 'notes' or 'note'"),
+                "unexpected kwargs error for '{bad}': {e_kw}"
+            );
+        }
+
+        // `--wrapper` via `turn` against live loopback server (asserting 0 HTTP and 0 `/tokenize`):
+        let bad_wrap = tmp.path().join(format!("fix11_bad_wrap_{idx}.md"));
+        fs::write(&bad_wrap, bad)?;
+        let g = tmp.path().join(format!("g_fix11_{idx}"));
+        write_to_seat(&g, "01", "talk", "Saltworks", "DAY 01 TALK")?;
+        let mut out = Vec::new();
+        let mut err_out = Vec::new();
+        assert_eq!(
+            execute_cli(
+                [
+                    "turn",
+                    "--game-dir",
+                    g.to_str().ok_or("utf8")?,
+                    "--day",
+                    "01",
+                    "--round",
+                    "talk",
+                    "--seats",
+                    seats_refusal.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    bad_wrap.to_str().ok_or("utf8")?,
+                    "--no-scratchpad",
+                    "--cap-gpu-secs",
+                    "10.0",
+                ],
+                |_| None,
+                &mut out,
+                &mut err_out,
+            ),
+            1
+        );
+        assert!(String::from_utf8_lossy(&err_out).contains("cannot mention 'notes' or 'note'"));
+        assert!(!g.join("relay/setup.json").exists());
+        assert!(!g.join("relay/calls.jsonl").exists());
+    }
+
+    // Explicit card requirement (`P44-B1`): `league-relay prebook-check` with `seats.json` whose seat
+    // has `"style": "n - o - t - e"` in `chat_template_kwargs` MUST exit non-zero:
+    let bad_style_seats = tmp.path().join("bad_style_seats.json");
+    fs::write(
+        &bad_style_seats,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:8000",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.3,
+                "max_output_tokens": 256,
+                "timeout_secs": 10.0,
+                "max_gpu_secs_per_call": 15.0,
+                "reasoning": {
+                    "effort": "medium",
+                    "chat_template_kwargs": {"style": "n - o - t - e"},
+                    "exclude_from_transcript": true
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+    let mut pb_out = Vec::new();
+    let mut pb_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                bad_style_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                clean_wrapper.to_str().ok_or("utf8")?,
+            ],
+            |_| None,
+            &mut pb_out,
+            &mut pb_err,
+        ),
+        1
+    );
+    assert!(String::from_utf8_lossy(&pb_err).contains("cannot mention 'notes' or 'note'"));
+
+    assert_eq!(srv.request_count()?, 0);
+    assert_eq!(srv.tokenize_requests()?.len(), 0);
+
+    // --- 2. `P44-B1` & `P44-C2` must-pass phrases ---
+    for ok_phrase in [
+        "a - b",
+        "x, y",
+        "I - am",
+        "1 2 3",
+        "Do not\u{000B}exceed",
+        "Do not\u{000C}exceed",
+        "Do not\u{0085}exceed",
+        "Do not\u{2028}exceed",
+        "Do not\u{2029}exceed",
+    ] {
+        let s_ok = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": ok_phrase,
+                    "title": ok_phrase,
+                    "examples": [ok_phrase],
+                    "default": ok_phrase
+                },
+                "notes": {"type": "string"}
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&s_ok.to_string(), None).is_ok(),
+            "P44-B1/C2 '{ok_phrase:?}' must pass in schema prose"
+        );
+        let ok_seats_p = tmp.path().join("fix11_ok_seats.json");
+        let ok_wrap_p = tmp.path().join("fix11_ok_wrap.md");
+        let ok_schema_p = tmp.path().join("fix11_ok_schema.json");
+        fs::write(
+            &ok_seats_p,
+            json!({
+                "seats": [{
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:8000",
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5,
+                    "reasoning": {
+                        "effort": "medium",
+                        "chat_template_kwargs": {"style": ok_phrase},
+                        "exclude_from_transcript": true
+                    }
+                }]
+            })
+            .to_string(),
+        )?;
+        fs::write(&ok_wrap_p, ok_phrase)?;
+        fs::write(&ok_schema_p, s_ok.to_string())?;
+        pb_out.clear();
+        pb_err.clear();
+        assert_eq!(
+            execute_cli(
+                [
+                    "prebook-check",
+                    "--seats",
+                    ok_seats_p.to_str().ok_or("utf8")?,
+                    "--wrapper",
+                    ok_wrap_p.to_str().ok_or("utf8")?,
+                    "--response-schema",
+                    ok_schema_p.to_str().ok_or("utf8")?,
+                ],
+                |_| None,
+                &mut pb_out,
+                &mut pb_err,
+            ),
+            0,
+            "P44-B1/C2 '{ok_phrase:?}' failed prebook-check: {}",
+            String::from_utf8_lossy(&pb_err)
         );
     }
 
