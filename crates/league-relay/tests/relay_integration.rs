@@ -16497,7 +16497,7 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const MIN_COMMITTED_HISTORY_ROWS: usize = 5;
+const MIN_COMMITTED_HISTORY_ROWS: usize = 6;
 const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
 fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
@@ -16887,6 +16887,101 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    // Row 5 (`P42-C1` widening row under `v2_neutral_2026_11_15_r6`): adds `whisper_supplementary_di_budget_truncation`
+    // (24 paths, verified byte-identical against `37fd97e` across all 23 Row-4 paths) so `6 * c.len_utf16()` budget
+    // mutations (`DI_LEN` / `DI_LEN1`) fail directly via `ARM_RENDER_PATH_HISTORY` digest comparison:
+    ArmRenderHistoryRow {
+        arm: "v2_neutral_2026_11_15_r6",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x12f0575c512507b475b9f7a2ef87a090,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+            (
+                "emc_excerpt_160_char_clip",
+                0xe7f8ace5cdc194668aeb07b653ad050f,
+            ),
+            (
+                "whisper_partial_word_truncation",
+                0x93d6b1a5a1fabbb05d2b3da069674a69,
+            ),
+            (
+                "seat_text_default_ignorable_escaped",
+                0x07d0fbd1e379a21ec5d5e547602fa5cd,
+            ),
+            (
+                "whisper_supplementary_di_budget_truncation",
+                0x8e1370adcce3bf0cdf5f7794b636bd9b,
+            ),
+        ],
+    },
 ];
 
 // `P41-C4` review note: an in-tree test can verify every row against `SEALED_IMMUTABLE_HISTORY_ROWS`
@@ -16913,6 +17008,10 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_neutral_2026_11_15_r6",
         0xef7cd7469b22a7f8295926f67eacc6d2,
+    ),
+    (
+        "v2_neutral_2026_11_15_r6",
+        0x41e0641516f522895b4d322557758ae0,
     ),
 ];
 
@@ -18714,6 +18813,94 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
     let di_reqs = srv_di.recorded_requests()?;
     assert_eq!(di_reqs.len(), 2);
 
+    // --- Group N (`P42-C1` widening under `r6`): whisper stuffed with BMP + supplementary `Default_Ignorable_Code_Point`s
+    //     hitting `MAX_WHISPER_CHARS` (`1,800`), guarding `6 * c.len_utf16()` via digest comparison ---
+    let srv_di_cap = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                r#"{"orders":["hold_salt"],"notes":""}"#,
+                "Qwen/Qwen3-14B",
+                20,
+                8,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_di_cap = tmp.path().join("seats_di_cap.json");
+    fs::write(
+        &seats_di_cap,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv_di_cap.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.3,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 1.0,
+                    "max_gpu_secs_per_call": 1.5
+                },
+                {
+                    "guild": "Weavers",
+                    "backend": "file"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_di_cap = tmp.path().join("g_di_cap");
+    write_to_seat(
+        &g_di_cap,
+        "01",
+        "talk",
+        "Saltworks",
+        "SUPPLEMENTARY DI CAP TURN",
+    )?;
+    let di_cap_whisper_body = format!("\u{200B}{}", "\u{E0073}".repeat(200));
+    fs::write(
+        g_di_cap.join("to-seat/day-01-talk-Saltworks.negotiation.json"),
+        serde_json::to_string(&NegotiationInputs {
+            batna: "Keep 3 salt; 0 VP.".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Weavers".to_owned(),
+                intent_header: None,
+                body: di_cap_whisper_body,
+            }],
+        })?,
+    )?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_di_cap.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_di_cap.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper_no_nl.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema_path.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0
+    );
+    let di_cap_reqs = srv_di_cap.recorded_requests()?;
+    assert_eq!(di_cap_reqs.len(), 1);
+
     let paths: Vec<(&'static str, String)> = vec![
         (
             "fallback_batna_and_zero_whispers",
@@ -18764,6 +18951,10 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
         (
             "seat_text_default_ignorable_escaped",
             di_reqs[1].body.clone(),
+        ),
+        (
+            "whisper_supplementary_di_budget_truncation",
+            di_cap_reqs[0].body.clone(),
         ),
     ];
 
@@ -19627,6 +19818,7 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
     assert_eq!(ARM_RENDER_PATH_HISTORY[2].path_digests.len(), 20);
     assert_eq!(ARM_RENDER_PATH_HISTORY[3].path_digests.len(), 22);
     assert_eq!(ARM_RENDER_PATH_HISTORY[4].path_digests.len(), 23);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[5].path_digests.len(), 24);
     assert_eq!(
         &ARM_RENDER_PATH_HISTORY[2].path_digests[..15],
         ARM_RENDER_PATH_HISTORY[1].path_digests,
@@ -19636,6 +19828,11 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
         &ARM_RENDER_PATH_HISTORY[3].path_digests[..20],
         ARM_RENDER_PATH_HISTORY[2].path_digests,
         "all 20 Row-2 render-path digests must remain identical in Row 3 under r5"
+    );
+    assert_eq!(
+        &ARM_RENDER_PATH_HISTORY[5].path_digests[..23],
+        ARM_RENDER_PATH_HISTORY[4].path_digests,
+        "all 23 Row-4 render-path digests must remain identical in Row 5 under r6"
     );
 
     verify_arm_render_path_history(
