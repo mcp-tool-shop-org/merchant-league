@@ -148,7 +148,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "04927019e294910f59659a0e6d4a5b6d2370caa89b1ab1dea0628661562378a5",
+          "hash": "91feacab744c3852db61fd4225b4a5d7f1195d8a2282ca38144a1a227bcda60e",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -2381,7 +2381,7 @@
           "path": ".gitignore"
         },
         {
-          "hash": "b9922b930ab0dbe63c66c0678a8a21a181945bc5aadb1af37932ba12078844a3",
+          "hash": "f1f1232b2256bd20d16f8199a0ea7588c08f2f868d242101fdfc3b975891ff13",
           "path": "CHANGELOG.md"
         },
         {
@@ -2389,7 +2389,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "1130f7eb0f8609aa514b878852ff05aa8eb672586c7fcaa00fdafe277e86e355",
+          "hash": "3a96ed34144e8778e7bb464500644f92a5c0ce87c0a185024c1fa9941517efc3",
           "path": "Cargo.lock"
         },
         {
@@ -3098,7 +3098,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d97301c91aa3c5d83e68b92a6b059ca86e198f7f",
+    "commit": "0b8aada6bb2556d60b76219ff2aa95848b989553",
     "tracked": 497
   },
   "landings": [
@@ -3869,7 +3869,7 @@
   "testFiles": 36,
   "unassigned": [
     {
-      "hash": "615bafda252cac1a61ad9198c197174bde3e92b36f16bb4b120114e36787a1a2",
+      "hash": "48d870e00fcf32be4aa139a5b7ac6fb7bacb5a26d08fc0ee81ddb105a34942d5",
       "path": "crates/league-relay/Cargo.toml"
     },
     {
@@ -5110,6 +5110,7 @@
         "set_fail_pending_temp_write_for_test",
         "sha256_hex",
         "take_durability_events_for_test",
+        "text_contains_scratchpad_confusable",
         "validate_day",
         "validate_scratchpad_setup",
         "watch_durability_events_for_test"
@@ -5173,855 +5174,890 @@
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 251
+          "line": 260
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 256
+          "line": 269
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 262
+          "line": 279
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 272
+          "line": 296
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 289
+          "line": 306
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 295
+          "line": 312
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 301
+          "line": 325
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 314
+          "line": 330
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 319
+          "line": 340
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 329
+          "line": 347
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 336
+          "line": 359
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 348
+          "line": 372
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 361
+          "line": 378
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 367
+          "line": 385
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 374
+          "line": 410
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 399
+          "line": 462
+        },
+        {
+          "in": "from_json_str",
+          "kind": "err",
+          "line": 479
+        },
+        {
+          "in": "reject_forbidden_ref_or_anchor_keyword",
+          "kind": "err",
+          "line": 612
+        },
+        {
+          "in": "validate_model_visible_schema_text",
+          "kind": "err",
+          "line": 914
+        },
+        {
+          "in": "validate_model_visible_schema_text",
+          "kind": "err",
+          "line": 919
         },
         {
           "in": "validate_property_key",
           "kind": "err",
-          "line": 753
+          "line": 935
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 768
+          "line": 950
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 776
+          "line": 958
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 781
+          "line": 963
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 787
+          "line": 969
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 874
+          "line": 1056
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 880
+          "line": 1062
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 885
+          "line": 1067
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 893
+          "line": 1075
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 899
+          "line": 1081
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 911
+          "line": 1093
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 955
+          "line": 1140
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 970
+          "line": 1155
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 975
+          "line": 1160
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 982
+          "line": 1167
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 996
+          "line": 1181
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1001
+          "line": 1186
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1369
+          "line": 1554
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1380
+          "line": 1565
         },
         {
           "in": "validate_property_names",
           "kind": "err",
-          "line": 1421
+          "line": 1606
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1464
+          "line": 1653
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1485
+          "line": 1674
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1492
+          "line": 1681
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1504
+          "line": 1693
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1509
+          "line": 1698
+        },
+        {
+          "in": "validate_subschema",
+          "kind": "err",
+          "line": 1706
+        },
+        {
+          "in": "validate_subschema",
+          "kind": "err",
+          "line": 1727
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 1921
+          "line": 2115
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2420
+          "line": 2614
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2422
+          "line": 2616
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2430
+          "line": 2624
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2431
+          "line": 2625
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2464
+          "line": 2658
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2470
+          "line": 2664
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2471
+          "line": 2665
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2491
+          "line": 2685
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2493
+          "line": 2687
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2498
+          "line": 2692
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2499
+          "line": 2693
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2523
+          "line": 2717
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 2529
+          "line": 2723
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2529
+          "line": 2723
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2733
+          "line": 2927
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2747
+          "line": 2941
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2752
+          "line": 2946
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2757
+          "line": 2951
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2768
+          "line": 2962
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2774
+          "line": 2968
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2780
+          "line": 2974
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2786
+          "line": 2980
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2865
+          "line": 3059
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3016
+          "line": 3210
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3025
+          "line": 3219
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3062
+          "line": 3256
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3072
+          "line": 3266
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3082
+          "line": 3276
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3092
+          "line": 3286
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3103
+          "line": 3297
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3117
+          "line": 3311
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3126
+          "line": 3320
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3138
+          "line": 3332
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3151
+          "line": 3345
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3180
+          "line": 3374
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3182
+          "line": 3376
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3184
+          "line": 3378
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3186
+          "line": 3380
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 3237
+          "line": 3431
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 3238
+          "line": 3432
         },
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 3247
+          "line": 3441
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3316
+          "line": 3510
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3317
+          "line": 3511
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3317
+          "line": 3511
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3328
+          "line": 3522
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3335
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 3363
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 3365
+          "line": 3529
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3369
+          "line": 3557
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3371
+          "line": 3559
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "match-err",
+          "line": 3563
+        },
+        {
+          "in": "write_reserved_entries_unlocked",
+          "kind": "err",
+          "line": 3565
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3393
+          "line": 3587
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3400
+          "line": 3594
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3436
+          "line": 3630
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3445
+          "line": 3639
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3447
+          "line": 3641
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3450
+          "line": 3644
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3452
+          "line": 3646
         },
         {
           "in": "open",
           "kind": "err",
-          "line": 3623
+          "line": 3817
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 3668
+          "line": 3862
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 3693
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "err",
-          "line": 3693
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "match-err",
-          "line": 3698
+          "line": 3887
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 3698
+          "line": 3887
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "match-err",
+          "line": 3892
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "err",
+          "line": 3892
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 3877
+          "line": 4071
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 3898
+          "line": 4092
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 3902
+          "line": 4096
         },
         {
           "in": "record_refusal",
           "kind": "err",
-          "line": 3914
+          "line": 4108
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 3943
+          "line": 4137
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 3953
+          "line": 4147
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 3974
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "err",
-          "line": 4015
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "err",
-          "line": 4032
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "match-err",
-          "line": 4036
-        },
-        {
-          "in": "finalize_turn",
-          "kind": "err",
-          "line": 4091
-        },
-        {
-          "in": "sum_charged_for_unit",
-          "kind": "err",
-          "line": 4160
-        },
-        {
-          "in": "sum_charged_for_unit",
-          "kind": "err",
           "line": 4168
         },
         {
-          "in": "sum_charged_for_unit",
+          "in": "finalize_turn",
           "kind": "err",
-          "line": 4173
+          "line": 4209
         },
         {
-          "in": "run_turn",
+          "in": "finalize_turn",
           "kind": "err",
+          "line": 4226
+        },
+        {
+          "in": "finalize_turn",
+          "kind": "match-err",
           "line": 4230
         },
         {
-          "in": "run_turn",
+          "in": "finalize_turn",
           "kind": "err",
-          "line": 4237
+          "line": 4285
         },
         {
-          "in": "run_turn",
+          "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4244
+          "line": 4354
         },
         {
-          "in": "run_turn",
+          "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4251
+          "line": 4362
         },
         {
-          "in": "run_turn",
+          "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4256
-        },
-        {
-          "in": "run_turn",
-          "kind": "err",
-          "line": 4261
+          "line": 4367
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4281
+          "line": 4424
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4287
+          "line": 4431
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4294
+          "line": 4438
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4318
+          "line": 4445
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4329
+          "line": 4450
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4455
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4475
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4481
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4488
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4512
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4523
+        },
+        {
+          "in": "run_turn",
+          "kind": "err",
+          "line": 4528
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4553
+          "line": 4757
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4562
+          "line": 4766
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4571
+          "line": 4775
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4628
+          "line": 4832
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4642
+          "line": 4846
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4673
+          "line": 4877
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4870
+          "line": 5074
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4909
+          "line": 5113
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4931
+          "line": 5135
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4941
+          "line": 5145
         },
         {
           "in": "run_single_automated_seat",
           "kind": "err",
-          "line": 5003
+          "line": 5207
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5025
+          "line": 5229
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5068
+          "line": 5272
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5139
+          "line": 5343
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5156
+          "line": 5360
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5166
+          "line": 5370
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5178
+          "line": 5382
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5248
+          "line": 5452
         },
         {
           "in": "validate_json_value_against_schema",
-          "kind": "err",
-          "line": 5415
-        },
-        {
-          "in": "validate_json_value_against_schema",
-          "kind": "err",
-          "line": 5421
-        },
-        {
-          "in": "validate_json_value_against_schema",
-          "kind": "err",
-          "line": 5427
-        },
-        {
-          "in": "validate_json_value_against_schema",
-          "kind": "err",
-          "line": 5437
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5468
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5476
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5492
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5517
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5530
-        },
-        {
-          "in": "evaluate_call_result",
-          "kind": "match-err",
-          "line": 5571
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 5615
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 5615
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 5616
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 5617
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
-          "line": 5619
-        },
-        {
-          "in": "call_with_wall_timeout",
           "kind": "err",
           "line": 5619
         },
         {
+          "in": "validate_json_value_against_schema",
+          "kind": "err",
+          "line": 5625
+        },
+        {
+          "in": "validate_json_value_against_schema",
+          "kind": "err",
+          "line": 5631
+        },
+        {
+          "in": "validate_json_value_against_schema",
+          "kind": "err",
+          "line": 5641
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5672
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5680
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5696
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5721
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5734
+        },
+        {
+          "in": "evaluate_call_result",
+          "kind": "match-err",
+          "line": 5775
+        },
+        {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5629
+          "line": 5819
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 5819
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5633
+          "line": 5820
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 5821
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5823
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 5823
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5833
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5837
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 5717
+          "line": 5921
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 5726
+          "line": 5930
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 5738
+          "line": 5942
         },
         {
           "in": "load_transcript",
           "kind": "err",
-          "line": 5748
+          "line": 5952
         }
       ],
-      "hash": "f65a6217c5c0993ef14184f4a84f7703b2cd5693c5f78a6cafd213d1cc8f9414",
+      "hash": "4ad7e61ef9f641721503eb61dcedd9ed8ab0d0a7e1d14dfcf2c65092a36a932c",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -6145,82 +6181,82 @@
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 586
+          "line": 584
         },
         {
           "in": "validate_seat_reasoning",
           "kind": "err",
-          "line": 594
+          "line": 591
+        },
+        {
+          "in": "validate_seat_reasoning",
+          "kind": "err",
+          "line": 598
+        },
+        {
+          "in": "validate_seat_reasoning",
+          "kind": "err",
+          "line": 606
         },
         {
           "in": "validate_local_seat_reasoning",
           "kind": "err",
-          "line": 614
+          "line": 626
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 640
+          "line": 652
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 647
+          "line": 659
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 654
+          "line": 666
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 663
+          "line": 675
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 672
+          "line": 684
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 680
+          "line": 692
         },
         {
           "in": "validate_vm_host_allowance",
           "kind": "err",
-          "line": 688
+          "line": 700
         },
         {
           "in": "validate_local_endpoints",
           "kind": "err",
-          "line": 752
+          "line": 764
         },
         {
           "in": "validate_local_tokenize_url",
           "kind": "err",
-          "line": 790
+          "line": 802
         },
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 809
+          "line": 821
         },
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 815
-        },
-        {
-          "in": "parse_and_validate_local_origin",
-          "kind": "err",
-          "line": 826
-        },
-        {
-          "in": "parse_and_validate_local_origin",
-          "kind": "err",
-          "line": 831
+          "line": 827
         },
         {
           "in": "parse_and_validate_local_origin",
@@ -6230,72 +6266,88 @@
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 856
+          "line": 843
         },
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 863
+          "line": 850
         },
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 880
+          "line": 868
         },
         {
           "in": "parse_and_validate_local_origin",
           "kind": "err",
-          "line": 886
+          "line": 875
+        },
+        {
+          "in": "parse_and_validate_local_origin",
+          "kind": "err",
+          "line": 892
+        },
+        {
+          "in": "parse_and_validate_local_origin",
+          "kind": "err",
+          "line": 898
         },
         {
           "in": "validate_guild_name",
           "kind": "err",
-          "line": 940
+          "line": 952
         },
         {
           "in": "validate_guild_name",
           "kind": "err",
-          "line": 947
+          "line": 959
         },
         {
           "in": "validate_pinned_local_model",
           "kind": "err",
-          "line": 962
+          "line": 974
         },
         {
           "in": "validate_pinned_local_model",
           "kind": "err",
-          "line": 971
+          "line": 983
         },
         {
           "in": "validate_pinned_local_model",
           "kind": "err",
-          "line": 987
+          "line": 999
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 997
+          "line": 1009
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 1002
+          "line": 1014
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 1013
+          "line": 1025
         },
         {
           "in": "validate_pinned_openrouter_slug",
           "kind": "err",
-          "line": 1024
+          "line": 1036
         }
       ],
-      "hash": "06d6579e385def722346327fb0dd46eaf49ca63fc5b7bbcebf50e6fc76c2852d",
+      "hash": "86cb4b30988b1a88ddb3a016a7e4b94167b2ea3f1143ebf7638fed17807b5bf5",
+      "importOrder": [
+        "crates/league-relay/src/error.rs",
+        "crates/league-relay/src/secret.rs",
+        "crates/league-relay/src/relay.rs"
+      ],
       "importsFiles": [
         "crates/league-relay/src/error.rs",
+        "crates/league-relay/src/relay.rs",
         "crates/league-relay/src/secret.rs"
       ],
       "path": "crates/league-relay/src/seats.rs"
@@ -6454,7 +6506,7 @@
       "path": "crates/league-relay/src/wording.rs"
     },
     {
-      "hash": "6871b2005b61119f2d110639be558905583b71d34e58fd0fd6e3c7099263be96",
+      "hash": "882839198839e36e1fdf49375b987f2466295411032fa95dba6ae2eb8bdd8556",
       "importsFiles": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",
