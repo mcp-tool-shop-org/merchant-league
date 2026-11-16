@@ -26,7 +26,7 @@ use crate::scoring::{
     compute_potential,
 };
 use crate::types::{
-    ActiveShock, AssetId, Bps, CLOSING_ROLL_START_TURN, CharterRole, CreditTier,
+    ActiveShock, AssetId, Bps, CLOSING_ROLL_START_TURN, CharterRole, ConverterRecipe, CreditTier,
     DEFAULT_PBRS_GAMMA_BPS, EngineError, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, MAX_TARIFF_BPS,
     ScheduledShockSpec, Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, Units,
     ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
@@ -410,12 +410,15 @@ pub struct BundlePreview {
     pub sweep_receipt: SweepReceipt,
 }
 
-struct SweepSeatDetails {
+/// Per-seat breakdown the Sweep computes alongside its [`SweepReceipt`].
+pub(crate) struct SweepSeatDetails {
     converter_orders_by_seat: Vec<Vec<ConverterOrderPreview>>,
     project_orders_by_seat: Vec<Vec<ProjectOrderPreview>>,
     settled_swaps: Vec<AtomicSwapProposal>,
-    upkeep_by_seat: Vec<SeatUpkeepPreview>,
-    spoilage_by_seat: Vec<Units>,
+    /// Step-5 upkeep settlement per seat.
+    pub(crate) upkeep_by_seat: Vec<SeatUpkeepPreview>,
+    /// Step-6 raw units removed per seat (free balances plus resting raw sell offers).
+    pub(crate) spoilage_by_seat: Vec<Units>,
 }
 
 /// Deterministic pure-state v2 Turn Engine.
@@ -1026,6 +1029,14 @@ impl TurnEngine {
         &mut self,
         vrf_proof: &[u8],
     ) -> Result<SweepReceipt, EngineError> {
+        Ok(self.sweep_turn_with_eval_vrf_detailed(vrf_proof)?.0)
+    }
+
+    /// [`TurnEngine::sweep_turn_with_eval_vrf`], also returning the Sweep's per-seat breakdown.
+    pub(crate) fn sweep_turn_with_eval_vrf_detailed(
+        &mut self,
+        vrf_proof: &[u8],
+    ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
         if self.state.spec.mode != TableMode::Eval {
             return Err(EngineError::InvalidConfig(
                 "sweep_turn_with_eval_vrf requires TableMode::Eval".to_owned(),
@@ -1047,7 +1058,7 @@ impl TurnEngine {
             Turn(self.state.turn),
             vrf_proof,
         )?;
-        Ok(self.sweep_turn_detailed(beacon)?.0)
+        self.sweep_turn_detailed(beacon)
     }
 
     /// Executes the 8-step deterministic `Sweep` for a Game-mode turn using an `ExternalDrand`
@@ -1061,6 +1072,17 @@ impl TurnEngine {
         drand_round: u64,
         drand_signature: &[u8],
     ) -> Result<SweepReceipt, EngineError> {
+        Ok(self
+            .sweep_turn_with_drand_detailed(drand_round, drand_signature)?
+            .0)
+    }
+
+    /// [`TurnEngine::sweep_turn_with_drand`], also returning the Sweep's per-seat breakdown.
+    pub(crate) fn sweep_turn_with_drand_detailed(
+        &mut self,
+        drand_round: u64,
+        drand_signature: &[u8],
+    ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
         if self.state.spec.mode != TableMode::Game {
             return Err(EngineError::InvalidConfig(
                 "sweep_turn_with_drand requires TableMode::Game".to_owned(),
@@ -1084,7 +1106,7 @@ impl TurnEngine {
             drand_signature,
             beacon,
         )?;
-        Ok(self.sweep_turn_detailed(beacon)?.0)
+        self.sweep_turn_detailed(beacon)
     }
 
     fn sweep_turn_detailed(
@@ -1390,39 +1412,6 @@ impl TurnEngine {
             .any(|c| c.role == role && c.holder == seat && c.expires_at_turn >= self.state.turn)
     }
 
-    fn base_tariff_bps(&self, asset: AssetId) -> Bps {
-        match asset {
-            AssetId::Cred => 0,
-            AssetId::Raw(g) => self
-                .state
-                .seats
-                .get(usize::from(g))
-                .map_or(0, |s| s.raw_tariff_bps),
-            AssetId::Refined(m) => self
-                .state
-                .seats
-                .get(usize::from(m))
-                .map_or(0, |s| s.refined_tariff_bps),
-        }
-    }
-
-    fn active_tariff_holiday_bps(&self, asset: AssetId) -> Option<Bps> {
-        let owner = match asset {
-            AssetId::Cred => return None,
-            AssetId::Raw(g) | AssetId::Refined(g) => g,
-        };
-        self.state
-            .active_shocks
-            .iter()
-            .filter(|s| {
-                s.target_seat == owner
-                    && s.kind == ShockKind::TariffHoliday
-                    && s.expires_after_turn >= self.state.turn
-            })
-            .map(|s| s.magnitude_bps)
-            .max()
-    }
-
     fn effective_asset_tariff_bps(
         &self,
         asset: AssetId,
@@ -1430,14 +1419,7 @@ impl TurnEngine {
         sender: u8,
         receiver: u8,
     ) -> Bps {
-        effective_export_tariff_bps(
-            self.base_tariff_bps(asset),
-            domain_id,
-            &self.state.domains,
-            sender,
-            receiver,
-            self.active_tariff_holiday_bps(asset),
-        )
+        effective_transfer_tariff_bps(&self.state, asset, domain_id, sender, receiver)
     }
 
     fn free_balance(&self, seat: u8, asset: AssetId) -> Units {
@@ -2663,19 +2645,8 @@ impl TurnEngine {
             };
             let used = runs_used.get(&order.recipe_idx).copied().unwrap_or(0);
             let remaining_cap = recipe.max_runs_per_turn.saturating_sub(used);
-            let affordable_by_inputs = recipe
-                .inputs
-                .iter()
-                .map(|&(raw_g, amt)| {
-                    if amt <= 0 {
-                        0
-                    } else {
-                        let avail = self.state.seats[s_idx].raw[usize::from(raw_g)].max(0);
-                        u32::try_from(avail / amt).unwrap_or(u32::MAX)
-                    }
-                })
-                .min()
-                .unwrap_or(0);
+            let affordable_by_inputs =
+                batches_covered_by_inputs(&recipe, &self.state.seats[s_idx].raw);
             let exec_runs = order.runs.min(remaining_cap).min(affordable_by_inputs);
             let clamped = exec_runs > 0 && exec_runs < order.runs;
             previews.push(ConverterOrderPreview {
@@ -3044,20 +3015,7 @@ impl TurnEngine {
 
     fn step4b_mint_raw_yields(&mut self, turn: u8) {
         for s_idx in 0..self.state.seats.len() {
-            let base_yield = self.state.spec.seats[s_idx].raw_yield_per_turn;
-            let freeze_bps = self
-                .state
-                .active_shocks
-                .iter()
-                .filter(|sh| {
-                    sh.kind == ShockKind::SupplyFreeze
-                        && sh.target_seat == s_idx as u8
-                        && sh.expires_after_turn >= turn
-                })
-                .map(|sh| sh.magnitude_bps)
-                .max()
-                .unwrap_or(0);
-            let actual_yield = base_yield - floor_bps_part(base_yield, freeze_bps);
+            let actual_yield = raw_yield_at_sweep(&self.state, s_idx, turn);
             self.state.seats[s_idx].raw[s_idx] =
                 self.state.seats[s_idx].raw[s_idx].saturating_add(actual_yield);
         }
@@ -3078,13 +3036,15 @@ impl TurnEngine {
             let cfg = &self.state.spec.seats[s_idx];
             let upkeep_g = usize::from(cfg.upkeep_good);
             let avail = self.state.seats[s_idx].refined[upkeep_g];
-            let paid = avail.min(cfg.upkeep_amount);
+            let settlement = settle_upkeep(
+                avail,
+                cfg.upkeep_amount,
+                self.state.parities.refined_per_unit[upkeep_g],
+            );
+            let paid = settlement.paid_with_refined;
             self.state.seats[s_idx].refined[upkeep_g] -= paid;
-            let shortfall = cfg.upkeep_amount - paid;
-            let mut new_debt = 0;
-            if shortfall > 0 {
-                let parity = self.state.parities.refined_per_unit[upkeep_g];
-                new_debt = ceil_units_parity(shortfall, parity);
+            let new_debt = settlement.new_shortfall_debt;
+            if settlement.shortfall > 0 {
                 self.state.seats[s_idx].cred_debt =
                     self.state.seats[s_idx].cred_debt.saturating_add(new_debt);
                 total_shortfall_debt = total_shortfall_debt.saturating_add(new_debt);
@@ -3103,26 +3063,9 @@ impl TurnEngine {
 
     fn step6_apply_perishable_spoilage(&mut self, turn: u8) -> (Units, Vec<Units>) {
         let n = self.state.seats.len();
-        let mut rate_by_good = Vec::with_capacity(n);
-        for g in 0..n {
-            let base = self.state.spec.seats[g].perishable_decay_bps;
-            let spike = self
-                .state
-                .active_shocks
-                .iter()
-                .filter(|sh| {
-                    sh.kind == ShockKind::SpoilageSpike
-                        && sh.target_seat == g as u8
-                        && sh.expires_after_turn >= turn
-                })
-                .map(|sh| sh.magnitude_bps)
-                .max()
-                .unwrap_or(0);
-            let headroom = 10_000_i32 - i32::from(base);
-            let boost = (headroom * i32::from(spike) + 9_999) / 10_000;
-            let eff = (i32::from(base) + boost).min(9_900) as Bps;
-            rate_by_good.push(eff);
-        }
+        let rate_by_good: Vec<Bps> = (0..n)
+            .map(|g| spoilage_bps_at_sweep(&self.state, g, turn))
+            .collect();
 
         let mut total_clawed: Units = 0;
         let mut by_seat: Vec<Units> = vec![0; n];
@@ -3491,6 +3434,142 @@ impl TurnEngine {
             season_closed,
         )
     }
+}
+
+/// Raw units of `Raw(seat_idx)` minted to `seat_idx` at Sweep Step 4b of `turn`: the base yield less
+/// the strongest active `SupplyFreeze` on that seat's good.
+pub(crate) fn raw_yield_at_sweep(state: &EngineState, seat_idx: usize, turn: u8) -> Units {
+    let base_yield = state.spec.seats[seat_idx].raw_yield_per_turn;
+    let freeze_bps = state
+        .active_shocks
+        .iter()
+        .filter(|sh| {
+            sh.kind == ShockKind::SupplyFreeze
+                && sh.target_seat == seat_idx as u8
+                && sh.expires_after_turn >= turn
+        })
+        .map(|sh| sh.magnitude_bps)
+        .max()
+        .unwrap_or(0);
+    base_yield - floor_bps_part(base_yield, freeze_bps)
+}
+
+/// Effective Sweep Step 6 decay rate (bps) on `Raw(good)` for `turn`: the good's base rate raised by
+/// the strongest active `SpoilageSpike` on it, capped at `9_900`.
+pub(crate) fn spoilage_bps_at_sweep(state: &EngineState, good: usize, turn: u8) -> Bps {
+    let base = state.spec.seats[good].perishable_decay_bps;
+    let spike = state
+        .active_shocks
+        .iter()
+        .filter(|sh| {
+            sh.kind == ShockKind::SpoilageSpike
+                && sh.target_seat == good as u8
+                && sh.expires_after_turn >= turn
+        })
+        .map(|sh| sh.magnitude_bps)
+        .max()
+        .unwrap_or(0);
+    let headroom = 10_000_i32 - i32::from(base);
+    let boost = (headroom * i32::from(spike) + 9_999) / 10_000;
+    (i32::from(base) + boost).min(9_900) as Bps
+}
+
+/// Sweep Step 5 upkeep settlement for one seat, before any state is changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct UpkeepSettlement {
+    /// Units of the upkeep good taken from the seat's free balance.
+    pub(crate) paid_with_refined: Units,
+    /// Units owed and not covered (`0` when covered).
+    pub(crate) shortfall: Units,
+    /// `CRED` auto-debt the shortfall adds, at the upkeep good's fundamental parity.
+    pub(crate) new_shortfall_debt: Units,
+}
+
+/// Settles `owed` units of upkeep against `held` units, converting any shortfall to auto-debt at
+/// `parity` (milli-`CRED` per `1_000` units), exactly as Sweep Step 5 does.
+pub(crate) fn settle_upkeep(held: Units, owed: Units, parity: Units) -> UpkeepSettlement {
+    let paid = held.min(owed);
+    let shortfall = owed - paid;
+    let new_shortfall_debt = if shortfall > 0 {
+        ceil_units_parity(shortfall, parity)
+    } else {
+        0
+    };
+    UpkeepSettlement {
+        paid_with_refined: paid,
+        shortfall,
+        new_shortfall_debt,
+    }
+}
+
+/// Whole converter batches of `recipe` that the free raw balances `raw` cover, ignoring the
+/// per-turn run cap (the same inventory clamp the Sweep applies to a converter order).
+pub(crate) fn batches_covered_by_inputs(recipe: &ConverterRecipe, raw: &[Units]) -> u32 {
+    recipe
+        .inputs
+        .iter()
+        .map(|&(raw_g, amt)| {
+            if amt <= 0 {
+                0
+            } else {
+                let avail = raw[usize::from(raw_g)].max(0);
+                u32::try_from(avail / amt).unwrap_or(u32::MAX)
+            }
+        })
+        .min()
+        .unwrap_or(0)
+}
+
+/// Base export tariff (bps) on `asset` set by its issuing seat (`0` for `CRED`).
+pub(crate) fn base_tariff_bps(state: &EngineState, asset: AssetId) -> Bps {
+    match asset {
+        AssetId::Cred => 0,
+        AssetId::Raw(g) => state
+            .seats
+            .get(usize::from(g))
+            .map_or(0, |s| s.raw_tariff_bps),
+        AssetId::Refined(m) => state
+            .seats
+            .get(usize::from(m))
+            .map_or(0, |s| s.refined_tariff_bps),
+    }
+}
+
+/// Strongest active `TariffHoliday` reduction (bps) on `asset`'s issuing seat, if any.
+pub(crate) fn active_tariff_holiday_bps(state: &EngineState, asset: AssetId) -> Option<Bps> {
+    let owner = match asset {
+        AssetId::Cred => return None,
+        AssetId::Raw(g) | AssetId::Refined(g) => g,
+    };
+    state
+        .active_shocks
+        .iter()
+        .filter(|s| {
+            s.target_seat == owner
+                && s.kind == ShockKind::TariffHoliday
+                && s.expires_after_turn >= state.turn
+        })
+        .map(|s| s.magnitude_bps)
+        .max()
+}
+
+/// Export tariff (bps) in force on a transfer of `asset` from `sender` to `receiver`, in
+/// `domain_id`'s book (`None` for the open book).
+pub(crate) fn effective_transfer_tariff_bps(
+    state: &EngineState,
+    asset: AssetId,
+    domain_id: Option<u8>,
+    sender: u8,
+    receiver: u8,
+) -> Bps {
+    effective_export_tariff_bps(
+        base_tariff_bps(state, asset),
+        domain_id,
+        &state.domains,
+        sender,
+        receiver,
+        active_tariff_holiday_bps(state, asset),
+    )
 }
 
 fn pick_plurality_winner_with_beacon(

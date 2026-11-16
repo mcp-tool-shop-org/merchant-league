@@ -259,8 +259,37 @@ pub fn mark_good_holding_at_close(
     good: AssetId,
     units: Units,
 ) -> Units {
+    close_mark_breakdown(state, seat, good, units).marked_value
+}
+
+/// How [`mark_good_holding_at_close`] reached its mark for one holding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CloseMarkBreakdown {
+    /// The close mark ([`mark_good_holding_at_close`]'s return value).
+    pub(crate) marked_value: Units,
+    /// Units taken by standing-bid slices that beat the `50%` floor.
+    pub(crate) units_marked_by_bids: Units,
+    /// Units valued under the one pooled `50%` floor (non-winning bid slices plus uncovered units).
+    pub(crate) units_at_floor: Units,
+    /// The pooled floor's value for `units_at_floor`.
+    pub(crate) value_at_floor: Units,
+}
+
+/// The body of [`mark_good_holding_at_close`], also reporting how many units the pooled `50%`
+/// floor valued and at what value.
+pub(crate) fn close_mark_breakdown(
+    state: &EngineState,
+    seat: u8,
+    good: AssetId,
+    units: Units,
+) -> CloseMarkBreakdown {
     if units <= 0 {
-        return 0;
+        return CloseMarkBreakdown {
+            marked_value: 0,
+            units_marked_by_bids: 0,
+            units_at_floor: 0,
+            value_at_floor: 0,
+        };
     }
     let parity = state.parities.asset_parity(good).max(0);
     let mut bids: Vec<&CredOffer> = state
@@ -276,6 +305,7 @@ pub fn mark_good_holding_at_close(
 
     let mut rem_units = units;
     let mut floored_units: i128 = 0;
+    let mut bid_units: i128 = 0;
     let mut proceeds: i128 = 0;
     let scale = i128::from(UNIT_SCALE) * BPS_SCALE;
     for bid in bids {
@@ -288,6 +318,7 @@ pub fn mark_good_holding_at_close(
             > i128::from(take) * i128::from(parity) * i128::from(UNSOLD_EXCESS_PARITY_BPS)
         {
             proceeds += i128::from(bid_cred);
+            bid_units += i128::from(take);
         } else {
             floored_units += i128::from(take);
         }
@@ -295,10 +326,48 @@ pub fn mark_good_holding_at_close(
     }
     let pooled_floor_units =
         (floored_units + i128::from(rem_units.max(0))).clamp(0, i128::from(Units::MAX)) as Units;
+    let mut value_at_floor = 0;
     if pooled_floor_units > 0 {
-        proceeds += i128::from(half_base_value_for_units(pooled_floor_units, parity));
+        value_at_floor = half_base_value_for_units(pooled_floor_units, parity);
+        proceeds += i128::from(value_at_floor);
     }
-    proceeds.clamp(i64::MIN as i128, i64::MAX as i128) as Units
+    CloseMarkBreakdown {
+        marked_value: proceeds.clamp(i64::MIN as i128, i64::MAX as i128) as Units,
+        units_marked_by_bids: bid_units.clamp(0, i128::from(Units::MAX)) as Units,
+        units_at_floor: pooled_floor_units,
+        value_at_floor,
+    }
+}
+
+/// The commodity stock [`compute_final_marked_net_asset_equity`] marks for `seat`: free raw and
+/// refined balances plus units on the seat's own resting `Sell` offers, indexed by good.
+pub(crate) fn seat_close_stock(state: &EngineState, seat: u8) -> (Vec<Units>, Vec<Units>) {
+    let idx = usize::from(seat);
+    let Some(seat_state) = state.seats.get(idx) else {
+        return (Vec::new(), Vec::new());
+    };
+    let n = state.parities.raw_per_unit.len();
+    let mut total_raw: Vec<i128> = seat_state.raw.iter().map(|&v| v as i128).collect();
+    let mut total_refined: Vec<i128> = seat_state.refined.iter().map(|&v| v as i128).collect();
+    for offer in state.offers.values() {
+        if offer.maker != seat || offer.remaining_units <= 0 || offer.side != OfferSide::Sell {
+            continue;
+        }
+        match offer.good {
+            AssetId::Raw(g) if usize::from(g) < n => {
+                total_raw[usize::from(g)] += offer.remaining_units as i128;
+            }
+            AssetId::Refined(m) if usize::from(m) < n => {
+                total_refined[usize::from(m)] += offer.remaining_units as i128;
+            }
+            _ => {}
+        }
+    }
+    let clamp = |v: &i128| (*v).clamp(i64::MIN as i128, i64::MAX as i128) as Units;
+    (
+        total_raw.iter().map(clamp).collect(),
+        total_refined.iter().map(clamp).collect(),
+    )
 }
 
 /// Computes `seat`'s terminal marked Net Asset Equity at Season Close (`2026-11-16` ruling),
@@ -314,26 +383,12 @@ pub fn compute_final_marked_net_asset_equity(state: &EngineState, seat: u8) -> U
     let n = state.parities.raw_per_unit.len();
     let mut equity = seat_state.cred as i128;
 
-    let mut total_raw: Vec<i128> = seat_state.raw.iter().map(|&v| v as i128).collect();
-    let mut total_refined: Vec<i128> = seat_state.refined.iter().map(|&v| v as i128).collect();
-
     for offer in state.offers.values() {
-        if offer.maker != seat || offer.remaining_units <= 0 {
-            continue;
-        }
-        match offer.side {
-            OfferSide::Buy => equity += offer.locked_cred as i128,
-            OfferSide::Sell => match offer.good {
-                AssetId::Raw(g) if usize::from(g) < n => {
-                    total_raw[usize::from(g)] += offer.remaining_units as i128;
-                }
-                AssetId::Refined(m) if usize::from(m) < n => {
-                    total_refined[usize::from(m)] += offer.remaining_units as i128;
-                }
-                _ => {}
-            },
+        if offer.maker == seat && offer.remaining_units > 0 && offer.side == OfferSide::Buy {
+            equity += offer.locked_cred as i128;
         }
     }
+    let (total_raw, total_refined) = seat_close_stock(state, seat);
 
     for escrow in state.escrows.values() {
         if escrow.sender == seat && escrow.status == EscrowStatus::Locked {
@@ -352,8 +407,8 @@ pub fn compute_final_marked_net_asset_equity(state: &EngineState, seat: u8) -> U
     }
 
     for g in 0..n {
-        let raw_units = total_raw[g].clamp(i64::MIN as i128, i64::MAX as i128) as Units;
-        let ref_units = total_refined[g].clamp(i64::MIN as i128, i64::MAX as i128) as Units;
+        let raw_units = total_raw[g];
+        let ref_units = total_refined[g];
         equity += i128::from(mark_good_holding_at_close(
             state,
             seat,
