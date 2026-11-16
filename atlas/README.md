@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-16 from commit 0b8aada by Atlas 1.26.0.
+Mapped at 2026-11-16 from commit eb2ea0f by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,12 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 11 parts, mostly Rust (337 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-15 (d97301c)
+## What changed since 2026-11-16 (0b8aada)
 
-- league-gen now imports league-core.
-- CI now also runs crates/league-gen/src/mandates.rs.
-- crates/league-core/ is now also read by crates/league-gen/Cargo.toml.
-- 1 file added and 16 changed content, across 5 parts.
+Nothing structural changed since 2026-11-16; 9 files changed content.
 
 ## What comes in
 
@@ -93,7 +90,7 @@ People write .github/, docs/ and the repository root; 1 write with a path built 
 
 ## Where to start
 
-crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/seats.rs → crates/league-relay/src/error.rs
+crates/league-relay/src/main.rs → crates/league-relay/src/lib.rs → crates/league-relay/src/cli.rs → crates/league-relay/src/secret.rs → crates/league-relay/src/seats.rs → crates/league-relay/src/wording.rs → crates/league-relay/src/error.rs
 
 Read those in order to follow one run of league-relay end to end. This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.
 

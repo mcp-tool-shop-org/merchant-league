@@ -52,7 +52,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-core",
-      "qualifyingSourceCommits": 2,
+      "qualifyingSourceCommits": 3,
       "rebaseline": null
     },
     {
@@ -84,7 +84,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-gen",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -134,7 +134,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "league-standalone",
-      "qualifyingSourceCommits": 1,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -200,8 +200,8 @@
         "path": ".gitignore"
       },
       {
-        "commits": 27,
-        "lines": 164,
+        "commits": 28,
+        "lines": 171,
         "path": "CHANGELOG.md"
       },
       {
@@ -210,8 +210,8 @@
         "path": "CLAUDE.md"
       },
       {
-        "commits": 12,
-        "lines": 8441,
+        "commits": 13,
+        "lines": 8442,
         "path": "Cargo.lock"
       },
       {
@@ -235,8 +235,8 @@
         "path": "SECURITY.md"
       },
       {
-        "commits": 34,
-        "lines": 750,
+        "commits": 35,
+        "lines": 779,
         "path": "atlas/README.md"
       },
       {
@@ -245,18 +245,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 34,
-        "lines": 2440,
+        "commits": 35,
+        "lines": 2522,
         "path": "atlas/page.json"
       },
       {
-        "commits": 34,
-        "lines": 12280,
+        "commits": 35,
+        "lines": 12393,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 34,
-        "lines": 28213,
+        "commits": 35,
+        "lines": 28672,
         "path": "atlas/structure.json"
       },
       {
@@ -265,23 +265,23 @@
         "path": "crates/league-core/Cargo.toml"
       },
       {
-        "commits": 1,
-        "lines": 881,
+        "commits": 2,
+        "lines": 1069,
         "path": "crates/league-core/src/commit.rs"
       },
       {
-        "commits": 1,
-        "lines": 351,
+        "commits": 2,
+        "lines": 421,
         "path": "crates/league-core/src/contracts.rs"
       },
       {
-        "commits": 1,
-        "lines": 2878,
+        "commits": 2,
+        "lines": 4030,
         "path": "crates/league-core/src/engine.rs"
       },
       {
-        "commits": 3,
-        "lines": 147,
+        "commits": 4,
+        "lines": 191,
         "path": "crates/league-core/src/lib.rs"
       },
       {
@@ -290,18 +290,18 @@
         "path": "crates/league-core/src/replay.rs"
       },
       {
-        "commits": 1,
-        "lines": 343,
+        "commits": 2,
+        "lines": 368,
         "path": "crates/league-core/src/scoring.rs"
       },
       {
-        "commits": 1,
-        "lines": 831,
+        "commits": 2,
+        "lines": 916,
         "path": "crates/league-core/src/types.rs"
       },
       {
-        "commits": 1,
-        "lines": 5424,
+        "commits": 2,
+        "lines": 6454,
         "path": "crates/league-core/tests/replay_invariants.rs"
       },
       {
@@ -315,8 +315,8 @@
         "path": "crates/league-dice/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 20,
+        "commits": 2,
+        "lines": 21,
         "path": "crates/league-gen/Cargo.toml"
       },
       {
@@ -335,14 +335,19 @@
         "path": "crates/league-gen/src/generator.rs"
       },
       {
-        "commits": 1,
-        "lines": 48,
+        "commits": 2,
+        "lines": 55,
         "path": "crates/league-gen/src/lib.rs"
       },
       {
         "commits": 1,
         "lines": 500,
         "path": "crates/league-gen/src/lp.rs"
+      },
+      {
+        "commits": 1,
+        "lines": 126,
+        "path": "crates/league-gen/src/mandates.rs"
       },
       {
         "commits": 1,
@@ -500,13 +505,13 @@
         "path": "crates/league-standalone/src/client.rs"
       },
       {
-        "commits": 1,
-        "lines": 1666,
+        "commits": 2,
+        "lines": 1727,
         "path": "crates/league-standalone/src/conformance.rs"
       },
       {
-        "commits": 1,
-        "lines": 1309,
+        "commits": 2,
+        "lines": 1422,
         "path": "crates/league-standalone/src/docker.rs"
       },
       {
@@ -515,8 +520,8 @@
         "path": "crates/league-standalone/src/lib.rs"
       },
       {
-        "commits": 1,
-        "lines": 182,
+        "commits": 2,
+        "lines": 188,
         "path": "crates/league-standalone/tests/standalone_live.rs"
       },
       {
@@ -530,8 +535,8 @@
         "path": "crates/league-tui/src/lib.rs"
       },
       {
-        "commits": 2,
-        "lines": 350,
+        "commits": 3,
+        "lines": 374,
         "path": "docs/design-v2.md"
       },
       {
@@ -875,8 +880,8 @@
         "path": "docs/receipts/m2c-patched-xrpl-rust-proof-2026-11-14/raw/hash_check.py"
       },
       {
-        "commits": 1,
-        "lines": 85,
+        "commits": 2,
+        "lines": 103,
         "path": "docs/standalone-xrpld.md"
       },
       {
@@ -2715,58 +2720,58 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-16T00:54:56.021Z",
+  "generatedAt": "2026-11-16T06:21:16.746Z",
   "generatedFrom": {
-    "commit": "0b8aada6bb2556d60b76219ff2aa95848b989553"
+    "commit": "eb2ea0ff4f97145a25db2f23f9bcad157582f570"
   },
   "pairs": [
     {
       "a": "Cargo.lock",
       "b": "Cargo.toml",
-      "either": 9,
+      "either": 10,
       "shared": 5,
-      "strength": 0.555556
+      "strength": 0.5
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 26,
-      "shared": 26,
+      "either": 27,
+      "shared": 27,
       "strength": 1
     },
     {
@@ -2878,16 +2883,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-15T19:10:11-05:00",
-    "inScopeFiles": 503,
+    "headDate": "2026-11-15T19:55:00-05:00",
+    "inScopeFiles": 511,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 40,
+    "qualifyingCommits": 41,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-20T00:10:11.000Z",
+    "since": "2026-05-20T00:55:00.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

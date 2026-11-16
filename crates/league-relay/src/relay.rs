@@ -16,9 +16,10 @@ use crate::transport::{
 };
 use crate::wording::{
     ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_SCRATCHPAD_TOKENS, extract_scratchpad_update, format_sanitized_scratchpad_section,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt,
-    split_negotiation_sections, strip_thinking_tags, wording_slot,
+    MAX_SCRATCHPAD_TOKENS, escape_default_ignorable_code_points, extract_scratchpad_update,
+    format_sanitized_scratchpad_section, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt, split_negotiation_sections,
+    strip_thinking_tags, wording_slot,
 };
 use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
@@ -238,6 +239,16 @@ impl ResponseFormatConfig {
         let pad_key = wording_slot("scratchpad_schema_key");
         let pinned_pad_desc = wording_slot("scratchpad_schema_description");
 
+        reject_default_ignorable_code_point(&name, "response_format schema 'name'")?;
+        if !name.is_empty() && name != wording_slot("default_schema_name") {
+            check_schema_identifier(
+                &name,
+                &pad_key,
+                true,
+                false,
+                "response_format schema 'name'",
+            )?;
+        }
         if name.is_empty()
             || !name
                 .chars()
@@ -247,18 +258,24 @@ impl ResponseFormatConfig {
                 "response_format schema 'name' must match [A-Za-z0-9_-]+".to_owned(),
             ));
         }
-        if is_confusable_with_scratchpad(&name) {
-            return Err(RelayError::Usage(format!(
-                "response_format schema 'name' cannot contain legacy 'scratchpad' ('{name}'); rename it or use '{pad_key}'"
-            )));
-        }
         let Some(schema_obj) = schema.as_object_mut() else {
             return Err(RelayError::Usage(
                 "response_format 'schema' must be a JSON object".to_owned(),
             ));
         };
+        for top_key in schema_obj.keys() {
+            reject_default_ignorable_code_point(
+                top_key,
+                &format!("response_format 'schema.{top_key}' keyword"),
+            )?;
+            reject_forbidden_ref_or_anchor_keyword(top_key, &format!("schema.{top_key}"))?;
+        }
         for unpinned_top_key in ["description", "title", "examples"] {
-            if schema_obj.contains_key(unpinned_top_key) {
+            if let Some(top_v) = schema_obj.get(unpinned_top_key) {
+                reject_default_ignorable_in_value(
+                    top_v,
+                    &format!("response_format 'schema.{unpinned_top_key}'"),
+                )?;
                 return Err(RelayError::Usage(format!(
                     "response_format top-level schema cannot carry unpinned '{unpinned_top_key}'"
                 )));
@@ -291,11 +308,25 @@ impl ResponseFormatConfig {
                     )));
                 };
                 for key in pad_obj.keys() {
+                    reject_default_ignorable_code_point(
+                        key,
+                        &format!("response_format 'schema.properties.{pad_key}' keyword"),
+                    )?;
+                    reject_forbidden_ref_or_anchor_keyword(
+                        key,
+                        &format!("schema.properties.{pad_key}.{key}"),
+                    )?;
                     if !matches!(key.as_str(), "type" | "description") {
                         return Err(RelayError::Usage(format!(
                             "response_format schema property '{pad_key}' cannot carry unpinned keyword '{key}' (only 'type' and 'description' are permitted; token cap is enforced via MAX_SCRATCHPAD_TOKENS)"
                         )));
                     }
+                }
+                if let Some(serde_json::Value::String(t_s)) = pad_obj.get("type") {
+                    reject_default_ignorable_code_point(
+                        t_s,
+                        &format!("response_format 'schema.properties.{pad_key}.type'"),
+                    )?;
                 }
                 if pad_obj.get("type").and_then(|v| v.as_str()) != Some("string") {
                     return Err(RelayError::Usage(format!(
@@ -310,7 +341,11 @@ impl ResponseFormatConfig {
                         );
                     }
                     Some(serde_json::Value::String(existing)) if existing == &pinned_pad_desc => {}
-                    Some(serde_json::Value::String(_)) => {
+                    Some(serde_json::Value::String(existing)) => {
+                        reject_default_ignorable_code_point(
+                            existing,
+                            &format!("response_format 'schema.properties.{pad_key}.description'"),
+                        )?;
                         return Err(RelayError::Usage(format!(
                             "response_format '{pad_key}' description must omit 'description' (populated from MODEL_FACING_WORDING) or match the pinned wording slot 'scratchpad_schema_description'"
                         )));
@@ -403,7 +438,6 @@ impl ResponseFormatConfig {
             }
         }
 
-        let root_uses_ref = root_composition_uses_ref(schema_obj);
         let root_rule = SubschemaRule {
             pad_key: &pad_key,
             forbid_notes: true,
@@ -411,12 +445,12 @@ impl ResponseFormatConfig {
         };
         let nested_prop_rule = SubschemaRule {
             pad_key: &pad_key,
-            forbid_notes: has_pad_prop,
+            forbid_notes: true,
             forbid_ref: has_pad_prop,
         };
         let defs_rule = SubschemaRule {
             pad_key: &pad_key,
-            forbid_notes: has_pad_prop || root_uses_ref,
+            forbid_notes: true,
             forbid_ref: has_pad_prop,
         };
 
@@ -440,46 +474,49 @@ impl ResponseFormatConfig {
                     validate_ref_value(top_val, "schema.$ref", root_rule)?;
                 }
                 "default" | "const" | "enum" | "examples" => {
-                    reject_literal_object_key_naming_notes(
+                    validate_literal_schema_value(
                         top_val,
                         &format!("schema.{top_key}"),
                         root_rule,
                     )?;
                 }
                 "$defs" | "definitions" => {
-                    if let Some(sub_map) = top_val.as_object() {
-                        for (sub_k, sub_v) in sub_map {
-                            check_schema_identifier(
-                                sub_k,
-                                &pad_key,
-                                true,
-                                false,
-                                &format!("response_format 'schema.{top_key}'"),
-                            )?;
-                            validate_subschema(
-                                sub_v,
-                                &format!("schema.{top_key}.{sub_k}"),
-                                defs_rule,
-                            )?;
-                        }
+                    let Some(sub_map) = top_val.as_object() else {
+                        return Err(RelayError::Usage(format!(
+                            "response_format 'schema.{top_key}' must be a JSON object"
+                        )));
+                    };
+                    for (sub_k, sub_v) in sub_map {
+                        check_schema_identifier(
+                            sub_k,
+                            &pad_key,
+                            true,
+                            false,
+                            &format!("response_format 'schema.{top_key}'"),
+                        )?;
+                        validate_subschema(sub_v, &format!("schema.{top_key}.{sub_k}"), defs_rule)?;
                     }
                 }
                 "dependentSchemas" => {
-                    if let Some(sub_map) = top_val.as_object() {
-                        for (sub_k, sub_v) in sub_map {
-                            check_schema_identifier(
-                                sub_k,
-                                &pad_key,
-                                true,
-                                false,
-                                "response_format 'schema.dependentSchemas'",
-                            )?;
-                            validate_subschema(
-                                sub_v,
-                                &format!("schema.dependentSchemas.{sub_k}"),
-                                root_rule,
-                            )?;
-                        }
+                    let Some(sub_map) = top_val.as_object() else {
+                        return Err(RelayError::Usage(
+                            "response_format 'schema.dependentSchemas' must be a JSON object"
+                                .to_owned(),
+                        ));
+                    };
+                    for (sub_k, sub_v) in sub_map {
+                        check_schema_identifier(
+                            sub_k,
+                            &pad_key,
+                            true,
+                            false,
+                            "response_format 'schema.dependentSchemas'",
+                        )?;
+                        validate_subschema(
+                            sub_v,
+                            &format!("schema.dependentSchemas.{sub_k}"),
+                            root_rule,
+                        )?;
                     }
                 }
                 "dependentRequired" => {
@@ -586,6 +623,22 @@ struct SubschemaRule<'a> {
     forbid_ref: bool,
 }
 
+fn is_forbidden_dynamic_or_anchor_keyword(key: &str) -> bool {
+    matches!(
+        key,
+        "$dynamicRef" | "$recursiveRef" | "$anchor" | "$dynamicAnchor" | "$recursiveAnchor"
+    )
+}
+
+fn reject_forbidden_ref_or_anchor_keyword(key: &str, path: &str) -> Result<(), RelayError> {
+    if is_forbidden_dynamic_or_anchor_keyword(key) {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' cannot use unsupported reference or anchor keyword '{key}'"
+        )));
+    }
+    Ok(())
+}
+
 fn is_valid_ascii_property_name(key: &str) -> bool {
     !key.is_empty()
         && key
@@ -593,152 +646,310 @@ fn is_valid_ascii_property_name(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// Return the first Unicode 18.0.0 `Default_Ignorable_Code_Point` (`icu_properties` `2.4.0`
+/// compiled data from `icu_properties_data` `2.4.0`, `PropertyBinaryDefaultIgnorableCodePointV1`)
+/// present in `s`, if any (`P39-B3`).
+///
+/// Covers the tag block (`U+E0000..=U+E007F`), Variation Selectors (`U+FE00..=U+FE0F`) and
+/// Variation Selectors Supplement (`U+E0100..=U+E01EF`, plus unassigned default-ignorables in
+/// `U+E0000..=U+E0FFF`), Shorthand Format Controls (`U+1BCA0..=U+1BCA3`), Mongolian Free
+/// Variation Selectors and Vowel Separator (`U+180B..=U+180F`), zero-width/bidi/format characters
+/// (`U+00AD`, `U+034F`, `U+061C`, `U+200B..=U+200F`, `U+202A..=U+202E`, `U+2060..=U+206F`,
+/// `U+FEFF`), Hangul/Khmer fillers (`U+115F..=U+1160`, `U+17B4..=U+17B5`, `U+3164`, `U+FFA0`),
+/// musical beam/slur controls (`U+1D173..=U+1D17A`), and `U+FFF0..=U+FFF8`.
+pub(crate) fn find_default_ignorable_code_point(s: &str) -> Option<char> {
+    let set =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
+    s.chars().find(|&c| set.contains(c))
+}
+
+fn reject_default_ignorable_code_point(s: &str, location: &str) -> Result<(), RelayError> {
+    if let Some(cp) = find_default_ignorable_code_point(s) {
+        return Err(RelayError::Usage(format!(
+            "{location} cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+            cp as u32
+        )));
+    }
+    Ok(())
+}
+
+fn reject_default_ignorable_in_value(
+    val: &serde_json::Value,
+    location: &str,
+) -> Result<(), RelayError> {
+    match val {
+        serde_json::Value::String(s) => reject_default_ignorable_code_point(s, location),
+        serde_json::Value::Array(arr) => {
+            for (idx, item) in arr.iter().enumerate() {
+                reject_default_ignorable_in_value(item, &format!("{location}[{idx}]"))?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                reject_default_ignorable_code_point(k, location)?;
+                reject_default_ignorable_in_value(v, &format!("{location}.{k}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn is_ignorable_confusable_mark(c: char) -> bool {
+    let default_ignorable =
+        icu_properties::CodePointSetData::new::<icu_properties::props::DefaultIgnorableCodePoint>();
     c.is_control()
+        || default_ignorable.contains(c)
         || matches!(
             c,
-            '\u{00AD}'
-                | '\u{0300}'..='\u{036F}'
-                | '\u{061C}'
-                | '\u{115F}'
-                | '\u{1160}'
-                | '\u{17B4}'
-                | '\u{17B5}'
-                | '\u{180B}'..='\u{180E}'
+            '\u{0300}'..='\u{036F}'
                 | '\u{1AB0}'..='\u{1AFF}'
                 | '\u{1DC0}'..='\u{1DFF}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{206F}'
                 | '\u{20D0}'..='\u{20FF}'
-                | '\u{FE00}'..='\u{FE0F}'
                 | '\u{FE20}'..='\u{FE2F}'
-                | '\u{FEFF}'
-                | '\u{FFA0}'
         )
 }
 
-fn is_confusable_separator(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '_' | '-' | '.' | '/' | ':')
+fn is_confusable_separator(c: char, fold_ascii_leet_digits: bool) -> bool {
+    c.is_whitespace()
+        || c.is_ascii_punctuation()
+        || (!c.is_alphanumeric() && !is_ignorable_confusable_mark(c))
+        || (!fold_ascii_leet_digits && c.is_ascii_digit())
 }
 
-fn fold_confusable_ascii_char(c: char) -> Option<(char, bool)> {
-    if is_ignorable_confusable_mark(c) || is_confusable_separator(c) {
+/// Normalize `raw` via Unicode 18.0.0 UAX #15 NFKC (`icu_normalizer` `2.4.0`), then decompose via
+/// NFKD and strip combining/ignorable marks (`C-19`).
+fn nfkc_and_strip_marks(raw: &str) -> String {
+    let nfkc = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc();
+    let nfkd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfkd();
+    nfkd.normalize_iter(nfkc.normalize_iter(raw.chars()))
+        .filter(|&c| !is_ignorable_confusable_mark(c))
+        .collect()
+}
+
+/// Normalize `raw` via Unicode 18.0.0 UAX #15 NFKC/NFKD (`icu_normalizer` `2.4.0`), mapping all
+/// Unicode `White_Space` (`char::is_whitespace`, including `\n`, `\r`, `\t`, NBSP, and ideographic
+/// space) to `' '` before stripping non-whitespace combining/ignorable/control marks (`P42-B1`).
+fn nfkc_and_strip_marks_preserving_whitespace(raw: &str) -> String {
+    let nfkc = icu_normalizer::ComposingNormalizerBorrowed::new_nfkc();
+    let nfkd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfkd();
+    let pre_ws = raw.chars().map(|c| if c.is_whitespace() { ' ' } else { c });
+    nfkd.normalize_iter(nfkc.normalize_iter(pre_ws))
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|&c| c == ' ' || !is_ignorable_confusable_mark(c))
+        .collect()
+}
+
+/// Hand-built single-character Latin fold table **inspired by** UTS #39 confusables (`C-19`, `C-22`),
+/// paired with optional ASCII leet digit folding (`0->o`, `1->i`, `3->e`, `4->a`, `5->s`, `7->t`, `8->b`).
+///
+/// Alongside direct UTS #39 homoglyphs (`օ`/`Օ` `U+0585`/`U+0555`, `ԁ`/`Ԁ` `U+0501`/`U+0500`,
+/// `һ` `U+04BB`, `ϲ`/`Ϲ`, `հ`, `а`, `ᴏ`, `ס`, `ꜱ`, `\u{017F}`, Cherokee `Ꭺ`..`Ꮓ`, Greek `Η`/`Ν`/`Ρ`/`Τ`/`Χ`/`Υ`/`Ζ`),
+/// this table includes extra visual mappings that lean conservatively toward refusal (`C-22`):
+/// - Latin small-caps (`ᴀ`, `ʙ`, `ᴄ`, `ᴅ`, `ᴇ`, `ꜰ`, `ɢ`, `ʜ`, `ɪ`, `ᴊ`, `ᴋ`, `ʟ`, `ᴍ`, `ɴ`, `ᴘ`, `ꞯ`, `ʀ`, `ᴛ`, `ᴜ`, `ᴠ`, `ᴡ`, `ʏ`, `ᴢ`);
+/// - IPA and Latin-Extended stroke/hook/ligature letters (`ɑ`, `ɒ`, `æ`, `Ƅ`, `ɓ`, `ƀ`, `ƈ`, `ȼ`, `ɔ`, `đ`, `ɗ`, `ɖ`, `ɛ`, `ǝ`, `ə`, `ɇ`, `ƒ`, `ɡ`, `ǥ`, `ħ`, `ɦ`, `ɨ`, `ɩ`, `ʝ`, `ƙ`, `ł`, `ɫ`, `ɬ`, `ɭ`, `ɱ`, `ɲ`, `ɳ`, `ŋ`, `ø`, `ɵ`, `ơ`, `ƥ`, `ʠ`, `ɾ`, `ɽ`, `ɍ`, `ʂ`, `ß`, `ŧ`, `ƭ`, `ʈ`, `ʉ`, `ư`, `ʊ`, `ʋ`, `ɏ`, `ƶ`, `ʐ`);
+/// - Cross-script visual look-alikes mapped directly to ASCII `a`–`z` (`ו` `U+05D5` -> `'i'` vs UTS #39 `'l'`,
+///   `ь` `U+044C` -> `'b'` vs `'ƅ'`, `п` `U+043F` -> `'n'` vs `'π'`, plus `ӑ`, `б`, `ҫ`, `ё`, `є`, `ҽ`, `ғ`, `ґ`, `ћ`, `ї`,
+///   `ќ`, `қ`, `м`, `т`, `ҭ`, `ѳ`, `ө`, `ү`, `ұ`, `ҳ`, `α`, `β`, `δ`, `ε`, `ϵ`, `κ`, `μ`, `η`, `σ`, `ς`, `τ`, `υ`, `χ`, `ζ`,
+///   `ց`, `ի`, `լ`, `ո`, `ռ`, `ք`, `ր`, `ս`, `Ꮥ`, `Ꮤ`, `Ᏺ`).
+fn fold_confusable_latin_char(c: char, fold_ascii_leet_digits: bool) -> Option<(char, bool)> {
+    if is_ignorable_confusable_mark(c) || is_confusable_separator(c, fold_ascii_leet_digits) {
         return None;
     }
     if c.is_ascii() {
-        return Some((c.to_ascii_lowercase(), c.is_ascii_uppercase()));
-    }
-    let cp = c as u32;
-    if (0xFF01..=0xFF5E).contains(&cp)
-        && let Some(ascii_ch) = char::from_u32(cp - 0xFEE0)
-    {
-        return Some((ascii_ch.to_ascii_lowercase(), ascii_ch.is_ascii_uppercase()));
-    }
-    if (0x1D400..=0x1D6A3).contains(&cp) {
-        for &(start, upper) in &[
-            (0x1D400u32, true),
-            (0x1D41A, false),
-            (0x1D434, true),
-            (0x1D44E, false),
-            (0x1D468, true),
-            (0x1D482, false),
-            (0x1D5A0, true),
-            (0x1D5BA, false),
-            (0x1D5D4, true),
-            (0x1D5EE, false),
-            (0x1D608, true),
-            (0x1D622, false),
-            (0x1D63C, true),
-            (0x1D656, false),
-            (0x1D670, true),
-            (0x1D68A, false),
-        ] {
-            if (start..start + 26).contains(&cp)
-                && let Some(ch) = char::from_u32(b'a' as u32 + (cp - start))
-            {
-                return Some((ch, upper));
+        if fold_ascii_leet_digits {
+            let leet = match c {
+                '0' => Some('o'),
+                '1' => Some('i'),
+                '3' => Some('e'),
+                '4' => Some('a'),
+                '5' => Some('s'),
+                '7' => Some('t'),
+                '8' => Some('b'),
+                _ => None,
+            };
+            if let Some(mapped) = leet {
+                return Some((mapped, false));
             }
         }
+        return Some((c.to_ascii_lowercase(), c.is_ascii_uppercase()));
     }
     let was_upper = c.is_uppercase();
+    let exact_before_lower = match c {
+        'Η' => Some('h'),
+        'Ν' => Some('n'),
+        'Ρ' => Some('p'),
+        'Τ' => Some('t'),
+        'Χ' => Some('x'),
+        'Υ' => Some('y'),
+        'Ζ' => Some('z'),
+        'Ϲ' => Some('c'),
+        'Օ' => Some('o'),
+        'Ԁ' => Some('d'),
+        'Տ' => Some('s'),
+        'Ս' => Some('u'),
+        'Ꭺ' => Some('a'),
+        'Ᏼ' => Some('b'),
+        'Ꮯ' => Some('c'),
+        'Ꭰ' => Some('d'),
+        'Ꭼ' => Some('e'),
+        'Ꮒ' => Some('h'),
+        'Ꭵ' => Some('i'),
+        'Ꭻ' => Some('j'),
+        'Ꮶ' => Some('k'),
+        'Ꮇ' => Some('m'),
+        'Ꮲ' => Some('p'),
+        'Ꭱ' => Some('r'),
+        'Ꮪ' | 'Ꮥ' => Some('s'),
+        'Ꭲ' => Some('t'),
+        'Ꮩ' => Some('v'),
+        'Ꮃ' | 'Ꮤ' => Some('w'),
+        'Ᏺ' => Some('y'),
+        'Ꮓ' => Some('z'),
+        _ => None,
+    };
+    if let Some(m) = exact_before_lower {
+        return Some((m, was_upper));
+    }
     let lower = c.to_lowercase().next().unwrap_or(c);
     let mapped = match lower {
-        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' | 'ǎ' | 'а' | 'α' => 'a',
-        'в' | 'β' => 'b',
-        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' | 'с' => 'c',
-        'ď' | 'đ' => 'd',
-        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' | 'е' | 'ё' | 'є' | 'ε' => {
-            'e'
-        }
-        'ĥ' | 'ħ' | 'н' | 'η' => 'h',
-        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' | 'і' | 'ї' | 'ι' => 'i',
-        'ĵ' | 'ј' => 'j',
-        'ķ' | 'к' | 'κ' => 'k',
-        'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => 'l',
-        'м' | 'μ' => 'm',
-        'ñ' | 'ń' | 'ņ' | 'ň' | 'ŉ' | 'ν' => 'n',
-        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' | 'ơ' | 'ǒ' | 'о' | 'ѳ' | 'ο' => {
-            'o'
-        }
-        'р' | 'ρ' => 'p',
-        'ŕ' | 'ŗ' | 'ř' => 'r',
-        'ś' | 'ŝ' | 'ş' | 'š' | 'ș' | '\u{017F}' | 'ѕ' | 'σ' | 'ς' => 's',
-        'ţ' | 'ť' | 'ŧ' | 'ț' | 'т' | 'τ' => 't',
-        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' | 'ư' | 'ǔ' => 'u',
-        'ŵ' => 'w',
-        'х' | 'χ' => 'x',
-        'ý' | 'ÿ' | 'ŷ' | 'у' => 'y',
-        'ź' | 'ż' | 'ž' => 'z',
+        'ᴀ' | 'ɑ' | 'ɒ' | 'æ' | 'а' | 'ӑ' | 'α' => 'a',
+        'ʙ' | 'Ƅ' | 'ɓ' | 'ƀ' | 'в' | 'ь' | 'б' | 'β' => 'b',
+        'ᴄ' | 'ƈ' | 'ȼ' | 'ɔ' | 'с' | 'ҫ' | 'ϲ' => 'c',
+        'ᴅ' | 'đ' | 'ɗ' | 'ɖ' | 'ԁ' | 'δ' => 'd',
+        'ᴇ' | 'ɛ' | 'ǝ' | 'ə' | 'ɇ' | 'е' | 'ё' | 'є' | 'ҽ' | 'ε' | 'ϵ' => 'e',
+        'ꜰ' | 'ƒ' | 'ғ' => 'f',
+        'ɢ' | 'ɡ' | 'ǥ' | 'ґ' | 'ց' => 'g',
+        'ʜ' | 'ħ' | 'ɦ' | 'н' | 'һ' | 'ћ' | 'հ' | 'ի' => 'h',
+        'ɪ' | 'ı' | 'ɨ' | 'ɩ' | 'і' | 'ї' | 'ӏ' | 'ι' | 'ו' => 'i',
+        'ᴊ' | 'ȷ' | 'ʝ' | 'ј' | 'յ' => 'j',
+        'ᴋ' | 'ƙ' | 'к' | 'ќ' | 'қ' | 'κ' => 'k',
+        'ʟ' | 'ł' | 'ɫ' | 'ɬ' | 'ɭ' | 'լ' => 'l',
+        'ᴍ' | 'ɱ' | 'м' | 'μ' => 'm',
+        'ɴ' | 'ɲ' | 'ɳ' | 'ŋ' | 'п' | 'ν' | 'η' | 'ո' | 'ռ' => 'n',
+        'ᴏ' | 'ø' | 'ɵ' | 'ơ' | 'о' | 'ѳ' | 'ө' | 'ο' | 'օ' | 'ס' => 'o',
+        'ᴘ' | 'ƥ' | 'р' | 'ρ' | 'ք' => 'p',
+        'ꞯ' | 'ʠ' => 'q',
+        'ʀ' | 'ɾ' | 'ɽ' | 'ɍ' | 'ր' => 'r',
+        'ꜱ' | 'ʂ' | 'ß' | '\u{017F}' | 'ѕ' | 'σ' | 'ς' => 's',
+        'ᴛ' | 'ŧ' | 'ƭ' | 'ʈ' | 'т' | 'ҭ' | 'τ' => 't',
+        'ᴜ' | 'ʉ' | 'ư' | 'ʊ' | 'υ' | 'ս' => 'u',
+        'ᴠ' | 'ʋ' => 'v',
+        'ᴡ' => 'w',
+        'х' | 'ҳ' | 'χ' => 'x',
+        'ʏ' | 'ɏ' | 'у' | 'ү' | 'ұ' => 'y',
+        'ᴢ' | 'ƶ' | 'ʐ' | 'ζ' => 'z',
         other => other,
     };
     Some((mapped, was_upper))
 }
 
-fn confusable_compact_and_words(raw: &str) -> (String, Vec<String>) {
-    let mut compact = String::with_capacity(raw.len());
-    let mut words: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut prev_was_lower = false;
+fn fold_confusable_ascii_char(c: char) -> Option<(char, bool)> {
+    let normalized = nfkc_and_strip_marks(&c.to_string());
+    let first = normalized.chars().next()?;
+    fold_confusable_latin_char(first, false)
+}
 
-    for c in raw.chars() {
-        if is_ignorable_confusable_mark(c) {
-            continue;
-        }
-        if is_confusable_separator(c) {
-            if !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
+/// Return `true` if `raw` contains `"scratch"` followed by `"pad"` with only non-letters
+/// (punctuation, brackets, spaces, digits, underscore, hyphen, or symbols) between them after
+/// Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet folds
+/// (`C-19`, `C-20`, `C-23`, `P41-C2`, `P41-C3`). Non-Latin letters (such as CJK ideographs)
+/// satisfy `char::is_alphabetic` and count as letters, not separators (`P41-C2`).
+pub(crate) fn text_contains_scratchpad_confusable(raw: &str) -> bool {
+    let normalized = nfkc_and_strip_marks(raw);
+    for leet in [false, true] {
+        let mut letters_only = String::with_capacity(normalized.len());
+        for c in normalized.chars() {
+            if is_ignorable_confusable_mark(c) {
+                continue;
             }
-            prev_was_lower = false;
-            continue;
-        }
-        if let Some((folded, was_upper)) = fold_confusable_ascii_char(c) {
-            if was_upper && prev_was_lower && !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
+            if !leet && c.is_ascii_digit() {
+                continue;
             }
-            compact.push(folded);
-            cur.push(folded);
-            prev_was_lower = !was_upper && folded.is_ascii_alphabetic();
+            if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+                && folded.is_alphabetic()
+            {
+                letters_only.push(folded);
+            }
+        }
+        if letters_only.contains("scratchpad") {
+            return true;
         }
     }
-    if !cur.is_empty() {
-        words.push(cur);
-    }
-    (compact, words)
+    false
 }
 
 fn is_confusable_with_scratchpad(raw: &str) -> bool {
-    let (compact, _) = confusable_compact_and_words(raw);
-    compact.contains("scratchpad")
+    text_contains_scratchpad_confusable(raw)
+}
+
+/// Return `true` if any whitespace-separated token of `raw` contains `"note"` (or `pad_key`,
+/// default `"notes"`) after removing punctuation and other non-letter separators within that
+/// token under Unicode 18.0.0 NFKC/NFKD plus our hand-built UTS #39-inspired and ASCII leet
+/// folds (`P42-B1`, `P41-B1`, `P41-C2`, `C-18`, `C-19`, `C-24`, `C-25`).
+///
+/// DO NOT RELAX (`P42-B1`, Publisher ruling 2026-11-16):
+/// - Split folded text into whitespace-separated tokens; within each token, strip punctuation and
+///   other non-letter separators while counting CJK and other non-Latin alphabetic characters
+///   (`char::is_alphabetic`) as letters (`P41-C2`), then refuse if the token contains `"note"`.
+/// - Refuses `no,tes`, `not.es`, `(no)(tes)`, `notepad`, `keynote`, `"Take note"`, `notebook`,
+///   `noted`, `denote`, and `footnote`; accepts cross-word English such as `"Do not exceed"`,
+///   `"not enough"`, `"can not end"`, `"no tea"`, and `"piano technique"`.
+/// - Do NOT narrow further (e.g. to exact-match or word-equality) and do NOT widen back to
+///   cross-word; `"scratchpad"` (`text_contains_scratchpad_confusable`) is NOT narrowed (`C-23`).
+pub(crate) fn text_contains_note_confusable(raw: &str, pad_key: &str) -> bool {
+    let pad_lower = pad_key.to_ascii_lowercase();
+    let normalized = nfkc_and_strip_marks_preserving_whitespace(raw);
+    for token in normalized.split_whitespace() {
+        for leet in [false, true] {
+            let mut letters_only = String::with_capacity(token.len());
+            for c in token.chars() {
+                if is_ignorable_confusable_mark(c) {
+                    continue;
+                }
+                if !leet && c.is_ascii_digit() {
+                    continue;
+                }
+                if let Some((folded, _)) = fold_confusable_latin_char(c, leet)
+                    && folded.is_alphabetic()
+                {
+                    letters_only.push(folded);
+                }
+            }
+            if letters_only.contains("note") || letters_only.contains(&pad_lower) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn is_confusable_with_notes(raw: &str, pad_key: &str) -> bool {
-    let pad_lower = pad_key.to_ascii_lowercase();
-    let (compact, words) = confusable_compact_and_words(raw);
-    compact == pad_lower
-        || compact == "note"
-        || compact.contains(&pad_lower)
-        || words.iter().any(|w| w == &pad_lower || w == "note")
+    text_contains_note_confusable(raw, pad_key)
+}
+
+fn text_contains_notes_confusable(text: &str, pad_key: &str) -> bool {
+    text_contains_note_confusable(text, pad_key)
+}
+
+fn validate_model_visible_schema_text(
+    text: &str,
+    path: &str,
+    pad_key: &str,
+) -> Result<(), RelayError> {
+    reject_default_ignorable_code_point(text, &format!("response_format '{path}'"))?;
+    if text_contains_scratchpad_confusable(text) {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'"
+        )));
+    }
+    if text_contains_notes_confusable(text, pad_key) {
+        return Err(RelayError::Usage(format!(
+            "response_format '{path}' cannot mention '{pad_key}' or a confusable variant outside top-level 'properties.{pad_key}'"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_property_key(
@@ -764,6 +975,7 @@ fn check_schema_identifier(
     allow_exact_pad_key: bool,
     location: &str,
 ) -> Result<(), RelayError> {
+    reject_default_ignorable_code_point(key, location)?;
     if is_confusable_with_scratchpad(key) {
         return Err(RelayError::Usage(format!(
             "{location} cannot name legacy or confusable 'scratchpad' field '{key}'; rename it to '{pad_key}'"
@@ -782,65 +994,12 @@ fn check_schema_identifier(
             "{location} cannot name case-variant '{key}'; rename it to exact lowercase '{pad_key}'"
         )));
     }
-    let has_non_ident_or_non_ascii = !is_valid_ascii_property_name(key);
-    if (forbid_notes || has_non_ident_or_non_ascii) && is_confusable_with_notes(key, pad_key) {
+    if forbid_notes && is_confusable_with_notes(key, pad_key) {
         return Err(RelayError::Usage(format!(
             "{location} cannot name confusable '{key}' outside top-level 'properties.{pad_key}'"
         )));
     }
     Ok(())
-}
-
-fn root_composition_uses_ref(schema_obj: &serde_json::Map<String, serde_json::Value>) -> bool {
-    if schema_obj.contains_key("$ref") {
-        return true;
-    }
-    for key in [
-        "allOf",
-        "anyOf",
-        "oneOf",
-        "not",
-        "if",
-        "then",
-        "else",
-        "dependentSchemas",
-    ] {
-        if let Some(sub) = schema_obj.get(key)
-            && value_contains_root_ref(sub)
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn value_contains_root_ref(val: &serde_json::Value) -> bool {
-    match val {
-        serde_json::Value::Array(arr) => arr.iter().any(value_contains_root_ref),
-        serde_json::Value::Object(map) => {
-            if map.contains_key("$ref") {
-                return true;
-            }
-            for (k, v) in map {
-                if !matches!(
-                    k.as_str(),
-                    "properties"
-                        | "items"
-                        | "prefixItems"
-                        | "additionalItems"
-                        | "unevaluatedItems"
-                        | "contains"
-                        | "$defs"
-                        | "definitions"
-                ) && value_contains_root_ref(v)
-                {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => false,
-    }
 }
 
 fn percent_decode_lossy(raw: &str) -> String {
@@ -886,7 +1045,9 @@ fn validate_ref_value(
             "response_format '{path}' must be a non-empty string"
         )));
     }
+    reject_default_ignorable_code_point(ref_str, &format!("response_format '{path}'"))?;
     let decoded = percent_decode_lossy(ref_str);
+    reject_default_ignorable_code_point(&decoded, &format!("response_format '{path}'"))?;
     for candidate in [ref_str, decoded.as_str()] {
         for seg in candidate.split('/') {
             if is_confusable_with_scratchpad(seg) {
@@ -917,15 +1078,18 @@ fn validate_ref_value(
     Ok(())
 }
 
-fn reject_literal_object_key_naming_notes(
+fn validate_literal_schema_value(
     val: &serde_json::Value,
     path: &str,
     rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     match val {
+        serde_json::Value::String(s) => {
+            validate_model_visible_schema_text(s, path, rule.pad_key)?;
+        }
         serde_json::Value::Array(arr) => {
             for (idx, item) in arr.iter().enumerate() {
-                reject_literal_object_key_naming_notes(item, &format!("{path}[{idx}]"), rule)?;
+                validate_literal_schema_value(item, &format!("{path}[{idx}]"), rule)?;
             }
         }
         serde_json::Value::Object(map) => {
@@ -937,7 +1101,7 @@ fn reject_literal_object_key_naming_notes(
                     false,
                     &format!("response_format '{path}'"),
                 )?;
-                reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), rule)?;
+                validate_literal_schema_value(v, &format!("{path}.{k}"), rule)?;
             }
         }
         _ => {}
@@ -1353,7 +1517,8 @@ fn pattern_names_forbidden_identifier(pattern: &str, rule: SubschemaRule<'_>) ->
     }
     if rule.forbid_notes
         && (is_confusable_with_notes(pattern, rule.pad_key)
-            || pattern_targets_word(pattern, rule.pad_key, 3))
+            || pattern_targets_word(pattern, rule.pad_key, 3)
+            || pattern_targets_word(pattern, "note", 3))
     {
         return true;
     }
@@ -1372,10 +1537,11 @@ fn validate_pattern_properties(
     };
     let child_rule = SubschemaRule {
         pad_key: rule.pad_key,
-        forbid_notes: rule.forbid_ref,
+        forbid_notes: true,
         forbid_ref: rule.forbid_ref,
     };
     for (pat, sub_v) in pat_map {
+        reject_default_ignorable_code_point(pat, &format!("response_format '{path}' pattern"))?;
         if pattern_names_forbidden_identifier(pat, rule) {
             return Err(RelayError::Usage(format!(
                 "response_format '{path}' pattern '{pat}' cannot name '{}' outside top-level 'properties.{}'",
@@ -1433,6 +1599,9 @@ fn validate_subschema(
     rule: SubschemaRule<'_>,
 ) -> Result<(), RelayError> {
     match val {
+        serde_json::Value::String(s) => {
+            validate_model_visible_schema_text(s, path, rule.pad_key)?;
+        }
         serde_json::Value::Array(arr) => {
             for (idx, item) in arr.iter().enumerate() {
                 validate_subschema(item, &format!("{path}[{idx}]"), rule)?;
@@ -1450,11 +1619,12 @@ fn validate_subschema(
                 && !map.contains_key("$ref");
             let nested_child_rule = SubschemaRule {
                 pad_key: rule.pad_key,
-                forbid_notes: rule.forbid_ref,
+                forbid_notes: true,
                 forbid_ref: rule.forbid_ref,
             };
 
             for (k, v) in map {
+                reject_forbidden_ref_or_anchor_keyword(k, &format!("{path}.{k}"))?;
                 match k.as_str() {
                     "$ref" => {
                         validate_ref_value(v, &format!("{path}.$ref"), rule)?;
@@ -1513,39 +1683,45 @@ fn validate_subschema(
                         }
                     }
                     "$defs" | "definitions" => {
-                        if let Some(sub_map) = v.as_object() {
-                            for (sub_k, sub_v) in sub_map {
-                                check_schema_identifier(
-                                    sub_k,
-                                    rule.pad_key,
-                                    true,
-                                    false,
-                                    &format!("response_format '{path}.{k}'"),
-                                )?;
-                                validate_subschema(
-                                    sub_v,
-                                    &format!("{path}.{k}.{sub_k}"),
-                                    nested_child_rule,
-                                )?;
-                            }
+                        let Some(sub_map) = v.as_object() else {
+                            return Err(RelayError::Usage(format!(
+                                "response_format '{path}.{k}' must be a JSON object"
+                            )));
+                        };
+                        for (sub_k, sub_v) in sub_map {
+                            check_schema_identifier(
+                                sub_k,
+                                rule.pad_key,
+                                true,
+                                false,
+                                &format!("response_format '{path}.{k}'"),
+                            )?;
+                            validate_subschema(
+                                sub_v,
+                                &format!("{path}.{k}.{sub_k}"),
+                                nested_child_rule,
+                            )?;
                         }
                     }
                     "dependentSchemas" => {
-                        if let Some(sub_map) = v.as_object() {
-                            for (sub_k, sub_v) in sub_map {
-                                check_schema_identifier(
-                                    sub_k,
-                                    rule.pad_key,
-                                    rule.forbid_notes,
-                                    false,
-                                    &format!("response_format '{path}.dependentSchemas'"),
-                                )?;
-                                validate_subschema(
-                                    sub_v,
-                                    &format!("{path}.dependentSchemas.{sub_k}"),
-                                    rule,
-                                )?;
-                            }
+                        let Some(sub_map) = v.as_object() else {
+                            return Err(RelayError::Usage(format!(
+                                "response_format '{path}.dependentSchemas' must be a JSON object"
+                            )));
+                        };
+                        for (sub_k, sub_v) in sub_map {
+                            check_schema_identifier(
+                                sub_k,
+                                rule.pad_key,
+                                rule.forbid_notes,
+                                false,
+                                &format!("response_format '{path}.dependentSchemas'"),
+                            )?;
+                            validate_subschema(
+                                sub_v,
+                                &format!("{path}.dependentSchemas.{sub_k}"),
+                                rule,
+                            )?;
                         }
                     }
                     "dependentRequired" => {
@@ -1563,7 +1739,7 @@ fn validate_subschema(
                         validate_property_names(v, &format!("{path}.propertyNames"), rule)?;
                     }
                     "default" | "const" | "enum" | "examples" => {
-                        reject_literal_object_key_naming_notes(v, &format!("{path}.{k}"), rule)?;
+                        validate_literal_schema_value(v, &format!("{path}.{k}"), rule)?;
                     }
                     "items" | "prefixItems" | "additionalItems" | "unevaluatedItems"
                     | "contains" => {
@@ -1637,7 +1813,6 @@ fn is_standard_json_schema_keyword(key: &str) -> bool {
             | "$ref"
             | "$id"
             | "$schema"
-            | "$anchor"
             | "allOf"
             | "anyOf"
             | "oneOf"
@@ -4330,6 +4505,34 @@ pub fn run_turn(
                     guild: seat.guild.clone(),
                 });
             };
+            if let Some(cp) = find_default_ignorable_code_point(&effective_wrapper) {
+                return Err(RelayError::Usage(redact_secrets(
+                    &format!(
+                        "seat '{}' --wrapper cannot contain Unicode Default_Ignorable_Code_Point U+{:04X}",
+                        seat.guild, cp as u32
+                    ),
+                    redaction_key,
+                )));
+            }
+            let pad_key = wording_slot("scratchpad_schema_key");
+            if text_contains_scratchpad_confusable(&effective_wrapper) {
+                return Err(RelayError::Usage(redact_secrets(
+                    &format!(
+                        "seat '{}' --wrapper cannot contain legacy or confusable 'scratchpad' text; use '{pad_key}'",
+                        seat.guild,
+                    ),
+                    redaction_key,
+                )));
+            }
+            if text_contains_note_confusable(&effective_wrapper, &pad_key) {
+                return Err(RelayError::Usage(redact_secrets(
+                    &format!(
+                        "seat '{}' --wrapper cannot mention '{pad_key}' or 'note' (reserved for pinned '{pad_key}' wording)",
+                        seat.guild,
+                    ),
+                    redaction_key,
+                )));
+            }
             seat_wrappers.push((seat.guild.clone(), effective_wrapper));
         }
     }
@@ -4549,7 +4752,7 @@ fn run_single_automated_seat(
     }
 
     let raw_block = match fs::read_to_string(&to_seat_path) {
-        Ok(text) => text,
+        Ok(text) => escape_default_ignorable_code_points(&text),
         Err(e) => {
             return SeatOutcome::SeatError {
                 detail: io_err(&to_seat_path, e, redaction_key).to_string(),
