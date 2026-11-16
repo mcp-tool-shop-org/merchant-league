@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 
 /// Active named arm for all model-facing labels and instructions in `league-relay`.
-pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r4";
+pub const ACTIVE_WORDING_ARM: &str = "v2_neutral_2026_11_15_r5";
 
 /// Maximum whitespace-delimited words permitted across `intent_header` + `body`
 /// in one inter-seat message (`B4.4`, `A-5`).
