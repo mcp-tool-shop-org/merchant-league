@@ -35,7 +35,8 @@ const SECONDARY_INPUT_SHARE_RANGE_4P: (f64, f64) = (0.24, 0.40);
 /// across `6` distinct foreign supply labels plus `2` own capacity rents). Every `5p` converter
 /// includes `R_{(i+2) mod 5}`, guaranteeing that any `4`-seat bloc covers at most `2` of its `4`
 /// members' upkeep (`A-1`, Route b + G1 item 2; measured Shapley `±3%` agreement on ShadowPrice
-/// tables is ~72.5% at `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`;
+/// tables is ~72.5% at `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`, on
+/// seeds `0..199`; the guard refuses no `N = 5` table there but can bind at `N = 5` on other seeds;
 /// provisional pending playtest 1).
 const MULTI_WORKSHOP_SHARE_RANGE_5P: (f64, f64) = (0.365, 0.635);
 /// Fixed required middle-input share on `R_{(i+2) mod 5}` inside `5`-seat intermediate `S1`
@@ -152,7 +153,8 @@ const SECONDARY_TIER1_MULTS: (f64, f64) = (1.02, 0.98);
 /// Input/output stoichiometry multipliers for `5`-/`6`-seat clearing secondary cross-converters
 /// (`1.045x` in / `0.955x` out so `P` and `S1` capacity duals remain strictly positive above
 /// recipe jitter; measured ShadowPrice vs Shapley `±3%` agreement on accepted tables is ~72.5% at
-/// `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`; calibrated, provisional pending playtest 1).
+/// `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`, on seeds `0..199` (the guard
+/// refuses no `N = 5` table there but can bind at `N = 5` on other seeds); calibrated, provisional pending playtest 1).
 const SECONDARY_TIER2_MULTS: (f64, f64) = (1.045, 0.955);
 /// Secondary clearing converter capacity cap per turn (`4.5` batch runs so residual raw supply
 /// clears cleanly without artificial salvage; provisional pending playtest 1).
