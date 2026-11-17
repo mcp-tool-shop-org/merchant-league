@@ -34,7 +34,7 @@ El diseño completo está en [`docs/design-v2.md`](docs/design-v2.md).
 | Modo | Dónde se ejecuta | Para quién es |
 | --- | --- | --- |
 | **Modo de juego** | la Testnet pública de XRPL, a un ritmo de aproximadamente dos turnos por día | personas, solas o con jugadores de IA |
-| **Modo de entrenamiento y evaluación** | un nodo `xrpld` independiente privado en un contenedor Docker local, que cierra los libros de cuentas en milisegundos | jugadores de IA: entrenamiento, pruebas de rendimiento y repeticiones |
+| **Modo de entrenamiento y evaluación** | un nodo `xrpld` independiente privado en un contenedor Docker local, que cierra los ledgers en milisegundos | jugadores de IA: entrenamiento, pruebas de rendimiento y repeticiones |
 
 Ambos modos comparten un motor de reglas. Un juego se repite exactamente a partir de su semilla y su registro.
 
@@ -44,10 +44,10 @@ Ambos modos comparten un motor de reglas. Un juego se repite exactamente a parti
 | --- | --- |
 | `league-core` | El motor de reglas: las fases del turno, los contratos, la puntuación, el cierre de la temporada, la repetición y los predicados de estado detrás del sistema de pistas planificado |
 | `league-gen` | El generador de mesas, con sus comprobaciones de equidad y sus grupos de semillas |
-| `league-dice` | Por ahora, solo son prototipos. La aleatoriedad del juego en sí (compromiso y revelación, combinados con un faro público drand en el modo de juego y una función aleatoria verificable en el modo de entrenamiento) se construye en `league-core` |
+| `league-dice` | Por ahora, solo son prototipos. La aleatoriedad del juego está integrada en `league-core`: en el modo de juego, la baliza de cada turno proviene de una ronda pública de drand, en las ejecuciones de evaluación, de una función aleatoria verificable, y las órdenes selladas utilizan el esquema de compromiso y revelación. |
 | `league-ledger` | El cliente de XRPL Testnet. Rechaza cualquier red que no sea la Testnet |
 | `league-standalone` | El conjunto `xrpld` independiente para el modo de entrenamiento, en un contenedor con recursos limitados y fijados |
-| `league-season` | Límites de temporada, que siguen los reinicios de la Testnet |
+| `league-season` | Se anuncian las fechas de reinicio de la Testnet, y se realiza una comprobación para detectar cualquier reinicio no anunciado; una temporada se ejecuta desde un reinicio hasta el siguiente. |
 | `league-relay` | La herramienta que ejecutó las pruebas en papel con jugadores de IA |
 | `league-tui` | El cliente de terminal. Solo una pantalla de título, por ahora |
 
@@ -69,14 +69,14 @@ Docker solo es necesario para el conjunto `xrpld` independiente, y sus pruebas s
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`bash scripts/verify.sh` ejecuta las comprobaciones que realiza CI, excepto el conjunto Docker y la comprobación del mapa de Atlas. La cobertura y `cargo audit` se ejecutan solo cuando `cargo-llvm-cov` y `cargo-audit` están instalados, y el script enumera cualquier comprobación que haya omitido.
+`bash scripts/verify.sh` ejecuta las comprobaciones de CI, excepto el entorno Docker y la comprobación del mapa de Atlas. La cobertura, `cargo audit` y la compilación del sitio se ejecutan solo cuando `cargo-llvm-cov`, `cargo-audit` y `npm` están instalados, y el script indica cualquier comprobación que haya omitido.
 
 ## Seguridad y datos
 
-- **Qué afecta.** En el modo de juego (todavía no construido), las claves de Testnet de un jugador permanecen en su propia máquina, en la carpeta `.league/` que se ignora en Git, y nunca se registran. El relé de prueba en papel lee su clave OpenRouter solo de la variable de entorno `OPENROUTER_API_KEY` y no realiza ninguna llamada OpenRouter sin `--live` y un límite de crédito. Sus jugadores locales rechazan cualquier clave de API, solo se conectan a una dirección de bucle o a una dirección de máquina virtual que permites con `--allow-vm-host`, y necesitan un límite de segundos de GPU. Guarda sus transcripciones en la carpeta del juego que le proporcionas.
-- **Qué no afecta.** No hay dinero real, no hay Mainnet y nada fuera de las carpetas anteriores. No hay **telemetría**: no se envía nada a ninguna parte, excepto las llamadas que necesita un modo (la Testnet, un faro de aleatoriedad público y, para el relé, OpenRouter o los servidores de modelo locales que permites).
-- **Permisos.** Acceso a la red a la Testnet en el modo de juego. Docker, con su puerto vinculado solo a `127.0.0.1`, para el conjunto independiente.
-- **Protecciones.** Cada conexión a la Testnet debe informar del ID de red de la Testnet, CI falla si hay algún nombre de host de Mainnet y una segunda protección falla si hay alguna copia que presente el juego como una fuente de ingresos.
+- **Qué afecta.** En el modo de juego (aún no implementado), las claves de la Testnet de un jugador permanecen en su propia máquina, en la carpeta `.league/`, que no se incluye en el control de versiones de Git, y nunca se registran. El relay de las pruebas en papel lee su clave OpenRouter solo de la variable de entorno `OPENROUTER_API_KEY` y no realiza ninguna llamada OpenRouter sin `--live` y un límite de crédito. Sus instancias locales rechazan cualquier clave de API, solo se conectan a una dirección de bucle o a una dirección de máquina virtual que permita `--allow-vm-host` y requieren un límite de segundos de GPU. Guarda sus transcripciones en la carpeta del juego que se le proporcione.
+- **Qué no afecta.** No hay dinero real, ni Mainnet, y nada fuera de las carpetas mencionadas. No hay **telemetría**: no se envía nada a ningún lugar, excepto las llamadas que necesita un modo (la Testnet, una señal de aleatoriedad pública y, para el relé, OpenRouter o los servidores de modelo locales que se permiten).
+- **Permisos.** Acceso a la red de la Testnet en el modo de juego. Docker, con su puerto vinculado solo a `127.0.0.1`, para el entorno independiente.
+- **Medidas de seguridad.** Cada conexión a la Testnet debe informar el ID de red de la Testnet. Un mecanismo de seguridad de CI falla si se encuentra cualquier nombre de host de Mainnet escrito en el repositorio fuera del código de terceros, y otro falla si se encuentra texto que presenta el juego como una fuente de ingresos. La revisión cubre lo que una lista de palabras no puede detectar.
 
 Consulta [`SECURITY.md`](SECURITY.md) para conocer el modelo de amenazas y cómo informar de una vulnerabilidad.
 

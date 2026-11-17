@@ -9,9 +9,9 @@
 
 ## A. Security Baseline
 
-- [x] `[all]` SECURITY.md exists (report email, supported versions, response timeline) — executed by `npx @mcptoolshop/shipcheck security-docs` (A1: present + reporting contact, not an empty stub) (2026-11-17: reporting through GitHub security advisories; supported-versions section; `shipcheck security-docs` passes)
+- [x] `[all]` SECURITY.md exists (report email, supported versions, response timeline) — executed by `npx @mcptoolshop/shipcheck security-docs` (A1: present + reporting contact, not an empty stub) (2026-11-17: reporting through GitHub security advisories; supported-versions section; `shipcheck security-docs` run on this branch: passed)
 - [x] `[all]` README includes threat model paragraph (data touched, data NOT touched, permissions required) — executed by `npx @mcptoolshop/shipcheck security-docs` (A2: trust/threat-model section present + non-empty; *quality* is not machine-checkable) (2026-11-17: README "Security and data": what it touches, what it does not, permissions)
-- [x] `[all]` No secrets, tokens, or credentials in source or diagnostics output — executed by `npx @mcptoolshop/shipcheck secrets` (scans every publishable tarball; matches redacted; not a manual attestation) (2026-11-17: identity scan CLEAN on the tracked tree; the relay reads its key only from the environment and redacts errors and panics)
+- [x] `[all]` No secrets, tokens, or credentials in source or diagnostics output — executed by `npx @mcptoolshop/shipcheck secrets` (scans every publishable tarball; matches redacted; not a manual attestation) (2026-11-17: `shipcheck secrets` has no publishable tarball to scan here (skipped); checked instead by the identity scan, CLEAN on the tracked tree, and the relay reads its key only from the environment and redacts errors and panics)
 - [x] `[all]` No telemetry by default — state it explicitly even if obvious (2026-11-17: stated in the README and the handbook security page)
 
 ### Default safety posture
@@ -23,9 +23,9 @@
 
 ## B. Error Handling
 
-- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field, and some (`NotTestnet` in league-ledger, `DiceError` in league-dice) carry no stable code yet
+- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field; only league-gen puts a stable code in its messages, and league-relay's `RelayError`, league-ledger's `NotTestnet` and league-dice's `DiceError` carry none
 - [ ] `[cli]` Exit codes: 0 ok · 1 user error · 2 runtime error · 3 partial success **OPEN, blocks the v0.1.0 tag (2026-11-17):** league-relay uses 0 ok, 1 error, 2 a seat not clean, 3 an unrecorded call, 4 locked; documented in the handbook, but not the 0/1/2/3 convention
-- [x] `[cli]` No raw stack traces without `--debug` (2026-11-17: the relay panic hook prints one redacted line, no backtrace)
+- [x] `[cli]` No raw stack traces without `--debug` (2026-11-17: the relay has no `--debug` flag; its panic hook prints one redacted line and never a backtrace)
 - [ ] SKIP: not an MCP server — `[mcp]` Tool errors return structured results — server never crashes on bad input
 - [ ] SKIP: not an MCP server — `[mcp]` State/config corruption degrades gracefully (stale data over crash)
 - [ ] SKIP: not a desktop app — `[desktop]` Errors shown as user-friendly messages — no raw exceptions in UI
@@ -43,9 +43,9 @@
 
 ## D. Shipping Hygiene
 
-- [x] `[all]` `verify` script exists (test + build + smoke in one command) (2026-11-17: scripts/verify.sh)
-- [x] `[all]` Version in manifest matches git tag — executed by `npx @mcptoolshop/shipcheck manifest` (D2: manifest version not behind the newest released tag; `--expect <ver>` for a strict release-time match) (2026-11-17: no tags yet; workspace version 0.0.0 until the v0.1.0 tag)
-- [x] `[all]` Dependency scanning runs in CI (ecosystem-appropriate) — executed by `npx @mcptoolshop/shipcheck ci` (D3: a recognized scanner is *configured* in CI, or dependabot is present) (2026-11-17: cargo audit --deny warnings; `shipcheck ci` passes)
+- [x] `[all]` `verify` script exists (test + build + smoke in one command) (2026-11-17: scripts/verify.sh: fmt, Clippy, tests, the two tripwires and their controls; coverage, `cargo audit` and the site build when their tools are installed; the Docker harness and the Atlas check run only in CI)
+- [x] `[all]` Version in manifest matches git tag — executed by `npx @mcptoolshop/shipcheck manifest` (D2: manifest version not behind the newest released tag; `--expect <ver>` for a strict release-time match) (2026-11-17: `shipcheck manifest` reads npm/PyPI manifests only, so checked by hand: Cargo workspace 0.0.0, `publish = false`, no tags yet)
+- [x] `[all]` Dependency scanning runs in CI (ecosystem-appropriate) — executed by `npx @mcptoolshop/shipcheck ci` (D3: a recognized scanner is *configured* in CI, or dependabot is present) (2026-11-17: cargo audit --deny warnings for the Cargo tree and `npm audit --audit-level=high` for the site, both in CI; `shipcheck ci` passes)
 - [x] `[all]` No known high/critical vulnerabilities in any dependency tree, and Dependabot alerts are enabled — executed by `npx @mcptoolshop/shipcheck deps` (the OUTCOME: audits **every** tree incl. subtrees, not just the root; `ci` only proves a scanner is configured) (2026-11-17: cargo audit in CI; site npm audit 0; Dependabot alerts enabled)
 - [ ] SKIP: optional; the org rule restricts the update bot, and Dependabot alerts are on — `[all]` Automated dependency **update** mechanism exists <!-- soft/optional: the org rule restricts the auto-PR bot (CI minutes), NOT alerts. The security outcome is enforced by `shipcheck deps`; the update bot is optional. -->
 - [ ] SKIP: no npm or PyPI package (Rust workspace, `publish = false`) — `[npm]` Published via OIDC trusted publishing with `--provenance` — executed by `npx @mcptoolshop/shipcheck ci` (config/intent; `--registry <pkg>` also confirms the attestation on npm)
@@ -58,7 +58,7 @@
 ## E. Identity (soft gate — does not block ship)
 
 - [x] `[all]` Logo in README header (2026-11-17: brand logos/merchant-league/readme.png, brand#118)
-- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; two Japanese lines fixed by hand and pinned in .polyglot-pins.json)
+- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; hand fixes, pinned in .polyglot-pins.json where the pin tool can hold them: 'paper test' in Japanese, Italian, Portuguese and Spanish, the evaluation-mode row in Chinese, Portuguese, Italian, Spanish and French, and the league-dice row in Japanese; the bold Game mode table cell is not held by a pin and is fixed by hand after every run)
 - [x] `[org]` Landing page (@mcptoolshop/site-theme) (2026-11-17: site/ with the Starlight handbook)
 - [x] `[all]` GitHub repo metadata: description, homepage, topics (2026-11-17: description, homepage and 11 topics set)
 

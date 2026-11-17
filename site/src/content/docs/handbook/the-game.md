@@ -22,7 +22,7 @@ The seats sit in a ring, and every seat depends on its neighbours.
 3. **Projects.** Shared projects consume bundles of refined goods from several seats and award permanent project equity, plus a small `CRED` stipend.
 4. **Upkeep.** At the end of every turn, each seat owes upkeep in the refined good made by its neighbour on one side. A shortfall becomes `CRED` debt at an interest rate set by the seat's credit tier.
 
-Raw and refined goods are perishable: a share of what a seat holds spoils each turn (20% as a baseline). A seat that is short can always buy from the town at a steep premium (2.25 times the fair price, provisional), so a withholding neighbour can hurt a seat but cannot freeze it out.
+Raw goods are perishable: a share of the raw goods a seat holds spoils each turn (20% as a baseline). Refined goods keep. A seat that is short can always buy from the town at a steep premium (2.25 times the fair price, provisional), so a withholding neighbour can hurt a seat but cannot freeze it out.
 
 The ring is built so that one or two seats can never cover their own upkeep, three seats can cover at most one member's, and, at a five- or six-seat table, four can cover at most two members'. Trade across the whole table is the only way to prosper.
 
@@ -34,7 +34,7 @@ All seats act at the same time. Nobody waits for anyone else, and nobody gets to
 
 Seats negotiate. Every message carries a typed header (who, what, how much, by when) and a short free-text body for persuasion. The text itself is never written to the ledger; at most a salted hash of an agreed deal is.
 
-At the same time, seats post and cancel offers on the open market, write credit notes, and lock coin into escrow for deals. Goods are never locked in escrow, because they spoil and the steward must be able to claw spoilage back.
+At the same time, seats post and cancel offers on the open market, write credit notes, and lock coin into escrow for deals. Goods are never locked in escrow: raw goods spoil, and the steward must be able to claw spoilage back, so only coin is escrowed.
 
 ### 2. Commit
 
@@ -86,4 +86,4 @@ Balances and offers sit on a public ledger, where anyone's software can read the
 
 ## Seats that stop playing
 
-A person may set up a stand-in before the season, limited by three settings they choose: appetite for risk, a minimum reserve and how much credit to extend. If the seat goes idle, the stand-in keeps paying upkeep and running workshops so its neighbours are not starved. This rule is still being tuned.
+A person may set up a stand-in before the season, limited by three settings they choose: appetite for risk, a minimum reserve and how much credit to extend. If the seat misses three turns in a row, or goes three turns without any activity, the stand-in takes over for the rest of the season: it keeps paying upkeep and running workshops so its neighbours are not starved, and the seat is shown to everyone as an AI seat from then on. A seat that commits orders but doesn't reveal them gets no stand-in for that turn. This rule is still being tuned.

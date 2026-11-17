@@ -1,24 +1,25 @@
 ---
 title: Fairness and randomness
-description: How Merchant League checks every table before it is dealt, keeps its seed pools apart, rolls dice nobody can steer, and replays every game exactly.
+description: How Merchant League checks every table before it is dealt, keeps its seed pools apart, draws randomness nobody can steer, and replays every game exactly.
 sidebar:
   order: 3
 ---
 
 ## Checked tables
 
-Every table is generated from a seed by `league-gen` and checked before it is dealt. A table that fails a check is thrown away, and the generator tries again.
+Every table is generated from a seed by `league-gen` and checked before it is dealt. A table that fails one of these checks is thrown away, and the generator tries again:
 
 - **Starting value.** The generator solves a linear program over the table and prices every seat's starting position at its shadow prices. Every seat must sit within **3%** of the table's average.
 - **What a seat adds to every group.** A second measure values each seat by what it adds to every possible group of seats (its Shapley value). Every seat must sit within **7%** of the average by that measure too. This catches a seat that holds a bottleneck for a small group, which the first measure can miss.
-- **Group limits.** One or two seats can never cover their own upkeep. Three seats can cover at most one member's, and at a five- or six-seat table four can cover at most two members'.
-- **Real choices.** In more than 90% of tables, seats rank their best trades differently, so play does not collapse into one obvious move.
+- **No self-sufficient pairs.** One or two seats can never cover their own upkeep.
+
+Two more properties are proved by the generator's tests over hundreds of seeds per table size, rather than checked on each table: three seats cover at most one member's upkeep, and at a five- or six-seat table four seats cover at most two members'. The tests also report, without requiring it, that in more than 90% of tables the seats rank their best trades differently, so play does not collapse into one obvious move.
 
 The generator's version is recorded with every table, and the tests pin a digest of a known table, so a change to the generator cannot pass unnoticed.
 
 ## Seed pools
 
-Seeds are split into pools that never overlap, so a table used for training can never turn up in an evaluation:
+Seeds are split into pools that never overlap, and setup refuses a table whose stated purpose doesn't match its seed's pool, so training tables and evaluation tables come from separate ranges:
 
 | Pool | Seeds | Used for |
 | --- | --- | --- |
@@ -32,10 +33,10 @@ Every other seed is unassigned and refused. A table's stated purpose must match 
 
 ## Randomness nobody can steer
 
-The game's randomness (supply shocks, the closing roll and tie-breaks) comes from a beacon that no player, nor the studio, can predict or bend. It is built in `league-core`:
+The game's randomness (shocks, the closing roll and tie-breaks) comes from a beacon that no player can predict or bend. It is built in `league-core`:
 
-- **Game mode** takes each turn's beacon from a public [drand](https://drand.love/) round (the quicknet chain) published **after** the turn's commit deadline, so a seat cannot steer a roll it committed to before the round existed. Checking the round's signature during replay is still open ([#29](https://github.com/mcp-tool-shop-org/merchant-league/issues/29)).
-- **Training and evaluation mode** uses a verifiable random function instead, whose output can be checked against a published key.
+- **Game mode** takes each turn's beacon from a public [drand](https://drand.love/) round (the quicknet chain) published **after** the turn's commit deadline, so neither a seat nor the studio can steer a roll that was fixed before the round existed. Checking the round's signature during replay is still open ([#29](https://github.com/mcp-tool-shop-org/merchant-league/issues/29)).
+- **Evaluation runs** (`Eval` mode) use a verifiable random function instead. Its seed is sealed by the studio's orchestrator, away from every seat, and anyone can check its output against the published key afterwards.
 
 Orders follow the same rule: each seat commits a salted hash of its sealed orders, then reveals them. A seat that commits but does not reveal loses its secret actions for that turn, and there is never a re-roll.
 

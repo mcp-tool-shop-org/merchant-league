@@ -20,7 +20,7 @@ Merchant League is a Rust workspace (edition 2024, toolchain 1.100.0). Unsafe co
 | `league-relay` | The paper-test relay: one AI seat's turn at a time, with transcripts and a credit cap |
 | `league-tui` | The terminal client, built on ratatui. A title screen for now |
 
-`vendor/xrpl-rust` holds `xrpl-rust` 1.3.0 with upstream's own fix for a security advisory that no release carries yet. It is patched in through `[patch.crates-io]` and is not a workspace member.
+`vendor/xrpl-rust` holds `xrpl-rust` 1.3.0 with three changes on top, listed in `vendor/xrpl-rust/VENDORED.md`: upstream's own fix for a security advisory that no release carries yet, and local patches for token escrows. It is patched in through `[patch.crates-io]` and is not a workspace member.
 
 ## Two modes, one engine
 
@@ -32,7 +32,8 @@ Merchant League is a Rust workspace (edition 2024, toolchain 1.100.0). Unsafe co
                          |                       |
             Game mode    v                       v   Training / evaluation mode
    league-ledger: the public Testnet      league-standalone: a private xrpld
-   (network id 1 only)                     in Docker (loopback only)
+   (network id 1 only; on-ledger play      in Docker (loopback only)
+   is not built yet)
 ```
 
 The rules live once, in `league-core`. A mode changes only where the ledger side of a turn happens: on the public Testnet for people, or on a private stand-alone node that closes ledgers in milliseconds for AI training and evaluation.
@@ -46,7 +47,7 @@ The rules live once, in `league-core`. A mode changes only where the ledger side
 
 ## The state predicates
 
-`league-core::predicates` computes facts about one seat's position from public state and that seat's own holdings: upkeep and debt, spoilage and conversion, scarcity and tariffs, what groups of seats could cover, and how the close would mark its holdings. They never read another seat's private information. Today they back the replay's metrics (`compute_season_metrics`); later they feed the planned hint system.
+`league-core::predicates` computes facts about one seat's position from public state and that seat's own holdings: upkeep and debt, spoilage and conversion, scarcity and tariffs, what groups of seats could cover, and how the close would mark its holdings. They never read another seat's private information. The replay can attach them to its record for every seat at every turn (`attach_state_predicates`), and the tests derive season metrics from them; later they feed the planned hint system.
 
 ## Quality gates
 

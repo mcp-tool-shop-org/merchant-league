@@ -44,10 +44,10 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | --- | --- |
 | `league-core` | The rules engine: the turn phases, contracts, scoring, the season close, replay, and the state predicates behind the planned hint system |
 | `league-gen` | The table generator, with its fairness checks and its seed pools |
-| `league-dice` | Stubs for now. The game's randomness itself (commit and reveal, mixed with a public drand beacon in Game mode and a verifiable random function in training mode) is built in `league-core` |
+| `league-dice` | Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal |
 | `league-ledger` | The XRPL Testnet client. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
-| `league-season` | Season boundaries, which follow the Testnet's resets |
+| `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset; a season runs from one reset to the next |
 | `league-relay` | The tool that ran the paper playtests with AI seats |
 | `league-tui` | The terminal client. A title screen only, for now |
 
@@ -69,14 +69,14 @@ Docker is needed only for the stand-alone `xrpld` harness, and its tests are ski
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`bash scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check. Coverage and `cargo audit` run only when `cargo-llvm-cov` and `cargo-audit` are installed, and the script names any check it skipped.
+`bash scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check. Coverage, `cargo audit` and the site build run only when `cargo-llvm-cov`, `cargo-audit` and `npm` are installed, and the script names any check it skipped.
 
 ## Security and data
 
 - **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.
 - **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).
 - **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.
-- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.
+- **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.
 
 See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulnerability.
 

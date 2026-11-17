@@ -13,71 +13,41 @@
       "translation": "AIプレイヤーとのペーパーテストを実行したツール。",
       "pinnedAt": "2026-11-17T10:27:48.306Z"
     },
-    "0d6af12fabeb5602:pt-br": {
-      "lang": "pt-br",
+    "0d6af12fabeb5602:pt": {
+      "lang": "pt",
       "source": "The tool that ran the paper playtests with AI seats",
       "translation": "A ferramenta que executou os testes em papel com jogadores de IA",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+      "pinnedAt": "2026-11-17T10:42:04.335Z"
     },
-    "1913a1776ce71fa9:pt-br": {
-      "lang": "pt-br",
-      "source": "CI builds and tests on Linux, and the workspace is developed on Windows. Other platforms are untested.",
-      "translation": "As construções e os testes de CI são feitos no Linux, e o espaço de trabalho é desenvolvido no Windows. Outras plataformas não foram testadas.",
-      "pinnedAt": "2026-11-17T10:27:48.951Z"
-    },
-    "2190a2398f62a1db:pt-br": {
-      "lang": "pt-br",
+    "2190a2398f62a1db:es": {
+      "lang": "es",
       "source": "a private stand-alone `xrpld` node in a local Docker container, closing ledgers in milliseconds",
-      "translation": "um nó `xrpld` autônomo privado em um contêiner Docker local, processando transações em milissegundos",
-      "pinnedAt": "2026-11-17T10:27:48.948Z"
+      "translation": "un nodo `xrpld` independiente privado en un contenedor Docker local, que cierra los ledgers en milisegundos",
+      "pinnedAt": "2026-11-17T10:41:23.994Z"
     },
-    "24106f89dea170fb:pt-br": {
-      "lang": "pt-br",
-      "source": "The table generator, with its fairness checks and its seed pools",
-      "translation": "O gerador de mesas, com suas verificações de justiça e seus pools de sementes",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+    "2190a2398f62a1db:fr": {
+      "lang": "fr",
+      "source": "a private stand-alone `xrpld` node in a local Docker container, closing ledgers in milliseconds",
+      "translation": "un nœud `xrpld` autonome privé dans un conteneur Docker local, qui clôture les ledgers en quelques millisecondes",
+      "pinnedAt": "2026-11-17T10:41:24.087Z"
     },
-    "2463488fcb5d6f58:pt-br": {
-      "lang": "pt-br",
-      "source": "the public XRPL Testnet, at about two turns a day",
-      "translation": "a Testnet pública do XRPL, com cerca de dois turnos por dia",
-      "pinnedAt": "2026-11-17T10:27:48.948Z"
-    },
-    "4068ec8ba98f6179:pt-br": {
-      "lang": "pt-br",
-      "source": "people, alone or with AI seats",
-      "translation": "pessoas, sozinhas ou com jogadores de IA",
-      "pinnedAt": "2026-11-17T10:27:48.948Z"
-    },
-    "42e5618601fd4295:it": {
+    "2190a2398f62a1db:it": {
       "lang": "it",
-      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.",
-      "translation": "- **Cosa viene toccato.** Nella modalità di gioco (non ancora implementata), le chiavi Testnet di un giocatore rimangono sulla propria macchina, nella cartella `.league/` ignorata da Git, e non vengono mai registrate. Il relay dei test su carta legge la sua chiave OpenRouter solo dalla variabile d'ambiente `OPENROUTER_API_KEY` e non effettua alcuna chiamata OpenRouter senza `--live` e un limite di credito. I suoi giocatori locali rifiutano qualsiasi chiave API, raggiungono solo un indirizzo loopback o un indirizzo VM che si consente con `--allow-vm-host` e richiedono un limite di secondi GPU. Conserva le sue trascrizioni nella cartella del gioco che gli si fornisce.\n- **Cosa non viene toccato.** Nessun denaro reale, nessuna Mainnet e niente al di fuori delle cartelle di cui sopra. Non c'è **telemetria**: niente viene inviato da nessuna parte tranne le chiamate di cui una modalità ha bisogno (la Testnet, un beacon di casualità pubblico e, per il relay, OpenRouter o i server del modello locali che si consentono).\n- **Autorizzazioni.** Accesso alla rete per la Testnet nella modalità di gioco. Docker, con la sua porta collegata solo a `127.0.0.1`, per l'ambiente autonomo.\n- **Protezioni.** Ogni connessione alla Testnet deve segnalare l'ID di rete della Testnet, CI fallisce su qualsiasi nome host Mainnet e un secondo meccanismo di sicurezza fallisce su qualsiasi copia che presenta il gioco come fonte di reddito.",
-      "pinnedAt": "2026-11-17T10:28:02.396Z"
+      "source": "a private stand-alone `xrpld` node in a local Docker container, closing ledgers in milliseconds",
+      "translation": "un nodo `xrpld` autonomo privato in un container Docker locale, che chiude i ledger in millisecondi",
+      "pinnedAt": "2026-11-17T10:41:24.311Z"
     },
-    "42e5618601fd4295:ja": {
-      "lang": "ja",
-      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.",
-      "translation": "- **アクセス範囲。** ゲームモード（まだ構築されていません）では、プレイヤーのテストネットキーは、gitで無視される`.league/`フォルダに保存され、ログに記録されることはありません。ペーパーテスト用のリレーは、そのOpenRouterキーを`OPENROUTER_API_KEY`環境変数からのみ読み取り、`--live`とクレジット制限がない限り、いかなるOpenRouter呼び出しも行いません。ローカルのプレイヤーは、APIキーを拒否し、ループバックアドレスまたは`--allow-vm-host`で許可されたVMアドレスにのみアクセスし、GPU秒数の制限が必要です。トランスクリプトは、指定されたゲームフォルダに保存されます。\n- **アクセスしない範囲。** 実際の資金、メインネット、および上記のフォルダ外のものは一切使用しません。**テレメトリーは存在しません**：モードが必要とする呼び出し（テストネット、パブリックランダムネスビーコン、およびリレーの場合はOpenRouterまたは許可されたローカルモデルサーバー）を除いて、何も送信されません。\n- **権限。** ゲームモードでは、テストネットへのネットワークアクセスが必要です。スタンドアロンハーネスの場合は、ポートを`127.0.0.1`にバインドしたDockerが必要です。\n- **保護。** すべてのテストネット接続は、テストネットのネットワークIDを報告する必要があります。CIは、メインネットのホスト名がある場合に失敗し、2回目のトリップワイヤは、ゲームを収入源として表現するコピーがある場合に失敗します。",
-      "pinnedAt": "2026-11-17T10:27:48.307Z"
+    "2190a2398f62a1db:pt": {
+      "lang": "pt",
+      "source": "a private stand-alone `xrpld` node in a local Docker container, closing ledgers in milliseconds",
+      "translation": "um nó `xrpld` autônomo privado em um contêiner Docker local, fechando ledgers em milissegundos",
+      "pinnedAt": "2026-11-17T10:42:04.334Z"
     },
-    "42e5618601fd4295:pt-br": {
-      "lang": "pt-br",
-      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.",
-      "translation": "- **O que ele acessa.** No modo de jogo (ainda não construído), as chaves da Testnet de um jogador permanecem em sua própria máquina, na pasta `.league/` ignorada pelo Git, e nunca são registradas. O relay dos testes em papel lê sua chave OpenRouter apenas da variável de ambiente `OPENROUTER_API_KEY` e não faz nenhuma chamada OpenRouter sem `--live` e um limite de crédito. Seus jogadores locais rejeitam qualquer chave de API, acessam apenas um endereço de loopback ou um endereço de VM que você permite com `--allow-vm-host` e precisam de um limite de segundos de GPU. Ele mantém suas transcrições na pasta do jogo que você fornece.\n- **O que ele não acessa.** Nenhum dinheiro real, nenhuma Mainnet e nada fora das pastas acima. Não há **telemetria**: nada é enviado para lugar nenhum, exceto as chamadas que um modo precisa (a Testnet, um beacon de aleatoriedade pública e, para o relay, OpenRouter ou os servidores de modelo locais que você permite).\n- **Permissões.** Acesso à rede para a Testnet no modo de jogo. Docker, com sua porta vinculada apenas a `127.0.0.1`, para o conjunto autônomo.\n- **Proteções.** Cada conexão com a Testnet deve relatar o ID da rede da Testnet, o CI falha em qualquer nome de host da Mainnet e uma segunda proteção falha em qualquer cópia que apresente o jogo como uma fonte de renda.",
-      "pinnedAt": "2026-11-17T10:28:02.515Z"
-    },
-    "547bb4d12439e327:pt-br": {
-      "lang": "pt-br",
-      "source": "See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulnerability.",
-      "translation": "Consulte [`SECURITY.md`](SECURITY.md) para o modelo de ameaças e como relatar uma vulnerabilidade.",
-      "pinnedAt": "2026-11-17T10:27:48.953Z"
-    },
-    "55892eca02d92645:pt-br": {
-      "lang": "pt-br",
-      "source": "The XRPL Testnet client. It refuses any network that is not the Testnet",
-      "translation": "O cliente XRPL Testnet. Ele rejeita qualquer rede que não seja a Testnet",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+    "2190a2398f62a1db:zh": {
+      "lang": "zh",
+      "source": "a private stand-alone `xrpld` node in a local Docker container, closing ledgers in milliseconds",
+      "translation": "一个私有的独立 `xrpld` 节点，在本地 Docker 容器中运行，在几毫秒内关闭账本（ledger）。",
+      "pinnedAt": "2026-11-17T10:41:23.892Z"
     },
     "7197c62064fe8aa7:ja": {
       "lang": "ja",
@@ -85,101 +55,65 @@
       "translation": "- [ハンドブック](https://mcp-tool-shop-org.github.io/merchant-league/handbook/)\n- [デザインv2](docs/design-v2.md)：ルール、経済、および2つのモード\n- [ペーパーテスト](docs/paper-test.md)：最初のプレイテスト。AIプレイヤーとペーパーでプレイしました。\n- [スタンドアロン`xrpld`ハーネス](docs/standalone-xrpld.md)\n- [レシート](docs/receipts/)：ライブテストネットチェック。テストネットは定期的にワイプされます（次回は2026年11月25日）。そのため、トランザクションハッシュはその後解決されなくなります。ただし、記録された内容とテストベクトルは、証拠として残ります。",
       "pinnedAt": "2026-11-17T10:27:48.307Z"
     },
-    "7197c62064fe8aa7:pt-br": {
-      "lang": "pt-br",
+    "7197c62064fe8aa7:pt": {
+      "lang": "pt",
       "source": "- [Handbook](https://mcp-tool-shop-org.github.io/merchant-league/handbook/)\n- [Design v2](docs/design-v2.md): the rules, the economy and the two modes\n- [Paper test](docs/paper-test.md): the first playtests, played on paper with AI seats\n- [Stand-alone `xrpld` harness](docs/standalone-xrpld.md)\n- [Receipts](docs/receipts/): live Testnet checks. The Testnet is wiped from time to time (next on 2026-11-25), so their transaction hashes stop resolving afterwards; what they recorded, and the test vectors, stay the evidence.",
       "translation": "- [Manual](https://mcp-tool-shop-org.github.io/merchant-league/handbook/)\n- [Design v2](docs/design-v2.md): as regras, a economia e os dois modos\n- [Teste em papel](docs/paper-test.md): os primeiros testes, realizados em papel com jogadores de IA\n- [Conjunto `xrpld` autônomo](docs/standalone-xrpld.md)\n- [Comprovantes](docs/receipts/): verificações da Testnet ao vivo. A Testnet é apagada de tempos em tempos (próxima em 25/11/2026), portanto, seus hashes de transação param de ser resolvidos depois disso; o que eles registraram e os vetores de teste permanecem como evidência.",
-      "pinnedAt": "2026-11-17T10:27:48.954Z"
+      "pinnedAt": "2026-11-17T10:42:04.336Z"
     },
-    "89ae069bd9336bed:pt-br": {
-      "lang": "pt-br",
-      "source": "The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container",
-      "translation": "O conjunto `xrpld` autônomo para o modo de treinamento, em um contêiner fixo com recursos limitados",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+    "99b6831a91f90e09:es": {
+      "lang": "es",
+      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.",
+      "translation": "- **Qué afecta.** En el modo de juego (aún no implementado), las claves de la Testnet de un jugador permanecen en su propia máquina, en la carpeta `.league/`, que no se incluye en el control de versiones de Git, y nunca se registran. El relay de las pruebas en papel lee su clave OpenRouter solo de la variable de entorno `OPENROUTER_API_KEY` y no realiza ninguna llamada OpenRouter sin `--live` y un límite de crédito. Sus instancias locales rechazan cualquier clave de API, solo se conectan a una dirección de bucle o a una dirección de máquina virtual que permita `--allow-vm-host` y requieren un límite de segundos de GPU. Guarda sus transcripciones en la carpeta del juego que se le proporcione.\n- **Qué no afecta.** No hay dinero real, ni Mainnet, y nada fuera de las carpetas mencionadas. No hay **telemetría**: no se envía nada a ningún lugar, excepto las llamadas que necesita un modo (la Testnet, una señal de aleatoriedad pública y, para el relé, OpenRouter o los servidores de modelo locales que se permiten).\n- **Permisos.** Acceso a la red de la Testnet en el modo de juego. Docker, con su puerto vinculado solo a `127.0.0.1`, para el entorno independiente.\n- **Medidas de seguridad.** Cada conexión a la Testnet debe informar el ID de red de la Testnet. Un mecanismo de seguridad de CI falla si se encuentra cualquier nombre de host de Mainnet escrito en el repositorio fuera del código de terceros, y otro falla si se encuentra texto que presenta el juego como una fuente de ingresos. La revisión cubre lo que una lista de palabras no puede detectar.",
+      "pinnedAt": "2026-11-17T10:42:04.209Z"
     },
-    "8ae2cd3cf4b0f474:pt-br": {
-      "lang": "pt-br",
-      "source": "Stubs for now. The game's randomness itself (commit and reveal, mixed with a public drand beacon in Game mode and a verifiable random function in training mode) is built in `league-core`",
-      "translation": "Por enquanto, apenas protótipos. A aleatoriedade do jogo em si (compromisso e revelação, misturados com um beacon público drand no modo de jogo e uma função aleatória verificável no modo de treinamento) é construída em `league-core`",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+    "99b6831a91f90e09:it": {
+      "lang": "it",
+      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.",
+      "translation": "- **Cosa influisce.** Nella modalità di gioco (non ancora implementata), le chiavi Testnet di un giocatore rimangono sulla propria macchina, nella cartella `.league/`, che non viene inclusa nel controllo del codice sorgente, e non vengono mai registrate. Il relay dei test su carta legge la sua chiave OpenRouter solo dalla variabile d'ambiente `OPENROUTER_API_KEY` e non effettua alcuna chiamata OpenRouter senza `--live` e un limite di crediti. Le sue istanze locali rifiutano qualsiasi chiave API, si connettono solo a un indirizzo di loopback o a un indirizzo VM che si autorizza con `--allow-vm-host` e richiedono un limite di secondi di GPU. Conserva le sue trascrizioni nella cartella del gioco fornita.\n- **Cosa non influisce.** Nessun denaro reale, nessuna Mainnet e nulla al di fuori delle cartelle sopra indicate. **Non c'è telemetria**: nulla viene inviato da nessuna parte, tranne le chiamate necessarie a una modalità (la Testnet, un segnale di casualità pubblico e, per il relay, OpenRouter o i server del modello locale che si autorizzano).\n- **Autorizzazioni.** Accesso alla rete della Testnet nella modalità di gioco. Docker, con la sua porta collegata solo a `127.0.0.1`, per il sistema autonomo.\n- **Misure di sicurezza.** Ogni connessione alla Testnet deve segnalare l'ID di rete della Testnet. Un controllo del sistema CI fallisce se viene rilevato qualsiasi nome host della Mainnet scritto nel repository al di fuori del codice fornito, e un secondo controllo fallisce se viene rilevato del testo che presenta il gioco come fonte di reddito. La revisione copre ciò che un elenco di parole non può vedere.",
+      "pinnedAt": "2026-11-17T10:42:04.083Z"
     },
-    "8b4cc0ca61e65cc0:pt-br": {
-      "lang": "pt-br",
-      "source": "AI seats: training, benchmarks and replays",
-      "translation": "jogadores de IA: treinamento, testes de desempenho e replays",
-      "pinnedAt": "2026-11-17T10:27:48.948Z"
+    "99b6831a91f90e09:pt": {
+      "lang": "pt",
+      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.",
+      "translation": "- **O que afeta.** No modo de jogo (ainda não implementado), as chaves da Testnet de um jogador permanecem na sua própria máquina, na pasta `.league/`, que é ignorada pelo Git, e nunca são registradas. O relay dos testes em papel lê a sua chave OpenRouter apenas da variável de ambiente `OPENROUTER_API_KEY` e não faz nenhuma chamada OpenRouter sem `--live` e um limite de crédito. Os seus locais virtuais rejeitam qualquer chave de API, acessam apenas um endereço de loopback ou um endereço de VM que você permite com `--allow-vm-host` e precisam de um limite de segundos de GPU. Mantém as suas transcrições na pasta do jogo que você lhe fornece.\n- **O que não afeta.** Nenhum dinheiro real, nenhuma Mainnet e nada fora das pastas acima. Não há **telemetria**: nada é enviado para lugar nenhum, exceto as chamadas que um modo precisa (a Testnet, um sinalizador de aleatoriedade público e, para o relé, OpenRouter ou os servidores de modelo locais que você permite).\n- **Permissões.** Acesso à rede da Testnet no modo de jogo. Docker, com a sua porta vinculada apenas a `127.0.0.1`, para o conjunto de ferramentas independente.\n- **Proteções.** Cada conexão com a Testnet deve reportar o ID da rede da Testnet. Um gatilho do CI falha em qualquer nome de host da Mainnet escrito no repositório fora do código fornecido, e um segundo falha em qualquer texto que apresente o jogo como uma fonte de receita. A revisão cobre o que uma lista de palavras não consegue ver.",
+      "pinnedAt": "2026-11-17T10:42:04.336Z"
     },
-    "940c3b772ae3b11a:pt-br": {
-      "lang": "pt-br",
-      "source": "Season boundaries, which follow the Testnet's resets",
-      "translation": "Os limites da temporada, que seguem os resets da Testnet",
-      "pinnedAt": "2026-11-17T10:27:48.950Z"
+    "9dcd80c9e608fc0c:es": {
+      "lang": "es",
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "Por ahora, solo son prototipos. La aleatoriedad del juego está integrada en `league-core`: en el modo de juego, la baliza de cada turno proviene de una ronda pública de drand, en las ejecuciones de evaluación, de una función aleatoria verificable, y las órdenes selladas utilizan el esquema de compromiso y revelación.",
+      "pinnedAt": "2026-11-17T10:41:23.995Z"
     },
-    "94fa20103ac9f6bb:pt-br": {
-      "lang": "pt-br",
-      "source": "**Status: prototype, design stage.** The rules engine, the table generator and the replay are built and tested. The game itself is **not playable yet**: there is no game client and no release. Testnet only: no real money, and no path to Mainnet.",
-      "translation": "**Status: protótipo, fase de design.** O motor de regras, o gerador de mesas e a função de replay foram criados e testados. O jogo em si **ainda não está jogável**: não há cliente de jogo e nem há lançamento. Apenas na Testnet: sem dinheiro real e sem caminho para a Mainnet.",
-      "pinnedAt": "2026-11-17T10:27:48.945Z"
+    "9dcd80c9e608fc0c:fr": {
+      "lang": "fr",
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "Pour l’instant, il s’agit de versions préliminaires. L’aléatoire du jeu est intégré dans `league-core` : en mode Jeu, la balise de chaque tour provient d’une ronde publique de drand, lors des tests d’évaluation, il provient d’une fonction aléatoire vérifiable, et les ordres scellés utilisent l’engagement et la révélation.",
+      "pinnedAt": "2026-11-17T10:41:24.088Z"
     },
-    "9ec6043a79eace8d:pt-br": {
-      "lang": "pt-br",
-      "source": "Both modes share one rules engine. A game replays exactly from its seed and its log.",
-      "translation": "Ambos os modos compartilham um único motor de regras. Um jogo é reproduzido exatamente a partir de sua semente e de seu registro.",
-      "pinnedAt": "2026-11-17T10:27:48.948Z"
+    "9dcd80c9e608fc0c:hi": {
+      "lang": "hi",
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "अभी के लिए, यह सिर्फ एक ढांचा है। गेम में यादृच्छिकता `league-core` में निर्मित है: गेम मोड में, प्रत्येक टर्न का बीकन एक सार्वजनिक ड्रैंड राउंड से आता है, मूल्यांकन रन में बीकन एक सत्यापन-योग्य यादृच्छिक फ़ंक्शन से आता है, और सीलबंद आदेश कमिट और रिवील का उपयोग करते हैं।",
+      "pinnedAt": "2026-11-17T10:41:24.182Z"
     },
-    "9fcc6b59eada1ffa:pt-br": {
-      "lang": "pt-br",
-      "source": "- **A ring of merchants.** Each seat produces its own raw good and needs goods from the other seats to pay its upkeep, run its workshops and deliver to shared projects. Nobody can prosper alone, and no small group can either.\n- **Simultaneous turns.** Every turn has three phases. Seats talk and trade in the open market; then each seat commits its orders in secret; then every seat's orders resolve at once, by the same rules for everyone.\n- **Politics.** Councils set tariffs, cartels can open private markets, and charters rotate between seats through the season.\n- **A season of 24 to 32 turns.** Shocks (a supply freeze, a tariff holiday, a demand surge or a spoilage spike) are forecast publicly a turn before they land, and the last turn is rolled, so nobody can plan a perfect final move.\n- **Scoring.** A seat scores its net worth at the close, plus a hidden objective card dealt at the start. Every seat keeps a reason to play until the last turn.\n- **Checked tables.** Every table is generated from a seed and checked before it is dealt. Each seat's starting value must sit within 3% of the table's average, and within 7% of the average when a seat is valued by what it adds to every group of seats.",
-      "translation": "- **Um círculo de comerciantes.** Cada jogador produz seus próprios bens brutos e precisa de bens dos outros jogadores para pagar suas despesas, manter suas oficinas e entregar em projetos compartilhados. Ninguém pode prosperar sozinho, e nenhum pequeno grupo também.\n- **Turnos simultâneos.** Cada turno tem três fases. Os jogadores conversam e negociam no mercado aberto; em seguida, cada jogador define seus pedidos em segredo; em seguida, os pedidos de cada jogador são resolvidos de uma vez, pelas mesmas regras para todos.\n- **Política.** Os conselhos definem tarifas, os cartéis podem abrir mercados privados e as licenças são rotacionadas entre os jogadores ao longo da temporada.\n- **Uma temporada de 24 a 32 turnos.** Os eventos inesperados (congelamento de fornecimento, isenção de tarifas, aumento da demanda ou pico de deterioração) são previstos publicamente um turno antes de ocorrerem, e o último turno é aleatório, para que ninguém possa planejar um movimento final perfeito.\n- **Pontuação.** Um jogador recebe pontos com base em seu patrimônio líquido no final, mais um cartão de objetivo oculto distribuído no início. Cada jogador tem um motivo para jogar até o último turno.\n- **Mesas verificadas.** Cada mesa é gerada a partir de uma semente e verificada antes de ser distribuída. O valor inicial de cada jogador deve estar dentro de 3% da média da mesa e dentro de 7% da média quando um jogador é avaliado com base no que ele contribui para cada grupo de jogadores.",
-      "pinnedAt": "2026-11-17T10:27:48.947Z"
+    "9dcd80c9e608fc0c:it": {
+      "lang": "it",
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "Per ora, solo degli schemi preliminari. La casualità del gioco è integrata in `league-core`: nella modalità di gioco, il beacon di ogni turno proviene da un round pubblico di drand, nelle esecuzioni di valutazione proviene da una funzione casuale verificabile e gli ordini sigillati utilizzano il meccanismo di impegno e rivelazione.",
+      "pinnedAt": "2026-11-17T10:41:24.312Z"
     },
-    "c6baff1ab84a3856:ja": {
+    "9dcd80c9e608fc0c:ja": {
       "lang": "ja",
-      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable, makes no network call without `--live` and a credit cap, and keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.",
-      "translation": "- **アクセス対象。** ゲームモード（まだ構築されていません）では、プレイヤーのテストネットキーは、gitで無視される`.league/`フォルダーに保存され、ログに記録されることはありません。ペーパーテスト用のリレーは、そのOpenRouterキーを`OPENROUTER_API_KEY`環境変数からのみ読み取り、`--live`とクレジット制限なしにネットワーク呼び出しを行わず、トランスクリプトをゲームフォルダーに保存します。\n- **アクセスしない対象。** 実際の資金、メインネット、および上記のフォルダー外のものは一切使用しません。**テレメトリーはありません**。モードが必要とする呼び出し（テストネット、パブリックランダムネスビーコン、およびリレーの場合はOpenRouter）を除き、何も送信されません。\n- **権限。** ゲームモードでは、テストネットへのネットワークアクセスが必要です。スタンドアロンハーネスの場合は、Dockerを使用し、ポートを`127.0.0.1`にバインドします。\n- **保護。** すべてのテストネット接続は、テストネットのネットワークIDを報告する必要があります。CIは、メインネットのホスト名がある場合に失敗し、2回目のトリップワイヤは、ゲームを収入源として表現するコピーがある場合に失敗します。",
-      "pinnedAt": "2026-11-17T09:12:28.584Z"
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "現時点ではスタブのみです。ゲームのランダム性は`league-core`に実装されています。ゲームモードでは各ターンのビーコンが公開のdrandラウンドから、評価実行では検証可能なランダム関数から得られ、封印された注文にはコミットとリビールを使います。",
+      "pinnedAt": "2026-11-17T10:41:23.779Z"
     },
-    "d5c8ebaced7fdfa7:pt-br": {
-      "lang": "pt-br",
-      "source": "The rules engine: the turn phases, contracts, scoring, the season close, replay, and the state predicates behind the planned hint system",
-      "translation": "O motor de regras: as fases do turno, os contratos, a pontuação, o encerramento da temporada, o replay e os predicados de estado por trás do sistema de dicas planejado",
-      "pinnedAt": "2026-11-17T10:27:48.949Z"
-    },
-    "dabe8269a54b024a:pt-br": {
-      "lang": "pt-br",
-      "source": "You need [Rust](https://rustup.rs/). The pinned toolchain (1.100.0) installs itself from `rust-toolchain.toml` on the first build.",
-      "translation": "Você precisa de [Rust](https://rustup.rs/). A cadeia de ferramentas fixa (1.100.0) é instalada automaticamente a partir de `rust-toolchain.toml` na primeira construção.",
-      "pinnedAt": "2026-11-17T10:27:48.951Z"
-    },
-    "e2db3b2b4474eb24:pt-br": {
-      "lang": "pt-br",
-      "source": "A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.",
-      "translation": "Um jogo de estratégia e política com ritmo lento, para quatro a seis jogadores, jogado na **Testnet** do XRP Ledger. Os jogadores podem ser pessoas ou jogadores de IA, na mesma mesa e sob as mesmas regras.",
-      "pinnedAt": "2026-11-17T10:27:48.944Z"
-    },
-    "e31a7c5f54b4c758:pt-br": {
-      "lang": "pt-br",
-      "source": "This is a prototype under active design. Issues and ideas are welcome on the [issue tracker](https://github.com/mcp-tool-shop-org/merchant-league/issues). There are no releases yet and no support guarantees. See the [CHANGELOG](CHANGELOG.md) for progress.",
-      "translation": "Este é um protótipo em fase de design ativo. Problemas e ideias são bem-vindos no [rastreador de problemas](https://github.com/mcp-tool-shop-org/merchant-league/issues). Ainda não há lançamentos e nem garantias de suporte. Consulte o [CHANGELOG](CHANGELOG.md) para obter informações sobre o progresso.",
-      "pinnedAt": "2026-11-17T10:27:48.955Z"
-    },
-    "ed48879888e11b84:pt-br": {
-      "lang": "pt-br",
-      "source": "`bash scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check. Coverage and `cargo audit` run only when `cargo-llvm-cov` and `cargo-audit` are installed, and the script names any check it skipped.",
-      "translation": "`bash scripts/verify.sh` executa as verificações que o CI executa, exceto o conjunto Docker e a verificação do mapa do Atlas. A cobertura e `cargo audit` são executadas apenas quando `cargo-llvm-cov` e `cargo-audit` estão instalados, e o script lista qualquer verificação que tenha sido ignorada.",
-      "pinnedAt": "2026-11-17T10:27:48.951Z"
-    },
-    "f5f049a0e1372e8c:pt-br": {
-      "lang": "pt-br",
-      "source": "Docker is needed only for the stand-alone `xrpld` harness, and its tests are skipped unless you ask for them:",
-      "translation": "O Docker é necessário apenas para o conjunto `xrpld` autônomo, e seus testes são ignorados, a menos que você solicite:",
-      "pinnedAt": "2026-11-17T10:27:48.951Z"
-    },
-    "fb318aac989fa0e7:pt-br": {
-      "lang": "pt-br",
-      "source": "The terminal client. A title screen only, for now",
-      "translation": "O cliente de terminal. Apenas uma tela de título, por enquanto",
-      "pinnedAt": "2026-11-17T10:27:48.951Z"
+    "9dcd80c9e608fc0c:pt": {
+      "lang": "pt",
+      "source": "Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal",
+      "translation": "Por enquanto, apenas esboços. A aleatoriedade do jogo está implementada em `league-core`: no modo de jogo, o beacon de cada turno vem de uma rodada pública do drand, nas execuções de avaliação, de uma função aleatória verificável, e as ordens seladas usam os mecanismos de compromisso e revelação.",
+      "pinnedAt": "2026-11-17T10:42:04.335Z"
     }
   }
 }

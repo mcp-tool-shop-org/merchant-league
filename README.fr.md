@@ -34,7 +34,7 @@ La conception complète est disponible dans [`docs/design-v2.md`](docs/design-v2
 | Mode | Environnement d’exécution | Public cible |
 | --- | --- | --- |
 | **Mode jeu** | le Testnet public XRPL, à raison d’environ deux tours par jour | des personnes, seules ou avec des joueurs IA |
-| **Mode entraînement et évaluation** | un nœud `xrpld` autonome privé dans un conteneur Docker local, qui exécute les registres en quelques millisecondes | joueurs IA : entraînement, tests de performance et relectures |
+| **Mode entraînement et évaluation** | un nœud `xrpld` autonome privé dans un conteneur Docker local, qui clôture les ledgers en quelques millisecondes | joueurs IA : entraînement, tests de performance et relectures |
 
 Les deux modes partagent le même moteur de règles. Un jeu est rejoué exactement à partir de sa valeur de départ et de son journal.
 
@@ -44,10 +44,10 @@ Les deux modes partagent le même moteur de règles. Un jeu est rejoué exacteme
 | --- | --- |
 | `league-core` | Le moteur de règles : les phases du tour, les contrats, le calcul des scores, la fin de la saison, la relecture et les prédicats d’état qui sous-tendent le système d’indices prévu |
 | `league-gen` | Le générateur de table, avec ses vérifications d’équité et ses ensembles de valeurs de départ |
-| `league-dice` | Pour l’instant, il s’agit de simples prototypes. L’aléatoire du jeu lui-même (engagement et révélation, combinés à un signal de drand public en mode jeu et à une fonction aléatoire vérifiable en mode entraînement) est développé en `league-core` |
+| `league-dice` | Pour l’instant, il s’agit de versions préliminaires. L’aléatoire du jeu est intégré dans `league-core` : en mode Jeu, la balise de chaque tour provient d’une ronde publique de drand, lors des tests d’évaluation, il provient d’une fonction aléatoire vérifiable, et les ordres scellés utilisent l’engagement et la révélation. |
 | `league-ledger` | Le client XRPL Testnet. Il refuse tout réseau qui n’est pas le Testnet |
 | `league-standalone` | L’ensemble `xrpld` autonome pour le mode entraînement, dans un conteneur avec des ressources limitées |
-| `league-season` | Les limites de saison, qui suivent les réinitialisations du Testnet |
+| `league-season` | Les dates de réinitialisation annoncées du Testnet, ainsi qu’une vérification qui détecte une réinitialisation non annoncée ; une saison s’étend d’une réinitialisation à la suivante. |
 | `league-relay` | L’outil qui a permis de réaliser les tests sur papier avec des joueurs IA |
 | `league-tui` | Le client terminal. Pour l’instant, il n’y a qu’un écran de titre. |
 
@@ -69,14 +69,14 @@ Docker n’est nécessaire que pour l’ensemble `xrpld` autonome, et ses tests 
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`bash scripts/verify.sh` exécute les vérifications que CI exécute, à l’exception de l’ensemble Docker et de la vérification de la carte Atlas. La couverture et `cargo audit` ne sont exécutées que lorsque `cargo-llvm-cov` et `cargo-audit` sont installés, et le script indique toutes les vérifications qu’il a ignorées.
+`bash scripts/verify.sh` exécute les vérifications CI, à l’exception du module Docker et de la vérification de la carte Atlas. La couverture, `cargo audit` et la construction du site ne s’exécutent que lorsque `cargo-llvm-cov`, `cargo-audit` et `npm` sont installés, et le script indique toutes les vérifications qu’il a ignorées.
 
 ## Sécurité et données
 
-- **Ce à quoi il a accès.** En mode jeu (pas encore développé), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/` ignoré par Git, et ne sont jamais enregistrées. Le relais de test sur papier lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY` et n’effectue aucun appel OpenRouter sans `--live` et une limite de crédit. Ses joueurs locaux refusent toute clé API, n’accèdent qu’à une adresse de boucle ou à une adresse VM que vous autorisez avec `--allow-vm-host`, et nécessitent une limite de secondes de GPU. Il conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
-- **Ce à quoi il n’a pas accès.** Pas d’argent réel, pas de Mainnet et rien en dehors des dossiers mentionnés ci-dessus. Il n’y a **pas de télémétrie** : rien n’est envoyé nulle part, à l’exception des appels dont un mode a besoin (le Testnet, un signal de hasard public et, pour le relais, OpenRouter ou les serveurs de modèles locaux que vous autorisez).
-- **Autorisations.** Accès au réseau pour le Testnet en mode jeu. Docker, avec son port lié uniquement à `127.0.0.1`, pour l’ensemble autonome.
-- **Gardiens.** Chaque connexion au Testnet doit signaler l’ID du réseau du Testnet, CI échoue sur tout nom d’hôte Mainnet, et un deuxième dispositif de sécurité échoue sur toute copie qui présente le jeu comme une source de revenus.
+- **Ce que cela affecte.** En mode Jeu (pas encore implémenté), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/`, qui est ignoré par Git, et ne sont jamais enregistrées. Le relais de test pratique lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY` et n’effectue aucun appel OpenRouter sans `--live` et une limite de crédit. Ses sièges locaux refusent toute clé API, ne se connectent qu’à une adresse de boucle ou à une adresse de machine virtuelle que vous autorisez avec `--allow-vm-host`, et nécessitent une limite de GPU-secondes. Il conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
+- **Ce que cela n’affecte pas.** Pas d’argent réel, pas de Mainnet et rien en dehors des dossiers mentionnés ci-dessus. Il n’y a **aucune télémétrie** : rien n’est envoyé nulle part, à l’exception des appels dont un mode a besoin (le Testnet, un signal d’aléatoire public et, pour le relais, OpenRouter ou les serveurs de modèle locaux que vous autorisez).
+- **Autorisations.** Accès réseau au Testnet en mode Jeu. Docker, avec son port lié uniquement à `127.0.0.1`, pour le module autonome.
+- **Garanties.** Chaque connexion au Testnet doit signaler l’ID du réseau Testnet. Un déclencheur CI échoue si un nom d’hôte Mainnet est écrit dans le dépôt en dehors du code fourni, et un deuxième déclencheur échoue si le contenu présente le jeu comme une source de revenus. La révision couvre ce qu’une liste de mots ne peut pas voir.
 
 Consultez [`SECURITY.md`](SECURITY.md) pour le modèle de menace et la manière de signaler une vulnérabilité.
 

@@ -34,7 +34,7 @@ O design completo está em [`docs/design-v2.md`](docs/design-v2.md).
 | Modo | Onde é executado | Para quem é |
 | --- | --- | --- |
 | **Modo de jogo** | a Testnet pública do XRPL, com cerca de dois turnos por dia | pessoas, sozinhas ou com jogadores de IA |
-| **Modo de treinamento e avaliação** | um nó `xrpld` autônomo privado em um contêiner Docker local, processando transações em milissegundos | jogadores de IA: treinamento, testes de desempenho e replays |
+| **Modo de treinamento e avaliação** | um nó `xrpld` autônomo privado em um contêiner Docker local, fechando ledgers em milissegundos | jogadores de IA: treinamento, testes de desempenho e replays |
 
 Ambos os modos compartilham um único motor de regras. Um jogo é reproduzido exatamente a partir de sua semente e de seu registro.
 
@@ -44,10 +44,10 @@ Ambos os modos compartilham um único motor de regras. Um jogo é reproduzido ex
 | --- | --- |
 | `league-core` | O motor de regras: as fases do turno, os contratos, a pontuação, o encerramento da temporada, o replay e os predicados de estado por trás do sistema de dicas planejado |
 | `league-gen` | O gerador de mesas, com suas verificações de justiça e seus pools de sementes |
-| `league-dice` | Por enquanto, apenas protótipos. A aleatoriedade do jogo em si (compromisso e revelação, misturados com um beacon público drand no modo de jogo e uma função aleatória verificável no modo de treinamento) é construída em `league-core` |
+| `league-dice` | Por enquanto, apenas esboços. A aleatoriedade do jogo está implementada em `league-core`: no modo de jogo, o beacon de cada turno vem de uma rodada pública do drand, nas execuções de avaliação, de uma função aleatória verificável, e as ordens seladas usam os mecanismos de compromisso e revelação. |
 | `league-ledger` | O cliente XRPL Testnet. Ele rejeita qualquer rede que não seja a Testnet |
 | `league-standalone` | O conjunto `xrpld` autônomo para o modo de treinamento, em um contêiner fixo com recursos limitados |
-| `league-season` | Os limites da temporada, que seguem os resets da Testnet |
+| `league-season` | As datas de reinicialização anunciadas da Testnet e uma verificação que detecta uma reinicialização não anunciada; uma temporada decorre de uma reinicialização para a seguinte. |
 | `league-relay` | A ferramenta que executou os testes em papel com jogadores de IA |
 | `league-tui` | O cliente de terminal. Apenas uma tela de título, por enquanto |
 
@@ -69,14 +69,14 @@ O Docker é necessário apenas para o conjunto `xrpld` autônomo, e seus testes 
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`bash scripts/verify.sh` executa as verificações que o CI executa, exceto o conjunto Docker e a verificação do mapa do Atlas. A cobertura e `cargo audit` são executadas apenas quando `cargo-llvm-cov` e `cargo-audit` estão instalados, e o script lista qualquer verificação que tenha sido ignorada.
+`bash scripts/verify.sh` executa as verificações do CI, exceto o conjunto de ferramentas Docker e a verificação do mapa Atlas. A cobertura, `cargo audit` e a construção do site são executadas apenas quando `cargo-llvm-cov`, `cargo-audit` e `npm` estiverem instalados, e o script indica qualquer verificação que tenha sido ignorada.
 
 ## Segurança e dados
 
-- **O que ele acessa.** No modo de jogo (ainda não construído), as chaves da Testnet de um jogador permanecem em sua própria máquina, na pasta `.league/` ignorada pelo Git, e nunca são registradas. O relay dos testes em papel lê sua chave OpenRouter apenas da variável de ambiente `OPENROUTER_API_KEY` e não faz nenhuma chamada OpenRouter sem `--live` e um limite de crédito. Seus jogadores locais rejeitam qualquer chave de API, acessam apenas um endereço de loopback ou um endereço de VM que você permite com `--allow-vm-host` e precisam de um limite de segundos de GPU. Ele mantém suas transcrições na pasta do jogo que você fornece.
-- **O que ele não acessa.** Nenhum dinheiro real, nenhuma Mainnet e nada fora das pastas acima. Não há **telemetria**: nada é enviado para lugar nenhum, exceto as chamadas que um modo precisa (a Testnet, um beacon de aleatoriedade pública e, para o relay, OpenRouter ou os servidores de modelo locais que você permite).
-- **Permissões.** Acesso à rede para a Testnet no modo de jogo. Docker, com sua porta vinculada apenas a `127.0.0.1`, para o conjunto autônomo.
-- **Proteções.** Cada conexão com a Testnet deve relatar o ID da rede da Testnet, o CI falha em qualquer nome de host da Mainnet e uma segunda proteção falha em qualquer cópia que apresente o jogo como uma fonte de renda.
+- **O que afeta.** No modo de jogo (ainda não implementado), as chaves da Testnet de um jogador permanecem na sua própria máquina, na pasta `.league/`, que é ignorada pelo Git, e nunca são registradas. O relay dos testes em papel lê a sua chave OpenRouter apenas da variável de ambiente `OPENROUTER_API_KEY` e não faz nenhuma chamada OpenRouter sem `--live` e um limite de crédito. Os seus locais virtuais rejeitam qualquer chave de API, acessam apenas um endereço de loopback ou um endereço de VM que você permite com `--allow-vm-host` e precisam de um limite de segundos de GPU. Mantém as suas transcrições na pasta do jogo que você lhe fornece.
+- **O que não afeta.** Nenhum dinheiro real, nenhuma Mainnet e nada fora das pastas acima. Não há **telemetria**: nada é enviado para lugar nenhum, exceto as chamadas que um modo precisa (a Testnet, um sinalizador de aleatoriedade público e, para o relé, OpenRouter ou os servidores de modelo locais que você permite).
+- **Permissões.** Acesso à rede da Testnet no modo de jogo. Docker, com a sua porta vinculada apenas a `127.0.0.1`, para o conjunto de ferramentas independente.
+- **Proteções.** Cada conexão com a Testnet deve reportar o ID da rede da Testnet. Um gatilho do CI falha em qualquer nome de host da Mainnet escrito no repositório fora do código fornecido, e um segundo falha em qualquer texto que apresente o jogo como uma fonte de receita. A revisão cobre o que uma lista de palavras não consegue ver.
 
 Consulte [`SECURITY.md`](SECURITY.md) para o modelo de ameaças e como relatar uma vulnerabilidade.
 

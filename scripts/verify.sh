@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # One command for the checks CI runs: format, lints, tests, coverage floor,
-# advisories and the two tripwires with their controls.
+# advisories, the two tripwires with their controls, and the site build.
 #
 # Not here: the stand-alone xrpld harness (it needs Docker; see the README)
 # and the Atlas map check (it needs Node). CI runs both.
 #
-# Coverage and the advisory audit run when cargo-llvm-cov and cargo-audit
-# are installed, and are skipped with a note otherwise.
+# Coverage, the advisory audit and the site build run when cargo-llvm-cov,
+# cargo-audit and npm are installed, and are skipped with a note otherwise.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,6 +46,14 @@ bash scripts/check-copy.sh
 
 step "Guard controls"
 bash scripts/test-guards.sh
+
+step "Site (npm ci, npm audit, build)"
+if command -v npm >/dev/null; then
+  (cd site && npm ci --no-fund --no-audit && npm audit --audit-level=high && npm run build)
+else
+  echo "skipped: npm is not installed (CI runs it)"
+  skipped+=("site build")
+fi
 
 if [ ${#skipped[@]} -eq 0 ]; then
   printf '\nverify: all checks passed\n'

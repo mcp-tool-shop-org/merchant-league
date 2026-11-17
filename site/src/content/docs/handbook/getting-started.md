@@ -41,6 +41,7 @@ It runs, in order:
 6. the Testnet-only tripwire (`scripts/check-testnet-only.sh`)
 7. the copy tripwire, which fails on text that frames the game as a source of income (`scripts/check-copy.sh`)
 8. the guards' own controls (`scripts/test-guards.sh`), which plant every banned pattern and check each guard still catches it
+9. the site: `npm ci`, `npm audit` and the build of the landing page and this handbook, when `npm` is installed
 
 CI also runs two checks that `verify.sh` leaves out: the stand-alone `xrpld` harness and the Atlas map check (`npx @dogfood-lab/atlas check`), which confirms the committed map in `atlas/` matches the code.
 
@@ -56,7 +57,7 @@ LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live -
 LEAGUE_XRPLD_LIVE=full cargo test -p league-standalone --test standalone_live --locked -- --test-threads=1
 ```
 
-The harness pulls one pinned image (`xrplf/xrpld:3.4.1`, by its manifest digest), runs at most one container at a time with 2 CPUs and 2 GB of memory, binds its port to `127.0.0.1` only, and removes the container after every run. The [Security](../security/) page has the full list of limits.
+The harness pulls one pinned image (`xrplf/xrpld:3.4.1`, by its manifest digest), runs at most one container at a time with 2 CPUs and 2 GB of memory, binds its port to `127.0.0.1` only, and removes the container after each run; a container left behind by a killed run is swept away when the next one starts. The [Security](../security/) page has the full list of limits.
 
 ## Try the paper-test relay offline
 

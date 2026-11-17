@@ -17,7 +17,7 @@ The rules engine, the table generator and the replay are built and tested. The g
 | --- | --- |
 | [Getting started](./getting-started/) | Building the workspace, running the tests and the checks CI runs |
 | [The game](./the-game/) | The ring economy, the three phases of a turn, politics, the season and scoring |
-| [Fairness and randomness](./fairness/) | How tables are checked before they are dealt, seed pools, the dice and exact replay |
+| [Fairness and randomness](./fairness/) | How tables are checked before they are dealt, seed pools, randomness and exact replay |
 | [Architecture](./architecture/) | The crates, the two modes and how a turn moves through the code |
 | [Security](./security/) | The Testnet-only guarantee, keys and secrets, the harness's limits, and reporting |
 | [Reference](./reference/) | The design documents, the playtest records and the relay's command line |

@@ -113,4 +113,4 @@ if [ -n "$hits" ]; then
   exit 1
 fi
 
-echo "[check-copy] OK: no real-money language in crates/, README.md or docs/."
+echo "[check-copy] OK: no real-money language in crates/, docs/, site/src, README.md or SECURITY.md."
