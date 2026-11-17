@@ -44,7 +44,6 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | --- | --- |
 | `league-core` | The rules engine: the turn phases, contracts, scoring, the season close, replay, and the state predicates behind the planned hint system |
 | `league-gen` | The table generator, with its fairness checks and its seed pools |
-| `league-dice` | Stubs only, to be retired. The game's randomness and its commit and reveal are in `league-core` |
 | `league-ledger` | The XRPL Testnet client. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
 | `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |

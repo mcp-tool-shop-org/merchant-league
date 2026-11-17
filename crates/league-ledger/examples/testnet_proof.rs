@@ -18,9 +18,9 @@
 //! one. Seeds are never printed.
 
 use league_ledger::client::{Account, Receipt, Testnet};
+use league_ledger::{ESCROW_FINISH_DEFAULT_FEE_DROPS, escrow_condition};
 use serde::de::DeserializeOwned;
 use serde_json::{Value as Json, json};
-use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 use xrpl::models::transactions::Credential;
@@ -48,22 +48,6 @@ const ASF_ALLOW_TRUSTLINE_LOCKING: u32 = 17;
 const RIPPLE_EPOCH_OFFSET: u64 = 946_684_800;
 /// "MerchantLeague", hex: the credential type the domain accepts.
 const CREDENTIAL_TYPE: &str = "4D65726368616E744C6561677565";
-/// An EscrowFinish with a 32-byte preimage costs 10 * (33 + 36/16) = 350
-/// drops at the base fee; 500 leaves room.
-const FINISH_FEE: &str = "500";
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
-}
-
-/// PREIMAGE-SHA-256 crypto-condition and fulfillment for a 32-byte secret.
-fn condition(secret: &[u8; 32]) -> (String, String) {
-    let digest = Sha256::digest(secret);
-    (
-        format!("A0258020{}810120", hex(&digest)),
-        format!("A0228020{}", hex(secret)),
-    )
-}
 
 fn random_secret() -> Res<[u8; 32]> {
     let mut s = [0u8; 32];
@@ -287,8 +271,8 @@ fn main() -> Res<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() - RIPPLE_EPOCH_OFFSET;
     let cancel_after = u32::try_from(now + 900)?;
     let (secret, wrong) = (random_secret()?, random_secret()?);
-    let (cond, fulfil) = condition(&secret);
-    let (_, wrong_fulfil) = condition(&wrong);
+    let (cond, fulfil) = escrow_condition(&secret);
+    let (_, wrong_fulfil) = escrow_condition(&wrong);
     let escrow = send!(
         p,
         "merchant_escrow_create",
@@ -298,7 +282,7 @@ fn main() -> Res<()> {
         json!({"Amount": "1", "Destination": iss, "CancelAfter": cancel_after, "Condition": cond}),
         ok
     );
-    let finish = |seq: u32, owner: &Account, f: &str| json!({"Owner": owner.address(), "OfferSequence": seq, "Condition": cond, "Fulfillment": f, "Fee": FINISH_FEE});
+    let finish = |seq: u32, owner: &Account, f: &str| json!({"Owner": owner.address(), "OfferSequence": seq, "Condition": cond, "Fulfillment": f, "Fee": ESCROW_FINISH_DEFAULT_FEE_DROPS});
     send!(
         p,
         "merchant_escrow_finish_wrong_secret",
@@ -539,7 +523,7 @@ mod tests {
         let a = someone()?;
         let b = someone()?;
         let iss = b.address();
-        let (cond, fulfil) = condition(&[7u8; 32]);
+        let (cond, fulfil) = escrow_condition(&[7u8; 32]);
         let domain = "C6B8F21B5D6B0A8E8C2B1F4E3D2A1908172635445362718293A4B5C6D7E8F901";
         fn check<T: serde::Serialize + Model>(tx: T) -> Res<()> {
             tx.get_errors().map_err(|e| format!("{e}"))?;
@@ -599,7 +583,7 @@ mod tests {
         check(build::<EscrowFinish>(
             "EscrowFinish",
             &a,
-            json!({"Owner": iss, "OfferSequence": 3, "Condition": cond, "Fulfillment": fulfil, "Fee": FINISH_FEE}),
+            json!({"Owner": iss, "OfferSequence": 3, "Condition": cond, "Fulfillment": fulfil, "Fee": ESCROW_FINISH_DEFAULT_FEE_DROPS}),
         )?)?;
         check(build::<Clawback>(
             "Clawback",
@@ -622,7 +606,7 @@ mod tests {
 
     #[test]
     fn the_condition_has_the_published_shape() {
-        let (c, f) = condition(&[0u8; 32]);
+        let (c, f) = escrow_condition(&[0u8; 32]);
         // SHA-256 of 32 zero bytes.
         assert_eq!(
             c,

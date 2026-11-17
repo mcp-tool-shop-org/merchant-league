@@ -29,16 +29,16 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 9,
-      "changed": 26,
+      "added": 11,
+      "changed": 44,
       "moved": 0,
-      "parts": 3,
-      "removed": 1
+      "parts": 8,
+      "removed": 4
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "CI's push trigger now also names `SECURITY.md`, `site/**` and `vendor/**`.",
+        "sentence": "CI's push trigger now also names `SECURITY.md` and `site/**`.",
         "subjects": [
           ".github/workflows/ci.yml"
         ]
@@ -55,10 +55,9 @@
       },
       {
         "kind": "door",
-        "sentence": "CI now also checks crates/league-dice/src/lib.rs, crates/league-ledger/src/lib.rs, crates/league-season/src/lib.rs and 2 more.",
+        "sentence": "CI now also checks crates/league-ledger/src/lib.rs, crates/league-season/src/lib.rs, crates/league-standalone/src/lib.rs and 1 more.",
         "subjects": [
           ".github/workflows/ci.yml",
-          "crates/league-dice/src/lib.rs",
           "crates/league-ledger/src/lib.rs",
           "crates/league-season/src/lib.rs",
           "crates/league-standalone/src/lib.rs",
@@ -67,7 +66,7 @@
       },
       {
         "kind": "door",
-        "sentence": "And 1 more change to a door.",
+        "sentence": "And 2 more changes to doors.",
         "subjects": []
       },
       {
@@ -87,8 +86,15 @@
         ]
       },
       {
+        "kind": "part",
+        "sentence": "league-dice is no longer a part.",
+        "subjects": [
+          "league-dice"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "9 files added, 1 removed and 26 changed content, across 3 parts.",
+        "sentence": "11 files added, 4 removed and 44 changed content, across 8 parts.",
         "subjects": []
       }
     ],
@@ -102,7 +108,7 @@
     {
       "a": "crates/league-core/src/replay.rs",
       "b": "crates/league-core/tests/replay_invariants.rs",
-      "either": 5,
+      "either": 6,
       "partLabels": [
         "league-core",
         "league-core"
@@ -112,7 +118,7 @@
         "league-core"
       ],
       "relation": "inside",
-      "shared": 5
+      "shared": 6
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -130,6 +136,21 @@
       "shared": 7
     },
     {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 20,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 17
+    },
+    {
       "a": "crates/league-gen/src/empirical.rs",
       "b": "crates/league-gen/tests/properties.rs",
       "either": 6,
@@ -143,21 +164,6 @@
       ],
       "relation": "inside",
       "shared": 5
-    },
-    {
-      "a": "crates/league-relay/src/relay.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 21,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 17
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -180,9 +186,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "541c2231d993226841864f1b9f3cbae848cc5d32",
+  "commit": "2418ec933edcb930b1bbda339fed8699b6e96c0f",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (340 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 8 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "10 parts, mostly Rust (340 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -201,12 +207,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 11
-        },
-        {
-          "boundary": "league-dice",
-          "depth": 0,
-          "files": 2
+          "files": 12
         },
         {
           "boundary": "league-gen",
@@ -216,7 +217,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 6
+          "files": 7
         },
         {
           "boundary": "league-season",
@@ -247,7 +248,6 @@
         "crates/league-core/src/lib.rs",
         "crates/league-core/src/replay.rs",
         "crates/league-core/tests/",
-        "crates/league-dice/",
         "crates/league-gen/src/empirical.rs",
         "crates/league-gen/src/feasibility.rs",
         "crates/league-gen/src/generator.rs",
@@ -267,13 +267,13 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 26,
+      "runsCount": 25,
       "runsMore": 34,
       "sends": [],
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 12 paths",
+        "on a push to main touching 11 paths",
         "or by hand"
       ]
     },
@@ -317,7 +317,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "runWith": "cargo run --example testnet_escrow_expiry",
@@ -345,7 +345,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "runWith": "cargo run --example testnet_proof",
@@ -373,7 +373,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "runWith": "cargo run --example testnet_requireauth",
@@ -435,7 +435,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-17T13:37:28.521Z",
+  "generatedAt": "2026-11-17T13:18:06.153Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
@@ -449,7 +449,6 @@
     ".github": ".github",
     "docs": "docs",
     "league-core": "league-core",
-    "league-dice": "league-dice",
     "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-season": "league-season",
@@ -458,7 +457,7 @@
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 11,
+  "parts": 10,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -485,15 +484,14 @@
   "summaryFrom": "person",
   "testFiles": 40,
   "testedBy": {
-    "league-core": 7,
-    "league-dice": 2,
+    "league-core": 8,
     "league-gen": 8,
-    "league-ledger": 7,
+    "league-ledger": 8,
     "league-season": 1,
     "league-standalone": 5,
     "league-tui": 1
   },
-  "testedCodeParts": 7,
+  "testedCodeParts": 6,
   "testedInside": [
     "league-season",
     "league-tui"

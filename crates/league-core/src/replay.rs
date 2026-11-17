@@ -1,6 +1,7 @@
 //! Deterministic Steward replay from initial `TableSpec`, public or redacted layout seed,
-//! Turn-1 mandate commitments, per-turn action/commit/reveal logs, and cryptographically verified
-//! turn beacons.
+//! Turn-1 mandate commitments, per-turn action/commit/reveal logs, and turn beacons (`EvalVrf`
+//! verified under `vrf-r255`; `ExternalDrand` currently **hash-bound, not yet authenticated**
+//! until `#29` wires BLS12-381 verification in [`crate::commit::check_drand_quicknet_signature`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -452,10 +453,11 @@ pub enum ReplayBeaconMode {
     /// Game mode with League of Entropy drand `quicknet` beacons: requires `spec.drand_schedule`,
     /// scheduled `drand_round`, and `turn_beacon == SHA-256(drand_signature)`.
     ///
-    /// **Deferred verification note (`M2`):** `league-core` does not yet perform BLS12-381
-    /// signature verification against the `quicknet` public key (that check runs in `#29`).
-    /// Consequently, `ExternalDrand` replay checks internal log self-consistency against the
-    /// pre-named round schedule, not cryptographic authenticity.
+    /// **Deferred authentication note (`#29`):** Drand beacons in Game-mode replay are currently
+    /// **hash-bound, not yet authenticated** — [`crate::commit::verify_drand_quicknet_beacon`]
+    /// calls [`crate::commit::check_drand_quicknet_signature`], which returns
+    /// [`crate::commit::DrandBeaconAuthStatus::HashBoundUnauthenticated`] until `#29` adds
+    /// BLS12-381 signature verification against the pinned `quicknet` chain public key.
     ExternalDrand,
     /// Legacy seed-derived beacon mode — refused by [`replay_season`] in both `Game` and `Eval`
     /// modes because randomness must never derive from the public layout seed (`#31`).
@@ -990,7 +992,7 @@ fn replay_season_inner(
                         "ExternalDrand replay requires TableSpec::drand_schedule".to_owned(),
                     ));
                 };
-                verify_drand_quicknet_beacon(
+                let _beacon_auth = verify_drand_quicknet_beacon(
                     schedule,
                     Turn(logged.turn),
                     round,

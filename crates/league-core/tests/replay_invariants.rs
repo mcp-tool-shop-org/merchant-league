@@ -13,20 +13,21 @@ use league_core::{
     CreditTier, DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_PBRS_GAMMA_BPS,
     DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
     DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS, DRAND_QUICKNET_SIGNATURE_BYTES,
-    DrandSchedule, DualEscrowProposal, EngineError, EngineState, EscrowFinishUnlock,
-    EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities, GradedMandateCard,
-    HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, IntentPledge, IntentTarget, LoggedTurn,
-    MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY,
-    MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide, OrderReveal,
-    PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview, ProjectRecipe,
-    RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError, ReplayRecord,
-    RevealSalt, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, ScheduledShockSpec, SealedEvalSeed,
-    SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, ShockKind, SwapPreviewOutcome, TableId,
-    TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, attach_state_predicates,
-    bonus_equity_for_completion_bps, break_tie_with_beacon, break_tie_with_turn_beacon,
-    ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
-    compute_final_scoreboard, compute_mandate_commitment, compute_net_asset_equity,
-    compute_order_commitment, compute_pbrs_reward, compute_potential, compute_preimage_condition,
+    DrandBeaconAuthStatus, DrandSchedule, DualEscrowProposal, EngineError, EngineState,
+    EscrowFinishUnlock, EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities,
+    GradedMandateCard, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, IntentPledge, IntentTarget,
+    LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
+    MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide,
+    OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview,
+    ProjectRecipe, RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError,
+    ReplayRecord, RevealSalt, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, ScheduledShockSpec,
+    SealedEvalSeed, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, ShockKind,
+    SwapPreviewOutcome, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
+    Units, attach_state_predicates, bonus_equity_for_completion_bps, break_tie_with_beacon,
+    break_tie_with_turn_beacon, ceil_bps_fee, ceil_units_parity, check_drand_quicknet_signature,
+    checked_ceil_units_parity, checked_mul_units_parity, compute_final_scoreboard,
+    compute_mandate_commitment, compute_net_asset_equity, compute_order_commitment,
+    compute_pbrs_reward, compute_potential, compute_preimage_condition,
     convert_mandate_points_to_equity, deal_graded_mandates, deal_graded_mandates_with_entropy,
     default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
     drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
@@ -4390,12 +4391,49 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     let r4_expected = must_ok(schedule.expected_round_for_turn(Turn(4)), "round 4");
     let sig_4 = vec![0x7B_u8; DRAND_QUICKNET_SIGNATURE_BYTES];
     let expected_beacon = must_ok(derive_drand_beacon(&sig_4), "beacon 4");
-    assert!(
-        verify_drand_quicknet_beacon(&schedule, Turn(4), r4_expected, &sig_4, expected_beacon)
-            .is_ok()
+    assert_eq!(
+        check_drand_quicknet_signature(r4_expected, &sig_4),
+        Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+    );
+    assert_eq!(
+        verify_drand_quicknet_beacon(&schedule, Turn(4), r4_expected, &sig_4, expected_beacon),
+        Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
     );
 
-    // Off-schedule round, truncated signature, and all-zero signature must all be rejected before sweep.
+    // Off-schedule round, round 0, truncated signature, and all-zero signature must all be rejected.
+    assert!(matches!(
+        check_drand_quicknet_signature(0, &sig_4),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        check_drand_quicknet_signature(r4_expected, &[0x7B; 47]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert!(matches!(
+        check_drand_quicknet_signature(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
+        Err(EngineError::InvalidOrder(_))
+    ));
+    assert_eq!(
+        DrandBeaconAuthStatus::HashBoundUnauthenticated.as_str(),
+        "hash_bound_unauthenticated"
+    );
+    assert_eq!(
+        DrandBeaconAuthStatus::HashBoundUnauthenticated.to_string(),
+        "hash_bound_unauthenticated"
+    );
+    let encoded_status = must_ok(
+        serde_json::to_string(&DrandBeaconAuthStatus::HashBoundUnauthenticated),
+        "serialize auth status",
+    );
+    assert_eq!(encoded_status, "\"hash_bound_unauthenticated\"");
+    let decoded_status: DrandBeaconAuthStatus = must_ok(
+        serde_json::from_str(&encoded_status),
+        "deserialize auth status",
+    );
+    assert_eq!(
+        decoded_status,
+        DrandBeaconAuthStatus::HashBoundUnauthenticated
+    );
     assert!(matches!(
         eng.sweep_turn_with_drand(r4_expected + 1, &sig_4),
         Err(EngineError::InvalidOrder(_))

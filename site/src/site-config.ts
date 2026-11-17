@@ -82,7 +82,6 @@ export const config: SiteConfig = {
       rows: [
         ['league-core', 'The rules engine: turn phases, contracts, scoring, the season close, replay and state predicates'],
         ['league-gen', 'The table generator, with its fairness checks and seed pools'],
-        ['league-dice', 'Stubs only, to be retired; the game’s randomness and its commit and reveal are in league-core'],
         ['league-ledger', 'The XRPL Testnet client; it refuses any other network'],
         ['league-standalone', 'The stand-alone xrpld harness for training mode, in a pinned, resource-capped container'],
         ['league-season', 'The Testnet’s announced reset dates, and a check that spots an unannounced reset'],

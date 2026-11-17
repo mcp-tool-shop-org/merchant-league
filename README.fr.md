@@ -44,7 +44,6 @@ Les deux modes partagent le même moteur de règles. Un jeu est rejoué exacteme
 | --- | --- |
 | `league-core` | Le moteur de règles : les phases du tour, les contrats, le calcul des scores, la fin de la saison, la relecture et les prédicats d’état qui sous-tendent le système d’indices prévu |
 | `league-gen` | Le générateur de table, avec ses vérifications d’équité et ses ensembles de valeurs de départ |
-| `league-dice` | Ébauches uniquement, appelé à être retiré. L’aléatoire du jeu, ainsi que l’engagement et la révélation, se trouvent dans `league-core` |
 | `league-ledger` | Le client XRPL Testnet. Il refuse tout réseau qui n’est pas le Testnet |
 | `league-standalone` | L’ensemble `xrpld` autonome pour le mode entraînement, dans un conteneur avec des ressources limitées |
 | `league-season` | Les dates de réinitialisation annoncées du Testnet, et une vérification qui détecte une réinitialisation non annoncée |

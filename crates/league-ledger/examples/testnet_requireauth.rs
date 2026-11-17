@@ -11,9 +11,9 @@
 //! Seeds are never printed.
 
 use league_ledger::client::{Account, Receipt, Testnet};
+use league_ledger::{ESCROW_FINISH_DEFAULT_FEE_DROPS, escrow_condition};
 use serde::de::DeserializeOwned;
 use serde_json::{Value as Json, json};
-use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 use xrpl::models::transactions::account_set::AccountSet;
@@ -33,18 +33,6 @@ const ASF_ALLOW_TRUSTLINE_LOCKING: u32 = 17;
 /// TrustSet tfSetfAuth: the issuer authorizes the holder's line.
 const TF_SET_AUTH: u32 = 0x0001_0000;
 const RIPPLE_EPOCH_OFFSET: u64 = 946_684_800;
-const FINISH_FEE: &str = "500";
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
-}
-
-fn condition(secret: &[u8; 32]) -> (String, String) {
-    (
-        format!("A0258020{}810120", hex(&Sha256::digest(secret))),
-        format!("A0228020{}", hex(secret)),
-    )
-}
 
 fn random_secret() -> Res<[u8; 32]> {
     let mut s = [0u8; 32];
@@ -217,14 +205,14 @@ fn main() -> Res<()> {
     // 3. Token escrows on authorized lines, and to an unauthorized line.
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() - RIPPLE_EPOCH_OFFSET;
     let cancel_after = u32::try_from(now + 900)?;
-    let (cond, fulfil) = condition(&random_secret()?);
+    let (cond, fulfil) = escrow_condition(&random_secret()?);
     let escrow = |to: &Account, amount: &str| {
         json!({"Amount": mrk(&iss, amount), "Destination": to.address(), "Condition": cond,
                "CancelAfter": cancel_after})
     };
     let finish = |owner: &Account, seq: u32| {
         json!({"Owner": owner.address(), "OfferSequence": seq, "Condition": cond,
-               "Fulfillment": fulfil, "Fee": FINISH_FEE})
+               "Fulfillment": fulfil, "Fee": ESCROW_FINISH_DEFAULT_FEE_DROPS})
     };
     let first = send!(
         p,
@@ -329,7 +317,7 @@ mod tests {
             .map_err(|e| format!("{e}"))?;
         let a = Account::from_seed(&w.seed)?;
         let iss = a.address();
-        let (cond, fulfil) = condition(&[7u8; 32]);
+        let (cond, fulfil) = escrow_condition(&[7u8; 32]);
         fn check<T: serde::Serialize + Model>(tx: T) -> Res<()> {
             tx.get_errors().map_err(|e| format!("{e}"))?;
             xrpl::core::binarycodec::encode(&tx).map_err(|e| format!("{e}"))?;
@@ -359,7 +347,7 @@ mod tests {
         check(build::<EscrowFinish>(
             "EscrowFinish",
             &a,
-            json!({"Owner": iss, "OfferSequence": 3, "Condition": cond, "Fulfillment": fulfil, "Fee": FINISH_FEE}),
+            json!({"Owner": iss, "OfferSequence": 3, "Condition": cond, "Fulfillment": fulfil, "Fee": ESCROW_FINISH_DEFAULT_FEE_DROPS}),
         )?)?;
         // For a trust line, the clawed amount's issuer field names the holder.
         let holder = xrpl::wallet::Wallet::create(Some(xrpl::constants::CryptoAlgorithm::ED25519))

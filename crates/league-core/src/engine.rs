@@ -1099,7 +1099,7 @@ impl TurnEngine {
             ));
         };
         let beacon = derive_drand_beacon(drand_signature)?;
-        verify_drand_quicknet_beacon(
+        let _beacon_auth = verify_drand_quicknet_beacon(
             &schedule,
             Turn(self.state.turn),
             drand_round,
