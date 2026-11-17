@@ -35,7 +35,9 @@ const SECONDARY_INPUT_SHARE_RANGE_4P: (f64, f64) = (0.24, 0.40);
 /// across `6` distinct foreign supply labels plus `2` own capacity rents). Every `5p` converter
 /// includes `R_{(i+2) mod 5}`, guaranteeing that any `4`-seat bloc covers at most `2` of its `4`
 /// members' upkeep (`A-1`, Route b + G1 item 2; measured Shapley `±3%` agreement on ShadowPrice
-/// tables is ~73% at `N = 6` and ~18–24% at `N = 4, 5`, `B-2`; provisional pending playtest 1).
+/// tables is ~72.5% at `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`, on
+/// seeds `0..199`; the guard refuses no `N = 5` table there but can bind at `N = 5` on other seeds;
+/// provisional pending playtest 1).
 const MULTI_WORKSHOP_SHARE_RANGE_5P: (f64, f64) = (0.365, 0.635);
 /// Fixed required middle-input share on `R_{(i+2) mod 5}` inside `5`-seat intermediate `S1`
 /// workshops `(R_{i+1}, R_{i+2}, R_{i+3})` (`0.16`, leaving `0.84` split across `(R_{i+1}, R_{i+3})`
@@ -150,8 +152,9 @@ const SECONDARY_4P_MULTS: (f64, f64) = (1.17, 0.84);
 const SECONDARY_TIER1_MULTS: (f64, f64) = (1.02, 0.98);
 /// Input/output stoichiometry multipliers for `5`-/`6`-seat clearing secondary cross-converters
 /// (`1.045x` in / `0.955x` out so `P` and `S1` capacity duals remain strictly positive above
-/// recipe jitter; measured ShadowPrice vs Shapley `±3%` agreement on accepted tables is ~73% at
-/// `N = 6` and ~18–24% at `N = 4, 5`, `B-2`; calibrated, provisional pending playtest 1).
+/// recipe jitter; measured ShadowPrice vs Shapley `±3%` agreement on accepted tables is ~72.5% at
+/// `N = 6` and ~19.5–25.0% at `N = 4, 5` with the 7% Shapley guard, `B-2`, on seeds `0..199` (the guard
+/// refuses no `N = 5` table there but can bind at `N = 5` on other seeds); calibrated, provisional pending playtest 1).
 const SECONDARY_TIER2_MULTS: (f64, f64) = (1.045, 0.955);
 /// Secondary clearing converter capacity cap per turn (`4.5` batch runs so residual raw supply
 /// clears cleanly without artificial salvage; provisional pending playtest 1).
@@ -969,8 +972,8 @@ mod tests {
     use super::*;
     use crate::feasibility::{compute_shadow_price_seat_evs, compute_shapley_seat_evs};
     use crate::schema::{
-        EvMethod, PROJECT_CONCORDAT_ID, commodity_glossary_word, is_allowed_commodity_code,
-        is_denied_currency_code,
+        EvMethod, PROJECT_CONCORDAT_ID, SHAPLEY_GUARD_MAX_REL_DEV, commodity_glossary_word,
+        is_allowed_commodity_code, is_denied_currency_code,
     };
 
     #[test]
@@ -1995,22 +1998,22 @@ mod tests {
     }
 
     #[test]
-    fn golden_v2_4_1_table_serialization_digest_matches_pinned_seed42() {
+    fn golden_v2_5_0_table_serialization_digest_matches_pinned_seed42() {
         let cfg = GeneratorConfig::default();
         let Ok((table, _)) = generate_ring_table(42, &cfg) else {
             panic!("seed 42 generates cleanly");
         };
-        assert_eq!(table.generator_version, "league-gen/v2.4.1");
+        assert_eq!(table.generator_version, "league-gen/v2.5.0");
         let Ok(bytes) = serde_json::to_vec(&table) else {
             panic!("RingTable serializes deterministically");
         };
         let digest = Sha256::digest(&bytes);
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         const EXPECTED_GOLDEN_SHA256: &str =
-            "7bd0859fc41b599ef78c5b73840bad46a37de2393b386e5c99157c0ffdd12a5f";
+            "9ebda366c22777bb11a7e05cff2b13b6a4428f8eef179fc0e996ce9809608b6a";
         assert_eq!(
             hex, EXPECTED_GOLDEN_SHA256,
-            "v2.4.1 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
+            "v2.5.0 golden digest mismatch (bump GENERATOR_VERSION if intentional)"
         );
     }
 
@@ -2425,5 +2428,263 @@ mod tests {
                 assert!(err_disp.contains(other_purpose.as_str()));
             }
         }
+    }
+
+    #[test]
+    fn shapley_guard_3_6_7_pct_counts_on_seeds_0_to_199_and_reproduces_14_0_0() {
+        let shapley_rel_dev = |table: &RingTable| -> f64 {
+            let Ok(evs) = compute_shapley_seat_evs(table) else {
+                panic!("compute_shapley_seat_evs failed");
+            };
+            let mean = evs.iter().sum::<f64>() / (evs.len() as f64);
+            evs.iter()
+                .map(|&v| ((v - mean) / mean).abs())
+                .fold(0.0_f64, f64::max)
+        };
+
+        let mut pre_le3 = [0usize; 3];
+        let mut pre_le6 = [0usize; 3];
+        let mut pre_gt6 = [0usize; 3];
+        let mut pre_le7 = [0usize; 3];
+        let mut pre_gt7 = [0usize; 3];
+
+        let mut post_le3 = [0usize; 3];
+        let mut post_le6 = [0usize; 3];
+        let mut post_gt6 = [0usize; 3];
+        let mut post_le7 = [0usize; 3];
+        let mut post_gt7 = [0usize; 3];
+
+        let mut refused_n4_seeds: Vec<u64> = Vec::new();
+        let mut pre_a0_200 = [0usize; 3];
+        let mut post_a0_200 = [0usize; 3];
+        let mut pre_att_sum_200 = [0u64; 3];
+        let mut post_att_sum_200 = [0u64; 3];
+        let mut pre_max_att_200 = [0u32; 3];
+        let mut post_max_att_200 = [0u32; 3];
+
+        for (n_idx, sc) in SeatCount::ALL.iter().copied().enumerate() {
+            let cfg_sp = GeneratorConfig {
+                seat_count: Some(sc),
+                ev_method: EvMethod::ShadowPrice,
+                ..GeneratorConfig::default()
+            };
+            for seed in 0u64..200 {
+                // Pre-guard ShadowPrice-accepted candidate: first attempt that clears every
+                // non-guard check (`Ok` or `Err(ShapleyGuardExceeded)`).
+                let mut stream = SeedStream::new(seed, b"ring-table");
+                let mut found_pre = None;
+                for attempt in 0..cfg_sp.max_attempts {
+                    let Ok(cand) = sample_candidate(seed, attempt, sc, &cfg_sp, &mut stream) else {
+                        panic!("sample_candidate failed seed={seed} attempt={attempt}");
+                    };
+                    match check_feasibility(&cand) {
+                        Ok(_) => {
+                            let rel = shapley_rel_dev(&cand);
+                            found_pre = Some((attempt, rel, false));
+                            break;
+                        }
+                        Err(FeasibilityError::ShapleyGuardExceeded {
+                            max_relative_deviation,
+                            max_allowed_deviation,
+                            ..
+                        }) => {
+                            assert!(
+                                (max_allowed_deviation - SHAPLEY_GUARD_MAX_REL_DEV).abs() < 1e-12
+                            );
+                            let rel = shapley_rel_dev(&cand);
+                            assert!((rel - max_relative_deviation).abs() < 1e-12);
+                            found_pre = Some((attempt, rel, true));
+                            break;
+                        }
+                        Err(_) => {}
+                    }
+                }
+                let Some((pre_att, pre_rel, pre_refused)) = found_pre else {
+                    panic!("no pre-guard ShadowPrice candidate found seed={seed} sc={sc:?}");
+                };
+                if pre_att == 0 {
+                    pre_a0_200[n_idx] += 1;
+                }
+                pre_att_sum_200[n_idx] += u64::from(pre_att);
+                pre_max_att_200[n_idx] = pre_max_att_200[n_idx].max(pre_att);
+
+                if pre_rel <= 0.03 + 1e-9 {
+                    pre_le3[n_idx] += 1;
+                }
+                if pre_rel <= 0.06 + 1e-9 {
+                    pre_le6[n_idx] += 1;
+                } else {
+                    pre_gt6[n_idx] += 1;
+                }
+                if pre_rel <= SHAPLEY_GUARD_MAX_REL_DEV + 1e-9 {
+                    assert!(!pre_refused);
+                    pre_le7[n_idx] += 1;
+                } else {
+                    assert!(pre_refused);
+                    pre_gt7[n_idx] += 1;
+                }
+
+                // Post-guard ShadowPrice-accepted table.
+                let Ok((post_table, _)) = generate_ring_table(seed, &cfg_sp) else {
+                    panic!("post-guard generate_ring_table failed seed={seed} sc={sc:?}");
+                };
+                let post_rel = shapley_rel_dev(&post_table);
+                if post_table.attempt == 0 {
+                    post_a0_200[n_idx] += 1;
+                }
+                post_att_sum_200[n_idx] += u64::from(post_table.attempt);
+                post_max_att_200[n_idx] = post_max_att_200[n_idx].max(post_table.attempt);
+
+                if post_rel <= 0.03 + 1e-9 {
+                    post_le3[n_idx] += 1;
+                }
+                if post_rel <= 0.06 + 1e-9 {
+                    post_le6[n_idx] += 1;
+                } else {
+                    post_gt6[n_idx] += 1;
+                }
+                if post_rel <= SHAPLEY_GUARD_MAX_REL_DEV + 1e-9 {
+                    post_le7[n_idx] += 1;
+                } else {
+                    post_gt7[n_idx] += 1;
+                }
+
+                if pre_refused && sc == SeatCount::Four {
+                    refused_n4_seeds.push(seed);
+                }
+            }
+        }
+
+        println!(
+            "SHAPLEY_GUARD_COUNTS_200: pre_le3={pre_le3:?} pre_le6={pre_le6:?} pre_gt6={pre_gt6:?} pre_le7={pre_le7:?} pre_gt7={pre_gt7:?} | post_le3={post_le3:?} post_le6={post_le6:?} post_gt6={post_gt6:?} post_le7={post_le7:?} post_gt7={post_gt7:?}"
+        );
+        println!(
+            "RETRIES_200: pre_a0={pre_a0_200:?} post_a0={post_a0_200:?} pre_mean_att=[{:.2}, {:.2}, {:.2}] post_mean_att=[{:.2}, {:.2}, {:.2}] pre_max_att={pre_max_att_200:?} post_max_att={post_max_att_200:?}",
+            pre_att_sum_200[0] as f64 / 200.0,
+            pre_att_sum_200[1] as f64 / 200.0,
+            pre_att_sum_200[2] as f64 / 200.0,
+            post_att_sum_200[0] as f64 / 200.0,
+            post_att_sum_200[1] as f64 / 200.0,
+            post_att_sum_200[2] as f64 / 200.0,
+        );
+        println!(
+            "REFUSED_N4_SEEDS ({}): {:?}",
+            refused_n4_seeds.len(),
+            refused_n4_seeds
+        );
+
+        // Pre-guard 3% / 6% / 7% counts across N = 4, 5, 6 on seeds 0..199.
+        assert_eq!(pre_le3, [37, 50, 145]);
+        assert_eq!(pre_le6, [160, 189, 199]);
+        assert_eq!(pre_gt6, [40, 11, 1]);
+        assert_eq!(pre_le7, [186, 200, 200]);
+        assert_eq!(pre_gt7, [14, 0, 0]);
+
+        // Post-guard 3% / 6% / 7% counts across N = 4, 5, 6 on seeds 0..199.
+        assert_eq!(post_le3, [39, 50, 145]);
+        assert_eq!(post_le6, [172, 189, 199]);
+        assert_eq!(post_gt6, [28, 11, 1]);
+        assert_eq!(post_le7, [200, 200, 200]);
+        assert_eq!(post_gt7, [0, 0, 0]);
+    }
+
+    #[test]
+    fn known_n4_seed_refused_by_shapley_guard_retries_to_compliant_table() {
+        // Seed 33 (dev pool) is one of the 14 N=4 seeds accepted on main with Shapley deviation > 7%
+        // (`0.0736`); with the 7% Shapley guard it retries to a compliant table.
+        const KNOWN_SEED: u64 = 33;
+        let cfg = GeneratorConfig {
+            seat_count: Some(SeatCount::Four),
+            ev_method: EvMethod::ShadowPrice,
+            ..GeneratorConfig::default()
+        };
+        let Ok((table, _)) = generate_ring_table(KNOWN_SEED, &cfg) else {
+            panic!("seed {KNOWN_SEED} must retry to a Shapley-compliant table");
+        };
+        let Ok(sh_evs) = compute_shapley_seat_evs(&table) else {
+            panic!("compute_shapley_seat_evs failed");
+        };
+        let mean = sh_evs.iter().sum::<f64>() / (sh_evs.len() as f64);
+        let max_rel = sh_evs
+            .iter()
+            .map(|&ev| ((ev - mean) / mean).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_rel <= SHAPLEY_GUARD_MAX_REL_DEV + 1e-9,
+            "seed {KNOWN_SEED} accepted table Shapley dev {max_rel:.6} exceeds {}",
+            SHAPLEY_GUARD_MAX_REL_DEV
+        );
+    }
+
+    #[test]
+    fn shapley_guard_refusal_names_measured_deviation_and_limit_across_ev_methods() {
+        const KNOWN_SEED: u64 = 33;
+        let cfg_sp = GeneratorConfig {
+            seat_count: Some(SeatCount::Four),
+            ev_method: EvMethod::ShadowPrice,
+            ..GeneratorConfig::default()
+        };
+        let mut stream = SeedStream::new(KNOWN_SEED, b"ring-table");
+        let mut refused_cand = None;
+        for attempt in 0..cfg_sp.max_attempts {
+            let Ok(cand) =
+                sample_candidate(KNOWN_SEED, attempt, SeatCount::Four, &cfg_sp, &mut stream)
+            else {
+                panic!("sample_candidate failed");
+            };
+            if let Err(err @ FeasibilityError::ShapleyGuardExceeded { .. }) =
+                check_feasibility(&cand)
+            {
+                refused_cand = Some((cand, err));
+                break;
+            }
+        }
+        let Some((mut cand, err_sp)) = refused_cand else {
+            panic!("expected seed {KNOWN_SEED} to yield a ShapleyGuardExceeded candidate");
+        };
+
+        let FeasibilityError::ShapleyGuardExceeded {
+            max_relative_deviation,
+            max_allowed_deviation,
+            shapley_seat_evs,
+        } = &err_sp
+        else {
+            unreachable!();
+        };
+        assert!((*max_allowed_deviation - SHAPLEY_GUARD_MAX_REL_DEV).abs() < 1e-12);
+        assert!(*max_relative_deviation > SHAPLEY_GUARD_MAX_REL_DEV + 1e-9);
+        assert_eq!(shapley_seat_evs.len(), 4);
+        let msg = err_sp.to_string();
+        assert!(
+            msg.contains(&format!("{max_relative_deviation:.4}")),
+            "refusal '{msg}' must name measured deviation {max_relative_deviation:.4}"
+        );
+        assert!(
+            msg.contains(&format!("{SHAPLEY_GUARD_MAX_REL_DEV:.4}")),
+            "refusal '{msg}' must name guard limit {:.4}",
+            SHAPLEY_GUARD_MAX_REL_DEV
+        );
+
+        // When `EvMethod::Shapley` is selected at default `ev_tolerance = 0.03`, the existing
+        // 3% check triggers first (`SeatEvOutOfTolerance`); when `ev_tolerance > 0.07`, the
+        // 7% Shapley guard triggers using the cached Shapley values without double counting.
+        cand.config.ev_method = EvMethod::Shapley;
+        cand.config.ev_tolerance = 0.03;
+        assert!(matches!(
+            check_feasibility(&cand),
+            Err(FeasibilityError::SeatEvOutOfTolerance { tolerance, .. }) if (tolerance - 0.03).abs() < 1e-12
+        ));
+
+        cand.config.ev_tolerance = 0.20;
+        let err_sh = check_feasibility(&cand);
+        assert!(matches!(
+            err_sh,
+            Err(FeasibilityError::ShapleyGuardExceeded {
+                max_relative_deviation: sh_dev,
+                max_allowed_deviation: sh_lim,
+                ..
+            }) if (sh_dev - *max_relative_deviation).abs() < 1e-12
+                && (sh_lim - SHAPLEY_GUARD_MAX_REL_DEV).abs() < 1e-12
+        ));
     }
 }

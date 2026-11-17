@@ -1269,4 +1269,65 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn documented_ensemble_exception_keeps_raw_generator_and_is_not_routed_through_pool_guard() {
+        use crate::generator::generate_ring_table_for_purpose;
+        use crate::schema::{GenError, SeedPool, TablePurpose, seed_pool};
+
+        let cfg_4p = GeneratorConfig {
+            seat_count: Some(SeatCount::Four),
+            ..GeneratorConfig::default()
+        };
+        assert_eq!(seed_pool(20_261_115), SeedPool::Unassigned);
+        for purpose in TablePurpose::ALL {
+            assert!(matches!(
+                generate_ring_table_for_purpose(20_261_115, purpose, &cfg_4p),
+                Err(GenError::SeedPoolMismatch(_))
+            ));
+        }
+        assert!(generate_ring_table(20_261_115, &cfg_4p).is_ok());
+
+        for (sc, mask) in [
+            (SeatCount::Four, 0xAAAA_BBBB_CCCC_DDDD_u64),
+            (SeatCount::Five, 0x1357_9BDF_2468_ACE0_u64),
+            (SeatCount::Six, 0xFEDC_BA98_7654_3210_u64),
+        ] {
+            let cfg_n = GeneratorConfig {
+                seat_count: Some(sc),
+                ..GeneratorConfig::default()
+            };
+            let base = 20_261_115_u64 ^ mask;
+            let mut unassigned_count = 0usize;
+            for t in 0..200_u64 {
+                let sub_seed = base.wrapping_add(t.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+                let pool = seed_pool(sub_seed);
+                assert_ne!(pool, SeedPool::Dev);
+                assert!(matches!(
+                    generate_ring_table_for_purpose(sub_seed, TablePurpose::Dev, &cfg_n),
+                    Err(GenError::SeedPoolMismatch(_))
+                ));
+                if pool == SeedPool::Unassigned {
+                    unassigned_count += 1;
+                    for purpose in TablePurpose::ALL {
+                        assert!(matches!(
+                            generate_ring_table_for_purpose(sub_seed, purpose, &cfg_n),
+                            Err(GenError::SeedPoolMismatch(_))
+                        ));
+                    }
+                }
+            }
+            assert!(
+                unassigned_count > 0,
+                "expected unassigned trials in 20_261_115 ensemble for {sc:?}"
+            );
+        }
+
+        // `measure_lockin_and_hhi(20_261_115, 200)` still completes all 200 trials per N via raw
+        // `generate_ring_table`, whereas routing through the pool setup guard refuses 200/200.
+        let cmp = measure_lockin_and_hhi(20_261_115, 200);
+        assert_eq!(cmp.ring_4p.trials, 200);
+        assert_eq!(cmp.ring_5p.trials, 200);
+        assert_eq!(cmp.ring_6p.trials, 200);
+    }
 }
