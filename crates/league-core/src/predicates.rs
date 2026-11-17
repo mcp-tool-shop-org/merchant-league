@@ -33,7 +33,7 @@ use crate::types::{
 };
 
 /// Version of [`SeatStatePredicates`]; bumped whenever a field's meaning or layout changes.
-pub const STATE_PREDICATES_VERSION: u32 = 2;
+pub const STATE_PREDICATES_VERSION: u32 = 3;
 
 /// Basis points at which a closing hazard makes the close certain (`roll < 10_000` always holds).
 const CERTAIN_CLOSE_HAZARD_BPS: Bps = 10_000;
@@ -209,6 +209,16 @@ pub struct SeatStatePredicates {
     pub coalitions: Vec<CoalitionReach>,
     /// Predicate 5.
     pub season_end: SeasonEndAndMarks,
+    /// Public Phase-1 cancel-lock status (`C4` amended `2026-11-17`): `true` once `begin_cancel_lock`
+    /// has engaged during `TalkAndMarket`, cleared when Phase 1 ends.
+    /// Always `false` in recorded predicates: they are taken at turn start, before any lock.
+    pub cancel_locked: bool,
+}
+
+/// Public Phase-1 cancel-lock predicate (`true` once the cancel lock is engaged for this turn).
+#[must_use]
+pub const fn cancel_locked(state: &EngineState) -> bool {
+    state.cancel_locked
 }
 
 fn seat_index(state: &EngineState, seat: Seat) -> Result<usize, EngineError> {
@@ -627,11 +637,12 @@ pub fn compute_seat_state_predicates(
         scarcity: scarcity_and_tariffs(state, seat)?,
         coalitions: all_coalitions_reach(state, seat)?,
         season_end: season_end_and_marks(state, seat)?,
+        cancel_locked: cancel_locked(state),
     })
 }
 
 /// Version of [`StatePredicateSection`]; bumped whenever a field's meaning or layout changes.
-pub const STATE_PREDICATE_SECTION_VERSION: u32 = 2;
+pub const STATE_PREDICATE_SECTION_VERSION: u32 = 3;
 
 /// What one seat's Sweep actually did, as the engine's own Sweep reported it (not a prediction).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -14,20 +14,22 @@ use sha2::{Digest, Sha256};
 use league_core::{
     AssetId, AtomicSwapProposal, BPS_SCALE, CLOSING_ROLL_START_TURN, CLOSING_ROLL_WINDOW_LEN,
     CharterBidOrder, CharterRole, CheckProposal, CommitmentHash, ConverterRunOrder,
-    CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
-    DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_SHOCK_DRAW_TURNS, DRAND_QUICKNET_GENESIS_UNIX,
-    DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError, EscrowFinishUnlock, EscrowProposal,
-    FinalScoreboard, HARD_TURN_CAP, LoggedTurn, MANDATE_STARTING_NW_FLOOR_BPS, MandateKind,
-    MarketAction, OfferProposal, OfferSide, OrderReveal, PreimageSecret, ProjectDeliveryOrder,
-    ReplayBeaconMode, ReplayLayoutSeed, RevealSalt, RngDomain, ScheduledShockSpec, SealedEvalSeed,
-    SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, ShockKind, TableId, TableMode,
-    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
-    cap_reach_probability, close_roll_bps_from_beacon, compute_mandate_commitment,
-    compute_order_commitment, compute_preimage_condition, compute_table_median_starting_net_worth,
-    convert_mandate_points_to_equity_with_floor, convert_mandate_points_to_equity_with_median,
-    deal_graded_mandates_with_entropy, derive_drand_beacon, derive_turn_beacon,
-    draw_shocks_for_turn, expand_turn_stream, expected_season_length_turns,
-    mark_good_holding_at_close, replay_season, standings_tie_key, table_median_net_worth,
+    CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CANCEL_LOCK_BPS,
+    DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_SHOCK_DRAW_TURNS,
+    DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES,
+    DrandSchedule, EngineError, EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP,
+    LoggedTurn, MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
+    OrderReveal, PreimageSecret, ProjectDeliveryOrder, ReplayBeaconMode, ReplayLayoutSeed,
+    RevealSalt, RngDomain, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle, SeasonReplayLog,
+    Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase,
+    UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units, cap_reach_probability, close_roll_bps_from_beacon,
+    compute_mandate_commitment, compute_order_commitment, compute_preimage_condition,
+    compute_table_median_starting_net_worth, convert_mandate_points_to_equity_with_floor,
+    convert_mandate_points_to_equity_with_median, deal_graded_mandates_with_entropy,
+    derive_drand_beacon, derive_turn_beacon, draw_shocks_for_turn, expand_turn_stream,
+    expected_season_length_turns, mark_good_holding_at_close, replay_season, standings_tie_key,
+    table_median_net_worth,
 };
 
 trait MustGet<T> {
@@ -147,6 +149,7 @@ where
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -302,6 +305,7 @@ fn game_mode_shocks_and_close_follow_logged_drand_beacons_and_refuse_seeded_shoc
     post_close_log.turns.push(LoggedTurn {
         turn: extra_t,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: BTreeMap::new(),
         reveals: BTreeMap::new(),
         turn_beacon: derive_drand_beacon(&extra_sig).must("sig"),
@@ -349,6 +353,7 @@ fn run_eval_vrf_season(
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -2812,6 +2817,10 @@ fn n4_generated_converted_table_spec(initial_cred: Units) -> TableSpec {
         town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
         works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
         mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
+        cancel_lock_bps: DEFAULT_CANCEL_LOCK_BPS,
+        wash_round_trip_min_units: DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
+        wash_freeze_bond_cred: DEFAULT_WASH_FREEZE_BOND_CRED,
+        wash_freeze_bounty_cred: DEFAULT_WASH_FREEZE_BOUNTY_CRED,
     }
 }
 

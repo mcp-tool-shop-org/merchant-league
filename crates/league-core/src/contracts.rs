@@ -2,12 +2,15 @@
 //! `TokenEscrow` collateral vaults and Steward bonds, breakable `CheckCreate` notes,
 //! cartel `PermissionedDomains`, and 6-turn Syndicate Charters).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::commit::{CommitmentHash, CouncilPlatform, IntentPledge};
-use crate::types::{AssetId, Bps, CharterRole, CreditTier, EngineError, Units};
+use crate::scoring::FundamentalParities;
+use crate::types::{
+    AssetId, Bps, CharterRole, CreditTier, EngineError, UNIT_SCALE, Units, town_import_cost_cred,
+};
 
 /// Maximum number of distinct `PermissionedDomain` cartel zones allowed on a table.
 pub const MAX_CARTEL_DOMAINS: usize = 16;
@@ -414,4 +417,156 @@ pub fn check_offer_domain_access(
         )));
     }
     Ok(())
+}
+
+/// Settlement category for an immutable [`FillRecord`] in [`crate::EngineState::fill_log`] and
+/// [`crate::SweepReceipt::fills`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FillKind {
+    /// Phase-1 resting DEX offer matched in Step 0 uniform-price batch clearing (`C4`).
+    BatchFill,
+    /// Bilateral `BatchV1_1` atomic swap settled in Step 2.
+    AtomicSwap,
+    /// Bilateral Step 2 contract delivery (`ContractDeliveryOrder`, optional `DualEscrow`).
+    ContractDelivery,
+    /// Track-2 deferred check (`CheckCreate` / `CheckCash`) cashed in Step 3 or C1a Regent sweep.
+    CheckCashed,
+    /// Track-1 `TokenEscrow` or `DualEscrow` vault unlocked cleanly in Step 2.
+    EscrowFinished,
+    /// Track-1 `TokenEscrow` or `DualEscrow` vault forfeited or expired in Step 2 (or Phase 1).
+    EscrowForfeited,
+    /// Escrowed funds returned to their own sender (`from == to`) when a `TokenEscrow` is
+    /// cancelled or expires unfinished; a refund, not a forfeit (`2026-11-17`).
+    EscrowRefunded,
+    /// Authority emergency commodity purchase executed via `MarketAction::TownImport` (`C1`).
+    TownImport,
+}
+
+/// Stable per-turn settlement log record (`§5.2` amended `2026-11-17`).
+///
+/// Every settlement in Step 0, Phase 1 `TownImport`, Step 2 (`AtomicSwap`, `ContractDelivery`,
+/// `EscrowFinish` / breach / expiry), and Step 3 (`CheckCash`, including Regent check cashing)
+/// appends one record so Customs Inspector audits, tournament chronicles, and dossiers read a
+/// uniform deterministic ledger log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillRecord {
+    /// Turn (`1..=32`) during which this settlement occurred.
+    pub turn: u8,
+    /// Settlement category.
+    pub kind: FillKind,
+    /// Settled commodity (`Raw(_)` / `Refined(_)`) or `AssetId::Cred` for `CRED`-only check/escrow transfers.
+    pub good: Option<AssetId>,
+    /// Delivering / selling seat index, or `None` when sourced from Authority (`TownImport`).
+    pub from: Option<u8>,
+    /// Receiving / buying seat index.
+    pub to: u8,
+    /// Gross units of `good` settled (`CRED` milli-units when `good == Some(AssetId::Cred)`).
+    pub units: Units,
+    /// Net units received after commodity export tariff (`== units` for `CRED` or zero-tariff fills).
+    pub net_units: Units,
+    /// `CRED` leg transferred (`0` for non-`CRED` unpriced transfers).
+    pub cred_amount: Units,
+    /// Clearing or implied unit price in milli-`CRED` per `1_000` commodity units (`None` when unpriced).
+    pub unit_price_cred: Option<Units>,
+}
+
+/// Upfront challenger bond posted by `CustomsInspector` on `FlagWashFreeze` and held by the
+/// engine until that turn's Sweep settles it against [`audit_wash_freeze`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingWashFreeze {
+    /// Turn in which `FlagWashFreeze` was invoked and settled.
+    pub turn: u8,
+    /// Seat holding an active `CustomsInspector` charter that posted `bond_cred`.
+    pub inspector: u8,
+    /// Frozen target seat index.
+    pub target_seat: u8,
+    /// Bond held from `inspector`'s free `CRED`.
+    pub bond_cred: Units,
+}
+
+/// Deterministic Sweep settlement result for one [`PendingWashFreeze`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WashFreezeSettlement {
+    /// Turn on which the freeze was enforced and settled.
+    pub turn: u8,
+    /// Seat holding the `CustomsInspector` charter.
+    pub inspector: u8,
+    /// Frozen target seat index.
+    pub target_seat: u8,
+    /// `true` when [`audit_wash_freeze`] confirmed a prior-turn round trip or above-import peer price.
+    pub confirmed: bool,
+    /// Bond returned to `inspector` (`bond_cred` if confirmed; `0` if clean, since a clean audit
+    /// pays the whole bond to `target_seat`).
+    pub bond_returned_cred: Units,
+    /// Bounty paid from `target_seat`'s free `CRED` (capped at available free `CRED`) when confirmed (`0` if clean).
+    pub bounty_paid_cred: Units,
+    /// Damages paid to `target_seat` when clean: the whole held bond (`bond_cred`); `0` if confirmed.
+    pub damages_paid_cred: Units,
+}
+
+/// Evaluates the pure `§5.2` (amended `2026-11-17`) Customs Inspector wash-freeze audit predicate
+/// over `prev_turn_fills` for `target_seat`.
+///
+/// Confirmed (`true`) if either condition holds across the previous turn's settled fills:
+/// - **(a) Round trip:** for some commodity `g` (`Raw(_)` or `Refined(_)`) and some peer seat
+///   `Y != target_seat`, total gross units sent `target_seat -> Y` in `g` and total gross units
+///   received `Y -> target_seat` in `g` are both `>= wash_round_trip_min_units`.
+/// - **(b) Above town-import price:** `target_seat` participated as buyer or seller in a peer fill
+///   (`from.is_some()`, excluding Authority `TownImport`) on commodity `g` whose
+///   `unit_price_cred` exceeds `town_import_cost_cred(UNIT_SCALE, parities.asset_parity(g),
+///   town_import_premium_bps)`.
+#[must_use]
+pub fn audit_wash_freeze(
+    prev_turn_fills: &[FillRecord],
+    target_seat: u8,
+    parities: &FundamentalParities,
+    town_import_premium_bps: Bps,
+    wash_round_trip_min_units: Units,
+) -> bool {
+    if wash_round_trip_min_units <= 0 {
+        return false;
+    }
+
+    let mut flows: BTreeMap<(u8, AssetId), (Units, Units)> = BTreeMap::new();
+    for fill in prev_turn_fills {
+        let Some(good) = fill.good else {
+            continue;
+        };
+        if !matches!(good, AssetId::Raw(_) | AssetId::Refined(_)) {
+            continue;
+        }
+        let Some(from) = fill.from else {
+            // Authority TownImport has `from: None` and neither starts a peer round-trip nor counts
+            // as an overpriced peer trade.
+            continue;
+        };
+        let involves_target = from == target_seat || fill.to == target_seat;
+        if !involves_target {
+            continue;
+        }
+        if let Some(price) = fill.unit_price_cred
+            && let Ok(import_unit_price) = town_import_cost_cred(
+                UNIT_SCALE,
+                parities.asset_parity(good),
+                town_import_premium_bps,
+            )
+            && price > import_unit_price
+        {
+            return true;
+        }
+        if fill.units > 0 && from != fill.to {
+            let peer = if from == target_seat { fill.to } else { from };
+            let entry = flows.entry((peer, good)).or_insert((0, 0));
+            if from == target_seat {
+                entry.0 = entry.0.saturating_add(fill.units);
+            } else {
+                entry.1 = entry.1.saturating_add(fill.units);
+            }
+        }
+    }
+
+    flows
+        .values()
+        .any(|&(sent, recv)| sent >= wash_round_trip_min_units && recv >= wash_round_trip_min_units)
 }

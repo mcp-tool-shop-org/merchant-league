@@ -22,11 +22,11 @@ pub use commit::{
     OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, RevealSalt, RngDomain,
     SealedEvalSeed, SealedMandateDeal, SealedOrderBundle, beacon_roll_bps,
     bonus_equity_for_completion_bps, bonus_points_milli_for_completion_bps, break_tie_with_beacon,
-    break_tie_with_turn_beacon, check_drand_quicknet_signature, close_roll_bps_from_beacon,
-    compute_mandate_commitment, compute_order_commitment, compute_preimage_condition,
-    deal_graded_mandates, deal_graded_mandates_with_entropy, deal_mandate_deck_indices,
-    default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
-    drand_quicknet_round_for_close, draw_shocks_for_turn, eval_vrf_alpha, expand_turn_stream,
+    break_tie_with_turn_beacon, close_roll_bps_from_beacon, compute_mandate_commitment,
+    compute_order_commitment, compute_preimage_condition, deal_graded_mandates,
+    deal_graded_mandates_with_entropy, deal_mandate_deck_indices, default_graded_mandate_deck,
+    derive_drand_beacon, derive_turn_beacon, drand_quicknet_round_for_close,
+    drand_quicknet_signature_status, draw_shocks_for_turn, eval_vrf_alpha, expand_turn_stream,
     graded_mandate_deck_for_mean_project_value, standings_tie_key, validate_eval_vrf_pubkey,
     verify_and_extract_eval_vrf_beacon, verify_drand_quicknet_beacon, verify_eval_vrf_beacon,
     verify_mandate_reveal, verify_order_reveal, verify_preimage_condition,
@@ -34,9 +34,10 @@ pub use commit::{
 };
 pub use contracts::{
     ActiveCharter, BondProposal, BondSettlementMode, BondSpec, CartelDomain, CheckProposal,
-    CheckStatus, CredOffer, CreditCheck, DualEscrowVault, EscrowProposal, EscrowStatus,
-    MAX_CARTEL_DOMAINS, MarketAction, OfferProposal, OfferSide, TokenEscrowVault,
-    check_offer_domain_access, effective_export_tariff_bps,
+    CheckStatus, CredOffer, CreditCheck, DualEscrowVault, EscrowProposal, EscrowStatus, FillKind,
+    FillRecord, MAX_CARTEL_DOMAINS, MarketAction, OfferProposal, OfferSide, PendingWashFreeze,
+    TokenEscrowVault, WashFreezeSettlement, audit_wash_freeze, check_offer_domain_access,
+    effective_export_tariff_bps,
 };
 pub use engine::{
     BrokenPromiseRecord, BundlePreview, CheckOrderPreview, CheckPreviewOutcome,
@@ -48,17 +49,17 @@ pub use predicates::{
     CoalitionReach, GoodScarcity, HoldingMark, ProjectCover, ProjectInputCover, RecipeCover,
     STATE_PREDICATE_SECTION_VERSION, STATE_PREDICATES_VERSION, SeasonEndAndMarks,
     SeatSeasonMetrics, SeatStatePredicates, SeatSweepOutcome, SpoilageAndConversion,
-    StatePredicateSection, TurnPredicateRecord, UpkeepAndDebt, all_coalitions_reach,
+    StatePredicateSection, TurnPredicateRecord, UpkeepAndDebt, all_coalitions_reach, cancel_locked,
     coalition_reach, compute_season_metrics, compute_seat_state_predicates,
     covered_with_own_offers_but_short_turns, held_enough_but_short_turns, scarcity_and_tariffs,
     season_end_and_marks, spoilage_and_conversion, spoiled_units_over_season,
     stranded_stock_at_close, upkeep_and_debt,
 };
 pub use replay::{
-    LoggedTurn, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError, ReplayOutcome,
-    ReplayRecord, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, SealedReplaySeed, SeasonReplayLog,
-    attach_state_predicates, layout_seed_digest, replay_season,
-    replay_season_with_state_predicates,
+    LoggedTurn, RejectedMarketAction, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError,
+    ReplayOutcome, ReplayRecord, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, SealedReplaySeed,
+    SeasonReplayLog, TurnRejectedActions, attach_state_predicates, layout_seed_digest,
+    replay_season, replay_season_with_state_predicates,
 };
 pub use scoring::{
     FinalScoreboard, FundamentalParities, SeatScoreEntry, compute_final_marked_net_asset_equity,
@@ -70,16 +71,17 @@ pub use scoring::{
 };
 pub use types::{
     ActiveShock, AssetId, BPS_SCALE, Bps, CLOSING_ROLL_START_TURN, CLOSING_ROLL_WINDOW_LEN,
-    CharterRole, ConverterRecipe, CreditTier, DEFAULT_CLOSING_HAZARD_BPS,
+    CharterRole, ConverterRecipe, CreditTier, DEFAULT_CANCEL_LOCK_BPS, DEFAULT_CLOSING_HAZARD_BPS,
     DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_PBRS_GAMMA_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
-    DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, EngineError, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS,
-    MANDATE_STARTING_NW_FLOOR_BPS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
-    MIN_MANDATE_BONUS_EQUITY, MarketDay, ProjectRecipe, RegentDoctrine, ScheduledShockSpec,
-    SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn,
-    UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units, cap_reach_probability, ceil_bps_fee,
-    ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
-    expected_season_length_turns, floor_bps_part, half_up_bps, mul_units_parity, scale_bps_signed,
-    town_import_cost_cred,
+    DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, EngineError,
+    HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, MANDATE_STARTING_NW_FLOOR_BPS,
+    MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MarketDay, ProjectRecipe,
+    RegentDoctrine, ScheduledShockSpec, SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind,
+    TableId, TableMode, TableSpec, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
+    cap_reach_probability, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
+    checked_mul_units_parity, expected_season_length_turns, floor_bps_part, half_up_bps,
+    mul_units_parity, scale_bps_signed, town_import_cost_cred,
 };
 
 #[cfg(test)]
