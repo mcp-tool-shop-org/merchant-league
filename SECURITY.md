@@ -11,6 +11,10 @@ That still leaves things worth protecting:
 - **Fairness.** A roll must not be predictable or steerable by any player, by the studio, or by the randomness beacon's operators.
 - **The Testnet-only guarantee.** Any path that could reach Mainnet is a security bug.
 
+## Supported versions
+
+There is no release yet. Security fixes land on `main`. Once releases begin, the latest release is the supported one.
+
 ## Reporting
 
 Please report a vulnerability privately through GitHub's security advisories for this repository ("Report a vulnerability" on the Security tab), not in a public issue.
