@@ -20,23 +20,23 @@ Un gioco di commercio e politica a turni lenti, per quattro-sei giocatori, gioca
 
 ## Il gioco
 
-- **Un anello di mercanti.** Ogni giocatore produce le proprie materie prime e ha bisogno di beni dagli altri giocatori per coprire le proprie spese, gestire le proprie attività e fornire progetti condivisi. Nessuno può prosperare da solo, e nemmeno un piccolo gruppo.
-- **Turni simultanei.** Ogni turno è suddiviso in tre fasi. I giocatori parlano e commerciano nel mercato aperto; quindi, ogni giocatore invia segretamente i propri ordini; quindi, gli ordini di ogni giocatore vengono risolti contemporaneamente, secondo le stesse regole per tutti.
+- **Un anello di mercanti.** Ogni giocatore produce le proprie materie prime e ha bisogno di beni dagli altri giocatori per coprire le spese, gestire le proprie attività e fornire progetti condivisi. Nessuno può prosperare da solo, e nemmeno un piccolo gruppo.
+- **Turni simultanei.** Ogni turno è suddiviso in tre fasi. I giocatori parlano e commerciano nel mercato aperto; quindi, ogni giocatore invia segretamente i propri ordini; infine, gli ordini di ogni giocatore vengono risolti contemporaneamente, secondo le stesse regole per tutti.
 - **Politica.** I consigli stabiliscono le tariffe, i cartelli possono aprire mercati privati e le cariche ruotano tra i giocatori durante la stagione.
-- **Una stagione di 24-32 turni.** Gli shock nell'offerta vengono annunciati due turni prima, e l'ultimo turno viene eseguito in modo casuale, in modo che nessuno possa pianificare una mossa finale perfetta.
-- **Punteggio.** Un giocatore calcola il proprio patrimonio netto alla fine, più una carta obiettivo nascosta distribuita all'inizio. Ogni giocatore ha un motivo per continuare a giocare fino all'ultimo turno.
-- **Tavoli controllati.** Ogni tavolo viene generato da un seme e controllato prima di essere utilizzato. Il valore iniziale di ogni giocatore deve rientrare nel 3% rispetto agli altri, e nel 7% quando il valore di un giocatore è determinato in base a ciò che aggiunge a ogni gruppo di giocatori.
+- **Una stagione di 24-32 turni.** Gli eventi imprevisti (blocco delle forniture, esenzione dalle tariffe, aumento della domanda o picco di deterioramento) vengono annunciati pubblicamente un turno prima che si verifichino e l'ultimo turno viene eseguito in modo casuale, in modo che nessuno possa pianificare una mossa finale perfetta.
+- **Punteggio.** Alla fine, ogni giocatore calcola il proprio patrimonio netto, a cui si aggiunge una carta obiettivo segreta distribuita all'inizio. Ogni giocatore ha un motivo per continuare a giocare fino all'ultimo turno.
+- **Tavoli controllati.** Ogni tavolo viene generato da un seme e controllato prima di essere utilizzato. Il valore iniziale di ogni giocatore deve rientrare nel 3% della media del tavolo e nel 7% della media quando il valore di un giocatore è determinato in base a ciò che aggiunge a ogni gruppo di giocatori.
 
 Il progetto completo è disponibile qui: [`docs/design-v2.md`](docs/design-v2.md).
 
 ## Due modalità di gioco
 
-| Modalità | Dove viene eseguito | Per chi è |
+| Modalità | Dove viene eseguito | A chi è destinato |
 | --- | --- | --- |
-| **Game mode** | la rete pubblica XRPL Testnet, con circa due turni al giorno | persone, da sole o con giocatori AI |
+| **Modalità di gioco** | la rete pubblica XRPL Testnet, con circa due turni al giorno | persone, da sole o con giocatori AI |
 | **Modalità di addestramento e valutazione** | un nodo `xrpld` autonomo privato in un container Docker locale, che esegue i ledger in millisecondi | giocatori AI: addestramento, benchmark e replay |
 
-Entrambe le modalità condividono lo stesso motore di regole. Un gioco viene riprodotto esattamente dal suo seme e dal suo registro.
+Entrambe le modalità condividono lo stesso motore di regole. Un gioco viene riprodotto esattamente a partire dal suo seme e dal suo registro.
 
 ## Cosa è stato creato
 
@@ -44,16 +44,16 @@ Entrambe le modalità condividono lo stesso motore di regole. Un gioco viene rip
 | --- | --- |
 | `league-core` | Il motore delle regole: le fasi del turno, i contratti, il punteggio, la chiusura della stagione, il replay e i predicati di stato alla base del sistema di suggerimenti previsto |
 | `league-gen` | Il generatore di tavoli, con i suoi controlli di equità e i suoi pool di semi |
-| `league-dice` | Dadi che nessun singolo giocatore può prevedere o influenzare: invio e rivelazione, combinati con un beacon di casualità pubblico |
+| `league-dice` | Per ora, solo degli schemi. La casualità del gioco stesso (invio e rivelazione, combinati con un beacon pubblico drand nella modalità di gioco e una funzione casuale verificabile nella modalità di addestramento) è implementata in `league-core` |
 | `league-ledger` | Il client XRPL Testnet. Rifiuta qualsiasi rete diversa dalla Testnet |
-| `league-standalone` | L'ambiente `xrpld` autonomo per la modalità di addestramento, in un container con risorse limitate |
+| `league-standalone` | L'ambiente `xrpld` autonomo per la modalità di addestramento, in un container con risorse limitate e configurazione fissa |
 | `league-season` | I confini della stagione, che seguono i riavvii della Testnet |
-| `league-relay` | Lo strumento che ha eseguito i test pratici con giocatori AI |
+| `league-relay` | Lo strumento che ha eseguito i test su carta con giocatori AI |
 | `league-tui` | Il client terminale. Per ora, solo una schermata introduttiva |
 
-## Compila dal codice sorgente
+## Compilazione dal codice sorgente
 
-È necessario [Rust](https://rustup.rs/). La toolchain con versione specifica (1.100.0) si installa automaticamente da `rust-toolchain.toml` alla prima compilazione.
+È necessario [Rust](https://rustup.rs/). La toolchain con configurazione fissa (1.100.0) si installa automaticamente da `rust-toolchain.toml` alla prima compilazione.
 
 ```bash
 git clone https://github.com/mcp-tool-shop-org/merchant-league.git
@@ -61,7 +61,7 @@ cd merchant-league
 cargo test --workspace --locked
 ```
 
-Le build CI e i test vengono eseguiti su Linux e l'ambiente di lavoro viene sviluppato su Windows. Altre piattaforme non sono state testate.
+Le build e i test CI vengono eseguiti su Linux e l'ambiente di lavoro viene sviluppato su Windows. Altre piattaforme non sono state testate.
 
 Docker è necessario solo per l'ambiente `xrpld` autonomo e i suoi test vengono saltati a meno che non vengano richiesti:
 
@@ -69,28 +69,28 @@ Docker è necessario solo per l'ambiente `xrpld` autonomo e i suoi test vengono 
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`scripts/verify.sh` esegue i controlli che esegue la CI, ad eccezione dell'ambiente Docker e del controllo della mappa Atlas.
+`bash scripts/verify.sh` esegue i controlli eseguiti da CI, ad eccezione dell'ambiente Docker e del controllo della mappa Atlas. La copertura e `cargo audit` vengono eseguiti solo quando `cargo-llvm-cov` e `cargo-audit` sono installati e lo script indica tutti i controlli che sono stati saltati.
 
 ## Sicurezza e dati
 
-- **Cosa tocca.** Nella modalità di gioco (non ancora implementata), le chiavi Testnet di un giocatore rimangono sulla propria macchina, nella cartella `.league/` ignorata da Git, e non vengono mai registrate. Il relay di test pratico legge la sua chiave OpenRouter solo dalla variabile d'ambiente `OPENROUTER_API_KEY`, non effettua chiamate di rete senza `--live` e un limite di credito e conserva le trascrizioni nella cartella del gioco che gli viene fornita.
-- **Cosa non tocca.** Nessun denaro reale, nessuna Mainnet e niente al di fuori delle cartelle sopra indicate. Non c'è **telemetria**: niente viene inviato da nessuna parte tranne le chiamate necessarie a una modalità (la Testnet, un beacon di casualità pubblico e, per il relay, OpenRouter).
-- **Autorizzazioni.** Accesso alla rete Testnet in modalità di gioco. Docker, con la sua porta collegata solo a `127.0.0.1`, per l'ambiente autonomo.
-- **Protezioni.** Ogni connessione alla Testnet deve segnalare l'ID di rete della Testnet, la CI fallisce su qualsiasi nome host Mainnet e un secondo meccanismo di sicurezza fallisce su qualsiasi copia che presenta il gioco come fonte di reddito.
+- **Cosa viene toccato.** Nella modalità di gioco (non ancora implementata), le chiavi Testnet di un giocatore rimangono sulla propria macchina, nella cartella `.league/` ignorata da Git, e non vengono mai registrate. Il relay dei test su carta legge la sua chiave OpenRouter solo dalla variabile d'ambiente `OPENROUTER_API_KEY` e non effettua alcuna chiamata OpenRouter senza `--live` e un limite di credito. I suoi giocatori locali rifiutano qualsiasi chiave API, raggiungono solo un indirizzo loopback o un indirizzo VM che si consente con `--allow-vm-host` e richiedono un limite di secondi GPU. Conserva le sue trascrizioni nella cartella del gioco che gli si fornisce.
+- **Cosa non viene toccato.** Nessun denaro reale, nessuna Mainnet e niente al di fuori delle cartelle di cui sopra. Non c'è **telemetria**: niente viene inviato da nessuna parte tranne le chiamate di cui una modalità ha bisogno (la Testnet, un beacon di casualità pubblico e, per il relay, OpenRouter o i server del modello locali che si consentono).
+- **Autorizzazioni.** Accesso alla rete per la Testnet nella modalità di gioco. Docker, con la sua porta collegata solo a `127.0.0.1`, per l'ambiente autonomo.
+- **Protezioni.** Ogni connessione alla Testnet deve segnalare l'ID di rete della Testnet, CI fallisce su qualsiasi nome host Mainnet e un secondo meccanismo di sicurezza fallisce su qualsiasi copia che presenta il gioco come fonte di reddito.
 
-Consulta [`SECURITY.md`](SECURITY.md) per il modello di minaccia e per sapere come segnalare una vulnerabilità.
+Consultare [`SECURITY.md`](SECURITY.md) per il modello di minaccia e per sapere come segnalare una vulnerabilità.
 
 ## Documentazione
 
 - [Manuale](https://mcp-tool-shop-org.github.io/merchant-league/handbook/)
-- [Progetto v2](docs/design-v2.md): le regole, l'economia e le due modalità
-- [Test pratico](docs/paper-test.md): i primi test pratici, eseguiti su carta con giocatori AI
-- [Ambiente `xrpld` autonomo](docs/standalone-xrpld.md)
-- [Ricevute](docs/receipts/): controlli live sulla Testnet. La Testnet viene cancellata di tanto in tanto (la prossima volta il 2026-11-25), quindi i relativi hash delle transazioni smettono di essere risolti in seguito; ciò che hanno registrato e i vettori di test rimangono la prova.
+- [Progettazione v2](docs/design-v2.md): le regole, l’economia e le due modalità
+- [Test su carta](docs/paper-test.md): le prime sessioni di test, svolte su carta con avversari simulati dall’IA
+- [Sistema `xrpld` autonomo](docs/standalone-xrpld.md)
+- [Registrazioni](docs/receipts/): verifiche in tempo reale sulla Testnet. La Testnet viene periodicamente resettata (la prossima volta il 25-11-2026), quindi i relativi hash delle transazioni smettono di essere validi; ciò che è stato registrato e i vettori di test rimangono come prova.
 
 ## Supporto
 
-Questo è un prototipo in fase di progettazione attiva. Segnalazioni di problemi e suggerimenti sono benvenuti sul [tracker dei problemi](https://github.com/mcp-tool-shop-org/merchant-league/issues). Non ci sono ancora versioni e non ci sono garanzie di supporto. Consulta il [REGISTRO DELLE MODIFICHE](CHANGELOG.md) per i progressi.
+Questo è un prototipo in fase di progettazione attiva. Segnalazioni di problemi e idee sono ben accette sul [tracker dei problemi](https://github.com/mcp-tool-shop-org/merchant-league/issues). Non ci sono ancora versioni e non ci sono garanzie di supporto. Consultare il [REGISTRO DELLE MODIFICHE](CHANGELOG.md) per i progressi.
 
 ## Licenza
 

@@ -23,9 +23,9 @@ A slow-turn trading and politics game for four to six seats, played on the XRP L
 - **A ring of merchants.** Each seat produces its own raw good and needs goods from the other seats to pay its upkeep, run its workshops and deliver to shared projects. Nobody can prosper alone, and no small group can either.
 - **Simultaneous turns.** Every turn has three phases. Seats talk and trade in the open market; then each seat commits its orders in secret; then every seat's orders resolve at once, by the same rules for everyone.
 - **Politics.** Councils set tariffs, cartels can open private markets, and charters rotate between seats through the season.
-- **A season of 24 to 32 turns.** Shocks to supply are announced two turns ahead, and the last turn is rolled, so nobody can plan a perfect final move.
+- **A season of 24 to 32 turns.** Shocks (a supply freeze, a tariff holiday, a demand surge or a spoilage spike) are forecast publicly a turn before they land, and the last turn is rolled, so nobody can plan a perfect final move.
 - **Scoring.** A seat scores its net worth at the close, plus a hidden objective card dealt at the start. Every seat keeps a reason to play until the last turn.
-- **Checked tables.** Every table is generated from a seed and checked before it is dealt. Each seat's starting value must sit within 3% of the others', and within 7% when a seat is valued by what it adds to every group of seats.
+- **Checked tables.** Every table is generated from a seed and checked before it is dealt. Each seat's starting value must sit within 3% of the table's average, and within 7% of the average when a seat is valued by what it adds to every group of seats.
 
 The full design is in [`docs/design-v2.md`](docs/design-v2.md).
 
@@ -44,7 +44,7 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | --- | --- |
 | `league-core` | The rules engine: the turn phases, contracts, scoring, the season close, replay, and the state predicates behind the planned hint system |
 | `league-gen` | The table generator, with its fairness checks and its seed pools |
-| `league-dice` | Dice that no single player can predict or steer: commit and reveal, mixed with a public randomness beacon |
+| `league-dice` | Stubs for now. The game's randomness itself (commit and reveal, mixed with a public drand beacon in Game mode and a verifiable random function in training mode) is built in `league-core` |
 | `league-ledger` | The XRPL Testnet client. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
 | `league-season` | Season boundaries, which follow the Testnet's resets |
@@ -69,12 +69,12 @@ Docker is needed only for the stand-alone `xrpld` harness, and its tests are ski
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check.
+`bash scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check. Coverage and `cargo audit` run only when `cargo-llvm-cov` and `cargo-audit` are installed, and the script names any check it skipped.
 
 ## Security and data
 
-- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable, makes no network call without `--live` and a credit cap, and keeps its transcripts in the game folder you give it.
-- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter).
+- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.
+- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).
 - **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.
 - **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.
 

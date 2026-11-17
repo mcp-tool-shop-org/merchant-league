@@ -9,9 +9,9 @@ sidebar:
 
 Every table is generated from a seed by `league-gen` and checked before it is dealt. A table that fails a check is thrown away, and the generator tries again.
 
-- **Starting value.** The generator solves a linear program over the table and prices every seat's starting position at its shadow prices. Every seat must sit within **3%** of the others.
+- **Starting value.** The generator solves a linear program over the table and prices every seat's starting position at its shadow prices. Every seat must sit within **3%** of the table's average.
 - **What a seat adds to every group.** A second measure values each seat by what it adds to every possible group of seats (its Shapley value). Every seat must sit within **7%** of the average by that measure too. This catches a seat that holds a bottleneck for a small group, which the first measure can miss.
-- **Group limits.** One or two seats can never cover their own upkeep. Three seats can cover at most one member's, and four can cover at most two members'.
+- **Group limits.** One or two seats can never cover their own upkeep. Three seats can cover at most one member's, and at a five- or six-seat table four can cover at most two members'.
 - **Real choices.** In more than 90% of tables, seats rank their best trades differently, so play does not collapse into one obvious move.
 
 The generator's version is recorded with every table, and the tests pin a digest of a known table, so a change to the generator cannot pass unnoticed.
@@ -30,15 +30,16 @@ Seeds are split into pools that never overlap, so a table used for training can 
 
 Every other seed is unassigned and refused. A table's stated purpose must match its seed's pool, or setup refuses it. Sealed seeds never appear in the clear in a replay log: the log records only the pool and a digest.
 
-## Dice nobody can steer
+## Randomness nobody can steer
 
-`league-dice` makes rolls that no single player, the studio or the randomness beacon's operators can predict or bend:
+The game's randomness (supply shocks, the closing roll and tie-breaks) comes from a beacon that no player, nor the studio, can predict or bend. It is built in `league-core`:
 
-1. Each seat commits to a secret before the reveal deadline.
-2. The secrets are revealed and mixed with a public [drand](https://drand.love/) beacon round published **after** that deadline.
-3. A seat that does not reveal loses the day. There is never a re-roll, so refusing to reveal cannot buy a better roll.
+- **Game mode** takes each turn's beacon from a public [drand](https://drand.love/) round (the quicknet chain) published **after** the turn's commit deadline, so a seat cannot steer a roll it committed to before the round existed. Checking the round's signature during replay is still open ([#29](https://github.com/mcp-tool-shop-org/merchant-league/issues/29)).
+- **Training and evaluation mode** uses a verifiable random function instead, whose output can be checked against a published key.
 
-The last seat to reveal cannot see the outcome first, because the beacon round does not exist yet when it commits.
+Orders follow the same rule: each seat commits a salted hash of its sealed orders, then reveals them. A seat that commits but does not reveal loses its secret actions for that turn, and there is never a re-roll.
+
+`league-dice`, the crate for per-merchant dice secrets settled on the ledger, is stubs only for now.
 
 ## Exact replay
 

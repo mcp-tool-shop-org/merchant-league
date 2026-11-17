@@ -24,7 +24,7 @@ The seats sit in a ring, and every seat depends on its neighbours.
 
 Raw and refined goods are perishable: a share of what a seat holds spoils each turn (20% as a baseline). A seat that is short can always buy from the town at a steep premium (2.25 times the fair price, provisional), so a withholding neighbour can hurt a seat but cannot freeze it out.
 
-The ring is built so that one or two seats can never cover their own upkeep, three seats can cover at most one member's, and four can cover at most two members'. Trade across the whole table is the only way to prosper.
+The ring is built so that one or two seats can never cover their own upkeep, three seats can cover at most one member's, and, at a five- or six-seat table, four can cover at most two members'. Trade across the whole table is the only way to prosper.
 
 ## A turn, in three phases
 
@@ -34,7 +34,7 @@ All seats act at the same time. Nobody waits for anyone else, and nobody gets to
 
 Seats negotiate. Every message carries a typed header (who, what, how much, by when) and a short free-text body for persuasion. The text itself is never written to the ledger; at most a salted hash of an agreed deal is.
 
-At the same time, seats post and cancel offers on the open market, write credit notes, and lock goods or coin into escrow for deals.
+At the same time, seats post and cancel offers on the open market, write credit notes, and lock coin into escrow for deals. Goods are never locked in escrow, because they spoil and the steward must be able to claw spoilage back.
 
 ### 2. Commit
 

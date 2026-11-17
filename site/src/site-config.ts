@@ -46,7 +46,7 @@ export const config: SiteConfig = {
         },
         {
           title: 'A season with no perfect ending',
-          desc: 'Seasons last 24 to 32 turns. Supply shocks are announced two turns ahead, and the last turn is rolled.',
+          desc: 'Seasons last 24 to 32 turns. Shocks are forecast publicly a turn before they land, and the last turn is rolled.',
         },
         {
           title: 'Scoring that keeps everyone playing',
@@ -54,7 +54,7 @@ export const config: SiteConfig = {
         },
         {
           title: 'Checked tables',
-          desc: 'Every table is generated from a seed and checked before it is dealt: each seat’s starting value sits within 3% of the others’.',
+          desc: 'Every table is generated from a seed and checked before it is dealt: each seat’s starting value sits within 3% of the table’s average.',
         },
       ],
     },
@@ -82,7 +82,7 @@ export const config: SiteConfig = {
       rows: [
         ['league-core', 'The rules engine: turn phases, contracts, scoring, the season close, replay and state predicates'],
         ['league-gen', 'The table generator, with its fairness checks and seed pools'],
-        ['league-dice', 'Dice no single player can predict or steer: commit and reveal, mixed with a public randomness beacon'],
+        ['league-dice', 'Stubs for now; the game’s randomness (commit and reveal plus a public beacon) is built in league-core'],
         ['league-ledger', 'The XRPL Testnet client; it refuses any other network'],
         ['league-standalone', 'The stand-alone xrpld harness for training mode, in a pinned, resource-capped container'],
         ['league-season', 'Season boundaries, which follow the Testnet’s resets'],

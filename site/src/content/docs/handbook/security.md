@@ -16,9 +16,10 @@ Merchant League plays only on the XRPL **Testnet**. Test XRP and the game's toke
 ## Keys and secrets
 
 - **Players' Testnet keys** (Game mode, not built yet) stay on the player's machine, in the git-ignored `.league/` folder, and are never logged or printed.
-- **Dice secrets** stay hidden until they are revealed, and secret types redact themselves in debug output.
+- **Committed orders and secrets** stay hidden until they are revealed, and secret types redact themselves in debug output.
 - **The relay's OpenRouter key** is read only from the `OPENROUTER_API_KEY` environment variable. Passing it as an argument or in a file is refused, and errors and panics pass through redaction, so the key cannot leak through a message.
-- The relay makes no network call without `--live`, and `--live` requires a credit cap, checked against the call log before every call.
+- The relay makes no OpenRouter call without `--live`, and `--live` requires a credit cap, checked against the call log before every call.
+- The relay's local seats refuse any API key, reach only a loopback address or a VM address allowed with `--allow-vm-host`, and need a GPU-seconds cap (`--cap-gpu-secs`).
 
 ## The stand-alone harness
 
@@ -27,7 +28,7 @@ The training-mode harness runs one pinned `xrpld` image in Docker, inside fixed 
 - the exact image tag and manifest digest, and nothing else;
 - at most one container per machine;
 - 2 CPUs, 2 GB of memory and no swap;
-- a 512 MB scratch disk in memory, with no host folders mounted;
+- a scratch disk in memory (512 MB by default, and never more than about 5 GB), with no host folders mounted;
 - its port bound to `127.0.0.1` only;
 - a self-expiry after at most 10 minutes, and removal after every run, including every failure path.
 
@@ -35,17 +36,17 @@ Before it talks to the node, the harness checks that the node reports the stand-
 
 ## No telemetry
 
-Nothing is sent anywhere except the calls a mode needs: the Testnet, the public drand beacon and, for the relay, OpenRouter.
+Nothing is sent anywhere except the calls a mode needs: the Testnet, the public drand beacon and, for the relay, OpenRouter or the local model servers you allow.
 
 ## Threats and defences
 
 | Threat | Defence |
 | --- | --- |
 | The client is pointed at Mainnet | Only Testnet endpoints exist in the code; every connection must report network id 1; CI fails on Mainnet hostnames |
-| A player biases the dice by not revealing | A missing reveal loses the day; there is never a re-roll |
-| The last player to reveal sees the outcome first | The roll also mixes in a drand round published after the reveal deadline |
-| A player makes many free accounts | Earnings are capped per account and per day; ranked play needs an invitation |
-| A seed or secret leaks into logs | Secret types redact themselves in debug output; seeds stay in `.league/` |
+| A player biases a roll by not revealing | A seat that commits but does not reveal loses its secret actions for the turn; there is never a re-roll |
+| The last player to reveal sees the outcome first | In Game mode the turn's beacon comes from a drand round published after the commit deadline |
+| A player makes many free accounts | Planned for Game mode, not built yet: ranked queues need verified matchmaking credentials, hide handles behind seasonal aliases, and flag pairs of seats that funnel wealth to each other |
+| A seed or secret leaks into logs | Secret types redact themselves in debug output; in Game mode (not built yet), seeds will stay in `.league/` |
 
 ## Reporting a vulnerability
 

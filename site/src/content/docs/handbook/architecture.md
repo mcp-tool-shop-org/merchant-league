@@ -13,7 +13,7 @@ Merchant League is a Rust workspace (edition 2024, toolchain 1.100.0). Unsafe co
 | --- | --- |
 | `league-core` | The rules engine. Pure state, with no input or output: the turn phases, contracts, scoring, the season close, replay and the state predicates |
 | `league-gen` | The table generator: the linear program, the fairness checks, the mandate deck and the seed pools |
-| `league-dice` | Commit-and-reveal dice mixed with a public beacon |
+| `league-dice` | Stubs only for now: per-merchant dice secrets, to be settled on the ledger. The game's randomness lives in `league-core` |
 | `league-ledger` | The XRPL Testnet client, built on `xrpl-rust`. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness: a pinned container, its limits and a conformance suite |
 | `league-season` | Season boundaries, from the Testnet's announced and observed resets |
@@ -46,7 +46,7 @@ The rules live once, in `league-core`. A mode changes only where the ledger side
 
 ## The state predicates
 
-`league-core::predicates` computes facts about one seat's position from public state and that seat's own holdings: upkeep and debt, spoilage and conversion, scarcity and tariffs, what groups of seats could cover, and how the close would mark its holdings. They never read another seat's private information. Today they feed the paper tests' metrics; later they feed the planned hint system.
+`league-core::predicates` computes facts about one seat's position from public state and that seat's own holdings: upkeep and debt, spoilage and conversion, scarcity and tariffs, what groups of seats could cover, and how the close would mark its holdings. They never read another seat's private information. Today they back the replay's metrics (`compute_season_metrics`); later they feed the planned hint system.
 
 ## Quality gates
 

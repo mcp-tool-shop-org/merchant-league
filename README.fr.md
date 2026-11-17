@@ -14,26 +14,26 @@
 
 # Ligue des marchands
 
-Un jeu de commerce et de politique au rythme lent, pour quatre à six joueurs, qui se déroule sur le **Testnet** de XRP Ledger. Les joueurs peuvent être des personnes ou des IA, à la même table et soumis aux mêmes règles.
+Un jeu de commerce et de politique au rythme lent, pour quatre à six joueurs, qui se déroule sur le **Testnet** du XRP Ledger. Les joueurs peuvent être des personnes ou des joueurs IA, à la même table et soumis aux mêmes règles.
 
 **État : prototype, phase de conception.** Le moteur de règles, le générateur de table et la fonction de relecture sont développés et testés. Le jeu lui-même n’est **pas encore jouable** : il n’y a pas de client de jeu et aucune version de sortie. Uniquement sur le Testnet : pas d’argent réel et aucune possibilité de passer au Mainnet.
 
 ## Le jeu
 
-- **Un cercle de marchands.** Chaque joueur produit ses propres matières premières et a besoin de produits provenant des autres joueurs pour couvrir ses dépenses, faire fonctionner ses ateliers et livrer des projets communs. Personne ne peut prospérer seul, et aucun petit groupe ne peut le faire non plus.
+- **Un cercle de marchands.** Chaque joueur produit ses propres matières premières et a besoin de biens provenant des autres joueurs pour couvrir ses dépenses, faire fonctionner ses ateliers et réaliser des projets communs. Personne ne peut prospérer seul, et aucun petit groupe ne peut le faire non plus.
 - **Tours simultanés.** Chaque tour comporte trois phases. Les joueurs discutent et échangent sur le marché ouvert ; puis chaque joueur soumet secrètement ses commandes ; enfin, les commandes de chaque joueur sont exécutées simultanément, selon les mêmes règles pour tous.
 - **Politique.** Les conseils fixent les tarifs, les cartels peuvent ouvrir des marchés privés et les chartes sont mises en rotation entre les joueurs au cours de la saison.
-- **Une saison de 24 à 32 tours.** Les chocs de l’offre sont annoncés deux tours à l’avance, et le dernier tour est aléatoire, de sorte que personne ne puisse planifier un dernier mouvement parfait.
+- **Une saison de 24 à 32 tours.** Les chocs (gel des approvisionnements, suspension des tarifs, augmentation de la demande ou pic de détérioration) sont annoncés publiquement un tour avant qu’ils ne se produisent, et le dernier tour est aléatoire, de sorte que personne ne puisse planifier un dernier mouvement parfait.
 - **Score.** Un joueur calcule sa valeur nette à la fin, plus une carte d’objectif cachée distribuée au début. Chaque joueur a une raison de jouer jusqu’au dernier tour.
-- **Tables vérifiées.** Chaque table est générée à partir d’une valeur de départ et vérifiée avant d’être distribuée. La valeur de départ de chaque joueur doit se situer dans une fourchette de 3 % par rapport aux autres, et dans une fourchette de 7 % lorsque la valeur d’un joueur est déterminée par ce qu’il apporte à chaque groupe de joueurs.
+- **Tables vérifiées.** Chaque table est générée à partir d’une valeur de départ et vérifiée avant d’être utilisée. La valeur de départ de chaque joueur doit se situer dans une fourchette de 3 % de la moyenne de la table, et dans une fourchette de 7 % de la moyenne lorsque la valeur d’un joueur est calculée en fonction de sa contribution à chaque groupe de joueurs.
 
 La conception complète est disponible dans [`docs/design-v2.md`](docs/design-v2.md).
 
-## Deux modes de jeu
+## Deux modes de jeu
 
 | Mode | Environnement d’exécution | Public cible |
 | --- | --- | --- |
-| **Game mode** | le Testnet public XRPL, à raison d’environ deux tours par jour | des personnes, seules ou avec des joueurs IA |
+| **Mode jeu** | le Testnet public XRPL, à raison d’environ deux tours par jour | des personnes, seules ou avec des joueurs IA |
 | **Mode entraînement et évaluation** | un nœud `xrpld` autonome privé dans un conteneur Docker local, qui exécute les registres en quelques millisecondes | joueurs IA : entraînement, tests de performance et relectures |
 
 Les deux modes partagent le même moteur de règles. Un jeu est rejoué exactement à partir de sa valeur de départ et de son journal.
@@ -42,13 +42,13 @@ Les deux modes partagent le même moteur de règles. Un jeu est rejoué exacteme
 
 | Crate | Ce que cela fait |
 | --- | --- |
-| `league-core` | Le moteur de règles : les phases du tour, les contrats, le calcul du score, la fin de la saison, la relecture et les prédicats d’état qui sous-tendent le système d’indices prévu |
+| `league-core` | Le moteur de règles : les phases du tour, les contrats, le calcul des scores, la fin de la saison, la relecture et les prédicats d’état qui sous-tendent le système d’indices prévu |
 | `league-gen` | Le générateur de table, avec ses vérifications d’équité et ses ensembles de valeurs de départ |
-| `league-dice` | Des dés qu’aucun joueur ne peut prédire ou manipuler : soumission et révélation, combinés à un signal de hasard public |
+| `league-dice` | Pour l’instant, il s’agit de simples prototypes. L’aléatoire du jeu lui-même (engagement et révélation, combinés à un signal de drand public en mode jeu et à une fonction aléatoire vérifiable en mode entraînement) est développé en `league-core` |
 | `league-ledger` | Le client XRPL Testnet. Il refuse tout réseau qui n’est pas le Testnet |
 | `league-standalone` | L’ensemble `xrpld` autonome pour le mode entraînement, dans un conteneur avec des ressources limitées |
 | `league-season` | Les limites de saison, qui suivent les réinitialisations du Testnet |
-| `league-relay` | L’outil qui a exécuté les tests sur papier avec des joueurs IA |
+| `league-relay` | L’outil qui a permis de réaliser les tests sur papier avec des joueurs IA |
 | `league-tui` | Le client terminal. Pour l’instant, il n’y a qu’un écran de titre. |
 
 ## Compilation à partir du code source
@@ -69,14 +69,14 @@ Docker n’est nécessaire que pour l’ensemble `xrpld` autonome, et ses tests 
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`scripts/verify.sh` exécute les vérifications que CI exécute, à l’exception de l’ensemble Docker et de la vérification de la carte Atlas.
+`bash scripts/verify.sh` exécute les vérifications que CI exécute, à l’exception de l’ensemble Docker et de la vérification de la carte Atlas. La couverture et `cargo audit` ne sont exécutées que lorsque `cargo-llvm-cov` et `cargo-audit` sont installés, et le script indique toutes les vérifications qu’il a ignorées.
 
 ## Sécurité et données
 
-- **Ce à quoi il a accès.** En mode Jeu (pas encore développé), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/` ignoré par Git, et ne sont jamais enregistrées. Le relais de test sur papier lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY`, n’effectue aucun appel réseau sans `--live` et une limite de crédit, et conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
-- **Ce à quoi il n’a pas accès.** Pas d’argent réel, pas de Mainnet et rien en dehors des dossiers mentionnés ci-dessus. Il n’y a **pas de télémétrie** : rien n’est envoyé nulle part, à l’exception des appels dont un mode a besoin (le Testnet, un signal de hasard public et, pour le relais, OpenRouter).
-- **Autorisations.** Accès réseau au Testnet en mode Jeu. Docker, avec son port lié uniquement à `127.0.0.1`, pour l’ensemble autonome.
-- **Gardiens.** Chaque connexion au Testnet doit signaler l’ID du réseau Testnet, CI échoue sur tout nom d’hôte Mainnet, et un deuxième dispositif de sécurité échoue sur toute copie qui présente le jeu comme une source de revenus.
+- **Ce à quoi il a accès.** En mode jeu (pas encore développé), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/` ignoré par Git, et ne sont jamais enregistrées. Le relais de test sur papier lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY` et n’effectue aucun appel OpenRouter sans `--live` et une limite de crédit. Ses joueurs locaux refusent toute clé API, n’accèdent qu’à une adresse de boucle ou à une adresse VM que vous autorisez avec `--allow-vm-host`, et nécessitent une limite de secondes de GPU. Il conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
+- **Ce à quoi il n’a pas accès.** Pas d’argent réel, pas de Mainnet et rien en dehors des dossiers mentionnés ci-dessus. Il n’y a **pas de télémétrie** : rien n’est envoyé nulle part, à l’exception des appels dont un mode a besoin (le Testnet, un signal de hasard public et, pour le relais, OpenRouter ou les serveurs de modèles locaux que vous autorisez).
+- **Autorisations.** Accès au réseau pour le Testnet en mode jeu. Docker, avec son port lié uniquement à `127.0.0.1`, pour l’ensemble autonome.
+- **Gardiens.** Chaque connexion au Testnet doit signaler l’ID du réseau du Testnet, CI échoue sur tout nom d’hôte Mainnet, et un deuxième dispositif de sécurité échoue sur toute copie qui présente le jeu comme une source de revenus.
 
 Consultez [`SECURITY.md`](SECURITY.md) pour le modèle de menace et la manière de signaler une vulnérabilité.
 
@@ -84,9 +84,9 @@ Consultez [`SECURITY.md`](SECURITY.md) pour le modèle de menace et la manière 
 
 - [Manuel](https://mcp-tool-shop-org.github.io/merchant-league/handbook/)
 - [Conception v2](docs/design-v2.md) : les règles, l’économie et les deux modes
-- [Test sur papier](docs/paper-test.md) : les premiers tests, effectués sur papier avec des joueurs IA
+- [Test sur papier](docs/paper-test.md) : les premiers tests, réalisés sur papier avec des joueurs IA
 - [Ensemble `xrpld` autonome](docs/standalone-xrpld.md)
-- [Reçus](docs/receipts/) : vérifications en direct sur le Testnet. Le Testnet est effacé de temps en temps (prochainement le 2026-11-25), de sorte que leurs hachages de transaction cessent de fonctionner par la suite ; ce qu’ils ont enregistré et les vecteurs de test restent la preuve.
+- [Reçus](docs/receipts/) : vérifications en direct sur le Testnet. Le Testnet est effacé de temps en temps (prochainement le 2026-11-25), de sorte que leurs hachages de transaction cessent de fonctionner par la suite ; ce qu’ils ont enregistré, ainsi que les vecteurs de test, restent la preuve.
 
 ## Assistance
 

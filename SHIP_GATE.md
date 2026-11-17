@@ -16,14 +16,14 @@
 
 ### Default safety posture
 
-- [x] `[cli|mcp|desktop]` Dangerous actions (kill, delete, restart) require explicit `--allow-*` flag (2026-11-17: league-relay makes no network call without `--live`, which also needs a credit cap)
-- [x] `[cli|mcp|desktop]` File operations constrained to known directories (2026-11-17: league-relay writes only inside the `--game-dir` it is given)
+- [x] `[cli|mcp|desktop]` Dangerous actions (kill, delete, restart) require explicit `--allow-*` flag (2026-11-17: league-relay makes no OpenRouter call without `--live`, which also needs a credit cap; its local seats need `--cap-gpu-secs` and reach only loopback or `--allow-vm-host` addresses)
+- [x] `[cli|mcp|desktop]` File operations constrained to known directories (2026-11-17: league-relay writes only inside the `--game-dir` it is given, and `prebook-check` only inside a fresh temporary folder)
 - [ ] SKIP: not an MCP server — `[mcp]` Network egress off by default
 - [ ] SKIP: not an MCP server — `[mcp]` Stack traces never exposed — structured error results only
 
 ## B. Error Handling
 
-- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field
+- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field, and some (`NotTestnet` in league-ledger, `DiceError` in league-dice) carry no stable code yet
 - [ ] `[cli]` Exit codes: 0 ok · 1 user error · 2 runtime error · 3 partial success **OPEN, blocks the v0.1.0 tag (2026-11-17):** league-relay uses 0 ok, 1 error, 2 a seat not clean, 3 an unrecorded call, 4 locked; documented in the handbook, but not the 0/1/2/3 convention
 - [x] `[cli]` No raw stack traces without `--debug` (2026-11-17: the relay panic hook prints one redacted line, no backtrace)
 - [ ] SKIP: not an MCP server — `[mcp]` Tool errors return structured results — server never crashes on bad input
