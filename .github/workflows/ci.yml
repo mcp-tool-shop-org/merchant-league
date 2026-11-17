@@ -13,6 +13,9 @@ on:
       - "crates/**"
       - "vendor/**"
       - "scripts/**"
+      # The npm audit gate's allowlist: '.github/workflows/**' does not cover it, and
+      # a change to it changes what the Site build step passes.
+      - ".github/audit-allowlist.json"
       - "atlas/**"
       - "README.md"
       - "SECURITY.md"
@@ -97,11 +100,21 @@ jobs:
 
       # The landing page and handbook build here, so a broken page fails the PR
       # rather than the Pages deploy after merge (pages.yml runs only on main).
+      # The site's npm audit goes through scripts/check-audit-allowlist.mjs
+      # (ported from brand, tested by the node --test line): reviewed,
+      # time-boxed exceptions live in .github/audit-allowlist.json, and any
+      # high/critical advisory not listed there, listed but expired, or whose
+      # reported range or fix status has changed, still fails this step.
       - name: Site build
         working-directory: site
         run: |
           npm ci --no-fund --no-audit
-          npm audit --audit-level=high
+          node --test ../scripts/check-audit-allowlist.test.mjs
+          set +e
+          npm audit --audit-level=high --json > audit-report.json
+          AUDIT_EXIT=$?
+          set -e
+          node ../scripts/check-audit-allowlist.mjs audit-report.json ../.github/audit-allowlist.json "$AUDIT_EXIT" package-lock.json
           npm run build
 
       - name: Stand-alone xrpld harness
