@@ -9,7 +9,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "cd744f1ae7305264315bf3f0c0e49fff2c2766fe43f2a8241e7f0581a2242f92",
+          "hash": "a111792e1d2bfe50cfe0aae3c13e1292c13f08ca7177ef2b23e3db471b95018e",
+          "path": ".github/audit-allowlist.json"
+        },
+        {
+          "hash": "b9e3d6415b3310cbadf13abbfc6791787528b9daa6a8ace195263d4588296634",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -3075,7 +3079,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "4ce822039d56263efb453233ded894de4ce279ca81f791cb976db8e1f5c3eee3",
+          "hash": "c7584137102c067c3793c6925867e2f69b4465871700391afa30bfbae856f0e5",
           "path": "CHANGELOG.md"
         },
         {
@@ -3127,7 +3131,7 @@
           "path": "README.zh.md"
         },
         {
-          "hash": "2534a15432fdd7359dd07e51a76406b356e788486533909216b766de4167b922",
+          "hash": "b1e7eaa67a7adb4e7f562334a7bbe6381f2643a2512d3850df9a2b5a3799be59",
           "path": "SECURITY.md"
         },
         {
@@ -3150,13 +3154,49 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 0,
+      "dynamicReads": 4,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 0,
       "entryPoints": [],
       "externals": 0,
       "files": [
+        {
+          "entry": "failClosed",
+          "entryRule": 1,
+          "failurePaths": [
+            {
+              "kind": "catch",
+              "line": 69
+            },
+            {
+              "kind": "catch",
+              "line": 78
+            },
+            {
+              "kind": "catch",
+              "line": 112
+            },
+            {
+              "kind": "catch",
+              "line": 211
+            }
+          ],
+          "hash": "7e16a8c0c9b4fa3990b16826768cf1260732089401db756e9c741935f90a0029",
+          "path": "scripts/check-audit-allowlist.mjs",
+          "sequences": []
+        },
+        {
+          "entry": "run",
+          "entryRule": 1,
+          "hash": "e5d8ad97f7d9427c8d87002d7a29d189c464ec432d3c7c4814138877396b5d00",
+          "path": "scripts/check-audit-allowlist.test.mjs",
+          "sequences": [],
+          "spawns": [
+            "scripts/check-audit-allowlist.mjs"
+          ],
+          "testFramework": "node --test"
+        },
         {
           "hash": "c7622613b487d9f329c2e9bd7d83ec0e99e855cce806bb0c2e02cd9b6a0abf0b",
           "path": "scripts/check-copy.sh"
@@ -3181,7 +3221,10 @@
       "name": "scripts",
       "origin": "authored",
       "role": "code",
-      "testedBy": 0,
+      "testRunners": [
+        "node --test"
+      ],
+      "testedBy": 1,
       "unresolvedSites": 0
     }
   ],
@@ -3274,6 +3317,7 @@
           "dir": "site",
           "job": "check",
           "programs": [
+            "node",
             "npm"
           ],
           "step": "Site build"
@@ -3363,7 +3407,16 @@
         }
       ],
       "landings": [],
-      "mentions": [],
+      "mentions": [
+        {
+          "job": "check",
+          "path": ".github/audit-allowlist.json"
+        },
+        {
+          "job": "check",
+          "path": "site/package-lock.json"
+        }
+      ],
       "name": "CI",
       "permissions": [
         "contents:read"
@@ -3403,7 +3456,7 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 3
+          "files": 5
         }
       ],
       "readers": [],
@@ -3635,6 +3688,16 @@
         },
         {
           "job": "check",
+          "path": "scripts/check-audit-allowlist.mjs",
+          "runKind": "executes"
+        },
+        {
+          "job": "check",
+          "path": "scripts/check-audit-allowlist.test.mjs",
+          "runKind": "executes"
+        },
+        {
+          "job": "check",
           "path": "scripts/check-copy.sh",
           "runKind": "executes"
         },
@@ -3664,7 +3727,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 32,
+      "runsCount": 34,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -3692,6 +3755,13 @@
           "step": "Coverage"
         },
         {
+          "dir": "site",
+          "files": 1,
+          "job": "check",
+          "runner": "node --test",
+          "step": "Site build"
+        },
+        {
           "files": 1,
           "job": "check",
           "runner": "cargo test",
@@ -3708,6 +3778,7 @@
           ],
           "event": "push",
           "paths": [
+            ".github/audit-allowlist.json",
             ".github/workflows/**",
             "Cargo.lock",
             "Cargo.toml",
@@ -3725,6 +3796,9 @@
         {
           "event": "workflow_dispatch"
         }
+      ],
+      "untrackedLandings": [
+        "site/audit-report.json"
       ],
       "uses": [
         "actions/cache",
@@ -4108,10 +4182,38 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "a006c74825a91e6129058500c4694144d99afb2a",
-    "tracked": 531
+    "commit": "7dca819bf8e0d3ecfeb8112922481e2e69c8499d",
+    "tracked": 534
   },
   "landings": [
+    {
+      "readers": [
+        {
+          "by": ".github/workflows/ci.yml",
+          "confidence": "config"
+        },
+        {
+          "by": "scripts/check-audit-allowlist.test.mjs",
+          "call": "readFileSync",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": ".github/audit-allowlist.json",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/check-audit-allowlist.test.mjs",
+          "call": "readFileSync",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": ".github/workflows/ci.yml",
+      "writers": []
+    },
     {
       "readers": [
         {
@@ -4393,6 +4495,18 @@
     {
       "readers": [
         {
+          "by": "scripts/check-audit-allowlist.test.mjs",
+          "call": "literal",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": "scripts/check-audit-allowlist.mjs",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
           "by": "scripts/verify.sh",
           "call": "literal",
           "confidence": "text"
@@ -4421,6 +4535,27 @@
         }
       ],
       "target": "scripts/test-guards.sh",
+      "writers": []
+    },
+    {
+      "readers": [],
+      "target": "site/audit-report.json",
+      "tracked": false,
+      "writers": [
+        {
+          "by": ".github/workflows/ci.yml",
+          "confidence": "config"
+        }
+      ]
+    },
+    {
+      "readers": [
+        {
+          "by": ".github/workflows/ci.yml",
+          "confidence": "config"
+        }
+      ],
+      "target": "site/package-lock.json",
       "writers": []
     },
     {
@@ -4941,7 +5076,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 41,
+  "testFiles": 42,
   "unassigned": [
     {
       "hash": "039b9da6674aea8546b137dbea959c5ac9a5b1f15a7a7c53374ed8613d7770ec",
