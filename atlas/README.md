@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-17 from commit 2418ec9 by Atlas 1.26.0.
+Mapped at 2026-11-17 from commit 1a4c6c3 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,20 +8,14 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 10 parts, mostly Rust (340 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-17 (67ff82e)
+## What changed since 2026-11-17 (2418ec9)
 
-- CI's push trigger now also names `SECURITY.md` and `site/**`.
-- CI now also runs crates/league-relay/src/relay.rs, site/astro.config.mjs and site/src/.
-- CI now also checks crates/league-ledger/src/lib.rs, crates/league-season/src/lib.rs, crates/league-standalone/src/lib.rs and 1 more.
-- And 2 more changes to doors.
-- SECURITY.md is now also read by scripts/check-copy.sh.
-- site/src/ is now read by scripts/check-copy.sh.
-- league-dice is no longer a part.
-- 11 files added, 4 removed and 44 changed content, across 8 parts.
+- CI's push trigger now also names `vendor/**`.
+- 3 files changed content, across 1 part.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 11 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 34 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 12 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 34 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 4. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
@@ -62,8 +56,8 @@ scripts holds only shell files, which this map does not read, so what uses it ca
 
 - **crates/league-core/src/replay.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 6 of 6 commits, inside the league-core part.
 - **crates/league-gen/src/generator.rs** and **crates/league-gen/src/lib.rs** changed together in 7 of 8 commits, inside the league-gen part.
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 17 of 20 commits.
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 17 of 21 commits.
 - **crates/league-gen/src/generator.rs** and **crates/league-gen/src/schema.rs** changed together in 8 of 10 commits, inside the league-gen part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
