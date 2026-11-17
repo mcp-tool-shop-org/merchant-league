@@ -30,3 +30,7 @@ Include what you found, how to reproduce it, and what it could let someone do. W
 | The last player to reveal sees the outcome first | No seat's reveal feeds the randomness. Game mode (not built yet) is designed to take each turn's beacon from a public drand round; checking the round's signature is open (#29). Evaluation runs use a sealed verifiable random function |
 | A player makes many free accounts | Planned for Game mode, not built yet: ranked queues need verified matchmaking credentials, hide handles behind seasonal aliases, and flag pairs of seats that funnel wealth to each other |
 | A seed or secret leaks into logs | Secret types redact themselves in debug output; in Game mode (not built yet), seeds will stay in `.league/` |
+
+## Dependency advisories
+
+- **2026-11-17:** the site's npm audit (CI, "Site build" step) carries one reviewed, time-boxed exception in `.github/audit-allowlist.json`: GHSA-fc5q-39xc-vjpf (npm id 1247710, picomatch `<=4.0.7`, ReDoS, high, no patched release yet), expiring 2026-12-17. picomatch reaches this repo only through the static-site build toolchain (astro, vite, tinyglobby); exploiting it needs an attacker-supplied glob, every glob in our site config is our own, and the site ships static HTML, so nothing uses picomatch at run time. The exception stops applying at its expiry, if the advisory's range changes, or once npm reports a fix, and it is removed in the PR that bumps picomatch. Every other high or critical advisory still fails CI.
