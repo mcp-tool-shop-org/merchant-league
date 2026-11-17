@@ -174,11 +174,7 @@ pub fn transaction_hash(signed_blob: &[u8]) -> String {
     let mut data = vec![0x54, 0x58, 0x4E, 0x00];
     data.extend_from_slice(signed_blob);
     let digest = Sha512::digest(&data);
-    upper_hex(&digest[..32])
-}
-
-fn upper_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
+    crate::upper_hex(&digest[..32])
 }
 
 /// Decode hex, upper or lower case.

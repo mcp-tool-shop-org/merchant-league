@@ -23,7 +23,7 @@
 
 ## B. Error Handling
 
-- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field; only league-gen puts a stable code in its messages, and league-relay's `RelayError`, league-ledger's `NotTestnet` and league-dice's `DiceError` carry none
+- [ ] `[all]` Errors follow the Structured Error Shape: `code`, `message`, `hint`, `cause?`, `retryable?` **OPEN, blocks the v0.1.0 tag (2026-11-17):** errors are typed enums with stable codes (e.g. `SEED_POOL_MISMATCH`), but carry no `hint` or `retryable` field; only league-gen puts a stable code in its messages, and league-relay's `RelayError` and league-ledger's `NotTestnet` carry none
 - [ ] `[cli]` Exit codes: 0 ok · 1 user error · 2 runtime error · 3 partial success **OPEN, blocks the v0.1.0 tag (2026-11-17):** league-relay uses 0 ok, 1 error, 2 a seat not clean, 3 an unrecorded call, 4 locked; documented in the handbook, but not the 0/1/2/3 convention
 - [x] `[cli]` No raw stack traces without `--debug` (2026-11-17: the relay has no `--debug` flag; its panic hook prints one redacted line and never a backtrace)
 - [ ] SKIP: not an MCP server — `[mcp]` Tool errors return structured results — server never crashes on bad input
@@ -58,7 +58,7 @@
 ## E. Identity (soft gate — does not block ship)
 
 - [x] `[all]` Logo in README header (2026-11-17: brand logos/merchant-league/readme.png, brand#118)
-- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; hand fixes, pinned in .polyglot-pins.json where the pin tool can hold them: 'paper test' in Japanese, Italian, Portuguese and Spanish, the evaluation-mode row in Chinese, Portuguese, Italian, Spanish and French, the league-dice row in Japanese (pinned with the model's rows in six languages), the Guards bullet in Chinese and Hindi, the league-dice and league-season rows translated by hand in all seven, and the product name kept as 'Merchant League' in every title; the bold Game mode table cell is not held by a pin and is fixed by hand after every run)
+- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; hand fixes, pinned in .polyglot-pins.json where the pin tool can hold them: 'paper test' in Japanese, Italian, Portuguese and Spanish, the evaluation-mode row in Chinese, Portuguese, Italian, Spanish and French, the league-dice row in Japanese (pinned with the model's rows in six languages), the Guards bullet in Chinese and Hindi, the league-dice and league-season rows translated by hand in all seven, and the product name kept as 'Merchant League' in every title; the bold Game mode table cell is not held by a pin and is fixed by hand after every run; `league-dice` row removed across all eight READMEs on 2026-11-17)
 - [x] `[org]` Landing page (@mcptoolshop/site-theme) (2026-11-17: site/ with the Starlight handbook)
 - [x] `[all]` GitHub repo metadata: description, homepage, topics (2026-11-17: description, homepage and 11 topics set)
 

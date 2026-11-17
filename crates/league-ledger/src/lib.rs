@@ -12,6 +12,16 @@
 use std::fmt;
 
 pub mod client;
+pub mod escrow;
+
+pub use escrow::{
+    ESCROW_FINISH_DEFAULT_FEE_DROPS, ESCROW_FINISH_FULFILLMENT_BYTES, condition_hex,
+    escrow_condition, escrow_finish_min_fee_drops, fulfillment_hex,
+};
+
+pub(crate) fn upper_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
 
 /// The Testnet's network id, as its servers report it in `server_info`
 /// (measured on 2026-11-14: rippled 3.4.1, `network_id` 1).

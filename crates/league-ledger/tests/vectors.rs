@@ -9,6 +9,10 @@
 //!   `vectors/LICENSE-xrpl.js`).
 
 use league_ledger::client::{Account, decode_hex, transaction_hash};
+use league_ledger::{
+    ESCROW_FINISH_DEFAULT_FEE_DROPS, condition_hex, escrow_condition, escrow_finish_min_fee_drops,
+    fulfillment_hex,
+};
 use serde_json::Value;
 use xrpl::core::binarycodec::encode;
 
@@ -217,4 +221,116 @@ fn every_validated_transaction_round_trips_through_its_typed_model() {
         }
     }
     assert_eq!(seen, 21);
+}
+
+fn decode_fulfillment_secret(fulfillment: &str) -> [u8; 32] {
+    let Some(preimage_hex) = fulfillment.strip_prefix("A0228020") else {
+        panic!("expected PREIMAGE-SHA-256 fulfillment prefix A0228020, got {fulfillment}");
+    };
+    let bytes = decode_hex(preimage_hex).unwrap_or_else(|e| panic!("invalid hex: {e}"));
+    bytes
+        .try_into()
+        .unwrap_or_else(|v: Vec<u8>| panic!("expected 32-byte secret, got {}", v.len()))
+}
+
+#[test]
+fn escrow_condition_matches_published_and_validated_testnet_vectors() {
+    // Published zero-secret vector (examples/testnet_proof.rs:629 / pre-retirement shape).
+    let (zero_cond, zero_fulfil) = escrow_condition(&[0u8; 32]);
+    assert_eq!(
+        zero_cond,
+        "A025802066687AADF862BD776C8FC18B8E9F8E20089714856EE233B3902A591D0D5F2925810120"
+    );
+    assert_eq!(
+        zero_fulfil,
+        "A02280200000000000000000000000000000000000000000000000000000000000000000"
+    );
+
+    // Validated Testnet spike vectors (testnet-spike-2026-11-14.json).
+    let spike = load("testnet-spike-2026-11-14.json");
+    let spike_txs = spike["transactions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut spike_finishes = 0;
+    let mut spike_creates = 0;
+    for tx in &spike_txs {
+        let tx_json = &tx["tx_json"];
+        match tx_json["TransactionType"].as_str() {
+            Some("EscrowCreate") => {
+                assert_eq!(
+                    tx_json["Condition"].as_str(),
+                    Some(
+                        "A0258020D9439BB41E98851DA594B3D3979CD16D89EE184EE30AB25196EA14116044B8D2810120"
+                    )
+                );
+                spike_creates += 1;
+            }
+            Some("EscrowFinish") => {
+                let cond = tx_json["Condition"].as_str().unwrap_or_default();
+                let fulfil = tx_json["Fulfillment"].as_str().unwrap_or_default();
+                let fee_str = tx_json["Fee"].as_str().unwrap_or_default();
+                assert_eq!(fee_str, ESCROW_FINISH_DEFAULT_FEE_DROPS);
+                let fee: u64 = fee_str
+                    .parse()
+                    .unwrap_or_else(|e| panic!("fee parse failed: {e}"));
+                assert!(fee >= escrow_finish_min_fee_drops(10));
+                let secret = decode_fulfillment_secret(fulfil);
+                match tx["result"].as_str() {
+                    Some("tesSUCCESS") => {
+                        assert_eq!(
+                            escrow_condition(&secret),
+                            (cond.to_owned(), fulfil.to_owned())
+                        );
+                    }
+                    Some("tecCRYPTOCONDITION_ERROR") => {
+                        assert_eq!(fulfillment_hex(&secret), fulfil);
+                        assert_ne!(condition_hex(&secret), cond);
+                    }
+                    other => panic!("unexpected EscrowFinish result {other:?}"),
+                }
+                spike_finishes += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!((spike_creates, spike_finishes), (1, 2));
+
+    // Validated TokenEscrow vectors (testnet-m2c-2026-11-14.json).
+    let m2c = load("testnet-m2c-2026-11-14.json");
+    let m2c_txs = m2c["transactions"].as_array().cloned().unwrap_or_default();
+    let mut m2c_escrows = 0;
+    let mut m2c_finishes = 0;
+    for tx in &m2c_txs {
+        let tx_json = &tx["tx_json"];
+        match tx_json["TransactionType"].as_str() {
+            Some("EscrowCreate") => {
+                assert_eq!(
+                    tx_json["Condition"].as_str(),
+                    Some(
+                        "A02580201739FA62E9BB5608151BDB9EC353BD12D1C902BC910CBD599EFF23467B01F7B9810120"
+                    )
+                );
+                m2c_escrows += 1;
+            }
+            Some("EscrowFinish") => {
+                let cond = tx_json["Condition"].as_str().unwrap_or_default();
+                let fulfil = tx_json["Fulfillment"].as_str().unwrap_or_default();
+                let fee_str = tx_json["Fee"].as_str().unwrap_or_default();
+                assert_eq!(fee_str, ESCROW_FINISH_DEFAULT_FEE_DROPS);
+                let fee: u64 = fee_str
+                    .parse()
+                    .unwrap_or_else(|e| panic!("fee parse failed: {e}"));
+                assert!(fee >= escrow_finish_min_fee_drops(12));
+                let secret = decode_fulfillment_secret(fulfil);
+                assert_eq!(
+                    escrow_condition(&secret),
+                    (cond.to_owned(), fulfil.to_owned())
+                );
+                m2c_finishes += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!((m2c_escrows, m2c_finishes), (2, 1));
 }

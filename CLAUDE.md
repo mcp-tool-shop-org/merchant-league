@@ -27,7 +27,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 ## Tables and roll
 
 - Game tables (road events, market shocks, town tables) are roll tables in `tables/`. CI validates them and computes their exact odds with roll 2.1.1, pinned, through roll's library API (its 2.1.1 command line reads only the older loot format). Node is CI-only, never in the game.
-- `league-core` reads the same JSON in Rust. Every draw's value comes from `league-dice`, never from a local RNG.
+- `league-core` reads the same JSON in Rust. Every draw's value comes from `league-core`'s turn beacon, never from a local RNG.
 - Do not write the roll conformance test, or depend on anything newer than roll 2.1.1, until the conformance fixture ships. Whether roll becomes a Rust crate (roll 3.0.0) is decided after M2.
 - roll changes go to R&D as tickets (`rnd-local/projects/antigravity/tickets/`), never straight to the roll repo. Credit roll (MIT, same org) in the notes wherever its code or design is used.
 
@@ -43,7 +43,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 
 1. **Scaffold** (this PR): workspace, crates with types and stubs, CI, Atlas map.
 2. **M2, Testnet spike:** prove `xrpl-rust` (pinned exactly) on Testnet: issuer, trust line, offer, check, escrow with a crypto-condition and its finish, clawback. A receipt. Decides the library.
-3. **M3, dice live:** commit and reveal through escrows plus a verified drand round, including the "did not reveal" path. A receipt.
+3. **M3, commit and reveal live:** commit and reveal through escrows in `league-ledger`, plus a verified drand round in `league-core`, including the "did not reveal" path. A receipt.
 4. **M1, rules:** `league-core`, only after the design review has been ruled on.
 5. **M4:** one table of three people on Testnet, with a receipt.
 
@@ -54,7 +54,6 @@ The client is a ratatui and crossterm terminal client, `league-tui` (decided 202
 | Crate | Holds |
 | --- | --- |
 | `league-core` | Game rules. Pure, no I/O, deterministic from a seed. Types only for now. |
-| `league-dice` | Commit and reveal through hash-locked escrows, the roll, the drand round rule. Stubs for now. |
 | `league-ledger` | Testnet access. The network guard and endpoints now; transactions in M2. |
 | `league-season` | Announced resets, the ledger-went-backwards check; the season record later. |
 | `league-tui` | The terminal client: title screen and key handling for now. |

@@ -1,8 +1,8 @@
-//! Merchant League seasons.
+//! Merchant League seasons and XRPL Testnet reset detection.
 //!
-//! A season runs from one reset of the XRPL Testnet to the next: a reset
-//! deletes every account and transaction, so it ends the season. A reset is
-//! known in one of two ways, ported from xrpl-lab's `resets.py`:
+//! A season is 24 to 32 turns (`docs/design-v2.md` §6.2, Director Decision 3).
+//! This crate holds the Testnet's announced reset dates and a check that spots
+//! an unannounced reset, ported from `xrpl-lab`'s `resets.py`:
 //!
 //! 1. **Announced.** The network's operators publish the day. The notice gives
 //!    a day with no hour or timezone, so the reset may begin as soon as that
