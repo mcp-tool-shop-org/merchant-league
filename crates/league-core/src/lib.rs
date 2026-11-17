@@ -54,8 +54,10 @@ pub use predicates::{
     stranded_stock_at_close, upkeep_and_debt,
 };
 pub use replay::{
-    LoggedTurn, ReplayBeaconMode, ReplayOutcome, ReplayRecord, SeasonReplayLog,
-    attach_state_predicates, replay_season, replay_season_with_state_predicates,
+    LoggedTurn, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError, ReplayOutcome,
+    ReplayRecord, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, SealedReplaySeed, SeasonReplayLog,
+    attach_state_predicates, layout_seed_digest, replay_season,
+    replay_season_with_state_predicates,
 };
 pub use scoring::{
     FinalScoreboard, FundamentalParities, SeatScoreEntry, compute_final_marked_net_asset_equity,

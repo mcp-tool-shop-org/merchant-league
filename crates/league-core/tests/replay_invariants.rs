@@ -19,9 +19,10 @@ use league_core::{
     MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY,
     MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide, OrderReveal,
     PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview, ProjectRecipe,
-    RegentDoctrine, ReplayBeaconMode, RevealSalt, ScheduledShockSpec, SealedEvalSeed,
+    RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError, ReplayRecord,
+    RevealSalt, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, ScheduledShockSpec, SealedEvalSeed,
     SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, ShockKind, SwapPreviewOutcome, TableId,
-    TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units,
+    TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, attach_state_predicates,
     bonus_equity_for_completion_bps, break_tie_with_beacon, break_tie_with_turn_beacon,
     ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity, checked_mul_units_parity,
     compute_final_scoreboard, compute_mandate_commitment, compute_net_asset_equity,
@@ -29,9 +30,9 @@ use league_core::{
     convert_mandate_points_to_equity, deal_graded_mandates, deal_graded_mandates_with_entropy,
     default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
     drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
-    mul_units_parity, replay_season, scale_bps_signed, town_import_cost_cred,
-    verify_drand_quicknet_beacon, verify_order_reveal, verify_preimage_condition,
-    verify_sealed_mandate_deal, width_independent_index,
+    layout_seed_digest, mul_units_parity, replay_season, replay_season_with_state_predicates,
+    scale_bps_signed, town_import_cost_cred, verify_drand_quicknet_beacon, verify_order_reveal,
+    verify_preimage_condition, verify_sealed_mandate_deal, width_independent_index,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -389,7 +390,7 @@ fn run_scripted_full_season(
     let log = SeasonReplayLog {
         spec,
         mode: TableMode::Eval,
-        seed,
+        seed: must_ok(ReplayLayoutSeed::try_clear(seed), "clear seed"),
         beacon_mode: ReplayBeaconMode::EvalVrf,
         eval_vrf_pubkey: eval_pk,
         sealed_mandate_deal: sealed_deal,
@@ -2748,7 +2749,7 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
         replay_season(&SeasonReplayLog {
             spec: spec2,
             mode: TableMode::Eval,
-            seed: 2,
+            seed: must_ok(ReplayLayoutSeed::try_clear(2), "clear seed"),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk2,
             sealed_mandate_deal: dealt2,
@@ -3257,7 +3258,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
     let log = SeasonReplayLog {
         spec,
         mode: TableMode::Eval,
-        seed,
+        seed: must_ok(ReplayLayoutSeed::try_clear(seed), "clear seed"),
         beacon_mode: ReplayBeaconMode::EvalVrf,
         eval_vrf_pubkey: eval_pk,
         sealed_mandate_deal: sealed_deal.clone(),
@@ -3345,7 +3346,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
     let drand_ok = SeasonReplayLog {
         spec: spec_drand,
         mode: TableMode::Game,
-        seed: 0,
+        seed: must_ok(ReplayLayoutSeed::try_clear(0), "clear seed"),
         beacon_mode: ReplayBeaconMode::ExternalDrand,
         eval_vrf_pubkey: None,
         sealed_mandate_deal: deal_drand,
@@ -3676,7 +3677,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         replay_season(&SeasonReplayLog {
             spec,
             mode: TableMode::Eval,
-            seed: 3,
+            seed: must_ok(ReplayLayoutSeed::try_clear(3), "clear seed"),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk_a,
             sealed_mandate_deal: deal_b1_1a,
@@ -3864,7 +3865,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         replay_season(&SeasonReplayLog {
             spec: spec_p,
             mode: TableMode::Eval,
-            seed: 7,
+            seed: must_ok(ReplayLayoutSeed::try_clear(7), "clear seed"),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk_b,
             sealed_mandate_deal: deal_b1_1b,
@@ -4539,7 +4540,7 @@ fn m3_mandates_use_os_csprng_and_resist_seed_bruteforce_probe_p9() {
     let valid_log = SeasonReplayLog {
         spec: spec_a,
         mode: TableMode::Eval,
-        seed: replay_seed,
+        seed: must_ok(ReplayLayoutSeed::try_clear(replay_seed), "clear seed"),
         beacon_mode: ReplayBeaconMode::EvalVrf,
         eval_vrf_pubkey: eval_pk_a,
         sealed_mandate_deal: deal_a,
@@ -4678,7 +4679,7 @@ fn f1_f2_scoring_refuses_undealt_card_and_reveal_succeeds_without_turn1_echo() {
         replay_season(&SeasonReplayLog {
             spec,
             mode: TableMode::Eval,
-            seed: 9,
+            seed: must_ok(ReplayLayoutSeed::try_clear(9), "clear seed"),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk_f1,
             sealed_mandate_deal: sealed_deal,
@@ -5178,7 +5179,7 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let log = SeasonReplayLog {
         spec,
         mode: TableMode::Eval,
-        seed,
+        seed: must_ok(ReplayLayoutSeed::try_clear(seed), "clear seed"),
         beacon_mode: ReplayBeaconMode::EvalVrf,
         eval_vrf_pubkey: eval_pk_rich,
         sealed_mandate_deal: sealed_deal,
@@ -5338,7 +5339,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         let log = SeasonReplayLog {
             spec,
             mode: TableMode::Eval,
-            seed: 5,
+            seed: must_ok(ReplayLayoutSeed::try_clear(5), "clear seed"),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: Some(eval_pk),
             sealed_mandate_deal: deal,
@@ -5451,7 +5452,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
     let coupled_log = SeasonReplayLog {
         spec: coupled_spec,
         mode: TableMode::Eval,
-        seed: beacon_seed,
+        seed: must_ok(ReplayLayoutSeed::try_clear(beacon_seed), "clear seed"),
         beacon_mode: ReplayBeaconMode::EvalVrf,
         eval_vrf_pubkey: coupled_pk,
         sealed_mandate_deal: coupled_deal,
@@ -5575,7 +5576,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         let log = SeasonReplayLog {
             spec,
             mode: TableMode::Game,
-            seed: 0,
+            seed: must_ok(ReplayLayoutSeed::try_clear(0), "clear seed"),
             beacon_mode: ReplayBeaconMode::ExternalDrand,
             eval_vrf_pubkey: None,
             sealed_mandate_deal: deal,
@@ -5608,7 +5609,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
     // 4. Refuse Game-mode logs carrying seeded beacons or unbound beacons.
     let mut game_seeded_mode = game_log_a.clone();
     game_seeded_mode.beacon_mode = ReplayBeaconMode::SeedDerived;
-    game_seeded_mode.seed = beacon_seed;
+    game_seeded_mode.seed = must_ok(ReplayLayoutSeed::try_clear(beacon_seed), "clear seed");
     game_seeded_mode.turns[0].turn_beacon = derive_turn_beacon(beacon_seed, tid_game, Turn(1));
     assert!(matches!(
         replay_season(&game_seeded_mode),
@@ -6564,4 +6565,1018 @@ fn c4_batch_clearing_beacon_tie_break_on_oversubscribed_level() {
         "beacon tie-break across seeds must select both Seat 1 and Seat 2"
     );
     assert_eq!(IDLE_MISS_TAKEOVER_TURNS, 3);
+}
+
+const SEALED_TEST_VALUES: [u64; 3] = [1_u64 << 63, u64::MAX, (1_u64 << 63) | 42];
+
+fn assert_seed_absent(haystack: &str, seed: u64, context: &str) {
+    let dec = seed.to_string();
+    let be_hex_padded = format!("{seed:016x}");
+    let be_hex_compact = format!("{seed:x}");
+    let be_hex_upper = format!("{seed:016X}");
+    let be_hex_compact_upper = format!("{seed:X}");
+    let le_hex_lower: String = seed
+        .to_le_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let le_hex_upper = le_hex_lower.to_ascii_uppercase();
+    for needle in [
+        dec,
+        be_hex_padded,
+        be_hex_compact,
+        be_hex_upper,
+        be_hex_compact_upper,
+        le_hex_lower,
+        le_hex_upper,
+    ] {
+        assert!(
+            !haystack.contains(&needle),
+            "{context}: unexpected clear layout-seed representation {needle:?} leaked in output"
+        );
+    }
+}
+
+fn clean_32(tag: u8) -> [u8; 32] {
+    std::array::from_fn(|i| {
+        0x21_u8
+            .wrapping_add(tag.wrapping_mul(13))
+            .wrapping_add((i as u8).wrapping_mul(7))
+    })
+}
+
+fn clean_drand_sig(tag: u8, turn: u8) -> Vec<u8> {
+    (0..DRAND_QUICKNET_SIGNATURE_BYTES)
+        .map(|i| {
+            0x35_u8
+                .wrapping_add(tag.wrapping_mul(11))
+                .wrapping_add(turn.wrapping_mul(5))
+                .wrapping_add((i as u8).wrapping_mul(3))
+        })
+        .collect()
+}
+
+fn coupled_layout_seed_candidates(seed: u64) -> [([u8; 32], &'static str); 2] {
+    use sha2::{Digest as _, Sha256};
+    let mut padded = [0_u8; 32];
+    padded[..8].copy_from_slice(&seed.to_le_bytes());
+    let hashed: [u8; 32] = Sha256::digest(seed.to_le_bytes()).into();
+    [(padded, "padded_le_bytes"), (hashed, "sha256_le_bytes")]
+}
+
+fn must_err<T: std::fmt::Debug, E>(res: Result<T, E>, ctx: &str) -> E {
+    match res {
+        Err(err) => err,
+        Ok(val) => panic!("{ctx}: expected Err, got Ok({val:?})"),
+    }
+}
+
+struct SeasonParts {
+    spec: TableSpec,
+    deal: league_core::SealedMandateDeal,
+    mandate_commits: Vec<Option<CommitmentHash>>,
+    turns: Vec<LoggedTurn>,
+    mandate_reveals: Vec<Option<MandateReveal>>,
+    board: FinalScoreboard,
+    digests: Vec<[u8; 32]>,
+}
+
+fn run_eval_season_parts(
+    table_id: TableId,
+    layout_seed: u64,
+    deal_seed: [u8; 32],
+    eval_bytes: [u8; 32],
+    salt_base: u8,
+) -> SeasonParts {
+    let salts: Vec<RevealSalt> = (0..4_u8)
+        .map(|s| RevealSalt(clean_32(salt_base.wrapping_add(s))))
+        .collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes(eval_bytes), "eval_seed");
+    let (spec, deal, eval_seed) = must_ok(
+        TableSpec::standard_eval_chiral_ring_with_explicit_setup(
+            table_id,
+            4,
+            layout_seed,
+            deal_seed,
+            &salts,
+            eval_seed,
+        ),
+        "standard_eval_chiral_ring_with_explicit_setup",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec.clone()), "TurnEngine::new eval");
+    let mut mandate_commits = vec![None; 4];
+    let mut mandate_reveals = vec![None; 4];
+    for s in 0..4_u8 {
+        let idx = usize::from(s);
+        let commit = spec.dealt_mandate_commits[idx];
+        must_ok(
+            engine.submit_mandate_commitment(Seat(s), commit),
+            "submit_mandate_commitment",
+        );
+        mandate_commits[idx] = Some(commit);
+        mandate_reveals[idx] = Some(deal.seat_reveals[idx].clone());
+    }
+    let mut turns = Vec::new();
+    let mut digests = Vec::new();
+    for t in 1..=HARD_TURN_CAP {
+        if engine.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) = commit_and_reveal_all(
+            &mut engine,
+            table_id,
+            t,
+            vec![SealedOrderBundle::default(); 4],
+        );
+        let (beacon, proof) = must_ok(eval_seed.prove_turn(table_id, Turn(t)), "prove_turn");
+        let receipt = must_ok(
+            engine.sweep_turn_with_eval_vrf(&proof),
+            "sweep_turn_with_eval_vrf",
+        );
+        digests.push(receipt.post_state_digest);
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: None,
+            drand_signature: None,
+            eval_vrf_proof: Some(proof.to_vec()),
+            drawn_shocks: receipt.newly_drawn_shocks.clone(),
+        });
+        if receipt.season_closed {
+            break;
+        }
+    }
+    assert_eq!(engine.state().phase, TurnPhase::AwaitingMandateReveal);
+    for (s_idx, rev_opt) in mandate_reveals.iter().enumerate() {
+        if let Some(rev) = rev_opt {
+            must_ok(
+                engine.submit_mandate_reveal(Seat(s_idx as u8), rev.clone()),
+                "submit_mandate_reveal",
+            );
+        }
+    }
+    let board = must_ok(engine.finalize_season(), "finalize_season eval");
+    SeasonParts {
+        spec,
+        deal,
+        mandate_commits,
+        turns,
+        mandate_reveals,
+        board,
+        digests,
+    }
+}
+
+fn run_game_season_parts(table_id: TableId, layout_seed: u64, sig_tag: u8) -> SeasonParts {
+    let schedule = DrandSchedule {
+        turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
+        turn_period_secs: 60,
+    };
+    let (spec, deal) = must_ok(
+        TableSpec::standard_game_chiral_ring_with_mandates(table_id, 4, layout_seed, schedule),
+        "standard_game_chiral_ring_with_mandates",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec.clone()), "TurnEngine::new game");
+    let mut mandate_commits = vec![None; 4];
+    let mut mandate_reveals = vec![None; 4];
+    for s in 0..4_u8 {
+        let idx = usize::from(s);
+        let commit = spec.dealt_mandate_commits[idx];
+        must_ok(
+            engine.submit_mandate_commitment(Seat(s), commit),
+            "submit_mandate_commitment",
+        );
+        mandate_commits[idx] = Some(commit);
+        mandate_reveals[idx] = Some(deal.seat_reveals[idx].clone());
+    }
+    let mut turns = Vec::new();
+    let mut digests = Vec::new();
+    for t in 1..=HARD_TURN_CAP {
+        if engine.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let (commitments, reveals) = commit_and_reveal_all(
+            &mut engine,
+            table_id,
+            t,
+            vec![SealedOrderBundle::default(); 4],
+        );
+        let round = must_ok(schedule.expected_round_for_turn(Turn(t)), "expected_round");
+        let sig = clean_drand_sig(sig_tag, t);
+        let beacon = must_ok(derive_drand_beacon(&sig), "derive_drand_beacon");
+        let receipt = must_ok(
+            engine.sweep_turn_with_drand(round, &sig),
+            "sweep_turn_with_drand",
+        );
+        digests.push(receipt.post_state_digest);
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: Vec::new(),
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: Some(round),
+            drand_signature: Some(sig),
+            eval_vrf_proof: None,
+            drawn_shocks: receipt.newly_drawn_shocks.clone(),
+        });
+        if receipt.season_closed {
+            break;
+        }
+    }
+    assert_eq!(engine.state().phase, TurnPhase::AwaitingMandateReveal);
+    for (s_idx, rev_opt) in mandate_reveals.iter().enumerate() {
+        if let Some(rev) = rev_opt {
+            must_ok(
+                engine.submit_mandate_reveal(Seat(s_idx as u8), rev.clone()),
+                "submit_mandate_reveal",
+            );
+        }
+    }
+    let board = must_ok(engine.finalize_season(), "finalize_season game");
+    SeasonParts {
+        spec,
+        deal,
+        mandate_commits,
+        turns,
+        mandate_reveals,
+        board,
+        digests,
+    }
+}
+
+#[test]
+fn sealed_replay_log_roundtrips_and_omits_clear_seed_dec_and_hex() {
+    assert_eq!(SEALED_LAYOUT_SEED_MIN, 1_u64 << 63);
+    assert_eq!(SEALED_SEED_POOL_NAME, "sealed");
+
+    for (idx, &sealed_val) in SEALED_TEST_VALUES.iter().enumerate() {
+        let base_tag = (idx as u8).wrapping_mul(7).wrapping_add(1);
+        let SeasonParts {
+            spec: spec_e,
+            deal: deal_e,
+            mandate_commits: commits_e,
+            turns: turns_e,
+            mandate_reveals: reveals_e,
+            board: board_e,
+            digests: digests_e,
+        } = run_eval_season_parts(
+            TableId(9_100 + idx as u64),
+            sealed_val,
+            clean_32(base_tag),
+            clean_32(base_tag.wrapping_add(1)),
+            base_tag.wrapping_add(10),
+        );
+        let log_new_sealed = must_ok(
+            SeasonReplayLog::new_sealed(
+                spec_e.clone(),
+                sealed_val,
+                deal_e.clone(),
+                commits_e.clone(),
+                turns_e.clone(),
+                reveals_e.clone(),
+            ),
+            "new_sealed eval",
+        );
+        let log_from_rig = must_ok(
+            SeasonReplayLog::from_rig_seed(
+                spec_e, sealed_val, deal_e, commits_e, turns_e, reveals_e,
+            ),
+            "from_rig_seed sealed eval",
+        );
+        assert_eq!(log_new_sealed, log_from_rig);
+
+        let SeasonParts {
+            spec: spec_g,
+            deal: deal_g,
+            mandate_commits: commits_g,
+            turns: turns_g,
+            mandate_reveals: reveals_g,
+            board: board_g,
+            digests: digests_g,
+        } = run_game_season_parts(
+            TableId(9_200 + idx as u64),
+            sealed_val,
+            base_tag.wrapping_add(30),
+        );
+        let log_game = must_ok(
+            SeasonReplayLog::new_sealed(spec_g, sealed_val, deal_g, commits_g, turns_g, reveals_g),
+            "new_sealed game",
+        );
+
+        let expected_digest = layout_seed_digest(sealed_val);
+        for (kind, log, live_board, live_digests) in [
+            ("eval", &log_new_sealed, &board_e, &digests_e),
+            ("game", &log_game, &board_g, &digests_g),
+        ] {
+            assert!(log.seed.is_sealed());
+            assert_eq!(log.seed.clear_seed(), None);
+            assert_eq!(log.seed.pool(), Some(SEALED_SEED_POOL_NAME));
+            assert_eq!(log.seed.sealed_digest(), Some(expected_digest.as_str()));
+            assert_eq!(
+                log.seed.independence_checked_at_write_unverified(),
+                Some(true)
+            );
+            let sealed_inner = must_ok(log.seed.sealed().ok_or("sealed payload"), "sealed()");
+            assert_eq!(sealed_inner.pool(), SEALED_SEED_POOL_NAME);
+            assert_eq!(sealed_inner.digest(), expected_digest);
+            assert!(sealed_inner.independence_checked_at_write_unverified());
+
+            let json_str = must_ok(serde_json::to_string(log), "serialize sealed log");
+            let json_val: serde_json::Value =
+                must_ok(serde_json::from_str(&json_str), "parse sealed log value");
+            let seed_obj = must_ok(
+                json_val["seed"].as_object().ok_or("seed json object"),
+                "seed object",
+            );
+            assert_eq!(seed_obj.len(), 3);
+            assert_eq!(seed_obj["pool"], SEALED_SEED_POOL_NAME);
+            assert_eq!(seed_obj["digest"], expected_digest);
+            assert_eq!(seed_obj["independence_checked_at_write_unverified"], true);
+
+            let debug_log = format!("{log:?}");
+            let debug_seed = format!("{:?}", log.seed);
+            assert_seed_absent(&json_str, sealed_val, &format!("{kind} log json"));
+            assert_seed_absent(&debug_log, sealed_val, &format!("{kind} log debug"));
+            assert_seed_absent(&debug_seed, sealed_val, &format!("{kind} seed debug"));
+
+            let roundtripped: SeasonReplayLog =
+                must_ok(serde_json::from_str(&json_str), "roundtrip sealed log");
+            assert_eq!(&roundtripped, log);
+            let out = must_ok(
+                replay_season(&roundtripped),
+                "replay roundtripped sealed log",
+            );
+            assert_eq!(&out.scoreboard, live_board);
+            assert_eq!(&out.state_digests, live_digests);
+
+            let record = must_ok(
+                attach_state_predicates(log),
+                "attach_state_predicates sealed",
+            );
+            let record_json = must_ok(serde_json::to_string(&record), "serialize ReplayRecord");
+            let debug_record = format!("{record:?}");
+            assert_seed_absent(&record_json, sealed_val, &format!("{kind} record json"));
+            assert_seed_absent(&debug_record, sealed_val, &format!("{kind} record debug"));
+            let rt_record = must_ok(
+                ReplayRecord::from_json_slice(record_json.as_bytes()),
+                "ReplayRecord::from_json_slice sealed",
+            );
+            assert_eq!(rt_record, record);
+            let (out_with_pred, _) = must_ok(
+                replay_season_with_state_predicates(&rt_record.log),
+                "replay_season_with_state_predicates sealed",
+            );
+            assert_eq!(&out_with_pred, &out);
+        }
+    }
+}
+
+#[test]
+fn deserializing_numeric_sealed_seed_or_malformed_digest_is_refused_by_name() {
+    let max_clear = SEALED_LAYOUT_SEED_MIN - 1;
+    assert_eq!(max_clear, (1_u64 << 63) - 1);
+
+    let clear_boundary = must_ok(ReplayLayoutSeed::try_clear(max_clear), "try_clear boundary");
+    assert_eq!(clear_boundary.clear_seed(), Some(max_clear));
+    assert!(!clear_boundary.is_sealed());
+    assert_eq!(
+        clear_boundary.independence_checked_at_write_unverified(),
+        None
+    );
+    assert_eq!(
+        must_ok(ReplayLayoutSeed::try_from(max_clear), "try_from boundary"),
+        clear_boundary
+    );
+    let boundary_json = must_ok(serde_json::to_string(&clear_boundary), "serialize boundary");
+    assert_eq!(boundary_json, max_clear.to_string());
+    assert_eq!(
+        must_ok(
+            serde_json::from_str::<ReplayLayoutSeed>(&boundary_json),
+            "deserialize boundary"
+        ),
+        clear_boundary
+    );
+
+    let SeasonParts {
+        spec: spec_b,
+        deal: deal_b,
+        mandate_commits: commits_b,
+        turns: turns_b,
+        mandate_reveals: reveals_b,
+        board: board_b,
+        digests: _,
+    } = run_eval_season_parts(TableId(9_300), max_clear, clean_32(41), clean_32(42), 50);
+    let boundary_log = must_ok(
+        SeasonReplayLog::from_rig_seed(spec_b, max_clear, deal_b, commits_b, turns_b, reveals_b),
+        "from_rig_seed max_clear",
+    );
+    assert_eq!(boundary_log.seed.clear_seed(), Some(max_clear));
+    assert_eq!(
+        must_ok(replay_season(&boundary_log), "replay boundary").scoreboard,
+        board_b
+    );
+
+    let base_clear_json: serde_json::Value = must_ok(
+        serde_json::from_slice(&must_ok(
+            serde_json::to_vec(&boundary_log),
+            "serialize boundary_log",
+        )),
+        "value boundary_log",
+    );
+
+    for &sealed_val in &SEALED_TEST_VALUES {
+        let expected_digest = layout_seed_digest(sealed_val);
+
+        let err_clear = must_err(
+            ReplayLayoutSeed::try_clear(sealed_val),
+            "sealed-range u64 must be refused in try_clear",
+        );
+        assert_eq!(
+            err_clear,
+            ReplayLayoutSeedError::SealedSeedInClear {
+                seed_digest: expected_digest.clone()
+            }
+        );
+        let msg_clear = err_clear.to_string();
+        assert!(msg_clear.contains("SEALED_SEED_IN_CLEAR"));
+        assert!(msg_clear.contains(&expected_digest));
+        assert_seed_absent(&msg_clear, sealed_val, "try_clear Display");
+        assert_seed_absent(&format!("{err_clear:?}"), sealed_val, "try_clear Debug");
+
+        let err_try_from = must_err(
+            ReplayLayoutSeed::try_from(sealed_val),
+            "sealed-range u64 must be refused in TryFrom",
+        );
+        assert!(err_try_from.to_string().contains("SEALED_SEED_IN_CLEAR"));
+        assert_seed_absent(&err_try_from.to_string(), sealed_val, "TryFrom Display");
+
+        let err_de_seed = must_err(
+            serde_json::from_str::<ReplayLayoutSeed>(&sealed_val.to_string()),
+            "numeric sealed seed JSON must fail deserialization",
+        );
+        let msg_de_seed = err_de_seed.to_string();
+        assert!(msg_de_seed.contains("SEALED_SEED_IN_CLEAR"));
+        assert_seed_absent(&msg_de_seed, sealed_val, "ReplayLayoutSeed JSON err");
+
+        let mut bad_log_val = base_clear_json.clone();
+        bad_log_val["seed"] = serde_json::Value::Number(serde_json::Number::from(sealed_val));
+        let bad_log_bytes = must_ok(serde_json::to_vec(&bad_log_val), "bad_log_val bytes");
+        let err_de_log = must_err(
+            serde_json::from_slice::<SeasonReplayLog>(&bad_log_bytes),
+            "SeasonReplayLog with numeric sealed seed must fail",
+        );
+        assert!(err_de_log.to_string().contains("SEALED_SEED_IN_CLEAR"));
+        assert_seed_absent(
+            &err_de_log.to_string(),
+            sealed_val,
+            "SeasonReplayLog JSON err",
+        );
+
+        let err_rec = must_err(
+            ReplayRecord::from_json_slice(&bad_log_bytes),
+            "ReplayRecord with numeric sealed seed must fail",
+        );
+        let err_rec_str = err_rec.to_string();
+        assert!(err_rec_str.contains("SEALED_SEED_IN_CLEAR"));
+        assert_seed_absent(&err_rec_str, sealed_val, "ReplayRecord JSON err");
+    }
+
+    // Passing a non-sealed seed (< 2^63) to new_sealed is refused by name.
+    for non_sealed in [0_u64, 42, max_clear] {
+        let err_non_sealed = must_err(
+            SeasonReplayLog::new_sealed(
+                boundary_log.spec.clone(),
+                non_sealed,
+                boundary_log.sealed_mandate_deal.clone(),
+                boundary_log.mandate_commits.clone(),
+                boundary_log.turns.clone(),
+                boundary_log.mandate_reveals.clone(),
+            ),
+            "new_sealed must reject < 2^63 seed",
+        );
+        assert!(
+            matches!(&err_non_sealed, EngineError::InvalidConfig(m) if m.contains("NON_SEALED_SEED_IN_SEALED")),
+            "expected NON_SEALED_SEED_IN_SEALED, got {err_non_sealed:?}"
+        );
+    }
+
+    let valid_digest = layout_seed_digest(SEALED_TEST_VALUES[0]);
+    for bad_pool in ["dev", "probe", "held_out", "unassigned", "Sealed", ""] {
+        let raw = serde_json::json!({
+            "pool": bad_pool,
+            "digest": valid_digest,
+            "independence_checked_at_write_unverified": true,
+        });
+        let err_seed = must_err(
+            serde_json::from_value::<ReplayLayoutSeed>(raw.clone()),
+            "invalid pool must fail",
+        );
+        assert!(
+            err_seed.to_string().contains("INVALID_SEALED_SEED_POOL"),
+            "pool={bad_pool:?}: got {err_seed}"
+        );
+        let mut bad_log_val = base_clear_json.clone();
+        bad_log_val["seed"] = raw;
+        let bad_bytes = must_ok(serde_json::to_vec(&bad_log_val), "bad pool log bytes");
+        let err_log = must_err(
+            serde_json::from_slice::<SeasonReplayLog>(&bad_bytes),
+            "log with invalid pool must fail",
+        );
+        assert!(err_log.to_string().contains("INVALID_SEALED_SEED_POOL"));
+        let err_rec = must_err(
+            ReplayRecord::from_json_slice(&bad_bytes),
+            "record with invalid pool must fail",
+        );
+        assert!(err_rec.to_string().contains("INVALID_SEALED_SEED_POOL"));
+    }
+
+    let bad_digests: Vec<serde_json::Value> = vec![
+        serde_json::json!(&valid_digest[..63]),
+        serde_json::json!(format!("{valid_digest}0")),
+        serde_json::json!(valid_digest.to_ascii_uppercase()),
+        serde_json::json!("g".repeat(64)),
+        serde_json::json!(""),
+        serde_json::json!(12345),
+    ];
+    for bad_digest in bad_digests {
+        let raw = serde_json::json!({
+            "pool": "sealed",
+            "digest": bad_digest,
+            "independence_checked_at_write_unverified": true,
+        });
+        let err_seed = must_err(
+            serde_json::from_value::<ReplayLayoutSeed>(raw.clone()),
+            "malformed digest must fail",
+        );
+        assert!(
+            err_seed.to_string().contains("INVALID_SEALED_SEED_DIGEST"),
+            "digest={bad_digest}: got {err_seed}"
+        );
+        let mut bad_log_val = base_clear_json.clone();
+        bad_log_val["seed"] = raw;
+        let bad_bytes = must_ok(serde_json::to_vec(&bad_log_val), "bad digest bytes");
+        let err_log = must_err(
+            serde_json::from_slice::<SeasonReplayLog>(&bad_bytes),
+            "log with malformed digest must fail",
+        );
+        assert!(err_log.to_string().contains("INVALID_SEALED_SEED_DIGEST"));
+    }
+
+    let missing_digest = serde_json::json!({
+        "pool": "sealed",
+        "independence_checked_at_write_unverified": true,
+    });
+    assert!(
+        must_err(
+            serde_json::from_value::<ReplayLayoutSeed>(missing_digest),
+            "missing digest must fail",
+        )
+        .to_string()
+        .contains("INVALID_SEALED_SEED_DIGEST")
+    );
+
+    let missing_pool = serde_json::json!({
+        "digest": valid_digest,
+        "independence_checked_at_write_unverified": true,
+    });
+    assert!(serde_json::from_value::<ReplayLayoutSeed>(missing_pool).is_err());
+
+    let missing_claim = serde_json::json!({
+        "pool": "sealed",
+        "digest": valid_digest,
+    });
+    assert!(serde_json::from_value::<ReplayLayoutSeed>(missing_claim).is_err());
+
+    let extra_field = serde_json::json!({
+        "pool": "sealed",
+        "digest": valid_digest,
+        "independence_checked_at_write_unverified": true,
+        "clear_seed": 42,
+    });
+    assert!(serde_json::from_value::<ReplayLayoutSeed>(extra_field).is_err());
+}
+
+#[test]
+fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
+    use sha2::{Digest as _, Sha256};
+
+    #[derive(serde::Serialize)]
+    struct MainSeasonReplayLog<'a> {
+        spec: &'a TableSpec,
+        mode: TableMode,
+        seed: u64,
+        beacon_mode: ReplayBeaconMode,
+        eval_vrf_pubkey: Option<String>,
+        sealed_mandate_deal: &'a league_core::SealedMandateDeal,
+        mandate_commits: &'a [Option<CommitmentHash>],
+        turns: &'a [LoggedTurn],
+        mandate_reveals: &'a [Option<MandateReveal>],
+    }
+
+    #[derive(serde::Serialize)]
+    struct MainReplayRecord<'a, S: serde::Serialize> {
+        #[serde(flatten)]
+        log: MainSeasonReplayLog<'a>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state_predicates: Option<&'a S>,
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    // Covers the clear scripted fixtures `(4, 11)`, `(5, 29)`, `(6, 73)` plus a 4-seat
+    // `SeedDerived`-free rich fixture `(4, 42)` also constructed via `from_rig_seed`.
+    for &(seats, clear_seed) in &[(4_u8, 11_u64), (5, 29), (6, 73), (4, 42)] {
+        let (log, live_board, live_digests) = run_scripted_full_season(seats, clear_seed);
+        assert_ne!(log.beacon_mode, ReplayBeaconMode::SeedDerived);
+        assert_eq!(log.seed.clear_seed(), Some(clear_seed));
+        assert!(!log.seed.is_sealed());
+        assert_eq!(log.seed.independence_checked_at_write_unverified(), None);
+
+        if (seats, clear_seed) == (4, 42) {
+            let from_rig = must_ok(
+                SeasonReplayLog::from_rig_seed(
+                    log.spec.clone(),
+                    clear_seed,
+                    log.sealed_mandate_deal.clone(),
+                    log.mandate_commits.clone(),
+                    log.turns.clone(),
+                    log.mandate_reveals.clone(),
+                ),
+                "from_rig_seed clear (4, 42)",
+            );
+            assert_eq!(from_rig, log);
+        }
+
+        let eval_pk_hex = log
+            .eval_vrf_pubkey
+            .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let main_log = MainSeasonReplayLog {
+            spec: &log.spec,
+            mode: log.mode,
+            seed: clear_seed,
+            beacon_mode: log.beacon_mode,
+            eval_vrf_pubkey: eval_pk_hex,
+            sealed_mandate_deal: &log.sealed_mandate_deal,
+            mandate_commits: &log.mandate_commits,
+            turns: &log.turns,
+            mandate_reveals: &log.mandate_reveals,
+        };
+
+        let main_bytes = must_ok(serde_json::to_vec(&main_log), "serialize main_log");
+        let new_bytes = must_ok(serde_json::to_vec(&log), "serialize log");
+        assert_eq!(
+            new_bytes, main_bytes,
+            "clear ({seats}, {clear_seed}) bare SeasonReplayLog JSON drifted from main"
+        );
+
+        let val: serde_json::Value = must_ok(serde_json::from_slice(&new_bytes), "parse log json");
+        assert_eq!(val["seed"], serde_json::json!(clear_seed));
+
+        let bare_record = ReplayRecord {
+            log: log.clone(),
+            state_predicates: None,
+        };
+        let bare_record_bytes = must_ok(serde_json::to_vec(&bare_record), "bare record bytes");
+        assert_eq!(
+            bare_record_bytes, main_bytes,
+            "clear ({seats}, {clear_seed}) bare ReplayRecord drifted from main"
+        );
+
+        let rt_from_main: SeasonReplayLog =
+            must_ok(serde_json::from_slice(&main_bytes), "parse main_bytes");
+        assert_eq!(rt_from_main, log);
+        let rt_rec_from_main = must_ok(
+            ReplayRecord::from_json_slice(&main_bytes),
+            "ReplayRecord::from_json_slice(main_bytes)",
+        );
+        assert_eq!(rt_rec_from_main, bare_record);
+
+        let out = must_ok(replay_season(&rt_from_main), "replay clear log");
+        assert_eq!(out.scoreboard, live_board);
+        assert_eq!(out.state_digests, live_digests);
+
+        let (out_with_pred, section) = must_ok(
+            replay_season_with_state_predicates(&log),
+            "replay_season_with_state_predicates clear",
+        );
+        assert_eq!(out_with_pred, out);
+
+        let attached_record = must_ok(attach_state_predicates(&log), "attach_state_predicates");
+        let attached_bytes = must_ok(serde_json::to_vec(&attached_record), "attached_bytes");
+        let main_record = MainReplayRecord {
+            log: main_log,
+            state_predicates: Some(&section),
+        };
+        let main_record_bytes = must_ok(serde_json::to_vec(&main_record), "main_record_bytes");
+        assert_eq!(
+            attached_bytes, main_record_bytes,
+            "clear ({seats}, {clear_seed}) ReplayRecord with predicates drifted from main"
+        );
+
+        let out_bytes = must_ok(serde_json::to_vec(&out), "serialize ReplayOutcome");
+        println!(
+            "byte-identical non-sealed ({seats}, {clear_seed}): log_sha256={} outcome_sha256={}",
+            sha256_hex(&new_bytes),
+            sha256_hex(&out_bytes)
+        );
+    }
+}
+
+#[test]
+fn deal_seed_and_vrf_independence_checked_on_both_clear_and_sealed_paths() {
+    let clear_seed = 42_u64;
+    for (cand_idx, (coupled_bytes, label)) in coupled_layout_seed_candidates(clear_seed)
+        .into_iter()
+        .enumerate()
+    {
+        // Clear path 1: coupled deal_seed is caught at write time (`from_rig_seed`) AND replay time.
+        let SeasonParts {
+            spec: spec_cd,
+            deal: deal_cd,
+            mandate_commits: commits_cd,
+            turns: turns_cd,
+            mandate_reveals: reveals_cd,
+            board: _,
+            digests: _,
+        } = run_eval_season_parts(
+            TableId(9_400 + cand_idx as u64),
+            clear_seed,
+            coupled_bytes,
+            clean_32(60 + cand_idx as u8),
+            70 + cand_idx as u8,
+        );
+        let err_write_cd = must_err(
+            SeasonReplayLog::from_rig_seed(
+                spec_cd.clone(),
+                clear_seed,
+                deal_cd.clone(),
+                commits_cd.clone(),
+                turns_cd.clone(),
+                reveals_cd.clone(),
+            ),
+            "from_rig_seed must reject clear coupled deal_seed",
+        );
+        assert!(
+            matches!(&err_write_cd, EngineError::InvalidConfig(m) if m.contains("deal_seed must be independent")),
+            "clear coupled deal_seed ({label}) from_rig_seed got {err_write_cd:?}"
+        );
+        let direct_clear_cd = SeasonReplayLog {
+            spec: spec_cd,
+            mode: TableMode::Eval,
+            seed: must_ok(ReplayLayoutSeed::try_clear(clear_seed), "clear seed"),
+            beacon_mode: ReplayBeaconMode::EvalVrf,
+            eval_vrf_pubkey: None,
+            sealed_mandate_deal: deal_cd,
+            mandate_commits: commits_cd,
+            turns: turns_cd,
+            mandate_reveals: reveals_cd,
+        };
+        let err_replay_cd = must_err(
+            replay_season(&direct_clear_cd),
+            "replay_season must reject clear coupled deal_seed",
+        );
+        assert!(
+            matches!(&err_replay_cd, EngineError::InvalidConfig(m) if m.contains("deal_seed must be independent")),
+            "clear coupled deal_seed ({label}) replay got {err_replay_cd:?}"
+        );
+
+        // Clear path 2: coupled Eval VRF key is caught at write time AND replay time.
+        let SeasonParts {
+            spec: spec_cv,
+            deal: deal_cv,
+            mandate_commits: commits_cv,
+            turns: turns_cv,
+            mandate_reveals: reveals_cv,
+            board: _,
+            digests: _,
+        } = run_eval_season_parts(
+            TableId(9_410 + cand_idx as u64),
+            clear_seed,
+            clean_32(80 + cand_idx as u8),
+            coupled_bytes,
+            90 + cand_idx as u8,
+        );
+        let eval_pk_cv = spec_cv.eval_vrf_pubkey;
+        let err_write_cv = must_err(
+            SeasonReplayLog::from_rig_seed(
+                spec_cv.clone(),
+                clear_seed,
+                deal_cv.clone(),
+                commits_cv.clone(),
+                turns_cv.clone(),
+                reveals_cv.clone(),
+            ),
+            "from_rig_seed must reject clear coupled Eval VRF key",
+        );
+        assert!(
+            matches!(&err_write_cv, EngineError::InvalidConfig(m) if m.contains("Eval VRF key must be independent")),
+            "clear coupled VRF ({label}) from_rig_seed got {err_write_cv:?}"
+        );
+        let direct_clear_cv = SeasonReplayLog {
+            spec: spec_cv,
+            mode: TableMode::Eval,
+            seed: must_ok(ReplayLayoutSeed::try_clear(clear_seed), "clear seed"),
+            beacon_mode: ReplayBeaconMode::EvalVrf,
+            eval_vrf_pubkey: eval_pk_cv,
+            sealed_mandate_deal: deal_cv,
+            mandate_commits: commits_cv,
+            turns: turns_cv,
+            mandate_reveals: reveals_cv,
+        };
+        let err_replay_cv = must_err(
+            replay_season(&direct_clear_cv),
+            "replay_season must reject clear coupled Eval VRF key",
+        );
+        assert!(
+            matches!(&err_replay_cv, EngineError::InvalidConfig(m) if m.contains("Eval VRF key must be independent")),
+            "clear coupled VRF ({label}) replay got {err_replay_cv:?}"
+        );
+    }
+
+    // Sealed path: checked at write time (`new_sealed` & `from_rig_seed`), never leaks clear value,
+    // and tampering `independence_checked_at_write_unverified` to false is refused at replay time.
+    for (s_idx, &sealed_val) in SEALED_TEST_VALUES.iter().enumerate() {
+        for (cand_idx, (coupled_bytes, label)) in coupled_layout_seed_candidates(sealed_val)
+            .into_iter()
+            .enumerate()
+        {
+            let tag_offset = (s_idx as u8).wrapping_mul(10).wrapping_add(cand_idx as u8);
+            let SeasonParts {
+                spec: spec_sd,
+                deal: deal_sd,
+                mandate_commits: commits_sd,
+                turns: turns_sd,
+                mandate_reveals: reveals_sd,
+                board: _,
+                digests: _,
+            } = run_eval_season_parts(
+                TableId(9_500 + s_idx as u64 * 10 + cand_idx as u64),
+                sealed_val,
+                coupled_bytes,
+                clean_32(110 + tag_offset),
+                120 + tag_offset,
+            );
+            for (ctor_name, res) in [
+                (
+                    "new_sealed",
+                    SeasonReplayLog::new_sealed(
+                        spec_sd.clone(),
+                        sealed_val,
+                        deal_sd.clone(),
+                        commits_sd.clone(),
+                        turns_sd.clone(),
+                        reveals_sd.clone(),
+                    ),
+                ),
+                (
+                    "from_rig_seed",
+                    SeasonReplayLog::from_rig_seed(
+                        spec_sd, sealed_val, deal_sd, commits_sd, turns_sd, reveals_sd,
+                    ),
+                ),
+            ] {
+                let err = must_err(res, "sealed coupled deal_seed must fail");
+                match &err {
+                    EngineError::InvalidConfig(msg) => {
+                        assert!(
+                            msg.contains("SEALED_DEAL_SEED_NOT_INDEPENDENT"),
+                            "{ctor_name} ({label}) unexpected error: {msg}"
+                        );
+                        assert_seed_absent(msg, sealed_val, &format!("{ctor_name} deal error"));
+                    }
+                    other => panic!("{ctor_name} ({label}) expected InvalidConfig, got {other:?}"),
+                }
+            }
+
+            let SeasonParts {
+                spec: spec_sv,
+                deal: deal_sv,
+                mandate_commits: commits_sv,
+                turns: turns_sv,
+                mandate_reveals: reveals_sv,
+                board: _,
+                digests: _,
+            } = run_eval_season_parts(
+                TableId(9_600 + s_idx as u64 * 10 + cand_idx as u64),
+                sealed_val,
+                clean_32(140 + tag_offset),
+                coupled_bytes,
+                150 + tag_offset,
+            );
+            for (ctor_name, res) in [
+                (
+                    "new_sealed",
+                    SeasonReplayLog::new_sealed(
+                        spec_sv.clone(),
+                        sealed_val,
+                        deal_sv.clone(),
+                        commits_sv.clone(),
+                        turns_sv.clone(),
+                        reveals_sv.clone(),
+                    ),
+                ),
+                (
+                    "from_rig_seed",
+                    SeasonReplayLog::from_rig_seed(
+                        spec_sv, sealed_val, deal_sv, commits_sv, turns_sv, reveals_sv,
+                    ),
+                ),
+            ] {
+                let err = must_err(res, "sealed coupled Eval VRF must fail");
+                match &err {
+                    EngineError::InvalidConfig(msg) => {
+                        assert!(
+                            msg.contains("SEALED_EVAL_VRF_NOT_INDEPENDENT"),
+                            "{ctor_name} ({label}) unexpected error: {msg}"
+                        );
+                        assert_seed_absent(msg, sealed_val, &format!("{ctor_name} vrf error"));
+                    }
+                    other => panic!("{ctor_name} ({label}) expected InvalidConfig, got {other:?}"),
+                }
+            }
+        }
+
+        // Independent sealed setup succeeds, records claim `true`, and false claim fails replay.
+        let base_tag = 180_u8.wrapping_add(s_idx as u8 * 4);
+        let SeasonParts {
+            spec: spec_ok,
+            deal: deal_ok,
+            mandate_commits: commits_ok,
+            turns: turns_ok,
+            mandate_reveals: reveals_ok,
+            board: board_ok,
+            digests: digests_ok,
+        } = run_eval_season_parts(
+            TableId(9_700 + s_idx as u64),
+            sealed_val,
+            clean_32(base_tag),
+            clean_32(base_tag + 1),
+            base_tag + 2,
+        );
+        let sealed_ok = must_ok(
+            SeasonReplayLog::new_sealed(
+                spec_ok, sealed_val, deal_ok, commits_ok, turns_ok, reveals_ok,
+            ),
+            "independent new_sealed",
+        );
+        assert_eq!(
+            sealed_ok.seed.independence_checked_at_write_unverified(),
+            Some(true)
+        );
+        let ok_out = must_ok(replay_season(&sealed_ok), "replay independent sealed");
+        assert_eq!(ok_out.scoreboard, board_ok);
+        assert_eq!(ok_out.state_digests, digests_ok);
+
+        let mut tampered_val: serde_json::Value = must_ok(
+            serde_json::from_slice(&must_ok(
+                serde_json::to_vec(&sealed_ok),
+                "serialize sealed_ok",
+            )),
+            "value sealed_ok",
+        );
+        tampered_val["seed"]["independence_checked_at_write_unverified"] =
+            serde_json::Value::Bool(false);
+        let tampered_bytes = must_ok(serde_json::to_vec(&tampered_val), "tampered_bytes");
+        let tampered_log: SeasonReplayLog = must_ok(
+            serde_json::from_slice(&tampered_bytes),
+            "parse tampered claim=false log",
+        );
+        assert_eq!(
+            tampered_log.seed.independence_checked_at_write_unverified(),
+            Some(false)
+        );
+        let err_replay = must_err(
+            replay_season(&tampered_log),
+            "replay_season must reject independence_checked_at_write_unverified=false",
+        );
+        assert!(
+            matches!(&err_replay, EngineError::InvalidConfig(m) if m.contains("SEALED_INDEPENDENCE_UNCHECKED")),
+            "expected SEALED_INDEPENDENCE_UNCHECKED, got {err_replay:?}"
+        );
+        let err_pred = must_err(
+            replay_season_with_state_predicates(&tampered_log),
+            "replay_season_with_state_predicates must reject unchecked sealed log",
+        );
+        assert!(
+            matches!(&err_pred, EngineError::InvalidConfig(m) if m.contains("SEALED_INDEPENDENCE_UNCHECKED")),
+            "expected SEALED_INDEPENDENCE_UNCHECKED with predicates, got {err_pred:?}"
+        );
+        let tampered_rec = must_ok(
+            ReplayRecord::from_json_slice(&tampered_bytes),
+            "ReplayRecord::from_json_slice tampered",
+        );
+        assert!(matches!(
+            replay_season(&tampered_rec.log),
+            Err(EngineError::InvalidConfig(m)) if m.contains("SEALED_INDEPENDENCE_UNCHECKED")
+        ));
+    }
 }

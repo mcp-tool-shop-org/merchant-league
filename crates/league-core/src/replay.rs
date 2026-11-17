@@ -1,9 +1,11 @@
-//! Deterministic Steward replay from initial `TableSpec`, public layout seed, Turn-1 mandate
-//! commitments, per-turn action/commit/reveal logs, and cryptographically verified turn beacons.
+//! Deterministic Steward replay from initial `TableSpec`, public or redacted layout seed,
+//! Turn-1 mandate commitments, per-turn action/commit/reveal logs, and cryptographically verified
+//! turn beacons.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::SerializeStruct};
 use sha2::{Digest, Sha256};
 
 use crate::commit::{
@@ -19,6 +21,393 @@ use crate::predicates::{
 };
 use crate::scoring::FinalScoreboard;
 use crate::types::{EngineError, ScheduledShockSpec, Seat, TableMode, TableSpec, Turn};
+
+/// Inclusive lower bound (`2^63`) of the `sealed` layout-seed pool (`2^63..=2^64 - 1`),
+/// matching `league_gen::SEALED_SEED_MIN`.
+pub const SEALED_LAYOUT_SEED_MIN: u64 = 1_u64 << 63;
+
+/// Canonical pool name recorded in a sealed table's [`SeasonReplayLog`] in place of a clear seed.
+pub const SEALED_SEED_POOL_NAME: &str = "sealed";
+
+/// Computes the lowercase 64-character ASCII hex digest of `seed`'s 8 big-endian bytes
+/// (`SHA-256(seed.to_be_bytes())`).
+///
+/// Both `league-core` replay redaction and `league-gen` (`sealed_seed_sha256`) delegate to this
+/// single function so issue `#58` (switching from an unkeyed 8-byte SHA-256 to a rig-held HMAC key
+/// before any sealed game's record leaves the rig) is a one-place change.
+#[must_use]
+pub fn layout_seed_digest(seed: u64) -> String {
+    hex::encode(Sha256::digest(seed.to_be_bytes()))
+}
+
+/// Validation failure returned when constructing or deserializing a [`ReplayLayoutSeed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayLayoutSeedError {
+    /// A `sealed`-range layout seed (`>= 2^63`) appeared in clear (`SEALED_SEED_IN_CLEAR`).
+    /// Carries only [`layout_seed_digest`], never the clear `u64`.
+    SealedSeedInClear {
+        /// Digest from [`layout_seed_digest`].
+        seed_digest: String,
+    },
+    /// A sealed layout-seed object carried a `pool` other than `"sealed"`
+    /// (`INVALID_SEALED_SEED_POOL`).
+    InvalidSealedPool {
+        /// Rejected `pool` value.
+        pool: String,
+    },
+    /// A sealed layout-seed object had a missing or malformed `digest` (must be 64 lowercase ASCII
+    /// hex characters; `INVALID_SEALED_SEED_DIGEST`).
+    InvalidSealedDigest,
+    /// A non-sealed layout seed (`< 2^63`) was passed to [`SeasonReplayLog::new_sealed`]
+    /// (`NON_SEALED_SEED_IN_SEALED`).
+    NonSealedSeedInSealed {
+        /// Clear non-sealed seed (`< 2^63`).
+        seed: u64,
+    },
+}
+
+impl fmt::Display for ReplayLayoutSeedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SealedSeedInClear { seed_digest } => write!(
+                f,
+                "SEALED_SEED_IN_CLEAR: replay log cannot hold a pool 'sealed' layout seed in clear (digest={seed_digest})"
+            ),
+            Self::InvalidSealedPool { pool } => write!(
+                f,
+                "INVALID_SEALED_SEED_POOL: sealed replay log seed pool must be '{SEALED_SEED_POOL_NAME}', got '{pool}'"
+            ),
+            Self::InvalidSealedDigest => write!(
+                f,
+                "INVALID_SEALED_SEED_DIGEST: sealed replay log seed digest must be 64 lowercase hex characters"
+            ),
+            Self::NonSealedSeedInSealed { seed } => write!(
+                f,
+                "NON_SEALED_SEED_IN_SEALED: layout seed {seed} is below sealed range (>= 2^63)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReplayLayoutSeedError {}
+
+/// Redacted [`SeasonReplayLog`] seed payload written for a `sealed`-pool table (`>= 2^63`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SealedReplaySeed {
+    pool: String,
+    digest: String,
+    /// Whether the deal-seed and Eval-VRF independence checks ran on the rig at write time before
+    /// the layout seed was redacted.
+    ///
+    /// **This is a claim by the log writer, not something [`replay_season`] verifies:** a replayer
+    /// of a sealed log cannot recompute those independence checks, because it does not have the
+    /// clear layout seed. Making this verifiable off-rig belongs to issue `#58`, where a keyed
+    /// commitment to the seed is introduced.
+    independence_checked_at_write_unverified: bool,
+}
+
+impl SealedReplaySeed {
+    /// Returns the seed pool name recorded in the log (`"sealed"`).
+    #[must_use]
+    pub fn pool(&self) -> &str {
+        &self.pool
+    }
+
+    /// Returns the lowercase 64-hex layout-seed digest from [`layout_seed_digest`].
+    #[must_use]
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    /// Returns the log writer's claim that layout-seed independence checks passed before redaction.
+    ///
+    /// **This is a claim by the log writer, not something [`replay_season`] verifies:** a replayer
+    /// of a sealed log cannot recompute those checks, because it does not have the clear seed.
+    /// Checking this independently requires a keyed commitment to the seed (issue `#58`).
+    #[must_use]
+    pub const fn independence_checked_at_write_unverified(&self) -> bool {
+        self.independence_checked_at_write_unverified
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReplayLayoutSeedRepr {
+    Clear(u64),
+    Sealed(SealedReplaySeed),
+}
+
+/// Validated layout-seed field carried in [`SeasonReplayLog::seed`] (`#56`).
+///
+/// For non-`sealed` tables (`< 2^63`), stores and serializes as the exact bare JSON `u64` number
+/// for byte-identical compatibility with legacy logs and fixtures. For `sealed`-pool tables
+/// (`>= 2^63`), stores only the pool name (`"sealed"`), [`layout_seed_digest`], and the log
+/// writer's unverified write-time independence claim — never the clear `u64`.
+///
+/// Private inner representation makes it impossible to construct a `sealed`-range value in the
+/// clear variant in code:
+///
+/// ```compile_fail
+/// use league_core::ReplayLayoutSeed;
+/// let _ = ReplayLayoutSeed(1_u64 << 63);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayLayoutSeed(ReplayLayoutSeedRepr);
+
+impl ReplayLayoutSeed {
+    /// Constructs a clear [`ReplayLayoutSeed`] for any non-sealed layout seed (`< 2^63`), refusing
+    /// `sealed`-range values (`>= 2^63`) with [`ReplayLayoutSeedError::SealedSeedInClear`].
+    pub fn try_clear(seed: u64) -> Result<Self, ReplayLayoutSeedError> {
+        if seed >= SEALED_LAYOUT_SEED_MIN {
+            return Err(ReplayLayoutSeedError::SealedSeedInClear {
+                seed_digest: layout_seed_digest(seed),
+            });
+        }
+        Ok(Self(ReplayLayoutSeedRepr::Clear(seed)))
+    }
+
+    pub(crate) fn sealed_checked(seed: u64) -> Result<Self, ReplayLayoutSeedError> {
+        if seed < SEALED_LAYOUT_SEED_MIN {
+            return Err(ReplayLayoutSeedError::NonSealedSeedInSealed { seed });
+        }
+        Ok(Self(ReplayLayoutSeedRepr::Sealed(SealedReplaySeed {
+            pool: SEALED_SEED_POOL_NAME.to_owned(),
+            digest: layout_seed_digest(seed),
+            independence_checked_at_write_unverified: true,
+        })))
+    }
+
+    /// Returns `Some(seed)` for a non-sealed clear seed, or `None` when redacted.
+    #[must_use]
+    pub const fn clear_seed(&self) -> Option<u64> {
+        match &self.0 {
+            ReplayLayoutSeedRepr::Clear(seed) => Some(*seed),
+            ReplayLayoutSeedRepr::Sealed(_) => None,
+        }
+    }
+
+    /// Returns the redacted [`SealedReplaySeed`] payload if this log is for a sealed table.
+    #[must_use]
+    pub const fn sealed(&self) -> Option<&SealedReplaySeed> {
+        match &self.0 {
+            ReplayLayoutSeedRepr::Clear(_) => None,
+            ReplayLayoutSeedRepr::Sealed(sealed) => Some(sealed),
+        }
+    }
+
+    /// Returns `Some("sealed")` when redacted, or `None` for a non-sealed clear seed.
+    #[must_use]
+    pub fn pool(&self) -> Option<&str> {
+        self.sealed().map(SealedReplaySeed::pool)
+    }
+
+    /// Returns `Some(digest)` when redacted, or `None` for a non-sealed clear seed.
+    #[must_use]
+    pub fn sealed_digest(&self) -> Option<&str> {
+        self.sealed().map(SealedReplaySeed::digest)
+    }
+
+    /// Returns `true` when this log carries a redacted `sealed`-pool digest instead of a clear `u64`.
+    #[must_use]
+    pub const fn is_sealed(&self) -> bool {
+        matches!(&self.0, ReplayLayoutSeedRepr::Sealed(_))
+    }
+
+    /// For a sealed log, returns the log writer's claim that write-time independence checks ran
+    /// before redaction; returns `None` for a clear log (where replay verifies independence
+    /// directly).
+    ///
+    /// **This is a claim by the log writer, not something [`replay_season`] verifies:** a replayer
+    /// of a sealed log cannot recompute those checks, because it does not have the clear seed.
+    /// Keyed commitments under issue `#58` are where this can become replay-verifiable.
+    #[must_use]
+    pub const fn independence_checked_at_write_unverified(&self) -> Option<bool> {
+        match &self.0 {
+            ReplayLayoutSeedRepr::Clear(_) => None,
+            ReplayLayoutSeedRepr::Sealed(sealed) => {
+                Some(sealed.independence_checked_at_write_unverified)
+            }
+        }
+    }
+}
+
+impl TryFrom<u64> for ReplayLayoutSeed {
+    type Error = ReplayLayoutSeedError;
+
+    fn try_from(seed: u64) -> Result<Self, Self::Error> {
+        Self::try_clear(seed)
+    }
+}
+
+impl Serialize for ReplayLayoutSeed {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.0 {
+            ReplayLayoutSeedRepr::Clear(seed) => serializer.serialize_u64(*seed),
+            ReplayLayoutSeedRepr::Sealed(sealed) => {
+                let mut state = serializer.serialize_struct("SealedReplaySeed", 3)?;
+                state.serialize_field("pool", &sealed.pool)?;
+                state.serialize_field("digest", &sealed.digest)?;
+                state.serialize_field(
+                    "independence_checked_at_write_unverified",
+                    &sealed.independence_checked_at_write_unverified,
+                )?;
+                state.end()
+            }
+        }
+    }
+}
+
+struct DigestField(String);
+
+impl<'de> Deserialize<'de> for DigestField {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct DigestVisitor;
+        impl de::Visitor<'_> for DigestVisitor {
+            type Value = DigestField;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a 64-character lowercase hex digest string")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(DigestField(v.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(DigestField(v))
+            }
+        }
+        deserializer
+            .deserialize_str(DigestVisitor)
+            .map_err(|_| de::Error::custom(ReplayLayoutSeedError::InvalidSealedDigest))
+    }
+}
+
+impl<'de> Deserialize<'de> for ReplayLayoutSeed {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        enum SealedSeedField {
+            Pool,
+            Digest,
+            IndependenceCheckedAtWriteUnverified,
+        }
+
+        impl<'de> Deserialize<'de> for SealedSeedField {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct FieldVisitor;
+                impl de::Visitor<'_> for FieldVisitor {
+                    type Value = SealedSeedField;
+
+                    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        f.write_str(
+                            "`pool`, `digest`, or `independence_checked_at_write_unverified`",
+                        )
+                    }
+
+                    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                        match value {
+                            "pool" => Ok(SealedSeedField::Pool),
+                            "digest" => Ok(SealedSeedField::Digest),
+                            "independence_checked_at_write_unverified" => {
+                                Ok(SealedSeedField::IndependenceCheckedAtWriteUnverified)
+                            }
+                            other => Err(de::Error::unknown_field(
+                                other,
+                                &["pool", "digest", "independence_checked_at_write_unverified"],
+                            )),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct ReplayLayoutSeedVisitor;
+
+        impl<'de> de::Visitor<'de> for ReplayLayoutSeedVisitor {
+            type Value = ReplayLayoutSeed;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(
+                    "a non-sealed u64 layout seed (< 2^63) or a sealed layout-seed object {pool, digest, independence_checked_at_write_unverified}",
+                )
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                ReplayLayoutSeed::try_clear(value).map_err(de::Error::custom)
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                if value < 0 {
+                    return Err(de::Error::custom("layout seed must be a non-negative u64"));
+                }
+                self.visit_u64(value as u64)
+            }
+
+            fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut pool: Option<String> = None;
+                let mut digest: Option<DigestField> = None;
+                let mut checked_claim: Option<bool> = None;
+
+                while let Some(key) = map.next_key::<SealedSeedField>()? {
+                    match key {
+                        SealedSeedField::Pool => {
+                            if pool.is_some() {
+                                return Err(de::Error::duplicate_field("pool"));
+                            }
+                            pool = Some(map.next_value()?);
+                        }
+                        SealedSeedField::Digest => {
+                            if digest.is_some() {
+                                return Err(de::Error::duplicate_field("digest"));
+                            }
+                            digest = Some(map.next_value()?);
+                        }
+                        SealedSeedField::IndependenceCheckedAtWriteUnverified => {
+                            if checked_claim.is_some() {
+                                return Err(de::Error::duplicate_field(
+                                    "independence_checked_at_write_unverified",
+                                ));
+                            }
+                            checked_claim = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let pool = pool.ok_or_else(|| de::Error::missing_field("pool"))?;
+                if pool != SEALED_SEED_POOL_NAME {
+                    return Err(de::Error::custom(
+                        ReplayLayoutSeedError::InvalidSealedPool { pool },
+                    ));
+                }
+
+                let DigestField(digest) = digest
+                    .ok_or_else(|| de::Error::custom(ReplayLayoutSeedError::InvalidSealedDigest))?;
+                let valid_hex = digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+                if !valid_hex {
+                    return Err(de::Error::custom(
+                        ReplayLayoutSeedError::InvalidSealedDigest,
+                    ));
+                }
+
+                let independence_checked_at_write_unverified = checked_claim.ok_or_else(|| {
+                    de::Error::missing_field("independence_checked_at_write_unverified")
+                })?;
+
+                Ok(ReplayLayoutSeed(ReplayLayoutSeedRepr::Sealed(
+                    SealedReplaySeed {
+                        pool,
+                        digest,
+                        independence_checked_at_write_unverified,
+                    },
+                )))
+            }
+        }
+
+        deserializer.deserialize_any(ReplayLayoutSeedVisitor)
+    }
+}
 
 mod opt_hex32_pub {
     use super::*;
@@ -108,8 +497,11 @@ pub struct SeasonReplayLog {
     pub spec: TableSpec,
     /// Required execution mode matching `spec.mode` (`Game` or `Eval`; prevents mode switches).
     pub mode: TableMode,
-    /// Public table layout seed associated with this log (never used to derive randomness or deals).
-    pub seed: u64,
+    /// Layout seed field (`ReplayLayoutSeed`): clear `u64` for non-`sealed` pools (`< 2^63`), or
+    /// redacted `{"pool":"sealed","digest":...,"independence_checked_at_write_unverified":...}`
+    /// carrying no clear value for `sealed`-pool tables (`>= 2^63`; never used to derive randomness
+    /// or deals).
+    pub seed: ReplayLayoutSeed,
     /// Verification rule applied to each logged turn beacon.
     pub beacon_mode: ReplayBeaconMode,
     /// Optional 32-byte `ristretto255` VRF public key (RFC 9381 ECVRF construction with C2SP's
@@ -124,6 +516,164 @@ pub struct SeasonReplayLog {
     pub turns: Vec<LoggedTurn>,
     /// Terminal Private Charter Mandate reveals per seat (`0..seat_count`).
     pub mandate_reveals: Vec<Option<MandateReveal>>,
+}
+
+fn layout_seed_beacon_candidates(seed: u64) -> [[u8; 32]; 2] {
+    let mut padded_beacon_seed = [0u8; 32];
+    padded_beacon_seed[..8].copy_from_slice(&seed.to_le_bytes());
+    let hashed_beacon_seed: [u8; 32] = Sha256::digest(seed.to_le_bytes()).into();
+    [padded_beacon_seed, hashed_beacon_seed]
+}
+
+fn check_deal_seed_independence(
+    seed: u64,
+    sealed_mandate_deal: &SealedMandateDeal,
+    sealed_context: bool,
+) -> Result<[[u8; 32]; 2], EngineError> {
+    let candidates = layout_seed_beacon_candidates(seed);
+    if sealed_mandate_deal.deal_seed == candidates[0]
+        || sealed_mandate_deal.deal_seed == candidates[1]
+    {
+        let msg = if sealed_context {
+            "SEALED_DEAL_SEED_NOT_INDEPENDENT: sealed_mandate_deal deal_seed must be independent of layout seed"
+        } else {
+            "sealed_mandate_deal deal_seed must be independent of public layout seed"
+        };
+        return Err(EngineError::InvalidConfig(msg.to_owned()));
+    }
+    Ok(candidates)
+}
+
+fn check_eval_vrf_independence(
+    candidates: [[u8; 32]; 2],
+    spec_pk: [u8; 32],
+    sealed_context: bool,
+) -> Result<(), EngineError> {
+    for candidate in candidates {
+        if let Ok(derived_seed) = SealedEvalSeed::try_from_bytes(candidate)
+            && derived_seed.public_key_bytes().ok() == Some(spec_pk)
+        {
+            let msg = if sealed_context {
+                "SEALED_EVAL_VRF_NOT_INDEPENDENT: Eval VRF key must be independent of layout seed"
+            } else {
+                "Eval VRF key must be independent of public layout seed"
+            };
+            return Err(EngineError::InvalidConfig(msg.to_owned()));
+        }
+    }
+    Ok(())
+}
+
+impl SeasonReplayLog {
+    /// Constructs a redacted [`SeasonReplayLog`] on the rig for a `sealed`-pool layout seed
+    /// (`>= 2^63`).
+    ///
+    /// Runs the layout-seed independence checks (`deal_seed` and, in `TableMode::Eval`,
+    /// `eval_vrf_pubkey`) against the clear `seed` *before* redacting it via
+    /// [`layout_seed_digest`], refuses any non-independent table with [`EngineError::InvalidConfig`],
+    /// and records `independence_checked_at_write_unverified = true`.
+    ///
+    /// Note: `independence_checked_at_write_unverified` in the emitted log is a **claim by the log
+    /// writer, not something [`replay_season`] verifies**: a replayer of a sealed log cannot
+    /// recompute the check without the seed (issue `#58` keyed commitments address off-rig
+    /// verifiability).
+    pub fn new_sealed(
+        spec: TableSpec,
+        seed: u64,
+        sealed_mandate_deal: SealedMandateDeal,
+        mandate_commits: Vec<Option<CommitmentHash>>,
+        turns: Vec<LoggedTurn>,
+        mandate_reveals: Vec<Option<MandateReveal>>,
+    ) -> Result<Self, EngineError> {
+        let redacted_seed = ReplayLayoutSeed::sealed_checked(seed)
+            .map_err(|err| EngineError::InvalidConfig(err.to_string()))?;
+        Self::build_checked(
+            spec,
+            seed,
+            redacted_seed,
+            true,
+            sealed_mandate_deal,
+            mandate_commits,
+            turns,
+            mandate_reveals,
+        )
+    }
+
+    /// Constructs a [`SeasonReplayLog`] on the rig from any layout `seed`: uses
+    /// [`SeasonReplayLog::new_sealed`] (redacting the seed) when `seed >= 2^63`, or stores the
+    /// validated clear `u64` via [`ReplayLayoutSeed::try_clear`] after checking independence when
+    /// `seed < 2^63`.
+    pub fn from_rig_seed(
+        spec: TableSpec,
+        seed: u64,
+        sealed_mandate_deal: SealedMandateDeal,
+        mandate_commits: Vec<Option<CommitmentHash>>,
+        turns: Vec<LoggedTurn>,
+        mandate_reveals: Vec<Option<MandateReveal>>,
+    ) -> Result<Self, EngineError> {
+        if seed >= SEALED_LAYOUT_SEED_MIN {
+            return Self::new_sealed(
+                spec,
+                seed,
+                sealed_mandate_deal,
+                mandate_commits,
+                turns,
+                mandate_reveals,
+            );
+        }
+        let clear_seed = ReplayLayoutSeed::try_clear(seed)
+            .map_err(|err| EngineError::InvalidConfig(err.to_string()))?;
+        Self::build_checked(
+            spec,
+            seed,
+            clear_seed,
+            false,
+            sealed_mandate_deal,
+            mandate_commits,
+            turns,
+            mandate_reveals,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_checked(
+        spec: TableSpec,
+        raw_seed: u64,
+        seed: ReplayLayoutSeed,
+        sealed_context: bool,
+        sealed_mandate_deal: SealedMandateDeal,
+        mandate_commits: Vec<Option<CommitmentHash>>,
+        turns: Vec<LoggedTurn>,
+        mandate_reveals: Vec<Option<MandateReveal>>,
+    ) -> Result<Self, EngineError> {
+        let candidates =
+            check_deal_seed_independence(raw_seed, &sealed_mandate_deal, sealed_context)?;
+        let mode = spec.mode;
+        let (beacon_mode, eval_vrf_pubkey) = match mode {
+            TableMode::Game => (ReplayBeaconMode::ExternalDrand, None),
+            TableMode::Eval => {
+                let Some(spec_pk) = spec.eval_vrf_pubkey else {
+                    return Err(EngineError::InvalidConfig(
+                        "EvalVrf replay requires TableSpec::eval_vrf_pubkey".to_owned(),
+                    ));
+                };
+                validate_eval_vrf_pubkey(spec_pk)?;
+                check_eval_vrf_independence(candidates, spec_pk, sealed_context)?;
+                (ReplayBeaconMode::EvalVrf, Some(spec_pk))
+            }
+        };
+        Ok(Self {
+            spec,
+            mode,
+            seed,
+            beacon_mode,
+            eval_vrf_pubkey,
+            sealed_mandate_deal,
+            mandate_commits,
+            turns,
+            mandate_reveals,
+        })
+    }
 }
 
 /// Complete verified artifacts emitted by replaying a [`SeasonReplayLog`].
@@ -284,16 +834,34 @@ fn replay_season_inner(
                 .to_owned(),
         ));
     }
-    let mut padded_beacon_seed = [0u8; 32];
-    padded_beacon_seed[..8].copy_from_slice(&log.seed.to_le_bytes());
-    let hashed_beacon_seed: [u8; 32] = Sha256::digest(log.seed.to_le_bytes()).into();
-    if log.sealed_mandate_deal.deal_seed == padded_beacon_seed
-        || log.sealed_mandate_deal.deal_seed == hashed_beacon_seed
-    {
-        return Err(EngineError::InvalidConfig(
-            "sealed_mandate_deal deal_seed must be independent of public layout seed".to_owned(),
-        ));
-    }
+    let clear_layout_candidates = match &log.seed.0 {
+        ReplayLayoutSeedRepr::Clear(clear_seed) => Some(check_deal_seed_independence(
+            *clear_seed,
+            &log.sealed_mandate_deal,
+            false,
+        )?),
+        ReplayLayoutSeedRepr::Sealed(sealed) => {
+            if sealed.pool != SEALED_SEED_POOL_NAME {
+                return Err(EngineError::InvalidConfig(
+                    ReplayLayoutSeedError::InvalidSealedPool {
+                        pool: sealed.pool.clone(),
+                    }
+                    .to_string(),
+                ));
+            }
+            // Replay cannot recompute `deal_seed` or Eval-VRF independence against the clear seed
+            // because a sealed log carries only the pool and digest; it records and requires the
+            // writer's unverified write-time claim (`SealedReplaySeed::independence_checked_at_write_unverified`).
+            // Off-rig verification awaits issue `#58` keyed commitments.
+            if !sealed.independence_checked_at_write_unverified {
+                return Err(EngineError::InvalidConfig(
+                    "SEALED_INDEPENDENCE_UNCHECKED: sealed replay log requires writer claim independence_checked_at_write_unverified=true"
+                        .to_owned(),
+                ));
+            }
+            None
+        }
+    };
 
     let (drand_schedule, eval_vrf_pk) = match log.mode {
         TableMode::Game => {
@@ -323,14 +891,8 @@ fn replay_season_inner(
                 ));
             }
             validate_eval_vrf_pubkey(spec_pk)?;
-            for candidate in [padded_beacon_seed, hashed_beacon_seed] {
-                if let Ok(derived_seed) = SealedEvalSeed::try_from_bytes(candidate)
-                    && derived_seed.public_key_bytes().ok() == Some(spec_pk)
-                {
-                    return Err(EngineError::InvalidConfig(
-                        "Eval VRF key must be independent of public layout seed".to_owned(),
-                    ));
-                }
+            if let Some(candidates) = clear_layout_candidates {
+                check_eval_vrf_independence(candidates, spec_pk, false)?;
             }
             (None, Some(spec_pk))
         }
@@ -532,11 +1094,14 @@ mod tests {
         else {
             panic!("valid spec");
         };
+        let Ok(clear_seed) = ReplayLayoutSeed::try_clear(7) else {
+            panic!("clear dev seed");
+        };
         let eval_pk = spec.eval_vrf_pubkey;
         let empty = SeasonReplayLog {
             spec: spec.clone(),
             mode: TableMode::Eval,
-            seed: 7,
+            seed: clear_seed.clone(),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk,
             sealed_mandate_deal: sealed_deal.clone(),
@@ -552,7 +1117,7 @@ mod tests {
         let bad_len = SeasonReplayLog {
             spec: spec.clone(),
             mode: TableMode::Eval,
-            seed: 7,
+            seed: clear_seed.clone(),
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk,
             sealed_mandate_deal: sealed_deal.clone(),
@@ -632,7 +1197,7 @@ mod tests {
         let log = SeasonReplayLog {
             spec,
             mode: TableMode::Eval,
-            seed: 7,
+            seed: clear_seed,
             beacon_mode: ReplayBeaconMode::EvalVrf,
             eval_vrf_pubkey: eval_pk,
             sealed_mandate_deal: sealed_deal,
