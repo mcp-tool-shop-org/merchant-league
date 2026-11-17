@@ -9,11 +9,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "e8f677159e1398d827f5d3dc39a90988ce311fbb068dc96f6df6c56211920130",
+          "hash": "cd744f1ae7305264315bf3f0c0e49fff2c2766fe43f2a8241e7f0581a2242f92",
           "path": ".github/workflows/ci.yml"
         },
         {
-          "hash": "c65d51b8784c70e5ec17b3973d82c04a55f9e20e5237abb047fe478d283a63db",
+          "hash": "2c1a225b2abadc8f00b601576b5a00f54cf3f49eb7509ead7fd1061d332fe2a8",
           "path": ".github/workflows/pages.yml"
         }
       ],
@@ -2975,19 +2975,27 @@
       "externals": 0,
       "files": [
         {
+          "hash": "c0ba16249c86c31e00abac6db93c5df8d48c48779f90ec2ca6872adb0e7f6f25",
+          "path": ".gitattributes"
+        },
+        {
           "hash": "c04f6bb58c4f3ef967efc19e001a90008bfb69eaf044552192d8dee0aedd4861",
           "path": ".gitignore"
         },
         {
-          "hash": "2a72fe8c0360e6e521af0a84cb2af7d66b07db2a85654fb37a4b443195a5bede",
+          "hash": "e195be81ec6f19099bce0038e025199d6b407381f3e8fdb6c2489ddec688daf4",
+          "path": ".polyglot-pins.json"
+        },
+        {
+          "hash": "7c732fa3eec06e0ecbf5d1f33742b5b19924e13ee69c962e9667c6a0c2c71126",
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
+          "hash": "cb7ea2039cbbb3037ca33b15fce06dca709b338e95fd5331d8f4b94bece95860",
           "path": "CLAUDE.md"
         },
         {
-          "hash": "bf1a06dc54c935c965f1ed0082a5a84dca1554407b3f7bc65bb0d328a5a60862",
+          "hash": "dda7a77bab62f6d19599734e32c86142b460ea8ddc1b6727602ab9f5e6036f5f",
           "path": "Cargo.lock"
         },
         {
@@ -2999,15 +3007,43 @@
           "path": "LICENSE"
         },
         {
-          "hash": "dfe90a9104c972ad645c99df0e94beacf4b470079ca4e05e51b7f9e976b056c4",
+          "hash": "8a84d6f32d628c96593099c7cc2f0a1eef94d7273b88afd59b79a0b3f61ba4ec",
+          "path": "README.es.md"
+        },
+        {
+          "hash": "b1430e73a632747b221ffa829abb13732fcd8b20dd7b905e2e5d99e39f7f9339",
+          "path": "README.fr.md"
+        },
+        {
+          "hash": "5a723af8a4c3e23862fa4a81f8572fb6582785cc2bd078a32b81a7ca8a8d0cba",
+          "path": "README.hi.md"
+        },
+        {
+          "hash": "828561603c2d41d7e8397d59fa7a55f643340408170e195a1279f528dbbf92f6",
+          "path": "README.it.md"
+        },
+        {
+          "hash": "68b6bf4bf7f73732a1ea8ae94ac05539e8b37aee317fcde623b354d6f5dc8dfe",
+          "path": "README.ja.md"
+        },
+        {
+          "hash": "2a9e05c80dc3ab54c9b40099fa263987127c2bdd710b2638a29a41b5ae3e66c2",
           "path": "README.md"
         },
         {
-          "hash": "323028db91c40b27a90d85fccdd7f1e04e77193d1a6fbeda7ec896461d259a32",
+          "hash": "ce5735cd2102963e5a890f64b68658eafe1565e4190054b68e5e0347799cda63",
+          "path": "README.pt-BR.md"
+        },
+        {
+          "hash": "6fe59f3a8164c5c1fdb990b15a5a6275da027cd5c3163424b3b3480a761fddf4",
+          "path": "README.zh.md"
+        },
+        {
+          "hash": "2534a15432fdd7359dd07e51a76406b356e788486533909216b766de4167b922",
           "path": "SECURITY.md"
         },
         {
-          "hash": "1971efbdb1eecf3b6110d1c6c1233f0afd7953afe466a6ccdbd0d9dc7ed6bbec",
+          "hash": "1aa944a8730126ddd78dc92a2c495210e6d52e31a3b471f9022f602f8c4a8b85",
           "path": "SHIP_GATE.md"
         },
         {
@@ -3034,19 +3070,19 @@
       "externals": 0,
       "files": [
         {
-          "hash": "116cfee878b1d710a5d37a6e8035faa0223721bd42e1c25e893814248c2fa682",
+          "hash": "c7622613b487d9f329c2e9bd7d83ec0e99e855cce806bb0c2e02cd9b6a0abf0b",
           "path": "scripts/check-copy.sh"
         },
         {
-          "hash": "825e7f302f7663d33d6fcc65a31a5f8b0ef3ad6a5a55c51cf58e36299d15addf",
+          "hash": "6eb95bc51f6427db5e6e9725a01f1e3e262e390591219fc1601c796e9ac543bb",
           "path": "scripts/check-testnet-only.sh"
         },
         {
-          "hash": "e0a457f8d8ae6035eb586595c64a13514cf352289434d7578f39e453cb1a0085",
+          "hash": "33c616664f1c86486ce9fd15d27c9cfe630c6f6a19bf0c83df779e3b648e48e0",
           "path": "scripts/test-guards.sh"
         },
         {
-          "hash": "5d346566cb702c1588a3270a26a58e6ebfa5732058839cc5349e238711f84c7f",
+          "hash": "1a8098c24192b962e40afaa8ac2863745a01fc2e08d20999d81cde351d0b2a30",
           "path": "scripts/verify.sh"
         }
       ],
@@ -3063,7 +3099,7 @@
   ],
   "doors": [
     {
-      "checksCount": 3,
+      "checksCount": 8,
       "commands": [
         {
           "dir": "",
@@ -3072,6 +3108,14 @@
             "rustup"
           ],
           "step": "Install the pinned Rust toolchain"
+        },
+        {
+          "dir": "",
+          "job": "check",
+          "programs": [
+            "echo"
+          ],
+          "step": "Read runner image id"
         },
         {
           "dir": "",
@@ -3110,15 +3154,6 @@
           "dir": "",
           "job": "check",
           "programs": [
-            "cargo",
-            "command"
-          ],
-          "step": "Security audit"
-        },
-        {
-          "dir": "",
-          "job": "check",
-          "programs": [
             "bash"
           ],
           "step": "Testnet only"
@@ -3148,6 +3183,14 @@
           "step": "Atlas check"
         },
         {
+          "dir": "site",
+          "job": "check",
+          "programs": [
+            "npm"
+          ],
+          "step": "Site build"
+        },
+        {
           "dir": "",
           "job": "check",
           "programs": [
@@ -3156,6 +3199,30 @@
             "timeout"
           ],
           "step": "Stand-alone xrpld harness"
+        },
+        {
+          "dir": "",
+          "job": "audit",
+          "programs": [
+            "rustup"
+          ],
+          "step": "Install the pinned Rust toolchain"
+        },
+        {
+          "dir": "",
+          "job": "audit",
+          "programs": [
+            "echo"
+          ],
+          "step": "Read runner image id"
+        },
+        {
+          "dir": "",
+          "job": "audit",
+          "programs": [
+            "cargo"
+          ],
+          "step": "Security audit"
         }
       ],
       "elsewhere": [],
@@ -3187,6 +3254,22 @@
               "step": "Set up Node for Atlas",
               "uses": "actions/setup-node",
               "version": "22"
+            }
+          ]
+        },
+        {
+          "basis": "declared",
+          "name": "audit",
+          "runsOn": [
+            {
+              "labels": [
+                "ubuntu-latest"
+              ],
+              "platform": {
+                "cpu": "x64",
+                "libc": "glibc",
+                "os": "linux"
+              }
             }
           ]
         }
@@ -3250,6 +3333,13 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-core/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-core/src/lib.rs",
@@ -3280,6 +3370,13 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-dice/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-gen/src/empirical.rs",
@@ -3299,6 +3396,13 @@
           "path": "crates/league-gen/src/generator.rs",
           "runKind": "executes",
           "via": "cargo test"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-gen/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3360,11 +3464,25 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-ledger/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-ledger/tests/vectors.rs",
           "runKind": "executes",
           "via": "cargo clippy"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-relay/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3374,11 +3492,25 @@
           "via": "cargo clippy"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-relay/src/main.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-relay/src/main.rs",
           "runKind": "checks",
           "via": "cargo clippy"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-relay/src/relay.rs",
+          "runKind": "executes",
+          "via": "cargo test"
         },
         {
           "directory": true,
@@ -3397,6 +3529,13 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-season/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "directory": true,
           "job": "check",
           "matched": true,
@@ -3405,12 +3544,26 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-standalone/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "directory": true,
           "job": "check",
           "matched": true,
           "path": "crates/league-tui/",
           "runKind": "executes",
           "via": "cargo test"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-tui/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3426,9 +3579,24 @@
           "job": "check",
           "path": "scripts/test-guards.sh",
           "runKind": "executes"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "site/astro.config.mjs",
+          "runKind": "executes",
+          "via": "astro build"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "site/src/",
+          "runKind": "executes",
+          "via": "astro build"
         }
       ],
-      "runsCount": 26,
+      "runsCount": 34,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -3443,14 +3611,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 30,
+          "files": 31,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 30,
+          "files": 31,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -3476,11 +3644,14 @@
             "Cargo.lock",
             "Cargo.toml",
             "README.md",
+            "SECURITY.md",
             "atlas/**",
             "crates/**",
             "docs/**",
             "rust-toolchain.toml",
-            "scripts/**"
+            "scripts/**",
+            "site/**",
+            "vendor/**"
           ]
         },
         {
@@ -3516,6 +3687,23 @@
       ],
       "elsewhere": [],
       "file": ".github/workflows/pages.yml",
+      "gated": [
+        {
+          "jobs": [
+            "deploy"
+          ],
+          "pushes": false,
+          "sends": [
+            "deploysPages"
+          ],
+          "stages": [],
+          "when": {
+            "branches": [
+              "main"
+            ]
+          }
+        }
+      ],
       "jobs": [
         {
           "basis": "declared",
@@ -3597,7 +3785,7 @@
       "runsCount": 2,
       "secrets": [],
       "sends": {
-        "deploysPages": true,
+        "deploysPages": false,
         "dispatchesTo": [],
         "opensIssues": false,
         "opensIssuesOnFailure": false,
@@ -3614,7 +3802,7 @@
           ],
           "event": "push",
           "paths": [
-            ".github/workflows/pages.yml",
+            ".github/workflows/**",
             "site/**"
           ]
         },
@@ -3852,8 +4040,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
-    "tracked": 523
+    "commit": "541c2231d993226841864f1b9f3cbae848cc5d32",
+    "tracked": 531
   },
   "landings": [
     {
@@ -3907,6 +4095,11 @@
     },
     {
       "readers": [
+        {
+          "by": "scripts/check-copy.sh",
+          "call": "literal",
+          "confidence": "text"
+        },
         {
           "by": "scripts/test-guards.sh",
           "call": "literal",
@@ -4183,6 +4376,17 @@
         }
       ],
       "target": "scripts/test-guards.sh",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/check-copy.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "site/src",
       "writers": []
     },
     {
@@ -4695,7 +4899,7 @@
   "testFiles": 40,
   "unassigned": [
     {
-      "hash": "082361994524b3764bf5704389a2b7077fa21d6e174f0014811667fdc72f7def",
+      "hash": "039b9da6674aea8546b137dbea959c5ac9a5b1f15a7a7c53374ed8613d7770ec",
       "path": "crates/league-relay/Cargo.toml"
     },
     {
@@ -6391,492 +6595,497 @@
         {
           "in": "parse",
           "kind": "err",
-          "line": 63
+          "line": 62
         },
         {
           "in": "parse",
           "kind": "err",
-          "line": 104
+          "line": 103
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 160
+          "line": 159
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 170
+          "line": 169
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 176
+          "line": 175
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 183
+          "line": 182
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 198
+          "line": 197
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 212
+          "line": 211
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 221
+          "line": 220
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 232
+          "line": 231
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 257
+          "line": 256
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 262
+          "line": 261
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 279
+          "line": 278
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 289
+          "line": 288
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 306
+          "line": 305
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 320
+          "line": 319
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 332
+          "line": 331
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 349
+          "line": 348
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 354
+          "line": 353
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 364
+          "line": 363
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 371
+          "line": 370
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 383
+          "line": 382
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 396
+          "line": 395
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 402
+          "line": 401
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 409
+          "line": 408
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 434
+          "line": 433
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 485
+          "line": 484
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 502
+          "line": 501
         },
         {
           "in": "reject_forbidden_ref_or_anchor_keyword",
           "kind": "err",
-          "line": 635
+          "line": 634
         },
         {
           "in": "reject_default_ignorable_code_point",
           "kind": "err",
-          "line": 668
+          "line": 667
         },
         {
           "in": "validate_model_visible_schema_text",
           "kind": "err",
-          "line": 992
+          "line": 991
         },
         {
           "in": "validate_model_visible_schema_text",
           "kind": "err",
-          "line": 997
+          "line": 996
         },
         {
           "in": "validate_property_key",
           "kind": "err",
-          "line": 1013
+          "line": 1012
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1029
+          "line": 1028
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1037
+          "line": 1036
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1042
+          "line": 1041
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1047
+          "line": 1046
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1082
+          "line": 1081
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1088
+          "line": 1087
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1093
+          "line": 1092
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1103
+          "line": 1102
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1109
+          "line": 1108
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1121
+          "line": 1120
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1168
+          "line": 1167
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1183
+          "line": 1182
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1188
+          "line": 1187
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1195
+          "line": 1194
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1209
+          "line": 1208
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1214
+          "line": 1213
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1583
+          "line": 1582
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1595
+          "line": 1594
         },
         {
           "in": "validate_property_names",
           "kind": "err",
-          "line": 1636
+          "line": 1635
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1683
+          "line": 1682
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1704
+          "line": 1703
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1711
+          "line": 1710
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1723
+          "line": 1722
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1728
+          "line": 1727
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1736
+          "line": 1735
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1757
+          "line": 1756
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 2145
+          "line": 2144
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2644
+          "line": 2643
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2646
+          "line": 2645
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2653
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2654
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2655
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 2688
+          "line": 2687
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2693
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2694
         },
         {
           "in": "acquire",
-          "kind": "err",
-          "line": 2695
-        },
-        {
-          "in": "acquire",
           "kind": "match-err",
-          "line": 2715
+          "line": 2714
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2717
+          "line": 2716
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2721
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2722
         },
         {
-          "in": "acquire",
-          "kind": "err",
-          "line": 2723
-        },
-        {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2747
+          "line": 2746
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 2753
+          "line": 2752
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2753
+          "line": 2752
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2957
+          "line": 2956
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2971
+          "line": 2970
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2976
+          "line": 2975
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2981
+          "line": 2980
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2992
+          "line": 2991
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2998
+          "line": 2997
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3004
+          "line": 3003
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3010
+          "line": 3009
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3089
+          "line": 3088
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3240
+          "line": 3239
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3249
+          "line": 3248
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3286
+          "line": 3285
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3296
+          "line": 3295
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3306
+          "line": 3305
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3316
+          "line": 3315
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3327
+          "line": 3326
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3341
+          "line": 3340
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3350
+          "line": 3349
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3362
+          "line": 3361
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3375
+          "line": 3374
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3404
+          "line": 3403
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3406
+          "line": 3405
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3408
+          "line": 3407
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3410
+          "line": 3409
+        },
+        {
+          "in": "is_run_reservation_lock_live",
+          "kind": "match-err",
+          "line": 3460
         },
         {
           "in": "is_run_reservation_lock_live",
@@ -6886,12 +7095,12 @@
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 3462
+          "line": 3470
         },
         {
-          "in": "is_run_reservation_lock_live",
+          "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3471
+          "line": 3539
         },
         {
           "in": "write_reserved_entries_unlocked",
@@ -6900,388 +7109,393 @@
         },
         {
           "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 3541
+          "kind": "err",
+          "line": 3540
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3541
+          "line": 3551
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3552
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 3559
+          "line": 3558
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3587
+          "line": 3586
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3589
+          "line": 3588
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3593
+          "line": 3592
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3595
+          "line": 3594
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3617
+          "line": 3616
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3624
+          "line": 3623
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3660
+          "line": 3659
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3669
+          "line": 3668
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3671
+          "line": 3670
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3674
+          "line": 3673
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3676
+          "line": 3675
         },
         {
           "in": "open",
           "kind": "err",
-          "line": 3847
+          "line": 3846
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 3892
+          "line": 3891
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 3917
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "err",
-          "line": 3917
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "match-err",
-          "line": 3922
+          "line": 3916
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 3922
+          "line": 3916
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "match-err",
+          "line": 3921
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "err",
+          "line": 3921
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 4101
+          "line": 4100
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 4122
+          "line": 4121
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 4126
+          "line": 4125
         },
         {
           "in": "record_refusal",
           "kind": "err",
-          "line": 4138
+          "line": 4137
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4167
+          "line": 4166
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4177
+          "line": 4176
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4198
+          "line": 4197
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4239
+          "line": 4238
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4256
+          "line": 4255
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4260
+          "line": 4259
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4315
+          "line": 4314
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4384
+          "line": 4383
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4392
+          "line": 4391
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4397
+          "line": 4396
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4447
+          "line": 4446
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4457
+          "line": 4456
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4465
+          "line": 4464
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4488
+          "line": 4487
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4495
+          "line": 4494
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4502
+          "line": 4501
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4509
+          "line": 4508
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4514
+          "line": 4513
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4519
+          "line": 4518
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4539
+          "line": 4538
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4545
+          "line": 4544
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4552
+          "line": 4551
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4583
+          "line": 4582
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4594
+          "line": 4593
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4823
+          "line": 4822
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4832
+          "line": 4831
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4841
+          "line": 4840
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4898
+          "line": 4897
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4912
+          "line": 4911
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4943
+          "line": 4942
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5140
+          "line": 5139
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5179
+          "line": 5178
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5201
+          "line": 5200
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5211
+          "line": 5210
         },
         {
           "in": "run_single_automated_seat",
           "kind": "err",
-          "line": 5273
+          "line": 5272
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5295
+          "line": 5294
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5338
+          "line": 5337
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5409
+          "line": 5408
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5426
+          "line": 5425
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5436
+          "line": 5435
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5448
+          "line": 5447
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5518
+          "line": 5517
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5685
+          "line": 5684
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5691
+          "line": 5690
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5697
+          "line": 5696
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5707
+          "line": 5706
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5738
+          "line": 5737
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5746
+          "line": 5745
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5762
+          "line": 5761
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5787
+          "line": 5786
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5800
+          "line": 5799
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5841
+          "line": 5840
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5884
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 5884
         },
         {
           "in": "call_with_wall_timeout",
@@ -7291,60 +7505,55 @@
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 5885
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
           "line": 5886
         },
         {
           "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5888
+        },
+        {
+          "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 5887
+          "line": 5888
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5889
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 5889
+          "line": 5898
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5899
+          "line": 5902
         },
         {
-          "in": "call_with_wall_timeout",
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 5986
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 5995
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 6007
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 6017
+        },
+        {
+          "in": "format_system_time_utc_rfc3339",
           "kind": "match-err",
-          "line": 5903
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 5987
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 5996
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 6008
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 6018
+          "line": 6110
         }
       ],
-      "hash": "79933c527cbbdb25ea3be32fd1ec310b5f09ae51520ac8ae457fc0f975431950",
+      "hash": "80f4db280672782cc48bbf9ddb1b315c7e86a48a397c4257433aa17a9f1c7474",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -7352,7 +7561,8 @@
         "crates/league-relay/src/transport.rs",
         "crates/league-relay/src/wording.rs"
       ],
-      "path": "crates/league-relay/src/relay.rs"
+      "path": "crates/league-relay/src/relay.rs",
+      "testsInside": true
     },
     {
       "exports": [
@@ -7850,7 +8060,7 @@
       "path": "site/public/favicon.svg"
     },
     {
-      "hash": "c33b32734f3a46adb1f01eabdc944a3b85bb09df5d93295ab476c25a24c6ce37",
+      "hash": "cf7bfdbdbcca8098f4f44c0dfbb1de2ec59124178a39253d72f712bb7cb41065",
       "path": "site/src/assets/logo.png"
     },
     {
@@ -7859,19 +8069,19 @@
       "path": "site/src/content.config.ts"
     },
     {
-      "hash": "c63caa7998dff7c9f34fabe8f5b69a41a46fa4fcc0942b3d84d272c84d17cfd7",
+      "hash": "0143d7952e5148ec18626526aef99a26a655d860e6edd22161f660fca7f1d104",
       "path": "site/src/content/docs/handbook/architecture.md"
     },
     {
-      "hash": "b64bb2b1a3a8249b0f0a2d91a6951e4275561feef969e7fe8d0fe4a7933074b2",
+      "hash": "d7a9ab823e44d4743f3f33f5fbb62a9bc7e5bf9bcd971e5c936af7ca13d85fe4",
       "path": "site/src/content/docs/handbook/fairness.md"
     },
     {
-      "hash": "4c575c2d8444f4c437acfbda53a4afb0dc5394627bf2a3c6f45bdaa2dd463848",
+      "hash": "33c9c73d10773563057bda50a379e9d490fda1106cd5effab9319e42fa03b804",
       "path": "site/src/content/docs/handbook/getting-started.md"
     },
     {
-      "hash": "a25e2d54b4c418833f31bc66f9fdcc8ff79215c3e23e4b915a1caea6af70f1c8",
+      "hash": "92f988cb0aedfb82e5f46f341bc03d340473c20e4c35059fe71e21e4faf0d009",
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
@@ -7879,11 +8089,11 @@
       "path": "site/src/content/docs/handbook/reference.md"
     },
     {
-      "hash": "d5e0f0fb718f4cd45468868b5200b29c040d00b44301a85425a11f9fa002b5ea",
+      "hash": "e947618b8ab50894043c16a7bcf341d0486afc5dbf8a77dbbba44590fe11cfac",
       "path": "site/src/content/docs/handbook/security.md"
     },
     {
-      "hash": "22de5290bbbdb06bff5acef075205c0a627c14669882a528730347737c2ba29f",
+      "hash": "4d137e3244cb2c00d9a0a7f01048d4de73ff5ddc0139335bef357b074900bb1b",
       "path": "site/src/content/docs/handbook/the-game.md"
     },
     {
@@ -7900,7 +8110,7 @@
     },
     {
       "constantOnly": true,
-      "hash": "071d35daebfff5eba8d69f3260ffad1f86b3624908ff159c7d1a5881e5d1ceb8",
+      "hash": "d30f41ad7eba4c8a95ef9273caa66396011bfad14f08328ee298bc24568c3704",
       "path": "site/src/site-config.ts"
     },
     {
@@ -7916,11 +8126,11 @@
       "path": "site/tsconfig.json"
     },
     {
-      "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",
+      "hash": "9a3759b99e6cbd302511f162463c71aa7e64170fd86b1cebfb3957a14de80bce",
       "path": "vendor/xrpl-rust/Cargo.toml"
     },
     {
-      "hash": "7e41d8e89d90b2e928c336325b8a5d2606ea7eadd332afe05d3cd9fb7a997e91",
+      "hash": "d94e8adda0909b21c7cc27df9c8ad7c593fd6891f6817adad2d8a490b584898f",
       "path": "vendor/xrpl-rust/Cargo.toml.orig"
     },
     {
@@ -7936,7 +8146,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "11b00b7a3dfcb7fc8fb1fe45c2136d0482bfdf6cab466716eac64e2efd8f9cf1",
+      "hash": "9dbd3d0fefbb7e435aa42265a65737f6a83fdebfed5955c52190611b47382b4e",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
@@ -15266,7 +15476,7 @@
         "is_iso_code",
         "is_iso_hex"
       ],
-      "hash": "02d4984657ffdc221ea64fece104adf0006656f07fda4378329ab8b7ce91de4f",
+      "hash": "8cc95bece19abf5695796dae1b4fb3cb7521840e1799145b385b39f1d26e9f78",
       "importOrder": [
         "vendor/xrpl-rust/src/utils/exceptions.rs",
         "vendor/xrpl-rust/src/utils/get_nftoken_id.rs",
@@ -15275,7 +15485,6 @@
         "vendor/xrpl-rust/src/utils/parse_nftoken_id.rs",
         "vendor/xrpl-rust/src/utils/str_conversion.rs",
         "vendor/xrpl-rust/src/utils/testing.rs",
-        "vendor/xrpl-rust/src/utils/time_conversion.rs",
         "vendor/xrpl-rust/src/utils/transactions.rs",
         "vendor/xrpl-rust/src/utils/txn_parser/mod.rs",
         "vendor/xrpl-rust/src/utils/xrpl_conversion.rs",
@@ -15290,7 +15499,6 @@
         "vendor/xrpl-rust/src/utils/parse_nftoken_id.rs",
         "vendor/xrpl-rust/src/utils/str_conversion.rs",
         "vendor/xrpl-rust/src/utils/testing.rs",
-        "vendor/xrpl-rust/src/utils/time_conversion.rs",
         "vendor/xrpl-rust/src/utils/transactions.rs",
         "vendor/xrpl-rust/src/utils/txn_parser/mod.rs",
         "vendor/xrpl-rust/src/utils/xrpl_conversion.rs"
@@ -15496,32 +15704,6 @@
         "vendor/xrpl-rust/src/wallet/mod.rs"
       ],
       "path": "vendor/xrpl-rust/src/utils/testing.rs",
-      "testsInside": true
-    },
-    {
-      "exports": [
-        "datetime_to_ripple_time",
-        "posix_to_ripple_time",
-        "ripple_time_to_datetime",
-        "ripple_time_to_posix"
-      ],
-      "failurePaths": [
-        {
-          "in": "_ripple_check_max",
-          "kind": "err",
-          "line": 19
-        },
-        {
-          "in": "ripple_time_to_datetime",
-          "kind": "err",
-          "line": 39
-        }
-      ],
-      "hash": "b299994c767a1b78d2ef6140cf5a21fb726596266ffacb5f4fedcc42e54f6fcd",
-      "importsFiles": [
-        "vendor/xrpl-rust/src/utils/exceptions.rs"
-      ],
-      "path": "vendor/xrpl-rust/src/utils/time_conversion.rs",
       "testsInside": true
     },
     {

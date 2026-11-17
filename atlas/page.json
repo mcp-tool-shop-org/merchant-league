@@ -29,86 +29,72 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 21,
-      "changed": 4,
+      "added": 9,
+      "changed": 26,
       "moved": 0,
       "parts": 3,
-      "removed": 0
+      "removed": 1
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "Deploy site to GitHub Pages (.github/workflows/pages.yml) is a new door. It starts on a push to main touching 2 paths; or by hand. It runs site/astro.config.mjs and site/src/.",
+        "sentence": "CI's push trigger now also names `SECURITY.md`, `site/**` and `vendor/**`.",
         "subjects": [
-          ".github/workflows/pages.yml",
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-relay/src/relay.rs, site/astro.config.mjs and site/src/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-relay/src/relay.rs",
           "site/astro.config.mjs",
           "site/src/"
         ]
       },
       {
-        "kind": "landing",
-        "sentence": "scripts/check-copy.sh is now read by scripts/verify.sh.",
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-dice/src/lib.rs, crates/league-ledger/src/lib.rs, crates/league-season/src/lib.rs and 2 more.",
         "subjects": [
-          "scripts/check-copy.sh",
-          "scripts/verify.sh"
+          ".github/workflows/ci.yml",
+          "crates/league-dice/src/lib.rs",
+          "crates/league-ledger/src/lib.rs",
+          "crates/league-season/src/lib.rs",
+          "crates/league-standalone/src/lib.rs",
+          "crates/league-tui/src/lib.rs"
         ]
       },
       {
-        "kind": "landing",
-        "sentence": "scripts/check-testnet-only.sh is now read by scripts/verify.sh.",
-        "subjects": [
-          "scripts/check-testnet-only.sh",
-          "scripts/verify.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "scripts/test-guards.sh is now read by scripts/verify.sh.",
-        "subjects": [
-          "scripts/test-guards.sh",
-          "scripts/verify.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 2 more new writers and readers of places.",
+        "kind": "door",
+        "sentence": "And 1 more change to a door.",
         "subjects": []
       },
       {
-        "kind": "unassigned",
-        "sentence": "site/astro.config.mjs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "kind": "landing",
+        "sentence": "SECURITY.md is now also read by scripts/check-copy.sh.",
         "subjects": [
-          "site/astro.config.mjs"
+          "SECURITY.md",
+          "scripts/check-copy.sh"
         ]
       },
       {
-        "kind": "unassigned",
-        "sentence": "site/package-lock.json is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "kind": "landing",
+        "sentence": "site/src/ is now read by scripts/check-copy.sh.",
         "subjects": [
-          "site/package-lock.json"
+          "site/src/",
+          "scripts/check-copy.sh"
         ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "site/package.json is new and belongs to no part, so atlas check fails on it against the previous map.",
-        "subjects": [
-          "site/package.json"
-        ]
-      },
-      {
-        "kind": "unassigned",
-        "sentence": "And 15 more new files that belong to no part.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "21 files added and 4 changed content, across 3 parts.",
+        "sentence": "9 files added, 1 removed and 26 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "d4fe153fa0c44776f1450a5eb2a23904f6b2f667",
-      "generatedAt": "2026-11-17T02:49:37.531Z"
+      "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
+      "generatedAt": "2026-11-17T09:09:31.289Z"
     },
     "unchanged": false
   },
@@ -127,21 +113,6 @@
       ],
       "relation": "inside",
       "shared": 5
-    },
-    {
-      "a": "crates/league-relay/src/relay.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 19,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 17
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -174,6 +145,21 @@
       "shared": 5
     },
     {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 21,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 17
+    },
+    {
       "a": "crates/league-gen/src/generator.rs",
       "b": "crates/league-gen/src/schema.rs",
       "either": 10,
@@ -194,9 +180,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
+  "commit": "541c2231d993226841864f1b9f3cbae848cc5d32",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (341 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 8 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (340 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 8 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -273,18 +259,21 @@
         "crates/league-ledger/examples/",
         "crates/league-ledger/src/",
         "crates/league-ledger/tests/vectors.rs",
+        "crates/league-relay/src/relay.rs",
         "crates/league-relay/tests/",
         "crates/league-season/",
         "crates/league-standalone/",
-        "crates/league-tui/"
+        "crates/league-tui/",
+        "site/astro.config.mjs",
+        "site/src/"
       ],
-      "runsCount": 23,
-      "runsMore": 30,
+      "runsCount": 26,
+      "runsMore": 34,
       "sends": [],
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 9 paths",
+        "on a push to main touching 12 paths",
         "or by hand"
       ]
     },
@@ -305,7 +294,7 @@
       "runsCount": 2,
       "runsMore": 0,
       "sends": [
-        "deploys the site"
+        "deploys the site on main"
       ],
       "stages": [],
       "triggers": [
@@ -446,13 +435,13 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-17T09:09:31.289Z",
+  "generatedAt": "2026-11-17T13:37:28.521Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
     "1 write goes to a temporary directory, not to this repository.",
-    "389 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 386 more.",
+    "388 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 385 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -491,7 +480,7 @@
     "crates/league-relay/src/wording.rs",
     "crates/league-relay/src/error.rs"
   ],
-  "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests and checks.",
+  "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
   "testFiles": 40,

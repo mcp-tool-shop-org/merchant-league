@@ -190,13 +190,18 @@
     "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
     "files": [
       {
-        "commits": 8,
-        "lines": 217,
+        "commits": 1,
+        "lines": 2,
+        "path": ".gitattributes"
+      },
+      {
+        "commits": 11,
+        "lines": 284,
         "path": ".github/workflows/ci.yml"
       },
       {
         "commits": 1,
-        "lines": 52,
+        "lines": 55,
         "path": ".github/workflows/pages.yml"
       },
       {
@@ -205,18 +210,23 @@
         "path": ".gitignore"
       },
       {
-        "commits": 53,
-        "lines": 339,
+        "commits": 1,
+        "lines": 263,
+        "path": ".polyglot-pins.json"
+      },
+      {
+        "commits": 54,
+        "lines": 341,
         "path": "CHANGELOG.md"
       },
       {
-        "commits": 12,
-        "lines": 160,
+        "commits": 13,
+        "lines": 162,
         "path": "CLAUDE.md"
       },
       {
-        "commits": 18,
-        "lines": 8484,
+        "commits": 19,
+        "lines": 8718,
         "path": "Cargo.lock"
       },
       {
@@ -230,13 +240,48 @@
         "path": "LICENSE"
       },
       {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.es.md"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.fr.md"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.hi.md"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.it.md"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.ja.md"
+      },
+      {
         "commits": 4,
-        "lines": 107,
+        "lines": 111,
         "path": "README.md"
       },
       {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.pt-BR.md"
+      },
+      {
+        "commits": 1,
+        "lines": 101,
+        "path": "README.zh.md"
+      },
+      {
         "commits": 3,
-        "lines": 60,
+        "lines": 78,
         "path": "SECURITY.md"
       },
       {
@@ -245,8 +290,8 @@
         "path": "SHIP_GATE.md"
       },
       {
-        "commits": 56,
-        "lines": 1094,
+        "commits": 57,
+        "lines": 1126,
         "path": "atlas/README.md"
       },
       {
@@ -255,18 +300,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 56,
-        "lines": 3645,
+        "commits": 57,
+        "lines": 3756,
         "path": "atlas/page.json"
       },
       {
-        "commits": 56,
-        "lines": 16467,
+        "commits": 57,
+        "lines": 16664,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 56,
-        "lines": 40655,
+        "commits": 57,
+        "lines": 40952,
         "path": "atlas/structure.json"
       },
       {
@@ -460,8 +505,8 @@
         "path": "crates/league-ledger/tests/vectors/xrpljs-keypairs-api.json"
       },
       {
-        "commits": 8,
-        "lines": 39,
+        "commits": 9,
+        "lines": 40,
         "path": "crates/league-relay/Cargo.toml"
       },
       {
@@ -485,8 +530,8 @@
         "path": "crates/league-relay/src/main.rs"
       },
       {
-        "commits": 25,
-        "lines": 15273,
+        "commits": 27,
+        "lines": 15397,
         "path": "crates/league-relay/src/relay.rs"
       },
       {
@@ -920,13 +965,13 @@
         "path": "rust-toolchain.toml"
       },
       {
-        "commits": 16,
-        "lines": 462,
+        "commits": 17,
+        "lines": 473,
         "path": "scripts/check-copy.sh"
       },
       {
-        "commits": 8,
-        "lines": 311,
+        "commits": 9,
+        "lines": 313,
         "path": "scripts/check-testnet-only.sh"
       },
       {
@@ -935,13 +980,13 @@
         "path": "scripts/test-copy-check.sh"
       },
       {
-        "commits": 13,
-        "lines": 695,
+        "commits": 14,
+        "lines": 697,
         "path": "scripts/test-guards.sh"
       },
       {
         "commits": 1,
-        "lines": 47,
+        "lines": 62,
         "path": "scripts/verify.sh"
       },
       {
@@ -975,18 +1020,18 @@
         "path": "site/src/content.config.ts"
       },
       {
-        "commits": 1,
-        "lines": 57,
+        "commits": 2,
+        "lines": 59,
         "path": "site/src/content/docs/handbook/architecture.md"
       },
       {
         "commits": 1,
-        "lines": 45,
+        "lines": 47,
         "path": "site/src/content/docs/handbook/fairness.md"
       },
       {
         "commits": 1,
-        "lines": 69,
+        "lines": 70,
         "path": "site/src/content/docs/handbook/getting-started.md"
       },
       {
@@ -1001,7 +1046,7 @@
       },
       {
         "commits": 1,
-        "lines": 52,
+        "lines": 53,
         "path": "site/src/content/docs/handbook/security.md"
       },
       {
@@ -1040,13 +1085,13 @@
         "path": "vendor/xrpl-rust/Cargo.lock"
       },
       {
-        "commits": 2,
-        "lines": 710,
+        "commits": 3,
+        "lines": 721,
         "path": "vendor/xrpl-rust/Cargo.toml"
       },
       {
-        "commits": 2,
-        "lines": 388,
+        "commits": 3,
+        "lines": 395,
         "path": "vendor/xrpl-rust/Cargo.toml.orig"
       },
       {
@@ -1065,8 +1110,8 @@
         "path": "vendor/xrpl-rust/README.md"
       },
       {
-        "commits": 11,
-        "lines": 186,
+        "commits": 13,
+        "lines": 207,
         "path": "vendor/xrpl-rust/VENDORED.md"
       },
       {
@@ -2630,8 +2675,8 @@
         "path": "vendor/xrpl-rust/src/utils/get_xchain_claim_id.rs"
       },
       {
-        "commits": 2,
-        "lines": 252,
+        "commits": 3,
+        "lines": 254,
         "path": "vendor/xrpl-rust/src/utils/mod.rs"
       },
       {
@@ -2765,8 +2810,8 @@
         "path": "vendor/xrpl-rust/src/utils/testing.rs"
       },
       {
-        "commits": 2,
-        "lines": 446,
+        "commits": 3,
+        "lines": 669,
         "path": "vendor/xrpl-rust/src/utils/time_conversion.rs"
       },
       {
@@ -2845,79 +2890,86 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-17T09:09:31.289Z",
+  "generatedAt": "2026-11-17T13:37:28.521Z",
   "generatedFrom": {
-    "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483"
+    "commit": "541c2231d993226841864f1b9f3cbae848cc5d32"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 49,
-      "shared": 28,
-      "strength": 0.571429
+      "either": 50,
+      "shared": 29,
+      "strength": 0.58
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 49,
-      "shared": 28,
-      "strength": 0.571429
+      "either": 50,
+      "shared": 29,
+      "strength": 0.58
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 49,
-      "shared": 28,
-      "strength": 0.571429
+      "either": 50,
+      "shared": 29,
+      "strength": 0.58
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 49,
-      "shared": 28,
-      "strength": 0.571429
+      "either": 50,
+      "shared": 29,
+      "strength": 0.58
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "scripts/check-copy.sh",
+      "either": 14,
+      "shared": 7,
+      "strength": 0.5
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 39,
-      "shared": 39,
+      "either": 40,
+      "shared": 40,
       "strength": 1
     },
     {
@@ -3063,16 +3115,16 @@
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 19,
+      "either": 21,
       "shared": 17,
-      "strength": 0.894737
+      "strength": 0.809524
     },
     {
       "a": "crates/league-relay/src/relay.rs",
       "b": "docs/paper-test/relay.md",
-      "either": 17,
+      "either": 19,
       "shared": 16,
-      "strength": 0.941176
+      "strength": 0.842105
     },
     {
       "a": "crates/league-relay/tests/relay_integration.rs",
@@ -3084,9 +3136,9 @@
     {
       "a": "scripts/check-copy.sh",
       "b": "scripts/test-guards.sh",
-      "either": 11,
-      "shared": 9,
-      "strength": 0.818182
+      "either": 12,
+      "shared": 10,
+      "strength": 0.833333
     }
   ],
   "parameters": {
@@ -3099,16 +3151,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-17T04:09:18-05:00",
-    "inScopeFiles": 528,
+    "headDate": "2026-11-17T08:37:24-05:00",
+    "inScopeFiles": 536,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 60,
+    "qualifyingCommits": 63,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-21T09:09:18.000Z",
+    "since": "2026-05-21T13:37:24.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
