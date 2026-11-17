@@ -10,6 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+skipped=()
 step() { printf '\n== %s\n' "$1"; }
 
 step "Format"
@@ -26,6 +27,7 @@ if command -v cargo-llvm-cov >/dev/null; then
   cargo llvm-cov --workspace --locked --fail-under-lines 90
 else
   echo "skipped: cargo-llvm-cov is not installed (CI runs it)"
+  skipped+=("coverage")
 fi
 
 step "Security audit"
@@ -33,6 +35,7 @@ if command -v cargo-audit >/dev/null; then
   cargo audit --deny warnings
 else
   echo "skipped: cargo-audit is not installed (CI runs it)"
+  skipped+=("cargo audit")
 fi
 
 step "Testnet only"
@@ -44,4 +47,8 @@ bash scripts/check-copy.sh
 step "Guard controls"
 bash scripts/test-guards.sh
 
-printf '\nverify: all checks passed\n'
+if [ ${#skipped[@]} -eq 0 ]; then
+  printf '\nverify: all checks passed\n'
+else
+  printf '\nverify: every check that ran passed; NOT run here: %s (install the tool, or rely on CI)\n' "${skipped[*]}"
+fi

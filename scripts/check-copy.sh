@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A tripwire: fails when player-facing text (the crates, the README and the
-# docs) frames the game as real money.
+# A tripwire: fails when player-facing text (the crates, the README, SECURITY.md,
+# the docs and the site) frames the game as real money.
 #
 # Game words are fine, including ordinary trading language: "buy in Varn",
 # "sell at a profit", "a profitable route" are about goods and marks (the
@@ -76,11 +76,12 @@ pattern=$(IFS='|'; echo "${banned[*]}")
 # Saying there is no real money: no, not, never, without, not for.
 disclaimer="\b(no|not|never|without)(${sep}+for)?${sep}+real${sep}*money\b"
 
-# The files: the crates, the docs and the README, less the licence files
+# The files: the crates, the docs, the site's source (site/src: the landing
+# page and the handbook), the README and SECURITY.md, less the licence files
 # and the recorded play.
 licence='^crates/(.*/)?(LICENSE|LICENSE\.md|LICENSE\.txt|LICENSE-MIT|LICENSE-APACHE|LICENSE-xrpl\.js|LICENSE-rippled)$'
 recorded='^docs/paper-test/game-[0-9]{2}/(log|metrics)\.md$'
-all=$( { find crates docs -type f 2>/dev/null; [ -f README.md ] && echo README.md; } | sort)
+all=$( { find crates docs site/src -type f 2>/dev/null; [ -f README.md ] && echo README.md; [ -f SECURITY.md ] && echo SECURITY.md; } | sort)
 skip=$( {
   printf '%s\n' "$all" | grep -E "$licence" | grep -viE '\.rs$' || true
   printf '%s\n' "$all" | grep -E "$recorded" || true
