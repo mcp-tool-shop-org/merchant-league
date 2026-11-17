@@ -9,11 +9,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "e8f677159e1398d827f5d3dc39a90988ce311fbb068dc96f6df6c56211920130",
+          "hash": "8e31606b524ab51376253942011448e58e22bde3fcf5b3a5e4709623d7655f42",
           "path": ".github/workflows/ci.yml"
         },
         {
-          "hash": "c65d51b8784c70e5ec17b3973d82c04a55f9e20e5237abb047fe478d283a63db",
+          "hash": "2c1a225b2abadc8f00b601576b5a00f54cf3f49eb7509ead7fd1061d332fe2a8",
           "path": ".github/workflows/pages.yml"
         }
       ],
@@ -36,11 +36,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "e0f19d88faa1d34347ecc8ad59caf028371bd85d2f05bf4826eac332ddefb26f",
+          "hash": "d56857d0e2b21e57fcb506928d132ec9b11e0b8357d571cca3d0ba2b09a28fda",
           "path": "docs/design-v2.md"
         },
         {
-          "hash": "cbd10211dde8696632f2819d8e1d14be26b543ee44f81dc66d304f26dc06c870",
+          "hash": "cf3206e70060ff408e2062edd803ea35a7ea437945974499ba68c127a4835ee1",
           "path": "docs/design.md"
         },
         {
@@ -56,7 +56,7 @@
           "path": "docs/paper-test/brief.md"
         },
         {
-          "hash": "b1f22ec20dea2a7653bbf29757bd768b64cad9e9ba88df13c733a2178ba9ddcf",
+          "hash": "9d50dbaffdb4542675bf1cfe960637047273aaf7a6eede39778d069ac3cb5769",
           "path": "docs/paper-test/design-ruling-1.md"
         },
         {
@@ -226,7 +226,7 @@
           "path": "docs/receipts/design-check-requireauth-2026-11-14/raw/hash_check.py"
         },
         {
-          "hash": "4ddb2fc96afd1ef352b866a06c1cac87283c07d425c8e74e831f9227f62f2f28",
+          "hash": "ce60e4a25bc7ef5f5c423dd9d5decd9be6811d13a348c30cc42be64728a8f6b5",
           "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/README.md"
         },
         {
@@ -250,7 +250,7 @@
           "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/raw/03_cargo_audit_with_xrpl_rust.txt"
         },
         {
-          "hash": "640c56407de274e84035f1a76976885ddc38eb6197607a9302965d7f796e1ad6",
+          "hash": "eb7a522fbced95409d096d15c058805ab3d00d88c70c7d64002a27a1f85096ef",
           "path": "docs/receipts/m2-xrpl-rust-spike-2026-11-14/testnet_spike.rs.txt"
         },
         {
@@ -367,6 +367,7 @@
             "bonus_points_milli_for_completion_bps",
             "break_tie_with_beacon",
             "break_tie_with_turn_beacon",
+            "check_drand_quicknet_signature",
             "close_roll_bps_from_beacon",
             "compute_mandate_commitment",
             "compute_order_commitment",
@@ -496,62 +497,77 @@
               "line": 1110
             },
             {
-              "in": "derive_drand_beacon",
+              "in": "check_drand_quicknet_signature",
               "kind": "err",
-              "line": 1126
+              "line": 1159
+            },
+            {
+              "in": "check_drand_quicknet_signature",
+              "kind": "err",
+              "line": 1164
+            },
+            {
+              "in": "check_drand_quicknet_signature",
+              "kind": "err",
+              "line": 1170
             },
             {
               "in": "derive_drand_beacon",
               "kind": "err",
-              "line": 1132
+              "line": 1187
+            },
+            {
+              "in": "derive_drand_beacon",
+              "kind": "err",
+              "line": 1193
             },
             {
               "in": "verify_drand_quicknet_beacon",
-              "kind": "err",
-              "line": 1153
-            },
-            {
-              "in": "verify_drand_quicknet_beacon",
-              "kind": "err",
-              "line": 1160
-            },
-            {
-              "in": "try_from_bytes",
-              "kind": "err",
-              "line": 1203
-            },
-            {
-              "in": "secret_key",
               "kind": "err",
               "line": 1217
             },
             {
-              "in": "prove_turn",
+              "in": "verify_drand_quicknet_beacon",
               "kind": "err",
-              "line": 1243
+              "line": 1225
+            },
+            {
+              "in": "try_from_bytes",
+              "kind": "err",
+              "line": 1268
+            },
+            {
+              "in": "secret_key",
+              "kind": "err",
+              "line": 1282
             },
             {
               "in": "prove_turn",
               "kind": "err",
-              "line": 1253
+              "line": 1308
+            },
+            {
+              "in": "prove_turn",
+              "kind": "err",
+              "line": 1318
             },
             {
               "in": "validate_eval_vrf_pubkey",
               "kind": "err",
-              "line": 1279
+              "line": 1344
             },
             {
               "in": "verify_and_extract_eval_vrf_beacon",
               "kind": "err",
-              "line": 1296
+              "line": 1361
             },
             {
               "in": "verify_eval_vrf_beacon",
               "kind": "err",
-              "line": 1334
+              "line": 1399
             }
           ],
-          "hash": "749596a9a73dd5a77150ed426c69bcb4518afd297696d3e7046850dce4060847",
+          "hash": "16ec83ae839eb46cad8484021ba1f03b433b5829b8e261bfea536a10274385ba",
           "importsFiles": [
             "crates/league-core/src/types.rs"
           ],
@@ -958,7 +974,7 @@
               "line": 2578
             }
           ],
-          "hash": "6fb1d8a17b69234bf382c2a7bcaffd0b1969b6d32a8988201b15b733ea14cbcf",
+          "hash": "7b80c72f3731936d8a6eb40b00e2b84de1fdf31d110b02fed00c092aa7a6f37c",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -969,7 +985,7 @@
           "testsInside": true
         },
         {
-          "hash": "7a532d04edaad5898250b599e6c3c5a4cbf034527e0a6ed1f721a50ff837a007",
+          "hash": "9095e92597fd95206551a1bd92f124e1af9a8ba6ac5e2aab7cffb49bb375415a",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1039,205 +1055,205 @@
             {
               "in": "try_clear",
               "kind": "err",
-              "line": 161
+              "line": 162
             },
             {
               "in": "sealed_checked",
               "kind": "err",
-              "line": 170
+              "line": 171
             },
             {
               "in": "visit_str",
               "kind": "err",
-              "line": 312
+              "line": 313
             },
             {
               "in": "visit_i64",
               "kind": "err",
-              "line": 340
+              "line": 341
             },
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 354
+              "line": 355
             },
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 360
+              "line": 361
             },
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 366
+              "line": 367
             },
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 377
+              "line": 378
             },
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 389
+              "line": 390
             },
             {
               "in": "deserialize",
               "kind": "err",
-              "line": 434
+              "line": 435
             },
             {
               "in": "check_deal_seed_independence",
               "kind": "err",
-              "line": 542
+              "line": 544
             },
             {
               "in": "check_eval_vrf_independence",
               "kind": "err",
-              "line": 561
+              "line": 563
             },
             {
               "in": "build_checked",
               "kind": "err",
-              "line": 656
+              "line": 658
             },
             {
               "in": "from_json_slice",
               "kind": "err",
-              "line": 728
+              "line": 730
             },
             {
               "in": "from_json_slice",
               "kind": "err",
-              "line": 736
+              "line": 738
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 792
+              "line": 794
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 798
+              "line": 800
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 805
+              "line": 807
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 811
+              "line": 813
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 821
+              "line": 823
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 832
+              "line": 834
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 845
+              "line": 847
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 857
+              "line": 859
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 869
+              "line": 871
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 874
+              "line": 876
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 883
+              "line": 885
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 888
+              "line": 890
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 906
+              "line": 908
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 922
+              "line": 924
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 929
+              "line": 931
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 938
+              "line": 940
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 944
+              "line": 946
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 950
+              "line": 952
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 965
+              "line": 967
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 971
+              "line": 973
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 977
+              "line": 979
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 983
+              "line": 985
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 989
+              "line": 991
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 1012
+              "line": 1014
             },
             {
               "in": "replay_season_inner",
               "kind": "err",
-              "line": 1061
+              "line": 1063
             }
           ],
-          "hash": "1e67fcb65ca5853de3a5f104548c0a2d2400f8b1e20c6192f3f2ae79f09133ca",
+          "hash": "93dfc5d7b9e7c249fbf02085b956dd859e5c7b540f887eb874588fb97d11dd45",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1470,7 +1486,16 @@
           "testsInside": true
         },
         {
-          "hash": "662de5de1b1c1caeb86c8bbc69bb1f09468a5cdda3c650350c04c5976f02520b",
+          "hash": "d287d68fdcb6057627bd963e0af3da46c99186a05120b13ef02ff60fced079d8",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs"
+          ],
+          "library": "crates/league-core/src/lib.rs",
+          "path": "crates/league-core/tests/fu1_no_seed_secret.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "5476d02d6d4e79ea23eadeda8094a0429cfbf86bfe0defd0845a02c492dadf90",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1498,61 +1523,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 7,
-      "unresolvedSites": 0
-    },
-    {
-      "dynamicReads": 0,
-      "dynamicSpawns": 0,
-      "dynamicSpawnsInTests": 0,
-      "dynamicWrites": 0,
-      "entryPoints": [
-        "crates/league-dice/src/lib.rs"
-      ],
-      "externals": 0,
-      "files": [
-        {
-          "hash": "2a799e9c088afd2aa80d40e0479ad168936918a9c3953b2d8def23303e03b74e",
-          "path": "crates/league-dice/Cargo.toml"
-        },
-        {
-          "failurePaths": [
-            {
-              "in": "try_from_bytes",
-              "kind": "err",
-              "line": 54
-            },
-            {
-              "in": "generate_with",
-              "kind": "err",
-              "line": 72
-            }
-          ],
-          "hash": "2372e5ca18efe36115ac87ca19e065a8e85f43dcb2796b173df6d916f952096e",
-          "path": "crates/league-dice/src/lib.rs",
-          "testsInside": true
-        },
-        {
-          "hash": "5cf9cd3522954f8af0372a37bd1f4890030eb0f6347c1c4c6738d83370c474a7",
-          "importsFiles": [
-            "crates/league-dice/src/lib.rs"
-          ],
-          "library": "crates/league-dice/src/lib.rs",
-          "path": "crates/league-dice/tests/fu1_no_seed_secret.rs",
-          "testsInside": true
-        }
-      ],
-      "globs": [
-        "crates/league-dice/**"
-      ],
-      "importConfidence": "full",
-      "name": "league-dice",
-      "origin": "authored",
-      "role": "code",
-      "testRunners": [
-        "cargo test"
-      ],
-      "testedBy": 2,
+      "testedBy": 8,
       "unresolvedSites": 0
     },
     {
@@ -2224,12 +2195,13 @@
             {
               "in": "main",
               "kind": "err",
-              "line": 215
+              "line": 209
             }
           ],
-          "hash": "9d85b63ec7e905a88d5d5465172c6ee62a5f75ba08aec83e6ca1dfbe51145ba2",
+          "hash": "ed4c707bd10b6cb243eec0734e4ad5da9b6013d8f97889014589bf5629c49718",
           "importsFiles": [
-            "crates/league-ledger/src/client.rs"
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/lib.rs"
           ],
           "library": "crates/league-ledger/src/lib.rs",
           "path": "crates/league-ledger/examples/testnet_escrow_expiry.rs",
@@ -2237,11 +2209,18 @@
             {
               "calls": [
                 {
-                  "line": 96,
+                  "line": 90,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
                     "file": "crates/league-ledger/src/client.rs"
+                  }
+                },
+                {
+                  "line": 151,
+                  "name": "condition_hex",
+                  "target": {
+                    "file": "crates/league-ledger/src/lib.rs"
                   }
                 }
               ],
@@ -2260,12 +2239,13 @@
             {
               "in": "main",
               "kind": "err",
-              "line": 519
+              "line": 503
             }
           ],
-          "hash": "dd63a65739a4f8f9aa7a8d5a318669decc36a653187ed8e531b86c37fa10ab93",
+          "hash": "6b9b6921b6f7103877d280e5f3a1c63341d5a1b7a866e3f193c9a2171e1fe977",
           "importsFiles": [
-            "crates/league-ledger/src/client.rs"
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/lib.rs"
           ],
           "library": "crates/league-ledger/src/lib.rs",
           "path": "crates/league-ledger/examples/testnet_proof.rs",
@@ -2273,11 +2253,18 @@
             {
               "calls": [
                 {
-                  "line": 171,
+                  "line": 155,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
                     "file": "crates/league-ledger/src/client.rs"
+                  }
+                },
+                {
+                  "line": 274,
+                  "name": "escrow_condition",
+                  "target": {
+                    "file": "crates/league-ledger/src/lib.rs"
                   }
                 }
               ],
@@ -2296,12 +2283,13 @@
             {
               "in": "main",
               "kind": "err",
-              "line": 315
+              "line": 303
             }
           ],
-          "hash": "c83c09b05152ac490f2c9ab7c492cc4f089585a11880ba57a554950aa1f73837",
+          "hash": "c04342aa35fccefecb7fffdc1ffd275def633fe9b079854358c4ac8e6ce329c0",
           "importsFiles": [
-            "crates/league-ledger/src/client.rs"
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/lib.rs"
           ],
           "library": "crates/league-ledger/src/lib.rs",
           "path": "crates/league-ledger/examples/testnet_requireauth.rs",
@@ -2309,11 +2297,18 @@
             {
               "calls": [
                 {
-                  "line": 107,
+                  "line": 95,
                   "name": "connect",
                   "receiver": "Testnet",
                   "target": {
                     "file": "crates/league-ledger/src/client.rs"
+                  }
+                },
+                {
+                  "line": 208,
+                  "name": "escrow_condition",
+                  "target": {
+                    "file": "crates/league-ledger/src/lib.rs"
                   }
                 }
               ],
@@ -2326,6 +2321,8 @@
           "testsInside": true
         },
         {
+          "entry": "transaction_hash",
+          "entryRule": 4,
           "exports": [
             "decode_hex",
             "transaction_hash"
@@ -2344,83 +2341,117 @@
             {
               "in": "decode_hex",
               "kind": "err",
-              "line": 187
+              "line": 183
             },
             {
               "in": "rpc",
               "kind": "err",
-              "line": 255
+              "line": 251
             },
             {
               "in": "fund_new_account",
               "kind": "err",
-              "line": 322
+              "line": 318
             },
             {
               "in": "wait_for_account",
               "kind": "match-err",
-              "line": 341
+              "line": 337
             },
             {
               "in": "wait_for_account",
               "kind": "match-err",
-              "line": 344
-            },
-            {
-              "in": "wait_for_account",
-              "kind": "err",
-              "line": 344
+              "line": 340
             },
             {
               "in": "wait_for_account",
               "kind": "err",
-              "line": 347
+              "line": 340
+            },
+            {
+              "in": "wait_for_account",
+              "kind": "err",
+              "line": 343
             },
             {
               "in": "submit",
               "kind": "match-err",
-              "line": 420
+              "line": 416
             },
             {
               "in": "submit",
               "kind": "match-err",
-              "line": 421
+              "line": 417
             },
             {
               "in": "submit",
               "kind": "err",
-              "line": 421
+              "line": 417
             }
           ],
-          "hash": "398681d2430663a759133375345ccab1d81a458c71000276c895c1b9d9db8616",
+          "hash": "03cf27fecd852c0b980fdd241ead05086d89d082cb1a68ef15e7b48909ecfb9f",
           "importsFiles": [
             "crates/league-ledger/src/lib.rs"
           ],
           "path": "crates/league-ledger/src/client.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "line": 177,
+                  "name": "upper_hex",
+                  "target": {
+                    "file": "crates/league-ledger/src/lib.rs"
+                  }
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "transaction_hash"
+            }
+          ],
           "testsInside": true
         },
         {
           "exports": [
-            "require_testnet"
+            "condition_hex",
+            "escrow_condition",
+            "escrow_finish_min_fee_drops",
+            "fulfillment_hex"
+          ],
+          "hash": "b9a6085354605ae41df841e5915100b979383d5534a4d7e6f6d327685f886400",
+          "importsFiles": [
+            "crates/league-ledger/src/lib.rs"
+          ],
+          "path": "crates/league-ledger/src/escrow.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
+            "require_testnet",
+            "upper_hex"
           ],
           "failurePaths": [
             {
               "in": "require_testnet",
               "kind": "err",
-              "line": 60
+              "line": 70
             }
           ],
-          "hash": "0ffc848dbba1f831fcdd253976a2c1c61f949daa1d7d99f84321180b31e6cc2d",
+          "hash": "7bf2f67bd8f781ad7e208f7221a7d27be259058f51e4744fde3765f1dddf6474",
           "importsFiles": [
-            "crates/league-ledger/src/client.rs"
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/escrow.rs"
           ],
           "path": "crates/league-ledger/src/lib.rs",
           "testsInside": true
         },
         {
-          "hash": "d6f43f4d24e417b05965623395f04ec4b12222589416a44ebfee16bb48ad22ba",
+          "hash": "f264f6cc72d3da628331cf51c66c90e07bbdf724f2425929ac7d329ceccc761a",
           "importsFiles": [
-            "crates/league-ledger/src/client.rs"
+            "crates/league-ledger/src/client.rs",
+            "crates/league-ledger/src/lib.rs"
           ],
           "library": "crates/league-ledger/src/lib.rs",
           "path": "crates/league-ledger/tests/vectors.rs",
@@ -2462,7 +2493,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 7,
+      "testedBy": 8,
       "unresolvedSites": 0
     },
     {
@@ -2483,7 +2514,7 @@
           "exports": [
             "ledger_went_backwards"
           ],
-          "hash": "51a0eca78c7d1870a746955bf21cec5df1ff6ddc5c838e789ed1f0643e2a8cb2",
+          "hash": "c0175c71ee5bda689160cd804ebfacd971d6f8a8cc83e22d5c02a73fcaaa813a",
           "path": "crates/league-season/src/lib.rs",
           "testsInside": true
         }
@@ -2975,23 +3006,31 @@
       "externals": 0,
       "files": [
         {
+          "hash": "c0ba16249c86c31e00abac6db93c5df8d48c48779f90ec2ca6872adb0e7f6f25",
+          "path": ".gitattributes"
+        },
+        {
           "hash": "c04f6bb58c4f3ef967efc19e001a90008bfb69eaf044552192d8dee0aedd4861",
           "path": ".gitignore"
         },
         {
-          "hash": "2a72fe8c0360e6e521af0a84cb2af7d66b07db2a85654fb37a4b443195a5bede",
+          "hash": "e195be81ec6f19099bce0038e025199d6b407381f3e8fdb6c2489ddec688daf4",
+          "path": ".polyglot-pins.json"
+        },
+        {
+          "hash": "4bd42213985b9eac729b07da1af4b30fc636420b7765a3aa356a1ff3b397ae38",
           "path": "CHANGELOG.md"
         },
         {
-          "hash": "37d6cde331e7c31d78f77b4fb0593c2d7c1970a7dd13eecb3cbe39e8196374c5",
+          "hash": "6023b8a0ef68ccbc7e2de40b8a239daef48a521f422b0732710284eb1aedb373",
           "path": "CLAUDE.md"
         },
         {
-          "hash": "bf1a06dc54c935c965f1ed0082a5a84dca1554407b3f7bc65bb0d328a5a60862",
+          "hash": "7060361bd32830c695be3c5b5e3956af41e3b369080e46af11ef023e724ac698",
           "path": "Cargo.lock"
         },
         {
-          "hash": "f63fa98f754248643ea715dcea59d95bd03888f03f29e8e2685f18a14f7798ed",
+          "hash": "98b85540823529a60ad62b0941ed54ec52cf9b5f7d36985768c910729d235b03",
           "path": "Cargo.toml"
         },
         {
@@ -2999,15 +3038,43 @@
           "path": "LICENSE"
         },
         {
-          "hash": "dfe90a9104c972ad645c99df0e94beacf4b470079ca4e05e51b7f9e976b056c4",
+          "hash": "7aff06dcbeb12e5bb6f9e01824d19c41092580a4d8876f9c49e65054e69cff6c",
+          "path": "README.es.md"
+        },
+        {
+          "hash": "1b3c1ab75d2792f7a3603074ac58ac11e5baa9855489e98c416a24cda07cd51b",
+          "path": "README.fr.md"
+        },
+        {
+          "hash": "102977d4709df541d20d8e8877ad5ebea4f7bc3cca176fc76522dded90f1b2a1",
+          "path": "README.hi.md"
+        },
+        {
+          "hash": "6e19dacdc900df653b8b8786565fedb73fce2fcbd19af3e1411fa31ab4a8e806",
+          "path": "README.it.md"
+        },
+        {
+          "hash": "240684c2fdcad6b001bcbc7016ed6bc0c7672dfb7e036875487df7d1aa045ae3",
+          "path": "README.ja.md"
+        },
+        {
+          "hash": "d725fc842c12535f80b566982eb9e0a66a3b9dc217d684802196973c4e5f7cdc",
           "path": "README.md"
         },
         {
-          "hash": "323028db91c40b27a90d85fccdd7f1e04e77193d1a6fbeda7ec896461d259a32",
+          "hash": "e351fc7b899b0d7ae16faa1e39f13c2d44df0102da24af26891b4702fa18ffa9",
+          "path": "README.pt-BR.md"
+        },
+        {
+          "hash": "a8bebdf10d60e7a31beb00acc34910c70b353476e43d94d9092ff519c4608701",
+          "path": "README.zh.md"
+        },
+        {
+          "hash": "2534a15432fdd7359dd07e51a76406b356e788486533909216b766de4167b922",
           "path": "SECURITY.md"
         },
         {
-          "hash": "1971efbdb1eecf3b6110d1c6c1233f0afd7953afe466a6ccdbd0d9dc7ed6bbec",
+          "hash": "ac2a150681196a2214b80fe6695a065453396cf9ce974123b233622fadc583e4",
           "path": "SHIP_GATE.md"
         },
         {
@@ -3034,19 +3101,19 @@
       "externals": 0,
       "files": [
         {
-          "hash": "116cfee878b1d710a5d37a6e8035faa0223721bd42e1c25e893814248c2fa682",
+          "hash": "c7622613b487d9f329c2e9bd7d83ec0e99e855cce806bb0c2e02cd9b6a0abf0b",
           "path": "scripts/check-copy.sh"
         },
         {
-          "hash": "825e7f302f7663d33d6fcc65a31a5f8b0ef3ad6a5a55c51cf58e36299d15addf",
+          "hash": "6eb95bc51f6427db5e6e9725a01f1e3e262e390591219fc1601c796e9ac543bb",
           "path": "scripts/check-testnet-only.sh"
         },
         {
-          "hash": "e0a457f8d8ae6035eb586595c64a13514cf352289434d7578f39e453cb1a0085",
+          "hash": "33c616664f1c86486ce9fd15d27c9cfe630c6f6a19bf0c83df779e3b648e48e0",
           "path": "scripts/test-guards.sh"
         },
         {
-          "hash": "5d346566cb702c1588a3270a26a58e6ebfa5732058839cc5349e238711f84c7f",
+          "hash": "1a8098c24192b962e40afaa8ac2863745a01fc2e08d20999d81cde351d0b2a30",
           "path": "scripts/verify.sh"
         }
       ],
@@ -3063,7 +3130,7 @@
   ],
   "doors": [
     {
-      "checksCount": 3,
+      "checksCount": 7,
       "commands": [
         {
           "dir": "",
@@ -3110,15 +3177,6 @@
           "dir": "",
           "job": "check",
           "programs": [
-            "cargo",
-            "command"
-          ],
-          "step": "Security audit"
-        },
-        {
-          "dir": "",
-          "job": "check",
-          "programs": [
             "bash"
           ],
           "step": "Testnet only"
@@ -3148,6 +3206,14 @@
           "step": "Atlas check"
         },
         {
+          "dir": "site",
+          "job": "check",
+          "programs": [
+            "npm"
+          ],
+          "step": "Site build"
+        },
+        {
           "dir": "",
           "job": "check",
           "programs": [
@@ -3156,6 +3222,23 @@
             "timeout"
           ],
           "step": "Stand-alone xrpld harness"
+        },
+        {
+          "dir": "",
+          "job": "audit",
+          "programs": [
+            "rustup"
+          ],
+          "step": "Install the pinned Rust toolchain"
+        },
+        {
+          "dir": "",
+          "job": "audit",
+          "programs": [
+            "cargo",
+            "command"
+          ],
+          "step": "Security audit"
         }
       ],
       "elsewhere": [],
@@ -3189,6 +3272,22 @@
               "version": "22"
             }
           ]
+        },
+        {
+          "basis": "declared",
+          "name": "audit",
+          "runsOn": [
+            {
+              "labels": [
+                "ubuntu-latest"
+              ],
+              "platform": {
+                "cpu": "x64",
+                "libc": "glibc",
+                "os": "linux"
+              }
+            }
+          ]
         }
       ],
       "landings": [],
@@ -3202,12 +3301,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 11
-        },
-        {
-          "boundary": "league-dice",
-          "depth": 0,
-          "files": 2
+          "files": 12
         },
         {
           "boundary": "league-gen",
@@ -3217,7 +3311,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 6
+          "files": 7
         },
         {
           "boundary": "league-season",
@@ -3250,6 +3344,13 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-core/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-core/src/lib.rs",
@@ -3268,14 +3369,6 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-core/tests/",
-          "runKind": "executes",
-          "via": "cargo test"
-        },
-        {
-          "directory": true,
-          "job": "check",
-          "matched": true,
-          "path": "crates/league-dice/",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -3299,6 +3392,13 @@
           "path": "crates/league-gen/src/generator.rs",
           "runKind": "executes",
           "via": "cargo test"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-gen/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3360,11 +3460,25 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-ledger/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-ledger/tests/vectors.rs",
           "runKind": "executes",
           "via": "cargo clippy"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-relay/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3374,11 +3488,25 @@
           "via": "cargo clippy"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-relay/src/main.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-relay/src/main.rs",
           "runKind": "checks",
           "via": "cargo clippy"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-relay/src/relay.rs",
+          "runKind": "executes",
+          "via": "cargo test"
         },
         {
           "directory": true,
@@ -3397,6 +3525,13 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-season/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "directory": true,
           "job": "check",
           "matched": true,
@@ -3405,12 +3540,26 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-standalone/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
           "directory": true,
           "job": "check",
           "matched": true,
           "path": "crates/league-tui/",
           "runKind": "executes",
           "via": "cargo test"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-tui/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
         },
         {
           "job": "check",
@@ -3426,9 +3575,24 @@
           "job": "check",
           "path": "scripts/test-guards.sh",
           "runKind": "executes"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "site/astro.config.mjs",
+          "runKind": "executes",
+          "via": "astro build"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "site/src/",
+          "runKind": "executes",
+          "via": "astro build"
         }
       ],
-      "runsCount": 26,
+      "runsCount": 32,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -3443,14 +3607,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 30,
+          "files": 31,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 30,
+          "files": 31,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -3476,11 +3640,13 @@
             "Cargo.lock",
             "Cargo.toml",
             "README.md",
+            "SECURITY.md",
             "atlas/**",
             "crates/**",
             "docs/**",
             "rust-toolchain.toml",
-            "scripts/**"
+            "scripts/**",
+            "site/**"
           ]
         },
         {
@@ -3516,6 +3682,23 @@
       ],
       "elsewhere": [],
       "file": ".github/workflows/pages.yml",
+      "gated": [
+        {
+          "jobs": [
+            "deploy"
+          ],
+          "pushes": false,
+          "sends": [
+            "deploysPages"
+          ],
+          "stages": [],
+          "when": {
+            "branches": [
+              "main"
+            ]
+          }
+        }
+      ],
       "jobs": [
         {
           "basis": "declared",
@@ -3597,7 +3780,7 @@
       "runsCount": 2,
       "secrets": [],
       "sends": {
-        "deploysPages": true,
+        "deploysPages": false,
         "dispatchesTo": [],
         "opensIssues": false,
         "opensIssuesOnFailure": false,
@@ -3614,7 +3797,7 @@
           ],
           "event": "push",
           "paths": [
-            ".github/workflows/pages.yml",
+            ".github/workflows/**",
             "site/**"
           ]
         },
@@ -3646,7 +3829,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "readers": [],
@@ -3689,7 +3872,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "readers": [],
@@ -3732,7 +3915,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 3
+          "files": 4
         }
       ],
       "readers": [],
@@ -3852,8 +4035,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
-    "tracked": 523
+    "commit": "2418ec933edcb930b1bbda339fed8699b6e96c0f",
+    "tracked": 530
   },
   "landings": [
     {
@@ -3908,6 +4091,11 @@
     {
       "readers": [
         {
+          "by": "scripts/check-copy.sh",
+          "call": "literal",
+          "confidence": "text"
+        },
+        {
           "by": "scripts/test-guards.sh",
           "call": "literal",
           "confidence": "text"
@@ -3935,29 +4123,6 @@
         }
       ],
       "target": "crates/league-core",
-      "writers": []
-    },
-    {
-      "readers": [
-        {
-          "by": "Cargo.toml",
-          "call": "configuration",
-          "confidence": "config"
-        }
-      ],
-      "target": "crates/league-dice",
-      "writers": []
-    },
-    {
-      "readers": [
-        {
-          "by": "crates/league-dice/tests/fu1_no_seed_secret.rs",
-          "call": "include_str",
-          "confidence": "ast",
-          "fromTests": true
-        }
-      ],
-      "target": "crates/league-dice/src/lib.rs",
       "writers": []
     },
     {
@@ -4183,6 +4348,17 @@
         }
       ],
       "target": "scripts/test-guards.sh",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/check-copy.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "site/src",
       "writers": []
     },
     {
@@ -4695,7 +4871,7 @@
   "testFiles": 40,
   "unassigned": [
     {
-      "hash": "082361994524b3764bf5704389a2b7077fa21d6e174f0014811667fdc72f7def",
+      "hash": "039b9da6674aea8546b137dbea959c5ac9a5b1f15a7a7c53374ed8613d7770ec",
       "path": "crates/league-relay/Cargo.toml"
     },
     {
@@ -6391,492 +6567,497 @@
         {
           "in": "parse",
           "kind": "err",
-          "line": 63
+          "line": 62
         },
         {
           "in": "parse",
           "kind": "err",
-          "line": 104
+          "line": 103
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 160
+          "line": 159
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 170
+          "line": 169
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 176
+          "line": 175
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 183
+          "line": 182
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 198
+          "line": 197
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 212
+          "line": 211
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 221
+          "line": 220
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 232
+          "line": 231
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 257
+          "line": 256
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 262
+          "line": 261
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 279
+          "line": 278
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 289
+          "line": 288
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 306
+          "line": 305
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 320
+          "line": 319
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 332
+          "line": 331
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 349
+          "line": 348
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 354
+          "line": 353
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 364
+          "line": 363
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 371
+          "line": 370
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 383
+          "line": 382
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 396
+          "line": 395
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 402
+          "line": 401
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 409
+          "line": 408
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 434
+          "line": 433
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 485
+          "line": 484
         },
         {
           "in": "from_json_str",
           "kind": "err",
-          "line": 502
+          "line": 501
         },
         {
           "in": "reject_forbidden_ref_or_anchor_keyword",
           "kind": "err",
-          "line": 635
+          "line": 634
         },
         {
           "in": "reject_default_ignorable_code_point",
           "kind": "err",
-          "line": 668
+          "line": 667
         },
         {
           "in": "validate_model_visible_schema_text",
           "kind": "err",
-          "line": 992
+          "line": 991
         },
         {
           "in": "validate_model_visible_schema_text",
           "kind": "err",
-          "line": 997
+          "line": 996
         },
         {
           "in": "validate_property_key",
           "kind": "err",
-          "line": 1013
+          "line": 1012
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1029
+          "line": 1028
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1037
+          "line": 1036
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1042
+          "line": 1041
         },
         {
           "in": "check_schema_identifier",
           "kind": "err",
-          "line": 1047
+          "line": 1046
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1082
+          "line": 1081
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1088
+          "line": 1087
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1093
+          "line": 1092
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1103
+          "line": 1102
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1109
+          "line": 1108
         },
         {
           "in": "validate_ref_value",
           "kind": "err",
-          "line": 1121
+          "line": 1120
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1168
+          "line": 1167
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1183
+          "line": 1182
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1188
+          "line": 1187
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1195
+          "line": 1194
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1209
+          "line": 1208
         },
         {
           "in": "validate_dependent_required",
           "kind": "err",
-          "line": 1214
+          "line": 1213
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1583
+          "line": 1582
         },
         {
           "in": "validate_pattern_properties",
           "kind": "err",
-          "line": 1595
+          "line": 1594
         },
         {
           "in": "validate_property_names",
           "kind": "err",
-          "line": 1636
+          "line": 1635
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1683
+          "line": 1682
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1704
+          "line": 1703
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1711
+          "line": 1710
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1723
+          "line": 1722
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1728
+          "line": 1727
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1736
+          "line": 1735
         },
         {
           "in": "validate_subschema",
           "kind": "err",
-          "line": 1757
+          "line": 1756
         },
         {
           "in": "validate_day",
           "kind": "err",
-          "line": 2145
+          "line": 2144
         },
         {
           "in": "acquire",
           "kind": "match-err",
-          "line": 2644
+          "line": 2643
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2646
+          "line": 2645
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2653
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2654
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2655
-        },
-        {
-          "in": "acquire",
-          "kind": "err",
-          "line": 2688
+          "line": 2687
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2693
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2694
         },
         {
           "in": "acquire",
-          "kind": "err",
-          "line": 2695
-        },
-        {
-          "in": "acquire",
           "kind": "match-err",
-          "line": 2715
+          "line": 2714
         },
         {
           "in": "acquire",
           "kind": "err",
-          "line": 2717
+          "line": 2716
         },
         {
           "in": "acquire",
           "kind": "match-err",
+          "line": 2721
+        },
+        {
+          "in": "acquire",
+          "kind": "err",
           "line": 2722
         },
         {
-          "in": "acquire",
-          "kind": "err",
-          "line": 2723
-        },
-        {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2747
+          "line": 2746
         },
         {
           "in": "verify_identity",
           "kind": "match-err",
-          "line": 2753
+          "line": 2752
         },
         {
           "in": "verify_identity",
           "kind": "err",
-          "line": 2753
+          "line": 2752
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2957
+          "line": 2956
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2971
+          "line": 2970
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2976
+          "line": 2975
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2981
+          "line": 2980
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2992
+          "line": 2991
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 2998
+          "line": 2997
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3004
+          "line": 3003
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3010
+          "line": 3009
         },
         {
           "in": "resolve_table_scratchpad_plan",
           "kind": "err",
-          "line": 3089
+          "line": 3088
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3240
+          "line": 3239
         },
         {
           "in": "load_compatible_setup_if_exists",
           "kind": "err",
-          "line": 3249
+          "line": 3248
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3286
+          "line": 3285
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3296
+          "line": 3295
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3306
+          "line": 3305
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3316
+          "line": 3315
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3327
+          "line": 3326
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3341
+          "line": 3340
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3350
+          "line": 3349
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3362
+          "line": 3361
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3375
+          "line": 3374
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3404
+          "line": 3403
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3406
+          "line": 3405
         },
         {
           "in": "ensure_game_setup",
           "kind": "match-err",
-          "line": 3408
+          "line": 3407
         },
         {
           "in": "ensure_game_setup",
           "kind": "err",
-          "line": 3410
+          "line": 3409
+        },
+        {
+          "in": "is_run_reservation_lock_live",
+          "kind": "match-err",
+          "line": 3460
         },
         {
           "in": "is_run_reservation_lock_live",
@@ -6886,12 +7067,12 @@
         {
           "in": "is_run_reservation_lock_live",
           "kind": "match-err",
-          "line": 3462
+          "line": 3470
         },
         {
-          "in": "is_run_reservation_lock_live",
+          "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3471
+          "line": 3539
         },
         {
           "in": "write_reserved_entries_unlocked",
@@ -6900,388 +7081,393 @@
         },
         {
           "in": "write_reserved_entries_unlocked",
-          "kind": "match-err",
-          "line": 3541
+          "kind": "err",
+          "line": 3540
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3541
+          "line": 3551
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3552
-        },
-        {
-          "in": "write_reserved_entries_unlocked",
-          "kind": "err",
-          "line": 3559
+          "line": 3558
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3587
+          "line": 3586
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3589
+          "line": 3588
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "match-err",
-          "line": 3593
+          "line": 3592
         },
         {
           "in": "write_reserved_entries_unlocked",
           "kind": "err",
-          "line": 3595
+          "line": 3594
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3617
+          "line": 3616
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3624
+          "line": 3623
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3660
+          "line": 3659
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3669
+          "line": 3668
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3671
+          "line": 3670
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "match-err",
-          "line": 3674
+          "line": 3673
         },
         {
           "in": "write_pending_side_file_unlocked",
           "kind": "err",
-          "line": 3676
+          "line": 3675
         },
         {
           "in": "open",
           "kind": "err",
-          "line": 3847
+          "line": 3846
         },
         {
           "in": "check_lock_identity",
           "kind": "match-err",
-          "line": 3892
+          "line": 3891
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "match-err",
-          "line": 3917
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "err",
-          "line": 3917
-        },
-        {
-          "in": "ensure_run_resv_lock",
-          "kind": "match-err",
-          "line": 3922
+          "line": 3916
         },
         {
           "in": "ensure_run_resv_lock",
           "kind": "err",
-          "line": 3922
+          "line": 3916
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "match-err",
+          "line": 3921
+        },
+        {
+          "in": "ensure_run_resv_lock",
+          "kind": "err",
+          "line": 3921
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 4101
+          "line": 4100
         },
         {
           "in": "finish_call_and_record",
           "kind": "match-err",
-          "line": 4122
+          "line": 4121
         },
         {
           "in": "finish_call_and_record",
           "kind": "err",
-          "line": 4126
+          "line": 4125
         },
         {
           "in": "record_refusal",
           "kind": "err",
-          "line": 4138
+          "line": 4137
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4167
+          "line": 4166
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4177
+          "line": 4176
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4198
+          "line": 4197
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4239
+          "line": 4238
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4256
+          "line": 4255
         },
         {
           "in": "finalize_turn",
           "kind": "match-err",
-          "line": 4260
+          "line": 4259
         },
         {
           "in": "finalize_turn",
           "kind": "err",
-          "line": 4315
+          "line": 4314
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4384
+          "line": 4383
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4392
+          "line": 4391
         },
         {
           "in": "sum_charged_for_unit",
           "kind": "err",
-          "line": 4397
+          "line": 4396
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4447
+          "line": 4446
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4457
+          "line": 4456
         },
         {
           "in": "validate_wrapper_text_for_label",
           "kind": "err",
-          "line": 4465
+          "line": 4464
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4488
+          "line": 4487
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4495
+          "line": 4494
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4502
+          "line": 4501
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4509
+          "line": 4508
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4514
+          "line": 4513
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4519
+          "line": 4518
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4539
+          "line": 4538
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4545
+          "line": 4544
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4552
+          "line": 4551
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4583
+          "line": 4582
         },
         {
           "in": "run_turn",
           "kind": "err",
-          "line": 4594
+          "line": 4593
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4823
+          "line": 4822
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4832
+          "line": 4831
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4841
+          "line": 4840
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4898
+          "line": 4897
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4912
+          "line": 4911
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 4943
+          "line": 4942
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5140
+          "line": 5139
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5179
+          "line": 5178
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5201
+          "line": 5200
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5211
+          "line": 5210
         },
         {
           "in": "run_single_automated_seat",
           "kind": "err",
-          "line": 5273
+          "line": 5272
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5295
+          "line": 5294
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5338
+          "line": 5337
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5409
+          "line": 5408
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5426
+          "line": 5425
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5436
+          "line": 5435
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5448
+          "line": 5447
         },
         {
           "in": "run_single_automated_seat",
           "kind": "match-err",
-          "line": 5518
+          "line": 5517
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5685
+          "line": 5684
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5691
+          "line": 5690
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5697
+          "line": 5696
         },
         {
           "in": "validate_json_value_against_schema",
           "kind": "err",
-          "line": 5707
+          "line": 5706
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5738
+          "line": 5737
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5746
+          "line": 5745
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5762
+          "line": 5761
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5787
+          "line": 5786
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5800
+          "line": 5799
         },
         {
           "in": "evaluate_call_result",
           "kind": "match-err",
-          "line": 5841
+          "line": 5840
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5884
+        },
+        {
+          "in": "call_with_wall_timeout",
+          "kind": "err",
+          "line": 5884
         },
         {
           "in": "call_with_wall_timeout",
@@ -7291,60 +7477,55 @@
         {
           "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 5885
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "match-err",
           "line": 5886
         },
         {
           "in": "call_with_wall_timeout",
+          "kind": "match-err",
+          "line": 5888
+        },
+        {
+          "in": "call_with_wall_timeout",
           "kind": "err",
-          "line": 5887
+          "line": 5888
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5889
-        },
-        {
-          "in": "call_with_wall_timeout",
-          "kind": "err",
-          "line": 5889
+          "line": 5898
         },
         {
           "in": "call_with_wall_timeout",
           "kind": "match-err",
-          "line": 5899
+          "line": 5902
         },
         {
-          "in": "call_with_wall_timeout",
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 5986
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 5995
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 6007
+        },
+        {
+          "in": "load_transcript",
+          "kind": "err",
+          "line": 6017
+        },
+        {
+          "in": "format_system_time_utc_rfc3339",
           "kind": "match-err",
-          "line": 5903
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 5987
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 5996
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 6008
-        },
-        {
-          "in": "load_transcript",
-          "kind": "err",
-          "line": 6018
+          "line": 6110
         }
       ],
-      "hash": "79933c527cbbdb25ea3be32fd1ec310b5f09ae51520ac8ae457fc0f975431950",
+      "hash": "9edd1661a301f307e4b16aace3adcafaee297ed50a49b70a20a9ad747017049e",
       "importsFiles": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -7352,7 +7533,8 @@
         "crates/league-relay/src/transport.rs",
         "crates/league-relay/src/wording.rs"
       ],
-      "path": "crates/league-relay/src/relay.rs"
+      "path": "crates/league-relay/src/relay.rs",
+      "testsInside": true
     },
     {
       "exports": [
@@ -7850,7 +8032,7 @@
       "path": "site/public/favicon.svg"
     },
     {
-      "hash": "c33b32734f3a46adb1f01eabdc944a3b85bb09df5d93295ab476c25a24c6ce37",
+      "hash": "cf7bfdbdbcca8098f4f44c0dfbb1de2ec59124178a39253d72f712bb7cb41065",
       "path": "site/src/assets/logo.png"
     },
     {
@@ -7859,19 +8041,19 @@
       "path": "site/src/content.config.ts"
     },
     {
-      "hash": "c63caa7998dff7c9f34fabe8f5b69a41a46fa4fcc0942b3d84d272c84d17cfd7",
+      "hash": "cfae2a34c81622784c84078e4e63a68dfdf3a7dda00a55a74dd7e3d4f6e3fe24",
       "path": "site/src/content/docs/handbook/architecture.md"
     },
     {
-      "hash": "b64bb2b1a3a8249b0f0a2d91a6951e4275561feef969e7fe8d0fe4a7933074b2",
+      "hash": "939dcc25506d8bd2a798bf881fdb6743d14726a529ecb48ae69f2f26ad5059c9",
       "path": "site/src/content/docs/handbook/fairness.md"
     },
     {
-      "hash": "4c575c2d8444f4c437acfbda53a4afb0dc5394627bf2a3c6f45bdaa2dd463848",
+      "hash": "33c9c73d10773563057bda50a379e9d490fda1106cd5effab9319e42fa03b804",
       "path": "site/src/content/docs/handbook/getting-started.md"
     },
     {
-      "hash": "a25e2d54b4c418833f31bc66f9fdcc8ff79215c3e23e4b915a1caea6af70f1c8",
+      "hash": "92f988cb0aedfb82e5f46f341bc03d340473c20e4c35059fe71e21e4faf0d009",
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
@@ -7879,11 +8061,11 @@
       "path": "site/src/content/docs/handbook/reference.md"
     },
     {
-      "hash": "d5e0f0fb718f4cd45468868b5200b29c040d00b44301a85425a11f9fa002b5ea",
+      "hash": "e947618b8ab50894043c16a7bcf341d0486afc5dbf8a77dbbba44590fe11cfac",
       "path": "site/src/content/docs/handbook/security.md"
     },
     {
-      "hash": "22de5290bbbdb06bff5acef075205c0a627c14669882a528730347737c2ba29f",
+      "hash": "4d137e3244cb2c00d9a0a7f01048d4de73ff5ddc0139335bef357b074900bb1b",
       "path": "site/src/content/docs/handbook/the-game.md"
     },
     {
@@ -7900,7 +8082,7 @@
     },
     {
       "constantOnly": true,
-      "hash": "071d35daebfff5eba8d69f3260ffad1f86b3624908ff159c7d1a5881e5d1ceb8",
+      "hash": "6b5fead3b9387285515c63f0ae81bd350bdd587964967364b0df973cb4a8c3e4",
       "path": "site/src/site-config.ts"
     },
     {
@@ -7916,11 +8098,11 @@
       "path": "site/tsconfig.json"
     },
     {
-      "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",
+      "hash": "9a3759b99e6cbd302511f162463c71aa7e64170fd86b1cebfb3957a14de80bce",
       "path": "vendor/xrpl-rust/Cargo.toml"
     },
     {
-      "hash": "7e41d8e89d90b2e928c336325b8a5d2606ea7eadd332afe05d3cd9fb7a997e91",
+      "hash": "d94e8adda0909b21c7cc27df9c8ad7c593fd6891f6817adad2d8a490b584898f",
       "path": "vendor/xrpl-rust/Cargo.toml.orig"
     },
     {
@@ -7936,7 +8118,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "11b00b7a3dfcb7fc8fb1fe45c2136d0482bfdf6cab466716eac64e2efd8f9cf1",
+      "hash": "8dc350cbc423e02398822728133bd989b773a6f0c17f76030627941e72eb20bb",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
@@ -15266,7 +15448,7 @@
         "is_iso_code",
         "is_iso_hex"
       ],
-      "hash": "02d4984657ffdc221ea64fece104adf0006656f07fda4378329ab8b7ce91de4f",
+      "hash": "8cc95bece19abf5695796dae1b4fb3cb7521840e1799145b385b39f1d26e9f78",
       "importOrder": [
         "vendor/xrpl-rust/src/utils/exceptions.rs",
         "vendor/xrpl-rust/src/utils/get_nftoken_id.rs",
@@ -15275,7 +15457,6 @@
         "vendor/xrpl-rust/src/utils/parse_nftoken_id.rs",
         "vendor/xrpl-rust/src/utils/str_conversion.rs",
         "vendor/xrpl-rust/src/utils/testing.rs",
-        "vendor/xrpl-rust/src/utils/time_conversion.rs",
         "vendor/xrpl-rust/src/utils/transactions.rs",
         "vendor/xrpl-rust/src/utils/txn_parser/mod.rs",
         "vendor/xrpl-rust/src/utils/xrpl_conversion.rs",
@@ -15290,7 +15471,6 @@
         "vendor/xrpl-rust/src/utils/parse_nftoken_id.rs",
         "vendor/xrpl-rust/src/utils/str_conversion.rs",
         "vendor/xrpl-rust/src/utils/testing.rs",
-        "vendor/xrpl-rust/src/utils/time_conversion.rs",
         "vendor/xrpl-rust/src/utils/transactions.rs",
         "vendor/xrpl-rust/src/utils/txn_parser/mod.rs",
         "vendor/xrpl-rust/src/utils/xrpl_conversion.rs"
@@ -15496,32 +15676,6 @@
         "vendor/xrpl-rust/src/wallet/mod.rs"
       ],
       "path": "vendor/xrpl-rust/src/utils/testing.rs",
-      "testsInside": true
-    },
-    {
-      "exports": [
-        "datetime_to_ripple_time",
-        "posix_to_ripple_time",
-        "ripple_time_to_datetime",
-        "ripple_time_to_posix"
-      ],
-      "failurePaths": [
-        {
-          "in": "_ripple_check_max",
-          "kind": "err",
-          "line": 19
-        },
-        {
-          "in": "ripple_time_to_datetime",
-          "kind": "err",
-          "line": 39
-        }
-      ],
-      "hash": "b299994c767a1b78d2ef6140cf5a21fb726596266ffacb5f4fedcc42e54f6fcd",
-      "importsFiles": [
-        "vendor/xrpl-rust/src/utils/exceptions.rs"
-      ],
-      "path": "vendor/xrpl-rust/src/utils/time_conversion.rs",
       "testsInside": true
     },
     {
