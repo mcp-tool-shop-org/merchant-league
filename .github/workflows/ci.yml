@@ -71,12 +71,6 @@ jobs:
           command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked --version "0.9.1"
           cargo llvm-cov --workspace --locked --fail-under-lines 90
 
-      # Advisories are fixed by upgrading, never ignored.
-      - name: Security audit
-        run: |
-          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked --version "0.22.2"
-          cargo audit --deny warnings
-
       - name: Testnet only
         run: bash scripts/check-testnet-only.sh
 
@@ -102,3 +96,29 @@ jobs:
         run: |
           timeout 300 cargo test -p league-standalone --test standalone_live --locked -- --nocapture --test-threads=1
           test -z "$(docker ps -aq --filter label=merchant-league.harness=standalone)"
+
+  # The advisory audit runs in its own job. A new advisory is an event in the
+  # outside database, not in this change: in its own job it turns only this
+  # check red, and the build, tests, guards and harness above still run and
+  # report. Advisories are fixed by upgrading or replacing, never ignored.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-0.22.2
+
+      - name: Security audit
+        run: |
+          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked --version "0.22.2"
+          cargo audit --deny warnings
