@@ -6145,7 +6145,7 @@ fn format_utc_rfc3339_millis(secs: i64, subsec_nanos: u32) -> String {
 /// from days since `1970-01-01` (`0` = `1970-01-01`, `-1` = `1969-12-31`).
 fn civil_from_days(days_since_unix_epoch: i128) -> (i128, u32, u32) {
     let z = days_since_unix_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let era = z.div_euclid(146_097);
     let doe = (z - era * 146_097) as u32;
     let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
     let y = i128::from(yoe) + era * 400;

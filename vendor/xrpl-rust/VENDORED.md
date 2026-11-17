@@ -41,9 +41,10 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
      - The ported code carries a header naming the source.
 3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits in either case, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
 4. **Drop `chrono` (`RUSTSEC-2026-0543`, "chrono is unmaintained"):**
-   - `src/utils/time_conversion.rs` and its `pub mod` / `pub use` lines in `src/utils/mod.rs` are deleted. That module was the crate's only `chrono` user, and its two public functions (`posix_to_ripple_time` and `ripple_time_to_posix`) had no callers in `vendor/` or `crates/`.
+   - `src/utils/time_conversion.rs` and its `pub mod` / `pub use` lines in `src/utils/mod.rs` are deleted. That module was the crate's only `chrono` user, and its two public functions (`posix_to_ripple_time` and `ripple_time_to_posix`) had no callers in `vendor/` or `crates/`; the deleted module also exported the constants `RIPPLE_EPOCH` and `MAX_XRPL_TIME` and the two `pub(crate)` functions `ripple_time_to_datetime` and `datetime_to_ripple_time`, none of them used outside it.
    - `[dependencies.chrono]` and `"chrono/std"` are removed from `Cargo.toml` and `Cargo.toml.orig`.
    - `serde_with` is set to `default-features = false` and `features = ["macros"]` in both manifests: `xrpl-rust` uses only `serde_with::skip_serializing_none`, while `serde_with`'s default `std` and `alloc` features carry weak `chrono_0_4?/...` references that otherwise keep `chrono` in `Cargo.lock`.
+   - Upstream's `README.md` (lines 756–772 of the vendored copy) still shows the removed functions and is left untouched.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.
 

@@ -11,6 +11,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "crates/**"
+      - "vendor/**"
       - "scripts/**"
       - "atlas/**"
       - "README.md"
@@ -43,7 +44,11 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      # Registry, git sources and the two pinned tools. Not target/: a cache
+      - name: Read runner image id
+        id: image
+        run: echo "id=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      # Registry, git sources and cargo-llvm-cov. Not target/: a cache
       # of build output across toolchain changes has hung CI elsewhere.
       - name: Cache Cargo downloads and tools
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -52,9 +57,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-llvm-cov
-            ~/.cargo/bin/cargo-audit
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-llvmcov0.9.1-audit0.22.2
-          restore-keys: cargo-${{ runner.os }}-
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-llvmcov0.9.1
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-
 
       - name: Format
         run: cargo fmt --all --check
@@ -123,13 +127,21 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
+      - name: Read runner image id
+        id: image
+        run: echo "id=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+
       - name: Cache cargo-audit
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-${{ runner.os }}-0.22.2
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-0.22.2
 
+      # `cargo audit --version` prints `cargo-audit-audit <version>`.
       - name: Security audit
         run: |
-          command -v cargo-audit >/dev/null || cargo install cargo-audit --locked --version "0.22.2"
+          if [ "$(cargo audit --version 2>/dev/null || true)" != "cargo-audit-audit 0.22.2" ]; then
+            cargo install cargo-audit --locked --force --version "0.22.2"
+          fi
+          cargo audit --version
           cargo audit --deny warnings
