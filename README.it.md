@@ -44,7 +44,6 @@ Entrambe le modalità condividono lo stesso motore di regole. Un gioco viene rip
 | --- | --- |
 | `league-core` | Il motore delle regole: le fasi del turno, i contratti, il punteggio, la chiusura della stagione, il replay e i predicati di stato alla base del sistema di suggerimenti previsto |
 | `league-gen` | Il generatore di tavoli, con i suoi controlli di equità e i suoi pool di semi |
-| `league-dice` | Solo bozze, da ritirare. La casualità del gioco e il suo impegno e rivelazione si trovano in `league-core` |
 | `league-ledger` | Il client XRPL Testnet. Rifiuta qualsiasi rete diversa dalla Testnet |
 | `league-standalone` | L'ambiente `xrpld` autonomo per la modalità di addestramento, in un container con risorse limitate e configurazione fissa |
 | `league-season` | Le date di ripristino annunciate della Testnet e un controllo che individua un ripristino non annunciato |

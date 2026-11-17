@@ -13,7 +13,6 @@ Merchant League is a Rust workspace (edition 2024, toolchain 1.100.0). Unsafe co
 | --- | --- |
 | `league-core` | The rules engine. Pure state, with no input or output: the turn phases, contracts, scoring, the season close, replay and the state predicates |
 | `league-gen` | The table generator: the linear program, the fairness checks, the mandate deck and the seed pools |
-| `league-dice` | Stubs only, to be retired. The game's randomness and its commit and reveal live in `league-core` |
 | `league-ledger` | The XRPL Testnet client, built on `xrpl-rust`. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness: a pinned container, its limits and a conformance suite |
 | `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |

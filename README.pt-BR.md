@@ -44,7 +44,6 @@ Ambos os modos compartilham um único motor de regras. Um jogo é reproduzido ex
 | --- | --- |
 | `league-core` | O motor de regras: as fases do turno, os contratos, a pontuação, o encerramento da temporada, o replay e os predicados de estado por trás do sistema de dicas planejado |
 | `league-gen` | O gerador de mesas, com suas verificações de justiça e seus pools de sementes |
-| `league-dice` | Apenas esboços, a ser retirado. A aleatoriedade do jogo e o seu compromisso e revelação estão em `league-core` |
 | `league-ledger` | O cliente XRPL Testnet. Ele rejeita qualquer rede que não seja a Testnet |
 | `league-standalone` | O conjunto `xrpld` autônomo para o modo de treinamento, em um contêiner fixo com recursos limitados |
 | `league-season` | As datas de reinicialização anunciadas da Testnet e uma verificação que detecta uma reinicialização não anunciada |

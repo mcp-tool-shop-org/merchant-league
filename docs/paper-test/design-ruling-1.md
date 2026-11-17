@@ -236,6 +236,7 @@ A day's roll is a **drand round named by its number**. The number comes from the
 - Checked 2026-11-14: the period, genesis and formula came from drand's API, the formula matched a live round, and the randomness was the SHA-256 of its signature. A BLS signature has not yet been verified locally.
 
 - **Road events, the bell and edicts** take their numbers from the roll by a fixed index, through the table engine (`league-dice` → roll 3.0's Rust core; see "Tables with roll").
+  - *Note (2026-11-17): `league-dice` was retired on 2026-11-17; turn randomness and commit-reveal live in `league-core`, and XRPL `PREIMAGE-SHA-256` escrow condition/fulfillment encoding lives in `league-ledger::escrow`.*
 - **Sealed travel orders** are the one thing hidden.
   - Each order is committed in one day's transaction as SHA-256 of the order plus a fresh salt, and revealed in the next day's.
   - Anyone can check the reveal against the memo. No escrow is needed, so each day needs one transaction, not three.

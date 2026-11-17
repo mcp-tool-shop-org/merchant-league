@@ -19,9 +19,9 @@
 //! holder. Seeds are never printed.
 
 use league_ledger::client::{Account, Receipt, Testnet};
+use league_ledger::condition_hex;
 use serde::de::DeserializeOwned;
 use serde_json::{Value as Json, json};
-use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use xrpl::models::transactions::account_set::AccountSet;
@@ -38,12 +38,6 @@ const RIPPLE_EPOCH_OFFSET: u64 = 946_684_800;
 
 fn mrk(issuer: &str, value: &str) -> Json {
     json!({ "currency": "MRK", "issuer": issuer, "value": value })
-}
-
-fn condition(secret: &[u8; 32]) -> String {
-    let digest = Sha256::digest(secret);
-    let hex: String = digest.iter().map(|b| format!("{b:02X}")).collect();
-    format!("A0258020{hex}810120")
 }
 
 fn build<T: DeserializeOwned>(kind: &str, account: &Account, mut fields: Json) -> Res<T> {
@@ -154,7 +148,7 @@ fn main() -> Res<()> {
         ok
     );
 
-    let cond = condition(&[9u8; 32]);
+    let cond = condition_hex(&[9u8; 32]);
     // Neither expiry: refused for XRP and for a token alike.
     send!(
         p,
@@ -229,7 +223,7 @@ mod tests {
         let a = Account::from_seed(&w.seed)?;
         let iss = a.address();
         for fields in [
-            json!({"Amount": "1000", "Destination": iss, "Condition": condition(&[1u8; 32])}),
+            json!({"Amount": "1000", "Destination": iss, "Condition": condition_hex(&[1u8; 32])}),
             json!({"Amount": mrk(iss, "5"), "Destination": iss, "CancelAfter": 600}),
             json!({"Amount": mrk(iss, "5"), "Destination": iss, "FinishAfter": 5}),
         ] {

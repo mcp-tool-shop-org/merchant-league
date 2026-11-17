@@ -1114,13 +1114,74 @@ pub fn drand_quicknet_round_for_close(close_unix_secs: u64) -> Result<u64, Engin
     Ok((close_unix_secs - DRAND_QUICKNET_GENESIS_UNIX) / DRAND_QUICKNET_PERIOD_SECS + 1)
 }
 
+/// Authentication status of a drand `quicknet` round signature (`#29`).
+///
+/// Until `#29` lands with BLS12-381 pairing verification against the League of Entropy
+/// `quicknet` chain public key, `league-core` verifies round-schedule binding and
+/// `turn_beacon == SHA-256(drand_signature)` only — beacons in replay are **hash-bound, not yet
+/// authenticated**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrandBeaconAuthStatus {
+    /// Schedule round and `SHA-256(drand_signature)` match `turn_beacon`, while BLS12-381
+    /// signature verification against the `quicknet` chain public key is deferred to `#29`.
+    HashBoundUnauthenticated,
+}
+
+impl DrandBeaconAuthStatus {
+    /// Returns the stable `snake_case` status string (`"hash_bound_unauthenticated"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HashBoundUnauthenticated => "hash_bound_unauthenticated",
+        }
+    }
+}
+
+impl fmt::Display for DrandBeaconAuthStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Single home for `#29`'s drand `quicknet` BLS12-381 signature check on
+/// `(drand_round, drand_signature)`.
+///
+/// Rejects round `0`, signatures whose byte length is not [`DRAND_QUICKNET_SIGNATURE_BYTES`]
+/// (`48`), and the degenerate all-zero slice. Until `#29` lands with the pinned `quicknet` chain
+/// public key and BLS12-381 pairing check, every well-formed non-zero input returns
+/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`] ("hash-bound, not authenticated").
+pub fn check_drand_quicknet_signature(
+    drand_round: u64,
+    drand_signature: &[u8],
+) -> Result<DrandBeaconAuthStatus, EngineError> {
+    if drand_round == 0 {
+        return Err(EngineError::InvalidOrder(
+            "drand quicknet round must be >= 1".to_owned(),
+        ));
+    }
+    if drand_signature.len() != DRAND_QUICKNET_SIGNATURE_BYTES {
+        return Err(EngineError::InvalidOrder(format!(
+            "drand quicknet signature must be {DRAND_QUICKNET_SIGNATURE_BYTES} bytes, got {}",
+            drand_signature.len()
+        )));
+    }
+    if drand_signature.iter().all(|&b| b == 0) {
+        return Err(EngineError::InvalidOrder(
+            "degenerate all-zero drand signature is forbidden".to_owned(),
+        ));
+    }
+    Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
+}
+
 /// Derives the 32-byte turn randomness beacon as `SHA-256(drand_signature)` (`design-v2` §6.1).
 ///
-/// **Deferred verification notice:** BLS12-381 pairing verification against the League of Entropy
-/// `quicknet` chain public key follows in the live oracle/harness layer. As a result, this helper
-/// and replay logs using `ExternalDrand` guarantee internal log self-consistency (`turn_beacon ==
-/// SHA-256(drand_signature)` on the scheduled `drand_round`), not yet cryptographic authentication
-/// against the quicknet chain key inside `league-core`.
+/// **Deferred authentication notice (`#29`):** Drand beacons in Game mode are currently
+/// **hash-bound, not yet authenticated** — `league-core` checks `turn_beacon ==
+/// SHA-256(drand_signature)` on the scheduled `drand_round` and routes signature checking through
+/// [`check_drand_quicknet_signature`], which returns
+/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`] until `#29` adds BLS12-381 pairing
+/// verification against the `quicknet` chain public key.
 pub fn derive_drand_beacon(drand_signature: &[u8]) -> Result<[u8; 32], EngineError> {
     if drand_signature.len() != DRAND_QUICKNET_SIGNATURE_BYTES {
         return Err(EngineError::InvalidOrder(format!(
@@ -1137,16 +1198,19 @@ pub fn derive_drand_beacon(drand_signature: &[u8]) -> Result<[u8; 32], EngineErr
 }
 
 /// Validates an `ExternalDrand` turn beacon against a pre-named `DrandSchedule`, confirming
-/// `drand_round == expected_round_for_turn(turn)` and `expected_beacon == SHA-256(drand_signature)`.
+/// `drand_round == expected_round_for_turn(turn)` and `expected_beacon == SHA-256(drand_signature)`,
+/// and calling [`check_drand_quicknet_signature`] (`#29`'s home).
 ///
-/// See [`derive_drand_beacon`] regarding deferred BLS12-381 signature authentication.
+/// Until `#29` lands, drand beacons in replay are **hash-bound, not yet authenticated** against the
+/// `quicknet` chain public key; this returns
+/// [`DrandBeaconAuthStatus::HashBoundUnauthenticated`].
 pub fn verify_drand_quicknet_beacon(
     schedule: &DrandSchedule,
     turn: Turn,
     drand_round: u64,
     drand_signature: &[u8],
     expected_beacon: [u8; 32],
-) -> Result<(), EngineError> {
+) -> Result<DrandBeaconAuthStatus, EngineError> {
     schedule.validate()?;
     let expected_round = schedule.expected_round_for_turn(turn)?;
     if drand_round != expected_round {
@@ -1155,6 +1219,7 @@ pub fn verify_drand_quicknet_beacon(
             turn.0
         )));
     }
+    let auth_status = check_drand_quicknet_signature(drand_round, drand_signature)?;
     let derived = derive_drand_beacon(drand_signature)?;
     if derived != expected_beacon {
         return Err(EngineError::InvalidOrder(format!(
@@ -1162,7 +1227,7 @@ pub fn verify_drand_quicknet_beacon(
             turn.0
         )));
     }
-    Ok(())
+    Ok(auth_status)
 }
 
 /// Byte length of a compressed `ristretto255` public key for the RFC 9381 ECVRF construction

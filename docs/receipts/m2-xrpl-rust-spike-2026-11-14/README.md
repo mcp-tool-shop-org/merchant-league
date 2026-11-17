@@ -33,6 +33,8 @@ The spike asked one question: can `xrpl-rust` 1.3.0 build, sign and submit every
 
 Every transaction above is in a validated ledger (`raw/02_merchant_account_tx.json`, read back from the Testnet after the run). The condition and fulfillment came from `league-dice`'s encoding, tested against xrpl.org's example and an independent encoding.
 
+*Note (2026-11-17): `league-dice` was retired on 2026-11-17; the XRPL `PREIMAGE-SHA-256` encoding (`condition_hex`, `fulfillment_hex`, `escrow_condition`) and `EscrowFinish` fee helpers (`escrow_finish_min_fee_drops`, `ESCROW_FINISH_DEFAULT_FEE_DROPS`) live in `league-ledger::escrow` (`crates/league-ledger/src/escrow.rs`), while in-engine commitments use `league-core`'s `PreimageSecret` (`crates/league-core/src/commit.rs`).*
+
 **Final state, read from the validated ledger** (`raw/01_spike.out`, last line):
 
 - Merchant's MRK balance: **102**. Predicted 100 + 5 − 3 = 102.

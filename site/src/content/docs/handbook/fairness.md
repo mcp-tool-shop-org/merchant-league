@@ -40,8 +40,6 @@ The game's randomness (shocks, the closing roll and tie-breaks) comes from a bea
 
 Orders follow the same rule: each seat commits a salted hash of its sealed orders, then reveals them. A seat that commits but does not reveal loses its secret actions for that turn, and there is never a re-roll.
 
-`league-dice` is stubs only, and is to be retired.
-
 ## Exact replay
 
 A game replays exactly from its seed and its ordered log of commitments, reveals and beacon outputs. Replays are bit-for-bit: the tests run full seasons at four, five and six seats and check that the replay and its JSON form match. Anyone who holds the log can check the scores, the tie-breaks and every turn's state.

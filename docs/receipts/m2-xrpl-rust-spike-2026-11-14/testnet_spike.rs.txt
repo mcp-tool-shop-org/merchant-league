@@ -23,6 +23,7 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// Note (2026-11-17): `league-dice` was retired on 2026-11-17; XRPL `PREIMAGE-SHA-256` `condition_hex`, `fulfillment_hex`, `escrow_condition`, and `escrow_finish_min_fee_drops` now live in `league_ledger::escrow` (`crates/league-ledger/src/escrow.rs`).
 use league_dice::{Secret, condition_hex, finish_fee_drops, fulfillment_hex};
 use league_ledger::{TESTNET_FAUCET, TESTNET_JSON_RPC, require_testnet};
 use serde_json::{Value, json};

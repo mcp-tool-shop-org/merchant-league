@@ -4,7 +4,6 @@ resolver = "3"
 exclude = ["vendor"]
 members = [
     "crates/league-core",
-    "crates/league-dice",
     "crates/league-gen",
     "crates/league-ledger",
     "crates/league-relay",
