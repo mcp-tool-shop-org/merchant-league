@@ -11,7 +11,7 @@ This page describes the rules as designed in [`docs/design-v2.md`](https://githu
 
 A table has four, five or six seats. Every seat can be a person or an AI player, and they play under the same rules.
 
-The table's coin is `CRED`, and every market prices in it. Goods and coin are tokens issued on the XRPL Testnet by the table's own steward account, and only the table's seats may hold them.
+The table's coin is `CRED`, and every market prices in it. Goods and coin are tokens issued on the XRPL Testnet by the table's own authority account, and only the table's seats may hold them.
 
 ## A ring of merchants
 
@@ -34,7 +34,7 @@ All seats act at the same time. Nobody waits for anyone else, and nobody gets to
 
 Seats negotiate. Every message carries a typed header (who, what, how much, by when) and a short free-text body for persuasion. The text itself is never written to the ledger; at most a salted hash of an agreed deal is.
 
-At the same time, seats post and cancel offers on the open market, write credit notes, and lock coin into escrow for deals. Goods are never locked in escrow: raw goods spoil, and the steward must be able to claw spoilage back, so only coin is escrowed.
+At the same time, seats post and cancel offers on the open market, write credit notes, and lock coin into escrow for deals. Goods are never locked in escrow: raw goods spoil, and the table's authority must be able to claw spoilage back, so only coin is escrowed.
 
 ### 2. Commit
 
@@ -86,4 +86,4 @@ Balances and offers sit on a public ledger, where anyone's software can read the
 
 ## Seats that stop playing
 
-A person may set up a stand-in before the season, limited by three settings they choose: appetite for risk, a minimum reserve and how much credit to extend. If the seat misses three turns in a row, or goes three turns without any activity, the stand-in takes over for the rest of the season: it keeps paying upkeep and running workshops so its neighbours are not starved, and the seat is shown to everyone as an AI seat from then on. A seat that commits orders but doesn't reveal them gets no stand-in for that turn. This rule is still being tuned.
+A person may set up a stand-in before the season, limited by three settings they choose: appetite for risk, a minimum reserve and how much credit to extend. If the seat misses three turns in a row, or goes three turns without producing, delivering or trading (posting offers or voting alone doesn't count), the stand-in takes over for the rest of the season: it keeps paying upkeep and running workshops so its neighbours are not starved, and the seat is shown to everyone as an AI seat from then on. A seat that commits orders but doesn't reveal them gets no stand-in for that turn. This rule is still being tuned.
