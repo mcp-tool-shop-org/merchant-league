@@ -58,7 +58,7 @@
 ## E. Identity (soft gate — does not block ship)
 
 - [x] `[all]` Logo in README header (2026-11-17: brand logos/merchant-league/readme.png, brand#118)
-- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; hand fixes, pinned in .polyglot-pins.json where the pin tool can hold them: 'paper test' in Japanese, Italian, Portuguese and Spanish, the evaluation-mode row in Chinese, Portuguese, Italian, Spanish and French, and the league-dice row in Japanese; the bold Game mode table cell is not held by a pin and is fixed by hand after every run)
+- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; hand fixes, pinned in .polyglot-pins.json where the pin tool can hold them: 'paper test' in Japanese, Italian, Portuguese and Spanish, the evaluation-mode row in Chinese, Portuguese, Italian, Spanish and French, the league-dice row in Japanese (pinned with the model's rows in six languages), the Guards bullet in Chinese and Hindi, the league-dice and league-season rows translated by hand in all seven, and the product name kept as 'Merchant League' in every title; the bold Game mode table cell is not held by a pin and is fixed by hand after every run)
 - [x] `[org]` Landing page (@mcptoolshop/site-theme) (2026-11-17: site/ with the Starlight handbook)
 - [x] `[all]` GitHub repo metadata: description, homepage, topics (2026-11-17: description, homepage and 11 topics set)
 

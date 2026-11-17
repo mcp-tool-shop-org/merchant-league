@@ -135,6 +135,7 @@ run_case $c fail "$tui" "// real	money"
 run_case $c fail docs/planted.md "Players cash out at the end."
 run_case $c fail README.md "Win real money!"
 run_case $c fail site/src/content/docs/handbook/planted.md "Players cash out at the end."
+run_case $c fail SECURITY.md "Players cash out at the end."
 # A disclaimer on the line doesn't hide another banned phrase.
 run_case $c fail "$tui" "// No real money, but you can cash out."
 # A phrase split across two lines.

@@ -12,9 +12,9 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Liga Mercantil
+# Merchant League
 
-Um jogo de estratégia e política com ritmo lento, para quatro a seis jogadores, jogado na **Testnet** do XRP Ledger. Os jogadores podem ser pessoas ou jogadores de IA, na mesma mesa e sob as mesmas regras.
+Um jogo de comércio e política em turnos lentos, para quatro a seis jogadores, jogado na **Testnet** do XRP Ledger. Os jogadores podem ser pessoas ou jogadores de IA, na mesma mesa e sob as mesmas regras.
 
 **Status: protótipo, fase de design.** O motor de regras, o gerador de mesas e a função de replay foram criados e testados. O jogo em si **ainda não está jogável**: não há cliente de jogo e nem há lançamento. Apenas na Testnet: sem dinheiro real e sem caminho para a Mainnet.
 
@@ -44,10 +44,10 @@ Ambos os modos compartilham um único motor de regras. Um jogo é reproduzido ex
 | --- | --- |
 | `league-core` | O motor de regras: as fases do turno, os contratos, a pontuação, o encerramento da temporada, o replay e os predicados de estado por trás do sistema de dicas planejado |
 | `league-gen` | O gerador de mesas, com suas verificações de justiça e seus pools de sementes |
-| `league-dice` | Por enquanto, apenas esboços. A aleatoriedade do jogo está implementada em `league-core`: no modo de jogo, o beacon de cada turno vem de uma rodada pública do drand, nas execuções de avaliação, de uma função aleatória verificável, e as ordens seladas usam os mecanismos de compromisso e revelação. |
+| `league-dice` | Apenas esboços, a ser retirado. A aleatoriedade do jogo e o seu compromisso e revelação estão em `league-core` |
 | `league-ledger` | O cliente XRPL Testnet. Ele rejeita qualquer rede que não seja a Testnet |
 | `league-standalone` | O conjunto `xrpld` autônomo para o modo de treinamento, em um contêiner fixo com recursos limitados |
-| `league-season` | As datas de reinicialização anunciadas da Testnet e uma verificação que detecta uma reinicialização não anunciada; uma temporada decorre de uma reinicialização para a seguinte. |
+| `league-season` | As datas de reinicialização anunciadas da Testnet e uma verificação que detecta uma reinicialização não anunciada |
 | `league-relay` | A ferramenta que executou os testes em papel com jogadores de IA |
 | `league-tui` | O cliente de terminal. Apenas uma tela de título, por enquanto |
 

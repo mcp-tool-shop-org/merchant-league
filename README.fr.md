@@ -12,7 +12,7 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Ligue des marchands
+# Merchant League
 
 Un jeu de commerce et de politique au rythme lent, pour quatre à six joueurs, qui se déroule sur le **Testnet** du XRP Ledger. Les joueurs peuvent être des personnes ou des joueurs IA, à la même table et soumis aux mêmes règles.
 
@@ -44,10 +44,10 @@ Les deux modes partagent le même moteur de règles. Un jeu est rejoué exacteme
 | --- | --- |
 | `league-core` | Le moteur de règles : les phases du tour, les contrats, le calcul des scores, la fin de la saison, la relecture et les prédicats d’état qui sous-tendent le système d’indices prévu |
 | `league-gen` | Le générateur de table, avec ses vérifications d’équité et ses ensembles de valeurs de départ |
-| `league-dice` | Pour l’instant, il s’agit de versions préliminaires. L’aléatoire du jeu est intégré dans `league-core` : en mode Jeu, la balise de chaque tour provient d’une ronde publique de drand, lors des tests d’évaluation, il provient d’une fonction aléatoire vérifiable, et les ordres scellés utilisent l’engagement et la révélation. |
+| `league-dice` | Ébauches uniquement, appelé à être retiré. L’aléatoire du jeu, ainsi que l’engagement et la révélation, se trouvent dans `league-core` |
 | `league-ledger` | Le client XRPL Testnet. Il refuse tout réseau qui n’est pas le Testnet |
 | `league-standalone` | L’ensemble `xrpld` autonome pour le mode entraînement, dans un conteneur avec des ressources limitées |
-| `league-season` | Les dates de réinitialisation annoncées du Testnet, ainsi qu’une vérification qui détecte une réinitialisation non annoncée ; une saison s’étend d’une réinitialisation à la suivante. |
+| `league-season` | Les dates de réinitialisation annoncées du Testnet, et une vérification qui détecte une réinitialisation non annoncée |
 | `league-relay` | L’outil qui a permis de réaliser les tests sur papier avec des joueurs IA |
 | `league-tui` | Le client terminal. Pour l’instant, il n’y a qu’un écran de titre. |
 
@@ -73,7 +73,7 @@ LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live -
 
 ## Sécurité et données
 
-- **Ce que cela affecte.** En mode Jeu (pas encore implémenté), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/`, qui est ignoré par Git, et ne sont jamais enregistrées. Le relais de test pratique lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY` et n’effectue aucun appel OpenRouter sans `--live` et une limite de crédit. Ses sièges locaux refusent toute clé API, ne se connectent qu’à une adresse de boucle ou à une adresse de machine virtuelle que vous autorisez avec `--allow-vm-host`, et nécessitent une limite de GPU-secondes. Il conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
+- **Ce que cela affecte.** En mode Jeu (pas encore implémenté), les clés Testnet d’un joueur restent sur sa propre machine, dans le dossier `.league/`, qui est ignoré par Git, et ne sont jamais enregistrées. Le relais des tests sur papier lit sa clé OpenRouter uniquement à partir de la variable d’environnement `OPENROUTER_API_KEY` et n’effectue aucun appel OpenRouter sans `--live` et une limite de crédit. Ses sièges locaux refusent toute clé API, ne se connectent qu’à une adresse de boucle ou à une adresse de machine virtuelle que vous autorisez avec `--allow-vm-host`, et nécessitent une limite de GPU-secondes. Il conserve ses transcriptions dans le dossier du jeu que vous lui fournissez.
 - **Ce que cela n’affecte pas.** Pas d’argent réel, pas de Mainnet et rien en dehors des dossiers mentionnés ci-dessus. Il n’y a **aucune télémétrie** : rien n’est envoyé nulle part, à l’exception des appels dont un mode a besoin (le Testnet, un signal d’aléatoire public et, pour le relais, OpenRouter ou les serveurs de modèle locaux que vous autorisez).
 - **Autorisations.** Accès réseau au Testnet en mode Jeu. Docker, avec son port lié uniquement à `127.0.0.1`, pour le module autonome.
 - **Garanties.** Chaque connexion au Testnet doit signaler l’ID du réseau Testnet. Un déclencheur CI échoue si un nom d’hôte Mainnet est écrit dans le dépôt en dehors du code fourni, et un deuxième déclencheur échoue si le contenu présente le jeu comme une source de revenus. La révision couvre ce qu’une liste de mots ne peut pas voir.

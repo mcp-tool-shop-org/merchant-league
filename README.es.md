@@ -12,7 +12,7 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Liga de Comerciantes
+# Merchant League
 
 Un juego de comercio y política de ritmo lento para cuatro a seis jugadores, que se juega en la **Testnet** de XRP Ledger. Los jugadores pueden ser personas o jugadores de IA, en la misma mesa y bajo las mismas reglas.
 
@@ -44,10 +44,10 @@ Ambos modos comparten un motor de reglas. Un juego se repite exactamente a parti
 | --- | --- |
 | `league-core` | El motor de reglas: las fases del turno, los contratos, la puntuación, el cierre de la temporada, la repetición y los predicados de estado detrás del sistema de pistas planificado |
 | `league-gen` | El generador de mesas, con sus comprobaciones de equidad y sus grupos de semillas |
-| `league-dice` | Por ahora, solo son prototipos. La aleatoriedad del juego está integrada en `league-core`: en el modo de juego, la baliza de cada turno proviene de una ronda pública de drand, en las ejecuciones de evaluación, de una función aleatoria verificable, y las órdenes selladas utilizan el esquema de compromiso y revelación. |
+| `league-dice` | Solo esbozos; se retirará. La aleatoriedad del juego y su compromiso y revelación están en `league-core` |
 | `league-ledger` | El cliente de XRPL Testnet. Rechaza cualquier red que no sea la Testnet |
 | `league-standalone` | El conjunto `xrpld` independiente para el modo de entrenamiento, en un contenedor con recursos limitados y fijados |
-| `league-season` | Se anuncian las fechas de reinicio de la Testnet, y se realiza una comprobación para detectar cualquier reinicio no anunciado; una temporada se ejecuta desde un reinicio hasta el siguiente. |
+| `league-season` | Las fechas de reinicio anunciadas de la Testnet y una comprobación que detecta un reinicio no anunciado |
 | `league-relay` | La herramienta que ejecutó las pruebas en papel con jugadores de IA |
 | `league-tui` | El cliente de terminal. Solo una pantalla de título, por ahora |
 

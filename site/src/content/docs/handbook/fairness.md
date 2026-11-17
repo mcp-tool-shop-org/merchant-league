@@ -13,7 +13,7 @@ Every table is generated from a seed by `league-gen` and checked before it is de
 - **What a seat adds to every group.** A second measure values each seat by what it adds to every possible group of seats (its Shapley value). Every seat must sit within **7%** of the average by that measure too. This catches a seat that holds a bottleneck for a small group, which the first measure can miss.
 - **No self-sufficient pairs.** One or two seats can never cover their own upkeep.
 
-Two more properties are proved by the generator's tests over hundreds of seeds per table size, rather than checked on each table: three seats cover at most one member's upkeep, and at a five- or six-seat table four seats cover at most two members'. The tests also report, without requiring it, that in more than 90% of tables the seats rank their best trades differently, so play does not collapse into one obvious move.
+Two more properties are proved by the generator's tests over hundreds of seeds per table size, rather than checked on each table: three seats cover at most one member's upkeep, and at a five- or six-seat table four seats cover at most two members'. The gate tests also require that at least 90% of generated tables, over 600 seeds per table size, give the seats different rankings of their best trades, so play does not collapse into one obvious move.
 
 The generator's version is recorded with every table, and the tests pin a digest of a known table, so a change to the generator cannot pass unnoticed.
 
@@ -33,14 +33,14 @@ Every other seed is unassigned and refused. A table's stated purpose must match 
 
 ## Randomness nobody can steer
 
-The game's randomness (shocks, the closing roll and tie-breaks) comes from a beacon that no player can predict or bend. It is built in `league-core`:
+The game's randomness (shocks, the closing roll and tie-breaks) comes from a beacon, never from a seat's own choices. It is built in `league-core`:
 
-- **Game mode** takes each turn's beacon from a public [drand](https://drand.love/) round (the quicknet chain) published **after** the turn's commit deadline, so neither a seat nor the studio can steer a roll that was fixed before the round existed. Checking the round's signature during replay is still open ([#29](https://github.com/mcp-tool-shop-org/merchant-league/issues/29)).
+- **Game mode** (not built yet) is designed to take each turn's beacon from a public [drand](https://drand.love/) round (the quicknet chain) published **after** the turn's commit deadline, so no seat's choices can steer it. Today the engine checks that a beacon matches its round's signature hash; verifying the signature itself against drand's key is not built yet ([#29](https://github.com/mcp-tool-shop-org/merchant-league/issues/29)).
 - **Evaluation runs** (`Eval` mode) use a verifiable random function instead. Its seed is sealed by the studio's orchestrator, away from every seat, and anyone can check its output against the published key afterwards.
 
 Orders follow the same rule: each seat commits a salted hash of its sealed orders, then reveals them. A seat that commits but does not reveal loses its secret actions for that turn, and there is never a re-roll.
 
-`league-dice`, the crate for per-merchant dice secrets settled on the ledger, is stubs only for now.
+`league-dice` is stubs only, and is to be retired.
 
 ## Exact replay
 

@@ -7,7 +7,7 @@ Merchant League plays only on the XRPL **Testnet**. Test XRP and the game's toke
 That still leaves things worth protecting:
 
 - **Players' Testnet seeds.** In Game mode (not built yet), they will stay on the player's machine, in the git-ignored `.league/` folder, and will never be logged or printed.
-- **Committed orders and secrets.** A seat's sealed orders stay hidden until they are revealed, and secret types redact themselves in debug output. (Per-merchant dice secrets settled on the ledger are planned; `league-dice` is stubs only.)
+- **Committed orders and secrets.** A seat's sealed orders stay hidden until they are revealed, and secret types redact themselves in debug output. The engine checks commitments in pure state; the reveal on the ledger is not built yet.
 - **Fairness.** A roll must not be predictable or steerable by any player, by the studio, or by the randomness beacon's operators.
 - **The Testnet-only guarantee.** Any path that could reach Mainnet is a security bug.
 
@@ -27,6 +27,6 @@ Include what you found, how to reproduce it, and what it could let someone do. W
 | --- | --- |
 | The client is pointed at Mainnet | The game's ledger client names only Testnet endpoints, and every connection must report network id 1; the stand-alone harness accepts only its private node (network id 21337, on loopback); a CI tripwire fails on Mainnet hostnames written in the repository |
 | A player biases a roll by not revealing | A seat that commits but does not reveal loses its secret actions for the turn; there is never a re-roll |
-| The last player to reveal sees the outcome first | In Game mode the turn's beacon comes from a drand round published after the commit deadline |
+| The last player to reveal sees the outcome first | No seat's reveal feeds the randomness. Game mode (not built yet) is designed to take each turn's beacon from a public drand round; checking the round's signature is open (#29). Evaluation runs use a sealed verifiable random function |
 | A player makes many free accounts | Planned for Game mode, not built yet: ranked queues need verified matchmaking credentials, hide handles behind seasonal aliases, and flag pairs of seats that funnel wealth to each other |
 | A seed or secret leaks into logs | Secret types redact themselves in debug output; in Game mode (not built yet), seeds will stay in `.league/` |

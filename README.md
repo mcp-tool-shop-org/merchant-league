@@ -44,10 +44,10 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | --- | --- |
 | `league-core` | The rules engine: the turn phases, contracts, scoring, the season close, replay, and the state predicates behind the planned hint system |
 | `league-gen` | The table generator, with its fairness checks and its seed pools |
-| `league-dice` | Stubs for now. The game's randomness is built in `league-core`: in Game mode each turn's beacon comes from a public drand round, in evaluation runs from a verifiable random function, and sealed orders use commit and reveal |
+| `league-dice` | Stubs only, to be retired. The game's randomness and its commit and reveal are in `league-core` |
 | `league-ledger` | The XRPL Testnet client. It refuses any network that is not the Testnet |
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
-| `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset; a season runs from one reset to the next |
+| `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |
 | `league-relay` | The tool that ran the paper playtests with AI seats |
 | `league-tui` | The terminal client. A title screen only, for now |
 

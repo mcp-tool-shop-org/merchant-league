@@ -54,7 +54,7 @@ export const config: SiteConfig = {
         },
         {
           title: 'Checked tables',
-          desc: 'Every table is generated from a seed and checked before it is dealt: each seat’s starting value sits within 3% of the table’s average.',
+          desc: 'Every table is generated from a seed and checked before it is dealt: each seat’s starting value sits within 3% of the table’s average, and within 7% by what it adds to every group of seats.',
         },
       ],
     },
@@ -82,7 +82,7 @@ export const config: SiteConfig = {
       rows: [
         ['league-core', 'The rules engine: turn phases, contracts, scoring, the season close, replay and state predicates'],
         ['league-gen', 'The table generator, with its fairness checks and seed pools'],
-        ['league-dice', 'Stubs for now; the game’s randomness (a public drand beacon in Game mode, commit and reveal for sealed orders) is built in league-core'],
+        ['league-dice', 'Stubs only, to be retired; the game’s randomness and its commit and reveal are in league-core'],
         ['league-ledger', 'The XRPL Testnet client; it refuses any other network'],
         ['league-standalone', 'The stand-alone xrpld harness for training mode, in a pinned, resource-capped container'],
         ['league-season', 'The Testnet’s announced reset dates, and a check that spots an unannounced reset'],

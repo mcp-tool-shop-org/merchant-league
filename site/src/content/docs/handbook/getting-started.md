@@ -61,7 +61,7 @@ The harness pulls one pinned image (`xrplf/xrpld:3.4.1`, by its manifest digest)
 
 ## Try the paper-test relay offline
 
-`league-relay` ran the paper playtests, sending each AI seat its turn. Its `prebook-check` command runs a whole turn against canned responses in a temporary folder, with no network call:
+`league-relay` ran the paper playtests, sending each AI seat its turn. Its `prebook-check` command runs a whole turn against canned responses in a temporary folder, with no network call. Its commands and options:
 
 ```bash
 cargo run -p league-relay -- --help

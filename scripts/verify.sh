@@ -3,7 +3,7 @@
 # advisories, the two tripwires with their controls, and the site build.
 #
 # Not here: the stand-alone xrpld harness (it needs Docker; see the README)
-# and the Atlas map check (it needs Node). CI runs both.
+# and the Atlas map check (CI pins its version). CI runs both.
 #
 # Coverage, the advisory audit and the site build run when cargo-llvm-cov,
 # cargo-audit and npm are installed, and are skipped with a note otherwise.

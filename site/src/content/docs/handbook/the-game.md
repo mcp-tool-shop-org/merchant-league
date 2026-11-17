@@ -52,14 +52,14 @@ At the cutoff, the engine resolves the turn in a fixed order, the same for every
 6. collect upkeep and price any shortfall as debt;
 7. apply spoilage;
 8. run the political calendar;
-9. advance the supply shocks and, late in the season, roll for the close.
+9. advance the shocks and, late in the season, roll for the close.
 
 ## Politics
 
 - **Councils**, every 4 turns, elect a **Trade Minister**, who sets export tariffs of 0% to 35% on each good, and **Cartel Chairs**, who found and run cartels. A cartel is a private market for its members, and a chair can expel a member at once.
-- **Charters**, auctioned every 6 turns by sealed bid, hand out three temporary roles. The **Clearinghouse Broker** may trade between cartel markets and the open market. The **Customs Inspector** may freeze suspicious trades. The **Oracle Auditor** learns the next supply shock early and may sell that knowledge, or bluff.
+- **Charters**, auctioned every 6 turns by sealed bid, hand out three temporary roles. The **Clearinghouse Broker** may trade between cartel markets and the open market. The **Customs Inspector** may freeze suspicious trades. The **Oracle Auditor** learns the next shock early and may sell that knowledge, or bluff.
 
-## Supply shocks
+## Shocks
 
 Shocks are telegraphed. The Oracle Auditor gets a private hint first; the next turn a public forecast narrows the range; the turn after, the shock lands: a supply freeze, a tariff holiday, a demand surge or a spoilage spike.
 

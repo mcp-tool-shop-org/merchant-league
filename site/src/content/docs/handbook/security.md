@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Merchant League plays only on the XRPL **Testnet**. Test XRP and the game's tokens have no value, and there is no real money anywhere in the game. That still leaves things worth protecting: players' keys, the dice's secrets, the fairness of a roll, and the Testnet-only guarantee itself.
+Merchant League plays only on the XRPL **Testnet**. Test XRP and the game's tokens have no value, and there is no real money anywhere in the game. That still leaves things worth protecting: players' keys, committed orders, the fairness of the game's randomness, and the Testnet-only guarantee itself.
 
 ## The Testnet-only guarantee
 
@@ -16,7 +16,7 @@ Merchant League plays only on the XRPL **Testnet**. Test XRP and the game's toke
 ## Keys and secrets
 
 - **Players' Testnet keys** (Game mode, not built yet) stay on the player's machine, in the git-ignored `.league/` folder, and are never logged or printed.
-- **Committed orders and secrets** stay hidden until they are revealed, and secret types redact themselves in debug output.
+- **Committed orders and secrets** stay hidden until they are revealed, and secret types redact themselves in debug output. The engine checks commitments in pure state; the reveal on the ledger is not built yet.
 - **The relay's OpenRouter key** is read only from the `OPENROUTER_API_KEY` environment variable. The relay refuses key-like flags (`--key`, `--api-key`, `--token` and similar), arguments that look like keys, and keys in the seat file, and its errors and panics pass through redaction. It does not scan the `--wrapper` or `--response-schema` files, so keep keys out of them.
 - The relay makes no OpenRouter call without `--live`, and `--live` requires a credit cap, checked against the call log before every call.
 - The relay's local seats refuse any API key, reach only a loopback address or a private-network address allowed with `--allow-vm-host`, and need a GPU-seconds cap (`--cap-gpu-secs`).
@@ -44,7 +44,7 @@ Nothing is sent anywhere except the calls a mode needs: the Testnet, the public 
 | --- | --- |
 | The client is pointed at Mainnet | The game's ledger client names only Testnet endpoints, and every connection must report network id 1; the stand-alone harness accepts only its private node (network id 21337, on loopback); a CI tripwire fails on Mainnet hostnames written in the repository |
 | A player biases a roll by not revealing | A seat that commits but does not reveal loses its secret actions for the turn; there is never a re-roll |
-| The last player to reveal sees the outcome first | In Game mode the turn's beacon comes from a drand round published after the commit deadline |
+| The last player to reveal sees the outcome first | No seat's reveal feeds the randomness. Game mode (not built yet) is designed to take each turn's beacon from a public drand round; checking the round's signature is open (#29). Evaluation runs use a sealed verifiable random function |
 | A player makes many free accounts | Planned for Game mode, not built yet: ranked queues need verified matchmaking credentials, hide handles behind seasonal aliases, and flag pairs of seats that funnel wealth to each other |
 | A seed or secret leaks into logs | Secret types redact themselves in debug output; in Game mode (not built yet), seeds will stay in `.league/` |
 
