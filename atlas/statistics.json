@@ -195,13 +195,18 @@
         "path": ".github/workflows/ci.yml"
       },
       {
-        "commits": 3,
-        "lines": 6,
+        "commits": 1,
+        "lines": 52,
+        "path": ".github/workflows/pages.yml"
+      },
+      {
+        "commits": 4,
+        "lines": 10,
         "path": ".gitignore"
       },
       {
-        "commits": 52,
-        "lines": 333,
+        "commits": 53,
+        "lines": 339,
         "path": "CHANGELOG.md"
       },
       {
@@ -225,18 +230,23 @@
         "path": "LICENSE"
       },
       {
-        "commits": 3,
-        "lines": 11,
+        "commits": 4,
+        "lines": 107,
         "path": "README.md"
       },
       {
-        "commits": 2,
-        "lines": 56,
+        "commits": 3,
+        "lines": 60,
         "path": "SECURITY.md"
       },
       {
-        "commits": 55,
-        "lines": 1082,
+        "commits": 1,
+        "lines": 84,
+        "path": "SHIP_GATE.md"
+      },
+      {
+        "commits": 56,
+        "lines": 1094,
         "path": "atlas/README.md"
       },
       {
@@ -245,18 +255,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 55,
-        "lines": 3593,
+        "commits": 56,
+        "lines": 3645,
         "path": "atlas/page.json"
       },
       {
-        "commits": 55,
-        "lines": 16310,
+        "commits": 56,
+        "lines": 16467,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 55,
-        "lines": 40472,
+        "commits": 56,
+        "lines": 40655,
         "path": "atlas/structure.json"
       },
       {
@@ -928,6 +938,101 @@
         "commits": 13,
         "lines": 695,
         "path": "scripts/test-guards.sh"
+      },
+      {
+        "commits": 1,
+        "lines": 47,
+        "path": "scripts/verify.sh"
+      },
+      {
+        "commits": 1,
+        "lines": 36,
+        "path": "site/astro.config.mjs"
+      },
+      {
+        "commits": 1,
+        "lines": 5818,
+        "path": "site/package-lock.json"
+      },
+      {
+        "commits": 1,
+        "lines": 18,
+        "path": "site/package.json"
+      },
+      {
+        "commits": 1,
+        "lines": 5,
+        "path": "site/public/favicon.svg"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "site/src/assets/logo.png"
+      },
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": "site/src/content.config.ts"
+      },
+      {
+        "commits": 1,
+        "lines": 57,
+        "path": "site/src/content/docs/handbook/architecture.md"
+      },
+      {
+        "commits": 1,
+        "lines": 45,
+        "path": "site/src/content/docs/handbook/fairness.md"
+      },
+      {
+        "commits": 1,
+        "lines": 69,
+        "path": "site/src/content/docs/handbook/getting-started.md"
+      },
+      {
+        "commits": 1,
+        "lines": 34,
+        "path": "site/src/content/docs/handbook/index.md"
+      },
+      {
+        "commits": 1,
+        "lines": 61,
+        "path": "site/src/content/docs/handbook/reference.md"
+      },
+      {
+        "commits": 1,
+        "lines": 52,
+        "path": "site/src/content/docs/handbook/security.md"
+      },
+      {
+        "commits": 1,
+        "lines": 89,
+        "path": "site/src/content/docs/handbook/the-game.md"
+      },
+      {
+        "commits": 1,
+        "lines": 35,
+        "path": "site/src/pages/index.astro"
+      },
+      {
+        "commits": 1,
+        "lines": 110,
+        "path": "site/src/site-config.ts"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "site/src/styles/global.css"
+      },
+      {
+        "commits": 1,
+        "lines": 5,
+        "path": "site/src/styles/starlight-custom.css"
+      },
+      {
+        "commits": 1,
+        "lines": 5,
+        "path": "site/tsconfig.json"
       },
       {
         "commits": 2,
@@ -2740,79 +2845,79 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-17T02:49:37.531Z",
+  "generatedAt": "2026-11-17T09:09:31.289Z",
   "generatedFrom": {
-    "commit": "d4fe153fa0c44776f1450a5eb2a23904f6b2f667"
+    "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 48,
-      "shared": 27,
-      "strength": 0.5625
+      "either": 49,
+      "shared": 28,
+      "strength": 0.571429
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 48,
-      "shared": 27,
-      "strength": 0.5625
+      "either": 49,
+      "shared": 28,
+      "strength": 0.571429
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 48,
-      "shared": 27,
-      "strength": 0.5625
+      "either": 49,
+      "shared": 28,
+      "strength": 0.571429
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 48,
-      "shared": 27,
-      "strength": 0.5625
+      "either": 49,
+      "shared": 28,
+      "strength": 0.571429
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 38,
-      "shared": 38,
+      "either": 39,
+      "shared": 39,
       "strength": 1
     },
     {
@@ -2994,16 +3099,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-16T21:49:33-05:00",
-    "inScopeFiles": 507,
+    "headDate": "2026-11-17T04:09:18-05:00",
+    "inScopeFiles": 528,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 59,
+    "qualifyingCommits": 60,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-21T02:49:33.000Z",
+    "since": "2026-05-21T09:09:18.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

@@ -14,7 +14,9 @@ on:
       - "scripts/**"
       - "atlas/**"
       - "README.md"
+      - "SECURITY.md"
       - "docs/**"
+      - "site/**"
       - ".github/workflows/**"
   pull_request:
   workflow_dispatch:
@@ -88,6 +90,15 @@ jobs:
 
       - name: Atlas check
         run: npx --yes @dogfood-lab/atlas@1.26.0 check
+
+      # The landing page and handbook build here, so a broken page fails the PR
+      # rather than the Pages deploy after merge (pages.yml runs only on main).
+      - name: Site build
+        working-directory: site
+        run: |
+          npm ci --no-fund --no-audit
+          npm audit --audit-level=high
+          npm run build
 
       - name: Stand-alone xrpld harness
         env:

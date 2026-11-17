@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 # crate. The vendored crate is third-party source; its Mainnet defaults sit
 # in a module the build leaves out (vendor/xrpl-rust/VENDORED.md). This
 # script and its tests name the patterns, so they are skipped too.
-skip_dirs=(--exclude-dir=.git --exclude-dir=target --exclude-dir=vendor --exclude-dir=node_modules)
+skip_dirs=(--exclude-dir=.git --exclude-dir=target --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.astro)
 self='^\./scripts/(check-testnet-only|test-guards)\.sh:'
 
 hosts=(

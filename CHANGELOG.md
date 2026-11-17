@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- The full treatment, with the release held (Director, 2026-11-17: no v0.1.0 tag or Docker image until a table can be played):
+  - **README** rewritten for the prototype: what the game is, the two modes, what each crate does, how to build from source, a security and data section (what it touches, what it doesn't, permissions, no telemetry), and the support status. The brand logo is in its header.
+  - **Landing page and handbook** under `site/` (`@mcptoolshop/site-theme` with Starlight), deployed to GitHub Pages by `.github/workflows/pages.yml` on pushes to `site/`. Seven handbook pages: welcome, getting started, the game, fairness and randomness, architecture, security, and reference (including `league-relay`'s options and exit codes).
+  - **`scripts/verify.sh`** runs the checks CI runs in one command: format, Clippy, tests, the coverage floor and `cargo audit` when installed, the two tripwires and their controls.
+  - **`SHIP_GATE.md`** from shipcheck, filled in against this repository.
+
 - `league-core` & `league-gen` `#56` sealed replay-log layout-seed redaction:
   - Replaced `SeasonReplayLog.seed: u64` in `crates/league-core/src/replay.rs` with `ReplayLayoutSeed` (private inner representation; clear construction and numeric JSON deserialization for `>= 2^63` refused by name as `SEALED_SEED_IN_CLEAR`). Non-`sealed` logs (`< 2^63`) serialize as the exact bare JSON `u64` byte-identically to `main` with zero golden or state-digest changes.
   - Added canonical `layout_seed_digest(seed: u64) -> String` in `crates/league-core/src/replay.rs` (lowercase 64-hex `SHA-256(seed.to_be_bytes())`, naming `#58` keyed commitments as a one-place follow-up) and delegated `league_gen::sealed_seed_sha256` in `crates/league-gen/src/schema.rs` to it, backed by `layout_seed_digest_matches_sealed_seed_sha256_on_reserved_sealed_test_values` on `[1 << 63, u64::MAX, (1 << 63) | 42]`.
