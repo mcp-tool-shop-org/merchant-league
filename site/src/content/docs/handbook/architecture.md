@@ -20,7 +20,7 @@ Merchant League is a Rust workspace (edition 2024, toolchain 1.100.0). Unsafe co
 | `league-relay` | The paper-test relay: one AI seat's turn at a time, with transcripts and a credit cap |
 | `league-tui` | The terminal client, built on ratatui. A title screen for now |
 
-`vendor/xrpl-rust` holds `xrpl-rust` 1.3.0 with three changes on top, listed in `vendor/xrpl-rust/VENDORED.md`: upstream's own fix for a security advisory that no release carries yet, token escrows, and domain IDs for the permissioned DEX. It is patched in through `[patch.crates-io]` and is not a workspace member.
+`vendor/xrpl-rust` holds `xrpl-rust` 1.3.0 with four changes on top, listed in `vendor/xrpl-rust/VENDORED.md`: upstream's own fix for a security advisory that no release carries yet, token escrows, domain IDs for the permissioned DEX, and removing `chrono` (`RUSTSEC-2026-0543`). It is patched in through `[patch.crates-io]` and is not a workspace member.
 
 ## Two modes, one engine
 

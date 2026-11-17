@@ -1,6 +1,6 @@
 # Vendored: xrpl-rust 1.3.0, patched
 
-This folder is **xrpl-rust 1.3.0 as published on crates.io**, with three changes on top. The workspace uses it through `[patch.crates-io]` in the root `Cargo.toml`.
+This folder is **xrpl-rust 1.3.0 as published on crates.io**, with four changes on top. The workspace uses it through `[patch.crates-io]` in the root `Cargo.toml`.
 
 ## Where it comes from
 
@@ -11,7 +11,7 @@ This folder is **xrpl-rust 1.3.0 as published on crates.io**, with three changes
 
 ## Why
 
-xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory with no fix in 0.5: RUSTSEC-2026-0387, timing variability in operations meant to be constant-time. Upstream fixed this after 1.3.0, but no release carries the fix yet. The repository's rule is that advisories are fixed, never ignored (Director, 2026-11-14), so the fix is applied here. Merchant League also needs two transaction features 1.3.0 doesn't have.
+xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory with no fix in 0.5: RUSTSEC-2026-0387, timing variability in operations meant to be constant-time. Upstream fixed this after 1.3.0, but no release carries the fix yet. The repository's rule is that advisories are fixed, never ignored (Director, 2026-11-14), so the fix is applied here. It also depended on chrono 0.4, marked unmaintained in RUSTSEC-2026-0543. Merchant League also needs two transaction features 1.3.0 doesn't have.
 
 ## The changes
 
@@ -40,12 +40,16 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
      - Its notice is in `LICENSE-rippled`: rippled's `LICENSE.md` at that tag, copied verbatim, sha256 `4c697169c3dd8c4ff3c88bede09ed9cc0490ea41e5c0c460ea17d15e357f2c8c`.
      - The ported code carries a header naming the source.
 3. **DomainID (Permissioned DEX):** an optional `domain_id` on `OfferCreate` and `Payment`, serialised as `DomainID` and set with `with_domain_id`. It's validated by `PermissionedDomainSet`'s own `validate_domain_id`: 64 hex digits in either case, not all zero. The binary codec's definitions already had the field (Hash256, number 34). Tests: JSON round trip, validation, and omission when unset.
+4. **Drop `chrono` (`RUSTSEC-2026-0543`, "chrono is unmaintained"):**
+   - `src/utils/time_conversion.rs` and its `pub mod` / `pub use` lines in `src/utils/mod.rs` are deleted. That module was the crate's only `chrono` user, and its two public functions (`posix_to_ripple_time` and `ripple_time_to_posix`) had no callers in `vendor/` or `crates/`.
+   - `[dependencies.chrono]` and `"chrono/std"` are removed from `Cargo.toml` and `Cargo.toml.orig`.
+   - `serde_with` is set to `default-features = false` and `features = ["macros"]` in both manifests: `xrpl-rust` uses only `serde_with::skip_serializing_none`, while `serde_with`'s default `std` and `alloc` features carry weak `chrono_0_4?/...` references that otherwise keep `chrono` in `Cargo.lock`.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.
 
 ## The build uses
 
-`default-features = false` with `std`, `core`, `utils`, `models` and `wallet`. The `json-rpc` feature (reqwless, embedded-tls) is **off**: it would bring crypto-bigint 0.5 back through p256 0.13, plus atomic-polyfill (RUSTSEC-2023-0089). Submission goes through the league's own JSON-RPC client instead.
+`default-features = false` with `std`, `core`, `utils`, `models` and `wallet`, and `serde_with` is built with `macros` only (`default-features = false`). The `json-rpc` feature (reqwless, embedded-tls) is **off**: it would bring crypto-bigint 0.5 back through p256 0.13, plus atomic-polyfill (RUSTSEC-2023-0089). Submission goes through the league's own JSON-RPC client instead.
 
 **Mainnet:** the library's only Mainnet hosts (`DEFAULT_MAINNET_URL` and `DEFAULT_WEBSOCKET_URL`, both xrplcluster.com) are in `src/cli/`. That module is compiled only with the `cli` feature (`src/lib.rs:40`), which the league leaves off, so they're not in the game's build. The league's guard still refuses any server that doesn't report the Testnet's network id.
 
@@ -54,8 +58,10 @@ Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the Domain
 ## Checks at vendoring
 
 - `cargo tree -i crypto-bigint`: no such package in the lock.
-- `cargo audit --deny warnings`: clean, with no ignores.
-- The vendored crate's own tests: 1,283 pass with these features, including the new ones.
+- `grep -c '^name = "chrono"$' Cargo.lock`: `0`.
+- `cargo tree -i chrono --target all`: ``error: package ID specification `chrono` did not match any packages``.
+- `cargo audit --deny warnings`: clean (407 crate dependencies scanned), with no ignores and no `audit.toml`.
+- The vendored crate's own tests: 1,283 pass at initial vendoring with these features, including the new ones; change 4 deleted `src/utils/time_conversion.rs` and its 11 tests with it (the vendored suite is not re-run).
 
 ## Live proof
 
@@ -77,4 +83,4 @@ The validated transactions are test vectors in `crates/league-ledger/tests/vecto
 
 ## Updating
 
-When an xrpl-rust release carries the fix and these two features, drop this folder and the `[patch.crates-io]` entry, and pin that release. Until then, any change here is reviewed like the league's own code.
+When an xrpl-rust release carries the fix and these two features and also builds without chrono, drop this folder and the `[patch.crates-io]` entry, and pin that release. Until then, any change here is reviewed like the league's own code.

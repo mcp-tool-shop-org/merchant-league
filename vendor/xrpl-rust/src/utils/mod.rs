@@ -11,7 +11,6 @@ pub mod parse_nftoken_id;
 pub mod str_conversion;
 #[cfg(test)]
 pub mod testing;
-pub mod time_conversion;
 #[cfg(feature = "models")]
 pub(crate) mod transactions;
 #[cfg(feature = "models")]
@@ -19,7 +18,6 @@ pub mod txn_parser;
 pub mod xrpl_conversion;
 
 pub use self::mptoken_metadata::*;
-pub use self::time_conversion::*;
 pub use self::xrpl_conversion::*;
 
 use crate::constants::*;

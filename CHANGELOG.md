@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Removed `chrono` from the workspace and `Cargo.lock` (`RUSTSEC-2026-0543`, "chrono is unmaintained"): replaced `league-relay`'s `now_utc_rfc3339()` body with a `std`-only Howard Hinnant `civil_from_days` formatter (`YYYY-MM-DDTHH:MM:SS.mmmZ`, milliseconds truncated, pre-1970 safe, tested against recorded `chrono` outputs), deleted unused `vendor/xrpl-rust/src/utils/time_conversion.rs`, removed `chrono` from `vendor/xrpl-rust`'s manifests, and set `vendor/xrpl-rust`'s `serde_with` dependency to `default-features = false, features = ["macros"]` so weak `chrono` feature references no longer retain `chrono` in `Cargo.lock`.
+
 - The full treatment, with the release held (Director, 2026-11-17: no v0.1.0 tag or Docker image until a table can be played):
   - **README** rewritten for the prototype: what the game is, the two modes, what each crate does, how to build from source, a security and data section (what it touches, what it doesn't, permissions, no telemetry), and the support status. The brand logo is in its header.
   - **Landing page and handbook** under `site/` (`@mcptoolshop/site-theme` with Starlight), deployed to GitHub Pages by `.github/workflows/pages.yml` on pushes to `site/`. Seven handbook pages: welcome, getting started, the game, fairness and randomness, architecture, security, and reference (including `league-relay`'s options and exit codes).
