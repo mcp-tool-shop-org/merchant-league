@@ -3,7 +3,6 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Generator release identifier embedded in every produced [`RingTable`] for cross-run comparability.
 pub const GENERATOR_VERSION: &str = "league-gen/v2.5.0";
@@ -228,16 +227,14 @@ pub struct TableSetupOptions {
     pub training_logged: bool,
 }
 
-/// Computes the lowercase 64-character hex SHA-256 digest of `seed`'s 8 big-endian bytes.
+/// Computes the lowercase 64-character hex SHA-256 digest of `seed`'s 8 big-endian bytes by
+/// delegating directly to [`league_core::layout_seed_digest`].
+///
+/// Routing both crates through that single `league-core` function ensures issue `#58` (a rig-keyed
+/// digest before any sealed record leaves the rig) is a one-place change.
 #[must_use]
 pub fn sealed_seed_sha256(seed: u64) -> String {
-    let digest = Sha256::digest(seed.to_be_bytes());
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        use std::fmt::Write as _;
-        let _ = write!(&mut hex, "{byte:02x}");
-    }
-    hex
+    league_core::layout_seed_digest(seed)
 }
 
 /// Validation failure returned when deserializing an invalid [`RecordedLayoutSeed`].
@@ -1647,6 +1644,7 @@ impl std::error::Error for GenError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn seat_count_and_currency_code_validation() {
@@ -2011,6 +2009,24 @@ mod tests {
             SEALED_SEED_MAX - 1,
         ] {
             assert!(!is_reserved_test_seed(non_reserved));
+        }
+    }
+
+    #[test]
+    fn layout_seed_digest_matches_sealed_seed_sha256_on_reserved_sealed_test_values() {
+        assert_eq!(league_core::SEALED_LAYOUT_SEED_MIN, SEALED_SEED_MIN);
+        for made_up_sealed in [SEALED_SEED_MIN, SEALED_SEED_MAX, SEALED_SEED_MIN | 42] {
+            assert!(is_reserved_test_seed(made_up_sealed));
+            let expected_bytes = Sha256::digest(made_up_sealed.to_be_bytes());
+            let mut expected_hex = String::with_capacity(64);
+            for byte in expected_bytes {
+                use std::fmt::Write as _;
+                let _ = write!(&mut expected_hex, "{byte:02x}");
+            }
+            let from_gen = sealed_seed_sha256(made_up_sealed);
+            let from_core = league_core::layout_seed_digest(made_up_sealed);
+            assert_eq!(from_gen, expected_hex);
+            assert_eq!(from_core, from_gen);
         }
     }
 }
