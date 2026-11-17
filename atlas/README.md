@@ -1,25 +1,35 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-17 from commit d4fe153 by Atlas 1.26.0.
+Mapped at 2026-11-17 from commit 67ff82e by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-11 parts, mostly Rust (341 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+11 parts, mostly Rust (341 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 8 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-16 (a46e51c)
+## What changed since 2026-11-17 (d4fe153)
 
-Nothing structural changed since 2026-11-16; 9 files changed content.
+- Deploy site to GitHub Pages (.github/workflows/pages.yml) is a new door. It starts on a push to main touching 2 paths; or by hand. It runs site/astro.config.mjs and site/src/.
+- scripts/check-copy.sh is now read by scripts/verify.sh.
+- scripts/check-testnet-only.sh is now read by scripts/verify.sh.
+- scripts/test-guards.sh is now read by scripts/verify.sh.
+- And 2 more new writers and readers of places.
+- site/astro.config.mjs is new and belongs to no part, so atlas check fails on it against the previous map.
+- site/package-lock.json is new and belongs to no part, so atlas check fails on it against the previous map.
+- site/package.json is new and belongs to no part, so atlas check fails on it against the previous map.
+- And 15 more new files that belong to no part.
+- 21 files added and 4 changed content, across 3 parts.
 
 ## What comes in
 
 1. **CI.** On a pull request; on a push to main touching 9 paths; or by hand. Runs scripts/check-copy.sh, scripts/check-testnet-only.sh, scripts/test-guards.sh and 30 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
-2. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
-3. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
-4. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
-5. **league-relay** (a command people run). Runs crates/league-relay/src/main.rs.
-6. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
+2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
+3. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
+4. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
+5. **testnet_requireauth** (a command people run with `cargo run --example testnet_requireauth`). Runs crates/league-ledger/examples/testnet_requireauth.rs.
+6. **league-relay** (a command people run). Runs crates/league-relay/src/main.rs.
+7. **xrpl** (a command built from vendor/xrpl-rust, which nothing ships). Runs vendor/xrpl-rust/src/bin/xrpl.rs.
 
 ## What happens through CI
 
@@ -30,6 +40,8 @@ Nothing structural changed since 2026-11-16; 9 files changed content.
 CI writes nothing in the files this map could read; 1 file could not be.
 
 ## The other doors
+
+**Deploy site to GitHub Pages** runs site/astro.config.mjs and site/src/, and deploys the site.
 
 **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`) runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 
@@ -100,7 +112,7 @@ Beside the path, crates/league-relay/src/cli.rs also calls crates/league-relay/s
 - 1 write uses a path built at run time and is not named here.
 - 4 writes and 3 reads go to a path their caller passes, not to this repository.
 - 1 write goes to a temporary directory, not to this repository.
-- 371 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 368 more.
+- 389 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 386 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.

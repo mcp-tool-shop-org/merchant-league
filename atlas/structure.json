@@ -11,6 +11,10 @@
         {
           "hash": "e8f677159e1398d827f5d3dc39a90988ce311fbb068dc96f6df6c56211920130",
           "path": ".github/workflows/ci.yml"
+        },
+        {
+          "hash": "c65d51b8784c70e5ec17b3973d82c04a55f9e20e5237abb047fe478d283a63db",
+          "path": ".github/workflows/pages.yml"
         }
       ],
       "globs": [
@@ -2971,11 +2975,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "18e5187cd14b962b39b52556ba6e9bbb2ce5301af4202a483bffd027e45d03a7",
+          "hash": "c04f6bb58c4f3ef967efc19e001a90008bfb69eaf044552192d8dee0aedd4861",
           "path": ".gitignore"
         },
         {
-          "hash": "0e2c3a8705a1a0fcec49a759cecfb407eb549ed7823baa793a8f84db22999226",
+          "hash": "2a72fe8c0360e6e521af0a84cb2af7d66b07db2a85654fb37a4b443195a5bede",
           "path": "CHANGELOG.md"
         },
         {
@@ -2995,12 +2999,16 @@
           "path": "LICENSE"
         },
         {
-          "hash": "fb969963d16ea3a3462758044ed7636d9701e40a481f793180845bf69a08e1df",
+          "hash": "dfe90a9104c972ad645c99df0e94beacf4b470079ca4e05e51b7f9e976b056c4",
           "path": "README.md"
         },
         {
-          "hash": "cb01bab42effe369aa2e6d12fabb17635b487c9b202c24f0d7921438e29946d0",
+          "hash": "323028db91c40b27a90d85fccdd7f1e04e77193d1a6fbeda7ec896461d259a32",
           "path": "SECURITY.md"
+        },
+        {
+          "hash": "1971efbdb1eecf3b6110d1c6c1233f0afd7953afe466a6ccdbd0d9dc7ed6bbec",
+          "path": "SHIP_GATE.md"
         },
         {
           "hash": "2048caac098def2f2147966e69ca934a9c1f6ea17e62a5fcb506254161bed5c5",
@@ -3036,6 +3044,10 @@
         {
           "hash": "e0a457f8d8ae6035eb586595c64a13514cf352289434d7578f39e453cb1a0085",
           "path": "scripts/test-guards.sh"
+        },
+        {
+          "hash": "5d346566cb702c1588a3270a26a58e6ebfa5732058839cc5349e238711f84c7f",
+          "path": "scripts/verify.sh"
         }
       ],
       "globs": [
@@ -3484,6 +3496,142 @@
     },
     {
       "checksCount": 0,
+      "commands": [
+        {
+          "dir": "site",
+          "job": "build",
+          "programs": [
+            "npm"
+          ],
+          "step": "Install site dependencies"
+        },
+        {
+          "dir": "site",
+          "job": "build",
+          "programs": [
+            "npm"
+          ],
+          "step": "Build site"
+        }
+      ],
+      "elsewhere": [],
+      "file": ".github/workflows/pages.yml",
+      "jobs": [
+        {
+          "basis": "declared",
+          "name": "build",
+          "runsOn": [
+            {
+              "labels": [
+                "ubuntu-latest"
+              ],
+              "platform": {
+                "cpu": "x64",
+                "libc": "glibc",
+                "os": "linux"
+              }
+            }
+          ],
+          "setup": [
+            {
+              "ranges": [
+                {
+                  "from": "22",
+                  "range": ">=22.0.0 <23.0.0-0"
+                }
+              ],
+              "step": "1",
+              "uses": "actions/setup-node",
+              "version": "22"
+            }
+          ]
+        },
+        {
+          "basis": "declared",
+          "environment": {
+            "name": "github-pages"
+          },
+          "name": "deploy",
+          "runsOn": [
+            {
+              "labels": [
+                "ubuntu-latest"
+              ],
+              "platform": {
+                "cpu": "x64",
+                "libc": "glibc",
+                "os": "linux"
+              }
+            }
+          ]
+        }
+      ],
+      "landings": [],
+      "mentions": [],
+      "name": "Deploy site to GitHub Pages",
+      "permissions": [
+        "contents:read",
+        "id-token:write",
+        "pages:write"
+      ],
+      "pushes": false,
+      "reach": [],
+      "readers": [],
+      "runs": [
+        {
+          "job": "build",
+          "matched": true,
+          "path": "site/astro.config.mjs",
+          "runKind": "executes",
+          "via": "astro build"
+        },
+        {
+          "directory": true,
+          "job": "build",
+          "matched": true,
+          "path": "site/src/",
+          "runKind": "executes",
+          "via": "astro build"
+        }
+      ],
+      "runsCount": 2,
+      "secrets": [],
+      "sends": {
+        "deploysPages": true,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [
+        {
+          "branches": [
+            "main"
+          ],
+          "event": "push",
+          "paths": [
+            ".github/workflows/pages.yml",
+            "site/**"
+          ]
+        },
+        {
+          "event": "workflow_dispatch"
+        }
+      ],
+      "uses": [
+        "actions/checkout",
+        "actions/deploy-pages",
+        "actions/setup-node",
+        "actions/upload-pages-artifact"
+      ],
+      "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
       "commands": [],
       "elsewhere": [],
       "example": true,
@@ -3704,8 +3852,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d4fe153fa0c44776f1450a5eb2a23904f6b2f667",
-    "tracked": 502
+    "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
+    "tracked": 523
   },
   "landings": [
     {
@@ -4002,6 +4150,61 @@
         }
       ],
       "target": "docs/paper-test/results.md",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/verify.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "scripts/check-copy.sh",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/verify.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "scripts/check-testnet-only.sh",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/verify.sh",
+          "call": "literal",
+          "confidence": "text"
+        }
+      ],
+      "target": "scripts/test-guards.sh",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "site/astro.config.mjs",
+          "call": "content-collection",
+          "confidence": "ast"
+        }
+      ],
+      "target": "site/src/content/docs",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "site/astro.config.mjs",
+          "call": "autogenerate",
+          "confidence": "ast"
+        }
+      ],
+      "target": "site/src/content/docs/handbook",
       "writers": []
     },
     {
@@ -7629,6 +7832,88 @@
         "crates/league-relay/src/main.rs"
       ],
       "testsInside": true
+    },
+    {
+      "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",
+      "path": "site/astro.config.mjs"
+    },
+    {
+      "hash": "41ec5c228253fea2eace9a25bb51e0315a581e240cb9d4d1765f83af0d2b3df6",
+      "path": "site/package-lock.json"
+    },
+    {
+      "hash": "9c39e620ebae2c5718ecd8c6188bd3451409a614ec8f5308dc15d5fd886e5b91",
+      "path": "site/package.json"
+    },
+    {
+      "hash": "db3c76ae1d22efa9f6c9a1cf3d8b1f45a5e94210d34e4b518006018e7d3d097d",
+      "path": "site/public/favicon.svg"
+    },
+    {
+      "hash": "c33b32734f3a46adb1f01eabdc944a3b85bb09df5d93295ab476c25a24c6ce37",
+      "path": "site/src/assets/logo.png"
+    },
+    {
+      "constantOnly": true,
+      "hash": "ee756dfba4122d2acc94a39b2555d9f200fff56a87a8c0b10f9cd01df26a8b62",
+      "path": "site/src/content.config.ts"
+    },
+    {
+      "hash": "c63caa7998dff7c9f34fabe8f5b69a41a46fa4fcc0942b3d84d272c84d17cfd7",
+      "path": "site/src/content/docs/handbook/architecture.md"
+    },
+    {
+      "hash": "b64bb2b1a3a8249b0f0a2d91a6951e4275561feef969e7fe8d0fe4a7933074b2",
+      "path": "site/src/content/docs/handbook/fairness.md"
+    },
+    {
+      "hash": "4c575c2d8444f4c437acfbda53a4afb0dc5394627bf2a3c6f45bdaa2dd463848",
+      "path": "site/src/content/docs/handbook/getting-started.md"
+    },
+    {
+      "hash": "a25e2d54b4c418833f31bc66f9fdcc8ff79215c3e23e4b915a1caea6af70f1c8",
+      "path": "site/src/content/docs/handbook/index.md"
+    },
+    {
+      "hash": "897a77629f1555c34720b3285183e6722a0e7e4423ecdbdd3107def78bd7ac98",
+      "path": "site/src/content/docs/handbook/reference.md"
+    },
+    {
+      "hash": "d5e0f0fb718f4cd45468868b5200b29c040d00b44301a85425a11f9fa002b5ea",
+      "path": "site/src/content/docs/handbook/security.md"
+    },
+    {
+      "hash": "22de5290bbbdb06bff5acef075205c0a627c14669882a528730347737c2ba29f",
+      "path": "site/src/content/docs/handbook/the-game.md"
+    },
+    {
+      "hash": "4fb84a646c4d833c33f4058e1ed1775849e855c65e5adb7e45d2a633674bd603",
+      "importOrder": [
+        "site/src/styles/global.css",
+        "site/src/site-config.ts"
+      ],
+      "importsFiles": [
+        "site/src/site-config.ts",
+        "site/src/styles/global.css"
+      ],
+      "path": "site/src/pages/index.astro"
+    },
+    {
+      "constantOnly": true,
+      "hash": "071d35daebfff5eba8d69f3260ffad1f86b3624908ff159c7d1a5881e5d1ceb8",
+      "path": "site/src/site-config.ts"
+    },
+    {
+      "hash": "29ee8df91833e694bdba973126b34a6177de4cf01dab6d9ef7d3126e8e2b67fb",
+      "path": "site/src/styles/global.css"
+    },
+    {
+      "hash": "cdb0845dea4e7835ceb5c750caa9358e03cb03132cd85c17931a9fb96299b94f",
+      "path": "site/src/styles/starlight-custom.css"
+    },
+    {
+      "hash": "b5b0a5b04a14cddd7713c5e1c82e86c79c17c2f86b170e26e9b170b3d5e01cd9",
+      "path": "site/tsconfig.json"
     },
     {
       "hash": "183b80272903c157ee426d92d75c6e1c7eeedfd5ad34ac184963914e53719e21",

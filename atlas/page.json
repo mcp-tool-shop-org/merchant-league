@@ -29,24 +29,88 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 9,
+      "added": 21,
+      "changed": 4,
       "moved": 0,
-      "parts": 4,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "Deploy site to GitHub Pages (.github/workflows/pages.yml) is a new door. It starts on a push to main touching 2 paths; or by hand. It runs site/astro.config.mjs and site/src/.",
+        "subjects": [
+          ".github/workflows/pages.yml",
+          "site/astro.config.mjs",
+          "site/src/"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "scripts/check-copy.sh is now read by scripts/verify.sh.",
+        "subjects": [
+          "scripts/check-copy.sh",
+          "scripts/verify.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "scripts/check-testnet-only.sh is now read by scripts/verify.sh.",
+        "subjects": [
+          "scripts/check-testnet-only.sh",
+          "scripts/verify.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "scripts/test-guards.sh is now read by scripts/verify.sh.",
+        "subjects": [
+          "scripts/test-guards.sh",
+          "scripts/verify.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 2 more new writers and readers of places.",
+        "subjects": []
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "site/astro.config.mjs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "site/astro.config.mjs"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "site/package-lock.json is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "site/package-lock.json"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "site/package.json is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "site/package.json"
+        ]
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "And 15 more new files that belong to no part.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-16; 9 files changed content.",
+        "sentence": "21 files added and 4 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "a46e51cc18cabf705ec86cc729e704a3c92fa2ed",
-      "generatedAt": "2026-11-16T23:26:18.708Z"
+      "commit": "d4fe153fa0c44776f1450a5eb2a23904f6b2f667",
+      "generatedAt": "2026-11-17T02:49:37.531Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -130,9 +194,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "d4fe153fa0c44776f1450a5eb2a23904f6b2f667",
+  "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
   "defaultBranch": "main",
-  "derived": "11 parts, mostly Rust (341 files), Python (3), shell (3) and JavaScript (1). Work enters through 6 doors; the busiest is CI, which reaches 8 parts. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "11 parts, mostly Rust (341 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 8 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -221,6 +285,31 @@
       "triggers": [
         "on a pull request",
         "on a push to main touching 9 paths",
+        "or by hand"
+      ]
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": ".github/workflows/pages.yml",
+      "id": ".github/workflows/pages.yml",
+      "landings": [],
+      "name": "Deploy site to GitHub Pages",
+      "pushes": false,
+      "reach": [],
+      "runs": [
+        "site/astro.config.mjs",
+        "site/src/"
+      ],
+      "runsCount": 2,
+      "runsMore": 0,
+      "sends": [
+        "deploys the site"
+      ],
+      "stages": [],
+      "triggers": [
+        "on a push to main touching 2 paths",
         "or by hand"
       ]
     },
@@ -357,13 +446,13 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-17T02:49:37.531Z",
+  "generatedAt": "2026-11-17T09:09:31.289Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
     "4 writes and 3 reads go to a path their caller passes, not to this repository.",
     "1 write goes to a temporary directory, not to this repository.",
-    "371 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 368 more.",
+    "389 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 386 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
