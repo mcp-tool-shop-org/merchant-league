@@ -436,6 +436,9 @@ pub enum FillKind {
     EscrowFinished,
     /// Track-1 `TokenEscrow` or `DualEscrow` vault forfeited or expired in Step 2 (or Phase 1).
     EscrowForfeited,
+    /// Escrowed funds returned to their own sender (`from == to`) when a `TokenEscrow` is
+    /// cancelled or expires unfinished; a refund, not a forfeit (`2026-11-17`).
+    EscrowRefunded,
     /// Authority emergency commodity purchase executed via `MarketAction::TownImport` (`C1`).
     TownImport,
 }
@@ -493,11 +496,12 @@ pub struct WashFreezeSettlement {
     pub target_seat: u8,
     /// `true` when [`audit_wash_freeze`] confirmed a prior-turn round trip or above-import peer price.
     pub confirmed: bool,
-    /// Bond returned to `inspector` (`bond_cred` if confirmed; `bond_cred - damages_paid_cred` if clean).
+    /// Bond returned to `inspector` (`bond_cred` if confirmed; `0` if clean, since a clean audit
+    /// pays the whole bond to `target_seat`).
     pub bond_returned_cred: Units,
     /// Bounty paid from `target_seat`'s free `CRED` (capped at available free `CRED`) when confirmed (`0` if clean).
     pub bounty_paid_cred: Units,
-    /// Damages transferred from the held challenger bond to `target_seat` when clean (`0` if confirmed).
+    /// Damages paid to `target_seat` when clean: the whole held bond (`bond_cred`); `0` if confirmed.
     pub damages_paid_cred: Units,
 }
 

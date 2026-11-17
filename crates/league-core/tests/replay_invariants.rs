@@ -3445,7 +3445,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "d79b33af5af546f39e210d2b017fa4c2ea180a553b38984a554836a2dce35ef9"
+        "74cdaac93a401c7a80b50a69afd82597072ad7c02bc6fbf166121d09fec2eacc"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -4473,8 +4473,6 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
         break_tie_with_turn_beacon(expected_beacon, tid, Turn(4), b"trade_minister", &[1, 2]);
     let expected_cc = Some(if expected_tm == 1 { 2 } else { 1 });
     let _touch_compat = break_tie_with_beacon(expected_beacon, b"trade_minister", &[1, 2]);
-    let _touch_cc_tie =
-        break_tie_with_turn_beacon(expected_beacon, tid, Turn(4), b"cartel_chair", &[1, 2]);
     let r4 = must_ok(
         eng.sweep_turn_with_drand(r4_expected, &sig_4),
         "sweep 4 drand",
@@ -5265,11 +5263,11 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "544948796a882d84a7951659fc04b214fd41cb7ed4fb6f267f2ee63313cfb39a"
+        "7eaf7769631a1fff3194a2ae396725bac10b3e1272b03a46655b4daae189a3e3"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "97d8dc624aad0e52cb9d82e365dcccd56fc32f4fd51884a371ccef4798c20fb8"
+        "e423d54509bab25800d5b6651f49a48a46e1b572f718a8eeae97f8ce0e8730ff"
     );
 }
 

@@ -17,10 +17,9 @@ use league_core::{
     CouncilPlatform, CouncilVoteBallot, CreditTier, DEFAULT_CANCEL_LOCK_BPS,
     DEFAULT_CLOSING_HAZARD_BPS, DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_SHOCK_DRAW_TURNS,
     DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-    DEFAULT_WASH_FREEZE_DAMAGES_CRED, DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
-    DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES, DrandSchedule, EngineError,
-    EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP, LoggedTurn,
-    MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES,
+    DrandSchedule, EngineError, EscrowFinishUnlock, EscrowProposal, FinalScoreboard, HARD_TURN_CAP,
+    LoggedTurn, MANDATE_STARTING_NW_FLOOR_BPS, MandateKind, MarketAction, OfferProposal, OfferSide,
     OrderReveal, PreimageSecret, ProjectDeliveryOrder, ReplayBeaconMode, ReplayLayoutSeed,
     RevealSalt, RngDomain, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle, SeasonReplayLog,
     Seat, SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase,
@@ -2822,7 +2821,6 @@ fn n4_generated_converted_table_spec(initial_cred: Units) -> TableSpec {
         wash_round_trip_min_units: DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
         wash_freeze_bond_cred: DEFAULT_WASH_FREEZE_BOND_CRED,
         wash_freeze_bounty_cred: DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-        wash_freeze_damages_cred: DEFAULT_WASH_FREEZE_DAMAGES_CRED,
     }
 }
 

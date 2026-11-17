@@ -1357,7 +1357,7 @@ fn replay_section_off_is_byte_identical_and_on_leaves_the_engine_unchanged() {
     assert_eq!(with, plain);
     assert_eq!(
         hex::encode(with.state_digests[with.state_digests.len() - 1]),
-        "544948796a882d84a7951659fc04b214fd41cb7ed4fb6f267f2ee63313cfb39a"
+        "7eaf7769631a1fff3194a2ae396725bac10b3e1272b03a46655b4daae189a3e3"
     );
     assert_eq!(section.turns.len(), log.turns.len());
     assert_eq!(section.at_close.len(), 4);

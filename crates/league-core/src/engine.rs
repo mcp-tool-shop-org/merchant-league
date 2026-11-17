@@ -2080,7 +2080,7 @@ impl TurnEngine {
         self.adjust_free_balance(escrow.sender, AssetId::Cred, escrow.amount_cred)?;
         self.state.fill_log.push(FillRecord {
             turn: self.state.turn,
-            kind: FillKind::EscrowForfeited,
+            kind: FillKind::EscrowRefunded,
             good: Some(AssetId::Cred),
             from: Some(escrow.sender),
             to: escrow.sender,
@@ -3126,20 +3126,18 @@ impl TurnEngine {
                     damages_paid_cred: 0,
                 });
             } else {
-                let damages = self.state.spec.wash_freeze_damages_cred.min(wf.bond_cred);
-                let returned = wf.bond_cred.saturating_sub(damages);
+                // Clean audit (§5.2 amended 2026-11-17): the whole held bond goes to the frozen
+                // seat as damages; nothing returns to the Inspector.
+                let damages = wf.bond_cred;
                 if damages > 0 {
                     let _ = self.adjust_free_balance(wf.target_seat, AssetId::Cred, damages);
-                }
-                if returned > 0 {
-                    let _ = self.adjust_free_balance(wf.inspector, AssetId::Cred, returned);
                 }
                 settlements.push(WashFreezeSettlement {
                     turn,
                     inspector: wf.inspector,
                     target_seat: wf.target_seat,
                     confirmed: false,
-                    bond_returned_cred: returned,
+                    bond_returned_cred: 0,
                     bounty_paid_cred: 0,
                     damages_paid_cred: damages,
                 });

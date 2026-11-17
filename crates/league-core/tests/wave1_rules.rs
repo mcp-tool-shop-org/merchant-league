@@ -16,14 +16,13 @@ use league_core::{
     AssetId, AtomicSwapProposal, CharterRole, CommitmentHash, ConverterRunOrder, CouncilPlatform,
     CouncilVoteBallot, DEFAULT_CANCEL_LOCK_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
     DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-    DEFAULT_WASH_FREEZE_DAMAGES_CRED, DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
-    DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES, DrandBeaconAuthStatus,
-    DrandSchedule, EngineError, FillKind, FillRecord, FundamentalParities, HARD_TURN_CAP,
-    LoggedTurn, MarketAction, OfferProposal, OfferSide, OrderReveal, ReplayBeaconMode, RevealSalt,
-    SealedOrderBundle, SeasonReplayLog, Seat, TableId, TableMode, TableSpec, Turn, TurnEngine,
-    TurnPhase, UNIT_SCALE, Units, audit_wash_freeze, break_tie_with_turn_beacon,
-    compute_order_commitment, derive_drand_beacon, derive_turn_beacon, mark_good_holding_at_close,
-    replay_season, town_import_cost_cred,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES,
+    DrandBeaconAuthStatus, DrandSchedule, EngineError, FillKind, FillRecord, FundamentalParities,
+    HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal, OfferSide, OrderReveal,
+    ReplayBeaconMode, RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat, TableId, TableMode,
+    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, audit_wash_freeze,
+    break_tie_with_turn_beacon, compute_order_commitment, derive_drand_beacon, derive_turn_beacon,
+    mark_good_holding_at_close, replay_season, town_import_cost_cred,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -222,6 +221,17 @@ fn b1_live_and_replay_reject_same_locked_cancels_and_omit_empty_rejections() {
         let mut actions = Vec::new();
         let mut lock_at = None;
         if t == 1 {
+            // Pre-lock rejection with a code other than CANCEL_LOCKED: cancelling an offer that
+            // does not exist, before the lock begins, gives UNKNOWN_OBJECT at index 0.
+            let a_pre = MarketAction::CancelOffer {
+                seat: 1,
+                offer_id: 998,
+            };
+            if let Err(err) = eng.apply_market_action(a_pre.clone()) {
+                expected_live_rejections.push((t, 0, err.code()));
+            }
+            actions.push(a_pre);
+
             let a0 = MarketAction::PostOffer {
                 seat: 0,
                 order: OfferProposal {
@@ -237,14 +247,14 @@ fn b1_live_and_replay_reject_same_locked_cancels_and_omit_empty_rejections() {
             actions.push(a0);
 
             must_ok(eng.begin_cancel_lock(), "live lock turn 1");
-            lock_at = Some(1_u32);
+            lock_at = Some(2_u32);
 
             let a1 = MarketAction::CancelOffer {
                 seat: 0,
                 offer_id: 1,
             };
             if let Err(err) = eng.apply_market_action(a1.clone()) {
-                expected_live_rejections.push((t, 1, err.code()));
+                expected_live_rejections.push((t, 2, err.code()));
             }
             actions.push(a1);
 
@@ -253,7 +263,7 @@ fn b1_live_and_replay_reject_same_locked_cancels_and_omit_empty_rejections() {
                 offer_id: 999,
             };
             if let Err(err) = eng.apply_market_action(a2.clone()) {
-                expected_live_rejections.push((t, 2, err.code()));
+                expected_live_rejections.push((t, 3, err.code()));
             }
             actions.push(a2);
         }
@@ -316,8 +326,9 @@ fn b1_live_and_replay_reject_same_locked_cancels_and_omit_empty_rejections() {
     assert_eq!(
         flat_replayed,
         vec![
-            (1, 1, "CANCEL_LOCKED".to_owned()),
+            (1, 0, "UNKNOWN_OBJECT".to_owned()),
             (1, 2, "CANCEL_LOCKED".to_owned()),
+            (1, 3, "CANCEL_LOCKED".to_owned()),
         ]
     );
 
@@ -686,10 +697,6 @@ fn b3_customs_inspector_audit_confirmed_a_confirmed_b_clean_bounty_cap_insuffici
         spec.wash_freeze_bounty_cred,
         DEFAULT_WASH_FREEZE_BOUNTY_CRED
     );
-    assert_eq!(
-        spec.wash_freeze_damages_cred,
-        DEFAULT_WASH_FREEZE_DAMAGES_CRED
-    );
 
     let parities = FundamentalParities::from_spec(&spec);
     let raw0_import_price = must_ok(
@@ -729,6 +736,7 @@ fn b3_customs_inspector_audit_confirmed_a_confirmed_b_clean_bounty_cap_insuffici
         FillKind::CheckCashed,
         FillKind::EscrowFinished,
         FillKind::EscrowForfeited,
+        FillKind::EscrowRefunded,
         FillKind::TownImport,
     ] {
         let rec = FillRecord {
@@ -747,11 +755,12 @@ fn b3_customs_inspector_audit_confirmed_a_confirmed_b_clean_bounty_cap_insuffici
         assert_eq!(parsed, rec);
     }
 
-    let mut base_eng = must_ok(TurnEngine::new(spec), "engine");
+    let mut base_eng = must_ok(TurnEngine::new(spec.clone()), "engine");
     grant_inspector_charter(&mut base_eng, 0, tid);
 
     // Case 1: Clean challenge (Turn 7 freeze on seat 2 with zero suspicious Turn 6 fills) ->
-    // Inspector loses bond to target seat as damages; freeze itself stays forward-only on Turn 7.
+    // Inspector loses the whole bond to the target seat as damages (none returns to the
+    // Inspector); freeze itself stays forward-only on Turn 7.
     let mut clean_eng = base_eng.clone();
     let insp_cred_before = clean_eng.state().seats[0].cred;
     let target_cred_before = clean_eng.state().seats[2].cred;
@@ -782,15 +791,43 @@ fn b3_customs_inspector_audit_confirmed_a_confirmed_b_clean_bounty_cap_insuffici
     assert!(!wf_clean.confirmed);
     assert_eq!(wf_clean.bond_returned_cred, 0);
     assert_eq!(wf_clean.bounty_paid_cred, 0);
-    assert_eq!(wf_clean.damages_paid_cred, DEFAULT_WASH_FREEZE_DAMAGES_CRED);
+    assert_eq!(wf_clean.damages_paid_cred, DEFAULT_WASH_FREEZE_BOND_CRED);
     assert_eq!(
         clean_eng.state().seats[0].cred,
-        insp_cred_before - DEFAULT_WASH_FREEZE_DAMAGES_CRED
+        insp_cred_before - DEFAULT_WASH_FREEZE_BOND_CRED
     );
     assert_eq!(
         clean_eng.state().seats[2].cred,
-        target_cred_before + DEFAULT_WASH_FREEZE_DAMAGES_CRED
+        target_cred_before + DEFAULT_WASH_FREEZE_BOND_CRED
     );
+
+    // Clean challenge with a non-default bond: the whole bond, whatever its size, goes to the
+    // frozen seat and none returns to the Inspector (§5.2 amended 2026-11-17, Publisher ruling).
+    let big_bond: Units = 700;
+    let mut big_spec = spec.clone();
+    big_spec.wash_freeze_bond_cred = big_bond;
+    let mut big_eng = must_ok(TurnEngine::new(big_spec), "big-bond engine");
+    grant_inspector_charter(&mut big_eng, 0, tid);
+    let big_insp_before = big_eng.state().seats[0].cred;
+    let big_target_before = big_eng.state().seats[2].cred;
+    must_ok(
+        big_eng.apply_market_action(MarketAction::FlagWashFreeze {
+            inspector: 0,
+            target_seat: 2,
+        }),
+        "big-bond clean freeze",
+    );
+    commit_and_reveal_all(&mut big_eng, tid, 7, vec![SealedOrderBundle::default(); 4]);
+    let big_r7 = must_ok(
+        big_eng.sweep_turn(derive_turn_beacon(3, tid, Turn(7))),
+        "big-bond sweep 7",
+    );
+    let wf_big = big_r7.wash_freeze_settlements[0];
+    assert!(!wf_big.confirmed);
+    assert_eq!(wf_big.bond_returned_cred, 0);
+    assert_eq!(wf_big.damages_paid_cred, big_bond);
+    assert_eq!(big_eng.state().seats[0].cred, big_insp_before - big_bond);
+    assert_eq!(big_eng.state().seats[2].cred, big_target_before + big_bond);
 
     // Insufficient bond CRED must refuse FlagWashFreeze with InsufficientBalance.
     let mut broke_eng = base_eng.clone();
@@ -989,7 +1026,6 @@ fn b3_old_logs_without_part_b_fields_still_replay_identically_and_b4_drand_statu
         obj.remove("wash_round_trip_min_units");
         obj.remove("wash_freeze_bond_cred");
         obj.remove("wash_freeze_bounty_cred");
-        obj.remove("wash_freeze_damages_cred");
     }
     let compat_spec: TableSpec = must_ok(serde_json::from_value(spec_val), "compat TableSpec");
     assert_eq!(compat_spec, spec);
@@ -1056,7 +1092,167 @@ fn b3_old_logs_without_part_b_fields_still_replay_identically_and_b4_drand_statu
     );
 }
 
-// --- B1 Spoof-Bot & #54 Close-Mark Measurements (dev-pool seeds 0..=9_999) ----------------------
+#[test]
+fn b3_bonded_freezes_confirmed_and_clean_replay_bit_for_bit() {
+    let tid = TableId(609);
+    let (mut spec, sealed_deal, eval_seed) = must_ok(
+        TableSpec::standard_eval_chiral_ring_with_setup(tid, 4, 7),
+        "setup",
+    );
+    spec.closing_hazard_bps = [10_000; 8];
+    let eval_pk = spec.eval_vrf_pubkey;
+    let mut eng = must_ok(TurnEngine::new(spec.clone()), "engine");
+
+    // Turn 6: seat 0 buys the Customs Inspector charter. Turn 7: seats 1 and 2 round-trip Raw(1).
+    // Turn 8: seat 0 freezes seat 2 (confirmed by the Turn 7 round trip) and seat 3 (clean).
+    let rt_swap_1 = AtomicSwapProposal {
+        swap_id: 901,
+        maker: 1,
+        taker: 2,
+        maker_asset: AssetId::Raw(1),
+        maker_amount: 1_200,
+        taker_asset: AssetId::Cred,
+        taker_amount: 1_200,
+        domain_id: None,
+    };
+    let rt_swap_2 = AtomicSwapProposal {
+        swap_id: 902,
+        maker: 2,
+        taker: 1,
+        maker_asset: AssetId::Raw(1),
+        maker_amount: 1_000,
+        taker_asset: AssetId::Cred,
+        taker_amount: 1_200,
+        domain_id: None,
+    };
+
+    let mut turns = Vec::new();
+    let mut live_receipts = Vec::new();
+    let mut live_digests = Vec::new();
+    for t in 1..=HARD_TURN_CAP {
+        if eng.state().phase != TurnPhase::TalkAndMarket {
+            break;
+        }
+        let mut actions = Vec::new();
+        let mut bundles = vec![SealedOrderBundle::default(); 4];
+        match t {
+            6 => bundles[0].charter_bids.push(league_core::CharterBidOrder {
+                role: CharterRole::CustomsInspector,
+                bid_cred: 100,
+            }),
+            7 => {
+                bundles[1].atomic_swaps = vec![rt_swap_1.clone(), rt_swap_2.clone()];
+                bundles[2].atomic_swaps = vec![rt_swap_1.clone(), rt_swap_2.clone()];
+            }
+            8 => {
+                for target_seat in [2_u8, 3] {
+                    let action = MarketAction::FlagWashFreeze {
+                        inspector: 0,
+                        target_seat,
+                    };
+                    must_ok(eng.apply_market_action(action.clone()), "freeze");
+                    actions.push(action);
+                }
+            }
+            _ => {}
+        }
+        let (commitments, reveals) = commit_and_reveal_all(&mut eng, tid, t, bundles);
+        let (beacon, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove");
+        let rec = must_ok(eng.sweep_turn_with_eval_vrf(&proof), "sweep");
+        live_digests.push(rec.post_state_digest);
+        turns.push(LoggedTurn {
+            turn: t,
+            market_actions: actions,
+            cancel_lock_at: None,
+            commitments,
+            reveals,
+            turn_beacon: beacon,
+            drand_round: None,
+            drand_signature: None,
+            eval_vrf_proof: Some(proof.to_vec()),
+            drawn_shocks: rec.newly_drawn_shocks.clone(),
+        });
+        let closed = rec.season_closed;
+        live_receipts.push(rec);
+        if closed {
+            break;
+        }
+    }
+
+    // The live season really holds one confirmed and one clean bonded freeze.
+    let r8 = &live_receipts[7];
+    assert_eq!(r8.wash_freeze_settlements.len(), 2);
+    let confirmed = r8.wash_freeze_settlements[0];
+    assert_eq!(confirmed.target_seat, 2);
+    assert!(confirmed.confirmed);
+    assert_eq!(confirmed.bond_returned_cred, DEFAULT_WASH_FREEZE_BOND_CRED);
+    let clean = r8.wash_freeze_settlements[1];
+    assert_eq!(clean.target_seat, 3);
+    assert!(!clean.confirmed);
+    assert_eq!(clean.bond_returned_cred, 0);
+    assert_eq!(clean.damages_paid_cred, DEFAULT_WASH_FREEZE_BOND_CRED);
+    assert!(
+        live_receipts[6]
+            .fills
+            .iter()
+            .any(|f| f.kind == FillKind::AtomicSwap)
+    );
+
+    let rev0 = sealed_deal.seat_reveals[0].clone();
+    must_ok(eng.submit_mandate_reveal(Seat(0), rev0.clone()), "mandate");
+    let live_board = must_ok(eng.finalize_season(), "finalize");
+
+    let mut mandate_reveals = vec![None; 4];
+    mandate_reveals[0] = Some(rev0);
+    let log = SeasonReplayLog {
+        spec,
+        mode: TableMode::Eval,
+        seed: must_ok(league_core::ReplayLayoutSeed::try_clear(7), "seed"),
+        beacon_mode: ReplayBeaconMode::EvalVrf,
+        eval_vrf_pubkey: eval_pk,
+        sealed_mandate_deal: sealed_deal,
+        mandate_commits: vec![None; 4],
+        turns,
+        mandate_reveals,
+    };
+    let log_json = must_ok(serde_json::to_string(&log), "serialize log");
+    let parsed_log: SeasonReplayLog = must_ok(serde_json::from_str(&log_json), "parse log");
+    for (label, replay_log) in [("in-memory", &log), ("json", &parsed_log)] {
+        let out = must_ok(replay_season(replay_log), label);
+        assert_eq!(out.state_digests, live_digests, "{label}: digests");
+        assert_eq!(out.scoreboard, live_board, "{label}: scoreboard");
+        assert!(
+            out.rejected_market_actions.is_empty(),
+            "{label}: rejections"
+        );
+        assert_eq!(
+            out.receipts.len(),
+            live_receipts.len(),
+            "{label}: receipt count"
+        );
+        for (live, replayed) in live_receipts.iter().zip(&out.receipts) {
+            assert_eq!(replayed.fills, live.fills, "{label}: fills");
+            assert_eq!(
+                replayed.wash_freeze_settlements, live.wash_freeze_settlements,
+                "{label}: wash-freeze settlements"
+            );
+        }
+        assert_eq!(out.receipts, live_receipts, "{label}: receipts");
+    }
+}
+
+// --- B1 Spoof-Bot & #54 Close-Mark Measurements (league-core standard chiral ring) -------------
+//
+// What the spoof bot is, exactly:
+// - The table is league-core's `TableSpec::standard_chiral_ring`, not a league-gen generated
+//   table. In that builder the seed enters the layout only as `seed % 5` (a +/-100 milli-CRED
+//   starting-CRED spread), so any number of seeds is five layouts; the seed also sets the
+//   `TableId`, which varies the turn beacons and the closing turn.
+// - The bot calls `begin_cancel_lock()` before every pull, unconditionally.
+// - The bot supplies its own crossing ask (seat 1 asks at `parity + 200` against seat 0's
+//   `parity + 500` bid), so every bid it does not pull fills at Step 0.
+// So the figures show that the lock works as coded, not how a spoofer behaves. Measuring real
+// bots on league-gen tables waits for a TrackerBot or OpportunistBot.
 
 struct SpoofMeasurement {
     seeds_per_n: u64,
@@ -1078,8 +1274,11 @@ fn run_single_season_for_spoof(
     n: u8,
     cancel_lock_bps: u16,
 ) -> (u64, u64, u64, i128, Units, i128) {
-    // Dev pool only (`0..=9_999`), matching `league_gen::SEED_POOL_TABLE`.
-    assert!(seed <= 9_999, "spoof measurement uses dev pool seeds only");
+    // Seeds stay below 1_000 so the TableIds below stay distinct per N.
+    assert!(
+        seed < 1_000,
+        "spoof measurement seeds must stay below 1_000"
+    );
     let tid = TableId(20_000 + u64::from(n) * 1_000 + seed);
     let mut spec = must_ok(TableSpec::standard_chiral_ring(tid, n, seed), "ring spec");
     spec.cancel_lock_bps = cancel_lock_bps;
@@ -1287,7 +1486,7 @@ fn measure_spoof_bot(seeds_per_n: u64) -> BTreeMap<u8, SpoofMeasurement> {
 }
 
 #[test]
-fn cancel_lock_spoof_bot_5_dev_seeds_per_n_direction_and_issue54_report() {
+fn cancel_lock_spoof_bot_5_ring_seeds_per_n_direction_and_issue54_report() {
     let summary = measure_spoof_bot(5);
     for (n, m) in &summary {
         assert_eq!(m.pulls_refused_off, 0, "N={n}: off refused pulls");
@@ -1309,8 +1508,8 @@ fn cancel_lock_spoof_bot_5_dev_seeds_per_n_direction_and_issue54_report() {
 }
 
 #[test]
-#[ignore = "explicit 200-dev-seed per N measurement run via cargo test -- --ignored --nocapture"]
-fn cancel_lock_spoof_bot_200_dev_seeds_per_n_full_measurement() {
+#[ignore = "explicit run: 200 standard-ring seeds per N (five layouts, seed % 5), -- --ignored --nocapture"]
+fn cancel_lock_spoof_bot_200_ring_seeds_per_n_full_measurement() {
     let summary = measure_spoof_bot(200);
     for (n, m) in &summary {
         assert_eq!(m.pulls_refused_off, 0, "N={n}");

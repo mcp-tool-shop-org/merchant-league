@@ -211,6 +211,7 @@ pub struct SeatStatePredicates {
     pub season_end: SeasonEndAndMarks,
     /// Public Phase-1 cancel-lock status (`C4` amended `2026-11-17`): `true` once `begin_cancel_lock`
     /// has engaged during `TalkAndMarket`, cleared when Phase 1 ends.
+    /// Always `false` in recorded predicates: they are taken at turn start, before any lock.
     pub cancel_locked: bool,
 }
 

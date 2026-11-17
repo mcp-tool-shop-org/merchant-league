@@ -155,18 +155,14 @@ pub const DEFAULT_WASH_ROUND_TRIP_MIN_UNITS: Units = 1_000;
 
 /// Provisional challenger bond (`500` milli-`CRED` = `0.500 CRED`) posted upfront by the active
 /// `CustomsInspector` on `FlagWashFreeze` (`§5.2` amended `2026-11-17`; provisional, pending
-/// playtest calibration).
+/// playtest calibration). A clean audit pays the whole bond to the frozen seat as damages; a
+/// confirmed audit returns it to the Inspector.
 pub const DEFAULT_WASH_FREEZE_BOND_CRED: Units = 500;
 
 /// Provisional confirmation bounty (`500` milli-`CRED` = `0.500 CRED`) paid from the frozen
 /// seat's free `CRED` (capped at available free `CRED`) when a Customs Inspector wash freeze is
 /// confirmed (`§5.2` amended `2026-11-17`; provisional, pending playtest calibration).
 pub const DEFAULT_WASH_FREEZE_BOUNTY_CRED: Units = 500;
-
-/// Provisional damages (`500` milli-`CRED` = `0.500 CRED`) awarded to the frozen seat out of
-/// the Inspector's posted bond when a Customs Inspector wash freeze comes back clean (`§5.2`
-/// amended `2026-11-17`; provisional, pending playtest calibration).
-pub const DEFAULT_WASH_FREEZE_DAMAGES_CRED: Units = 500;
 
 const fn default_town_import_premium_bps() -> Bps {
     DEFAULT_TOWN_IMPORT_PREMIUM_BPS
@@ -194,10 +190,6 @@ const fn default_wash_freeze_bond_cred() -> Units {
 
 const fn default_wash_freeze_bounty_cred() -> Units {
     DEFAULT_WASH_FREEZE_BOUNTY_CRED
-}
-
-const fn default_wash_freeze_damages_cred() -> Units {
-    DEFAULT_WASH_FREEZE_DAMAGES_CRED
 }
 
 /// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
@@ -607,7 +599,9 @@ pub struct TableSpec {
     pub wash_round_trip_min_units: Units,
     /// Provisional challenger bond posted upfront by `CustomsInspector` on `FlagWashFreeze`
     /// (`DEFAULT_WASH_FREEZE_BOND_CRED = 500`; `§5.2` amended `2026-11-17`, pending playtest
-    /// calibration).
+    /// calibration). The bond is the one source of truth for both outcomes: a clean audit pays
+    /// all of it to the frozen seat as damages, and a confirmed audit returns all of it to the
+    /// Inspector.
     #[serde(default = "default_wash_freeze_bond_cred")]
     pub wash_freeze_bond_cred: Units,
     /// Provisional bounty transferred from confirmed wash target free `CRED` (capped at balance)
@@ -615,11 +609,6 @@ pub struct TableSpec {
     /// pending playtest calibration).
     #[serde(default = "default_wash_freeze_bounty_cred")]
     pub wash_freeze_bounty_cred: Units,
-    /// Provisional damages paid from the held challenger bond to the frozen seat when the wash
-    /// audit comes back clean (`DEFAULT_WASH_FREEZE_DAMAGES_CRED = 500`; `§5.2` amended
-    /// `2026-11-17`, pending playtest calibration).
-    #[serde(default = "default_wash_freeze_damages_cred")]
-    pub wash_freeze_damages_cred: Units,
 }
 
 impl TableSpec {
@@ -791,14 +780,6 @@ impl TableSpec {
             return Err(EngineError::InvalidConfig(format!(
                 "wash_freeze_bounty_cred must be >= 0, got {}",
                 self.wash_freeze_bounty_cred
-            )));
-        }
-        if self.wash_freeze_damages_cred <= 0
-            || self.wash_freeze_damages_cred > self.wash_freeze_bond_cred
-        {
-            return Err(EngineError::InvalidConfig(format!(
-                "wash_freeze_damages_cred {} must lie in 1..={}",
-                self.wash_freeze_damages_cred, self.wash_freeze_bond_cred
             )));
         }
         Ok(())
@@ -1032,7 +1013,6 @@ impl TableSpec {
             wash_round_trip_min_units: DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
             wash_freeze_bond_cred: DEFAULT_WASH_FREEZE_BOND_CRED,
             wash_freeze_bounty_cred: DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-            wash_freeze_damages_cred: DEFAULT_WASH_FREEZE_DAMAGES_CRED,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))
