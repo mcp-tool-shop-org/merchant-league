@@ -88,7 +88,6 @@ smol-rt = ["dep:smol"]
 std = [
     "rand/std",
     "regex/std",
-    "chrono/std",
     "rand/std_rng",
     "hex/std",
     "rust_decimal/std",
@@ -146,14 +145,6 @@ version = "0.5.0"
 features = [
     "check",
     "alloc",
-]
-default-features = false
-
-[dependencies.chrono]
-version = "0.4.19"
-features = [
-    "alloc",
-    "clock",
 ]
 default-features = false
 
@@ -286,6 +277,8 @@ version = "0.1"
 
 [dependencies.serde_with]
 version = "3.2.0"
+features = ["macros"]
+default-features = false
 
 [dependencies.sha2]
 version = "0.10.2"

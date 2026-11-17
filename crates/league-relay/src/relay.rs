@@ -21,7 +21,6 @@ use crate::wording::{
     load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt, split_negotiation_sections,
     strip_thinking_tags, wording_slot,
 };
-use chrono::{SecondsFormat, Utc};
 use same_file::Handle as SameFileHandle;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -6096,5 +6095,124 @@ fn append_transcript_turn(
 }
 
 fn now_utc_rfc3339() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+    format_system_time_utc_rfc3339(SystemTime::now())
+}
+
+/// Formats a [`SystemTime`] as `YYYY-MM-DDTHH:MM:SS.mmmZ` in UTC with
+/// truncated milliseconds, matching `chrono::DateTime::<Utc>::from(instant)
+/// .to_rfc3339_opts(SecondsFormat::Millis, true)` including pre-1970 clocks.
+fn format_system_time_utc_rfc3339(instant: SystemTime) -> String {
+    let (secs, subsec_nanos) = match instant.duration_since(UNIX_EPOCH) {
+        Ok(dur) => (
+            i64::try_from(dur.as_secs()).unwrap_or(i64::MAX),
+            dur.subsec_nanos(),
+        ),
+        Err(err) => {
+            let dur = err.duration();
+            let sec = i64::try_from(dur.as_secs()).unwrap_or(i64::MAX);
+            let nsec = dur.subsec_nanos();
+            if nsec == 0 {
+                (-sec, 0)
+            } else {
+                (-sec - 1, 1_000_000_000 - nsec)
+            }
+        }
+    };
+    format_utc_rfc3339_millis(secs, subsec_nanos)
+}
+
+/// Formats signed Unix seconds (`secs`) plus `subsec_nanos` nanoseconds
+/// (`instant = secs + subsec_nanos * 1e-9`) as `YYYY-MM-DDTHH:MM:SS.mmmZ`
+/// with milliseconds truncated (`nanos / 1_000_000`).
+fn format_utc_rfc3339_millis(secs: i64, subsec_nanos: u32) -> String {
+    let total_secs = i128::from(secs) + i128::from(subsec_nanos / 1_000_000_000);
+    let nanos = subsec_nanos % 1_000_000_000;
+    let days = total_secs.div_euclid(86_400);
+    let sec_of_day = total_secs.rem_euclid(86_400) as u32;
+    let hour = sec_of_day / 3_600;
+    let minute = (sec_of_day % 3_600) / 60;
+    let second = sec_of_day % 60;
+    let millis = nanos / 1_000_000;
+    let (year, month, day) = civil_from_days(days);
+    if (0..=9999).contains(&year) {
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+    } else {
+        format!("{year:+05}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+    }
+}
+
+/// Howard Hinnant's `civil_from_days`: proleptic Gregorian `(year, month, day)`
+/// from days since `1970-01-01` (`0` = `1970-01-01`, `-1` = `1969-12-31`).
+fn civil_from_days(days_since_unix_epoch: i128) -> (i128, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = i128::from(yoe) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    (year, m, d)
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::{format_system_time_utc_rfc3339, format_utc_rfc3339_millis, now_utc_rfc3339};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn known_answers_match_recorded_chrono_rfc3339() {
+        let cases: [(i64, u32, &str); 6] = [
+            (0, 0, "1970-01-01T00:00:00.000Z"),
+            (-1, 500_000_000, "1969-12-31T23:59:59.500Z"),
+            (951_825_600, 0, "2000-02-29T12:00:00.000Z"),
+            (1_709_251_199, 999_000_000, "2024-02-29T23:59:59.999Z"),
+            (4_107_542_400, 0, "2100-03-01T00:00:00.000Z"),
+            (1_794_913_754, 999_999_999, "2026-11-17T11:09:14.999Z"),
+        ];
+        for (secs, nanos, expected) in cases {
+            assert_eq!(format_utc_rfc3339_millis(secs, nanos), expected);
+        }
+    }
+
+    #[test]
+    fn system_time_before_at_and_after_unix_epoch_matches_chrono() {
+        assert_eq!(
+            format_system_time_utc_rfc3339(UNIX_EPOCH),
+            "1970-01-01T00:00:00.000Z"
+        );
+        assert_eq!(
+            format_system_time_utc_rfc3339(UNIX_EPOCH - Duration::from_millis(500)),
+            "1969-12-31T23:59:59.500Z"
+        );
+        assert_eq!(
+            format_system_time_utc_rfc3339(UNIX_EPOCH - Duration::from_secs(1)),
+            "1969-12-31T23:59:59.000Z"
+        );
+        assert_eq!(
+            format_system_time_utc_rfc3339(UNIX_EPOCH + Duration::from_secs(951_825_600)),
+            "2000-02-29T12:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn extended_iso_years_and_now_utc_smoke() {
+        assert_eq!(
+            format_utc_rfc3339_millis(-62_167_219_200, 0),
+            "0000-01-01T00:00:00.000Z"
+        );
+        assert_eq!(
+            format_utc_rfc3339_millis(-62_167_219_201, 0),
+            "-0001-12-31T23:59:59.000Z"
+        );
+        assert_eq!(
+            format_utc_rfc3339_millis(253_402_300_800, 0),
+            "+10000-01-01T00:00:00.000Z"
+        );
+        let now = now_utc_rfc3339();
+        assert_eq!(now.len(), 24);
+        assert!(now.ends_with('Z'));
+    }
 }
