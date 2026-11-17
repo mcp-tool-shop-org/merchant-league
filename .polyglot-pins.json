@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "pins": {
+    "c6baff1ab84a3856:ja": {
+      "lang": "ja",
+      "source": "- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable, makes no network call without `--live` and a credit cap, and keeps its transcripts in the game folder you give it.\n- **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter).\n- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.\n- **Guards.** Every Testnet connection must report the Testnet's network id, CI fails on any Mainnet hostname, and a second tripwire fails on any copy that frames the game as a source of income.",
+      "translation": "- **アクセス対象。** ゲームモード（まだ構築されていません）では、プレイヤーのテストネットキーは、gitで無視される`.league/`フォルダーに保存され、ログに記録されることはありません。ペーパーテスト用のリレーは、そのOpenRouterキーを`OPENROUTER_API_KEY`環境変数からのみ読み取り、`--live`とクレジット制限なしにネットワーク呼び出しを行わず、トランスクリプトをゲームフォルダーに保存します。\n- **アクセスしない対象。** 実際の資金、メインネット、および上記のフォルダー外のものは一切使用しません。**テレメトリーはありません**。モードが必要とする呼び出し（テストネット、パブリックランダムネスビーコン、およびリレーの場合はOpenRouter）を除き、何も送信されません。\n- **権限。** ゲームモードでは、テストネットへのネットワークアクセスが必要です。スタンドアロンハーネスの場合は、Dockerを使用し、ポートを`127.0.0.1`にバインドします。\n- **保護。** すべてのテストネット接続は、テストネットのネットワークIDを報告する必要があります。CIは、メインネットのホスト名がある場合に失敗し、2回目のトリップワイヤは、ゲームを収入源として表現するコピーがある場合に失敗します。",
+      "pinnedAt": "2026-11-17T09:12:28.584Z"
+    }
+  }
+}

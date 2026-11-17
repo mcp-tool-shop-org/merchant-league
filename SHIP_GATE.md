@@ -58,7 +58,7 @@
 ## E. Identity (soft gate — does not block ship)
 
 - [x] `[all]` Logo in README header (2026-11-17: brand logos/merchant-league/readme.png, brand#118)
-- [ ] `[all]` Translations (polyglot-mcp, 8 languages)
+- [x] `[all]` Translations (polyglot-mcp, 8 languages) (2026-11-17: TranslateGemma 27B, local; two Japanese lines fixed by hand and pinned in .polyglot-pins.json)
 - [x] `[org]` Landing page (@mcptoolshop/site-theme) (2026-11-17: site/ with the Starlight handbook)
 - [x] `[all]` GitHub repo metadata: description, homepage, topics (2026-11-17: description, homepage and 11 topics set)
 
