@@ -29,78 +29,29 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 11,
-      "changed": 44,
+      "added": 0,
+      "changed": 3,
       "moved": 0,
-      "parts": 8,
-      "removed": 4
+      "parts": 1,
+      "removed": 0
     },
     "items": [
       {
         "kind": "door",
-        "sentence": "CI's push trigger now also names `SECURITY.md` and `site/**`.",
+        "sentence": "CI's push trigger now also names `vendor/**`.",
         "subjects": [
           ".github/workflows/ci.yml"
         ]
       },
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-relay/src/relay.rs, site/astro.config.mjs and site/src/.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-relay/src/relay.rs",
-          "site/astro.config.mjs",
-          "site/src/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also checks crates/league-ledger/src/lib.rs, crates/league-season/src/lib.rs, crates/league-standalone/src/lib.rs and 1 more.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-ledger/src/lib.rs",
-          "crates/league-season/src/lib.rs",
-          "crates/league-standalone/src/lib.rs",
-          "crates/league-tui/src/lib.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "And 2 more changes to doors.",
-        "subjects": []
-      },
-      {
-        "kind": "landing",
-        "sentence": "SECURITY.md is now also read by scripts/check-copy.sh.",
-        "subjects": [
-          "SECURITY.md",
-          "scripts/check-copy.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "site/src/ is now read by scripts/check-copy.sh.",
-        "subjects": [
-          "site/src/",
-          "scripts/check-copy.sh"
-        ]
-      },
-      {
-        "kind": "part",
-        "sentence": "league-dice is no longer a part.",
-        "subjects": [
-          "league-dice"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "11 files added, 4 removed and 44 changed content, across 8 parts.",
+        "sentence": "3 files changed content, across 1 part.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "67ff82ee3c1128f13de0784dc1c0fa031fe73483",
-      "generatedAt": "2026-11-17T09:09:31.289Z"
+      "commit": "2418ec933edcb930b1bbda339fed8699b6e96c0f",
+      "generatedAt": "2026-11-17T13:18:06.153Z"
     },
     "unchanged": false
   },
@@ -136,21 +87,6 @@
       "shared": 7
     },
     {
-      "a": "crates/league-relay/src/relay.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 20,
-      "partLabels": [
-        null,
-        null
-      ],
-      "parts": [
-        null,
-        null
-      ],
-      "relation": "unassigned",
-      "shared": 17
-    },
-    {
       "a": "crates/league-gen/src/empirical.rs",
       "b": "crates/league-gen/tests/properties.rs",
       "either": 6,
@@ -164,6 +100,21 @@
       ],
       "relation": "inside",
       "shared": 5
+    },
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 21,
+      "partLabels": [
+        null,
+        null
+      ],
+      "parts": [
+        null,
+        null
+      ],
+      "relation": "unassigned",
+      "shared": 17
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -186,7 +137,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "2418ec933edcb930b1bbda339fed8699b6e96c0f",
+  "commit": "1a4c6c3e129f9cca6df03dcf666c6aac27d39d02",
   "defaultBranch": "main",
   "derived": "10 parts, mostly Rust (340 files), shell (4), Python (3), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -273,7 +224,7 @@
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 11 paths",
+        "on a push to main touching 12 paths",
         "or by hand"
       ]
     },
@@ -435,7 +386,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-17T13:18:06.153Z",
+  "generatedAt": "2026-11-17T13:42:10.644Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write uses a path built at run time and is not named here.",
