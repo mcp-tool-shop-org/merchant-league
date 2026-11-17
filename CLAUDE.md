@@ -43,7 +43,7 @@ A slow-turn multiplayer trading game for 2 to 6 players, played entirely on the 
 
 1. **Scaffold** (this PR): workspace, crates with types and stubs, CI, Atlas map.
 2. **M2, Testnet spike:** prove `xrpl-rust` (pinned exactly) on Testnet: issuer, trust line, offer, check, escrow with a crypto-condition and its finish, clawback. A receipt. Decides the library.
-3. **M3, commit and reveal live:** commit and reveal through escrows in `league-ledger`, plus a verified drand round in `league-core`, including the "did not reveal" path. A receipt.
+3. **M3, commit and reveal live:** commit and reveal through escrows in `league-ledger`, plus a drand round authenticated against the quicknet key (#29) in `league-core`, including the "did not reveal" path. A receipt.
 4. **M1, rules:** `league-core`, only after the design review has been ruled on.
 5. **M4:** one table of three people on Testnet, with a receipt.
 

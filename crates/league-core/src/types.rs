@@ -144,6 +144,30 @@ pub const DEFAULT_TOWN_IMPORT_PREMIUM_BPS: Bps = 22_500;
 /// giving leftover `CRED` any standalone Patronage or Project VP bonus.
 pub const DEFAULT_WORKS_STIPEND_PER_UNIT_CRED: Units = 350;
 
+/// Provisional cancel-lock fraction of Phase 1 (`2_500 bps` = final `25.00%`; `C4` amended
+/// `2026-11-17`; `0` disables the lock; provisional, pending playtest calibration).
+pub const DEFAULT_CANCEL_LOCK_BPS: Bps = 2_500;
+
+/// Provisional minimum bidirectional commodity flow (`1_000` milli-units = `1.000` unit) per
+/// direction in one turn required to confirm a Customs Inspector wash-freeze round-trip audit
+/// (`§5.2` amended `2026-11-17`; provisional, pending playtest calibration).
+pub const DEFAULT_WASH_ROUND_TRIP_MIN_UNITS: Units = 1_000;
+
+/// Provisional challenger bond (`500` milli-`CRED` = `0.500 CRED`) posted upfront by the active
+/// `CustomsInspector` on `FlagWashFreeze` (`§5.2` amended `2026-11-17`; provisional, pending
+/// playtest calibration).
+pub const DEFAULT_WASH_FREEZE_BOND_CRED: Units = 500;
+
+/// Provisional confirmation bounty (`500` milli-`CRED` = `0.500 CRED`) paid from the frozen
+/// seat's free `CRED` (capped at available free `CRED`) when a Customs Inspector wash freeze is
+/// confirmed (`§5.2` amended `2026-11-17`; provisional, pending playtest calibration).
+pub const DEFAULT_WASH_FREEZE_BOUNTY_CRED: Units = 500;
+
+/// Provisional damages (`500` milli-`CRED` = `0.500 CRED`) awarded to the frozen seat out of
+/// the Inspector's posted bond when a Customs Inspector wash freeze comes back clean (`§5.2`
+/// amended `2026-11-17`; provisional, pending playtest calibration).
+pub const DEFAULT_WASH_FREEZE_DAMAGES_CRED: Units = 500;
+
 const fn default_town_import_premium_bps() -> Bps {
     DEFAULT_TOWN_IMPORT_PREMIUM_BPS
 }
@@ -154,6 +178,26 @@ const fn default_works_stipend_per_unit_cred() -> Units {
 
 const fn default_mandate_alpha_bps() -> Bps {
     DEFAULT_MANDATE_ALPHA_BPS
+}
+
+const fn default_cancel_lock_bps() -> Bps {
+    DEFAULT_CANCEL_LOCK_BPS
+}
+
+const fn default_wash_round_trip_min_units() -> Units {
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS
+}
+
+const fn default_wash_freeze_bond_cred() -> Units {
+    DEFAULT_WASH_FREEZE_BOND_CRED
+}
+
+const fn default_wash_freeze_bounty_cred() -> Units {
+    DEFAULT_WASH_FREEZE_BOUNTY_CRED
+}
+
+const fn default_wash_freeze_damages_cred() -> Units {
+    DEFAULT_WASH_FREEZE_DAMAGES_CRED
 }
 
 /// Computes `ceil(amount * asset_parity * premium_bps / (UNIT_SCALE * BPS_SCALE))` for Phase-1
@@ -552,6 +596,30 @@ pub struct TableSpec {
     /// (`DEFAULT_MANDATE_ALPHA_BPS = 250` = `2.5%`).
     #[serde(default = "default_mandate_alpha_bps")]
     pub mandate_alpha_bps: Bps,
+    /// Provisional cancel-lock fraction of Phase-1 duration (`DEFAULT_CANCEL_LOCK_BPS = 2_500`;
+    /// `0` disables the lock; `C4` amended `2026-11-17`, pending playtest calibration).
+    #[serde(default = "default_cancel_lock_bps")]
+    pub cancel_lock_bps: Bps,
+    /// Provisional minimum per-direction commodity flow in one turn confirming a Customs Inspector
+    /// wash-freeze round-trip audit (`DEFAULT_WASH_ROUND_TRIP_MIN_UNITS = 1_000`; `§5.2` amended
+    /// `2026-11-17`, pending playtest calibration).
+    #[serde(default = "default_wash_round_trip_min_units")]
+    pub wash_round_trip_min_units: Units,
+    /// Provisional challenger bond posted upfront by `CustomsInspector` on `FlagWashFreeze`
+    /// (`DEFAULT_WASH_FREEZE_BOND_CRED = 500`; `§5.2` amended `2026-11-17`, pending playtest
+    /// calibration).
+    #[serde(default = "default_wash_freeze_bond_cred")]
+    pub wash_freeze_bond_cred: Units,
+    /// Provisional bounty transferred from confirmed wash target free `CRED` (capped at balance)
+    /// to `CustomsInspector` (`DEFAULT_WASH_FREEZE_BOUNTY_CRED = 500`; `§5.2` amended `2026-11-17`,
+    /// pending playtest calibration).
+    #[serde(default = "default_wash_freeze_bounty_cred")]
+    pub wash_freeze_bounty_cred: Units,
+    /// Provisional damages paid from the held challenger bond to the frozen seat when the wash
+    /// audit comes back clean (`DEFAULT_WASH_FREEZE_DAMAGES_CRED = 500`; `§5.2` amended
+    /// `2026-11-17`, pending playtest calibration).
+    #[serde(default = "default_wash_freeze_damages_cred")]
+    pub wash_freeze_damages_cred: Units,
 }
 
 impl TableSpec {
@@ -699,6 +767,38 @@ impl TableSpec {
             return Err(EngineError::InvalidConfig(format!(
                 "works_stipend_per_unit_cred {} must lie in 0..{min_ref_val}",
                 self.works_stipend_per_unit_cred
+            )));
+        }
+        if i128::from(self.cancel_lock_bps) > BPS_SCALE {
+            return Err(EngineError::InvalidConfig(format!(
+                "cancel_lock_bps must lie in 0..={BPS_SCALE}, got {}",
+                self.cancel_lock_bps
+            )));
+        }
+        if self.wash_round_trip_min_units <= 0 {
+            return Err(EngineError::InvalidConfig(format!(
+                "wash_round_trip_min_units must be > 0, got {}",
+                self.wash_round_trip_min_units
+            )));
+        }
+        if self.wash_freeze_bond_cred <= 0 {
+            return Err(EngineError::InvalidConfig(format!(
+                "wash_freeze_bond_cred must be > 0, got {}",
+                self.wash_freeze_bond_cred
+            )));
+        }
+        if self.wash_freeze_bounty_cred < 0 {
+            return Err(EngineError::InvalidConfig(format!(
+                "wash_freeze_bounty_cred must be >= 0, got {}",
+                self.wash_freeze_bounty_cred
+            )));
+        }
+        if self.wash_freeze_damages_cred <= 0
+            || self.wash_freeze_damages_cred > self.wash_freeze_bond_cred
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "wash_freeze_damages_cred {} must lie in 1..={}",
+                self.wash_freeze_damages_cred, self.wash_freeze_bond_cred
             )));
         }
         Ok(())
@@ -928,6 +1028,11 @@ impl TableSpec {
             town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
             works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
             mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
+            cancel_lock_bps: DEFAULT_CANCEL_LOCK_BPS,
+            wash_round_trip_min_units: DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
+            wash_freeze_bond_cred: DEFAULT_WASH_FREEZE_BOND_CRED,
+            wash_freeze_bounty_cred: DEFAULT_WASH_FREEZE_BOUNTY_CRED,
+            wash_freeze_damages_cred: DEFAULT_WASH_FREEZE_DAMAGES_CRED,
         };
         spec.validate()?;
         Ok((spec, sealed_deal))
@@ -1036,8 +1141,32 @@ pub enum EngineError {
     CommitmentMismatch(u8),
     /// Seat lacks required cartel domain credential or `ClearinghouseBroker` bridge.
     DomainAccessDenied(String),
+    /// Seat attempted `CancelOffer` after Phase-1 cancel lock engaged (`C4` amended `2026-11-17`).
+    CancelLocked,
     /// Season replay log was incomplete or inconsistent with closed status.
     SeasonEnded(String),
+}
+
+impl EngineError {
+    /// Returns a stable SCREAMING_SNAKE error code string for this [`EngineError`] variant.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidConfig(_) => "INVALID_CONFIG",
+            Self::InvalidPhase(_) => "INVALID_PHASE",
+            Self::InvalidSeat(_) => "INVALID_SEAT",
+            Self::InvalidOrder(_) => "INVALID_ORDER",
+            Self::UnknownObject(_) => "UNKNOWN_OBJECT",
+            Self::Unauthorized(_) => "UNAUTHORIZED",
+            Self::PerishableEscrowForbidden => "PERISHABLE_ESCROW_FORBIDDEN",
+            Self::InsufficientBalance(_) => "INSUFFICIENT_BALANCE",
+            Self::AlreadySubmitted(_) => "ALREADY_SUBMITTED",
+            Self::CommitmentMismatch(_) => "COMMITMENT_MISMATCH",
+            Self::DomainAccessDenied(_) => "DOMAIN_ACCESS_DENIED",
+            Self::CancelLocked => "CANCEL_LOCKED",
+            Self::SeasonEnded(_) => "SEASON_ENDED",
+        }
+    }
 }
 
 impl fmt::Display for EngineError {
@@ -1060,6 +1189,7 @@ impl fmt::Display for EngineError {
                 write!(f, "seat {seat} already submitted for this turn phase")
             }
             Self::DomainAccessDenied(msg) => write!(f, "cartel domain access denied: {msg}"),
+            Self::CancelLocked => write!(f, "Phase-1 cancel lock is active"),
             Self::SeasonEnded(msg) => write!(f, "season replay/lifecycle error: {msg}"),
         }
     }

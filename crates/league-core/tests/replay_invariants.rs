@@ -24,16 +24,16 @@ use league_core::{
     SealedEvalSeed, SealedOrderBundle, SeasonReplayLog, Seat, SeatIdentity, ShockKind,
     SwapPreviewOutcome, TableId, TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
     Units, attach_state_predicates, bonus_equity_for_completion_bps, break_tie_with_beacon,
-    break_tie_with_turn_beacon, ceil_bps_fee, ceil_units_parity, check_drand_quicknet_signature,
-    checked_ceil_units_parity, checked_mul_units_parity, compute_final_scoreboard,
-    compute_mandate_commitment, compute_net_asset_equity, compute_order_commitment,
-    compute_pbrs_reward, compute_potential, compute_preimage_condition,
-    convert_mandate_points_to_equity, deal_graded_mandates, deal_graded_mandates_with_entropy,
-    default_graded_mandate_deck, derive_drand_beacon, derive_turn_beacon,
-    drand_quicknet_round_for_close, evaluate_mandate_bonus, floor_bps_part, half_up_bps,
-    layout_seed_digest, mul_units_parity, replay_season, replay_season_with_state_predicates,
-    scale_bps_signed, town_import_cost_cred, verify_drand_quicknet_beacon, verify_order_reveal,
-    verify_preimage_condition, verify_sealed_mandate_deal, width_independent_index,
+    break_tie_with_turn_beacon, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
+    checked_mul_units_parity, compute_final_scoreboard, compute_mandate_commitment,
+    compute_net_asset_equity, compute_order_commitment, compute_pbrs_reward, compute_potential,
+    compute_preimage_condition, convert_mandate_points_to_equity, deal_graded_mandates,
+    deal_graded_mandates_with_entropy, default_graded_mandate_deck, derive_drand_beacon,
+    derive_turn_beacon, drand_quicknet_round_for_close, drand_quicknet_signature_status,
+    evaluate_mandate_bonus, floor_bps_part, half_up_bps, layout_seed_digest, mul_units_parity,
+    replay_season, replay_season_with_state_predicates, scale_bps_signed, town_import_cost_cred,
+    verify_drand_quicknet_beacon, verify_order_reveal, verify_preimage_condition,
+    verify_sealed_mandate_deal, width_independent_index,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -335,7 +335,7 @@ fn run_scripted_full_season(
             }
             for (s_idx, b) in bundles.iter_mut().enumerate() {
                 b.council_vote = Some(CouncilVoteBallot {
-                    trade_minister: ((s_idx + 1) % n) as u8,
+                    trade_minister: ((s_idx % (n - 1)) + 1) as u8,
                     cartel_chair: 0,
                 });
             }
@@ -362,6 +362,7 @@ fn run_scripted_full_season(
         turns.push(LoggedTurn {
             turn: t,
             market_actions: actions,
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -518,7 +519,7 @@ fn hard_credit_default_cascade_evicts_cartel_cancels_checks_and_compounds_debt()
             1 | 2 => bundles[1].check_cashes.push(u64::from(t)),
             4 => {
                 bundles[1].council_vote = Some(CouncilVoteBallot {
-                    trade_minister: 1,
+                    trade_minister: 2,
                     cartel_chair: 1,
                 });
             }
@@ -882,7 +883,7 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
                 "stand readmit 3",
             );
             bundles[0].council_vote = Some(CouncilVoteBallot {
-                trade_minister: 0,
+                trade_minister: 1,
                 cartel_chair: 0,
             });
         }
@@ -1025,7 +1026,7 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
             assert_eq!(receipt.broken_promises[0].pledge_id, 3);
         }
         if t == 4 {
-            assert_eq!(receipt.elected_officers, Some((2, 0)));
+            assert_eq!(receipt.elected_officers, Some((2, Some(0))));
             // Proposed 9_000 raw tariff was clamped down to MAX_TARIFF_BPS (3_500).
             assert_eq!(engine.state().seats[0].raw_tariff_bps, MAX_TARIFF_BPS);
             assert!(!engine.state().domains[0].members.contains(&3));
@@ -1285,7 +1286,7 @@ fn pbrs_zero_surplus_anti_wash_invariant_holds_across_dex_and_atomic_swaps() {
         let mut bundles = vec![SealedOrderBundle::default(); 4];
         if t == 4 {
             bundles[0].council_vote = Some(CouncilVoteBallot {
-                trade_minister: 0,
+                trade_minister: 1,
                 cartel_chair: 0,
             });
         }
@@ -2724,6 +2725,7 @@ fn phase1_actions_are_atomic_on_error_and_replay_handles_refused_actions() {
         logged_turns.push(LoggedTurn {
             turn: t,
             market_actions: actions,
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -2929,7 +2931,7 @@ fn council_zero_vote_keeps_incumbent_beacon_breaks_ties_and_platform_needs_no_ba
         commit_and_reveal_all(&mut eng, tid, t, bundles);
         let r = must_ok(eng.sweep_turn(derive_turn_beacon(1, tid, Turn(t))), "sweep");
         if t == 4 {
-            assert_eq!(r.elected_officers, Some((2, 3)));
+            assert_eq!(r.elected_officers, Some((2, Some(3))));
             assert_eq!(eng.state().seats[0].raw_tariff_bps, 1_200);
             assert_eq!(eng.state().seats[0].refined_tariff_bps, 900);
             assert!(eng.state().domains[0].members.contains(&3));
@@ -2937,7 +2939,7 @@ fn council_zero_vote_keeps_incumbent_beacon_breaks_ties_and_platform_needs_no_ba
         if t == 8 {
             assert_eq!(r.elected_officers, None);
             assert_eq!(eng.state().trade_minister, 2);
-            assert_eq!(eng.state().cartel_chair, 3);
+            assert_eq!(eng.state().cartel_chair, Some(3));
         }
     }
 
@@ -2983,12 +2985,12 @@ fn council_zero_vote_keeps_incumbent_beacon_breaks_ties_and_platform_needs_no_ba
     let mut eng_a = eng.clone();
     commit_and_reveal_all(&mut eng_a, tid, 12, b_tie.clone());
     let r_a = must_ok(eng_a.sweep_turn(b1), "tie a");
-    assert_eq!(r_a.elected_officers, Some((2, 1)));
+    assert_eq!(r_a.elected_officers, Some((2, Some(1))));
 
     let mut eng_b = eng;
     commit_and_reveal_all(&mut eng_b, tid, 12, b_tie);
     let r_b = must_ok(eng_b.sweep_turn(b3), "tie b");
-    assert_eq!(r_b.elected_officers, Some((2, 3)));
+    assert_eq!(r_b.elected_officers, Some((2, Some(3))));
 }
 
 #[test]
@@ -3244,6 +3246,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -3332,6 +3335,7 @@ fn replay_verifies_seed_derived_and_external_drand_beacons() {
         drand_turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -3441,7 +3445,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
     }
     assert_eq!(
         hex::encode(final_digest),
-        "93607848db8c4b6b161a399fc83bc9a4308d9e2a2296032cb16e3defedc37344"
+        "d79b33af5af546f39e210d2b017fa4c2ea180a553b38984a554836a2dce35ef9"
     );
 
     // 2. B9: Same-turn Turn-2 AtomicSwap fulfills a bond whose deadline is Turn 2.
@@ -3590,6 +3594,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     logged_turns.push(LoggedTurn {
         turn: 1,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: c1,
         reveals: rev1,
         turn_beacon: b1,
@@ -3647,6 +3652,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     logged_turns.push(LoggedTurn {
         turn: 2,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: c2,
         reveals: rev2,
         turn_beacon: b2,
@@ -3665,6 +3671,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         logged_turns.push(LoggedTurn {
             turn,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments: c,
             reveals: rev,
             turn_beacon: beacon,
@@ -3716,6 +3723,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     replay_turns.push(LoggedTurn {
         turn: 1,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: pc1,
         reveals: prev1,
         turn_beacon: rb1,
@@ -3790,6 +3798,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     replay_turns.push(LoggedTurn {
         turn: 2,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: pc2,
         reveals: prev2,
         turn_beacon: rb2,
@@ -3828,6 +3837,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
     replay_turns.push(LoggedTurn {
         turn: 3,
         market_actions: Vec::new(),
+        cancel_lock_at: None,
         commitments: pc3,
         reveals: prev3,
         turn_beacon: rb3,
@@ -3853,6 +3863,7 @@ fn b1_1_clamps_over_ordered_converters_and_projects_counts_receipt_and_replays_s
         replay_turns.push(LoggedTurn {
             turn,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments: c,
             reveals: rev,
             turn_beacon: beacon,
@@ -4275,23 +4286,34 @@ fn m1_unelected_and_zero_vote_officers_never_enact_platforms() {
             seat: 0,
             platform: CouncilPlatform {
                 proposed_tariffs_bps: vec![(1, (5_000, 5_000))],
-                cartel_admissions: vec![(7, 0), (7, 1)],
+                cartel_admissions: Vec::new(),
                 cartel_revocations: Vec::new(),
             },
         }),
         "stand 0 turn 8",
     );
+    must_ok(
+        eng.apply_market_action(MarketAction::StandForOffice {
+            seat: 1,
+            platform: CouncilPlatform {
+                proposed_tariffs_bps: Vec::new(),
+                cartel_admissions: vec![(7, 0), (7, 1)],
+                cartel_revocations: Vec::new(),
+            },
+        }),
+        "stand 1 turn 8",
+    );
     let mut b8 = vec![SealedOrderBundle::default(); 4];
     b8[2].council_vote = Some(CouncilVoteBallot {
         trade_minister: 0,
-        cartel_chair: 0,
+        cartel_chair: 1,
     });
     commit_and_reveal_all(&mut eng, tid, 8, b8);
     let r8 = must_ok(
         eng.sweep_turn(derive_turn_beacon(1, tid, Turn(8))),
         "sweep 8",
     );
-    assert_eq!(r8.elected_officers, Some((0, 0)));
+    assert_eq!(r8.elected_officers, Some((0, Some(1))));
     assert_eq!(eng.state().domains.len(), 1);
     assert_eq!(eng.state().domains[0].domain_id, 7);
     assert!(eng.state().domains[0].members.contains(&0));
@@ -4299,8 +4321,8 @@ fn m1_unelected_and_zero_vote_officers_never_enact_platforms() {
     assert_eq!(eng.state().seats[1].raw_tariff_bps, MAX_TARIFF_BPS);
     assert_eq!(eng.state().seats[1].refined_tariff_bps, MAX_TARIFF_BPS);
 
-    // Turns 9..12: Previously elected incumbent files a new platform on Turn 12 with ZERO votes ->
-    // incumbent keeps office index, elected_officers is None, and the unvoted platform is ignored.
+    // Turns 9..12: Previously elected incumbents file new platforms on Turn 12 with ZERO votes ->
+    // incumbents keep office indices, elected_officers is None, and unvoted platforms are ignored.
     for t in 9..=11_u8 {
         commit_and_reveal_all(&mut eng, tid, t, vec![SealedOrderBundle::default(); 4]);
         let _ = must_ok(
@@ -4326,7 +4348,7 @@ fn m1_unelected_and_zero_vote_officers_never_enact_platforms() {
     );
     assert_eq!(r12.elected_officers, None);
     assert_eq!(eng.state().trade_minister, 0);
-    assert_eq!(eng.state().cartel_chair, 0);
+    assert_eq!(eng.state().cartel_chair, Some(1));
     assert_eq!(eng.state().domains.len(), 1);
     assert_eq!(eng.state().seats[2].raw_tariff_bps, 800);
     assert_eq!(eng.state().seats[2].refined_tariff_bps, 600);
@@ -4392,7 +4414,7 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
     let sig_4 = vec![0x7B_u8; DRAND_QUICKNET_SIGNATURE_BYTES];
     let expected_beacon = must_ok(derive_drand_beacon(&sig_4), "beacon 4");
     assert_eq!(
-        check_drand_quicknet_signature(r4_expected, &sig_4),
+        drand_quicknet_signature_status(r4_expected, &sig_4),
         Ok(DrandBeaconAuthStatus::HashBoundUnauthenticated)
     );
     assert_eq!(
@@ -4402,15 +4424,15 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
 
     // Off-schedule round, round 0, truncated signature, and all-zero signature must all be rejected.
     assert!(matches!(
-        check_drand_quicknet_signature(0, &sig_4),
+        drand_quicknet_signature_status(0, &sig_4),
         Err(EngineError::InvalidOrder(_))
     ));
     assert!(matches!(
-        check_drand_quicknet_signature(r4_expected, &[0x7B; 47]),
+        drand_quicknet_signature_status(r4_expected, &[0x7B; 47]),
         Err(EngineError::InvalidOrder(_))
     ));
     assert!(matches!(
-        check_drand_quicknet_signature(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
+        drand_quicknet_signature_status(r4_expected, &[0u8; DRAND_QUICKNET_SIGNATURE_BYTES]),
         Err(EngineError::InvalidOrder(_))
     ));
     assert_eq!(
@@ -4449,9 +4471,10 @@ fn m2_drand_quicknet_schedule_and_signature_bound_tie_break() {
 
     let expected_tm =
         break_tie_with_turn_beacon(expected_beacon, tid, Turn(4), b"trade_minister", &[1, 2]);
-    let expected_cc =
-        break_tie_with_turn_beacon(expected_beacon, tid, Turn(4), b"cartel_chair", &[1, 2]);
+    let expected_cc = Some(if expected_tm == 1 { 2 } else { 1 });
     let _touch_compat = break_tie_with_beacon(expected_beacon, b"trade_minister", &[1, 2]);
+    let _touch_cc_tie =
+        break_tie_with_turn_beacon(expected_beacon, tid, Turn(4), b"cartel_chair", &[1, 2]);
     let r4 = must_ok(
         eng.sweep_turn_with_drand(r4_expected, &sig_4),
         "sweep 4 drand",
@@ -4563,6 +4586,7 @@ fn m3_mandates_use_os_csprng_and_resist_seed_bruteforce_probe_p9() {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -4648,6 +4672,7 @@ fn f1_f2_scoring_refuses_undealt_card_and_reveal_succeeds_without_turn1_echo() {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -4780,9 +4805,16 @@ fn table_cred_total(eng: &TurnEngine, total_repaid: Units, total_burned: Units) 
         .filter(|e| e.status == EscrowStatus::Locked)
         .map(|e| e.buyer_bond_cred + e.seller_bond_cred)
         .sum();
+    let wash_freeze_locked: Units = eng
+        .state()
+        .pending_wash_freezes
+        .iter()
+        .map(|w| w.bond_cred)
+        .sum();
     free + offer_locked
         + escrow_locked
         + dual_locked
+        + wash_freeze_locked
         + eng.state().pending_town_import_cred_spent
         + total_repaid
         + total_burned
@@ -5194,6 +5226,7 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: actions,
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -5232,11 +5265,11 @@ fn f7_rich_season_golden_digest_is_exact_and_reproducible() {
     let last_turn_digest = must_ok(live_digests.last().copied().ok_or("last digest"), "last");
     assert_eq!(
         hex::encode(last_turn_digest),
-        "9d37f093626f58ddcf38009fd54da54ddae088e32de8d57f9b18aed007ae7c6b"
+        "544948796a882d84a7951659fc04b214fd41cb7ed4fb6f267f2ee63313cfb39a"
     );
     assert_eq!(
         hex::encode(live_terminal),
-        "c4ae0140539806dac34796c02d5477425b18e7c2f929865208f9d0644cf1c23d"
+        "97d8dc624aad0e52cb9d82e365dcccd56fc32f4fd51884a371ccef4798c20fb8"
     );
 }
 
@@ -5359,6 +5392,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
             turns.push(LoggedTurn {
                 turn: t,
                 market_actions: actions,
+                cancel_lock_at: None,
                 commitments,
                 reveals,
                 turn_beacon: beacon,
@@ -5418,8 +5452,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         b"trade_minister",
         &[1, 2],
     );
-    let expected_eval_cc =
-        break_tie_with_turn_beacon(eval_t4_beacon, tid_eval, Turn(4), b"cartel_chair", &[1, 2]);
+    let expected_eval_cc = Some(if expected_eval_tm == 1 { 2 } else { 1 });
     assert_eq!(eval_t4_a, Some((expected_eval_tm, expected_eval_cc)));
     assert_eq!(eval_t4_a, eval_t4_b);
     assert_eq!(eval_tariff_a, eval_tariff_b);
@@ -5475,6 +5508,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         coupled_turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: b,
@@ -5598,6 +5632,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
             turns.push(LoggedTurn {
                 turn: t,
                 market_actions: actions,
+                cancel_lock_at: None,
                 commitments,
                 reveals,
                 turn_beacon: beacon,
@@ -5635,8 +5670,7 @@ fn addendum_game_vs_eval_mode_ties_and_replay_mode_lock() {
         b"trade_minister",
         &[1, 2],
     );
-    let expected_game_cc =
-        break_tie_with_turn_beacon(drand_t4_beacon, tid_game, Turn(4), b"cartel_chair", &[1, 2]);
+    let expected_game_cc = Some(if expected_game_tm == 1 { 2 } else { 1 });
     assert_eq!(game_t4_a, Some((expected_game_tm, expected_game_cc)));
     assert_eq!(game_t4_a, game_t4_b);
 
@@ -6735,6 +6769,7 @@ fn run_eval_season_parts(
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -6813,6 +6848,7 @@ fn run_game_season_parts(table_id: TableId, layout_seed: u64, sig_tag: u8) -> Se
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,

@@ -188,9 +188,12 @@ mod tests {
         initial_cred_milli: Units,
     ) -> league_core::TableSpec {
         use league_core::{
-            CLOSING_ROLL_WINDOW_LEN, ConverterRecipe, DEFAULT_MANDATE_ALPHA_BPS,
-            DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, ProjectRecipe,
-            ScheduledShockSpec, SeatConfig, SeatIdentity, ShockKind, TableMode, TableSpec,
+            CLOSING_ROLL_WINDOW_LEN, ConverterRecipe, DEFAULT_CANCEL_LOCK_BPS,
+            DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
+            DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
+            DEFAULT_WASH_FREEZE_DAMAGES_CRED, DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
+            DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, ProjectRecipe, ScheduledShockSpec, SeatConfig,
+            SeatIdentity, ShockKind, TableMode, TableSpec,
         };
 
         let n = table.seat_count.as_u8();
@@ -272,6 +275,11 @@ mod tests {
             town_import_premium_bps: DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
             works_stipend_per_unit_cred: DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
             mandate_alpha_bps: DEFAULT_MANDATE_ALPHA_BPS,
+            cancel_lock_bps: DEFAULT_CANCEL_LOCK_BPS,
+            wash_round_trip_min_units: DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
+            wash_freeze_bond_cred: DEFAULT_WASH_FREEZE_BOND_CRED,
+            wash_freeze_bounty_cred: DEFAULT_WASH_FREEZE_BOUNTY_CRED,
+            wash_freeze_damages_cred: DEFAULT_WASH_FREEZE_DAMAGES_CRED,
         }
     }
 

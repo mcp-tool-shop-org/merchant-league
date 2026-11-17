@@ -1,7 +1,7 @@
 //! Deterministic Steward replay from initial `TableSpec`, public or redacted layout seed,
 //! Turn-1 mandate commitments, per-turn action/commit/reveal logs, and turn beacons (`EvalVrf`
 //! verified under `vrf-r255`; `ExternalDrand` currently **hash-bound, not yet authenticated**
-//! until `#29` wires BLS12-381 verification in [`crate::commit::check_drand_quicknet_signature`]).
+//! until `#29` wires BLS12-381 verification in [`crate::commit::drand_quicknet_signature_status`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -10,9 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::Serialize
 use sha2::{Digest, Sha256};
 
 use crate::commit::{
-    CommitmentHash, MandateReveal, OrderReveal, SealedEvalSeed, SealedMandateDeal,
-    draw_shocks_for_turn, validate_eval_vrf_pubkey, verify_drand_quicknet_beacon,
-    verify_eval_vrf_beacon, verify_sealed_mandate_deal,
+    CommitmentHash, DrandBeaconAuthStatus, MandateReveal, OrderReveal, SealedEvalSeed,
+    SealedMandateDeal, draw_shocks_for_turn, validate_eval_vrf_pubkey,
+    verify_drand_quicknet_beacon, verify_eval_vrf_beacon, verify_sealed_mandate_deal,
 };
 use crate::contracts::MarketAction;
 use crate::engine::{SweepReceipt, TurnEngine, TurnPhase};
@@ -455,7 +455,7 @@ pub enum ReplayBeaconMode {
     ///
     /// **Deferred authentication note (`#29`):** Drand beacons in Game-mode replay are currently
     /// **hash-bound, not yet authenticated** — [`crate::commit::verify_drand_quicknet_beacon`]
-    /// calls [`crate::commit::check_drand_quicknet_signature`], which returns
+    /// calls [`crate::commit::drand_quicknet_signature_status`], which returns
     /// [`crate::commit::DrandBeaconAuthStatus::HashBoundUnauthenticated`] until `#29` adds
     /// BLS12-381 signature verification against the pinned `quicknet` chain public key.
     ExternalDrand,
@@ -471,6 +471,11 @@ pub struct LoggedTurn {
     pub turn: u8,
     /// Ordered Phase 1 market, check, escrow, and intent actions.
     pub market_actions: Vec<MarketAction>,
+    /// Optional zero-based index into `market_actions` (`0..=market_actions.len()`) at which
+    /// Phase-1 cancel lock engaged (`TurnEngine::begin_cancel_lock`) on this turn (`C4` amended
+    /// `2026-11-17`). Absent / `None` leaves cancel lock disengaged for the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_lock_at: Option<u32>,
     /// Phase 2 cryptographic order commitments keyed by seat index.
     pub commitments: BTreeMap<u8, CommitmentHash>,
     /// Phase 2 order reveals keyed by seat index.
@@ -678,6 +683,24 @@ impl SeasonReplayLog {
     }
 }
 
+/// One rejected Phase-1 `MarketAction` recorded during replay (`C4` amended `2026-11-17`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RejectedMarketAction {
+    /// Zero-based index into [`LoggedTurn::market_actions`].
+    pub action_index: u32,
+    /// Stable SCREAMING_SNAKE [`EngineError::code`] returned by the engine.
+    pub error_code: String,
+}
+
+/// Per-turn list of rejected Phase-1 market actions recorded during [`replay_season`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnRejectedActions {
+    /// Turn (`1..=32`) on which the rejections occurred.
+    pub turn: u8,
+    /// Rejected actions in submission order.
+    pub rejections: Vec<RejectedMarketAction>,
+}
+
 /// Complete verified artifacts emitted by replaying a [`SeasonReplayLog`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayOutcome {
@@ -687,6 +710,14 @@ pub struct ReplayOutcome {
     pub state_digests: Vec<[u8; 32]>,
     /// Terminal Cardinal Net Equity scoreboard (`Completed`).
     pub scoreboard: FinalScoreboard,
+    /// Per-turn rejected Phase-1 market action indices and error codes (omitted when empty so clean
+    /// logs serialize byte-identically).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejected_market_actions: Vec<TurnRejectedActions>,
+    /// `#29` drand `quicknet` authentication status for `Game`-mode (`ExternalDrand`) seasons,
+    /// omitted (`None`) for `Eval`-mode seasons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drand_beacon_auth_status: Option<DrandBeaconAuthStatus>,
 }
 
 /// A replay record: the [`SeasonReplayLog`] plus the optional, additive state-predicate section.
@@ -913,6 +944,8 @@ fn replay_season_inner(
     let mut receipts = Vec::with_capacity(log.turns.len());
     let mut state_digests = Vec::with_capacity(log.turns.len());
     let mut prev_drand_round: Option<u64> = None;
+    let mut rejected_market_actions = Vec::new();
+    let mut drand_beacon_auth_status = None;
 
     enum TurnSource<'a> {
         Drand(u64, &'a [u8]),
@@ -992,13 +1025,15 @@ fn replay_season_inner(
                         "ExternalDrand replay requires TableSpec::drand_schedule".to_owned(),
                     ));
                 };
-                let _beacon_auth = verify_drand_quicknet_beacon(
-                    schedule,
-                    Turn(logged.turn),
-                    round,
-                    drand_signature,
-                    logged.turn_beacon,
-                )?;
+                let auth_status @ DrandBeaconAuthStatus::HashBoundUnauthenticated =
+                    verify_drand_quicknet_beacon(
+                        schedule,
+                        Turn(logged.turn),
+                        round,
+                        drand_signature,
+                        logged.turn_beacon,
+                    )?;
+                drand_beacon_auth_status = Some(auth_status);
                 prev_drand_round = Some(round);
                 TurnSource::Drand(round, drand_signature.as_slice())
             }
@@ -1021,8 +1056,45 @@ fn replay_season_inner(
             Some(_) => Some(all_seat_predicates(&engine)?),
             None => None,
         };
-        for action in &logged.market_actions {
-            let _ = engine.apply_market_action(action.clone());
+        let action_len = logged.market_actions.len();
+        let lock_at = match logged.cancel_lock_at {
+            Some(idx) => {
+                let idx_usize = usize::try_from(idx).map_err(|_| {
+                    EngineError::InvalidOrder(format!(
+                        "turn {} cancel_lock_at {idx} exceeds usize range",
+                        logged.turn
+                    ))
+                })?;
+                if idx_usize > action_len {
+                    return Err(EngineError::InvalidOrder(format!(
+                        "turn {} cancel_lock_at {idx} exceeds market_actions.len() ({action_len})",
+                        logged.turn
+                    )));
+                }
+                Some(idx_usize)
+            }
+            None => None,
+        };
+        let mut turn_rejections = Vec::new();
+        for (idx, action) in logged.market_actions.iter().enumerate() {
+            if lock_at == Some(idx) {
+                engine.begin_cancel_lock()?;
+            }
+            if let Err(err) = engine.apply_market_action(action.clone()) {
+                turn_rejections.push(RejectedMarketAction {
+                    action_index: idx as u32,
+                    error_code: err.code().to_owned(),
+                });
+            }
+        }
+        if lock_at == Some(action_len) {
+            engine.begin_cancel_lock()?;
+        }
+        if !turn_rejections.is_empty() {
+            rejected_market_actions.push(TurnRejectedActions {
+                turn: logged.turn,
+                rejections: turn_rejections,
+            });
         }
         engine.advance_to_commit()?;
         for (&seat_idx, &commit) in &logged.commitments {
@@ -1080,6 +1152,8 @@ fn replay_season_inner(
         receipts,
         state_digests,
         scoreboard,
+        rejected_market_actions,
+        drand_beacon_auth_status,
     })
 }
 
@@ -1179,6 +1253,7 @@ mod tests {
             turns.push(LoggedTurn {
                 turn: t,
                 market_actions: Vec::new(),
+                cancel_lock_at: None,
                 commitments,
                 reveals,
                 turn_beacon: beacon,
@@ -1226,6 +1301,7 @@ mod tests {
         extra.turns.push(LoggedTurn {
             turn: next_t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments: BTreeMap::new(),
             reveals: BTreeMap::new(),
             turn_beacon: [0; 32],

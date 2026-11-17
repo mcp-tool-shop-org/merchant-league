@@ -563,6 +563,7 @@ fn quiet_season_log(n: u8) -> (SeasonReplayLog, TurnEngine) {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: Vec::new(),
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -1156,9 +1157,33 @@ fn same_state_gives_the_same_serialized_struct_for_4_5_6() {
             let parsed: SeatStatePredicates = must(serde_json::from_slice(&a), "parse");
             assert_eq!(json(&parsed), a);
             assert_eq!(parsed.version, league_core::STATE_PREDICATES_VERSION);
+            assert_eq!(league_core::STATE_PREDICATES_VERSION, 3);
+            assert!(!parsed.cancel_locked);
             assert_eq!(parsed.scarcity.len(), 2 * usize::from(n));
         }
     }
+    // Public cancel-lock predicate flips when TurnEngine::begin_cancel_lock engages and clears on Commit.
+    let (spec_lock, _) = quiet_spec(TableId(99), 4);
+    let mut eng_lock = must(TurnEngine::new(spec_lock), "engine lock");
+    assert!(!league_core::cancel_locked(eng_lock.state()));
+    assert!(
+        !must(
+            compute_seat_state_predicates(eng_lock.state(), Seat(1)),
+            "pred before lock"
+        )
+        .cancel_locked
+    );
+    must(eng_lock.begin_cancel_lock(), "begin lock");
+    assert!(league_core::cancel_locked(eng_lock.state()));
+    assert!(
+        must(
+            compute_seat_state_predicates(eng_lock.state(), Seat(1)),
+            "pred after lock"
+        )
+        .cancel_locked
+    );
+    must(eng_lock.advance_to_commit(), "commit clears lock");
+    assert!(!league_core::cancel_locked(eng_lock.state()));
     // Rebuilt from scratch: the same table and edits give the same bytes.
     let (a, _) = busy_state(5);
     let (b, _) = busy_state(5);
@@ -1264,6 +1289,7 @@ fn rich_season_log() -> SeasonReplayLog {
         turns.push(LoggedTurn {
             turn: t,
             market_actions: actions,
+            cancel_lock_at: None,
             commitments,
             reveals,
             turn_beacon: beacon,
@@ -1331,7 +1357,7 @@ fn replay_section_off_is_byte_identical_and_on_leaves_the_engine_unchanged() {
     assert_eq!(with, plain);
     assert_eq!(
         hex::encode(with.state_digests[with.state_digests.len() - 1]),
-        "9d37f093626f58ddcf38009fd54da54ddae088e32de8d57f9b18aed007ae7c6b"
+        "544948796a882d84a7951659fc04b214fd41cb7ed4fb6f267f2ee63313cfb39a"
     );
     assert_eq!(section.turns.len(), log.turns.len());
     assert_eq!(section.at_close.len(), 4);
