@@ -35,17 +35,50 @@ pub const fn is_base58_byte(b: u8) -> bool {
     )
 }
 
-const fn is_token_stopper(b: u8) -> bool {
-    b.is_ascii_whitespace() || matches!(b, b',' | b';' | b')' | b']' | b'}' | b'"' | b'\'' | b'\\')
+/// Returns `true` if byte offset `i` is at a word boundary, including immediately after a
+/// preceding JSON escape (`\n`, `\t`, `\r`, `\"`, `\/`) or URL percent-encoded byte (`%xx`).
+#[must_use]
+pub const fn is_at_boundary(bytes: &[u8], i: usize) -> bool {
+    if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
+        return true;
+    }
+    if i >= 2 && bytes[i - 2] == b'\\' && matches!(bytes[i - 1], b'n' | b't' | b'r' | b'"' | b'/') {
+        return true;
+    }
+    i >= 3
+        && bytes[i - 3] == b'%'
+        && bytes[i - 2].is_ascii_hexdigit()
+        && bytes[i - 1].is_ascii_hexdigit()
+}
+
+/// Returns `true` if byte offset `idx` begins a token delimiter: ASCII whitespace, closing
+/// punctuation, a bare quote, or a backslash run escaping a quote (`\"`, `\'`, `\\\"`).
+///
+/// A backslash followed by any non-quote byte (such as `\a` or `\d` inside `Bearer tok\abc`
+/// or `OPENROUTER_API_KEY=abc\def`) is not a stopper, so the full token is scrubbed while
+/// escaped JSON (`\"KEY=val\"`) stops cleanly before the closing quote escape.
+#[must_use]
+pub fn is_token_stopper_at(bytes: &[u8], idx: usize) -> bool {
+    let Some(&b) = bytes.get(idx) else {
+        return true;
+    };
+    if b.is_ascii_whitespace() || matches!(b, b',' | b';' | b')' | b']' | b'}' | b'"' | b'\'') {
+        return true;
+    }
+    if b == b'\\' {
+        let mut k = idx + 1;
+        while k < bytes.len() && bytes[k] == b'\\' {
+            k += 1;
+        }
+        return matches!(bytes.get(k), Some(b'"' | b'\''));
+    }
+    false
 }
 
 fn match_already_redacted<'a>(rest: &str, marker: &'a str) -> Option<&'a str> {
     for candidate in [marker, REDACTED_PLACEHOLDER, RELAY_REDACTED_MARKER] {
         if let Some(after) = rest.strip_prefix(candidate)
-            && after
-                .as_bytes()
-                .first()
-                .is_none_or(|b| is_token_stopper(*b))
+            && is_token_stopper_at(after.as_bytes(), 0)
         {
             return Some(candidate);
         }
@@ -78,11 +111,10 @@ pub fn scrub_secret_text_with_marker(input: &str, marker: &str) -> String {
     let mut i = 0;
 
     while i < bytes.len() {
-        let at_boundary = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        let at_boundary = is_at_boundary(bytes, i);
 
-        // 1. Case-insensitive `Bearer <token>` or `Bearer\t<token>` (C1) at a word boundary.
-        if at_boundary
-            && i + 7 <= bytes.len()
+        // 1. Case-insensitive `Bearer <token>` or `Bearer\t<token>` anywhere (`9818e991` relay + C1).
+        if i + 7 <= bytes.len()
             && bytes[i..i + 6].eq_ignore_ascii_case(b"bearer")
             && matches!(bytes[i + 6], b' ' | b'\t')
         {
@@ -98,7 +130,7 @@ pub fn scrub_secret_text_with_marker(input: &str, marker: &str) -> String {
                 continue;
             }
             let start = i;
-            while i < bytes.len() && !is_token_stopper(bytes[i]) {
+            while i < bytes.len() && !is_token_stopper_at(bytes, i) {
                 i += 1;
             }
             if i > start {
@@ -107,7 +139,7 @@ pub fn scrub_secret_text_with_marker(input: &str, marker: &str) -> String {
             continue;
         }
 
-        // 2. Known secret env-var assignments (`KEY=<value>`, case-insensitive).
+        // 2. Known secret env-var assignments (`KEY=<value>`, case-insensitive, at word/escape boundary).
         let mut matched_len = None;
         if at_boundary {
             for prefix in SECRET_ENV_PREFIXES {
@@ -128,7 +160,7 @@ pub fn scrub_secret_text_with_marker(input: &str, marker: &str) -> String {
                 continue;
             }
             let start = i;
-            while i < bytes.len() && !is_token_stopper(bytes[i]) {
+            while i < bytes.len() && !is_token_stopper_at(bytes, i) {
                 i += 1;
             }
             if i > start {
@@ -137,24 +169,26 @@ pub fn scrub_secret_text_with_marker(input: &str, marker: &str) -> String {
             continue;
         }
 
-        // 3. API key tokens (`sk-or-...`, `sk-proj-...`, `sk-ant-...`).
-        if at_boundary {
-            let token_prefix_len = ["sk-or-", "sk-proj-", "sk-ant-"]
-                .into_iter()
-                .find(|p| input[i..].starts_with(p))
-                .map(str::len);
-            if let Some(plen) = token_prefix_len {
-                let mut end = i + plen;
-                while end < bytes.len()
-                    && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
-                {
-                    end += 1;
-                }
-                if end > i + plen {
-                    out.push_str(marker);
-                    i = end;
-                    continue;
-                }
+        // 3. API key tokens (`sk-or-...`, `sk-proj-...`, `sk-ant-...`), case-insensitive anywhere.
+        let token_prefix_len = [
+            b"sk-or-".as_slice(),
+            b"sk-proj-".as_slice(),
+            b"sk-ant-".as_slice(),
+        ]
+        .into_iter()
+        .find(|p| bytes.len() - i >= p.len() && bytes[i..i + p.len()].eq_ignore_ascii_case(p))
+        .map(<[u8]>::len);
+        if let Some(plen) = token_prefix_len {
+            let mut end = i + plen;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_' | b'.'))
+            {
+                end += 1;
+            }
+            if end > i + plen {
+                out.push_str(marker);
+                i = end;
+                continue;
             }
         }
 
@@ -211,13 +245,14 @@ impl Serialize for StructuredError {
     {
         let scrubbed_message = scrub_secret_text(&self.message);
         let scrubbed_cause = self.cause.as_deref().map(scrub_secret_text);
-        let field_count = if scrubbed_cause.is_some() { 5 } else { 4 };
-        let mut state = serializer.serialize_struct("StructuredError", field_count)?;
+        let mut state = serializer.serialize_struct("StructuredError", 5)?;
         state.serialize_field("code", self.code)?;
         state.serialize_field("message", &scrubbed_message)?;
         state.serialize_field("hint", self.hint)?;
         if let Some(cause) = &scrubbed_cause {
             state.serialize_field("cause", cause)?;
+        } else {
+            state.skip_field("cause")?;
         }
         state.serialize_field("retryable", &self.retryable)?;
         state.end()
@@ -289,8 +324,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn matches_pre_change_league_core_7fd3b481_json_and_format_text_literals() {
+    fn secret_free_shapes_match_captured_7fd3b481_league_core_bytes() {
+        // Exact JSON and `format_text()` bytes captured from `league-core` at `7fd3b481`.
         // 1. cause: None, retryable: false
+        let p1 = StructuredError::new(
+            "INVALID_CONFIG",
+            "bad config field table_mode mismatch",
+            "check TableSpec",
+            false,
+        );
+        assert_eq!(
+            p1.to_json_string()
+                .unwrap_or_else(|e| panic!("p1 json failed: {e}")),
+            "{\"code\":\"INVALID_CONFIG\",\"message\":\"bad config field table_mode mismatch\",\"hint\":\"check TableSpec\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p1.format_text(),
+            "[INVALID_CONFIG] bad config field table_mode mismatch; hint: check TableSpec"
+        );
+        assert_eq!(p1.to_string(), p1.format_text());
+
+        // 2. cause: None, retryable: true
+        let p2 = StructuredError::new(
+            "TURN_LOCKED",
+            "turn phase lock active for seat 2",
+            "wait and retry",
+            true,
+        );
+        assert_eq!(
+            p2.to_json_string()
+                .unwrap_or_else(|e| panic!("p2 json failed: {e}")),
+            "{\"code\":\"TURN_LOCKED\",\"message\":\"turn phase lock active for seat 2\",\"hint\":\"wait and retry\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p2.format_text(),
+            "[TURN_LOCKED] turn phase lock active for seat 2; hint: wait and retry [retryable]"
+        );
+
+        // 3. cause: Some, retryable: false
+        let p3 = StructuredError::new("RELAY_IO", "io error reading state", "check path", false)
+            .with_cause("underlying file not found");
+        assert_eq!(
+            p3.to_json_string()
+                .unwrap_or_else(|e| panic!("p3 json failed: {e}")),
+            "{\"code\":\"RELAY_IO\",\"message\":\"io error reading state\",\"hint\":\"check path\",\"cause\":\"underlying file not found\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p3.format_text(),
+            "[RELAY_IO] io error reading state (cause: underlying file not found); hint: check path"
+        );
+
+        // 4. cause: Some, retryable: true
+        let p4 = StructuredError::new("SIGN_ERR", "failed signing tx", "rotate seed", true)
+            .with_cause("connection timed out caused retryable failure");
+        assert_eq!(
+            p4.to_json_string()
+                .unwrap_or_else(|e| panic!("p4 json failed: {e}")),
+            "{\"code\":\"SIGN_ERR\",\"message\":\"failed signing tx\",\"hint\":\"rotate seed\",\"cause\":\"connection timed out caused retryable failure\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p4.format_text(),
+            "[SIGN_ERR] failed signing tx (cause: connection timed out caused retryable failure); hint: rotate seed [retryable]"
+        );
+    }
+
+    #[test]
+    fn secret_bearing_structured_error_scrubs_once_without_double_bracket_bug() {
+        // New fixed behaviour (differs from 7fd3b481 which double-scrubbed `[REDACTED]` into
+        // `[REDACTED]]` and left literal `serde_json::to_string` unscrubbed).
         let c1 = StructuredError::new(
             "INVALID_CONFIG",
             "bad config OPENROUTER_API_KEY=sk-or-secret123",
@@ -306,39 +407,7 @@ mod tests {
             c1.format_text(),
             "[INVALID_CONFIG] bad config OPENROUTER_API_KEY=[REDACTED]; hint: check TableSpec"
         );
-        assert_eq!(c1.to_string(), c1.format_text());
 
-        // 2. cause: None, retryable: true
-        let c2 = StructuredError::new(
-            "TURN_LOCKED",
-            "lock busy sk-or-v1-abc123",
-            "wait and retry",
-            true,
-        );
-        assert_eq!(
-            c2.to_json_string()
-                .unwrap_or_else(|e| panic!("c2 json failed: {e}")),
-            "{\"code\":\"TURN_LOCKED\",\"message\":\"lock busy [REDACTED]\",\"hint\":\"wait and retry\",\"retryable\":true}"
-        );
-        assert_eq!(
-            c2.format_text(),
-            "[TURN_LOCKED] lock busy [REDACTED]; hint: wait and retry [retryable]"
-        );
-
-        // 3. cause: Some, retryable: false
-        let c3 = StructuredError::new("RELAY_IO", "io error", "check path", false)
-            .with_cause("GEMINI_API_KEY=AIzaSySecret12345 failed");
-        assert_eq!(
-            c3.to_json_string()
-                .unwrap_or_else(|e| panic!("c3 json failed: {e}")),
-            "{\"code\":\"RELAY_IO\",\"message\":\"io error\",\"hint\":\"check path\",\"cause\":\"GEMINI_API_KEY=[REDACTED] failed\",\"retryable\":false}"
-        );
-        assert_eq!(
-            c3.format_text(),
-            "[RELAY_IO] io error (cause: GEMINI_API_KEY=[REDACTED] failed); hint: check path"
-        );
-
-        // 4. cause: Some, retryable: true
         let c4 = StructuredError::new(
             "SIGN_ERR",
             "failed signing with sEd7f3A9kL2mN4pQ6rT8vW1xY3zB5cD",
@@ -355,10 +424,23 @@ mod tests {
             c4.format_text(),
             "[SIGN_ERR] failed signing with [REDACTED] (cause: GEMINI_API_KEY=[REDACTED] caused retryable failure); hint: rotate seed [retryable]"
         );
+
+        // Field-by-field struct construction still scrubs during `serde_json::to_string`.
+        let raw_literal = StructuredError {
+            code: "RAW",
+            message: "SK-OR-V1-RAW123".to_owned(),
+            hint: "hint",
+            cause: Some("OPENROUTER_API_KEY=abc\\def".to_owned()),
+            retryable: false,
+        };
+        let literal_json = serde_json::to_string(&raw_literal)
+            .unwrap_or_else(|e| panic!("raw literal json failed: {e}"));
+        assert!(literal_json.contains("\"message\":\"[REDACTED]\""));
+        assert!(literal_json.contains("\"cause\":\"OPENROUTER_API_KEY=[REDACTED]\""));
     }
 
     #[test]
-    fn b5_and_c1_planted_secrets_and_idempotency_across_shared_scrubber() {
+    fn planted_union_rules_escape_boundaries_backslash_tokens_and_idempotency() {
         let planted_bearer_space = "Bearer tok_space_12345";
         let planted_bearer_tab = "Bearer\ttok_tab_67890";
         let planted_sk_or = "sk-or-v1-planted001";
@@ -421,6 +503,38 @@ mod tests {
             scrub_secret_text("Authorization: Bearer\tsecret_tab_val ok"),
             "Authorization: Bearer\t[REDACTED] ok"
         );
+
+        // C1: Backslash inside Bearer / env tokens redacts through non-quote escapes,
+        // while `\"` still stops cleanly for escaped JSON.
+        assert_eq!(
+            scrub_secret_text("Bearer tok\\abc end"),
+            "Bearer [REDACTED] end"
+        );
+        assert_eq!(
+            scrub_secret_text("OPENROUTER_API_KEY=abc\\def"),
+            "OPENROUTER_API_KEY=[REDACTED]"
+        );
+
+        // A1 & B3: Anywhere + case-insensitive prefixes and escape boundaries.
+        assert_eq!(
+            scrub_secret_text("body \\nsk-or-v1-leakEscNewline end"),
+            "body \\n[REDACTED] end"
+        );
+        assert_eq!(scrub_secret_text("SK-OR-V1-LEAKUPPER123"), "[REDACTED]");
+        assert_eq!(scrub_secret_text("keysk-proj-leakGlued1"), "key[REDACTED]");
+        assert_eq!(
+            scrub_secret_text("xBearer leakBearerGlued"),
+            "xBearer [REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\nsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"),
+            "\\n[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\nOPENROUTER_API_KEY=leakEnvNL"),
+            "\\nOPENROUTER_API_KEY=[REDACTED]"
+        );
+
         assert_eq!(scrub_secret_text(&scrubbed), scrubbed);
 
         // Relay marker preservation & idempotency.

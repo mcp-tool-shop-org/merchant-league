@@ -2085,6 +2085,77 @@ fn check_league_core_manifest(manifest: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn check_league_error_leaf_manifest(manifest: &str) -> Result<(), String> {
+    for raw_line in manifest.lines() {
+        let code_part = raw_line.split('#').next().unwrap_or("").trim();
+        if code_part.contains("engine-internals") {
+            return Err(
+                "league-error/Cargo.toml must not enable or define `engine-internals`".to_owned(),
+            );
+        }
+    }
+
+    let mut section = String::new();
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+
+    for raw_line in manifest.lines() {
+        let code_part = raw_line.split('#').next().unwrap_or("").trim();
+        if code_part.is_empty() {
+            continue;
+        }
+        if brace_depth == 0
+            && bracket_depth == 0
+            && code_part.starts_with('[')
+            && code_part.ends_with(']')
+        {
+            section = code_part.to_owned();
+            if !matches!(section.as_str(), "[package]" | "[dependencies]" | "[lints]") {
+                return Err(format!(
+                    "league-error/Cargo.toml defines forbidden section `{section}`; only `[package]`, `[dependencies]`, and `[lints]` are permitted"
+                ));
+            }
+            continue;
+        }
+        if section == "[dependencies]" {
+            if brace_depth == 0
+                && bracket_depth == 0
+                && let Some((lhs, _rhs)) = code_part.split_once('=')
+            {
+                let dep_key = lhs.trim().trim_matches('"').trim_matches('\'');
+                if !matches!(dep_key, "serde" | "serde_json") {
+                    return Err(format!(
+                        "league-error/Cargo.toml dependency `{dep_key}` is not in allow-list `[\"serde\", \"serde_json\"]`"
+                    ));
+                }
+            }
+            if code_part.contains("path")
+                || code_part.contains("git")
+                || code_part.contains("package")
+            {
+                return Err(
+                    "league-error/Cargo.toml must only depend on registry `serde` and `serde_json` without `path`, `git`, or `package` overrides"
+                        .to_owned(),
+                );
+            }
+            for ch in code_part.chars() {
+                match ch {
+                    '{' => brace_depth += 1,
+                    '}' => brace_depth = brace_depth.saturating_sub(1),
+                    '[' => bracket_depth += 1,
+                    ']' => bracket_depth = bracket_depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+        } else if section == "[lints]" && code_part != "workspace = true" {
+            return Err(format!(
+                "league-error/Cargo.toml `[lints]` only permits `workspace = true`, found `{code_part}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn parse_workspace_members(workspace_root: &Path) -> Result<Vec<PathBuf>, String> {
     let manifest_path = workspace_root.join("Cargo.toml");
     let manifest = fs::read_to_string(&manifest_path)
@@ -2185,6 +2256,9 @@ fn check_workspace_manifests_and_crate_sources(
                 );
             }
         } else {
+            if crate_name == "league-error" {
+                check_league_error_leaf_manifest(&manifest)?;
+            }
             let mut in_features = false;
             for raw_line in manifest.lines() {
                 let code_part = raw_line.split('#').next().unwrap_or("").trim();
@@ -2205,10 +2279,9 @@ fn check_workspace_manifests_and_crate_sources(
                 }
                 // C1: Card 7 plans to add `league-core` to `league-relay` and must explicitly
                 // transition `league-relay` onto the structural seat-side rule in the same PR.
-                // Leaf crate `league-error` and `league-ledger` must never depend on `league-core`.
-                if (crate_name == "league-error"
-                    || crate_name == "league-ledger"
-                    || crate_name == "league-relay")
+                // `league-ledger` and `league-relay` must never depend on `league-core`; leaf crate
+                // `league-error` is additionally enforced via strict allow-list above (`B1`).
+                if (crate_name == "league-ledger" || crate_name == "league-relay")
                     && code_part.contains("league-core")
                 {
                     return Err(format!(
@@ -2981,6 +3054,31 @@ fn planted_leaf_error_control_2_league_core_dep_in_manifest_fails() {
         .unwrap_or_else(|| panic!("league-core dep in league-error/Cargo.toml must fail guard"));
     assert!(
         err.contains("league-error/Cargo.toml") && err.contains("league-core"),
+        "unexpected error: {err}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn planted_leaf_error_control_3_transitive_league_gen_dep_in_manifest_fails() {
+    let root = unique_tmp_dir("leaf_err_league_gen_dep");
+    if let Err(err) = write_minimal_workspace_tree(&root) {
+        panic!("setup workspace: {err}");
+    }
+    if let Err(err) = check_workspace_manifests_and_crate_sources(&root) {
+        panic!("clean minimal workspace should pass guard: {err}");
+    }
+    if let Err(err) = fs::write(
+        root.join("crates/league-error/Cargo.toml"),
+        "[package]\nname = \"league-error\"\n[dependencies]\nserde = \"1.0.229\"\nserde_json = \"1.0.154\"\nleague-gen = { path = \"../league-gen\" }\n",
+    ) {
+        panic!("write league-error Cargo.toml: {err}");
+    }
+    let err = check_workspace_manifests_and_crate_sources(&root)
+        .err()
+        .unwrap_or_else(|| panic!("league-gen dep in league-error/Cargo.toml must fail guard"));
+    assert!(
+        err.contains("league-error/Cargo.toml") && err.contains("league-gen"),
         "unexpected error: {err}"
     );
     let _ = fs::remove_dir_all(&root);

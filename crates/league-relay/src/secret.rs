@@ -374,9 +374,7 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
     while b58_start > 0 && league_error::is_base58_byte(bytes[b58_start - 1]) {
         b58_start -= 1;
     }
-    if b58_start < cut
-        && bytes[b58_start] == b's'
-        && (b58_start == 0 || !bytes[b58_start - 1].is_ascii_alphanumeric())
+    if b58_start < cut && bytes[b58_start] == b's' && league_error::is_at_boundary(bytes, b58_start)
     {
         let mut b58_end = cut;
         while b58_end < bytes.len() && league_error::is_base58_byte(bytes[b58_end]) {
@@ -391,39 +389,38 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
         }
     }
 
-    // 2. `sk-or-` / `sk-proj-` / `sk-ant-` token starting < cut and straddling past cut.
-    let mut tok_start = cut;
-    while tok_start > 0
-        && (bytes[tok_start - 1].is_ascii_alphanumeric()
-            || matches!(bytes[tok_start - 1], b'-' | b'_'))
-    {
-        tok_start -= 1;
-    }
-    for cand in tok_start..cut {
-        if (cand == 0 || !bytes[cand - 1].is_ascii_alphanumeric())
-            && (window[cand..].starts_with("sk-or-")
-                || window[cand..].starts_with("sk-proj-")
-                || window[cand..].starts_with("sk-ant-"))
-        {
-            let mut end = cut;
+    // 2. Case-insensitive `sk-or-` / `sk-proj-` / `sk-ant-` token starting anywhere < cut and straddling past cut.
+    let tok_scan_from = cut.saturating_sub(48);
+    for cand in tok_scan_from..cut {
+        let plen_opt = [
+            b"sk-or-".as_slice(),
+            b"sk-proj-".as_slice(),
+            b"sk-ant-".as_slice(),
+        ]
+        .into_iter()
+        .find(|p| {
+            bytes.len() - cand >= p.len() && bytes[cand..cand + p.len()].eq_ignore_ascii_case(p)
+        })
+        .map(<[u8]>::len);
+        if let Some(plen) = plen_opt {
+            let mut end = cand + plen;
             while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_' | b'.'))
             {
                 end += 1;
             }
-            effective_cut = effective_cut.max(end);
-            break;
+            if end > cut {
+                effective_cut = effective_cut.max(end);
+                break;
+            }
         }
     }
 
-    // 3. `Bearer <tok>` / `Bearer\t<tok>` or `ENV_KEY=<val>` starting < cut whose value straddles cut.
+    // 3. Case-insensitive `Bearer <tok>` / `Bearer\t<tok>` anywhere or boundary-gated
+    //    `ENV_KEY=<val>` starting < cut whose value straddles cut.
     let scan_from = cut.saturating_sub(48);
     for pos in scan_from..cut {
         if !window.is_char_boundary(pos) {
-            continue;
-        }
-        let at_boundary = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
-        if !at_boundary {
             continue;
         }
         let val_start_opt = if pos + 7 <= bytes.len()
@@ -435,18 +432,20 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
                 p += 1;
             }
             Some(p)
-        } else {
+        } else if league_error::is_at_boundary(bytes, pos) {
             SECRET_ENV_ASSIGNMENT_PREFIXES.iter().find_map(|prefix| {
                 (bytes.len() - pos >= prefix.len()
                     && bytes[pos..pos + prefix.len()].eq_ignore_ascii_case(prefix.as_bytes()))
                 .then_some(pos + prefix.len())
             })
+        } else {
+            None
         };
         if let Some(val_start) = val_start_opt
             && val_start <= cut
         {
             let mut val_end = val_start;
-            while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
+            while val_end < bytes.len() && !league_error::is_token_stopper_at(bytes, val_end) {
                 val_end += 1;
             }
             if val_end > cut {
@@ -646,7 +645,7 @@ fn starts_with_redacted_marker(rest: &str) -> bool {
     let Some(after) = rest.strip_prefix(REDACTED_MARKER) else {
         return false;
     };
-    after.as_bytes().first().is_none_or(|b| is_stopper_byte(*b))
+    league_error::is_token_stopper_at(after.as_bytes(), 0)
 }
 
 fn count_preceding_backslashes(bytes: &[u8], idx: usize) -> usize {
@@ -792,9 +791,11 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
 
     while i < bytes.len() {
         let at_word_boundary =
-            i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+            league_error::is_at_boundary(bytes, i) && (i == 0 || bytes[i - 1] != b'_');
 
-        // 1. JSON secret field `"<key>"\s*:\s*<val>` and JSON-escaped `\"<key>\"\s*:\s*<val>` (B1).
+        // 1. JSON secret field `"<key>"\s*:\s*<val>` and JSON-escaped `\"<key>\"\s*:\s*<val>` (B1/B2).
+        //    Never emit `&input[i..j]` until a branch commits, and redact unterminated values
+        //    to the end of the input so keys are never duplicated and no secret byte leaks.
         if let Some((key_start, quote_len, quote_bs)) = match_field_quote_open(bytes, i) {
             let key_close_opt = if quote_bs > 0 {
                 find_escaped_json_string_end_with_bs(bytes, i, quote_bs)
@@ -817,57 +818,93 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                         j += 1;
                     }
                     let quote_seq = &input[i..i + quote_len];
-                    if j < bytes.len() {
+                    if j == bytes.len() {
                         out.push_str(&input[i..j]);
-                        if quote_bs > 0 {
-                            if let Some(val_end) =
-                                find_escaped_json_string_end_with_bs(bytes, j, quote_bs)
-                            {
-                                let inner = &input[j + quote_len..val_end];
-                                out.push_str(quote_seq);
-                                if !inner.is_empty() {
-                                    out.push_str(REDACTED_MARKER);
-                                }
-                                out.push_str(quote_seq);
-                                i = val_end + quote_len;
-                                continue;
-                            }
-                        } else if bytes[j] == b'"'
-                            && let Some(val_end) = find_json_string_end(bytes, j)
-                        {
+                        i = j;
+                        continue;
+                    }
+                    if quote_bs == 0 && bytes[j] == b'"' {
+                        out.push_str(&input[i..j]);
+                        out.push('"');
+                        if let Some(val_end) = find_json_string_end(bytes, j) {
                             let inner = &input[j + 1..val_end];
-                            out.push_str(quote_seq);
+                            if !inner.is_empty() {
+                                out.push_str(REDACTED_MARKER);
+                            }
+                            out.push('"');
+                            i = val_end + 1;
+                        } else {
+                            if j + 1 < bytes.len() {
+                                out.push_str(REDACTED_MARKER);
+                            }
+                            i = bytes.len();
+                        }
+                        continue;
+                    }
+                    if quote_bs > 0
+                        && bytes.len() - j > quote_bs
+                        && bytes[j..j + quote_bs].iter().all(|&b| b == b'\\')
+                        && bytes[j + quote_bs] == b'"'
+                    {
+                        out.push_str(&input[i..j]);
+                        out.push_str(quote_seq);
+                        if let Some(val_end) =
+                            find_escaped_json_string_end_with_bs(bytes, j, quote_bs)
+                        {
+                            let inner = &input[j + quote_len..val_end];
                             if !inner.is_empty() {
                                 out.push_str(REDACTED_MARKER);
                             }
                             out.push_str(quote_seq);
-                            i = val_end + 1;
-                            continue;
-                        }
-                        if matches!(bytes[j], b'{' | b'[') {
-                            let close = if bytes[j] == b'{' { b'}' } else { b']' };
-                            if let Some(val_end) =
-                                find_matching_delimited(bytes, j, bytes[j], close, quote_bs)
-                            {
-                                out.push_str(quote_seq);
+                            i = val_end + quote_len;
+                        } else {
+                            if j + quote_len < bytes.len() {
                                 out.push_str(REDACTED_MARKER);
-                                out.push_str(quote_seq);
-                                i = val_end + 1;
-                                continue;
                             }
+                            i = bytes.len();
                         }
-                        let mut val_end = j;
-                        while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
-                            val_end += 1;
-                        }
-                        if val_end > j {
-                            out.push_str(quote_seq);
-                            out.push_str(REDACTED_MARKER);
-                            out.push_str(quote_seq);
-                            i = val_end;
-                            continue;
-                        }
+                        continue;
                     }
+                    if matches!(bytes[j], b'"' | b'\'' | b'\\') {
+                        out.push_str(&input[i..j]);
+                        out.push_str(quote_seq);
+                        out.push_str(REDACTED_MARKER);
+                        i = bytes.len();
+                        continue;
+                    }
+                    if matches!(bytes[j], b'{' | b'[') {
+                        let close = if bytes[j] == b'{' { b'}' } else { b']' };
+                        out.push_str(&input[i..j]);
+                        out.push_str(quote_seq);
+                        out.push_str(REDACTED_MARKER);
+                        if let Some(val_end) =
+                            find_matching_delimited(bytes, j, bytes[j], close, quote_bs)
+                        {
+                            out.push_str(quote_seq);
+                            i = val_end + 1;
+                        } else {
+                            i = bytes.len();
+                        }
+                        continue;
+                    }
+                    if starts_with_redacted_marker(&input[j..]) {
+                        out.push_str(&input[i..j]);
+                        out.push_str(REDACTED_MARKER);
+                        i = j + REDACTED_MARKER.len();
+                        continue;
+                    }
+                    let mut val_end = j;
+                    while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
+                        val_end += 1;
+                    }
+                    out.push_str(&input[i..j]);
+                    if val_end > j {
+                        out.push_str(quote_seq);
+                        out.push_str(REDACTED_MARKER);
+                        out.push_str(quote_seq);
+                    }
+                    i = val_end;
+                    continue;
                 }
             }
         }
@@ -898,6 +935,13 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                         i = end_delim + 1;
                         continue;
                     }
+                    out.push_str(prefix);
+                    out.push('(');
+                    if j + 1 < bytes.len() {
+                        out.push_str(REDACTED_MARKER);
+                    }
+                    i = bytes.len();
+                    continue;
                 }
             }
         }
@@ -918,7 +962,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                     continue;
                 }
                 let mut end = eq_after;
-                while end < bytes.len() && !is_stopper_byte(bytes[end]) {
+                while end < bytes.len() && !league_error::is_token_stopper_at(bytes, end) {
                     end += 1;
                 }
                 if end > eq_after {
@@ -1094,5 +1138,68 @@ mod tests {
         let scrubbed = redact_secrets("Authorization: Bearer\ttab_secret_token_999\tend", None);
         assert!(!scrubbed.contains("tab_secret_token_999"), "{scrubbed}");
         assert_eq!(scrubbed, "Authorization: Bearer\t<REDACTED_API_KEY>\tend");
+    }
+
+    #[test]
+    fn b2_json_field_matcher_never_duplicates_key_or_leaks_unterminated_values() {
+        // 1. Unterminated JSON field value -> key once, secret completely redacted to end.
+        let unterminated = r#"a "api_key":"leakUnterm1"#;
+        let out_unterm = redact_secrets(unterminated, None);
+        assert_eq!(out_unterm.matches("api_key").count(), 1, "{out_unterm}");
+        assert!(!out_unterm.contains("leakUnterm1"), "{out_unterm}");
+        assert_eq!(out_unterm, r#"a "api_key":"<REDACTED_API_KEY>"#);
+        assert_eq!(redact_secrets(&out_unterm, None), out_unterm);
+
+        // 2. Empty value before delimiter -> key once, no duplication.
+        let empty_val = r#"a "api_key": , b"#;
+        let out_empty = redact_secrets(empty_val, None);
+        assert_eq!(out_empty.matches("api_key").count(), 1, "{out_empty}");
+        assert_eq!(out_empty, empty_val);
+        assert_eq!(redact_secrets(&out_empty, None), out_empty);
+
+        // 3. Mismatched escaped open / unescaped close quote -> key once, no secret byte leaked.
+        let escaped_mismatch = r#"a {\"preimage_secret\":\"leakPQ3"} b"#;
+        let out_mismatch = redact_secrets(escaped_mismatch, None);
+        assert_eq!(
+            out_mismatch.matches("preimage_secret").count(),
+            1,
+            "{out_mismatch}"
+        );
+        assert!(!out_mismatch.contains("leakPQ3"), "{out_mismatch}");
+        assert_eq!(
+            out_mismatch,
+            r#"a {\"preimage_secret\":\"<REDACTED_API_KEY>"#
+        );
+        assert_eq!(redact_secrets(&out_mismatch, None), out_mismatch);
+
+        // 4. `"api_key":"..."` value cut at every offset across the 4 KiB cap -> key once, 0 secret bytes.
+        let secret_val = "12345678901234567890123456";
+        let field = format!(r#""api_key":"{secret_val}""#);
+        for offset in 1..=(field.len() + 2) {
+            let prefix_len = MAX_REDACTION_SCAN_BYTES - offset;
+            let body = format!("{}{field} tail", "z".repeat(prefix_len));
+            let scrubbed = redact_secrets(&body, None);
+            if body[..MAX_REDACTION_SCAN_BYTES].contains("api_key") {
+                assert_eq!(
+                    scrubbed.matches("api_key").count(),
+                    1,
+                    "offset {offset}: key duplicated or dropped: {:?}",
+                    &scrubbed[scrubbed.len().saturating_sub(64)..]
+                );
+            }
+            for digit in secret_val.chars() {
+                assert!(
+                    !scrubbed.contains(digit),
+                    "offset {offset}: secret digit '{digit}' survived: {:?}",
+                    &scrubbed[scrubbed.len().saturating_sub(64)..]
+                );
+            }
+            assert!(
+                !scrubbed.contains(secret_val),
+                "offset {offset}: secret survived: {:?}",
+                &scrubbed[scrubbed.len().saturating_sub(64)..]
+            );
+            assert_eq!(redact_secrets(&scrubbed, None), scrubbed);
+        }
     }
 }

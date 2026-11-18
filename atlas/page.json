@@ -30,75 +30,44 @@
   "changes": {
     "fileCounts": {
       "added": 2,
-      "changed": 19,
+      "changed": 7,
       "moved": 0,
-      "parts": 5,
-      "removed": 1
+      "parts": 3,
+      "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-core/src/error.rs, crates/league-error/, crates/league-ledger/src/ and 1 more.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-core/src/error.rs",
-          "crates/league-error/",
-          "crates/league-ledger/src/",
-          "crates/league-relay/src/secret.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also checks crates/league-error/src/lib.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-error/src/lib.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI no longer runs crates/league-ledger/src/client.rs and crates/league-ledger/src/escrow.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-ledger/src/client.rs",
-          "crates/league-ledger/src/escrow.rs"
-        ]
-      },
-      {
         "kind": "landing",
-        "sentence": "crates/league-error/ is now read by Cargo.toml, crates/league-core/Cargo.toml, crates/league-ledger/Cargo.toml, crates/league-relay/Cargo.toml and crates/league-standalone/Cargo.toml.",
+        "sentence": "crates/league-error/tests/scrubber_superset_corpus.json is now read by crates/league-error/tests/superset_corpus.rs and crates/league-relay/tests/cli_hygiene.rs.",
         "subjects": [
-          "crates/league-error/",
-          "Cargo.toml",
-          "crates/league-core/Cargo.toml",
-          "crates/league-ledger/Cargo.toml",
-          "crates/league-relay/Cargo.toml",
-          "crates/league-standalone/Cargo.toml"
+          "crates/league-error/tests/scrubber_superset_corpus.json",
+          "crates/league-error/tests/superset_corpus.rs",
+          "crates/league-relay/tests/cli_hygiene.rs"
         ]
       },
       {
         "kind": "unassigned",
-        "sentence": "crates/league-error/Cargo.toml is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "sentence": "crates/league-error/tests/scrubber_superset_corpus.json is new and belongs to no part, so atlas check fails on it against the previous map.",
         "subjects": [
-          "crates/league-error/Cargo.toml"
+          "crates/league-error/tests/scrubber_superset_corpus.json"
         ]
       },
       {
         "kind": "unassigned",
-        "sentence": "crates/league-error/src/lib.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "sentence": "crates/league-error/tests/superset_corpus.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
         "subjects": [
-          "crates/league-error/src/lib.rs"
+          "crates/league-error/tests/superset_corpus.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "2 files added, 1 removed and 19 changed content, across 5 parts.",
+        "sentence": "2 files added and 7 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "7fd3b481aaaed5409d4d8b7958f6d3d86de4de9f",
-      "generatedAt": "2026-11-18T11:03:08.819Z"
+      "commit": "9818e991535b514baa6a3253276e4af08669dc0c",
+      "generatedAt": "2026-11-18T12:23:51.346Z"
     },
     "unchanged": false
   },
@@ -106,7 +75,7 @@
     {
       "a": "crates/league-relay/src/secret.rs",
       "b": "crates/league-relay/src/transport.rs",
-      "either": 5,
+      "either": 6,
       "partLabels": [
         null,
         null
@@ -116,7 +85,7 @@
         null
       ],
       "relation": "unassigned",
-      "shared": 5
+      "shared": 6
     },
     {
       "a": "crates/league-gen/src/empirical.rs",
@@ -181,12 +150,12 @@
   ],
   "changesTogetherNote": [
     "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
-    "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
+    "Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "9818e991535b514baa6a3253276e4af08669dc0c",
+  "commit": "53b25056ec943d6fc435ee0b103c3f5d51ce10a5",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (354 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "10 parts, mostly Rust (355 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -271,7 +240,7 @@
         "site/src/"
       ],
       "runsCount": 30,
-      "runsMore": 45,
+      "runsMore": 46,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -439,14 +408,14 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-18T12:23:51.346Z",
+  "generatedAt": "2026-11-18T13:32:29.479Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "3 writes and 4 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "5 writes and 5 reads go to a path their caller passes, not to this repository.",
     "1 write goes to a temporary directory, not to this repository.",
-    "391 files belong to no part: crates/league-error/Cargo.toml, crates/league-error/src/lib.rs, crates/league-relay/Cargo.toml and 388 more.",
+    "393 files belong to no part: crates/league-error/Cargo.toml, crates/league-error/src/lib.rs, crates/league-error/tests/scrubber_superset_corpus.json and 390 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -487,7 +456,7 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 49,
+  "testFiles": 51,
   "testedBy": {
     "league-core": 15,
     "league-gen": 9,

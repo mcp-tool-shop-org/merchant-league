@@ -1,0 +1,780 @@
+[
+  {
+    "id": "relay_cli_bearer",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:33",
+    "input": "Bearer Br9Kx3ZmVp2QnW7cRt5Yh",
+    "secret_needles": [
+      "Br9Kx3ZmVp2QnW7cRt5Yh"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_sk_or",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:34",
+    "input": "sk-or-v1-abc987def654ghi321",
+    "secret_needles": [
+      "abc987def654ghi321"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_sk_proj",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:35",
+    "input": "sk-proj-Zyx987Wvu654Tsr321",
+    "secret_needles": [
+      "Zyx987Wvu654Tsr321"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_sk_ant",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:36",
+    "input": "sk-ant-api03-Mno741Pqr852",
+    "secret_needles": [
+      "Mno741Pqr852"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_xrpl_secp",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:37",
+    "input": "sp5fghtJtpUorTwvof1NpDXAzNwf5",
+    "secret_needles": [
+      "sp5fghtJtpUorTwvof1NpDXAzNwf5"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_xrpl_ed",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:38",
+    "input": "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_cli_secret_flag",
+    "source": "9818e991:crates/league-relay/tests/cli_hygiene.rs:1450",
+    "input": "--sk-proj-Zyx987Wvu654Tsr321-sp5fghtJtpUorTwvof1NpDXAzNwf5",
+    "secret_needles": [
+      "Zyx987Wvu654Tsr321",
+      "sp5fghtJtpUorTwvof1NpDXAzNwf5"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_openrouter_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:45",
+    "input": "OPENROUTER_API_KEY=Zx9QvR2mKp8LnW4tYs7BcF1h",
+    "secret_needles": [
+      "Zx9QvR2mKp8LnW4tYs7BcF1h"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_openrouter_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:26",
+    "input": "openrouter_api_key=Zx9QvR2mKp8LnW4tYs7BcF1h",
+    "secret_needles": [
+      "Zx9QvR2mKp8LnW4tYs7BcF1h"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_anthropic_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:46",
+    "input": "ANTHROPIC_API_KEY=ant_secret_val_99",
+    "secret_needles": [
+      "ant_secret_val_99"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_anthropic_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:37",
+    "input": "anthropic_api_key=ant_secret_val_99",
+    "secret_needles": [
+      "ant_secret_val_99"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_openai_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:47",
+    "input": "OPENAI_API_KEY=Qw7ErT9yUi3OpA6sDf8GhJ2k",
+    "secret_needles": [
+      "Qw7ErT9yUi3OpA6sDf8GhJ2k"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_openai_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:28",
+    "input": "openai_api_key=Qw7ErT9yUi3OpA6sDf8GhJ2k",
+    "secret_needles": [
+      "Qw7ErT9yUi3OpA6sDf8GhJ2k"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_gemini_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:48",
+    "input": "GEMINI_API_KEY=gem_secret_val_88",
+    "secret_needles": [
+      "gem_secret_val_88"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_gemini_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:39",
+    "input": "gemini_api_key=gem_secret_val_88",
+    "secret_needles": [
+      "gem_secret_val_88"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_league_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:49",
+    "input": "LEAGUE_API_KEY=lg_secret_val_77",
+    "secret_needles": [
+      "lg_secret_val_77"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_league_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:41",
+    "input": "league_api_key=lg_secret_val_77",
+    "secret_needles": [
+      "lg_secret_val_77"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_vllm_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:50",
+    "input": "VLLM_API_KEY=Mn4BvC6xZ1LkJ8hGf3DsA5pQ",
+    "secret_needles": [
+      "Mn4BvC6xZ1LkJ8hGf3DsA5pQ"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_vllm_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:30",
+    "input": "vllm_api_key=Mn4BvC6xZ1LkJ8hGf3DsA5pQ",
+    "secret_needles": [
+      "Mn4BvC6xZ1LkJ8hGf3DsA5pQ"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_local_upper",
+    "source": "9818e991:crates/league-relay/src/secret.rs:51",
+    "input": "LOCAL_API_KEY=Pl0OkI9uY7yTrE5wQ3aSdF2g",
+    "secret_needles": [
+      "Pl0OkI9uY7yTrE5wQ3aSdF2g"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_env_local_lower",
+    "source": "9818e991:crates/league-relay/src/secret.rs:32",
+    "input": "local_api_key=Pl0OkI9uY7yTrE5wQ3aSdF2g",
+    "secret_needles": [
+      "Pl0OkI9uY7yTrE5wQ3aSdF2g"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_auth_bearer_sk_or",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:1078",
+    "input": "header Authorization: Bearer sk-or-v1-planted-fake-secret-998877665544332211 and custom_secret_token",
+    "secret_needles": [
+      "planted-fake-secret-998877665544332211"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_proxy_rejected_bearer",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:1157",
+    "input": "proxy rejected Bearer sk-or-v1-planted-fake-secret-998877665544332211",
+    "secret_needles": [
+      "planted-fake-secret-998877665544332211"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_socket_broken_bearer",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:1610",
+    "input": "socket broken for Bearer sk-or-v1-planted-fake-secret-998877665544332211",
+    "secret_needles": [
+      "planted-fake-secret-998877665544332211"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_unplanted_bearer_and_sk_or",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:1596",
+    "input": "Bearer plain_secret_tok and sk-or-v1-unplanted_secret_99 and Bearer   ",
+    "secret_needles": [
+      "plain_secret_tok",
+      "unplanted_secret_99"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_sk_proj_forbidden",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:11394",
+    "input": "sk-proj-forbidden-local-secret-1234567890",
+    "secret_needles": [
+      "forbidden-local-secret-1234567890"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_c7_third_sk_proj",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:12737",
+    "input": "first=pub1 second=pub2 third=sk-proj-abc123def456",
+    "secret_needles": [
+      "abc123def456"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_planted_test_key",
+    "source": "9818e991:crates/league-relay/tests/relay_integration.rs:23038",
+    "input": "sk-or-v1-planted-test-key-123456",
+    "secret_needles": [
+      "planted-test-key-123456"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "ledger_lib_combined",
+    "source": "9818e991:crates/league-ledger/src/lib.rs:184",
+    "input": "Bearer tok123 sk-or-v1-abc OPENROUTER_API_KEY=secretval sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r sp5fghtJtpUorTwvof1NpDXAzNwf5",
+    "secret_needles": [
+      "tok123",
+      "sk-or-v1-abc",
+      "secretval",
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+      "sp5fghtJtpUorTwvof1NpDXAzNwf5"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "ledger_client_transport_bearer_ed",
+    "source": "9818e991:crates/league-ledger/src/client.rs:943",
+    "input": "Bearer tok_abc sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r down",
+    "secret_needles": [
+      "tok_abc",
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "ledger_client_reply_env_secp",
+    "source": "9818e991:crates/league-ledger/src/client.rs:967",
+    "input": "OPENROUTER_API_KEY=sk-or-secret123 sp5fghtJtpUorTwvof1NpDXAzNwf5",
+    "secret_needles": [
+      "sk-or-secret123",
+      "sp5fghtJtpUorTwvof1NpDXAzNwf5"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "ledger_client_build_ed",
+    "source": "9818e991:crates/league-ledger/src/client.rs:971",
+    "input": "bad tx sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_invalid_config_env",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2503",
+    "input": "bad config OPENROUTER_API_KEY=sk-or-secret123",
+    "secret_needles": [
+      "sk-or-secret123"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_invalid_order_bearer",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2506",
+    "input": "Bearer my-secret-token-value bad order",
+    "secret_needles": [
+      "my-secret-token-value"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_sign_err_ed",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2548",
+    "input": "failed signing with sEd7f3A9kL2mN4pQ6rT8vW1xY3zB5cD",
+    "secret_needles": [
+      "sEd7f3A9kL2mN4pQ6rT8vW1xY3zB5cD"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_cause_gemini",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2550",
+    "input": "GEMINI_API_KEY=AIzaSySecret12345 caused retryable failure",
+    "secret_needles": [
+      "AIzaSySecret12345"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_bearer_multispace",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2564",
+    "input": "Bearer   trailing",
+    "secret_needles": [
+      "trailing"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "core_obs_benign_bearish_sn123",
+    "source": "7fd3b481:crates/league-core/tests/club_seat_observation.rs:2560",
+    "input": "bearish market sn123",
+    "secret_needles": [],
+    "expect_unchanged": true,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "review_a1_1_esc_nl_sk_or",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:25",
+    "input": "body \\nsk-or-v1-leakEscNewline end",
+    "secret_needles": [
+      "leakEscNewline"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_2_esc_tab_sk_ant",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:26",
+    "input": "body \\tsk-ant-api03-leakEscTab end",
+    "secret_needles": [
+      "leakEscTab"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_3_url_pct3d_sk_or",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:27",
+    "input": "q=api_key%3Dsk-or-v1-leakUrlEnc",
+    "secret_needles": [
+      "leakUrlEnc"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_4_upper_sk_or",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:28",
+    "input": "SK-OR-V1-LEAKUPPER123",
+    "secret_needles": [
+      "LEAKUPPER123"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_5_glued_sk_proj",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:29",
+    "input": "keysk-proj-leakGlued1",
+    "secret_needles": [
+      "leakGlued1"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_6_esc_nl_bearer",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:30",
+    "input": "hdr \\nBearer leakBearerNL",
+    "secret_needles": [
+      "leakBearerNL"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_a1_7_glued_bearer",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:31",
+    "input": "xBearer leakBearerGlued",
+    "secret_needles": [
+      "leakBearerGlued"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "review_b3_1_esc_nl_seed",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:75",
+    "input": "\\nsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "review_b3_2_esc_nl_env",
+    "source": "2026-11-18-opus-review-ml-pr80-fix1.md:75",
+    "input": "\\nOPENROUTER_API_KEY=leakEnvNL",
+    "secret_needles": [
+      "leakEnvNL"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "fix2_esc_cr_seed",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:27",
+    "input": "\\rsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "fix2_esc_quote_env",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:27",
+    "input": "\\\"OPENROUTER_API_KEY=leakEnvQuote\\\"",
+    "secret_needles": [
+      "leakEnvQuote"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "fix2_esc_slash_seed",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:27",
+    "input": "\\/sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "fix2_url_pct3d_seed",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:27",
+    "input": "seed%3DsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+    "secret_needles": [
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "review_c1_1_bearer_backslash",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:64",
+    "input": "Bearer tok\\abc end",
+    "secret_needles": [
+      "tok",
+      "abc"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "review_c1_2_env_backslash",
+    "source": "card-2026-11-18-ml-wave2-card4-fix2.md:64",
+    "input": "OPENROUTER_API_KEY=abc\\def",
+    "secret_needles": [
+      "abc",
+      "def"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "fix1_bearer_tab_1",
+    "source": "53b25056:crates/league-error/src/lib.rs:363",
+    "input": "Bearer\ttok_tab_67890",
+    "secret_needles": [
+      "tok_tab_67890"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  },
+  {
+    "id": "fix1_bearer_tab_2",
+    "source": "53b25056:crates/league-error/src/lib.rs:421",
+    "input": "Authorization: Bearer\tsecret_tab_val ok",
+    "secret_needles": [
+      "secret_tab_val"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": false,
+      "relay_9818e991": false
+    }
+  }
+]

@@ -80,7 +80,7 @@ mod tests {
     use std::any::TypeId;
 
     #[test]
-    fn reexported_structured_error_matches_7fd3b481_pre_change_json_and_format_text() {
+    fn reexported_secret_free_shapes_match_captured_7fd3b481_bytes() {
         assert_eq!(
             TypeId::of::<StructuredError>(),
             TypeId::of::<league_error::StructuredError>()
@@ -90,6 +90,93 @@ mod tests {
             TypeId::of::<league_error::StructuredError>()
         );
 
+        // Exact secret-free JSON and `format_text()` bytes captured from `league-core` at `7fd3b481`.
+        let p1 = crate::StructuredError::new(
+            "INVALID_CONFIG",
+            "bad config field table_mode mismatch",
+            "check TableSpec",
+            false,
+        );
+        assert_eq!(
+            p1.to_json_string()
+                .unwrap_or_else(|e| panic!("p1 json failed: {e}")),
+            "{\"code\":\"INVALID_CONFIG\",\"message\":\"bad config field table_mode mismatch\",\"hint\":\"check TableSpec\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p1.format_text(),
+            "[INVALID_CONFIG] bad config field table_mode mismatch; hint: check TableSpec"
+        );
+
+        let p2 = crate::StructuredError::new(
+            "TURN_LOCKED",
+            "turn phase lock active for seat 2",
+            "wait and retry",
+            true,
+        );
+        assert_eq!(
+            p2.to_json_string()
+                .unwrap_or_else(|e| panic!("p2 json failed: {e}")),
+            "{\"code\":\"TURN_LOCKED\",\"message\":\"turn phase lock active for seat 2\",\"hint\":\"wait and retry\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p2.format_text(),
+            "[TURN_LOCKED] turn phase lock active for seat 2; hint: wait and retry [retryable]"
+        );
+
+        let p3 =
+            crate::StructuredError::new("RELAY_IO", "io error reading state", "check path", false)
+                .with_cause("underlying file not found");
+        assert_eq!(
+            p3.to_json_string()
+                .unwrap_or_else(|e| panic!("p3 json failed: {e}")),
+            "{\"code\":\"RELAY_IO\",\"message\":\"io error reading state\",\"hint\":\"check path\",\"cause\":\"underlying file not found\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p3.format_text(),
+            "[RELAY_IO] io error reading state (cause: underlying file not found); hint: check path"
+        );
+
+        let p4 = crate::StructuredError::new("SIGN_ERR", "failed signing tx", "rotate seed", true)
+            .with_cause("connection timed out caused retryable failure");
+        assert_eq!(
+            p4.to_json_string()
+                .unwrap_or_else(|e| panic!("p4 json failed: {e}")),
+            "{\"code\":\"SIGN_ERR\",\"message\":\"failed signing tx\",\"hint\":\"rotate seed\",\"cause\":\"connection timed out caused retryable failure\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p4.format_text(),
+            "[SIGN_ERR] failed signing tx (cause: connection timed out caused retryable failure); hint: rotate seed [retryable]"
+        );
+
+        let cancel_se = EngineError::CancelLocked.to_structured_error();
+        assert_eq!(
+            cancel_se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("cancel json failed: {e}")),
+            "{\"code\":\"CANCEL_LOCKED\",\"message\":\"Phase-1 cancel lock is active\",\"hint\":\"cancel resting offers before Phase-1 cancel lock engages; late cancellations are rejected\",\"retryable\":false}"
+        );
+        assert_eq!(
+            cancel_se.format_text(),
+            "[CANCEL_LOCKED] Phase-1 cancel lock is active; hint: cancel resting offers before Phase-1 cancel lock engages; late cancellations are rejected"
+        );
+
+        let seed_se = ReplayLayoutSeedError::InvalidSealedDigest.to_structured_error();
+        assert_eq!(
+            seed_se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("seed json failed: {e}")),
+            "{\"code\":\"INVALID_SEALED_SEED_DIGEST\",\"message\":\"INVALID_SEALED_SEED_DIGEST: sealed replay log seed digest must be 64 lowercase hex characters\",\"hint\":\"provide a 64-character lowercase ASCII hex SHA-256 digest for the sealed layout seed\",\"retryable\":false}"
+        );
+        assert_eq!(
+            seed_se.format_text(),
+            "[INVALID_SEALED_SEED_DIGEST] INVALID_SEALED_SEED_DIGEST: sealed replay log seed digest must be 64 lowercase hex characters; hint: provide a 64-character lowercase ASCII hex SHA-256 digest for the sealed layout seed"
+        );
+    }
+
+    #[test]
+    fn reexported_secret_bearing_structured_error_uses_fixed_idempotent_scrubber() {
+        // Fixed secret-scrubbing behaviour (eliminates 7fd3b481 `[REDACTED]]` double-scrub and
+        // expands env/prefix/escape/seed coverage).
         let c1 = crate::StructuredError::new(
             "INVALID_CONFIG",
             "bad config OPENROUTER_API_KEY=sk-or-secret123",
@@ -106,34 +193,6 @@ mod tests {
             "[INVALID_CONFIG] bad config OPENROUTER_API_KEY=[REDACTED]; hint: check TableSpec"
         );
 
-        let c2 = crate::StructuredError::new(
-            "TURN_LOCKED",
-            "lock busy sk-or-v1-abc123",
-            "wait and retry",
-            true,
-        );
-        assert_eq!(
-            c2.to_json_string()
-                .unwrap_or_else(|e| panic!("c2 json failed: {e}")),
-            "{\"code\":\"TURN_LOCKED\",\"message\":\"lock busy [REDACTED]\",\"hint\":\"wait and retry\",\"retryable\":true}"
-        );
-        assert_eq!(
-            c2.format_text(),
-            "[TURN_LOCKED] lock busy [REDACTED]; hint: wait and retry [retryable]"
-        );
-
-        let c3 = crate::StructuredError::new("RELAY_IO", "io error", "check path", false)
-            .with_cause("GEMINI_API_KEY=AIzaSySecret12345 failed");
-        assert_eq!(
-            c3.to_json_string()
-                .unwrap_or_else(|e| panic!("c3 json failed: {e}")),
-            "{\"code\":\"RELAY_IO\",\"message\":\"io error\",\"hint\":\"check path\",\"cause\":\"GEMINI_API_KEY=[REDACTED] failed\",\"retryable\":false}"
-        );
-        assert_eq!(
-            c3.format_text(),
-            "[RELAY_IO] io error (cause: GEMINI_API_KEY=[REDACTED] failed); hint: check path"
-        );
-
         let c4 = crate::StructuredError::new(
             "SIGN_ERR",
             "failed signing with sEd7f3A9kL2mN4pQ6rT8vW1xY3zB5cD",
@@ -146,10 +205,6 @@ mod tests {
                 .unwrap_or_else(|e| panic!("c4 json failed: {e}")),
             "{\"code\":\"SIGN_ERR\",\"message\":\"failed signing with [REDACTED]\",\"hint\":\"rotate seed\",\"cause\":\"GEMINI_API_KEY=[REDACTED] caused retryable failure\",\"retryable\":true}"
         );
-        assert_eq!(
-            c4.format_text(),
-            "[SIGN_ERR] failed signing with [REDACTED] (cause: GEMINI_API_KEY=[REDACTED] caused retryable failure); hint: rotate seed [retryable]"
-        );
 
         let eng_err = EngineError::InvalidOrder(
             "Bearer\ttab_secret_tok OPENROUTER_API_KEY=sk-or-secret999".to_owned(),
@@ -159,12 +214,6 @@ mod tests {
         assert!(!eng_se.message.contains("tab_secret_tok"));
         assert!(!eng_se.message.contains("sk-or-secret999"));
         assert!(eng_se.message.contains("Bearer\t[REDACTED]"));
-
-        let seed_err = ReplayLayoutSeedError::InvalidSealedDigest;
-        assert_eq!(
-            seed_err.to_structured_error().code,
-            "INVALID_SEALED_SEED_DIGEST"
-        );
         assert_eq!(
             crate::scrub_secret_text("Bearer\ttok_abc"),
             "Bearer\t[REDACTED]"

@@ -2065,3 +2065,96 @@ fn b2_cli_redacts_xrpl_seed_straddling_4kib_cap_across_offsets_1_to_30() -> Test
     assert_no_secrets_leaked(&bin_calls, "b2/bin/calls.jsonl")?;
     Ok(())
 }
+
+#[test]
+fn fix2_relay_redacts_a1_b3_c1_full_superset_corpus_and_b2_json_edge_cases() -> TestResult {
+    // 1. Full 55-entry superset corpus from `league-error` plus all 6 relay sealed-secret cases.
+    let corpus_raw = include_str!("../../league-error/tests/scrubber_superset_corpus.json");
+    let entries: Vec<serde_json::Value> = serde_json::from_str(corpus_raw)?;
+    assert_eq!(entries.len(), 55);
+
+    for entry in &entries {
+        let id = entry["id"].as_str().ok_or("missing id")?;
+        let input = entry["input"].as_str().ok_or("missing input")?;
+        let expect_unchanged = entry["expect_unchanged"].as_bool().unwrap_or(false);
+        let needles: Vec<&str> = entry["secret_needles"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        let scrubbed = league_relay::redact_secrets(input, None);
+        if expect_unchanged {
+            assert_eq!(scrubbed, input, "benign corpus entry '{id}' changed");
+        } else {
+            assert_ne!(scrubbed, input, "relay missed corpus entry '{id}'");
+            for needle in needles {
+                assert!(
+                    !scrubbed.contains(needle),
+                    "relay leaked '{needle}' on corpus entry '{id}': {scrubbed:?}"
+                );
+            }
+            assert_eq!(
+                league_relay::redact_secrets(&scrubbed, None),
+                scrubbed,
+                "relay not idempotent on '{id}'"
+            );
+        }
+    }
+
+    for (label, input, needle) in [
+        (
+            "sealed_struct_eval",
+            PLANTED_SEALED_STRUCT,
+            "9876543210987654321",
+        ),
+        (
+            "sealed_struct_preimage",
+            PLANTED_PREIMAGE_STRUCT,
+            "deadbeefcafe001122334455",
+        ),
+        ("sealed_hex", PLANTED_SEALED_HEX, PLANTED_SEALED_HEX),
+        ("sealed_dec", PLANTED_SEALED_DEC, PLANTED_SEALED_DEC),
+        (
+            "eval_vrf_field",
+            PLANTED_EVAL_FIELD,
+            "vrf-secret-payload-9911",
+        ),
+        (
+            "preimage_json",
+            PLANTED_PREIMAGE_JSON,
+            "preimage-secret-payload-7722",
+        ),
+    ] {
+        let scrubbed = league_relay::redact_secrets(input, None);
+        assert!(
+            !scrubbed.contains(needle),
+            "relay leaked '{label}': {scrubbed}"
+        );
+        assert_eq!(league_relay::redact_secrets(&scrubbed, None), scrubbed);
+    }
+
+    // 2. B2 JSON field matcher edge cases + 4 KiB cap cut across key/value boundary.
+    let unterm = r#"a "api_key":"leakUnterm1"#;
+    let out_unterm = league_relay::redact_secrets(unterm, None);
+    assert_eq!(out_unterm.matches("api_key").count(), 1);
+    assert!(!out_unterm.contains("leakUnterm1"));
+
+    let empty = r#"a "api_key": , b"#;
+    let out_empty = league_relay::redact_secrets(empty, None);
+    assert_eq!(out_empty.matches("api_key").count(), 1);
+    assert_eq!(out_empty, empty);
+
+    let esc_mismatch = r#"a {\"preimage_secret\":\"leakPQ3"} b"#;
+    let out_mismatch = league_relay::redact_secrets(esc_mismatch, None);
+    assert_eq!(out_mismatch.matches("preimage_secret").count(), 1);
+    assert!(!out_mismatch.contains("leakPQ3"));
+
+    let cut_secret = "cutCapApiKeySecret_77665544";
+    let cap_prefix = "x".repeat(league_relay::MAX_REDACTION_SCAN_BYTES - 15);
+    let cap_body = format!(r#"{cap_prefix}"api_key":"{cut_secret}""#);
+    let out_cap = league_relay::redact_secrets(&cap_body, None);
+    assert_eq!(out_cap.matches("api_key").count(), 1);
+    assert!(!out_cap.contains("cutCap"));
+    assert!(!out_cap.contains("7766"));
+    Ok(())
+}

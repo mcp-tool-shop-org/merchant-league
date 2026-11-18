@@ -13,7 +13,7 @@
           "path": ".github/audit-allowlist.json"
         },
         {
-          "hash": "6ea38e345b2147175f336f84cf135ee6332b63b117cdac16dac692a3466d8b54",
+          "hash": "8e5fc709ceea7cb873e00da20e0f18d5edffda4015c2f36f3db3e8cfc768aa52",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -1186,7 +1186,7 @@
           "testsInside": true
         },
         {
-          "hash": "b8565418bf9e1d60de6463f52bce05e53da9f33c8333e642daa590390b7b0ba6",
+          "hash": "906c8c82acbaae8ca551ccf82061065c2ffa4fe21e9dd0eb16ccae465b76e999",
           "importOrder": [
             "crates/league-error/src/lib.rs",
             "crates/league-core/src/replay.rs",
@@ -1914,7 +1914,7 @@
           "testsInside": true
         },
         {
-          "hash": "2cd5283a0c4b71e852f7b4e4dabec0445661c518e8f1e5a1e6fdc78eb82c08a2",
+          "hash": "b065be06792e5aa2844877adb70f6f2b85207c51189ea9e5d66aaaaca76b446f",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -3580,7 +3580,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "308b34ab7b8dde4ad7e28a0cd44b39d738f5b31c68a206452e1c172d1fed6969",
+          "hash": "c702ec5ee67e4b3c8510e6ea408a95deea6da8a91128e9b463db9038e5d5d356",
           "path": "CHANGELOG.md"
         },
         {
@@ -3774,6 +3774,16 @@
             "grep"
           ],
           "step": "Standalone seat-crate feature check"
+        },
+        {
+          "dir": "",
+          "job": "check",
+          "programs": [
+            "cargo",
+            "echo",
+            "grep"
+          ],
+          "step": "No league-core dependency in relay or ledger"
         },
         {
           "dir": "",
@@ -4282,14 +4292,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 40,
+          "files": 41,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 40,
+          "files": 41,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -4722,8 +4732,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "9818e991535b514baa6a3253276e4af08669dc0c",
-    "tracked": 550
+    "commit": "53b25056ec943d6fc435ee0b103c3f5d51ce10a5",
+    "tracked": 552
   },
   "landings": [
     {
@@ -4887,6 +4897,24 @@
         }
       ],
       "target": "crates/league-error",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "crates/league-error/tests/superset_corpus.rs",
+          "call": "include_str",
+          "confidence": "ast",
+          "fromTests": true
+        },
+        {
+          "by": "crates/league-relay/tests/cli_hygiene.rs",
+          "call": "include_str",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": "crates/league-error/tests/scrubber_superset_corpus.json",
       "writers": []
     },
     {
@@ -5665,7 +5693,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 49,
+  "testFiles": 51,
   "unassigned": [
     {
       "hash": "6dcab83f368674ff0bf0d76af2144ac73e5d7868cb0e68460bf83df2d9bf686d",
@@ -5673,13 +5701,28 @@
     },
     {
       "exports": [
+        "is_at_boundary",
         "is_base58_byte",
+        "is_token_stopper_at",
         "looks_like_xrpl_family_seed",
         "scrub_secret_text",
         "scrub_secret_text_with_marker"
       ],
-      "hash": "9f0d032e7d35f8f67233d799cf3aec83612b6e2e06d6c44c559e1f5c3ee6c60a",
+      "hash": "ba55e400506142985f5c66b7847d47ac1dce953d6747aed323267402b79152ae",
       "path": "crates/league-error/src/lib.rs",
+      "testsInside": true
+    },
+    {
+      "hash": "1644bf0e3f12ea8fe9261370429960ebdc68f186f9838d672f8705dd3c39362f",
+      "path": "crates/league-error/tests/scrubber_superset_corpus.json"
+    },
+    {
+      "hash": "4b0162b3aaff03310ba3270e260557f291c7d42b91b6c4d8cbc123cdb7ce984a",
+      "importsFiles": [
+        "crates/league-error/src/lib.rs"
+      ],
+      "library": "crates/league-error/src/lib.rs",
+      "path": "crates/league-error/tests/superset_corpus.rs",
       "testsInside": true
     },
     {
@@ -8928,7 +8971,7 @@
           "line": 310
         }
       ],
-      "hash": "5711c0469dbed98143d8ecbb841a20055b3421ec03abdc03a20be92639cb0304",
+      "hash": "d91db960fd0dbcd2a500697c88045cd694866a91796a1ac7115a3653f78b54fc",
       "importOrder": [
         "crates/league-relay/src/error.rs",
         "crates/league-relay/src/seats.rs",
@@ -9049,7 +9092,7 @@
       "path": "crates/league-relay/src/wording.rs"
     },
     {
-      "hash": "0f999badd76e5e55d31c2eda9b1039e5596e03dd3917b6e085d9211ecdd7ef63",
+      "hash": "b1ae670b54784cad7027abcc5cfda87d24c7f1d9af709a3938e3fea684894110",
       "importOrder": [
         "crates/league-relay/src/cli.rs",
         "crates/league-relay/src/lib.rs",

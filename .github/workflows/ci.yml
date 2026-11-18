@@ -81,6 +81,14 @@ jobs:
             exit 1
           fi
 
+      - name: No league-core dependency in relay or ledger
+        run: |
+          cargo tree -p league-relay -p league-ledger -e normal --locked
+          if cargo tree -p league-relay -p league-ledger -e normal --locked | grep -q 'league-core'; then
+            echo "ERROR: league-relay or league-ledger depends on league-core"
+            exit 1
+          fi
+
       - name: Test
         run: cargo test --workspace --locked
 
