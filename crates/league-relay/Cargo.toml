@@ -17,6 +17,7 @@ path = "src/main.rs"
 test-hooks = []
 
 [dependencies]
+league-error = { path = "../league-error" }
 hex = "0.4.3"
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }

@@ -86,6 +86,67 @@ impl fmt::Display for LedgerError {
 
 impl std::error::Error for LedgerError {}
 
+impl LedgerError {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::NotTestnet(e) => e.code(),
+            Self::Transport(_) => "LEDGER_TRANSPORT",
+            Self::Rpc { .. } => "LEDGER_RPC",
+            Self::Reply(_) => "LEDGER_BAD_REPLY",
+            Self::Build(_) => "LEDGER_TX_BUILD",
+            Self::NotEd25519 => "NOT_ED25519_SEED",
+        }
+    }
+}
+
+impl crate::ToStructuredError for LedgerError {
+    fn to_structured_error(&self) -> crate::StructuredError {
+        match self {
+            Self::NotTestnet(e) => e.to_structured_error(),
+            Self::Transport(msg) => crate::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "check Testnet connectivity and retry once the JSON-RPC endpoint is reachable",
+                true,
+            )
+            .with_cause(msg),
+            Self::Rpc { error, .. } => {
+                let retryable =
+                    matches!(error.as_str(), "tooBusy" | "slowDown" | "noCurrent" | "noNetwork");
+                crate::StructuredError::new(
+                    self.code(),
+                    self.to_string(),
+                    "inspect the XRPL Testnet RPC method parameters and error code; retry only on transient server load",
+                    retryable,
+                )
+                .with_cause(error)
+            }
+            Self::Reply(msg) => crate::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "verify the XRPL Testnet server_info, faucet, or transaction response matches rippled JSON-RPC format",
+                false,
+            )
+            .with_cause(msg),
+            Self::Build(msg) => crate::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "check the ed25519 seed encoding and transaction fields before signing",
+                false,
+            )
+            .with_cause(msg),
+            Self::NotEd25519 => crate::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "use an ed25519 XRPL Testnet seed (sEd...) rather than a secp256k1 seed",
+                false,
+            ),
+        }
+    }
+}
+
 /// A seed returned by the faucet. Never printed.
 pub struct Seed(String);
 
@@ -863,5 +924,77 @@ mod tests {
             assert!(!e.to_string().is_empty());
         }
         assert_eq!(format!("{:?}", Seed("s".into())), "Seed(<hidden>)");
+    }
+
+    #[test]
+    fn ledger_error_structured_shape_and_secret_scrubbing() {
+        use crate::ToStructuredError as _;
+
+        let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
+        let cases = [
+            (
+                LedgerError::NotTestnet(NotTestnet { reported: Some(0) }),
+                "NOT_TESTNET",
+                false,
+                false,
+            ),
+            (
+                LedgerError::Transport(format!("Bearer tok_abc {ed_seed} down")),
+                "LEDGER_TRANSPORT",
+                true,
+                true,
+            ),
+            (
+                LedgerError::Rpc {
+                    method: "account_info".into(),
+                    error: "tooBusy".into(),
+                },
+                "LEDGER_RPC",
+                true,
+                true,
+            ),
+            (
+                LedgerError::Rpc {
+                    method: "account_info".into(),
+                    error: "actNotFound".into(),
+                },
+                "LEDGER_RPC",
+                true,
+                false,
+            ),
+            (
+                LedgerError::Reply(format!("OPENROUTER_API_KEY=sk-or-secret123 {secp_seed}")),
+                "LEDGER_BAD_REPLY",
+                true,
+                false,
+            ),
+            (
+                LedgerError::Build(format!("bad tx {ed_seed}")),
+                "LEDGER_TX_BUILD",
+                true,
+                false,
+            ),
+            (LedgerError::NotEd25519, "NOT_ED25519_SEED", false, false),
+        ];
+
+        for (err, expected_code, expect_cause, expect_retryable) in cases {
+            assert_eq!(err.code(), expected_code);
+            let se = err.to_structured_error();
+            assert_eq!(se.code, expected_code);
+            assert!(!se.hint.is_empty());
+            assert_eq!(se.cause.is_some(), expect_cause);
+            assert_eq!(se.retryable, expect_retryable);
+            let json = se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("json serialize: {e}"));
+            let formatted = se.format_text();
+            for text in [&json, &formatted, &se.message] {
+                assert!(!text.contains(ed_seed), "leaked ed25519 seed: {text}");
+                assert!(!text.contains(secp_seed), "leaked secp seed: {text}");
+                assert!(!text.contains("tok_abc"), "leaked bearer token: {text}");
+                assert!(!text.contains("sk-or-secret123"), "leaked api key: {text}");
+            }
+        }
     }
 }

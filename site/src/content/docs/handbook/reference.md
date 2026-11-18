@@ -42,17 +42,25 @@ league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <p
 | `--cap-gpu-secs <n>` | The total GPU-seconds cap for local, OpenAI-compatible seats |
 | `--allow-vm-host <host>` | One more local server address a local seat may use |
 | `--mock-dir <dir>` | Run against canned responses in `<dir>/responses.json` |
+| `--error-format <text|json>` | Error encoding on `stderr`: `text` (default) or compact `StructuredError` JSON |
+| `--log-level <level>` | Diagnostic verbosity: `silent`, `normal` (default), `verbose`, or `debug` (or `LEAGUE_LOG_LEVEL`) |
+| `-q`, `--silent` | Shorthand for `--log-level silent` |
+| `-v`, `--verbose` | Shorthand for `--log-level verbose` (timings and cap accounting) |
+| `--debug` | Shorthand for `--log-level debug` (redacted transport, hash, lock metadata, and panic backtraces) |
 | `-h`, `--help` | Print the help |
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Done; every seat's turn was clean |
-| 1 | An error: bad arguments, a bad seats file, a refused key placement, input or output |
-| 2 | Done, but at least one seat's turn was not clean |
-| 3 | A call was made but could not be recorded; its reservation is kept for the next run |
-| 4 | Another `turn` holds the game folder's lock, or the lock was changed mid-turn |
+| 0 | Done; every seat's turn was clean (`--help` and passing `prebook-check` also exit `0`) |
+| 1 | User or configuration error (bad arguments or `LEAGUE_LOG_LEVEL`, bad seats file, refused key placement, live/local gate refusal, missing `--wrapper` on turn 1, or incompatible setup) |
+| 2 | Runtime error (`TURN_LOCKED`, `UNRECORDED_CHARGE`, file I/O or missing `--game-dir`, corrupt log/setup, failed `prebook-check`, or a `turn` with `0` clean seats) |
+| 3 | Partial success (`turn` recorded cleanly on disk with at least `1` clean seat and at least `1` failed seat) |
+
+An uncaught panic on the main thread exits with Rust's standard code `101` (with secrets redacted on `stderr`, and a stack backtrace emitted only under `--debug`).
+
+**Breaking change (`B7`):** Exit `4` is retired, `TurnLocked` and `UnrecordedCharge` now return `2`, `RelayError::Io` / `CorruptLog` return `2`, `3` now means partial success, and default `--error-format text` `stderr` output changed from `error: <msg>` to `error: [CODE] <msg>; hint: <hint>`. Scripts that matched exit `3` to catch unrecorded spend or scraped `error: <msg>` text must check exit `2` and pass `--error-format json` (`code == "UNRECORDED_CHARGE"`).
 
 ## Project files
 

@@ -15,6 +15,7 @@ publish.workspace = true
 engine-internals = []
 
 [dependencies]
+league-error = { path = "../league-error" }
 getrandom = "0.3.4"
 hex = "0.4.3"
 hkdf = "0.12.4"

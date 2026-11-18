@@ -3,16 +3,17 @@
 //! Kept in the library crate so every CLI validation, redaction, and exit-code
 //! path is covered by both unit and integration tests.
 
-use crate::error::RelayError;
+use crate::error::{RelayError, ToStructuredError, scrub_structured_error_with_keys};
 use crate::relay::{
-    GameSetupRecord, MemoryMode, ResponseFormatConfig, Round, SeatOutcome, TurnConfig, TurnSummary,
-    run_turn, validate_day, validate_scratchpad_setup,
+    GameSetupRecord, MemoryMode, RelayDiagSink, ResponseFormatConfig, Round, SeatOutcome,
+    TurnConfig, TurnSummary, run_turn_with_diag, validate_day, validate_scratchpad_setup,
 };
 use crate::seats::{SeatBackend, SeatFile, validate_vm_host_allowance};
 use crate::secret::{
-    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
-    MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, redact_secrets,
-    redact_secrets_multi_with_limit, truncate_after_redaction,
+    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LEAGUE_LOG_LEVEL_ENV, LiveGate, LocalGate, LogLevel,
+    MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, collect_env_redaction_keys,
+    panic_hook_log_level, redact_secrets, redact_secrets_multi_with_limit,
+    set_panic_hook_log_level, truncate_after_redaction,
 };
 use crate::transport::{
     LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
@@ -25,6 +26,47 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+/// Exit code `0`: clean completion (`SHIP_GATE.md` `:27`).
+pub const EXIT_OK: i32 = 0;
+/// Exit code `1`: user, CLI, or configuration error (`SHIP_GATE.md` `:27`).
+pub const EXIT_USER_ERROR: i32 = 1;
+/// Exit code `2`: runtime error (`TURN_LOCKED`, `UNRECORDED_CHARGE`, I/O, corrupt log, or zero-clean turn).
+pub const EXIT_RUNTIME_ERROR: i32 = 2;
+/// Exit code `3`: partial success (turn recorded cleanly with `>= 1` clean and `>= 1` failed seat).
+pub const EXIT_PARTIAL_SUCCESS: i32 = 3;
+
+/// Output encoding selected by `--error-format` (`SHIP_GATE.md` `:26`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ErrorFormat {
+    /// Human-readable single-line redacted [`StructuredError`](crate::StructuredError) text (`default`).
+    #[default]
+    Text,
+    /// Compact machine-readable [`StructuredError`](crate::StructuredError) JSON on `stderr`.
+    Json,
+}
+
+impl ErrorFormat {
+    /// Parse `"text"` or `"json"` (case-insensitive).
+    pub fn parse(raw: &str) -> Result<Self, RelayError> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            _ => Err(RelayError::Usage(
+                "--error-format must be 'text' or 'json'".to_owned(),
+            )),
+        }
+    }
+
+    /// Lowercase CLI label (`"text"` or `"json"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Json => "json",
+        }
+    }
+}
+
 /// Usage text printed for `--help`.
 pub const USAGE_TEXT: &str = "\
 Usage:
@@ -32,18 +74,23 @@ Usage:
   league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <path>] [options]
 
 Options:
-  --wrapper <path>           System wrapper markdown sent as role='system' (required on turn 1)
-  --memory-mode <mode>       Prompt memory mode: snapshot (default), emc, or full
-  --response-schema <path>   Optional JSON Schema file sent in response_format (json_schema)
-  --scratchpad               Require persistent scratchpad notes (requires snapshot mode + schema)
-  --no-scratchpad            Disable persistent scratchpad notes for this run
-  --mixed-scratchpad-arm     Permit a deliberate arm mixing scratchpad and no-scratchpad seats
-  --cap-gpu-secs <n>         Cumulative GPU-seconds ceiling for local OpenAI-compatible seats
-  --allow-vm-host <host>     Additional VM-local server address permitted in local seat base_url
-  --live                     Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
-  --cap-credits <n>          Cumulative credit cap checked against relay/calls.jsonl before each call
-  --mock-dir <dir>           Run against canned offline responses in <dir>/responses.json
-  -h, --help                 Print this help message
+  --wrapper <path>                 System wrapper markdown sent as role='system' (required on turn 1)
+  --memory-mode <mode>             Prompt memory mode: snapshot (default), emc, or full
+  --response-schema <path>         Optional JSON Schema file sent in response_format (json_schema)
+  --scratchpad                     Require persistent scratchpad notes (requires snapshot mode + schema)
+  --no-scratchpad                  Disable persistent scratchpad notes for this run
+  --mixed-scratchpad-arm           Permit a deliberate arm mixing scratchpad and no-scratchpad seats
+  --cap-gpu-secs <n>               Cumulative GPU-seconds ceiling for local OpenAI-compatible seats
+  --allow-vm-host <host>           Additional VM-local server address permitted in local seat base_url
+  --live                           Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
+  --cap-credits <n>                Cumulative credit cap checked against relay/calls.jsonl before each call
+  --mock-dir <dir>                 Run against canned offline responses in <dir>/responses.json
+  --error-format <text|json>       Error output encoding on stderr: text (default) or json
+  --log-level <level>              Log verbosity: silent, normal (default), verbose, or debug (or LEAGUE_LOG_LEVEL)
+  -q, --silent                     Shorthand for --log-level silent
+  -v, --verbose                    Shorthand for --log-level verbose (timings and cap accounting)
+  --debug                          Shorthand for --log-level debug (redacted transport, hash, lock metadata, backtrace)
+  -h, --help                       Print this help message
 ";
 
 /// Parsed command-line request.
@@ -75,6 +122,10 @@ pub struct PrebookCheckArgs {
     pub mixed_scratchpad_arm: bool,
     /// `--allow-vm-host <host>`
     pub allowed_vm_hosts: Vec<String>,
+    /// `--error-format <text|json>`
+    pub error_format: ErrorFormat,
+    /// Explicit CLI `--log-level` / `-q` / `-v` / `--debug` override, if passed.
+    pub log_level: Option<LogLevel>,
 }
 
 /// Parsed arguments for `league-relay turn`.
@@ -108,6 +159,10 @@ pub struct TurnArgs {
     pub allowed_vm_hosts: Vec<String>,
     /// `--mock-dir <dir>`
     pub mock_dir: Option<PathBuf>,
+    /// `--error-format <text|json>`
+    pub error_format: ErrorFormat,
+    /// Explicit CLI `--log-level` / `-q` / `-v` / `--debug` override, if passed.
+    pub log_level: Option<LogLevel>,
 }
 
 /// Parse CLI arguments (excluding `argv[0]`), never echoing flag values on unknown/key flags.
@@ -117,6 +172,157 @@ where
     S: AsRef<str>,
 {
     parse_args_with_key(args, None)
+}
+
+fn set_log_level_checked(slot: &mut Option<LogLevel>, next: LogLevel) -> Result<(), RelayError> {
+    if let Some(prev) = *slot
+        && prev != next
+    {
+        return Err(RelayError::Usage(format!(
+            "conflicting log-level flags ('{}' and '{}')",
+            prev.as_str(),
+            next.as_str()
+        )));
+    }
+    *slot = Some(next);
+    Ok(())
+}
+
+fn try_consume_hygiene_flag(
+    flag: &str,
+    inline_val: Option<&str>,
+    tokens: &[String],
+    idx: usize,
+    error_format: &mut ErrorFormat,
+    seen_error_format: &mut Option<ErrorFormat>,
+    log_level: &mut Option<LogLevel>,
+) -> Result<Option<usize>, RelayError> {
+    match flag {
+        "--error-format" => {
+            let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+            let parsed = ErrorFormat::parse(val)?;
+            if let Some(prev) = *seen_error_format
+                && prev != parsed
+            {
+                return Err(RelayError::Usage(format!(
+                    "conflicting --error-format values ('{}' and '{}')",
+                    prev.as_str(),
+                    parsed.as_str()
+                )));
+            }
+            *seen_error_format = Some(parsed);
+            *error_format = parsed;
+            Ok(Some(step))
+        }
+        "--log-level" => {
+            let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+            let parsed = LogLevel::parse(val)?;
+            set_log_level_checked(log_level, parsed)?;
+            Ok(Some(step))
+        }
+        "-q" | "--silent" => {
+            if inline_val.is_some() {
+                return Err(RelayError::Usage(format!("{flag} takes no value")));
+            }
+            set_log_level_checked(log_level, LogLevel::Silent)?;
+            Ok(Some(1))
+        }
+        "-v" | "--verbose" => {
+            if inline_val.is_some() {
+                return Err(RelayError::Usage(format!("{flag} takes no value")));
+            }
+            set_log_level_checked(log_level, LogLevel::Verbose)?;
+            Ok(Some(1))
+        }
+        "--debug" => {
+            if inline_val.is_some() {
+                return Err(RelayError::Usage("--debug takes no value".to_owned()));
+            }
+            set_log_level_checked(log_level, LogLevel::Debug)?;
+            Ok(Some(1))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Best-effort scan of raw CLI arguments for `--error-format`, used when full parsing fails.
+#[must_use]
+pub fn infer_error_format_best_effort<I, S>(args: I) -> ErrorFormat
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let tokens: Vec<String> = args.into_iter().map(|s| s.as_ref().to_owned()).collect();
+    let mut format = ErrorFormat::default();
+    let mut idx = 0;
+    while idx < tokens.len() {
+        let arg = &tokens[idx];
+        if let Some(val) = arg.strip_prefix("--error-format=") {
+            if let Ok(parsed) = ErrorFormat::parse(val) {
+                format = parsed;
+            }
+            idx += 1;
+        } else if arg == "--error-format" {
+            if let Some(next) = tokens.get(idx + 1)
+                && let Ok(parsed) = ErrorFormat::parse(next)
+            {
+                format = parsed;
+            }
+            idx += 2;
+        } else {
+            idx += 1;
+        }
+    }
+    format
+}
+
+/// Best-effort scan of raw CLI arguments and `LEAGUE_LOG_LEVEL` for early panic-hook setup.
+pub fn infer_log_level_best_effort<I, S, E>(args: I, mut env_reader: E) -> LogLevel
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    E: FnMut(&str) -> Option<String>,
+{
+    let tokens: Vec<String> = args.into_iter().map(|s| s.as_ref().to_owned()).collect();
+    let mut cli_level: Option<LogLevel> = None;
+    let mut idx = 0;
+    while idx < tokens.len() {
+        let arg = &tokens[idx];
+        if let Some(val) = arg.strip_prefix("--log-level=") {
+            if let Ok(parsed) = LogLevel::parse(val) {
+                cli_level = Some(parsed);
+            }
+            idx += 1;
+        } else if arg == "--log-level" {
+            if let Some(next) = tokens.get(idx + 1)
+                && let Ok(parsed) = LogLevel::parse(next)
+            {
+                cli_level = Some(parsed);
+            }
+            idx += 2;
+        } else if matches!(arg.as_str(), "-q" | "--silent") {
+            cli_level = Some(LogLevel::Silent);
+            idx += 1;
+        } else if matches!(arg.as_str(), "-v" | "--verbose") {
+            cli_level = Some(LogLevel::Verbose);
+            idx += 1;
+        } else if arg == "--debug" {
+            cli_level = Some(LogLevel::Debug);
+            idx += 1;
+        } else {
+            idx += 1;
+        }
+    }
+    if let Some(lvl) = cli_level {
+        return lvl;
+    }
+    if let Some(raw_env) = read_named_env(&mut env_reader, LEAGUE_LOG_LEVEL_ENV)
+        && !raw_env.trim().is_empty()
+        && let Ok(parsed) = LogLevel::parse(&raw_env)
+    {
+        return parsed;
+    }
+    LogLevel::Normal
 }
 
 /// Parse CLI arguments with an optional [`ApiKey`] so any shortened flag name is redacted before truncation.
@@ -134,15 +340,68 @@ where
             "missing subcommand (expected 'turn' or '--help')".to_owned(),
         ));
     }
-    if tokens.len() == 1 && matches!(tokens[0].as_str(), "-h" | "--help" | "help") {
+
+    let mut error_format = ErrorFormat::default();
+    let mut seen_error_format: Option<ErrorFormat> = None;
+    let mut log_level: Option<LogLevel> = None;
+
+    let mut pos = 0;
+    while pos < tokens.len() {
+        let raw_arg = &tokens[pos];
+        if matches!(raw_arg.as_str(), "-h" | "--help") {
+            return Ok(CliCommand::Help);
+        }
+        if !raw_arg.starts_with('-') {
+            break;
+        }
+        let (flag, inline_val) = match raw_arg.split_once('=') {
+            Some((f, v)) => (f, Some(v)),
+            None => (raw_arg.as_str(), None),
+        };
+        if is_forbidden_key_flag(flag) || looks_like_cli_secret(raw_arg) {
+            return Err(RelayError::SecretInForbiddenPlace(
+                "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
+                    .to_owned(),
+            ));
+        }
+        if let Some(step) = try_consume_hygiene_flag(
+            flag,
+            inline_val,
+            &tokens,
+            pos,
+            &mut error_format,
+            &mut seen_error_format,
+            &mut log_level,
+        )? {
+            pos += step;
+            continue;
+        }
+        return Err(RelayError::Usage(format!(
+            "unknown option '{}' before subcommand (expected 'turn', 'prebook-check', or '--help')",
+            sanitize_flag_name(flag, redaction_key)
+        )));
+    }
+
+    if pos >= tokens.len() {
+        return Err(RelayError::Usage(
+            "missing subcommand (expected 'turn', 'prebook-check', or '--help')".to_owned(),
+        ));
+    }
+    if pos + 1 == tokens.len() && matches!(tokens[pos].as_str(), "-h" | "--help" | "help") {
         return Ok(CliCommand::Help);
     }
-    if tokens[0] == "prebook-check" {
-        return parse_prebook_check_args(&tokens, redaction_key);
+    if tokens[pos] == "prebook-check" {
+        return parse_prebook_check_args(
+            &tokens[pos..],
+            redaction_key,
+            error_format,
+            seen_error_format,
+            log_level,
+        );
     }
-    if tokens[0] != "turn" {
-        let first_flag = tokens[0].split('=').next().unwrap_or(&tokens[0]);
-        if is_forbidden_key_flag(first_flag) || looks_like_cli_secret(&tokens[0]) {
+    if tokens[pos] != "turn" {
+        let first_flag = tokens[pos].split('=').next().unwrap_or(&tokens[pos]);
+        if is_forbidden_key_flag(first_flag) || looks_like_cli_secret(&tokens[pos]) {
             return Err(RelayError::SecretInForbiddenPlace(
                 "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
                     .to_owned(),
@@ -153,6 +412,7 @@ where
         ));
     }
 
+    let sub_tokens = &tokens[pos..];
     let mut game_dir: Option<PathBuf> = None;
     let mut day: Option<String> = None;
     let mut round: Option<Round> = None;
@@ -169,8 +429,8 @@ where
     let mut mock_dir: Option<PathBuf> = None;
 
     let mut idx = 1;
-    while idx < tokens.len() {
-        let raw_arg = &tokens[idx];
+    while idx < sub_tokens.len() {
+        let raw_arg = &sub_tokens[idx];
         if matches!(raw_arg.as_str(), "-h" | "--help") {
             return Ok(CliCommand::Help);
         }
@@ -187,6 +447,19 @@ where
             ));
         }
 
+        if let Some(step) = try_consume_hygiene_flag(
+            flag,
+            inline_val,
+            sub_tokens,
+            idx,
+            &mut error_format,
+            &mut seen_error_format,
+            &mut log_level,
+        )? {
+            idx += step;
+            continue;
+        }
+
         match flag {
             "--live" => {
                 if inline_val.is_some() {
@@ -196,38 +469,38 @@ where
                 idx += 1;
             }
             "--game-dir" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 game_dir = Some(PathBuf::from(val));
                 idx += step;
             }
             "--day" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 validate_day(val)?;
                 day = Some(val.to_owned());
                 idx += step;
             }
             "--round" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 round = Some(Round::parse(val)?);
                 idx += step;
             }
             "--seats" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 seats_path = Some(PathBuf::from(val));
                 idx += step;
             }
             "--wrapper" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 wrapper_path = Some(PathBuf::from(val));
                 idx += step;
             }
             "--memory-mode" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 memory_mode = MemoryMode::parse(val)?;
                 idx += step;
             }
             "--response-schema" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 response_schema_path = Some(PathBuf::from(val));
                 idx += step;
             }
@@ -274,7 +547,7 @@ where
                 idx += 1;
             }
             "--cap-credits" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 let parsed: f64 = val
                     .parse::<f64>()
                     .ok()
@@ -288,7 +561,7 @@ where
                 idx += step;
             }
             "--cap-gpu-secs" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 let parsed: f64 = val
                     .parse::<f64>()
                     .ok()
@@ -302,7 +575,7 @@ where
                 idx += step;
             }
             "--allow-vm-host" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 let normalized = validate_vm_host_allowance(val)?;
                 if !allowed_vm_hosts.contains(&normalized) {
                     allowed_vm_hosts.push(normalized);
@@ -310,7 +583,7 @@ where
                 idx += step;
             }
             "--mock-dir" => {
-                let (val, step) = take_flag_value(flag, inline_val, &tokens, idx)?;
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
                 mock_dir = Some(PathBuf::from(val));
                 idx += step;
             }
@@ -358,6 +631,8 @@ where
         cap_gpu_secs,
         allowed_vm_hosts,
         mock_dir,
+        error_format,
+        log_level,
     }))
 }
 
@@ -427,14 +702,54 @@ impl Transport for NoopManualTransport {
     }
 }
 
+struct PanicHookLevelGuard {
+    previous: LogLevel,
+}
+
+impl Drop for PanicHookLevelGuard {
+    fn drop(&mut self) {
+        set_panic_hook_log_level(self.previous);
+    }
+}
+
+fn read_named_env<E>(env_reader: &mut E, name: &str) -> Option<String>
+where
+    E: FnMut(&str) -> Option<String>,
+{
+    let probe = env_reader("__LEAGUE_RELAY_UNSET_PROBE__");
+    let value = env_reader(name)?;
+    if probe.as_deref() == Some(value.as_str()) {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn resolve_log_level<E>(
+    cli_override: Option<LogLevel>,
+    env_reader: &mut E,
+) -> Result<LogLevel, RelayError>
+where
+    E: FnMut(&str) -> Option<String>,
+{
+    if let Some(level) = cli_override {
+        return Ok(level);
+    }
+    if let Some(raw_env) = read_named_env(env_reader, LEAGUE_LOG_LEVEL_ENV)
+        && !raw_env.trim().is_empty()
+    {
+        return LogLevel::parse(&raw_env);
+    }
+    Ok(LogLevel::Normal)
+}
+
 /// Run CLI command with an injected environment lookup and output streams.
 ///
-/// Returns `0` on clean completion, `2` if any seat failed to deliver a reply,
-/// `3` if a sent call's post-call line could not be written to either `calls.jsonl`
-/// or `calls.pending.jsonl` (its pre-call reservation stays held in `calls.reserved.jsonl`),
-/// `4` if `<game-dir>/relay/turn.lock` is held by
-/// another run or deleted/replaced mid-turn, or `1` on invalid CLI,
-/// configuration, live-gate, or file I/O refusal.
+/// Unified exit codes (`SHIP_GATE.md` `:27`):
+/// - `0` ([`EXIT_OK`]): clean completion, `--help`, or passing `prebook-check`.
+/// - `1` ([`EXIT_USER_ERROR`]): invalid CLI arguments, forbidden secret placement, config/setup, or live-gate refusal.
+/// - `2` ([`EXIT_RUNTIME_ERROR`]): runtime failure (`TURN_LOCKED`, `UNRECORDED_CHARGE`, I/O, corrupt log, failed `prebook-check`, or zero-clean `turn`).
+/// - `3` ([`EXIT_PARTIAL_SUCCESS`]): `turn` recorded cleanly with `>= 1` clean seat and `>= 1` failed seat.
 pub fn execute_cli<I, S, E>(
     args: I,
     mut env_reader: E,
@@ -446,50 +761,100 @@ where
     S: AsRef<str>,
     E: FnMut(&str) -> Option<String>,
 {
+    let tokens: Vec<String> = args.into_iter().map(|s| s.as_ref().to_owned()).collect();
+    let mut error_format = infer_error_format_best_effort(&tokens);
+    let mut resolved_log_level = infer_log_level_best_effort(&tokens, |k| env_reader(k));
+
     let env_key = ApiKey::from_env_reader(|k| env_reader(k));
     let mut redaction_keys: Vec<ApiKey> = Vec::new();
     if let Ok(ref primary) = env_key {
         redaction_keys.push(primary.clone());
     }
-    let mut any_forbidden_local_key = env_key.is_ok();
-    for env_name in FORBIDDEN_LOCAL_KEY_ENVS {
-        if *env_name == OPENROUTER_API_KEY_ENV {
-            continue;
-        }
-        if let Some(val) = env_reader(env_name)
-            && !val.trim().is_empty()
+    for extra in collect_env_redaction_keys(|k| env_reader(k)) {
+        if !redaction_keys
+            .iter()
+            .any(|existing| existing.secret_str() == extra.secret_str())
         {
-            any_forbidden_local_key = true;
-            if let Ok(extra) = ApiKey::from_env_reader(|_| Some(val)) {
-                redaction_keys.push(extra);
-            }
+            redaction_keys.push(extra);
         }
     }
-    let redact_ref = redaction_keys.first();
+    let any_forbidden_local_key = env_key.is_ok()
+        || FORBIDDEN_LOCAL_KEY_ENVS.iter().any(|env_name| {
+            *env_name != OPENROUTER_API_KEY_ENV
+                && env_reader(env_name).is_some_and(|val| !val.trim().is_empty())
+        });
 
-    match run_cli_inner(args, &env_key, any_forbidden_local_key, redact_ref, stdout) {
+    let _panic_level_guard = PanicHookLevelGuard {
+        previous: panic_hook_log_level(),
+    };
+    set_panic_hook_log_level(resolved_log_level);
+
+    let mut diag_lines: Vec<String> = Vec::new();
+    let outcome = run_cli_inner(
+        &tokens,
+        &env_key,
+        any_forbidden_local_key,
+        &redaction_keys,
+        &mut env_reader,
+        &mut error_format,
+        &mut resolved_log_level,
+        &mut diag_lines,
+        stdout,
+    );
+
+    for line in &diag_lines {
+        let _ = writeln!(stderr, "{line}");
+    }
+
+    match outcome {
         Ok(CliRunOutcome::Turn(summary)) => {
-            let rendered = redact_secrets_multi_with_limit(
-                &summary.format_paths_and_hashes(),
-                &redaction_keys,
-                MAX_UNRECORDED_CHARGE_SCAN_BYTES,
-            );
-            let _ = write!(stdout, "{rendered}");
-            if summary.all_clean() { 0 } else { 2 }
+            if resolved_log_level != LogLevel::Silent {
+                let rendered = redact_secrets_multi_with_limit(
+                    &summary.format_paths_and_hashes(),
+                    &redaction_keys,
+                    MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+                );
+                let _ = write!(stdout, "{rendered}");
+            }
+            summary.exit_code()
         }
-        Ok(CliRunOutcome::PrebookOk | CliRunOutcome::Help) => 0,
-        Ok(CliRunOutcome::PrebookSeatFailed) => 2,
+        Ok(CliRunOutcome::PrebookOk | CliRunOutcome::Help) => EXIT_OK,
+        Ok(CliRunOutcome::PrebookSeatFailed) => EXIT_RUNTIME_ERROR,
         Err(e) => {
-            let (exit_code, scan_limit) = match &e {
-                RelayError::UnrecordedCharge { .. } => (3, MAX_UNRECORDED_CHARGE_SCAN_BYTES),
-                RelayError::TurnLocked { .. } => (4, MAX_REDACTION_SCAN_BYTES),
-                _ => (1, MAX_REDACTION_SCAN_BYTES),
-            };
-            let _ = writeln!(
-                stderr,
-                "error: {}",
-                redact_secrets_multi_with_limit(&e.to_string(), &redaction_keys, scan_limit)
+            let exit_code = e.exit_code();
+            let scan_limit = e.redaction_scan_limit();
+            let structured = scrub_structured_error_with_keys(
+                &e.to_structured_error(),
+                &redaction_keys,
+                scan_limit,
             );
+            match error_format {
+                ErrorFormat::Text => {
+                    let formatted = redact_secrets_multi_with_limit(
+                        &structured.format_text(),
+                        &redaction_keys,
+                        MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+                    );
+                    let _ = writeln!(stderr, "error: {formatted}");
+                }
+                ErrorFormat::Json => match structured.to_json_string() {
+                    Ok(json) => {
+                        let redacted = redact_secrets_multi_with_limit(
+                            &json,
+                            &redaction_keys,
+                            MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+                        );
+                        let _ = writeln!(stderr, "{redacted}");
+                    }
+                    Err(_) => {
+                        let _ = writeln!(
+                            stderr,
+                            "{{\"code\":{},\"message\":\"internal error serialization failure\",\"hint\":\"report this bug\",\"retryable\":false}}",
+                            serde_json::Value::String(structured.code.to_owned())
+                        );
+                    }
+                },
+            }
             exit_code
         }
     }
@@ -505,6 +870,9 @@ enum CliRunOutcome {
 fn parse_prebook_check_args(
     tokens: &[String],
     redaction_key: Option<&ApiKey>,
+    mut error_format: ErrorFormat,
+    mut seen_error_format: Option<ErrorFormat>,
+    mut log_level: Option<LogLevel>,
 ) -> Result<CliCommand, RelayError> {
     let mut seats_path: Option<PathBuf> = None;
     let mut wrapper_path: Option<PathBuf> = None;
@@ -529,6 +897,18 @@ fn parse_prebook_check_args(
                 "API key must be read from OPENROUTER_API_KEY only, never passed as an argument"
                     .to_owned(),
             ));
+        }
+        if let Some(step) = try_consume_hygiene_flag(
+            flag,
+            inline_val,
+            tokens,
+            idx,
+            &mut error_format,
+            &mut seen_error_format,
+            &mut log_level,
+        )? {
+            idx += step;
+            continue;
         }
         match flag {
             "--seats" => {
@@ -631,6 +1011,8 @@ fn parse_prebook_check_args(
         scratchpad_requested,
         mixed_scratchpad_arm,
         allowed_vm_hosts,
+        error_format,
+        log_level,
     }))
 }
 
@@ -852,12 +1234,17 @@ fn infer_prebook_vm_hosts(seats_path: &std::path::Path) -> Vec<String> {
     hosts
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_prebook_check(
     args: PrebookCheckArgs,
     any_forbidden_local_key: bool,
-    redact_ref: Option<&ApiKey>,
+    redaction_keys: &[ApiKey],
     stdout: &mut dyn Write,
+    log_level: LogLevel,
+    diag_sink: &RelayDiagSink,
+    diag_lines: &mut Vec<String>,
 ) -> Result<CliRunOutcome, RelayError> {
+    let redact_ref = redaction_keys.first();
     if any_forbidden_local_key {
         return Err(RelayError::SecretInForbiddenPlace(
             "prebook-check refuses API keys; unset OPENROUTER_API_KEY, OPENAI_API_KEY, VLLM_API_KEY, and LOCAL_API_KEY".to_owned(),
@@ -954,16 +1341,20 @@ fn run_prebook_check(
     .with_response_format(response_format)
     .with_scratchpad(args.scratchpad_requested)
     .with_mixed_scratchpad_arm(seats.mixed_scratchpad_arm || args.mixed_scratchpad_arm)
-    .with_allowed_vm_hosts(effective_vm_hosts);
+    .with_allowed_vm_hosts(effective_vm_hosts)
+    .with_log_level(log_level)
+    .with_extra_redaction_keys(redaction_keys.to_vec());
 
     validate_scratchpad_setup(&cfg)?;
 
-    let summary = if seats.has_local_seat() || seats.has_openrouter_seat() {
+    let turn_res = if seats.has_local_seat() || seats.has_openrouter_seat() {
         let mock_transport = MockDirTransport::load_with_key(&mock_dir, redact_ref)?;
-        run_turn(&cfg, &mock_transport, redact_ref)?
+        run_turn_with_diag(&cfg, &mock_transport, redact_ref, Some(diag_sink))
     } else {
-        run_turn(&cfg, &NoopManualTransport, redact_ref)?
+        run_turn_with_diag(&cfg, &NoopManualTransport, redact_ref, Some(diag_sink))
     };
+    diag_lines.extend(diag_sink.drain_redacted(redaction_keys));
+    let summary = turn_res?;
 
     let setup_raw = fs::read_to_string(game_dir.join("relay/setup.json")).map_err(|e| {
         RelayError::Io(redact_secrets(
@@ -978,74 +1369,104 @@ fn run_prebook_check(
         ))
     })?;
 
-    for (seat_spec, report) in seats.seats.iter().zip(summary.reports.iter()) {
-        let backend_label = match seat_spec.backend {
-            SeatBackend::Local(_) => "local",
-            SeatBackend::Openrouter(_) => "openrouter",
-            SeatBackend::File { .. } => "file",
-        };
-        match &report.outcome {
-            SeatOutcome::Delivered { attempts, .. } => {
-                let _ = writeln!(
-                    stdout,
-                    "prebook-check: seat={} backend={backend_label} outcome=OK attempts={attempts}",
-                    report.guild
-                );
-            }
-            SeatOutcome::RelayedByHand => {
-                let _ = writeln!(
-                    stdout,
-                    "prebook-check: seat={} backend={backend_label} outcome=FILE_MANUAL",
-                    report.guild
-                );
-            }
-            _ => {
-                let _ = writeln!(
-                    stdout,
-                    "prebook-check: seat={} backend={backend_label} outcome=FAILED",
-                    report.guild
-                );
+    if log_level != LogLevel::Silent {
+        for (seat_spec, report) in seats.seats.iter().zip(summary.reports.iter()) {
+            let backend_label = match seat_spec.backend {
+                SeatBackend::Local(_) => "local",
+                SeatBackend::Openrouter(_) => "openrouter",
+                SeatBackend::File { .. } => "file",
+            };
+            match &report.outcome {
+                SeatOutcome::Delivered { attempts, .. } => {
+                    let _ = writeln!(
+                        stdout,
+                        "prebook-check: seat={} backend={backend_label} outcome=OK attempts={attempts}",
+                        report.guild
+                    );
+                }
+                SeatOutcome::RelayedByHand => {
+                    let _ = writeln!(
+                        stdout,
+                        "prebook-check: seat={} backend={backend_label} outcome=FILE_MANUAL",
+                        report.guild
+                    );
+                }
+                _ => {
+                    let _ = writeln!(
+                        stdout,
+                        "prebook-check: seat={} backend={backend_label} outcome=FAILED",
+                        report.guild
+                    );
+                }
             }
         }
     }
 
     if summary.all_clean() {
-        let _ = writeln!(
-            stdout,
-            "prebook-check: OK seats={} wording_arm={} memory_mode={} scratchpad=\"{}\" non_pinned_strings={}",
-            seats.seats.len(),
-            setup.wording_arm,
-            setup.memory_mode,
-            setup.scratchpad,
-            setup.non_pinned_model_facing_strings.len()
-        );
+        if log_level != LogLevel::Silent {
+            let _ = writeln!(
+                stdout,
+                "prebook-check: OK seats={} wording_arm={} memory_mode={} scratchpad=\"{}\" non_pinned_strings={}",
+                seats.seats.len(),
+                setup.wording_arm,
+                setup.memory_mode,
+                setup.scratchpad,
+                setup.non_pinned_model_facing_strings.len()
+            );
+        }
         Ok(CliRunOutcome::PrebookOk)
     } else {
         Ok(CliRunOutcome::PrebookSeatFailed)
     }
 }
 
-fn run_cli_inner<I, S>(
+#[allow(clippy::too_many_arguments)]
+fn run_cli_inner<I, S, E>(
     args: I,
     env_key: &Result<ApiKey, RelayError>,
     any_forbidden_local_key: bool,
-    redact_ref: Option<&ApiKey>,
+    redaction_keys: &[ApiKey],
+    env_reader: &mut E,
+    resolved_error_format: &mut ErrorFormat,
+    resolved_log_level: &mut LogLevel,
+    diag_lines: &mut Vec<String>,
     stdout: &mut dyn Write,
 ) -> Result<CliRunOutcome, RelayError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
+    E: FnMut(&str) -> Option<String>,
 {
+    let redact_ref = redaction_keys.first();
     let turn_args = match parse_args_with_key(args, redact_ref)? {
         CliCommand::Help => {
             let _ = write!(stdout, "{USAGE_TEXT}");
             return Ok(CliRunOutcome::Help);
         }
         CliCommand::PrebookCheck(p) => {
-            return run_prebook_check(p, any_forbidden_local_key, redact_ref, stdout);
+            *resolved_error_format = p.error_format;
+            let effective_log_level = resolve_log_level(p.log_level, env_reader)?;
+            *resolved_log_level = effective_log_level;
+            set_panic_hook_log_level(effective_log_level);
+            let diag_sink = RelayDiagSink::new(effective_log_level);
+            return run_prebook_check(
+                p,
+                any_forbidden_local_key,
+                redaction_keys,
+                stdout,
+                effective_log_level,
+                &diag_sink,
+                diag_lines,
+            );
         }
         CliCommand::Turn(t) => t,
     };
+
+    *resolved_error_format = turn_args.error_format;
+    let effective_log_level = resolve_log_level(turn_args.log_level, env_reader)?;
+    *resolved_log_level = effective_log_level;
+    set_panic_hook_log_level(effective_log_level);
+    let diag_sink = RelayDiagSink::new(effective_log_level);
 
     let seats = SeatFile::load_with_allowed_hosts(
         &turn_args.seats_path,
@@ -1078,15 +1499,17 @@ where
     .with_response_format(response_format)
     .with_scratchpad(turn_args.scratchpad_requested)
     .with_mixed_scratchpad_arm(turn_args.mixed_scratchpad_arm)
-    .with_allowed_vm_hosts(turn_args.allowed_vm_hosts.clone());
+    .with_allowed_vm_hosts(turn_args.allowed_vm_hosts.clone())
+    .with_log_level(effective_log_level)
+    .with_extra_redaction_keys(redaction_keys.to_vec());
 
     validate_scratchpad_setup(&base_cfg)?;
 
-    let summary = if let Some(mock_dir) = &turn_args.mock_dir {
+    let turn_res = if let Some(mock_dir) = &turn_args.mock_dir {
         let mock_transport = MockDirTransport::load_with_key(mock_dir, redact_ref)?;
         let mut cfg = base_cfg;
         cfg.live = false;
-        run_turn(&cfg, &mock_transport, redact_ref)?
+        run_turn_with_diag(&cfg, &mock_transport, redact_ref, Some(&diag_sink))
     } else if seats.has_local_seat() {
         let local_gate = LocalGate::acquire(
             turn_args.live,
@@ -1096,16 +1519,22 @@ where
         )?;
         let cfg = base_cfg.with_cap_gpu_secs(Some(local_gate.cap_gpu_secs()));
         let local_transport = LocalOpenAiTransport::new(local_gate);
-        run_turn(&cfg, &local_transport, None)?
+        run_turn_with_diag(&cfg, &local_transport, None, Some(&diag_sink))
     } else if turn_args.live || seats.has_openrouter_seat() {
         let gate = LiveGate::acquire(turn_args.live, turn_args.cap_credits, env_key.clone())?;
         let mut cfg = base_cfg;
         cfg.live = true;
         cfg.cap_credits = Some(gate.cap_credits());
         let live_transport = UreqTransport::new(gate);
-        run_turn(&cfg, &live_transport, redact_ref)?
+        run_turn_with_diag(&cfg, &live_transport, redact_ref, Some(&diag_sink))
     } else {
-        run_turn(&base_cfg, &NoopManualTransport, redact_ref)?
+        run_turn_with_diag(
+            &base_cfg,
+            &NoopManualTransport,
+            redact_ref,
+            Some(&diag_sink),
+        )
     };
-    Ok(CliRunOutcome::Turn(summary))
+    diag_lines.extend(diag_sink.drain_redacted(redaction_keys));
+    Ok(CliRunOutcome::Turn(turn_res?))
 }

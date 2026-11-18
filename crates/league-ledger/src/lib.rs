@@ -18,6 +18,7 @@ pub use escrow::{
     ESCROW_FINISH_DEFAULT_FEE_DROPS, ESCROW_FINISH_FULFILLMENT_BYTES, condition_hex,
     escrow_condition, escrow_finish_min_fee_drops, fulfillment_hex,
 };
+pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 
 pub(crate) fn upper_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
@@ -59,6 +60,25 @@ impl fmt::Display for NotTestnet {
 }
 
 impl std::error::Error for NotTestnet {}
+
+impl NotTestnet {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        "NOT_TESTNET"
+    }
+}
+
+impl ToStructuredError for NotTestnet {
+    fn to_structured_error(&self) -> StructuredError {
+        StructuredError::new(
+            self.code(),
+            self.to_string(),
+            "connect only to an XRPL Testnet node reporting network_id 1",
+            false,
+        )
+    }
+}
 
 /// Accept a server only if it reports the Testnet's network id.
 ///
@@ -137,5 +157,40 @@ mod tests {
         for url in [TESTNET_JSON_RPC, TESTNET_WEBSOCKET, TESTNET_FAUCET] {
             assert!(url.contains(".altnet.rippletest.net"), "{url}");
         }
+    }
+
+    #[test]
+    fn not_testnet_implements_structured_error_and_scrubs_secrets() {
+        assert_eq!(
+            std::any::TypeId::of::<StructuredError>(),
+            std::any::TypeId::of::<league_error::StructuredError>()
+        );
+        for err in [
+            NotTestnet { reported: Some(0) },
+            NotTestnet { reported: None },
+        ] {
+            let se = err.to_structured_error();
+            assert_eq!(se.code, "NOT_TESTNET");
+            assert!(!se.retryable);
+            assert!(se.cause.is_none());
+            assert!(se.hint.contains("network_id 1"));
+            let json = se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("json serialize: {e}"));
+            assert!(json.contains("\"code\":\"NOT_TESTNET\""));
+            assert!(!json.contains("\"cause\""));
+        }
+
+        let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
+        let scrubbed = scrub_secret_text(&format!(
+            "Bearer tok123 sk-or-v1-abc OPENROUTER_API_KEY=secretval {ed_seed} {secp_seed}"
+        ));
+        assert!(!scrubbed.contains("tok123"));
+        assert!(!scrubbed.contains("sk-or-v1-abc"));
+        assert!(!scrubbed.contains("secretval"));
+        assert!(!scrubbed.contains(ed_seed));
+        assert!(!scrubbed.contains(secp_seed));
+        assert_eq!(scrub_secret_text(&scrubbed), scrubbed);
     }
 }

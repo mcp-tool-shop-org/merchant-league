@@ -1,206 +1,10 @@
 //! Structured operator/caller error representation (`SHIP_GATE.md` `:26`) with built-in secret
-//! scrubbing before text or JSON emission.
+//! scrubbing before text or JSON emission, re-exported from the `league-error` leaf crate.
 
-use std::fmt;
-
-use serde::Serialize;
+pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 
 use crate::replay::ReplayLayoutSeedError;
 use crate::types::EngineError;
-
-const REDACTED: &str = "[REDACTED]";
-
-const SECRET_ENV_PREFIXES: [&str; 5] = [
-    "OPENROUTER_API_KEY=",
-    "ANTHROPIC_API_KEY=",
-    "OPENAI_API_KEY=",
-    "GEMINI_API_KEY=",
-    "LEAGUE_API_KEY=",
-];
-
-const fn is_base58_char(b: u8) -> bool {
-    matches!(
-        b,
-        b'1'..=b'9' | b'A'..=b'H' | b'J'..=b'N' | b'P'..=b'Z' | b'a'..=b'k' | b'm'..=b'z'
-    )
-}
-
-const fn is_token_stopper(b: u8) -> bool {
-    b.is_ascii_whitespace() || matches!(b, b',' | b';' | b')' | b']' | b'}' | b'"' | b'\'')
-}
-
-/// Redacts bearer tokens, API keys, known secret env-var assignments, and XRPL seeds from
-/// diagnostic or error text before printing or serializing.
-#[must_use]
-pub fn scrub_secret_text(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
-
-    while i < bytes.len() {
-        // 1. Case-insensitive `Bearer <token>` (only when `bearer ` starts at a word boundary).
-        let at_boundary = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if at_boundary && i + 7 <= bytes.len() && bytes[i..i + 7].eq_ignore_ascii_case(b"bearer ") {
-            out.push_str(&input[i..i + 7]);
-            i += 7;
-            while i < bytes.len() && bytes[i] == b' ' {
-                out.push(' ');
-                i += 1;
-            }
-            let start = i;
-            while i < bytes.len() && !is_token_stopper(bytes[i]) {
-                i += 1;
-            }
-            if i > start {
-                out.push_str(REDACTED);
-            }
-            continue;
-        }
-
-        // 2. Known secret env-var assignments (`KEY=<value>`).
-        let mut matched_env = None;
-        if at_boundary {
-            for prefix in SECRET_ENV_PREFIXES {
-                if input[i..].starts_with(prefix) {
-                    matched_env = Some(prefix);
-                    break;
-                }
-            }
-        }
-        if let Some(prefix) = matched_env {
-            out.push_str(prefix);
-            i += prefix.len();
-            let start = i;
-            while i < bytes.len() && !is_token_stopper(bytes[i]) {
-                i += 1;
-            }
-            if i > start {
-                out.push_str(REDACTED);
-            }
-            continue;
-        }
-
-        // 3. OpenRouter API key tokens (`sk-or-...`).
-        if at_boundary && input[i..].starts_with("sk-or-") {
-            let mut end = i + 6;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
-            {
-                end += 1;
-            }
-            if end > i + 6 {
-                out.push_str(REDACTED);
-                i = end;
-                continue;
-            }
-        }
-
-        // 4. XRPL base58 family seeds (`sEd...` / `sn...` of 22+ base58 characters).
-        if at_boundary && (input[i..].starts_with("sEd") || input[i..].starts_with("sn")) {
-            let mut end = i;
-            while end < bytes.len() && is_base58_char(bytes[end]) {
-                end += 1;
-            }
-            let boundary_after = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
-            if end - i >= 22 && boundary_after {
-                out.push_str(REDACTED);
-                i = end;
-                continue;
-            }
-        }
-
-        // Advance one UTF-8 scalar safely.
-        let ch = input[i..].chars().next().unwrap_or('\0');
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-
-    out
-}
-
-/// Canonical machine- and human-readable error shape required across workspace crates
-/// (`SHIP_GATE.md` `:26`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct StructuredError {
-    /// Stable `SCREAMING_SNAKE_CASE` error identifier.
-    pub code: &'static str,
-    /// Scrubbed human-readable description of the failure.
-    pub message: String,
-    /// Actionable recovery hint for callers or operators.
-    pub hint: &'static str,
-    /// Optional scrubbed underlying cause chain.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cause: Option<String>,
-    /// Whether retrying the identical operation without changing configuration might succeed.
-    pub retryable: bool,
-}
-
-impl StructuredError {
-    /// Constructs a [`StructuredError`] while scrubbing `message` of any accidental secret tokens.
-    #[must_use]
-    pub fn new(
-        code: &'static str,
-        message: impl Into<String>,
-        hint: &'static str,
-        retryable: bool,
-    ) -> Self {
-        Self {
-            code,
-            message: scrub_secret_text(&message.into()),
-            hint,
-            cause: None,
-            retryable,
-        }
-    }
-
-    /// Attaches a scrubbed underlying cause string to this [`StructuredError`].
-    #[must_use]
-    pub fn with_cause(mut self, cause: impl Into<String>) -> Self {
-        self.cause = Some(scrub_secret_text(&cause.into()));
-        self
-    }
-
-    /// Formats this error for single- or multi-line plain-text CLI/log output with scrubbed text.
-    #[must_use]
-    pub fn format_text(&self) -> String {
-        let msg = scrub_secret_text(&self.message);
-        let mut out = format!("[{}] {}", self.code, msg);
-        if let Some(cause) = &self.cause {
-            out.push_str(&format!(" (cause: {})", scrub_secret_text(cause)));
-        }
-        out.push_str(&format!("; hint: {}", self.hint));
-        if self.retryable {
-            out.push_str(" [retryable]");
-        }
-        out
-    }
-
-    /// Serializes this error as compact scrubbed JSON.
-    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
-        let scrubbed = Self {
-            code: self.code,
-            message: scrub_secret_text(&self.message),
-            hint: self.hint,
-            cause: self.cause.as_deref().map(scrub_secret_text),
-            retryable: self.retryable,
-        };
-        serde_json::to_string(&scrubbed)
-    }
-}
-
-impl fmt::Display for StructuredError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.format_text())
-    }
-}
-
-impl std::error::Error for StructuredError {}
-
-/// Conversion trait projecting crate error enums onto [`StructuredError`].
-pub trait ToStructuredError {
-    /// Projects `&self` onto a scrubbed [`StructuredError`].
-    fn to_structured_error(&self) -> StructuredError;
-}
 
 impl ToStructuredError for EngineError {
     fn to_structured_error(&self) -> StructuredError {
@@ -267,5 +71,152 @@ impl ToStructuredError for ReplayLayoutSeedError {
             }
         };
         StructuredError::new(self.code(), self.to_string(), hint, false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::any::TypeId;
+
+    #[test]
+    fn reexported_secret_free_shapes_match_captured_7fd3b481_bytes() {
+        assert_eq!(
+            TypeId::of::<StructuredError>(),
+            TypeId::of::<league_error::StructuredError>()
+        );
+        assert_eq!(
+            TypeId::of::<crate::StructuredError>(),
+            TypeId::of::<league_error::StructuredError>()
+        );
+
+        // Exact secret-free JSON and `format_text()` bytes captured from `league-core` at `7fd3b481`.
+        let p1 = crate::StructuredError::new(
+            "INVALID_CONFIG",
+            "bad config field table_mode mismatch",
+            "check TableSpec",
+            false,
+        );
+        assert_eq!(
+            p1.to_json_string()
+                .unwrap_or_else(|e| panic!("p1 json failed: {e}")),
+            "{\"code\":\"INVALID_CONFIG\",\"message\":\"bad config field table_mode mismatch\",\"hint\":\"check TableSpec\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p1.format_text(),
+            "[INVALID_CONFIG] bad config field table_mode mismatch; hint: check TableSpec"
+        );
+
+        let p2 = crate::StructuredError::new(
+            "TURN_LOCKED",
+            "turn phase lock active for seat 2",
+            "wait and retry",
+            true,
+        );
+        assert_eq!(
+            p2.to_json_string()
+                .unwrap_or_else(|e| panic!("p2 json failed: {e}")),
+            "{\"code\":\"TURN_LOCKED\",\"message\":\"turn phase lock active for seat 2\",\"hint\":\"wait and retry\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p2.format_text(),
+            "[TURN_LOCKED] turn phase lock active for seat 2; hint: wait and retry [retryable]"
+        );
+
+        let p3 =
+            crate::StructuredError::new("RELAY_IO", "io error reading state", "check path", false)
+                .with_cause("underlying file not found");
+        assert_eq!(
+            p3.to_json_string()
+                .unwrap_or_else(|e| panic!("p3 json failed: {e}")),
+            "{\"code\":\"RELAY_IO\",\"message\":\"io error reading state\",\"hint\":\"check path\",\"cause\":\"underlying file not found\",\"retryable\":false}"
+        );
+        assert_eq!(
+            p3.format_text(),
+            "[RELAY_IO] io error reading state (cause: underlying file not found); hint: check path"
+        );
+
+        let p4 = crate::StructuredError::new("SIGN_ERR", "failed signing tx", "rotate seed", true)
+            .with_cause("connection timed out caused retryable failure");
+        assert_eq!(
+            p4.to_json_string()
+                .unwrap_or_else(|e| panic!("p4 json failed: {e}")),
+            "{\"code\":\"SIGN_ERR\",\"message\":\"failed signing tx\",\"hint\":\"rotate seed\",\"cause\":\"connection timed out caused retryable failure\",\"retryable\":true}"
+        );
+        assert_eq!(
+            p4.format_text(),
+            "[SIGN_ERR] failed signing tx (cause: connection timed out caused retryable failure); hint: rotate seed [retryable]"
+        );
+
+        let cancel_se = EngineError::CancelLocked.to_structured_error();
+        assert_eq!(
+            cancel_se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("cancel json failed: {e}")),
+            "{\"code\":\"CANCEL_LOCKED\",\"message\":\"Phase-1 cancel lock is active\",\"hint\":\"cancel resting offers before Phase-1 cancel lock engages; late cancellations are rejected\",\"retryable\":false}"
+        );
+        assert_eq!(
+            cancel_se.format_text(),
+            "[CANCEL_LOCKED] Phase-1 cancel lock is active; hint: cancel resting offers before Phase-1 cancel lock engages; late cancellations are rejected"
+        );
+
+        let seed_se = ReplayLayoutSeedError::InvalidSealedDigest.to_structured_error();
+        assert_eq!(
+            seed_se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("seed json failed: {e}")),
+            "{\"code\":\"INVALID_SEALED_SEED_DIGEST\",\"message\":\"INVALID_SEALED_SEED_DIGEST: sealed replay log seed digest must be 64 lowercase hex characters\",\"hint\":\"provide a 64-character lowercase ASCII hex SHA-256 digest for the sealed layout seed\",\"retryable\":false}"
+        );
+        assert_eq!(
+            seed_se.format_text(),
+            "[INVALID_SEALED_SEED_DIGEST] INVALID_SEALED_SEED_DIGEST: sealed replay log seed digest must be 64 lowercase hex characters; hint: provide a 64-character lowercase ASCII hex SHA-256 digest for the sealed layout seed"
+        );
+    }
+
+    #[test]
+    fn reexported_secret_bearing_structured_error_uses_fixed_idempotent_scrubber() {
+        // Fixed secret-scrubbing behaviour (eliminates 7fd3b481 `[REDACTED]]` double-scrub and
+        // expands env/prefix/escape/seed coverage).
+        let c1 = crate::StructuredError::new(
+            "INVALID_CONFIG",
+            "bad config OPENROUTER_API_KEY=sk-or-secret123",
+            "check TableSpec",
+            false,
+        );
+        assert_eq!(
+            c1.to_json_string()
+                .unwrap_or_else(|e| panic!("c1 json failed: {e}")),
+            "{\"code\":\"INVALID_CONFIG\",\"message\":\"bad config OPENROUTER_API_KEY=[REDACTED]\",\"hint\":\"check TableSpec\",\"retryable\":false}"
+        );
+        assert_eq!(
+            c1.format_text(),
+            "[INVALID_CONFIG] bad config OPENROUTER_API_KEY=[REDACTED]; hint: check TableSpec"
+        );
+
+        let c4 = crate::StructuredError::new(
+            "SIGN_ERR",
+            "failed signing with sEd7f3A9kL2mN4pQ6rT8vW1xY3zB5cD",
+            "rotate seed",
+            true,
+        )
+        .with_cause("GEMINI_API_KEY=AIzaSySecret12345 caused retryable failure");
+        assert_eq!(
+            c4.to_json_string()
+                .unwrap_or_else(|e| panic!("c4 json failed: {e}")),
+            "{\"code\":\"SIGN_ERR\",\"message\":\"failed signing with [REDACTED]\",\"hint\":\"rotate seed\",\"cause\":\"GEMINI_API_KEY=[REDACTED] caused retryable failure\",\"retryable\":true}"
+        );
+
+        let eng_err = EngineError::InvalidOrder(
+            "Bearer\ttab_secret_tok OPENROUTER_API_KEY=sk-or-secret999".to_owned(),
+        );
+        let eng_se = eng_err.to_structured_error();
+        assert_eq!(eng_se.code, "INVALID_ORDER");
+        assert!(!eng_se.message.contains("tab_secret_tok"));
+        assert!(!eng_se.message.contains("sk-or-secret999"));
+        assert!(eng_se.message.contains("Bearer\t[REDACTED]"));
+        assert_eq!(
+            crate::scrub_secret_text("Bearer\ttok_abc"),
+            "Bearer\t[REDACTED]"
+        );
     }
 }

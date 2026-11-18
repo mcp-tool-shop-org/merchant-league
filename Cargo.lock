@@ -1418,12 +1418,21 @@ dependencies = [
  "hex",
  "hkdf",
  "league-core",
+ "league-error",
  "proptest",
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "sha2",
  "vrf-r255",
+]
+
+[[package]]
+name = "league-error"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1442,6 +1451,7 @@ name = "league-ledger"
 version = "0.0.0"
 dependencies = [
  "getrandom 0.3.4",
+ "league-error",
  "serde",
  "serde_json",
  "sha2",
@@ -1457,6 +1467,7 @@ dependencies = [
  "hex",
  "icu_normalizer",
  "icu_properties",
+ "league-error",
  "league-relay",
  "same-file",
  "serde",
@@ -1475,6 +1486,7 @@ name = "league-standalone"
 version = "0.0.0"
 dependencies = [
  "league-core",
+ "league-error",
  "league-ledger",
  "serde",
  "serde_json",
