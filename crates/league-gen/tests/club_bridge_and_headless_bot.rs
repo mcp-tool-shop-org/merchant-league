@@ -445,7 +445,8 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass A");
                     let mandate = obs
-                        .own_mandate
+                        .own_mandate()
+                        .copied()
                         .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass A"));
                     for act in bots[usize::from(s_idx)].plan_pass_a(&obs, &mandate) {
                         must_ok(
@@ -463,7 +464,8 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass B");
                     let mandate = obs
-                        .own_mandate
+                        .own_mandate()
+                        .copied()
                         .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass B"));
                     let (pass_b_actions, bundle) =
                         bots[usize::from(s_idx)].plan_pass_b_and_bundle(&obs, &mandate);

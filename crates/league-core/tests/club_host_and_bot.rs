@@ -38,7 +38,8 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass A");
         let mandate = obs
-            .own_mandate
+            .own_mandate()
+            .copied()
             .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass A"));
         for action in bot.plan_pass_a(&obs, &mandate) {
             if host.apply_market_action(action).is_err() {
@@ -55,7 +56,8 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass B");
         let mandate = obs
-            .own_mandate
+            .own_mandate()
+            .copied()
             .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass B"));
         let (pass_b_actions, bundle) = bot.plan_pass_b_and_bundle(&obs, &mandate);
         for action in pass_b_actions {
@@ -306,7 +308,8 @@ fn club_bot_determinism_and_phase_lock_freeze_compliance() {
 
     let obs_t1 = must_ok(host.observe_seat(Seat(0)), "observe t1");
     let mandate = obs_t1
-        .own_mandate
+        .own_mandate()
+        .copied()
         .unwrap_or_else(|| panic!("Seat(0) SeatObservation missing own_mandate"));
     let d1 = bot.decide_full_turn(&obs_t1, &mandate);
     let d2 = bot.decide_full_turn(&obs_t1, &mandate);

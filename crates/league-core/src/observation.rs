@@ -13,7 +13,9 @@ pub use league_seat_types::{
     WhatIfPreview,
 };
 
-use crate::commit::{SealedOrderBundle, derive_turn_beacon};
+use league_seat_types::SeatObservationPublicParts;
+
+use crate::commit::{PrivateMandate, SealedOrderBundle, derive_turn_beacon};
 use crate::engine::{
     CheckPreviewOutcome, EngineState, ShockForecastEvent, SwapPreviewOutcome, SweepMode,
     SweepReceipt, TurnEngine, TurnPhase,
@@ -155,6 +157,7 @@ pub(crate) fn build_seat_observation_from_engine_state(
     baseline_predicates: SeatStatePredicates,
     engine_receipts: &[PublicSweepReceipt],
     caller_receipts: Option<&[SweepReceipt]>,
+    own_mandate: Option<PrivateMandate>,
 ) -> SeatObservation {
     let (last_swept_turn, is_active_turn, public_forecasts) = compute_public_forecasts(state);
 
@@ -190,42 +193,44 @@ pub(crate) fn build_seat_observation_from_engine_state(
             .collect(),
     };
 
-    SeatObservation {
-        seat: seat.0,
-        table_id: state.table_id,
-        turn: state.turn,
-        phase: state.phase,
-        cancel_locked: state.cancel_locked,
-        trade_minister: state.trade_minister,
-        cartel_chair: state.cartel_chair,
-        spec: public_table_spec_from_raw(&state.spec),
-        parities: state.parities.clone(),
-        seats: state.seats.clone(),
-        offers: state.offers.clone(),
-        checks: state.checks.clone(),
-        escrows: state.escrows.clone(),
-        dual_escrows: state.dual_escrows.clone(),
-        pledges: state.pledges.clone(),
-        audited_pledges: state.audited_pledges.clone(),
-        domains: state.domains.clone(),
-        council_platforms: state.council_platforms.clone(),
-        charters: state.charters.clone(),
-        active_shocks: state.active_shocks.clone(),
-        public_forecasts,
-        auditor_hints,
-        next_offer_id: state.next_offer_id,
-        next_check_id: state.next_check_id,
-        next_escrow_id: state.next_escrow_id,
-        delivery_ledger: state.delivery_ledger.clone(),
-        last_potentials: state.last_potentials.clone(),
-        pending_town_import_cred_spent: state.pending_town_import_cred_spent,
-        fill_log: state.fill_log.clone(),
-        pending_wash_freezes: state.pending_wash_freezes.clone(),
-        eval_vrf_pubkey: state.spec.eval_vrf_pubkey,
-        baseline_predicates,
-        public_receipts,
-        own_mandate: None,
-    }
+    SeatObservation::from_host_parts(
+        SeatObservationPublicParts {
+            seat: seat.0,
+            table_id: state.table_id,
+            turn: state.turn,
+            phase: state.phase,
+            cancel_locked: state.cancel_locked,
+            trade_minister: state.trade_minister,
+            cartel_chair: state.cartel_chair,
+            spec: public_table_spec_from_raw(&state.spec),
+            parities: state.parities.clone(),
+            seats: state.seats.clone(),
+            offers: state.offers.clone(),
+            checks: state.checks.clone(),
+            escrows: state.escrows.clone(),
+            dual_escrows: state.dual_escrows.clone(),
+            pledges: state.pledges.clone(),
+            audited_pledges: state.audited_pledges.clone(),
+            domains: state.domains.clone(),
+            council_platforms: state.council_platforms.clone(),
+            charters: state.charters.clone(),
+            active_shocks: state.active_shocks.clone(),
+            public_forecasts,
+            auditor_hints,
+            next_offer_id: state.next_offer_id,
+            next_check_id: state.next_check_id,
+            next_escrow_id: state.next_escrow_id,
+            delivery_ledger: state.delivery_ledger.clone(),
+            last_potentials: state.last_potentials.clone(),
+            pending_town_import_cred_spent: state.pending_town_import_cred_spent,
+            fill_log: state.fill_log.clone(),
+            pending_wash_freezes: state.pending_wash_freezes.clone(),
+            eval_vrf_pubkey: state.spec.eval_vrf_pubkey,
+            baseline_predicates,
+            public_receipts,
+        },
+        own_mandate,
+    )
 }
 
 /// Materializes a sanitized [`TurnEngine`] holding zero hidden secrets or peer Phase-2 buffers.

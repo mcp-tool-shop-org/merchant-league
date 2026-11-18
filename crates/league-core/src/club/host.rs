@@ -372,11 +372,26 @@ impl ClubHost {
     /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
     /// let _ = host.own_mandate(Seat(0));
     /// ```
+    ///
+    /// `SeatObservation::own_mandate` cannot be overwritten or forged outside host construction:
+    ///
+    /// ```compile_fail,E0616
+    /// use league_core::{ClubHost, Seat, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let mut obs = host.observe_seat(Seat(0)).unwrap();
+    /// obs.own_mandate = None;
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use league_core::{ClubHost, Seat, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let obs = host.observe_seat(Seat(0)).unwrap();
+    /// let m = obs.own_mandate().copied().unwrap();
+    /// let _ = obs.with_own_mandate(m);
+    /// ```
     pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
         let mandate = *self.mandate_for_seat(seat)?;
-        let mut obs = self.engine.observe_seat(seat)?;
-        obs.own_mandate = Some(mandate);
-        Ok(obs)
+        self.engine.observe_seat_with_mandate(seat, mandate)
     }
 
     /// Host-only lookup returning `seat`'s dealt [`PrivateMandate`] (without its reveal salt).

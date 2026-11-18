@@ -1,6 +1,8 @@
-#![deny(clippy::disallowed_methods)]
-#![deny(clippy::disallowed_types)]
-#![deny(clippy::disallowed_macros)]
+#![forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 //! Seat-safe Merchant League terminal UI renderer.
 //!
 //! Depends strictly on `league-seat-types`, `ratatui`, and `crossterm` — never on
@@ -77,6 +79,16 @@ pub fn render_seat_with_commodities(
     render_seat_lines(frame, obs, &cred_label, Some(commodities), plain_codes);
 }
 
+fn format_own_mandate_line(own_mandate: Option<&league_seat_types::PrivateMandate>) -> String {
+    match own_mandate {
+        Some(mandate) => format!(
+            "Own Mandate: {:?} (+{} eq)",
+            mandate.kind, mandate.bonus_equity
+        ),
+        None => "Own Mandate: none attached".to_owned(),
+    }
+}
+
 fn render_seat_lines(
     frame: &mut Frame<'_>,
     obs: &SeatObservation,
@@ -100,13 +112,7 @@ fn render_seat_lines(
                 .unwrap_or_else(|| format!("Refined({})", cfg.upkeep_good))
         })
         .unwrap_or_else(|| "None".to_owned());
-    let mandate_line = match obs.own_mandate() {
-        Some(mandate) => format!(
-            "Own Mandate: {:?} (+{} eq)",
-            mandate.kind, mandate.bonus_equity
-        ),
-        None => "Own Mandate: none attached".to_owned(),
-    };
+    let mandate_line = format_own_mandate_line(obs.own_mandate());
     let lines = vec![
         Line::from(format!(
             "Table #{} | Turn {} ({:?}) | Seat {}",
@@ -140,8 +146,9 @@ mod tests {
         CommitmentHash, CommodityDisplayMap, CreditTier, FundamentalParities, GoodScarcity,
         GradedMandateCard, MandateKind, NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, PrivateMandate,
         PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION, SeasonEndAndMarks,
-        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatState, SeatStatePredicates, ShockKind,
-        SpoilageAndConversion, TableId, TableMode, TurnPhase, UpkeepAndDebt,
+        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservationPublicParts, SeatState,
+        SeatStatePredicates, ShockKind, SpoilageAndConversion, TableId, TableMode, TurnPhase,
+        UpkeepAndDebt,
     };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -163,7 +170,7 @@ mod tests {
             .join("\n")
     }
 
-    fn sample_seat_observation(own_mandate: Option<PrivateMandate>) -> SeatObservation {
+    fn sample_seat_observation() -> SeatObservation {
         let spec = PublicTableSpec {
             table_id: TableId(202_611),
             mode: TableMode::Club,
@@ -268,7 +275,7 @@ mod tests {
             CommitmentHash([0xAA; 32]),
             COMMODITY_DISPLAY_CATALOG.len(),
         );
-        SeatObservation {
+        SeatObservation::unmandated(SeatObservationPublicParts {
             seat: 0,
             table_id: TableId(202_611),
             turn: 1,
@@ -330,8 +337,7 @@ mod tests {
             eval_vrf_pubkey: None,
             baseline_predicates: predicates,
             public_receipts: Vec::new(),
-            own_mandate,
-        }
+        })
     }
 
     #[test]
@@ -375,22 +381,25 @@ mod tests {
 
     #[test]
     fn render_seat_and_commodity_display_render_cleanly() {
-        let obs_with = sample_seat_observation(Some(PrivateMandate {
+        let mandate_line = format_own_mandate_line(Some(&PrivateMandate {
             kind: MandateKind::MinProjectEquity { target: 28_000 },
             bonus_equity: 7_250,
         }));
+        assert!(mandate_line.contains("MinProjectEquity"));
+        assert!(mandate_line.contains("+7250 eq"));
+
+        let obs_unmandated = sample_seat_observation();
         let mut terminal = match Terminal::new(TestBackend::new(90, 9)) {
             Ok(t) => t,
             Err(never) => match never {},
         };
-        if let Err(never) = terminal.draw(|f| render_seat(f, &obs_with)) {
+        if let Err(never) = terminal.draw(|f| render_seat(f, &obs_unmandated)) {
             match never {}
         }
         let screen = buffer_text(&terminal);
         assert!(screen.contains("Table #202611 | Turn 1"));
         assert!(screen.contains("Clearinghouse Marks [CRED]: 15000"));
-        assert!(screen.contains("MinProjectEquity"));
-        assert!(screen.contains("+7250 eq"));
+        assert!(screen.contains("Own Mandate: none attached"));
 
         let cmap = CommodityDisplayMap {
             numeraire_code: NUMERAIRE_CODE.to_owned(),
@@ -426,7 +435,7 @@ mod tests {
                 },
             ],
         };
-        let obs_without = sample_seat_observation(None);
+        let obs_without = sample_seat_observation();
         if let Err(never) =
             terminal.draw(|f| render_seat_with_commodities(f, &obs_without, &cmap, false))
         {

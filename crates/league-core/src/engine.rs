@@ -14,10 +14,10 @@ pub use league_seat_types::{
 use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform,
     CouncilVoteBallot, DrandBeaconAuthStatus, DualEscrowProposal, EscrowFinishUnlock, IntentPledge,
-    IntentTarget, MandateReveal, OrderReveal, RevealSalt, RngDomain, SealedOrderBundle,
-    break_tie_with_turn_beacon, close_roll_bps_from_beacon, compute_order_commitment,
-    derive_drand_beacon, derive_turn_beacon, draw_shocks_for_turn, expand_turn_stream,
-    raw_zero_preimage_condition_hash, verify_and_extract_eval_vrf_beacon,
+    IntentTarget, MandateReveal, OrderReveal, PrivateMandate, RevealSalt, RngDomain,
+    SealedOrderBundle, break_tie_with_turn_beacon, close_roll_bps_from_beacon,
+    compute_order_commitment, derive_drand_beacon, derive_turn_beacon, draw_shocks_for_turn,
+    expand_turn_stream, raw_zero_preimage_condition_hash, verify_and_extract_eval_vrf_beacon,
     verify_drand_quicknet_beacon, verify_mandate_reveal, verify_order_reveal,
     verify_preimage_condition,
 };
@@ -461,7 +461,17 @@ impl TurnEngine {
     /// let _ = engine.preview_bundle(Seat(0), &[], &SealedOrderBundle::default());
     /// ```
     pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
-        self.observe_seat_internal(seat, None)
+        self.observe_seat_internal(seat, None, None)
+    }
+
+    /// Host-only constructor stamping `own_mandate` into [`SeatObservation`] solely for
+    /// [`crate::ClubHost::observe_seat`].
+    pub(crate) fn observe_seat_with_mandate(
+        &self,
+        seat: Seat,
+        own_mandate: PrivateMandate,
+    ) -> Result<SeatObservation, EngineError> {
+        self.observe_seat_internal(seat, None, Some(own_mandate))
     }
 
     /// Projects [`SeatObservation`] for `seat`, filtering caller-supplied raw [`SweepReceipt`]s
@@ -472,13 +482,14 @@ impl TurnEngine {
         seat: Seat,
         receipts: &[SweepReceipt],
     ) -> Result<SeatObservation, EngineError> {
-        self.observe_seat_internal(seat, Some(receipts))
+        self.observe_seat_internal(seat, Some(receipts), None)
     }
 
     fn observe_seat_internal(
         &self,
         seat: Seat,
         caller_receipts: Option<&[SweepReceipt]>,
+        own_mandate: Option<PrivateMandate>,
     ) -> Result<SeatObservation, EngineError> {
         self.ensure_seat(seat.0)?;
         let baseline_predicates = compute_seat_state_predicates(&self.state, seat)?;
@@ -490,6 +501,7 @@ impl TurnEngine {
             baseline_predicates,
             &self.public_receipts,
             caller_receipts,
+            own_mandate,
         ))
     }
 

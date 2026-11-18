@@ -1224,7 +1224,7 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
                     "Seat(0) observation mismatch at turn {cur_t}"
                 );
             }
-            let mandate = obs.own_mandate.unwrap_or_else(|| {
+            let mandate = obs.own_mandate().copied().unwrap_or_else(|| {
                 panic!("SeatObservation missing own_mandate at t={cur_t} s={s}")
             });
             for act in bots[usize::from(s)].plan_pass_a(&obs, &mandate) {
@@ -1236,7 +1236,8 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
         for s in 0..4_u8 {
             let obs = must_ok(host.observe_seat(Seat(s)), "season pass-b obs");
             let mandate = obs
-                .own_mandate
+                .own_mandate()
+                .copied()
                 .unwrap_or_else(|| panic!("SeatObservation missing own_mandate in pass B"));
             let (pass_b, bundle) = bots[usize::from(s)].plan_pass_b_and_bundle(&obs, &mandate);
             for act in pass_b {

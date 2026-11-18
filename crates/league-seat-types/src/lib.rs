@@ -1,6 +1,8 @@
-#![deny(clippy::disallowed_methods)]
-#![deny(clippy::disallowed_types)]
-#![deny(clippy::disallowed_macros)]
+#![forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 //! Seat-safe value, observation, preview, error, and commodity display types for Merchant League v2.
 //!
 //! This leaf crate depends solely on `serde`, `serde_json`, and `league-error` — never on
@@ -40,6 +42,8 @@ pub use engine_types::{
     SeatUpkeepPreview, ShockForecastEvent, TurnPhase,
 };
 pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
+#[doc(hidden)]
+pub use observation::SeatObservationPublicParts;
 pub use observation::{
     AiPreviewRequest, AuditorShockHint, CounterpartyAssumptions, DEALT_MANDATE_COMMIT_SENTINEL,
     HYPOTHETICAL_CLOSE_MARK_CAVEAT, HumanWhatIfRequest, PREVIEW_NEUTRAL_BEACON_SEED,

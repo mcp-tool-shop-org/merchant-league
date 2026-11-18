@@ -248,13 +248,147 @@ pub struct SeatObservation {
     pub baseline_predicates: SeatStatePredicates,
     /// Seat-safe 30-field historical Sweep receipts through `last_swept_turn`.
     pub public_receipts: Vec<PublicSweepReceipt>,
-    /// Dealt Turn-1 [`PrivateMandate`] belonging solely to `seat`, populated by
+    /// Dealt Turn-1 [`PrivateMandate`] belonging solely to `seat`, populated exclusively by
     /// `ClubHost::observe_seat` (never carries reveal salts or rival seats' mandates).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub own_mandate: Option<PrivateMandate>,
+    own_mandate: Option<PrivateMandate>,
+}
+
+/// Public non-mandate fields required to assemble a [`SeatObservation`] without exposing
+/// `own_mandate` as a writable field outside trusted host construction.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeatObservationPublicParts {
+    /// Observing seat index (`0..seat_count`).
+    pub seat: u8,
+    /// Table identifier.
+    pub table_id: TableId,
+    /// Current turn index (`1..=32`).
+    pub turn: u8,
+    /// Current turn phase or terminal close state.
+    pub phase: TurnPhase,
+    /// Whether Phase-1 cancel lock is currently engaged.
+    pub cancel_locked: bool,
+    /// Current Trade Minister seat index.
+    pub trade_minister: u8,
+    /// Current Cartel Chair seat index (`None` if vacant).
+    pub cartel_chair: Option<u8>,
+    /// Public table rule parameters.
+    pub spec: PublicTableSpec,
+    /// Precomputed fundamental shadow parities.
+    pub parities: FundamentalParities,
+    /// Per-seat public balances and reputations.
+    pub seats: Vec<SeatState>,
+    /// Resting `CRED`-priced DEX limit orders keyed by canonical `offer_id`.
+    pub offers: BTreeMap<u64, CredOffer>,
+    /// Track-2 deferred checks keyed by canonical `check_id`.
+    pub checks: BTreeMap<u64, CreditCheck>,
+    /// Track-1 `TokenEscrow` vaults keyed by canonical `escrow_id`.
+    pub escrows: BTreeMap<u64, TokenEscrowVault>,
+    /// Co-signed dual delivery-versus-payment escrows keyed by shared `escrow_id`.
+    pub dual_escrows: BTreeMap<u64, DualEscrowVault>,
+    /// Recorded Track-2 structured diplomatic pledges keyed by `pledge_id`.
+    pub pledges: BTreeMap<u64, IntentPledge>,
+    /// Pledge IDs already resolved (honored or flagged broken).
+    pub audited_pledges: BTreeSet<u64>,
+    /// Permissioned cartel trade domains.
+    pub domains: Vec<CartelDomain>,
+    /// Public council platforms filed ahead of Turn-`4n` elections.
+    pub council_platforms: BTreeMap<u8, CouncilPlatform>,
+    /// Active rotating Syndicate Charters.
+    pub charters: Vec<ActiveCharter>,
+    /// Active realized Horizon Shocks (`turn >= realize_turn`; magnitude is public from realize).
+    pub active_shocks: Vec<ActiveShock>,
+    /// Publicly announced Horizon Shock forecasts (`forecast_turn <= last_swept_turn`, no magnitude).
+    pub public_forecasts: Vec<ShockForecastEvent>,
+    /// Private `OracleAuditor` shock hints for `seat` (`hint_turn <= turn < forecast_turn`, no magnitude).
+    pub auditor_hints: Vec<AuditorShockHint>,
+    /// Monotonic next offer ID.
+    pub next_offer_id: u64,
+    /// Monotonic next check ID.
+    pub next_check_id: u64,
+    /// Monotonic next escrow ID.
+    pub next_escrow_id: u64,
+    /// Cumulative delivered volume `(sender, receiver, asset)`.
+    pub delivery_ledger: BTreeMap<(u8, u8, AssetId), Units>,
+    /// Previous step PBRS potentials `Psi_i(s_t)`.
+    pub last_potentials: Vec<Units>,
+    /// Accumulator of `CRED` spent on Phase-1 `TownImport` orders during the current turn.
+    pub pending_town_import_cred_spent: Units,
+    /// Append-only per-turn settlement log across all turns.
+    pub fill_log: Vec<FillRecord>,
+    /// Unsettled bonded `FlagWashFreeze` challenges for the current turn.
+    pub pending_wash_freezes: Vec<PendingWashFreeze>,
+    /// Optional `ristretto255` VRF public key (`PK_eval`) committed on the table.
+    pub eval_vrf_pubkey: Option<[u8; 32]>,
+    /// Static start-of-observation diagnostics for `seat`.
+    pub baseline_predicates: SeatStatePredicates,
+    /// Seat-safe 30-field historical Sweep receipts through `last_swept_turn`.
+    pub public_receipts: Vec<PublicSweepReceipt>,
 }
 
 impl SeatObservation {
+    /// Assembles a mandate-free [`SeatObservation`] (`own_mandate == None`) for pure UI/public
+    /// test construction without permitting any caller to attach a [`PrivateMandate`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn unmandated(parts: SeatObservationPublicParts) -> Self {
+        Self::from_parts_inner(parts, None)
+    }
+
+    /// Assembles a [`SeatObservation`] with optional `own_mandate`; guarded so only
+    /// `league-core::observation` (acting solely for `ClubHost::observe_seat`) may invoke it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_host_parts(
+        parts: SeatObservationPublicParts,
+        own_mandate: Option<PrivateMandate>,
+    ) -> Self {
+        Self::from_parts_inner(parts, own_mandate)
+    }
+
+    fn from_parts_inner(
+        parts: SeatObservationPublicParts,
+        own_mandate: Option<PrivateMandate>,
+    ) -> Self {
+        Self {
+            seat: parts.seat,
+            table_id: parts.table_id,
+            turn: parts.turn,
+            phase: parts.phase,
+            cancel_locked: parts.cancel_locked,
+            trade_minister: parts.trade_minister,
+            cartel_chair: parts.cartel_chair,
+            spec: parts.spec,
+            parities: parts.parities,
+            seats: parts.seats,
+            offers: parts.offers,
+            checks: parts.checks,
+            escrows: parts.escrows,
+            dual_escrows: parts.dual_escrows,
+            pledges: parts.pledges,
+            audited_pledges: parts.audited_pledges,
+            domains: parts.domains,
+            council_platforms: parts.council_platforms,
+            charters: parts.charters,
+            active_shocks: parts.active_shocks,
+            public_forecasts: parts.public_forecasts,
+            auditor_hints: parts.auditor_hints,
+            next_offer_id: parts.next_offer_id,
+            next_check_id: parts.next_check_id,
+            next_escrow_id: parts.next_escrow_id,
+            delivery_ledger: parts.delivery_ledger,
+            last_potentials: parts.last_potentials,
+            pending_town_import_cred_spent: parts.pending_town_import_cred_spent,
+            fill_log: parts.fill_log,
+            pending_wash_freezes: parts.pending_wash_freezes,
+            eval_vrf_pubkey: parts.eval_vrf_pubkey,
+            baseline_predicates: parts.baseline_predicates,
+            public_receipts: parts.public_receipts,
+            own_mandate,
+        }
+    }
+
     /// Returns the seat-safe `OracleAuditor` private shock hints (`hint_turn <= turn < forecast_turn`)
     /// for this observing seat, with `magnitude_bps` redacted until `realize_turn` (`B1`).
     ///
@@ -270,13 +404,6 @@ impl SeatObservation {
     #[must_use]
     pub const fn own_mandate(&self) -> Option<&PrivateMandate> {
         self.own_mandate.as_ref()
-    }
-
-    /// Attaches `mandate` as this seat's own [`PrivateMandate`] inside this observation.
-    #[must_use]
-    pub const fn with_own_mandate(mut self, mandate: PrivateMandate) -> Self {
-        self.own_mandate = Some(mandate);
-        self
     }
 
     /// Exports a sanitized [`PublicPreviewState`] containing strictly public Steps 0–7 simulation
