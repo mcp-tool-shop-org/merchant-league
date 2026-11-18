@@ -6,6 +6,7 @@
 //! replays byte-for-byte identically from a table's [`TableSpec`], seed, and ordered log of
 //! actions, commitments, reveals, and randomness beacons.
 
+pub mod bot;
 pub mod club;
 pub mod commit;
 pub mod contracts;
@@ -17,6 +18,7 @@ pub mod replay;
 pub mod scoring;
 pub mod types;
 
+pub use bot::{ClubBot, ClubBotDecision};
 pub use club::{
     CLUB_SAVE_FORMAT_VERSION, CLUB_SEAL_FORMAT_VERSION, ClubHost, ClubSaveSnapshot,
     DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE,

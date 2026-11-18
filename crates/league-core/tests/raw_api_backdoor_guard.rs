@@ -109,7 +109,8 @@ const SEAT_PRIMARY_PARAM_TYPES: [&str; 6] = [
     "AiPreviewRequest",
 ];
 
-const PRODUCTION_REQUIRED_MODS: [&str; 10] = [
+const PRODUCTION_REQUIRED_MODS: [&str; 11] = [
+    "bot",
     "club",
     "commit",
     "contracts",
