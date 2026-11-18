@@ -1,10 +1,119 @@
-//! Error types for `league-relay`.
+//! Error types and canonical [`StructuredError`] representation (`SHIP_GATE.md` `:26`) for
+//! `league-relay`.
 //!
-//! Every string carried inside [`RelayError`] is passed through
-//! [`redact_secrets`](crate::secret::redact_secrets) before construction so an
-//! API key can never leak through `Display` or `Debug`.
+//! Every string carried inside [`RelayError`] and [`StructuredError`] is scrubbed before display
+//! or JSON serialization so an API key, bearer credential, XRPL seed, or sealed game secret can
+//! never leak through `Display`, `Debug`, `stderr`, or JSON error emission.
 
+use crate::secret::{
+    ApiKey, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+    redact_secrets_multi_with_limit,
+};
 use std::fmt;
+
+/// Canonical machine- and human-readable error shape required across workspace crates
+/// (`SHIP_GATE.md` `:26`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct StructuredError {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier.
+    pub code: &'static str,
+    /// Scrubbed human-readable description of the failure.
+    pub message: String,
+    /// Actionable recovery hint for callers or operators.
+    pub hint: &'static str,
+    /// Optional scrubbed underlying cause chain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    /// Whether retrying the identical operation without changing configuration might succeed.
+    pub retryable: bool,
+}
+
+impl StructuredError {
+    /// Constructs a [`StructuredError`] while scrubbing `message` of any accidental secrets.
+    #[must_use]
+    pub fn new(
+        code: &'static str,
+        message: impl Into<String>,
+        hint: &'static str,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            code,
+            message: redact_secrets_multi_with_limit(
+                &message.into(),
+                &[],
+                MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+            ),
+            hint,
+            cause: None,
+            retryable,
+        }
+    }
+
+    /// Attaches a scrubbed underlying cause string to this [`StructuredError`].
+    #[must_use]
+    pub fn with_cause(mut self, cause: impl Into<String>) -> Self {
+        self.cause = Some(redact_secrets_multi_with_limit(
+            &cause.into(),
+            &[],
+            MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+        ));
+        self
+    }
+
+    /// Returns a copy with `message` and `cause` additionally scrubbed against `keys` up to `max_bytes`.
+    #[must_use]
+    pub fn scrubbed_with_keys(&self, keys: &[ApiKey], max_bytes: usize) -> Self {
+        Self {
+            code: self.code,
+            message: redact_secrets_multi_with_limit(&self.message, keys, max_bytes),
+            hint: self.hint,
+            cause: self
+                .cause
+                .as_deref()
+                .map(|c| redact_secrets_multi_with_limit(c, keys, max_bytes)),
+            retryable: self.retryable,
+        }
+    }
+
+    /// Formats this error for single- or multi-line plain-text CLI/log output with scrubbed text.
+    #[must_use]
+    pub fn format_text(&self) -> String {
+        let msg =
+            redact_secrets_multi_with_limit(&self.message, &[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
+        let mut out = format!("[{}] {}", self.code, msg);
+        if let Some(cause) = &self.cause {
+            let scrubbed_cause =
+                redact_secrets_multi_with_limit(cause, &[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
+            out.push_str(&format!(" (cause: {scrubbed_cause})"));
+        }
+        out.push_str(&format!("; hint: {}", self.hint));
+        if self.retryable {
+            out.push_str(" [retryable]");
+        }
+        out
+    }
+
+    /// Serializes this error as compact scrubbed JSON.
+    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
+        let scrubbed = self.scrubbed_with_keys(&[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
+        serde_json::to_string(&scrubbed)
+    }
+}
+
+impl fmt::Display for StructuredError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.format_text())
+    }
+}
+
+impl std::error::Error for StructuredError {}
+
+/// Conversion trait projecting crate error enums onto [`StructuredError`].
+pub trait ToStructuredError {
+    /// Projects `&self` onto a scrubbed [`StructuredError`].
+    fn to_structured_error(&self) -> StructuredError;
+}
 
 /// Errors returned when validating configuration or executing a relay turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +158,119 @@ pub enum RelayError {
         /// Redacted underlying ledger and side-file I/O error details.
         detail: String,
     },
+}
+
+impl RelayError {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Usage(_) => "INVALID_USAGE",
+            Self::SecretInForbiddenPlace(_) => "SECRET_IN_FORBIDDEN_PLACE",
+            Self::LiveFlagRequired => "LIVE_FLAG_REQUIRED",
+            Self::MissingApiKey => "MISSING_API_KEY",
+            Self::InvalidCap(_) => "INVALID_CAP",
+            Self::MissingWrapper { .. } => "MISSING_WRAPPER",
+            Self::SeatConfig(_) => "INVALID_SEAT_CONFIG",
+            Self::Io(_) => "RELAY_IO",
+            Self::CorruptLog(_) => "CORRUPT_LOG",
+            Self::IncompatibleSetup(_) => "INCOMPATIBLE_SETUP",
+            Self::TurnLocked { .. } => "TURN_LOCKED",
+            Self::UnrecordedCharge { .. } => "UNRECORDED_CHARGE",
+        }
+    }
+
+    /// Actionable operator hint for this error variant.
+    #[must_use]
+    pub const fn hint(&self) -> &'static str {
+        match self {
+            Self::Usage(_) => {
+                "run 'league-relay --help' and check subcommand, flag names, and required options"
+            }
+            Self::SecretInForbiddenPlace(_) => {
+                "supply OPENROUTER_API_KEY only in the environment for --live OpenRouter runs and unset all API keys for local or prebook-check runs"
+            }
+            Self::LiveFlagRequired => {
+                "pass --live with --cap-credits <n> and OPENROUTER_API_KEY in the environment, or pass --mock-dir <dir> for offline runs"
+            }
+            Self::MissingApiKey => {
+                "set a non-empty OPENROUTER_API_KEY in the process environment before passing --live"
+            }
+            Self::InvalidCap(_) => {
+                "pass a finite non-negative --cap-credits <n> for OpenRouter seats or --cap-gpu-secs <n> for local seats"
+            }
+            Self::MissingWrapper { .. } => "pass --wrapper <path> when running a seat's first turn",
+            Self::SeatConfig(_) => {
+                "fix the seats JSON file so every seat has a unique guild, valid backend, pinned model, and valid bounds"
+            }
+            Self::Io(_) => {
+                "verify --game-dir and input/output file paths exist and have read/write permissions"
+            }
+            Self::CorruptLog(_) => {
+                "inspect relay/calls.jsonl, side files, setup.json, or seat transcripts for truncated or malformed JSON lines"
+            }
+            Self::IncompatibleSetup(_) => {
+                "start a fresh --game-dir matching the active relay setup schema and wording arm"
+            }
+            Self::TurnLocked { .. } => {
+                "wait for the active league-relay turn on this --game-dir to finish without deleting relay/turn.lock, then retry"
+            }
+            Self::UnrecordedCharge { .. } => {
+                "restore write permissions under <game-dir>/relay/ so the next run reconciles relay/calls.reserved.jsonl automatically; do not copy the entry into relay/calls.jsonl by hand"
+            }
+        }
+    }
+
+    /// Whether retrying the identical operation without changing configuration might succeed.
+    #[must_use]
+    pub const fn is_retryable(&self) -> bool {
+        matches!(self, Self::TurnLocked { .. })
+    }
+
+    /// CLI exit code for this error under the unified `0/1/2/3` convention (`SHIP_GATE.md` `:27`).
+    #[must_use]
+    pub const fn exit_code(&self) -> i32 {
+        match self {
+            Self::Usage(_)
+            | Self::SecretInForbiddenPlace(_)
+            | Self::LiveFlagRequired
+            | Self::MissingApiKey
+            | Self::InvalidCap(_)
+            | Self::MissingWrapper { .. }
+            | Self::SeatConfig(_)
+            | Self::IncompatibleSetup(_) => 1,
+            Self::Io(_)
+            | Self::CorruptLog(_)
+            | Self::TurnLocked { .. }
+            | Self::UnrecordedCharge { .. } => 2,
+        }
+    }
+
+    pub(crate) const fn redaction_scan_limit(&self) -> usize {
+        match self {
+            Self::UnrecordedCharge { .. } => MAX_UNRECORDED_CHARGE_SCAN_BYTES,
+            _ => MAX_REDACTION_SCAN_BYTES,
+        }
+    }
+}
+
+impl ToStructuredError for RelayError {
+    fn to_structured_error(&self) -> StructuredError {
+        let base = StructuredError::new(
+            self.code(),
+            self.to_string(),
+            self.hint(),
+            self.is_retryable(),
+        );
+        match self {
+            Self::Io(detail) | Self::CorruptLog(detail) => base.with_cause(detail),
+            Self::TurnLocked {
+                holder: Some(h), ..
+            } if !h.is_empty() => base.with_cause(h),
+            Self::UnrecordedCharge { detail, .. } if !detail.is_empty() => base.with_cause(detail),
+            _ => base,
+        }
+    }
 }
 
 impl fmt::Display for RelayError {

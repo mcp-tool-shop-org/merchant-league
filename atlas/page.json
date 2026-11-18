@@ -29,24 +29,74 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 7,
-      "changed": 11,
+      "added": 2,
+      "changed": 15,
       "moved": 0,
-      "parts": 5,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-ledger/src/client.rs and crates/league-ledger/src/escrow.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-ledger/src/client.rs",
+          "crates/league-ledger/src/escrow.rs"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI no longer runs crates/league-ledger/src/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-ledger/src/"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `collect_env_redaction_keys`, before `from_env`.",
+        "subjects": [
+          "crates/league-relay/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `infer_log_level_best_effort`, before `install_redacting_panic_hook_with_level`.",
+        "subjects": [
+          "crates/league-relay/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-relay/src/main.rs, `main` gained a step, `install_redacting_panic_hook_with_level`, before `execute_cli`.",
+        "subjects": [
+          "crates/league-relay/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 11 more changes to the order of work.",
+        "subjects": []
+      },
+      {
+        "kind": "unassigned",
+        "sentence": "crates/league-relay/tests/cli_hygiene.rs is new and belongs to no part, so atlas check fails on it against the previous map.",
+        "subjects": [
+          "crates/league-relay/tests/cli_hygiene.rs"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-18; 7 files added and 11 changed content.",
+        "sentence": "2 files added and 15 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "4ec4ddd51da6b841dc6449dff596d8c6283aa09c",
-      "generatedAt": "2026-11-18T04:26:33.104Z"
+      "commit": "47cc0ab1f333ea8ab2576efa8659689dddb65016",
+      "generatedAt": "2026-11-18T06:34:15.729Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -63,6 +113,21 @@
       ],
       "relation": "inside",
       "shared": 5
+    },
+    {
+      "a": "crates/league-core/src/lib.rs",
+      "b": "crates/league-core/src/replay.rs",
+      "either": 11,
+      "partLabels": [
+        "league-core",
+        "league-core"
+      ],
+      "parts": [
+        "league-core",
+        "league-core"
+      ],
+      "relation": "inside",
+      "shared": 9
     },
     {
       "a": "crates/league-core/src/replay.rs",
@@ -108,21 +173,6 @@
       ],
       "relation": "inside",
       "shared": 8
-    },
-    {
-      "a": "crates/league-gen/src/generator.rs",
-      "b": "crates/league-gen/src/lib.rs",
-      "either": 9,
-      "partLabels": [
-        "league-gen",
-        "league-gen"
-      ],
-      "parts": [
-        "league-gen",
-        "league-gen"
-      ],
-      "relation": "inside",
-      "shared": 7
     }
   ],
   "changesTogetherNote": [
@@ -130,9 +180,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "47cc0ab1f333ea8ab2576efa8659689dddb65016",
+  "commit": "7fd3b481aaaed5409d4d8b7958f6d3d86de4de9f",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (352 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "10 parts, mostly Rust (354 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -161,7 +211,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 7
+          "files": 8
         },
         {
           "boundary": "league-season",
@@ -203,7 +253,9 @@
         "crates/league-gen/src/schema.rs",
         "crates/league-gen/tests/",
         "crates/league-ledger/examples/",
-        "crates/league-ledger/src/",
+        "crates/league-ledger/src/client.rs",
+        "crates/league-ledger/src/escrow.rs",
+        "crates/league-ledger/src/lib.rs",
         "crates/league-ledger/tests/vectors.rs",
         "crates/league-relay/src/relay.rs",
         "crates/league-relay/tests/",
@@ -213,8 +265,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 27,
-      "runsMore": 41,
+      "runsCount": 29,
+      "runsMore": 42,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -264,7 +316,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 5
         }
       ],
       "runWith": "cargo run --example testnet_escrow_expiry",
@@ -292,7 +344,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 5
         }
       ],
       "runWith": "cargo run --example testnet_proof",
@@ -320,7 +372,7 @@
         {
           "boundary": "league-ledger",
           "depth": 0,
-          "files": 4
+          "files": 5
         }
       ],
       "runWith": "cargo run --example testnet_requireauth",
@@ -376,20 +428,36 @@
       "unshipped": true
     }
   ],
-  "duplicates": [],
-  "duplicatesLead": null,
+  "duplicates": [
+    {
+      "files": [
+        "crates/league-core/src/error.rs",
+        "crates/league-ledger/src/error.rs"
+      ],
+      "name": "scrub_secret_text",
+      "partLabels": [
+        "league-core",
+        "league-ledger"
+      ],
+      "parts": [
+        "league-core",
+        "league-ledger"
+      ]
+    }
+  ],
+  "duplicatesLead": "These are candidates from names and call order, not a judgement.",
   "duplicatesNote": [],
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-18T06:34:15.729Z",
+  "generatedAt": "2026-11-18T11:03:08.819Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "3 writes and 4 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "5 writes and 5 reads go to a path their caller passes, not to this repository.",
     "1 write goes to a temporary directory, not to this repository.",
-    "388 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 385 more.",
+    "389 files belong to no part: crates/league-relay/Cargo.toml, crates/league-relay/src/cli.rs, crates/league-relay/src/error.rs and 386 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -430,7 +498,7 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 47,
+  "testFiles": 48,
   "testedBy": {
     "league-core": 14,
     "league-gen": 9,

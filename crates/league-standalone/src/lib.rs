@@ -15,6 +15,12 @@ pub mod client;
 pub mod conformance;
 pub mod docker;
 
+pub use league_core::{StructuredError, ToStructuredError};
+
+pub(crate) fn scrub_standalone_text(input: &str) -> String {
+    league_ledger::scrub_secret_text(input)
+}
+
 /// Fixed XRPL `[network_id]` required by the stand-alone harness.
 pub const STANDALONE_NETWORK_ID: u32 = 21_337;
 
@@ -91,6 +97,26 @@ impl fmt::Display for NotStandAlone {
 }
 
 impl std::error::Error for NotStandAlone {}
+
+impl NotStandAlone {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        "NOT_STANDALONE"
+    }
+}
+
+impl ToStructuredError for NotStandAlone {
+    fn to_structured_error(&self) -> StructuredError {
+        StructuredError::new(
+            self.code(),
+            scrub_standalone_text(&self.to_string()),
+            "connect only to a loopback http://127.0.0.1:<port> or http://localhost:<port> xrpld node in stand-alone mode (network_id 21337, validation_quorum 0, peers 0)",
+            false,
+        )
+        .with_cause(scrub_standalone_text(&self.reason))
+    }
+}
 
 /// Parsed `info` subset from `server_info` checked by `require_standalone_info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,5 +412,74 @@ mod tests {
         assert!(encode_currency_code("XRP").is_err());
         assert!(encode_currency_code("").is_err());
         assert!(encode_currency_code("TOO_LONG_CURRENCY_SYMBOL_21").is_err());
+    }
+
+    #[test]
+    fn not_standalone_structured_error_and_ledger_json_contract() {
+        let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
+        let err = NotStandAlone::new(format!(
+            "rejected Bearer tok_xyz {ed_seed} {secp_seed} OPENROUTER_API_KEY=sk-or-secret999"
+        ));
+        assert_eq!(err.code(), "NOT_STANDALONE");
+        let se = err.to_structured_error();
+        assert_eq!(se.code, "NOT_STANDALONE");
+        assert!(!se.retryable);
+        assert!(se.cause.is_some());
+        assert!(se.hint.contains("network_id 21337"));
+        let json = se
+            .to_json_string()
+            .unwrap_or_else(|e| panic!("json serialize: {e}"));
+        let text = se.format_text();
+        for s in [&json, &text, &se.message] {
+            assert!(!s.contains("tok_xyz"));
+            assert!(!s.contains(ed_seed));
+            assert!(!s.contains(secp_seed));
+            assert!(!s.contains("sk-or-secret999"));
+        }
+
+        // Cross-crate JSON contract proof: `league_ledger::StructuredError` must serialize
+        // identically to `league_core::StructuredError` across `cause: None`, `cause: Some(...)`,
+        // `retryable: false/true`, and planted secrets.
+        for retryable in [false, true] {
+            let core_plain = StructuredError::new(
+                "NOT_TESTNET",
+                format!("rejected {ed_seed} sk-or-secret999"),
+                "connect only to Testnet",
+                retryable,
+            );
+            let ledger_plain = league_ledger::StructuredError::new(
+                "NOT_TESTNET",
+                format!("rejected {ed_seed} sk-or-secret999"),
+                "connect only to Testnet",
+                retryable,
+            );
+            assert_eq!(
+                ledger_plain
+                    .to_json_string()
+                    .unwrap_or_else(|e| panic!("ledger json: {e}")),
+                core_plain
+                    .to_json_string()
+                    .unwrap_or_else(|e| panic!("core json: {e}")),
+            );
+            assert_eq!(ledger_plain.format_text(), core_plain.format_text());
+
+            let core_with_cause =
+                core_plain.with_cause(format!("nested {ed_seed} cause sk-or-secret999"));
+            let ledger_with_cause =
+                ledger_plain.with_cause(format!("nested {ed_seed} cause sk-or-secret999"));
+            assert_eq!(
+                ledger_with_cause
+                    .to_json_string()
+                    .unwrap_or_else(|e| panic!("ledger cause json: {e}")),
+                core_with_cause
+                    .to_json_string()
+                    .unwrap_or_else(|e| panic!("core cause json: {e}")),
+            );
+            assert_eq!(
+                ledger_with_cause.format_text(),
+                core_with_cause.format_text()
+            );
+        }
     }
 }

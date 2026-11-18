@@ -23,8 +23,9 @@ use xrpl::wallet::Wallet;
 
 use crate::{
     GENESIS_ACCOUNT_ADDRESS, MAINNET_MATCHED_AMENDMENTS, NotStandAlone, STANDALONE_NETWORK_ID,
-    StandAloneServerInfo, TESTNET_ONLY_DEFAULT_YES_AMENDMENT, VETOED_NON_MAINNET_AMENDMENTS,
-    require_loopback_http_url, require_standalone_info,
+    StandAloneServerInfo, StructuredError, TESTNET_ONLY_DEFAULT_YES_AMENDMENT, ToStructuredError,
+    VETOED_NON_MAINNET_AMENDMENTS, require_loopback_http_url, require_standalone_info,
+    scrub_standalone_text,
 };
 
 /// Minimum base transaction fee in drops for standard stand-alone transactions.
@@ -201,6 +202,80 @@ impl fmt::Display for StandAloneError {
 }
 
 impl std::error::Error for StandAloneError {}
+
+impl StandAloneError {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::NotStandAlone(e) => e.code(),
+            Self::Ledger(_) => "STANDALONE_ACCOUNT",
+            Self::Transport(_) => "STANDALONE_TRANSPORT",
+            Self::Rpc { .. } => "STANDALONE_RPC",
+            Self::Reply(_) => "STANDALONE_BAD_REPLY",
+            Self::Build(_) => "STANDALONE_TX_BUILD",
+            Self::TxFailed { .. } => "STANDALONE_TX_FAILED",
+        }
+    }
+}
+
+impl ToStructuredError for StandAloneError {
+    fn to_structured_error(&self) -> StructuredError {
+        match self {
+            Self::NotStandAlone(e) => e.to_structured_error(),
+            Self::Ledger(msg) => StructuredError::new(
+                self.code(),
+                scrub_standalone_text(&self.to_string()),
+                "supply a valid ed25519 XRPL seed (sEd...) when constructing a stand-alone seat account",
+                false,
+            )
+            .with_cause(scrub_standalone_text(msg)),
+            Self::Transport(msg) => StructuredError::new(
+                self.code(),
+                scrub_standalone_text(&self.to_string()),
+                "verify the local stand-alone xrpld container is running and accepting loopback HTTP JSON-RPC requests",
+                true,
+            )
+            .with_cause(scrub_standalone_text(msg)),
+            Self::Rpc {
+                error,
+                error_message,
+                ..
+            } => {
+                let retryable = matches!(error.as_str(), "tooBusy" | "slowDown" | "noCurrent");
+                let cause_raw = error_message.as_deref().unwrap_or(error.as_str());
+                StructuredError::new(
+                    self.code(),
+                    scrub_standalone_text(&self.to_string()),
+                    "inspect the stand-alone xrpld JSON-RPC request parameters and reported error identifier",
+                    retryable,
+                )
+                .with_cause(scrub_standalone_text(cause_raw))
+            }
+            Self::Reply(msg) => StructuredError::new(
+                self.code(),
+                scrub_standalone_text(&self.to_string()),
+                "check that the loopback endpoint is an xrpld 3.4.1 JSON-RPC port returning standard result payloads",
+                false,
+            )
+            .with_cause(scrub_standalone_text(msg)),
+            Self::Build(msg) => StructuredError::new(
+                self.code(),
+                scrub_standalone_text(&self.to_string()),
+                "verify transaction fields, currency codes, and signer keys before building or signing",
+                false,
+            )
+            .with_cause(scrub_standalone_text(msg)),
+            Self::TxFailed { result, .. } => StructuredError::new(
+                self.code(),
+                scrub_standalone_text(&self.to_string()),
+                "inspect the validated engine result code, account balances, sequence, and enabled v2 amendments",
+                false,
+            )
+            .with_cause(scrub_standalone_text(result)),
+        }
+    }
+}
 
 /// Verified summary of the v2 amendment feature set and full feature map on a stand-alone ledger.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1284,5 +1359,89 @@ mod tests {
             Err(err) => panic!("init failed: {err}"),
         };
         assert!(client_veto.verify_v2_amendments().is_err());
+    }
+
+    #[test]
+    fn standalone_error_structured_shape_and_secret_scrubbing() {
+        let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
+        let cases = [
+            (
+                StandAloneError::NotStandAlone(NotStandAlone::new("wrong network_id")),
+                "NOT_STANDALONE",
+                false,
+            ),
+            (
+                StandAloneError::Ledger(format!("bad seed {ed_seed}")),
+                "STANDALONE_ACCOUNT",
+                false,
+            ),
+            (
+                StandAloneError::Transport(format!("Bearer tok_123 {secp_seed}")),
+                "STANDALONE_TRANSPORT",
+                true,
+            ),
+            (
+                StandAloneError::Rpc {
+                    method: "server_info".into(),
+                    error: "tooBusy".into(),
+                    error_message: Some("try again".into()),
+                },
+                "STANDALONE_RPC",
+                true,
+            ),
+            (
+                StandAloneError::Rpc {
+                    method: "tx".into(),
+                    error: "txnNotFound".into(),
+                    error_message: None,
+                },
+                "STANDALONE_RPC",
+                false,
+            ),
+            (
+                StandAloneError::Reply("OPENROUTER_API_KEY=sk-or-secret999".into()),
+                "STANDALONE_BAD_REPLY",
+                false,
+            ),
+            (
+                StandAloneError::Build(format!("sign failed {ed_seed}")),
+                "STANDALONE_TX_BUILD",
+                false,
+            ),
+            (
+                StandAloneError::TxFailed {
+                    tx_type: "Payment".into(),
+                    result: "tecUNFUNDED_PAYMENT".into(),
+                },
+                "STANDALONE_TX_FAILED",
+                false,
+            ),
+        ];
+
+        for (err, expected_code, expect_retryable) in cases {
+            assert_eq!(err.code(), expected_code);
+            let se = err.to_structured_error();
+            assert_eq!(se.code, expected_code);
+            assert!(!se.hint.is_empty());
+            assert!(se.cause.is_some());
+            assert_eq!(se.retryable, expect_retryable);
+            let json = se
+                .to_json_string()
+                .unwrap_or_else(|e| panic!("json serialize: {e}"));
+            let text = se.format_text();
+            for rendered in [&json, &text, &se.message] {
+                assert!(!rendered.contains(ed_seed), "leaked ed seed: {rendered}");
+                assert!(
+                    !rendered.contains(secp_seed),
+                    "leaked secp seed: {rendered}"
+                );
+                assert!(!rendered.contains("tok_123"), "leaked bearer: {rendered}");
+                assert!(
+                    !rendered.contains("sk-or-secret999"),
+                    "leaked api key: {rendered}"
+                );
+            }
+        }
     }
 }

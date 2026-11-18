@@ -15,7 +15,8 @@ pub mod secret;
 pub mod transport;
 pub mod wording;
 
-pub use error::RelayError;
+pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ErrorFormat};
+pub use error::{RelayError, StructuredError, ToStructuredError};
 pub use relay::{
     CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
     Round, SeatOutcome, SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary,
@@ -33,10 +34,12 @@ pub use seats::{
     validate_pinned_local_model, validate_pinned_openrouter_slug, validate_vm_host_allowance,
 };
 pub use secret::{
-    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LiveGate, LocalGate, MAX_REDACTION_SCAN_BYTES,
-    MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV, REDACTED_MARKER, cap_utf8_bytes,
-    install_redacting_panic_hook, redact_and_truncate, redact_secrets,
-    redact_secrets_multi_with_limit, redact_secrets_with_limit, truncate_after_redaction,
+    ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LEAGUE_LOG_LEVEL_ENV, LiveGate, LocalGate, LogLevel,
+    MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV,
+    REDACTED_MARKER, cap_utf8_bytes, collect_env_redaction_keys, install_redacting_panic_hook,
+    install_redacting_panic_hook_with_level, panic_hook_log_level, redact_and_truncate,
+    redact_secrets, redact_secrets_multi_with_limit, redact_secrets_with_limit,
+    set_panic_hook_log_level, truncate_after_redaction,
 };
 pub use transport::{
     LocalOpenAiTransport, MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse,

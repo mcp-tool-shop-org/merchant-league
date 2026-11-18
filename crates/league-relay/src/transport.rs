@@ -8,7 +8,7 @@
 //! disables HTTP redirects, ignores environment proxies, and never sends an
 //! `Authorization` header).
 
-use crate::error::RelayError;
+use crate::error::{RelayError, StructuredError, ToStructuredError};
 use crate::seats::{validate_local_base_url, validate_local_tokenize_url};
 use crate::secret::{ApiKey, LiveGate, LocalGate, redact_secrets};
 use serde::Deserialize;
@@ -49,6 +49,37 @@ impl fmt::Display for TransportError {
 }
 
 impl std::error::Error for TransportError {}
+
+impl TransportError {
+    /// Stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Timeout => "TRANSPORT_TIMEOUT",
+            Self::Network(_) => "TRANSPORT_NETWORK",
+        }
+    }
+}
+
+impl ToStructuredError for TransportError {
+    fn to_structured_error(&self) -> StructuredError {
+        match self {
+            Self::Timeout => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "increase the seat's timeout_secs (and max_gpu_secs_per_call if local) or retry when the endpoint is responsive",
+                true,
+            ),
+            Self::Network(msg) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "verify the local server or OpenRouter endpoint is reachable and returns valid HTTP responses",
+                true,
+            )
+            .with_cause(msg),
+        }
+    }
+}
 
 /// Synchronous HTTP transport for chat-completions POST calls and local token counting.
 pub trait Transport: Send + Sync {

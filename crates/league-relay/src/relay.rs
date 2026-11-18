@@ -10,7 +10,10 @@ use crate::seats::{
     BackendKind, CostUnit, LocalSeat, OpenRouterSeat, ReasoningEffort, SeatBackend, SeatFile,
     SeatReasoningConfig, validate_local_base_url,
 };
-use crate::secret::{ApiKey, redact_and_truncate, redact_secrets};
+use crate::secret::{
+    ApiKey, LogLevel, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, redact_secrets,
+    redact_secrets_multi_with_limit, truncate_after_redaction,
+};
 use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
@@ -42,6 +45,55 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const CAP_EPSILON: f64 = 1e-12;
 const SETUP_FILENAME: &str = "setup.json";
 const SETUP_TMP_FILENAME: &str = "setup.json.tmp";
+
+/// Thread-safe buffered diagnostic sink emitted on `stderr` by the CLI after redaction.
+pub(crate) struct RelayDiagSink {
+    level: LogLevel,
+    entries: Mutex<Vec<(LogLevel, String)>>,
+}
+
+impl RelayDiagSink {
+    pub(crate) fn new(level: LogLevel) -> Self {
+        Self {
+            level,
+            entries: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn record<F>(&self, level: LogLevel, build_msg: F)
+    where
+        F: FnOnce() -> String,
+    {
+        if level <= self.level {
+            let msg = build_msg();
+            let mut guard = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+            guard.push((level, msg));
+        }
+    }
+
+    pub(crate) fn drain_redacted(&self, keys: &[ApiKey]) -> Vec<String> {
+        let mut guard = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        let drained = std::mem::take(&mut *guard);
+        drained
+            .into_iter()
+            .filter(|(lvl, _)| *lvl <= self.level)
+            .map(|(lvl, raw)| {
+                let scrubbed =
+                    redact_secrets_multi_with_limit(&raw, keys, MAX_UNRECORDED_CHARGE_SCAN_BYTES);
+                format!("[{}] {}", lvl.as_str(), scrubbed)
+            })
+            .collect()
+    }
+}
+
+fn diag_log<F>(sink: Option<&RelayDiagSink>, level: LogLevel, build_msg: F)
+where
+    F: FnOnce() -> String,
+{
+    if let Some(s) = sink {
+        s.record(level, build_msg);
+    }
+}
 
 /// Market-day round selector (`talk` or `act`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2179,6 +2231,10 @@ pub struct TurnConfig {
     pub allowed_vm_hosts: Vec<String>,
     /// Target chat-completions URL for `openrouter` seats.
     pub endpoint_url: String,
+    /// Diagnostic verbosity level (`LogLevel::Normal` by default).
+    pub log_level: LogLevel,
+    /// Additional environment keys supplied by the CLI for defense-in-depth scrubbing.
+    pub(crate) extra_redaction_keys: Vec<ApiKey>,
 }
 
 impl TurnConfig {
@@ -2207,6 +2263,8 @@ impl TurnConfig {
             mixed_scratchpad_arm: false,
             allowed_vm_hosts: Vec::new(),
             endpoint_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
+            log_level: LogLevel::default(),
+            extra_redaction_keys: Vec::new(),
         }
     }
 
@@ -2243,6 +2301,17 @@ impl TurnConfig {
     /// Configure permitted VM-local server hosts alongside loopback.
     pub fn with_allowed_vm_hosts(mut self, hosts: Vec<String>) -> Self {
         self.allowed_vm_hosts = hosts;
+        self
+    }
+
+    /// Configure the diagnostic [`LogLevel`] (`silent`, `normal`, `verbose`, or `debug`).
+    pub fn with_log_level(mut self, level: LogLevel) -> Self {
+        self.log_level = level;
+        self
+    }
+
+    pub(crate) fn with_extra_redaction_keys(mut self, keys: Vec<ApiKey>) -> Self {
+        self.extra_redaction_keys = keys;
         self
     }
 }
@@ -2377,6 +2446,14 @@ pub enum SeatOutcome {
     },
 }
 
+impl SeatOutcome {
+    /// `true` when this seat completed cleanly (`Delivered` or `RelayedByHand`).
+    #[must_use]
+    pub const fn is_clean(&self) -> bool {
+        matches!(self, Self::RelayedByHand | Self::Delivered { .. })
+    }
+}
+
 /// Report for a single seat in seat-file order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeatReport {
@@ -2396,12 +2473,33 @@ pub struct TurnSummary {
 impl TurnSummary {
     /// `true` if every seat either succeeded (`Delivered`) or was `RelayedByHand`.
     pub fn all_clean(&self) -> bool {
-        self.reports.iter().all(|r| {
-            matches!(
-                r.outcome,
-                SeatOutcome::RelayedByHand | SeatOutcome::Delivered { .. }
-            )
-        })
+        self.reports.iter().all(|r| r.outcome.is_clean())
+    }
+
+    /// Number of seats whose outcome was clean (`Delivered` or `RelayedByHand`).
+    #[must_use]
+    pub fn clean_seat_count(&self) -> usize {
+        self.reports.iter().filter(|r| r.outcome.is_clean()).count()
+    }
+
+    /// Number of seats whose outcome failed (`NoReply`, `CapReached`, refused, or `SeatError`).
+    #[must_use]
+    pub fn failed_seat_count(&self) -> usize {
+        self.reports.len().saturating_sub(self.clean_seat_count())
+    }
+
+    /// Unified CLI exit code (`SHIP_GATE.md` `:27`):
+    /// `0` when all seats are clean, `3` for partial success (`>= 1` clean and `>= 1` failed),
+    /// or `2` when zero seats succeeded (`>= 1` failed and `0` clean).
+    #[must_use]
+    pub fn exit_code(&self) -> i32 {
+        if self.failed_seat_count() == 0 {
+            0
+        } else if self.clean_seat_count() > 0 {
+            3
+        } else {
+            2
+        }
     }
 
     /// Format a plain paths-and-hashes report (never prints prompt or reply bodies).
@@ -3716,6 +3814,9 @@ struct CallLedger<'a> {
     ledger_write_failed_in_turn: bool,
     cost_unknown_in_turn: bool,
     cost_over_estimate_in_turn: bool,
+    initial_recorded_entries: usize,
+    initial_recorded_spend: f64,
+    initial_remaining_reserved: usize,
 }
 
 enum PreCallDecision {
@@ -3851,6 +3952,14 @@ impl<'a> CallLedger<'a> {
             }
         }
         let ledger_unit = cost_unit.unwrap_or(CostUnit::Credits);
+        let initial_recorded_entries = effective_entries.len();
+        let initial_recorded_spend =
+            sum_charged_for_unit(&effective_entries, ledger_unit).unwrap_or(0.0);
+        let initial_remaining_reserved = if reserved_path.exists() {
+            read_reserved_file(&reserved_path, redaction_key).map_or(0, |v| v.len())
+        } else {
+            0
+        };
 
         let mut cost_unknown_in_turn = false;
         let mut cost_over_estimate_in_turn = false;
@@ -3883,6 +3992,9 @@ impl<'a> CallLedger<'a> {
             ledger_write_failed_in_turn: false,
             cost_unknown_in_turn,
             cost_over_estimate_in_turn,
+            initial_recorded_entries,
+            initial_recorded_spend,
+            initial_remaining_reserved,
         })
     }
 
@@ -4480,6 +4592,18 @@ pub fn run_turn(
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
 ) -> Result<TurnSummary, RelayError> {
+    let sink =
+        (config.log_level >= LogLevel::Verbose).then(|| RelayDiagSink::new(config.log_level));
+    run_turn_with_diag(config, transport, redaction_key, sink.as_ref())
+}
+
+pub(crate) fn run_turn_with_diag(
+    config: &TurnConfig,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+    diag_sink: Option<&RelayDiagSink>,
+) -> Result<TurnSummary, RelayError> {
+    let turn_started = Instant::now();
     validate_day(&config.day)?;
     let scratchpad_plan = resolve_table_scratchpad_plan(config)?;
 
@@ -4553,7 +4677,29 @@ pub fn run_turn(
         ));
     }
 
-    let turn_lock = TurnLock::acquire(&config.game_dir, redaction_key)?;
+    let turn_lock = match TurnLock::acquire(&config.game_dir, redaction_key) {
+        Ok(lock) => {
+            diag_log(diag_sink, LogLevel::Debug, || {
+                format!(
+                    "lock=acquired path={} pid={}",
+                    redact_secrets(&lock.lock_path.display().to_string(), redaction_key),
+                    std::process::id()
+                )
+            });
+            lock
+        }
+        Err(err) => {
+            if let RelayError::TurnLocked { lock_path, holder } = &err {
+                diag_log(diag_sink, LogLevel::Debug, || {
+                    format!(
+                        "lock=contended path={lock_path} holder={}",
+                        holder.as_deref().unwrap_or("active")
+                    )
+                });
+            }
+            return Err(err);
+        }
+    };
     check_existing_setup_compatibility(&turn_lock, &config.game_dir, redaction_key)?;
 
     let wrapper_text = match &config.wrapper_path {
@@ -4617,6 +4763,21 @@ pub fn run_turn(
         CostUnit::Credits => config.cap_credits,
         CostUnit::GpuSeconds => config.cap_gpu_secs,
     };
+    let cap_label = active_cap.map_or_else(|| "none".to_owned(), |c| format!("{c:.6}"));
+
+    diag_log(diag_sink, LogLevel::Debug, || {
+        let schema_sha = config
+            .response_format
+            .as_ref()
+            .map_or_else(|| "none".to_owned(), ResponseFormatConfig::canonical_sha256);
+        let wrapper_sha = wrapper_text.as_deref().map_or_else(
+            || "from_transcript".to_owned(),
+            |w| sha256_hex(w.as_bytes()),
+        );
+        format!(
+            "setup=verified wording_arm={ACTIVE_WORDING_ARM} response_schema_sha256={schema_sha} wrapper_sha256={wrapper_sha}"
+        )
+    });
 
     let calls_path = config.game_dir.join("relay").join("calls.jsonl");
     let ledger = Mutex::new(CallLedger::open(
@@ -4629,6 +4790,31 @@ pub fn run_turn(
         redaction_key,
     )?);
 
+    {
+        let guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+        let prior_spend = guard.initial_recorded_spend;
+        let prior_entries = guard.initial_recorded_entries;
+        let unmigrated = guard.prior_unmigrated_pending.len();
+        let reserved = guard.initial_remaining_reserved;
+        let run_id = guard.run_id.clone();
+        let cost_unit_label = guard.cost_unit;
+        diag_log(diag_sink, LogLevel::Verbose, || {
+            format!(
+                "turn=start day={} round={} seats={} memory_mode={} cost_unit={cost_unit_label} cap={cap_label} prior_charged={prior_spend:.6}",
+                config.day,
+                config.round,
+                config.seats.seats.len(),
+                config.memory_mode,
+            )
+        });
+        diag_log(diag_sink, LogLevel::Debug, || {
+            format!(
+                "ledger=opened run_id={run_id} calls_path={} prior_entries={prior_entries} unmigrated_pending={unmigrated} remaining_reserved={reserved} cost_unit={cost_unit_label}",
+                redact_secrets(&calls_path.display().to_string(), redaction_key)
+            )
+        });
+    }
+
     let reports: Vec<SeatReport> = std::thread::scope(|scope| {
         let mut slots: Vec<(usize, SeatReport)> = Vec::with_capacity(config.seats.seats.len());
         let mut handles = Vec::new();
@@ -4639,13 +4825,21 @@ pub fn run_turn(
                 .get(idx)
                 .is_some_and(|d| d.keeps_scratchpad);
             match &seat.backend {
-                SeatBackend::File { .. } => slots.push((
-                    idx,
-                    SeatReport {
-                        guild: seat.guild.clone(),
-                        outcome: SeatOutcome::RelayedByHand,
-                    },
-                )),
+                SeatBackend::File { .. } => {
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_attempt seat={} backend=file outcome=FILE_MANUAL",
+                            seat.guild
+                        )
+                    });
+                    slots.push((
+                        idx,
+                        SeatReport {
+                            guild: seat.guild.clone(),
+                            outcome: SeatOutcome::RelayedByHand,
+                        },
+                    ));
+                }
                 SeatBackend::Openrouter(or_seat) => {
                     let guild = seat.guild.clone();
                     let wrapper_ref = wrapper_text.as_deref();
@@ -4663,6 +4857,7 @@ pub fn run_turn(
                             ledger_ref,
                             calls_ref,
                             redaction_key,
+                            diag_sink,
                         );
                         (idx, SeatReport { guild, outcome })
                     }));
@@ -4683,6 +4878,7 @@ pub fn run_turn(
                             ledger_ref,
                             calls_ref,
                             redaction_key,
+                            diag_sink,
                         );
                         (idx, SeatReport { guild, outcome })
                     }));
@@ -4699,14 +4895,35 @@ pub fn run_turn(
         slots.into_iter().map(|(_, r)| r).collect()
     });
 
+    let summary = TurnSummary { reports };
+
     {
         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-        guard.finalize_turn(redaction_key)?;
+        let finalize_res = guard.finalize_turn(redaction_key);
+        let cumulative_charged = guard
+            .read_state_unlocked(redaction_key)
+            .and_then(|st| sum_charged_for_unit(&st.persisted_for_sum, guard.cost_unit))
+            .unwrap_or(guard.initial_recorded_spend);
+        let turn_elapsed_ms = u64::try_from(turn_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        diag_log(diag_sink, LogLevel::Verbose, || {
+            format!(
+                "turn=finish day={} round={} elapsed_ms={turn_elapsed_ms} clean_seats={} failed_seats={} cumulative_charged={cumulative_charged:.6} cap={cap_label}",
+                config.day,
+                config.round,
+                summary.clean_seat_count(),
+                summary.failed_seat_count(),
+            )
+        });
+        finalize_res?;
     }
 
+    let lock_path_str = redact_secrets(&turn_lock.lock_path.display().to_string(), redaction_key);
     drop(ledger);
     drop(turn_lock);
-    Ok(TurnSummary { reports })
+    diag_log(diag_sink, LogLevel::Debug, || {
+        format!("lock=released path={lock_path_str}")
+    });
+    Ok(summary)
 }
 
 fn view_openrouter_seat<'a>(
@@ -4792,6 +5009,7 @@ fn run_single_automated_seat(
     ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
     redaction_key: Option<&ApiKey>,
+    diag_sink: Option<&RelayDiagSink>,
 ) -> SeatOutcome {
     let stem = format!("day-{}-{}-{guild}", config.day, config.round);
     let filename = format!("{stem}.md");
@@ -5086,10 +5304,17 @@ fn run_single_automated_seat(
         };
     };
     let request_body_sha256 = sha256_hex(request_body.as_bytes());
+    let wrapper_sha256 = sha256_hex(base_wrapper.as_bytes());
     let estimate_label = match seat.cost_unit {
         CostUnit::Credits => "max_cost_per_call",
         CostUnit::GpuSeconds => "max_gpu_secs_per_call",
     };
+    diag_log(diag_sink, LogLevel::Debug, || {
+        format!(
+            "seat_hashes seat={guild} backend={} wrapper_sha256={wrapper_sha256} request_body_sha256={request_body_sha256}",
+            seat.backend_kind.as_str()
+        )
+    });
 
     for attempt in [1_u8, 2_u8] {
         let trigger = if attempt == 1 { "turn" } else { "harness" };
@@ -5123,6 +5348,12 @@ fn run_single_automated_seat(
                     requested,
                     cap,
                 }) => {
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_cap_refusal seat={guild} attempt={attempt} trigger={trigger} charged={charged_sum:.6} reserved={reserved_in_flight:.6} requested={requested:.6} cap={cap:.6} cost_unit={}",
+                            seat.cost_unit
+                        )
+                    });
                     let entry = refused_call_entry(
                         config,
                         guild,
@@ -5215,22 +5446,55 @@ fn run_single_automated_seat(
             }
         };
 
+        let all_keys = merged_redaction_keys(redaction_key, &config.extra_redaction_keys);
+
+        diag_log(diag_sink, LogLevel::Debug, || {
+            format!(
+                "transport=dispatch seat={guild} backend={} endpoint={} attempt={attempt} trigger={trigger} timeout_ms={} reservation_id={reservation_id}",
+                seat.backend_kind.as_str(),
+                redact_secrets_multi_with_limit(
+                    seat.endpoint_url,
+                    &all_keys,
+                    MAX_REDACTION_SCAN_BYTES
+                ),
+                seat.timeout.as_millis()
+            )
+        });
+
         let (call_result, elapsed) = call_with_wall_timeout(
             transport,
             seat.endpoint_url,
             &request_body,
             seat.timeout,
-            redaction_key,
+            &all_keys,
         );
         let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
         let wall_secs = elapsed.as_secs_f64();
         let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
 
+        diag_log(diag_sink, LogLevel::Debug, || {
+            let status_desc = match &call_result {
+                CallTransportResult::OnTime(Ok(resp)) => format!("http_{}", resp.status),
+                CallTransportResult::OnTime(Err(TransportError::Timeout))
+                | CallTransportResult::TimedOut => "timeout".to_owned(),
+                CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
+                    format!(
+                        "transport_err({})",
+                        redact_secrets_multi_with_limit(msg, &all_keys, MAX_REDACTION_SCAN_BYTES)
+                    )
+                }
+                CallTransportResult::Late(resp) => format!("late_http_{}", resp.status),
+            };
+            format!(
+                "transport=response seat={guild} attempt={attempt} status={status_desc} latency_ms={latency_ms}"
+            )
+        });
+
         let raw_evaluated = evaluate_call_result(
             call_result,
             exclude_thinking,
             effective_response_format.as_ref(),
-            redaction_key,
+            &all_keys,
         );
 
         let mut validated_scratchpad_update: Option<String> = None;
@@ -5379,6 +5643,7 @@ fn run_single_automated_seat(
                     ),
                     _ => ("OK".to_owned(), None),
                 };
+                let outcome_for_diag = outcome_str.clone();
                 let entry = CallLogEntry {
                     time_utc: now_utc_rfc3339(),
                     day: config.day.clone(),
@@ -5403,6 +5668,17 @@ fn run_single_automated_seat(
                     error: err_opt,
                     reservation_id: Some(reservation_id.clone()),
                 };
+                diag_log(diag_sink, LogLevel::Verbose, || {
+                    format!(
+                        "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_for_diag} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                        seat.max_per_call_spend, seat.cost_unit
+                    )
+                });
+                diag_log(diag_sink, LogLevel::Debug, || {
+                    format!(
+                        "seat_reply_hash seat={guild} attempt={attempt} reply_sha256={reply_sha256}"
+                    )
+                });
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
@@ -5512,6 +5788,12 @@ fn run_single_automated_seat(
                     error: Some(reason),
                     reservation_id: Some(reservation_id.clone()),
                 };
+                diag_log(diag_sink, LogLevel::Verbose, || {
+                    format!(
+                        "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_label} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                        seat.max_per_call_spend, seat.cost_unit
+                    )
+                });
                 {
                     let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(e) = guard.finish_call_and_record(
@@ -5726,11 +6008,32 @@ fn validate_structured_reply(content: &str, rf: &ResponseFormatConfig) -> Result
         .map_err(|msg| format!("structured output failed schema '{}': {msg}", rf.name))
 }
 
+fn merged_redaction_keys(primary: Option<&ApiKey>, extra: &[ApiKey]) -> Vec<ApiKey> {
+    let mut keys: Vec<ApiKey> = Vec::with_capacity(extra.len() + usize::from(primary.is_some()));
+    if let Some(p) = primary {
+        keys.push(p.clone());
+    }
+    for k in extra {
+        if !keys
+            .iter()
+            .any(|existing| existing.secret_str() == k.secret_str())
+        {
+            keys.push(k.clone());
+        }
+    }
+    keys
+}
+
+fn redact_multi_and_truncate(raw: &str, keys: &[ApiKey], max_chars: usize) -> String {
+    let scrubbed = redact_secrets_multi_with_limit(raw, keys, MAX_REDACTION_SCAN_BYTES);
+    truncate_after_redaction(&scrubbed, max_chars)
+}
+
 fn evaluate_call_result(
     call_result: CallTransportResult,
     exclude_thinking: Option<bool>,
     response_format: Option<&ResponseFormatConfig>,
-    redaction_key: Option<&ApiKey>,
+    redaction_keys: &[ApiKey],
 ) -> EvaluatedCall {
     let raw = match call_result {
         CallTransportResult::TimedOut
@@ -5744,7 +6047,11 @@ fn evaluate_call_result(
         }
         CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
             return EvaluatedCall::DeliveryFailure {
-                reason: redact_secrets(&format!("transport: {msg}"), redaction_key),
+                reason: redact_secrets_multi_with_limit(
+                    &format!("transport: {msg}"),
+                    redaction_keys,
+                    MAX_REDACTION_SCAN_BYTES,
+                ),
                 model_returned: None,
                 usage: UsageWire::default(),
                 is_late_reply: false,
@@ -5755,7 +6062,13 @@ fn evaluate_call_result(
                 serde_json::from_str(&late_raw.body);
             let (model_returned, usage) = match parsed_opt {
                 Ok(p) => (
-                    p.model.map(|m| redact_secrets(&m, redaction_key)),
+                    p.model.map(|m| {
+                        redact_secrets_multi_with_limit(
+                            &m,
+                            redaction_keys,
+                            MAX_REDACTION_SCAN_BYTES,
+                        )
+                    }),
                     p.usage.unwrap_or_default(),
                 ),
                 Err(_) => (None, UsageWire::default()),
@@ -5780,12 +6093,14 @@ fn evaluate_call_result(
     if raw.status != 200 {
         let (model_returned, usage) = match parsed_opt {
             Ok(p) => (
-                p.model.map(|m| redact_secrets(&m, redaction_key)),
+                p.model.map(|m| {
+                    redact_secrets_multi_with_limit(&m, redaction_keys, MAX_REDACTION_SCAN_BYTES)
+                }),
                 p.usage.unwrap_or_default(),
             ),
             Err(_) => (None, UsageWire::default()),
         };
-        let snippet = redact_and_truncate(raw.body.trim(), redaction_key, 200);
+        let snippet = redact_multi_and_truncate(raw.body.trim(), redaction_keys, 200);
         return EvaluatedCall::DeliveryFailure {
             reason: format!("http {}: {snippet}", raw.status),
             model_returned,
@@ -5798,7 +6113,11 @@ fn evaluate_call_result(
         Ok(p) => p,
         Err(e) => {
             return EvaluatedCall::DeliveryFailure {
-                reason: redact_secrets(&format!("invalid response JSON: {e}"), redaction_key),
+                reason: redact_secrets_multi_with_limit(
+                    &format!("invalid response JSON: {e}"),
+                    redaction_keys,
+                    MAX_REDACTION_SCAN_BYTES,
+                ),
                 model_returned: None,
                 usage: UsageWire::default(),
                 is_late_reply: false,
@@ -5807,10 +6126,12 @@ fn evaluate_call_result(
     };
 
     let usage = parsed.usage.unwrap_or_default();
-    let model_returned = parsed.model.map(|m| redact_secrets(&m, redaction_key));
+    let model_returned = parsed
+        .model
+        .map(|m| redact_secrets_multi_with_limit(&m, redaction_keys, MAX_REDACTION_SCAN_BYTES));
 
     if let Some(err_val) = parsed.error {
-        let snippet = redact_and_truncate(&err_val.to_string(), redaction_key, 200);
+        let snippet = redact_multi_and_truncate(&err_val.to_string(), redaction_keys, 200);
         return EvaluatedCall::DeliveryFailure {
             reason: format!("provider error: {snippet}"),
             model_returned,
@@ -5840,7 +6161,7 @@ fn evaluate_call_result(
                 && let Err(schema_err) = validate_structured_reply(&content, rf)
             {
                 return EvaluatedCall::DeliveryFailure {
-                    reason: redact_and_truncate(&schema_err, redaction_key, 200),
+                    reason: redact_multi_and_truncate(&schema_err, redaction_keys, 200),
                     model_returned,
                     usage,
                     is_late_reply: false,
@@ -5871,7 +6192,7 @@ fn call_with_wall_timeout(
     url: &str,
     body: &str,
     timeout: Duration,
-    redaction_key: Option<&ApiKey>,
+    redaction_keys: &[ApiKey],
 ) -> (CallTransportResult, Duration) {
     let start = Instant::now();
     let (tx, rx) = mpsc::channel();
@@ -5882,12 +6203,13 @@ fn call_with_wall_timeout(
             })) {
                 Ok(Ok(resp)) => Ok(resp),
                 Ok(Err(TransportError::Timeout)) => Err(TransportError::Timeout),
-                Ok(Err(TransportError::Network(msg))) => {
-                    Err(TransportError::Network(redact_secrets(&msg, redaction_key)))
-                }
-                Err(payload) => Err(TransportError::Network(redact_secrets(
+                Ok(Err(TransportError::Network(msg))) => Err(TransportError::Network(
+                    redact_secrets_multi_with_limit(&msg, redaction_keys, MAX_REDACTION_SCAN_BYTES),
+                )),
+                Err(payload) => Err(TransportError::Network(redact_secrets_multi_with_limit(
                     &format!("transport panicked: {}", panic_message(&*payload)),
-                    redaction_key,
+                    redaction_keys,
+                    MAX_REDACTION_SCAN_BYTES,
                 ))),
             };
             let _ = tx.send(res);

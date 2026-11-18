@@ -3916,7 +3916,10 @@ fn b5_held_charge_persists_across_runs_flushes_migrates_and_reports_unwritable()
         &mut cli_out,
         &mut cli_err,
     );
-    assert_eq!(exit_code, 3, "expected distinct exit code 3");
+    assert_eq!(
+        exit_code, 2,
+        "expected runtime exit code 2 for UnrecordedCharge"
+    );
     let stderr_str = String::from_utf8(cli_err)?;
     let stdout_str = String::from_utf8(cli_out)?;
     assert!(
@@ -4284,7 +4287,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
             &mut cli_out,
             &mut cli_err,
         );
-        assert_eq!(cli_code, 4);
+        assert_eq!(cli_code, 2);
         let cli_stderr = String::from_utf8(cli_err)?;
         assert!(
             cli_stderr.contains("another league-relay turn is already running"),
@@ -4370,7 +4373,7 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         ])
         .stdin(Stdio::null())
         .output()?;
-    assert_eq!(child2_out.status.code(), Some(4));
+    assert_eq!(child2_out.status.code(), Some(2));
     let child2_stderr = String::from_utf8_lossy(&child2_out.stderr);
     assert!(
         child2_stderr.contains("another league-relay turn is already running"),
@@ -4701,10 +4704,10 @@ fn f1_turn_lock_prevents_concurrent_runs_overshoot_and_recovers_stale_or_error_l
         &mut err3,
     );
     set_fail_pending_temp_write_for_test(&rel_pending, false);
-    assert_eq!(code3, 3);
+    assert_eq!(code3, 2);
     assert!(
         !is_os_lock_held(&exit3_lock_path),
-        "turn.lock must be released after exit 3"
+        "turn.lock must be released after exit 2"
     );
 
     // (d) Restore permissions -> subsequent clean run (exit 0) succeeds and releases lock.
@@ -4862,7 +4865,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     );
     set_fail_pending_temp_write_for_test(&pending_path, false);
 
-    assert_eq!(code, 3, "expected exit code 3 on temp-file write failure");
+    assert_eq!(code, 2, "expected exit code 2 on temp-file write failure");
     assert!(
         !pending_tmp_path.exists(),
         "failed temp file calls.pending.jsonl.tmp must be cleaned up"
@@ -4874,7 +4877,7 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
     );
     let stderr_str = String::from_utf8(cli_err)?;
     assert!(
-        stderr_str.starts_with("error: post-call charge 0.030000 credits"),
+        stderr_str.starts_with("error: [UNRECORDED_CHARGE] post-call charge 0.030000 credits"),
         "expected total 0.030000 (old 0.01 + new 0.02) first, got: {stderr_str}"
     );
     assert!(
@@ -4916,11 +4919,11 @@ fn f2_atomic_pending_side_file_preserves_old_lines_and_reports_old_plus_new_on_e
         &mut ro_out,
         &mut ro_err,
     );
-    assert_eq!(ro_code, 3);
+    assert_eq!(ro_code, 2);
     assert_eq!(fs::read(&pending_path)?, old_bytes);
     let ro_stderr = String::from_utf8(ro_err)?;
     assert!(
-        ro_stderr.starts_with("error: post-call charge 0.050000 credits"),
+        ro_stderr.starts_with("error: [UNRECORDED_CHARGE] post-call charge 0.050000 credits"),
         "expected total 0.050000 (old 0.01 + Sub-case 1 exit-3 0.02 + Sub-case 2 0.02), got: {ro_stderr}"
     );
     assert!(
@@ -5243,7 +5246,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
         &mut n2_out,
         &mut n2_err,
     );
-    assert_eq!(n2_code, 3);
+    assert_eq!(n2_code, 2);
     let n2_stderr = String::from_utf8(n2_err)?;
     assert!(
         n2_stderr.len() > MAX_REDACTION_SCAN_BYTES,
@@ -5251,7 +5254,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
         n2_stderr.len()
     );
     assert!(
-        n2_stderr.starts_with("error: post-call charge 0.660000 credits"),
+        n2_stderr.starts_with("error: [UNRECORDED_CHARGE] post-call charge 0.660000 credits"),
         "expected total 0.660000 first, got head: {}",
         &n2_stderr[..n2_stderr.len().min(80)]
     );
@@ -5765,7 +5768,7 @@ fn b1_turn_lock_identity_normal_and_p3a_delete_while_live() -> TestResult {
         .env("OPENROUTER_API_KEY", B1_KEY)
         .stdin(Stdio::null())
         .output()?;
-    assert_eq!(proc_b.status.code(), Some(4));
+    assert_eq!(proc_b.status.code(), Some(2));
 
     fs::remove_file(&proc_lock)?;
     let proc_c = Command::new(env!("CARGO_BIN_EXE_league-relay"))
@@ -5799,8 +5802,8 @@ fn b1_turn_lock_identity_normal_and_p3a_delete_while_live() -> TestResult {
     let proc_a_out = proc_a.wait_with_output()?;
     assert_eq!(
         proc_a_out.status.code(),
-        Some(4),
-        "Holder proc_a must exit 4 on compromised turn.lock; stderr={}",
+        Some(2),
+        "Holder proc_a must exit 2 on compromised turn.lock; stderr={}",
         String::from_utf8_lossy(&proc_a_out.stderr)
     );
     let proc_a_stderr = String::from_utf8_lossy(&proc_a_out.stderr);
@@ -5921,7 +5924,7 @@ fn c2_turn_locked_exits_4_distinct_from_1_2_and_3() -> TestResult {
         &mut out4,
         &mut err4,
     );
-    assert_eq!(code4, 4, "TurnLocked must return distinct exit code 4");
+    assert_eq!(code4, 2, "TurnLocked must return runtime exit code 2");
     let stderr4 = String::from_utf8(err4)?;
     assert!(stderr4.contains("another league-relay turn is already running"));
     assert_no_8char_key_piece(&stderr4, C2_KEY, "C2 exit 4 stderr");
@@ -6048,7 +6051,7 @@ fn c4_nonexistent_or_file_game_dir_refused_before_creating_relay_dir() -> TestRe
         &mut cli_out,
         &mut cli_err,
     );
-    assert_eq!(cli_code, 1);
+    assert_eq!(cli_code, 2);
     let cli_stderr = String::from_utf8(cli_err)?;
     assert!(cli_stderr.contains("game directory does not exist"));
     assert_no_8char_key_piece(&cli_stderr, C4_KEY, "C4 CLI stderr");
@@ -6572,7 +6575,7 @@ fn b1_fix6_persisted_reservation_p3a_tight_cap_and_crash_reconcile() -> TestResu
                     .env("OPENROUTER_API_KEY", FIX6_KEY)
                     .stdin(Stdio::null())
                     .output()?;
-                assert_eq!(proc_b.status.code(), Some(4));
+                assert_eq!(proc_b.status.code(), Some(2));
 
                 assert!(
                     proc_a.try_wait()?.is_none(),
@@ -6633,8 +6636,8 @@ fn b1_fix6_persisted_reservation_p3a_tight_cap_and_crash_reconcile() -> TestResu
                 let proc_a_out = proc_a.wait_with_output()?;
                 assert_eq!(
                     proc_a_out.status.code(),
-                    Some(4),
-                    "proc_a must exit 4 on compromised turn.lock; stderr={}",
+                    Some(2),
+                    "proc_a must exit 2 on compromised turn.lock; stderr={}",
                     String::from_utf8_lossy(&proc_a_out.stderr)
                 );
                 assert!(
@@ -8155,8 +8158,8 @@ fn b2_fix7_pz_exit3_preserves_reservation_for_subsequent_run() -> TestResult {
             .output()?;
         assert_eq!(
             proc_a.status.code(),
-            Some(3),
-            "mode={mode}: expected exit 3 when both ledger and side file fail, stderr={}",
+            Some(2),
+            "mode={mode}: expected exit 2 when both ledger and side file fail, stderr={}",
             String::from_utf8_lossy(&proc_a.stderr)
         );
         let a_stderr = String::from_utf8_lossy(&proc_a.stderr);
@@ -8701,9 +8704,11 @@ fn b2_c1_fix8_exit3_wording_warns_against_hand_entry_and_empty_ids_never_collaps
         .env("OPENROUTER_API_KEY", FIX8_KEY)
         .stdin(Stdio::null())
         .output()?;
-    assert_eq!(proc_exit3.status.code(), Some(3));
+    assert_eq!(proc_exit3.status.code(), Some(2));
     let exit3_stderr = String::from_utf8_lossy(&proc_exit3.stderr);
-    assert!(exit3_stderr.starts_with("error: post-call charge 0.010000 credits"));
+    assert!(
+        exit3_stderr.starts_with("error: [UNRECORDED_CHARGE] post-call charge 0.010000 credits")
+    );
     assert!(exit3_stderr.contains("held as a reservation in relay/calls.reserved.jsonl"));
     assert!(exit3_stderr.contains("next run counts at max_cost_per_call"));
     assert!(
@@ -9853,7 +9858,7 @@ fn part1_local_refuses_keys_outside_hosts_and_preserves_fix7_fix8_ledger_safety(
     );
     set_file_writable(&exit3_calls)?;
     set_file_writable(&exit3_pending)?;
-    assert_eq!(code_exit3, 3, "unrecorded local GPU time must exit 3");
+    assert_eq!(code_exit3, 2, "unrecorded local GPU time must exit 2");
     let exit3_stderr = String::from_utf8_lossy(&err_out);
     assert!(exit3_stderr.contains("gpu_seconds"));
     assert!(exit3_stderr.contains("max_gpu_secs_per_call"));
@@ -9892,7 +9897,7 @@ fn part1_local_refuses_keys_outside_hosts_and_preserves_fix7_fix8_ledger_safety(
         &mut err_out,
     );
     let _ = lock_file.unlock();
-    assert_eq!(code_exit4, 4, "live turn.lock on local turn must exit 4");
+    assert_eq!(code_exit4, 2, "live turn.lock on local turn must exit 2");
 
     Ok(())
 }
@@ -15494,7 +15499,7 @@ fn fix4_nits_c7_c8_c9_c3_c4_c6_regressions() -> TestResult {
             &mut out,
             &mut err_out,
         );
-        assert_eq!(code_c4, 2);
+        assert_eq!(code_c4, 3);
         assert_eq!(srv.request_count()?, hits_before);
     }
 
@@ -20577,7 +20582,7 @@ fn fix7_c23_c24_c25_scratch_pad_separators_strict_note_prose_and_mixed_case_nest
     let c24_stderr = String::from_utf8_lossy(&err_out);
     assert!(
         c24_stderr.contains(
-            "error: invalid arguments: response_format 'schema.properties.orders.description' cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'"
+            "error: [INVALID_USAGE] invalid arguments: response_format 'schema.properties.orders.description' cannot mention 'notes' or a confusable variant outside top-level 'properties.notes'"
         ),
         "unexpected C-24 stderr: {c24_stderr}"
     );
