@@ -266,6 +266,31 @@ impl fmt::Display for RecordedLayoutSeedError {
 
 impl std::error::Error for RecordedLayoutSeedError {}
 
+impl RecordedLayoutSeedError {
+    /// Returns the stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::SealedValueInClear { .. } => "SEALED_SEED_IN_CLEAR",
+            Self::InvalidSealedDigest => "INVALID_SEALED_SEED_DIGEST",
+        }
+    }
+}
+
+impl league_core::ToStructuredError for RecordedLayoutSeedError {
+    fn to_structured_error(&self) -> league_core::StructuredError {
+        let hint = match self {
+            Self::SealedValueInClear { .. } => {
+                "record sealed-pool layout seeds with the sealed_sha256 variant rather than clear"
+            }
+            Self::InvalidSealedDigest => {
+                "supply a 64-character lowercase hexadecimal SHA-256 digest"
+            }
+        };
+        league_core::StructuredError::new(self.code(), self.to_string(), hint, false)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum RecordedLayoutSeedRepr {
     Clear(u64),
@@ -683,6 +708,10 @@ pub fn is_denied_currency_code(bytes: [u8; 3]) -> bool {
 }
 
 impl CurrencyCode {
+    pub(crate) const fn from_allowed_bytes_unchecked(bytes: [u8; 3]) -> Self {
+        Self(bytes)
+    }
+
     /// Constructs a [`CurrencyCode`] if `bytes` are 3 ASCII uppercase letters strictly inside
     /// [`ALLOWED_COMMODITY_GLOSSARY`] and outside [`DENIED_CURRENCY_CODES`].
     pub fn from_bytes(bytes: [u8; 3]) -> Result<Self, FeasibilityError> {
@@ -1476,6 +1505,55 @@ impl fmt::Display for FeasibilityError {
 
 impl std::error::Error for FeasibilityError {}
 
+impl FeasibilityError {
+    /// Returns the stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidTable(_) => "INVALID_RING_TABLE",
+            Self::PairCoversUpkeep { .. } => "PAIR_COVERS_UPKEEP",
+            Self::InsufficientSurplus { .. } => "INSUFFICIENT_SURPLUS",
+            Self::SeatEvOutOfTolerance { .. } => "SEAT_EV_OUT_OF_TOLERANCE",
+            Self::ShapleyGuardExceeded { .. } => "SHAPLEY_GUARD_EXCEEDED",
+            Self::PairShareExceedsCap { .. } => "PAIR_SHARE_EXCEEDED",
+            Self::RolloutGateFailed(_) => "ROLLOUT_GATE_FAILED",
+            Self::SolverFailure(_) => "LP_SOLVER_FAILURE",
+        }
+    }
+}
+
+impl league_core::ToStructuredError for FeasibilityError {
+    fn to_structured_error(&self) -> league_core::StructuredError {
+        let hint = match self {
+            Self::InvalidTable(_) => {
+                "fix structural RingTable fields, commodity codes, recipes, projects, or shock bounds"
+            }
+            Self::PairCoversUpkeep { .. } => {
+                "resample chiral recipes so no 1- or 2-seat subset covers its own upkeep"
+            }
+            Self::InsufficientSurplus { .. } => {
+                "increase converter yields or lower upkeep/min_surplus_ratio"
+            }
+            Self::SeatEvOutOfTolerance { .. } => {
+                "resample candidate parameters or adjust GeneratorConfig::ev_tolerance"
+            }
+            Self::ShapleyGuardExceeded { .. } => {
+                "resample table parameters so every seat stays within the 7% Shapley guard"
+            }
+            Self::PairShareExceedsCap { .. } => {
+                "resample converter input shares or adjust GeneratorConfig::max_pair_share_cap"
+            }
+            Self::RolloutGateFailed(_) => {
+                "inspect rollout grading metrics or resample the candidate RingTable"
+            }
+            Self::SolverFailure(_) => {
+                "verify LP constraints are finite, bounded, and well-conditioned"
+            }
+        };
+        league_core::StructuredError::new(self.code(), self.to_string(), hint, false)
+    }
+}
+
 /// Checked payload carried by [`GenError::SeedPoolMismatch`].
 ///
 /// Fields are private so callers outside the crate can construct this payload only via
@@ -1640,6 +1718,54 @@ impl fmt::Display for GenError {
 }
 
 impl std::error::Error for GenError {}
+
+impl GenError {
+    /// Returns the stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::SeedPoolMismatch(_) => "SEED_POOL_MISMATCH",
+            Self::TrainingLoggedMismatch(_) => "TRAINING_LOGGED_MISMATCH",
+            Self::InvalidConfig(_) => "INVALID_GENERATOR_CONFIG",
+            Self::NoFeasibleTableFound { .. } => "NO_FEASIBLE_TABLE_FOUND",
+        }
+    }
+}
+
+impl league_core::ToStructuredError for GenError {
+    fn to_structured_error(&self) -> league_core::StructuredError {
+        match self {
+            Self::SeedPoolMismatch(_) => league_core::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "choose a non-reserved layout seed belonging to the requested TablePurpose pool",
+                false,
+            ),
+            Self::TrainingLoggedMismatch(_) => league_core::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "set training_logged = false for any TablePurpose other than Train",
+                false,
+            ),
+            Self::InvalidConfig(_) => league_core::StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "check GeneratorConfig bounds, RingTable fields, and seed eligibility",
+                false,
+            ),
+            Self::NoFeasibleTableFound {
+                attempts,
+                last_error,
+            } => league_core::StructuredError::new(
+                self.code(),
+                format!("no feasible chiral table found in {attempts} attempts"),
+                "increase max_attempts or relax GeneratorConfig tolerances",
+                false,
+            )
+            .with_cause(last_error.to_string()),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

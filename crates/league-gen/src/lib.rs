@@ -32,14 +32,20 @@
 //! generator filter rejection rates, and static model HHI / `max_pair_share` outputs;
 //! played-game HHI belongs to Mode A engine runs.
 
+pub mod bridge;
 pub mod empirical;
 pub mod feasibility;
 pub mod generator;
+pub mod glossary;
 pub mod lp;
 pub mod mandates;
 pub mod rng;
 pub mod schema;
 
+pub use bridge::{
+    DEFAULT_CLUB_INITIAL_CRED, SeatCommodityAssignment, TableCommodityMap,
+    ring_table_to_table_spec, ring_table_to_table_spec_with_explicit_entropy,
+};
 pub use empirical::{
     EmpiricalComparison, EnsembleStats, HhiMetrics, RandomEndowmentTable, RandomTableMetrics,
     ReportHypotheses, RingTableMetrics, RolloutGradingReport, compute_hhi, compute_rollout_grading,
@@ -57,6 +63,10 @@ pub use generator::{
     PlrChoice, PlrEntry, PlrSampler, generate_ring_table, generate_ring_table_for_purpose,
     generate_ring_table_for_setup,
 };
+pub use glossary::{
+    CommodityCatalog, CommodityEntry, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL,
+};
+pub use league_core::{StructuredError, ToStructuredError};
 pub use lp::{LpError, LpSolution, LpStatus, solve_lp};
 pub use mandates::{
     CreditTier, GradedMandateCard, MandateKind, deal_graded_mandates,

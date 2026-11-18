@@ -342,6 +342,34 @@ pub struct SeatObservation {
     pub public_receipts: Vec<PublicSweepReceipt>,
 }
 
+pub(crate) fn compute_public_forecasts(state: &EngineState) -> (u8, bool, Vec<ShockForecastEvent>) {
+    let is_active_turn = matches!(
+        state.phase,
+        TurnPhase::TalkAndMarket | TurnPhase::Commit | TurnPhase::Reveal
+    );
+    let last_swept_turn = if is_active_turn {
+        state.turn.saturating_sub(1)
+    } else {
+        state.turn
+    };
+    let public_forecasts = state
+        .spec
+        .shocks
+        .iter()
+        .chain(state.drawn_shocks.iter())
+        .filter(|shock| {
+            shock.forecast_turn <= last_swept_turn
+                && (!is_active_turn || state.turn <= shock.realize_turn)
+        })
+        .map(|shock| ShockForecastEvent {
+            target_seat: shock.target_seat,
+            kind: shock.kind,
+            realize_turn: shock.realize_turn,
+        })
+        .collect();
+    (last_swept_turn, is_active_turn, public_forecasts)
+}
+
 impl SeatObservation {
     pub(crate) fn from_engine_state(
         state: &EngineState,
@@ -351,31 +379,7 @@ impl SeatObservation {
         engine_receipts: &[PublicSweepReceipt],
         caller_receipts: Option<&[SweepReceipt]>,
     ) -> Self {
-        let is_active_turn = matches!(
-            state.phase,
-            TurnPhase::TalkAndMarket | TurnPhase::Commit | TurnPhase::Reveal
-        );
-        let last_swept_turn = if is_active_turn {
-            state.turn.saturating_sub(1)
-        } else {
-            state.turn
-        };
-
-        let public_forecasts = state
-            .spec
-            .shocks
-            .iter()
-            .chain(state.drawn_shocks.iter())
-            .filter(|shock| {
-                shock.forecast_turn <= last_swept_turn
-                    && (!is_active_turn || state.turn <= shock.realize_turn)
-            })
-            .map(|shock| ShockForecastEvent {
-                target_seat: shock.target_seat,
-                kind: shock.kind,
-                realize_turn: shock.realize_turn,
-            })
-            .collect();
+        let (last_swept_turn, is_active_turn, public_forecasts) = compute_public_forecasts(state);
 
         let auditor_hints = if is_active_turn && is_auditor {
             state

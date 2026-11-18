@@ -1,10 +1,13 @@
 //! Merchant League v2 game rules and pure-state simultaneous turn engine.
 //!
-//! Pure Rust with zero ledger or network I/O. Every simultaneous turn runs
-//! `TalkAndMarket -> Commit -> Reveal -> Sweep (8 deterministic steps)` and replays
-//! byte-for-byte identically from a table's [`TableSpec`], seed, and ordered log of
+//! Core rules and engine state are pure Rust with zero ledger or network I/O; [`club::host`]
+//! provides atomic local `.save.json` / `.seal` persistence for offline Club Mode. Every
+//! simultaneous turn runs `TalkAndMarket -> Commit -> Reveal -> Sweep (8 deterministic steps)` and
+//! replays byte-for-byte identically from a table's [`TableSpec`], seed, and ordered log of
 //! actions, commitments, reveals, and randomness beacons.
 
+pub mod bot;
+pub mod club;
 pub mod commit;
 pub mod contracts;
 pub mod engine;
@@ -14,6 +17,12 @@ pub mod predicates;
 pub mod replay;
 pub mod scoring;
 pub mod types;
+
+pub use bot::{ClubBot, ClubBotDecision};
+pub use club::{
+    CLUB_SAVE_FORMAT_VERSION, CLUB_SEAL_FORMAT_VERSION, ClubHost, ClubSaveSnapshot,
+    DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE,
+};
 
 pub use commit::{
     AtomicSwapProposal, CharterBidOrder, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder,

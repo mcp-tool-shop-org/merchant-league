@@ -615,14 +615,14 @@ impl<'de> Deserialize<'de> for SeasonReplayLog {
     }
 }
 
-fn layout_seed_beacon_candidates(seed: u64) -> [[u8; 32]; 2] {
+pub(crate) fn layout_seed_beacon_candidates(seed: u64) -> [[u8; 32]; 2] {
     let mut padded_beacon_seed = [0u8; 32];
     padded_beacon_seed[..8].copy_from_slice(&seed.to_le_bytes());
     let hashed_beacon_seed: [u8; 32] = Sha256::digest(seed.to_le_bytes()).into();
     [padded_beacon_seed, hashed_beacon_seed]
 }
 
-fn check_deal_seed_independence(
+pub(crate) fn check_deal_seed_independence(
     seed: u64,
     sealed_mandate_deal: &SealedMandateDeal,
     sealed_context: bool,
@@ -641,7 +641,7 @@ fn check_deal_seed_independence(
     Ok(candidates)
 }
 
-fn check_eval_vrf_independence(
+pub(crate) fn check_eval_vrf_independence(
     candidates: [[u8; 32]; 2],
     spec_pk: [u8; 32],
     sealed_context: bool,

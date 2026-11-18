@@ -47,6 +47,25 @@ impl fmt::Display for LpError {
 
 impl std::error::Error for LpError {}
 
+impl LpError {
+    /// Returns the stable `SCREAMING_SNAKE_CASE` error identifier (`SHIP_GATE.md` `:26`).
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        "LP_ERROR"
+    }
+}
+
+impl league_core::ToStructuredError for LpError {
+    fn to_structured_error(&self) -> league_core::StructuredError {
+        league_core::StructuredError::new(
+            self.code(),
+            self.to_string(),
+            "supply finite LP constraint, rhs, and objective arrays with matching dimensions",
+            false,
+        )
+    }
+}
+
 /// Solves `maximize c^T x` subject to `A x <= b` and `x >= 0`.
 pub fn solve_lp(a: &[Vec<f64>], b: &[f64], c: &[f64]) -> Result<LpStatus, LpError> {
     let m = b.len();
