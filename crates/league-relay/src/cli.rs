@@ -3,7 +3,7 @@
 //! Kept in the library crate so every CLI validation, redaction, and exit-code
 //! path is covered by both unit and integration tests.
 
-use crate::error::{RelayError, ToStructuredError};
+use crate::error::{RelayError, ToStructuredError, scrub_structured_error_with_keys};
 use crate::relay::{
     GameSetupRecord, MemoryMode, RelayDiagSink, ResponseFormatConfig, Round, SeatOutcome,
     TurnConfig, TurnSummary, run_turn_with_diag, validate_day, validate_scratchpad_setup,
@@ -823,9 +823,11 @@ where
         Err(e) => {
             let exit_code = e.exit_code();
             let scan_limit = e.redaction_scan_limit();
-            let structured = e
-                .to_structured_error()
-                .scrubbed_with_keys(&redaction_keys, scan_limit);
+            let structured = scrub_structured_error_with_keys(
+                &e.to_structured_error(),
+                &redaction_keys,
+                scan_limit,
+            );
             match error_format {
                 ErrorFormat::Text => {
                     let formatted = redact_secrets_multi_with_limit(

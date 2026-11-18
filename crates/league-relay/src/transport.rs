@@ -72,11 +72,11 @@ impl ToStructuredError for TransportError {
             ),
             Self::Network(msg) => StructuredError::new(
                 self.code(),
-                self.to_string(),
+                redact_secrets(&self.to_string(), None),
                 "verify the local server or OpenRouter endpoint is reachable and returns valid HTTP responses",
                 true,
             )
-            .with_cause(msg),
+            .with_cause(redact_secrets(msg, None)),
         }
     }
 }

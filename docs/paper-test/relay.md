@@ -191,7 +191,7 @@ Unified exit codes (`0` / `1` / `2` / `3`; exit `4` retired):
 - **`1` (`EXIT_USER_ERROR`):** user or configuration refusal (invalid CLI flags or `LEAGUE_LOG_LEVEL`, forbidden secret placement, missing `--live` / `OPENROUTER_API_KEY`, invalid `--cap-*`, missing `--wrapper` on turn 1, invalid `seats.json`, or `IncompatibleSetup`).
 - **`2` (`EXIT_RUNTIME_ERROR`):** runtime failure — `TurnLocked` (`code: "TURN_LOCKED"`, `retryable: true`), `UnrecordedCharge` (`code: "UNRECORDED_CHARGE"`, `retryable: false`), file/directory I/O or missing `--game-dir` (`code: "RELAY_IO"`), corrupt log/setup (`code: "CORRUPT_LOG"`), failed `prebook-check`, or a `turn` where `0` seats succeeded.
 - **`3` (`EXIT_PARTIAL_SUCCESS`):** partial success — `turn` recorded cleanly on disk with `>= 1` clean seat (`Delivered` or `RelayedByHand`) and `>= 1` failed seat.
-- **BREAKING (`B7`) migration note:** Previously, `TurnLocked` returned `4`, `UnrecordedCharge` returned `3`, `RelayError::{Io, CorruptLog}` returned `1`, and partial failure returned `2`. Automation checking exit `3` to detect unrecorded spend MUST check exit `2` together with `--error-format json` `code == "UNRECORDED_CHARGE"`.
+- **BREAKING (`B7`) migration note:** Previously, `TurnLocked` returned `4`, `UnrecordedCharge` returned `3`, `RelayError::{Io, CorruptLog}` returned `1`, partial failure returned `2`, and `stderr` printed `error: <msg>` instead of `error: [CODE] <msg>; hint: <hint>`. Automation checking exit `3` to detect unrecorded spend MUST check exit `2` together with `--error-format json` `code == "UNRECORDED_CHARGE"`, and any parser reading `stderr` errors should pass `--error-format json`.
 
 Structured error and verbosity controls:
 

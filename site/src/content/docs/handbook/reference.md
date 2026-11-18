@@ -58,7 +58,9 @@ league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <p
 | 2 | Runtime error (`TURN_LOCKED`, `UNRECORDED_CHARGE`, file I/O or missing `--game-dir`, corrupt log/setup, failed `prebook-check`, or a `turn` with `0` clean seats) |
 | 3 | Partial success (`turn` recorded cleanly on disk with at least `1` clean seat and at least `1` failed seat) |
 
-**Breaking change (`B7`):** Exit `4` is retired, `TurnLocked` and `UnrecordedCharge` now return `2`, `RelayError::Io` / `CorruptLog` return `2`, and `3` now means partial success. Scripts that matched exit `3` to catch unrecorded spend must check exit `2` with `--error-format json` `code == "UNRECORDED_CHARGE"`.
+An uncaught panic on the main thread exits with Rust's standard code `101` (with secrets redacted on `stderr`, and a stack backtrace emitted only under `--debug`).
+
+**Breaking change (`B7`):** Exit `4` is retired, `TurnLocked` and `UnrecordedCharge` now return `2`, `RelayError::Io` / `CorruptLog` return `2`, `3` now means partial success, and default `--error-format text` `stderr` output changed from `error: <msg>` to `error: [CODE] <msg>; hint: <hint>`. Scripts that matched exit `3` to catch unrecorded spend or scraped `error: <msg>` text must check exit `2` and pass `--error-format json` (`code == "UNRECORDED_CHARGE"`).
 
 ## Project files
 

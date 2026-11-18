@@ -12,14 +12,13 @@
 use std::fmt;
 
 pub mod client;
-pub mod error;
 pub mod escrow;
 
-pub use error::{StructuredError, ToStructuredError, scrub_secret_text};
 pub use escrow::{
     ESCROW_FINISH_DEFAULT_FEE_DROPS, ESCROW_FINISH_FULFILLMENT_BYTES, condition_hex,
     escrow_condition, escrow_finish_min_fee_drops, fulfillment_hex,
 };
+pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 
 pub(crate) fn upper_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
@@ -162,6 +161,10 @@ mod tests {
 
     #[test]
     fn not_testnet_implements_structured_error_and_scrubs_secrets() {
+        assert_eq!(
+            std::any::TypeId::of::<StructuredError>(),
+            std::any::TypeId::of::<league_error::StructuredError>()
+        );
         for err in [
             NotTestnet { reported: Some(0) },
             NotTestnet { reported: None },

@@ -15,11 +15,7 @@ pub mod client;
 pub mod conformance;
 pub mod docker;
 
-pub use league_core::{StructuredError, ToStructuredError};
-
-pub(crate) fn scrub_standalone_text(input: &str) -> String {
-    league_ledger::scrub_secret_text(input)
-}
+pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 
 /// Fixed XRPL `[network_id]` required by the stand-alone harness.
 pub const STANDALONE_NETWORK_ID: u32 = 21_337;
@@ -110,11 +106,11 @@ impl ToStructuredError for NotStandAlone {
     fn to_structured_error(&self) -> StructuredError {
         StructuredError::new(
             self.code(),
-            scrub_standalone_text(&self.to_string()),
+            self.to_string(),
             "connect only to a loopback http://127.0.0.1:<port> or http://localhost:<port> xrpld node in stand-alone mode (network_id 21337, validation_quorum 0, peers 0)",
             false,
         )
-        .with_cause(scrub_standalone_text(&self.reason))
+        .with_cause(&self.reason)
     }
 }
 
@@ -438,9 +434,19 @@ mod tests {
             assert!(!s.contains("sk-or-secret999"));
         }
 
-        // Cross-crate JSON contract proof: `league_ledger::StructuredError` must serialize
-        // identically to `league_core::StructuredError` across `cause: None`, `cause: Some(...)`,
-        // `retryable: false/true`, and planted secrets.
+        // Cross-crate identity & JSON contract proof: all crates share `league_error::StructuredError`.
+        assert_eq!(
+            std::any::TypeId::of::<StructuredError>(),
+            std::any::TypeId::of::<league_error::StructuredError>()
+        );
+        assert_eq!(
+            std::any::TypeId::of::<league_core::StructuredError>(),
+            std::any::TypeId::of::<league_error::StructuredError>()
+        );
+        assert_eq!(
+            std::any::TypeId::of::<league_ledger::StructuredError>(),
+            std::any::TypeId::of::<league_error::StructuredError>()
+        );
         for retryable in [false, true] {
             let core_plain = StructuredError::new(
                 "NOT_TESTNET",

@@ -25,7 +25,6 @@ use crate::{
     GENESIS_ACCOUNT_ADDRESS, MAINNET_MATCHED_AMENDMENTS, NotStandAlone, STANDALONE_NETWORK_ID,
     StandAloneServerInfo, StructuredError, TESTNET_ONLY_DEFAULT_YES_AMENDMENT, ToStructuredError,
     VETOED_NON_MAINNET_AMENDMENTS, require_loopback_http_url, require_standalone_info,
-    scrub_standalone_text,
 };
 
 /// Minimum base transaction fee in drops for standard stand-alone transactions.
@@ -225,18 +224,18 @@ impl ToStructuredError for StandAloneError {
             Self::NotStandAlone(e) => e.to_structured_error(),
             Self::Ledger(msg) => StructuredError::new(
                 self.code(),
-                scrub_standalone_text(&self.to_string()),
+                self.to_string(),
                 "supply a valid ed25519 XRPL seed (sEd...) when constructing a stand-alone seat account",
                 false,
             )
-            .with_cause(scrub_standalone_text(msg)),
+            .with_cause(msg),
             Self::Transport(msg) => StructuredError::new(
                 self.code(),
-                scrub_standalone_text(&self.to_string()),
+                self.to_string(),
                 "verify the local stand-alone xrpld container is running and accepting loopback HTTP JSON-RPC requests",
                 true,
             )
-            .with_cause(scrub_standalone_text(msg)),
+            .with_cause(msg),
             Self::Rpc {
                 error,
                 error_message,
@@ -246,33 +245,33 @@ impl ToStructuredError for StandAloneError {
                 let cause_raw = error_message.as_deref().unwrap_or(error.as_str());
                 StructuredError::new(
                     self.code(),
-                    scrub_standalone_text(&self.to_string()),
+                    self.to_string(),
                     "inspect the stand-alone xrpld JSON-RPC request parameters and reported error identifier",
                     retryable,
                 )
-                .with_cause(scrub_standalone_text(cause_raw))
+                .with_cause(cause_raw)
             }
             Self::Reply(msg) => StructuredError::new(
                 self.code(),
-                scrub_standalone_text(&self.to_string()),
+                self.to_string(),
                 "check that the loopback endpoint is an xrpld 3.4.1 JSON-RPC port returning standard result payloads",
                 false,
             )
-            .with_cause(scrub_standalone_text(msg)),
+            .with_cause(msg),
             Self::Build(msg) => StructuredError::new(
                 self.code(),
-                scrub_standalone_text(&self.to_string()),
+                self.to_string(),
                 "verify transaction fields, currency codes, and signer keys before building or signing",
                 false,
             )
-            .with_cause(scrub_standalone_text(msg)),
+            .with_cause(msg),
             Self::TxFailed { result, .. } => StructuredError::new(
                 self.code(),
-                scrub_standalone_text(&self.to_string()),
+                self.to_string(),
                 "inspect the validated engine result code, account balances, sequence, and enabled v2 amendments",
                 false,
             )
-            .with_cause(scrub_standalone_text(result)),
+            .with_cause(result),
         }
     }
 }

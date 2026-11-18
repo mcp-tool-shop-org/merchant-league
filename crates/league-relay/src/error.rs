@@ -1,9 +1,11 @@
 //! Error types and canonical [`StructuredError`] representation (`SHIP_GATE.md` `:26`) for
-//! `league-relay`.
+//! `league-relay`, re-exported from the `league-error` leaf crate.
 //!
 //! Every string carried inside [`RelayError`] and [`StructuredError`] is scrubbed before display
 //! or JSON serialization so an API key, bearer credential, XRPL seed, or sealed game secret can
 //! never leak through `Display`, `Debug`, `stderr`, or JSON error emission.
+
+pub use league_error::{StructuredError, ToStructuredError};
 
 use crate::secret::{
     ApiKey, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES,
@@ -11,108 +13,21 @@ use crate::secret::{
 };
 use std::fmt;
 
-/// Canonical machine- and human-readable error shape required across workspace crates
-/// (`SHIP_GATE.md` `:26`).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct StructuredError {
-    /// Stable `SCREAMING_SNAKE_CASE` error identifier.
-    pub code: &'static str,
-    /// Scrubbed human-readable description of the failure.
-    pub message: String,
-    /// Actionable recovery hint for callers or operators.
-    pub hint: &'static str,
-    /// Optional scrubbed underlying cause chain.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cause: Option<String>,
-    /// Whether retrying the identical operation without changing configuration might succeed.
-    pub retryable: bool,
-}
-
-impl StructuredError {
-    /// Constructs a [`StructuredError`] while scrubbing `message` of any accidental secrets.
-    #[must_use]
-    pub fn new(
-        code: &'static str,
-        message: impl Into<String>,
-        hint: &'static str,
-        retryable: bool,
-    ) -> Self {
-        Self {
-            code,
-            message: redact_secrets_multi_with_limit(
-                &message.into(),
-                &[],
-                MAX_UNRECORDED_CHARGE_SCAN_BYTES,
-            ),
-            hint,
-            cause: None,
-            retryable,
-        }
+/// Returns a copy of `se` whose `message` and optional `cause` have also been scrubbed against
+/// relay-specific `keys` (`8+`-character substrings) and sealed game-secret rules up to
+/// `max_bytes`.
+#[must_use]
+pub fn scrub_structured_error_with_keys(
+    se: &StructuredError,
+    keys: &[ApiKey],
+    max_bytes: usize,
+) -> StructuredError {
+    let message = redact_secrets_multi_with_limit(&se.message, keys, max_bytes);
+    let mut scrubbed = StructuredError::new(se.code, message, se.hint, se.retryable);
+    if let Some(cause) = &se.cause {
+        scrubbed = scrubbed.with_cause(redact_secrets_multi_with_limit(cause, keys, max_bytes));
     }
-
-    /// Attaches a scrubbed underlying cause string to this [`StructuredError`].
-    #[must_use]
-    pub fn with_cause(mut self, cause: impl Into<String>) -> Self {
-        self.cause = Some(redact_secrets_multi_with_limit(
-            &cause.into(),
-            &[],
-            MAX_UNRECORDED_CHARGE_SCAN_BYTES,
-        ));
-        self
-    }
-
-    /// Returns a copy with `message` and `cause` additionally scrubbed against `keys` up to `max_bytes`.
-    #[must_use]
-    pub fn scrubbed_with_keys(&self, keys: &[ApiKey], max_bytes: usize) -> Self {
-        Self {
-            code: self.code,
-            message: redact_secrets_multi_with_limit(&self.message, keys, max_bytes),
-            hint: self.hint,
-            cause: self
-                .cause
-                .as_deref()
-                .map(|c| redact_secrets_multi_with_limit(c, keys, max_bytes)),
-            retryable: self.retryable,
-        }
-    }
-
-    /// Formats this error for single- or multi-line plain-text CLI/log output with scrubbed text.
-    #[must_use]
-    pub fn format_text(&self) -> String {
-        let msg =
-            redact_secrets_multi_with_limit(&self.message, &[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
-        let mut out = format!("[{}] {}", self.code, msg);
-        if let Some(cause) = &self.cause {
-            let scrubbed_cause =
-                redact_secrets_multi_with_limit(cause, &[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
-            out.push_str(&format!(" (cause: {scrubbed_cause})"));
-        }
-        out.push_str(&format!("; hint: {}", self.hint));
-        if self.retryable {
-            out.push_str(" [retryable]");
-        }
-        out
-    }
-
-    /// Serializes this error as compact scrubbed JSON.
-    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
-        let scrubbed = self.scrubbed_with_keys(&[], MAX_UNRECORDED_CHARGE_SCAN_BYTES);
-        serde_json::to_string(&scrubbed)
-    }
-}
-
-impl fmt::Display for StructuredError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.format_text())
-    }
-}
-
-impl std::error::Error for StructuredError {}
-
-/// Conversion trait projecting crate error enums onto [`StructuredError`].
-pub trait ToStructuredError {
-    /// Projects `&self` onto a scrubbed [`StructuredError`].
-    fn to_structured_error(&self) -> StructuredError;
+    scrubbed
 }
 
 /// Errors returned when validating configuration or executing a relay turn.
@@ -256,18 +171,19 @@ impl RelayError {
 
 impl ToStructuredError for RelayError {
     fn to_structured_error(&self) -> StructuredError {
-        let base = StructuredError::new(
-            self.code(),
-            self.to_string(),
-            self.hint(),
-            self.is_retryable(),
-        );
+        let limit = self.redaction_scan_limit();
+        let message = redact_secrets_multi_with_limit(&self.to_string(), &[], limit);
+        let base = StructuredError::new(self.code(), message, self.hint(), self.is_retryable());
         match self {
-            Self::Io(detail) | Self::CorruptLog(detail) => base.with_cause(detail),
+            Self::Io(detail) | Self::CorruptLog(detail) => {
+                base.with_cause(redact_secrets_multi_with_limit(detail, &[], limit))
+            }
             Self::TurnLocked {
                 holder: Some(h), ..
-            } if !h.is_empty() => base.with_cause(h),
-            Self::UnrecordedCharge { detail, .. } if !detail.is_empty() => base.with_cause(detail),
+            } if !h.is_empty() => base.with_cause(redact_secrets_multi_with_limit(h, &[], limit)),
+            Self::UnrecordedCharge { detail, .. } if !detail.is_empty() => {
+                base.with_cause(redact_secrets_multi_with_limit(detail, &[], limit))
+            }
             _ => base,
         }
     }

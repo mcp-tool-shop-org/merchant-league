@@ -26,11 +26,22 @@ use tempfile::TempDir;
 type TestResult = Result<(), Box<dyn Error>>;
 
 const OR_ENV_KEY: &str = "Zx9QvR2mKp8LnW4tYs7BcF1h";
+const OR_LOWER_KEY: &str = "Lx4PnM9qRs2TvW7xYz1AbC3d";
 const OAI_ENV_KEY: &str = "Qw7ErT9yUi3OpA6sDf8GhJ2k";
+const OAI_LOWER_KEY: &str = "Ko8LpM5nJq2RwE6tYu9IoP1a";
 const VLLM_ENV_KEY: &str = "Mn4BvC6xZ1LkJ8hGf3DsA5pQ";
+const VLLM_LOWER_KEY: &str = "Vm6BnC8xZ3LkJ2hGf9DsA4pR";
 const LOCAL_ENV_KEY: &str = "Pl0OkI9uY7yTrE5wQ3aSdF2g";
+const LOCAL_LOWER_KEY: &str = "Lc1OkI8uY6yTrE4wQ2aSdF3h";
+const ANTHROPIC_UP_KEY: &str = "An3UpK9mNp2QrS7tUv5WxY1z";
+const ANTHROPIC_LO_KEY: &str = "An7LoK4mNp8QrS2tUv9WxY6z";
+const GEMINI_UP_KEY: &str = "Gm5UpK8vWx2YzA7bCd3EfG9h";
+const GEMINI_LO_KEY: &str = "Gm1LoK4vWx6YzA9bCd5EfG2h";
+const LEAGUE_UP_KEY: &str = "Lg6UpK3cDe8FgH2jKm4NpQ7r";
+const LEAGUE_LO_KEY: &str = "Lg9LoK2cDe5FgH8jKm1NpQ4r";
 
 const PLANTED_BEARER: &str = "Bearer Br9Kx3ZmVp2QnW7cRt5Yh";
+const PLANTED_BEARER_TAB: &str = "Bearer\tBrTab8Kx2ZmQp4LnW6cRt";
 const PLANTED_SK_OR: &str = "sk-or-v1-abc987def654ghi321";
 const PLANTED_SK_PROJ: &str = "sk-proj-Zyx987Wvu654Tsr321";
 const PLANTED_SK_ANT: &str = "sk-ant-api03-Mno741Pqr852";
@@ -42,18 +53,55 @@ const PLANTED_SEALED_HEX: &str = "0x8000000000000042";
 const PLANTED_SEALED_DEC: &str = "9223372036854775850";
 const PLANTED_EVAL_FIELD: &str = "eval_vrf_seed=vrf-secret-payload-9911";
 const PLANTED_PREIMAGE_JSON: &str = "\"preimage_secret\":\"preimage-secret-payload-7722\"";
+const PLANTED_PREIMAGE_JSON_ESCAPED: &str = r#"line {\"preimage_secret\":\"escapedPreimageSecret8844\"} and {\"api_key\":\"escapedPlainApiKey5566\"}"#;
 
-fn planted_env_keys() -> [&'static str; 4] {
-    [OR_ENV_KEY, OAI_ENV_KEY, VLLM_ENV_KEY, LOCAL_ENV_KEY]
-}
-
-fn planted_secret_needles() -> [&'static str; 15] {
+fn upper_env_values() -> [&'static str; 7] {
     [
         OR_ENV_KEY,
         OAI_ENV_KEY,
         VLLM_ENV_KEY,
         LOCAL_ENV_KEY,
+        ANTHROPIC_UP_KEY,
+        GEMINI_UP_KEY,
+        LEAGUE_UP_KEY,
+    ]
+}
+
+fn lower_env_values() -> [&'static str; 7] {
+    [
+        OR_LOWER_KEY,
+        OAI_LOWER_KEY,
+        VLLM_LOWER_KEY,
+        LOCAL_LOWER_KEY,
+        ANTHROPIC_LO_KEY,
+        GEMINI_LO_KEY,
+        LEAGUE_LO_KEY,
+    ]
+}
+
+fn all_env_values() -> [&'static str; 14] {
+    [
+        OR_ENV_KEY,
+        OR_LOWER_KEY,
+        OAI_ENV_KEY,
+        OAI_LOWER_KEY,
+        VLLM_ENV_KEY,
+        VLLM_LOWER_KEY,
+        LOCAL_ENV_KEY,
+        LOCAL_LOWER_KEY,
+        ANTHROPIC_UP_KEY,
+        ANTHROPIC_LO_KEY,
+        GEMINI_UP_KEY,
+        GEMINI_LO_KEY,
+        LEAGUE_UP_KEY,
+        LEAGUE_LO_KEY,
+    ]
+}
+
+fn structural_secret_needles() -> [&'static str; 15] {
+    [
         "Br9Kx3ZmVp2QnW7cRt5Yh",
+        "BrTab8Kx2ZmQp4LnW6cRt",
         PLANTED_SK_OR,
         PLANTED_SK_PROJ,
         PLANTED_SK_ANT,
@@ -64,21 +112,28 @@ fn planted_secret_needles() -> [&'static str; 15] {
         PLANTED_SEALED_HEX,
         PLANTED_SEALED_DEC,
         "vrf-secret-payload-9911",
+        "preimage-secret-payload-7722",
+        "escapedPreimageSecret8844",
+        "escapedPlainApiKey5566",
     ]
 }
 
-fn assert_no_secrets_leaked(haystack: &str, context: &str) -> TestResult {
-    for needle in planted_secret_needles() {
+fn assert_no_secrets_leaked_with_envs(
+    haystack: &str,
+    context: &str,
+    env_keys: &[&str],
+) -> TestResult {
+    for needle in structural_secret_needles() {
         assert!(
             !haystack.contains(needle),
             "{context}: leaked secret needle '{needle}' in: {haystack}"
         );
     }
-    assert!(
-        !haystack.contains("preimage-secret-payload-7722"),
-        "{context}: leaked preimage JSON secret in: {haystack}"
-    );
-    for env_key in planted_env_keys() {
+    for env_key in env_keys {
+        assert!(
+            !haystack.contains(env_key),
+            "{context}: leaked env secret '{env_key}' in: {haystack}"
+        );
         let chars: Vec<char> = env_key.chars().collect();
         for win in chars.windows(8) {
             let sub: String = win.iter().collect();
@@ -89,6 +144,10 @@ fn assert_no_secrets_leaked(haystack: &str, context: &str) -> TestResult {
         }
     }
     Ok(())
+}
+
+fn assert_no_secrets_leaked(haystack: &str, context: &str) -> TestResult {
+    assert_no_secrets_leaked_with_envs(haystack, context, &upper_env_values())
 }
 
 fn write_wrapper(dir: &Path) -> Result<PathBuf, Box<dyn Error>> {
@@ -223,7 +282,11 @@ fn set_writable(path: &Path) -> TestResult {
 }
 
 #[test]
-fn structured_error_json_schema_matches_league_core() -> TestResult {
+fn relay_and_transport_errors_project_onto_shared_structured_error() -> TestResult {
+    assert_eq!(
+        std::any::TypeId::of::<StructuredError>(),
+        std::any::TypeId::of::<league_error::StructuredError>()
+    );
     let secret_blob = format!(
         "{PLANTED_BEARER} {PLANTED_SK_OR} {PLANTED_XRPL_ED} {PLANTED_SEALED_STRUCT} {PLANTED_SEALED_HEX}"
     );
@@ -781,6 +844,46 @@ fn exit_code_2_on_turn_locked_unrecorded_charge_io_corrupt_log_prebook_fail_and_
             &mut err,
         ),
         EXIT_RUNTIME_ERROR
+    );
+    out.clear();
+    err.clear();
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--error-format",
+                "json",
+                "--game-dir",
+                locked_game.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        ),
+        EXIT_RUNTIME_ERROR
+    );
+    let lock_err_str = String::from_utf8(err.clone())?;
+    let lock_json: serde_json::Value = serde_json::from_str(&lock_err_str)
+        .map_err(|e| format!("TURN_LOCKED JSON parse failed ({e}): err='{lock_err_str}'"))?;
+    assert_eq!(lock_json["code"], "TURN_LOCKED");
+    assert_eq!(lock_json["retryable"], true);
+    assert!(
+        lock_json["message"].as_str().is_some_and(|m| !m.is_empty()),
+        "expected non-empty TURN_LOCKED message: {lock_json}"
+    );
+    assert!(
+        lock_json["hint"].as_str().is_some_and(|h| !h.is_empty()),
+        "expected non-empty TURN_LOCKED hint: {lock_json}"
     );
     let _ = lock_f.unlock();
 
@@ -1360,28 +1463,19 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
     let tmp = TempDir::new()?;
     let wrapper = write_wrapper(tmp.path())?;
     let seats = write_openrouter_seats(tmp.path(), &["Saltworks"])?;
+    let partial_seats = write_partial_seats(tmp.path())?;
 
-    let all_planted = format!(
-        "{} {} {} {} {} {} {} {} {} {} {} {} {} {}",
-        OR_ENV_KEY,
-        OAI_ENV_KEY,
-        VLLM_ENV_KEY,
-        LOCAL_ENV_KEY,
-        PLANTED_BEARER,
-        PLANTED_SK_OR,
-        PLANTED_SK_PROJ,
-        PLANTED_SK_ANT,
-        PLANTED_XRPL_SECP,
-        PLANTED_XRPL_ED,
-        PLANTED_SEALED_STRUCT,
-        PLANTED_PREIMAGE_STRUCT,
-        PLANTED_EVAL_FIELD,
-        PLANTED_PREIMAGE_JSON
+    let structural_blob = format!(
+        "{PLANTED_BEARER} {PLANTED_BEARER_TAB} {PLANTED_SK_OR} {PLANTED_SK_PROJ} {PLANTED_SK_ANT} \
+         {PLANTED_XRPL_SECP} {PLANTED_XRPL_ED} {PLANTED_SEALED_STRUCT} {PLANTED_PREIMAGE_STRUCT} \
+         {PLANTED_EVAL_FIELD} {PLANTED_PREIMAGE_JSON} {PLANTED_PREIMAGE_JSON_ESCAPED}"
     );
+    let upper_planted = format!("{} {structural_blob}", upper_env_values().join(" "));
+    let lower_planted = format!("{} {structural_blob}", lower_env_values().join(" "));
     let numeric_seeds = format!("{PLANTED_SEALED_HEX} {PLANTED_SEALED_DEC}");
 
     // 1. Real binary subprocess with HTTP 500 + panic rules carrying all planted secret categories,
-    //    plus all FORBIDDEN_LOCAL_KEY_ENVS set in the subprocess env.
+    //    exercising both uppercase and lowercase env var names in subprocess environments.
     let mock_err = tmp.path().join("mock_err");
     fs::create_dir_all(&mock_err)?;
     fs::write(
@@ -1389,19 +1483,24 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
         serde_json::to_string(&json!({
             "rules": [
                 {
-                    "when_contains": "HTTP_ERR_RUN",
+                    "when_contains": "UPPER_ERR_RUN",
                     "status": 500,
-                    "response": { "error": { "message": format!("{all_planted} {numeric_seeds}") } }
+                    "response": { "error": { "message": format!("{upper_planted} {numeric_seeds}") } }
                 },
                 {
-                    "when_contains": "PANIC_RUN",
-                    "panic_message": format!("panic {all_planted} {numeric_seeds}")
+                    "when_contains": "UPPER_PANIC_RUN",
+                    "panic_message": format!("panic {upper_planted} {numeric_seeds}")
+                },
+                {
+                    "when_contains": "LOWER_ERR_RUN",
+                    "status": 500,
+                    "response": { "error": { "message": format!("{lower_planted} {numeric_seeds}") } }
                 }
             ]
         }))?,
     )?;
 
-    for scenario in ["HTTP_ERR_RUN", "PANIC_RUN"] {
+    for scenario in ["UPPER_ERR_RUN", "UPPER_PANIC_RUN"] {
         let g = tmp.path().join(format!("sub_{level_flag}_{scenario}"));
         write_board(&g, "Saltworks", scenario)?;
         let out = Command::new(env!("CARGO_BIN_EXE_league-relay"))
@@ -1428,6 +1527,9 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
             .env("OPENAI_API_KEY", OAI_ENV_KEY)
             .env("VLLM_API_KEY", VLLM_ENV_KEY)
             .env("LOCAL_API_KEY", LOCAL_ENV_KEY)
+            .env("ANTHROPIC_API_KEY", ANTHROPIC_UP_KEY)
+            .env("GEMINI_API_KEY", GEMINI_UP_KEY)
+            .env("LEAGUE_API_KEY", LEAGUE_UP_KEY)
             .env_remove(LEAGUE_LOG_LEVEL_ENV)
             .output()?;
         assert_eq!(out.status.code(), Some(2));
@@ -1439,15 +1541,325 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
         assert_no_secrets_leaked(&calls_raw, &format!("{level_flag}/{scenario}/calls.jsonl"))?;
     }
 
-    // 2. In-process `execute_cli` with planted secrets in CLI error/path/JSON output at this level.
+    // 2. Real binary subprocess runs with lower-case env names (removing uppercase first so Windows
+    //    preserves lowercase casing): HTTP 500 error (exit 2) AND partial turn (exit 3) with planted secrets.
+    let g_lower_err = tmp.path().join(format!("sub_{level_flag}_lower_err"));
+    write_board(&g_lower_err, "Saltworks", "LOWER_ERR_RUN")?;
+    let mut lower_err_cmd = Command::new(env!("CARGO_BIN_EXE_league-relay"));
+    lower_err_cmd.args([
+        "turn",
+        "--log-level",
+        level_flag,
+        "--game-dir",
+        g_lower_err.to_str().ok_or("utf8")?,
+        "--day",
+        "01",
+        "--round",
+        "talk",
+        "--seats",
+        seats.to_str().ok_or("utf8")?,
+        "--wrapper",
+        wrapper.to_str().ok_or("utf8")?,
+        "--mock-dir",
+        mock_err.to_str().ok_or("utf8")?,
+        "--cap-credits",
+        "1.0",
+    ]);
+    for upper in [
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "VLLM_API_KEY",
+        "LOCAL_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "LEAGUE_API_KEY",
+    ] {
+        lower_err_cmd.env_remove(upper);
+    }
+    let lower_err_out = lower_err_cmd
+        .env("openrouter_api_key", OR_LOWER_KEY)
+        .env("openai_api_key", OAI_LOWER_KEY)
+        .env("vllm_api_key", VLLM_LOWER_KEY)
+        .env("local_api_key", LOCAL_LOWER_KEY)
+        .env("anthropic_api_key", ANTHROPIC_LO_KEY)
+        .env("gemini_api_key", GEMINI_LO_KEY)
+        .env("league_api_key", LEAGUE_LO_KEY)
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    assert_eq!(lower_err_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    assert_no_secrets_leaked_with_envs(
+        &String::from_utf8(lower_err_out.stdout)?,
+        &format!("{level_flag}/lower_err/stdout"),
+        &lower_env_values(),
+    )?;
+    assert_no_secrets_leaked_with_envs(
+        &String::from_utf8(lower_err_out.stderr)?,
+        &format!("{level_flag}/lower_err/stderr"),
+        &lower_env_values(),
+    )?;
+    assert_no_secrets_leaked_with_envs(
+        &fs::read_to_string(g_lower_err.join("relay/calls.jsonl"))?,
+        &format!("{level_flag}/lower_err/calls.jsonl"),
+        &lower_env_values(),
+    )?;
+
+    let g_partial = tmp.path().join(format!("sub_{level_flag}_partial3"));
+    write_board(&g_partial, "Saltworks", "LOWER_ERR_RUN")?;
+    let mut partial_cmd = Command::new(env!("CARGO_BIN_EXE_league-relay"));
+    partial_cmd.args([
+        "turn",
+        "--log-level",
+        level_flag,
+        "--game-dir",
+        g_partial.to_str().ok_or("utf8")?,
+        "--day",
+        "01",
+        "--round",
+        "talk",
+        "--seats",
+        partial_seats.to_str().ok_or("utf8")?,
+        "--wrapper",
+        wrapper.to_str().ok_or("utf8")?,
+        "--mock-dir",
+        mock_err.to_str().ok_or("utf8")?,
+        "--cap-credits",
+        "1.0",
+    ]);
+    for upper in [
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "VLLM_API_KEY",
+        "LOCAL_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "LEAGUE_API_KEY",
+    ] {
+        partial_cmd.env_remove(upper);
+    }
+    let partial_out = partial_cmd
+        .env("openrouter_api_key", OR_LOWER_KEY)
+        .env("openai_api_key", OAI_LOWER_KEY)
+        .env("vllm_api_key", VLLM_LOWER_KEY)
+        .env("local_api_key", LOCAL_LOWER_KEY)
+        .env("anthropic_api_key", ANTHROPIC_LO_KEY)
+        .env("gemini_api_key", GEMINI_LO_KEY)
+        .env("league_api_key", LEAGUE_LO_KEY)
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    assert_eq!(
+        partial_out.status.code(),
+        Some(EXIT_PARTIAL_SUCCESS),
+        "{level_flag}: expected exit 3 partial turn, stderr={}",
+        String::from_utf8_lossy(&partial_out.stderr)
+    );
+    let partial_stdout = String::from_utf8(partial_out.stdout)?;
+    let partial_stderr = String::from_utf8(partial_out.stderr)?;
+    assert_no_secrets_leaked_with_envs(
+        &partial_stdout,
+        &format!("{level_flag}/partial3/stdout"),
+        &lower_env_values(),
+    )?;
+    assert_no_secrets_leaked_with_envs(
+        &partial_stderr,
+        &format!("{level_flag}/partial3/stderr"),
+        &lower_env_values(),
+    )?;
+    let partial_calls = fs::read_to_string(g_partial.join("relay/calls.jsonl"))?;
+    assert_no_secrets_leaked_with_envs(
+        &partial_calls,
+        &format!("{level_flag}/partial3/calls.jsonl"),
+        &lower_env_values(),
+    )?;
+
+    // 3. Per-level `--error-format json` binary runs of cause-carrying runtime errors
+    //    (`RELAY_IO` and `UNRECORDED_CHARGE`, both exit 2) with planted secrets & lowercase envs.
+    let secret_missing_game = tmp.path().join(format!(
+        "missing_{OR_LOWER_KEY}_{GEMINI_LO_KEY}_{PLANTED_SK_PROJ}_{PLANTED_XRPL_ED}"
+    ));
+    let mut io_cmd = Command::new(env!("CARGO_BIN_EXE_league-relay"));
+    io_cmd.args([
+        "turn",
+        "--log-level",
+        level_flag,
+        "--error-format",
+        "json",
+        "--game-dir",
+        secret_missing_game.to_str().ok_or("utf8")?,
+        "--day",
+        "01",
+        "--round",
+        "talk",
+        "--seats",
+        seats.to_str().ok_or("utf8")?,
+        "--wrapper",
+        wrapper.to_str().ok_or("utf8")?,
+        "--mock-dir",
+        mock_err.to_str().ok_or("utf8")?,
+    ]);
+    for upper in [
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "VLLM_API_KEY",
+        "LOCAL_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "LEAGUE_API_KEY",
+    ] {
+        io_cmd.env_remove(upper);
+    }
+    let io_out = io_cmd
+        .env("openrouter_api_key", OR_LOWER_KEY)
+        .env("openai_api_key", OAI_LOWER_KEY)
+        .env("vllm_api_key", VLLM_LOWER_KEY)
+        .env("local_api_key", LOCAL_LOWER_KEY)
+        .env("anthropic_api_key", ANTHROPIC_LO_KEY)
+        .env("gemini_api_key", GEMINI_LO_KEY)
+        .env("league_api_key", LEAGUE_LO_KEY)
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    assert_eq!(io_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let io_stdout = String::from_utf8(io_out.stdout)?;
+    let io_stderr = String::from_utf8(io_out.stderr)?;
+    let io_last_line = io_stderr
+        .lines()
+        .rfind(|l| !l.trim().is_empty())
+        .ok_or("missing RELAY_IO stderr line")?;
+    let io_json: serde_json::Value = serde_json::from_str(io_last_line)
+        .map_err(|e| format!("{level_flag}/RELAY_IO JSON parse failed ({e}): {io_stderr}"))?;
+    assert_eq!(io_json["code"], "RELAY_IO");
+    assert_eq!(io_json["retryable"], false);
+    assert!(
+        io_json["cause"].as_str().is_some_and(|c| !c.is_empty()),
+        "{level_flag}/RELAY_IO expected non-empty cause: {io_json}"
+    );
+    assert_no_secrets_leaked_with_envs(
+        &io_stdout,
+        &format!("{level_flag}/RELAY_IO/stdout"),
+        &lower_env_values(),
+    )?;
+    assert_no_secrets_leaked_with_envs(
+        &io_stderr,
+        &format!("{level_flag}/RELAY_IO/stderr"),
+        &lower_env_values(),
+    )?;
+
+    let unrec_game = tmp.path().join(format!(
+        "sub_{level_flag}_unrec_{ANTHROPIC_UP_KEY}_{LEAGUE_UP_KEY}"
+    ));
+    write_board(&unrec_game, "Saltworks", "UPPER_ERR_RUN")?;
+    fs::create_dir_all(unrec_game.join("relay"))?;
+    let calls_f = unrec_game.join("relay/calls.jsonl");
+    let pending_f = unrec_game.join("relay/calls.pending.jsonl");
+    fs::write(&calls_f, "")?;
+    let seed_pending = CallLogEntry {
+        time_utc: "2026-11-18T00:00:00.000Z".to_owned(),
+        day: "00".to_owned(),
+        round: Round::Talk,
+        guild: "Saltworks".to_owned(),
+        attempt: 1,
+        trigger: "turn".to_owned(),
+        model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
+        model_returned: None,
+        request_body_sha256: "00".repeat(32),
+        reply_sha256: None,
+        prompt_tokens: None,
+        completion_tokens: None,
+        total_tokens: None,
+        reasoning_tokens: None,
+        cost_unit: CostUnit::Credits,
+        wall_secs: None,
+        cost: None,
+        charged_credits: 0.0,
+        latency_ms: 0,
+        outcome: "CAP_REACHED".to_owned(),
+        error: None,
+        reservation_id: None,
+    };
+    fs::write(
+        &pending_f,
+        format!("{}\n", serde_json::to_string(&seed_pending)?),
+    )?;
+    set_readonly(&calls_f)?;
+    set_readonly(&pending_f)?;
+    let unrec_out = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--log-level",
+            level_flag,
+            "--error-format",
+            "json",
+            "--game-dir",
+            unrec_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_err.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ])
+        .env("OPENROUTER_API_KEY", OR_ENV_KEY)
+        .env("OPENAI_API_KEY", OAI_ENV_KEY)
+        .env("VLLM_API_KEY", VLLM_ENV_KEY)
+        .env("LOCAL_API_KEY", LOCAL_ENV_KEY)
+        .env("ANTHROPIC_API_KEY", ANTHROPIC_UP_KEY)
+        .env("GEMINI_API_KEY", GEMINI_UP_KEY)
+        .env("LEAGUE_API_KEY", LEAGUE_UP_KEY)
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    let _ = set_writable(&calls_f);
+    let _ = set_writable(&pending_f);
+    assert_eq!(unrec_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let unrec_stdout = String::from_utf8(unrec_out.stdout)?;
+    let unrec_stderr = String::from_utf8(unrec_out.stderr)?;
+    let unrec_last_line = unrec_stderr
+        .lines()
+        .rfind(|l| !l.trim().is_empty())
+        .ok_or("missing UNRECORDED_CHARGE stderr line")?;
+    let unrec_json: serde_json::Value = serde_json::from_str(unrec_last_line).map_err(|e| {
+        format!("{level_flag}/UNRECORDED_CHARGE JSON parse failed ({e}): {unrec_stderr}")
+    })?;
+    assert_eq!(unrec_json["code"], "UNRECORDED_CHARGE");
+    assert_eq!(unrec_json["retryable"], false);
+    assert!(
+        unrec_json["cause"].as_str().is_some_and(|c| !c.is_empty()),
+        "{level_flag}/UNRECORDED_CHARGE expected non-empty cause: {unrec_json}"
+    );
+    assert_no_secrets_leaked(
+        &unrec_stdout,
+        &format!("{level_flag}/UNRECORDED_CHARGE/stdout"),
+    )?;
+    assert_no_secrets_leaked(
+        &unrec_stderr,
+        &format!("{level_flag}/UNRECORDED_CHARGE/stderr"),
+    )?;
+
+    // 4. In-process `execute_cli` with ALL 14 env keys (upper + lower `FORBIDDEN_LOCAL_KEY_ENVS`
+    //    and upper + lower `EXTRA_SECRET_ENV_NAMES`) and planted secrets in CLI error/path/JSON output.
     let mut env_map = HashMap::new();
     env_map.insert("OPENROUTER_API_KEY", OR_ENV_KEY.to_owned());
+    env_map.insert("openrouter_api_key", OR_LOWER_KEY.to_owned());
     env_map.insert("OPENAI_API_KEY", OAI_ENV_KEY.to_owned());
+    env_map.insert("openai_api_key", OAI_LOWER_KEY.to_owned());
     env_map.insert("VLLM_API_KEY", VLLM_ENV_KEY.to_owned());
+    env_map.insert("vllm_api_key", VLLM_LOWER_KEY.to_owned());
     env_map.insert("LOCAL_API_KEY", LOCAL_ENV_KEY.to_owned());
+    env_map.insert("local_api_key", LOCAL_LOWER_KEY.to_owned());
+    env_map.insert("ANTHROPIC_API_KEY", ANTHROPIC_UP_KEY.to_owned());
+    env_map.insert("anthropic_api_key", ANTHROPIC_LO_KEY.to_owned());
+    env_map.insert("GEMINI_API_KEY", GEMINI_UP_KEY.to_owned());
+    env_map.insert("gemini_api_key", GEMINI_LO_KEY.to_owned());
+    env_map.insert("LEAGUE_API_KEY", LEAGUE_UP_KEY.to_owned());
+    env_map.insert("league_api_key", LEAGUE_LO_KEY.to_owned());
 
     for err_fmt in ["text", "json"] {
-        let secret_flag = format!("--{PLANTED_SK_PROJ}-{PLANTED_XRPL_SECP}");
+        let secret_flag =
+            format!("--{OR_LOWER_KEY}-{ANTHROPIC_LO_KEY}-{PLANTED_SK_PROJ}-{PLANTED_XRPL_SECP}");
         let mut out = Vec::new();
         let mut err = Vec::new();
         let code = execute_cli(
@@ -1464,13 +1876,14 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
             &mut err,
         );
         assert_eq!(code, EXIT_USER_ERROR);
-        assert_no_secrets_leaked(
+        assert_no_secrets_leaked_with_envs(
             &String::from_utf8(err)?,
             &format!("{level_flag}/cli_err_{err_fmt}"),
+            &all_env_values(),
         )?;
     }
 
-    // 3. Parse check with every `FORBIDDEN_LOCAL_KEY_ENVS` entry ensures list constant coverage.
+    // 5. Parse check with every `FORBIDDEN_LOCAL_KEY_ENVS` entry ensures list constant coverage.
     assert!(FORBIDDEN_LOCAL_KEY_ENVS.contains(&OPENROUTER_API_KEY_ENV));
     assert!(parse_args_with_key(["turn", "--log-level", level_flag, "--help"], None).is_ok());
     let _dummy_key = ApiKey::from_env_reader(|_| Some(OR_ENV_KEY.to_owned()))?;
@@ -1495,4 +1908,160 @@ fn planted_secrets_redacted_at_verbose_level() -> TestResult {
 #[test]
 fn planted_secrets_redacted_at_debug_level() -> TestResult {
     verify_planted_secrets_redacted_at_level("debug")
+}
+
+#[test]
+fn b1_cli_redacts_json_escaped_preimage_secret_and_non_sk_api_key_in_stderr_and_calls_log()
+-> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = write_wrapper(tmp.path())?;
+    let seats = write_openrouter_seats(tmp.path(), &["Saltworks"])?;
+    let mock_dir = tmp.path().join("mock_b1");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "B1_ESCAPED",
+                "status": 500,
+                "response": { "error": { "message": PLANTED_PREIMAGE_JSON_ESCAPED } }
+            }]
+        }))?,
+    )?;
+
+    let game_dir = tmp.path().join("b1_game");
+    write_board(&game_dir, "Saltworks", "B1_ESCAPED")?;
+    let out = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--log-level",
+            "debug",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ])
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    assert_eq!(out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let stderr_s = String::from_utf8(out.stderr)?;
+    let stdout_s = String::from_utf8(out.stdout)?;
+    let calls_raw = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+    assert_no_secrets_leaked(&stderr_s, "b1/stderr")?;
+    assert_no_secrets_leaked(&stdout_s, "b1/stdout")?;
+    assert_no_secrets_leaked(&calls_raw, "b1/calls.jsonl")?;
+    Ok(())
+}
+
+#[test]
+fn b2_cli_redacts_xrpl_seed_straddling_4kib_cap_across_offsets_1_to_30() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = write_wrapper(tmp.path())?;
+    let seats = write_openrouter_seats(tmp.path(), &["Saltworks"])?;
+    let mock_dir = tmp.path().join("mock_b2_all");
+    fs::create_dir_all(&mock_dir)?;
+
+    let mut rules = Vec::with_capacity(30);
+    for offset in 1..=30_usize {
+        let prefix = "p".repeat(league_relay::MAX_REDACTION_SCAN_BYTES - offset - 1);
+        let msg = format!("{prefix} {PLANTED_XRPL_ED} tail");
+        rules.push(json!({
+            "when_contains": format!("B2_CAP_OFFSET_{offset:02}"),
+            "status": 500,
+            "response": { "error": { "message": msg } }
+        }));
+    }
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({ "rules": rules }))?,
+    )?;
+
+    for offset in 1..=30_usize {
+        let game_dir = tmp.path().join(format!("b2_cli_game_{offset:02}"));
+        write_board(
+            &game_dir,
+            "Saltworks",
+            &format!("B2_CAP_OFFSET_{offset:02}"),
+        )?;
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--log-level",
+                "debug",
+                "--game-dir",
+                game_dir.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-credits",
+                "1.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(code, EXIT_RUNTIME_ERROR);
+        let stderr_s = String::from_utf8(err)?;
+        let calls_raw = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+        for haystack in [&stderr_s, &calls_raw] {
+            assert!(
+                !haystack.contains("sEdSKa"),
+                "offset {offset}: partial XRPL seed leaked in {haystack}"
+            );
+            assert_no_secrets_leaked(haystack, &format!("b2/offset={offset}"))?;
+        }
+    }
+
+    // Real binary subprocess check at the reviewer's exact 12-byte offset.
+    let bin_game = tmp.path().join("b2_bin_offset12");
+    write_board(&bin_game, "Saltworks", "B2_CAP_OFFSET_12")?;
+    let bin_out = Command::new(env!("CARGO_BIN_EXE_league-relay"))
+        .args([
+            "turn",
+            "--log-level",
+            "debug",
+            "--game-dir",
+            bin_game.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+        ])
+        .env_remove(LEAGUE_LOG_LEVEL_ENV)
+        .output()?;
+    assert_eq!(bin_out.status.code(), Some(EXIT_RUNTIME_ERROR));
+    let bin_stderr = String::from_utf8(bin_out.stderr)?;
+    let bin_calls = fs::read_to_string(bin_game.join("relay/calls.jsonl"))?;
+    assert!(!bin_stderr.contains("sEdSKa"));
+    assert!(!bin_calls.contains("sEdSKa"));
+    assert_no_secrets_leaked(&bin_stderr, "b2/bin/stderr")?;
+    assert_no_secrets_leaked(&bin_calls, "b2/bin/calls.jsonl")?;
+    Ok(())
 }

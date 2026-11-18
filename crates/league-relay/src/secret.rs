@@ -331,14 +331,20 @@ impl LocalGate {
 
 /// Upper bound in bytes scanned by [`redact_secrets`] and [`redact_and_truncate`].
 ///
-/// Any tail beyond 4 KiB is discarded before scanning so large upstream HTML
-/// error bodies cannot trigger quadratic work while preserving redact-before-truncate.
+/// Any tail beyond 4 KiB is discarded (aside from a bounded lookahead when an XRPL family seed,
+/// `sk-*` key, `Bearer` token, or env assignment straddles the 4 KiB cut, `B2`) so large
+/// upstream HTML error bodies cannot trigger quadratic work while preserving
+/// redact-before-truncate and zero partial-seed leakage.
 pub const MAX_REDACTION_SCAN_BYTES: usize = 4096;
 
 /// Upper bound in bytes scanned when formatting [`crate::RelayError::UnrecordedCharge`]
 /// on `stderr`, allowing hundreds of held seat lines to print in full with secret redaction.
 pub const MAX_UNRECORDED_CHARGE_SCAN_BYTES: usize = 65_536;
 
+// Minimum substring length matched when redacting raw `ApiKey` fragments (`C2`).
+// If an operator key is split across whitespace or a newline leaving a prefix shorter than
+// 8 characters on one side, that `< 8`-character prefix is intentionally left unscrubbed because
+// lowering this floor would cause false-positive redactions across normal English words and hex.
 const MIN_KEY_SUBSTRING_CHARS: usize = 8;
 
 /// Return the longest UTF-8 prefix of `input` whose byte length is at most `max_bytes`.
@@ -353,21 +359,116 @@ pub fn cap_utf8_bytes(input: &str, max_bytes: usize) -> &str {
     &input[..end]
 }
 
-/// Cap `input` at `max_bytes` and scrub every secret in `keys` (`8+` char substrings),
-/// env-var secret assignments, `Bearer <token>`, `sk-*` API keys, XRPL seeds, and sealed/unrevealed
-/// game secrets (`C-7`, `SHIP_GATE.md` `:40`).
+fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
+    const SECRET_LOOKAHEAD_BYTES: usize = 96;
+    let cut = cap_utf8_bytes(input, max_bytes).len();
+    if cut == input.len() {
+        return input;
+    }
+    let window = cap_utf8_bytes(input, max_bytes.saturating_add(SECRET_LOOKAHEAD_BYTES));
+    let bytes = window.as_bytes();
+    let mut effective_cut = cut;
+
+    // 1. XRPL family seed starting < cut and straddling past cut (B2).
+    let mut b58_start = cut;
+    while b58_start > 0 && league_error::is_base58_byte(bytes[b58_start - 1]) {
+        b58_start -= 1;
+    }
+    if b58_start < cut
+        && bytes[b58_start] == b's'
+        && (b58_start == 0 || !bytes[b58_start - 1].is_ascii_alphanumeric())
+    {
+        let mut b58_end = cut;
+        while b58_end < bytes.len() && league_error::is_base58_byte(bytes[b58_end]) {
+            b58_end += 1;
+        }
+        let boundary_after = b58_end == bytes.len() || !bytes[b58_end].is_ascii_alphanumeric();
+        if b58_end > cut
+            && boundary_after
+            && league_error::looks_like_xrpl_family_seed(&bytes[b58_start..b58_end])
+        {
+            effective_cut = effective_cut.max(b58_end);
+        }
+    }
+
+    // 2. `sk-or-` / `sk-proj-` / `sk-ant-` token starting < cut and straddling past cut.
+    let mut tok_start = cut;
+    while tok_start > 0
+        && (bytes[tok_start - 1].is_ascii_alphanumeric()
+            || matches!(bytes[tok_start - 1], b'-' | b'_'))
+    {
+        tok_start -= 1;
+    }
+    for cand in tok_start..cut {
+        if (cand == 0 || !bytes[cand - 1].is_ascii_alphanumeric())
+            && (window[cand..].starts_with("sk-or-")
+                || window[cand..].starts_with("sk-proj-")
+                || window[cand..].starts_with("sk-ant-"))
+        {
+            let mut end = cut;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
+            {
+                end += 1;
+            }
+            effective_cut = effective_cut.max(end);
+            break;
+        }
+    }
+
+    // 3. `Bearer <tok>` / `Bearer\t<tok>` or `ENV_KEY=<val>` starting < cut whose value straddles cut.
+    let scan_from = cut.saturating_sub(48);
+    for pos in scan_from..cut {
+        if !window.is_char_boundary(pos) {
+            continue;
+        }
+        let at_boundary = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+        if !at_boundary {
+            continue;
+        }
+        let val_start_opt = if pos + 7 <= bytes.len()
+            && bytes[pos..pos + 6].eq_ignore_ascii_case(b"bearer")
+            && matches!(bytes[pos + 6], b' ' | b'\t')
+        {
+            let mut p = pos + 6;
+            while p < bytes.len() && matches!(bytes[p], b' ' | b'\t') {
+                p += 1;
+            }
+            Some(p)
+        } else {
+            SECRET_ENV_ASSIGNMENT_PREFIXES.iter().find_map(|prefix| {
+                (bytes.len() - pos >= prefix.len()
+                    && bytes[pos..pos + prefix.len()].eq_ignore_ascii_case(prefix.as_bytes()))
+                .then_some(pos + prefix.len())
+            })
+        };
+        if let Some(val_start) = val_start_opt
+            && val_start <= cut
+        {
+            let mut val_end = val_start;
+            while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
+                val_end += 1;
+            }
+            if val_end > cut {
+                effective_cut = effective_cut.max(val_end);
+            }
+        }
+    }
+
+    &window[..effective_cut]
+}
+
+/// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`) and scrub
+/// every secret in `keys` (`8+` char substrings), env-var secret assignments, `Bearer <token>` /
+/// `Bearer\t<token>` (`C1`), `sk-*` API keys, XRPL seeds (via [`league_error`]), and
+/// sealed/unrevealed game secrets including JSON-escaped fields (`B1`, `C-7`, `SHIP_GATE.md` `:40`).
 pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
-    let bounded = cap_utf8_bytes(input, max_bytes);
+    let bounded = cap_utf8_with_secret_lookahead(input, max_bytes);
     let mut scrubbed = bounded.to_owned();
     for k in keys {
         scrubbed = redact_key_substrings(&scrubbed, k.secret_str());
     }
-    scrubbed = redact_env_assignments(&scrubbed);
-    scrubbed = redact_prefixed_token(&scrubbed, "bearer ", true);
-    scrubbed = redact_prefixed_token(&scrubbed, "sk-or-", false);
-    scrubbed = redact_prefixed_token(&scrubbed, "sk-proj-", false);
-    scrubbed = redact_prefixed_token(&scrubbed, "sk-ant-", false);
-    scrubbed = redact_xrpl_seeds(&scrubbed);
+    scrubbed = league_error::scrub_secret_text_with_marker(&scrubbed, REDACTED_MARKER);
     redact_sealed_and_unrevealed_secrets(&scrubbed)
 }
 
@@ -386,11 +487,11 @@ pub fn redact_secrets(input: &str, key: Option<&ApiKey>) -> String {
     redact_secrets_with_limit(input, key, MAX_REDACTION_SCAN_BYTES)
 }
 
-/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`), redact secrets first,
-/// and then shorten to at most `max_chars` characters without splitting [`REDACTED_MARKER`].
+/// Cap `input` at [`MAX_REDACTION_SCAN_BYTES`] (`4 KiB`, with straddling-secret lookahead),
+/// redact secrets first, and then shorten to at most `max_chars` characters without splitting
+/// [`REDACTED_MARKER`].
 pub fn redact_and_truncate(input: &str, key: Option<&ApiKey>, max_chars: usize) -> String {
-    let bounded = cap_utf8_bytes(input, MAX_REDACTION_SCAN_BYTES);
-    let scrubbed = redact_secrets(bounded, key);
+    let scrubbed = redact_secrets(input, key);
     truncate_after_redaction(&scrubbed, max_chars)
 }
 
@@ -476,6 +577,9 @@ pub fn install_redacting_panic_hook_with_level(keys: Vec<ApiKey>, level: LogLeve
     }));
 }
 
+// Substring matcher for `ApiKey` fragments of at least `MIN_KEY_SUBSTRING_CHARS` (`8`).
+// When an operator key is split across whitespace/newlines leaving a fragment shorter than
+// 8 chars, that fragment stays unredacted by design (`C2`).
 fn redact_key_substrings(input: &str, secret: &str) -> String {
     if secret.is_empty() || input.is_empty() {
         return input.to_owned();
@@ -534,19 +638,8 @@ fn redact_key_substrings(input: &str, secret: &str) -> String {
     out
 }
 
-fn is_token_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
-}
-
 const fn is_stopper_byte(b: u8) -> bool {
-    b.is_ascii_whitespace() || matches!(b, b',' | b';' | b')' | b']' | b'}' | b'"' | b'\'')
-}
-
-const fn is_base58_byte(b: u8) -> bool {
-    matches!(
-        b,
-        b'1'..=b'9' | b'A'..=b'H' | b'J'..=b'N' | b'P'..=b'Z' | b'a'..=b'k' | b'm'..=b'z'
-    )
+    b.is_ascii_whitespace() || matches!(b, b',' | b';' | b')' | b']' | b'}' | b'"' | b'\'' | b'\\')
 }
 
 fn starts_with_redacted_marker(rest: &str) -> bool {
@@ -556,107 +649,112 @@ fn starts_with_redacted_marker(rest: &str) -> bool {
     after.as_bytes().first().is_none_or(|b| is_stopper_byte(*b))
 }
 
-fn redact_env_assignments(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
+fn count_preceding_backslashes(bytes: &[u8], idx: usize) -> usize {
+    let mut k = idx;
+    let mut count = 0usize;
+    while k > 0 && bytes[k - 1] == b'\\' {
+        count += 1;
+        k -= 1;
+    }
+    count
+}
+
+fn find_escaped_json_string_end_with_bs(
+    bytes: &[u8],
+    quote_start: usize,
+    bs_expected: usize,
+) -> Option<usize> {
+    if quote_start + bs_expected >= bytes.len()
+        || !bytes[quote_start..quote_start + bs_expected]
+            .iter()
+            .all(|&b| b == b'\\')
+        || bytes[quote_start + bs_expected] != b'"'
+    {
+        return None;
+    }
+    let period = 2 * (bs_expected + 1);
+    let mut i = quote_start + bs_expected + 1;
     while i < bytes.len() {
-        let at_boundary = i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
-        let mut matched_len = None;
-        if at_boundary {
-            for prefix in SECRET_ENV_ASSIGNMENT_PREFIXES {
-                if bytes.len() - i >= prefix.len()
-                    && bytes[i..i + prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
-                {
-                    matched_len = Some(prefix.len());
-                    break;
-                }
+        if bytes[i] == b'\\' {
+            let mut bs = 1usize;
+            while i + bs < bytes.len() && bytes[i + bs] == b'\\' {
+                bs += 1;
             }
-        }
-        if let Some(plen) = matched_len {
-            out.push_str(&input[i..i + plen]);
-            i += plen;
-            if starts_with_redacted_marker(&input[i..]) {
-                out.push_str(REDACTED_MARKER);
-                i += REDACTED_MARKER.len();
+            if i + bs < bytes.len() && bytes[i + bs] == b'"' {
+                if bs < bs_expected && bs % 2 == 1 {
+                    // An outer-level escaped quote terminated before this inner string closed.
+                    return None;
+                }
+                if bs >= bs_expected && (bs - bs_expected).is_multiple_of(period) {
+                    return Some(i + bs - bs_expected);
+                }
+                i += bs + 1;
                 continue;
             }
-            let start = i;
-            while i < bytes.len() && !is_stopper_byte(bytes[i]) {
-                i += 1;
-            }
-            if i > start {
-                out.push_str(REDACTED_MARKER);
-            }
+            i += bs;
             continue;
         }
-        let ch = input[i..].chars().next().unwrap_or('\0');
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
-}
-
-fn looks_like_xrpl_seed(slice: &[u8]) -> bool {
-    if slice.starts_with(b"sEd") || slice.starts_with(b"sn") {
-        return slice.len() >= 22;
-    }
-    if !(25..=35).contains(&slice.len()) || !slice.starts_with(b"s") {
-        return false;
-    }
-    let has_digit = slice.iter().any(|b| matches!(b, b'1'..=b'9'));
-    let has_upper = slice.iter().any(u8::is_ascii_uppercase);
-    has_digit && has_upper
-}
-
-fn redact_xrpl_seeds(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let at_boundary = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if at_boundary && bytes[i] == b's' {
-            let mut end = i;
-            while end < bytes.len() && is_base58_byte(bytes[end]) {
-                end += 1;
-            }
-            let boundary_after = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
-            if boundary_after && looks_like_xrpl_seed(&bytes[i..end]) {
-                out.push_str(REDACTED_MARKER);
-                i = end;
-                continue;
-            }
+        if bs_expected > 0 && bytes[i] == b'"' {
+            // Unescaped quote ended the enclosing string before the escaped inner string closed.
+            return None;
         }
-        let ch = input[i..].chars().next().unwrap_or('\0');
-        out.push(ch);
-        i += ch.len_utf8();
+        i += 1;
     }
-    out
+    None
 }
 
-fn find_matching_delimited(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
+fn match_field_quote_open(bytes: &[u8], i: usize) -> Option<(usize, usize, usize)> {
+    let preceding = count_preceding_backslashes(bytes, i);
+    if preceding.is_multiple_of(2) && bytes[i] == b'"' {
+        return Some((i + 1, 1, 0));
+    }
+    if preceding == 0 && bytes[i] == b'\\' {
+        let mut bs = 1usize;
+        while i + bs < bytes.len() && bytes[i + bs] == b'\\' {
+            bs += 1;
+        }
+        if bs % 2 == 1 && bytes.get(i + bs) == Some(&b'"') {
+            return Some((i + bs + 1, bs + 1, bs));
+        }
+    }
+    None
+}
+
+fn find_matching_delimited(
+    bytes: &[u8],
+    start: usize,
+    open: u8,
+    close: u8,
+    quote_bs: usize,
+) -> Option<usize> {
     if start >= bytes.len() || bytes[start] != open {
         return None;
     }
     let mut depth = 0usize;
     let mut i = start;
-    let mut in_string = false;
     while i < bytes.len() {
         let b = bytes[i];
-        if in_string {
-            if b == b'\\' {
-                i += 2;
-                continue;
-            }
-            if b == b'"' {
-                in_string = false;
-            }
-            i += 1;
+        if quote_bs == 0 && b == b'"' && count_preceding_backslashes(bytes, i).is_multiple_of(2) {
+            let end = find_json_string_end(bytes, i)?;
+            i = end + 1;
             continue;
         }
-        if b == b'"' {
-            in_string = true;
-        } else if b == open {
+        if quote_bs > 0 && b == b'\\' && count_preceding_backslashes(bytes, i) == 0 {
+            let mut bs = 1usize;
+            while i + bs < bytes.len() && bytes[i + bs] == b'\\' {
+                bs += 1;
+            }
+            if bs == quote_bs
+                && bytes.get(i + bs) == Some(&b'"')
+                && let Some(end) = find_escaped_json_string_end_with_bs(bytes, i, quote_bs)
+            {
+                i = end + quote_bs + 1;
+                continue;
+            }
+            i += bs;
+            continue;
+        }
+        if b == open {
             depth += 1;
         } else if b == close {
             depth = depth.saturating_sub(1);
@@ -696,58 +794,79 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
         let at_word_boundary =
             i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
 
-        // 1. JSON secret field `"<key>"\s*:\s*<val>`.
-        if (i == 0 || bytes[i - 1] != b'\\')
-            && bytes[i] == b'"'
-            && let Some(key_end) = find_json_string_end(bytes, i)
-            && let key = &input[i + 1..key_end]
-            && SEALED_SECRET_FIELD_KEYS
-                .iter()
-                .any(|cand| cand.eq_ignore_ascii_case(key))
-        {
-            let mut j = key_end + 1;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b':' {
-                j += 1;
+        // 1. JSON secret field `"<key>"\s*:\s*<val>` and JSON-escaped `\"<key>\"\s*:\s*<val>` (B1).
+        if let Some((key_start, quote_len, quote_bs)) = match_field_quote_open(bytes, i) {
+            let key_close_opt = if quote_bs > 0 {
+                find_escaped_json_string_end_with_bs(bytes, i, quote_bs)
+            } else {
+                find_json_string_end(bytes, i)
+            };
+            if let Some(key_end) = key_close_opt
+                && let key = &input[key_start..key_end]
+                && SEALED_SECRET_FIELD_KEYS
+                    .iter()
+                    .any(|cand| cand.eq_ignore_ascii_case(key))
+            {
+                let mut j = key_end + quote_len;
                 while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                     j += 1;
                 }
-                if j < bytes.len() {
-                    out.push_str(&input[i..j]);
-                    if bytes[j] == b'"'
-                        && let Some(val_end) = find_json_string_end(bytes, j)
-                    {
-                        let inner = &input[j + 1..val_end];
-                        out.push('"');
-                        if !inner.is_empty() {
-                            out.push_str(REDACTED_MARKER);
-                        }
-                        out.push('"');
-                        i = val_end + 1;
-                        continue;
+                if j < bytes.len() && bytes[j] == b':' {
+                    j += 1;
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        j += 1;
                     }
-                    if matches!(bytes[j], b'{' | b'[') {
-                        let close = if bytes[j] == b'{' { b'}' } else { b']' };
-                        if let Some(val_end) = find_matching_delimited(bytes, j, bytes[j], close) {
-                            out.push('"');
-                            out.push_str(REDACTED_MARKER);
-                            out.push('"');
+                    let quote_seq = &input[i..i + quote_len];
+                    if j < bytes.len() {
+                        out.push_str(&input[i..j]);
+                        if quote_bs > 0 {
+                            if let Some(val_end) =
+                                find_escaped_json_string_end_with_bs(bytes, j, quote_bs)
+                            {
+                                let inner = &input[j + quote_len..val_end];
+                                out.push_str(quote_seq);
+                                if !inner.is_empty() {
+                                    out.push_str(REDACTED_MARKER);
+                                }
+                                out.push_str(quote_seq);
+                                i = val_end + quote_len;
+                                continue;
+                            }
+                        } else if bytes[j] == b'"'
+                            && let Some(val_end) = find_json_string_end(bytes, j)
+                        {
+                            let inner = &input[j + 1..val_end];
+                            out.push_str(quote_seq);
+                            if !inner.is_empty() {
+                                out.push_str(REDACTED_MARKER);
+                            }
+                            out.push_str(quote_seq);
                             i = val_end + 1;
                             continue;
                         }
-                    }
-                    let mut val_end = j;
-                    while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
-                        val_end += 1;
-                    }
-                    if val_end > j {
-                        out.push('"');
-                        out.push_str(REDACTED_MARKER);
-                        out.push('"');
-                        i = val_end;
-                        continue;
+                        if matches!(bytes[j], b'{' | b'[') {
+                            let close = if bytes[j] == b'{' { b'}' } else { b']' };
+                            if let Some(val_end) =
+                                find_matching_delimited(bytes, j, bytes[j], close, quote_bs)
+                            {
+                                out.push_str(quote_seq);
+                                out.push_str(REDACTED_MARKER);
+                                out.push_str(quote_seq);
+                                i = val_end + 1;
+                                continue;
+                            }
+                        }
+                        let mut val_end = j;
+                        while val_end < bytes.len() && !is_stopper_byte(bytes[val_end]) {
+                            val_end += 1;
+                        }
+                        if val_end > j {
+                            out.push_str(quote_seq);
+                            out.push_str(REDACTED_MARKER);
+                            out.push_str(quote_seq);
+                            i = val_end;
+                            continue;
+                        }
                     }
                 }
             }
@@ -766,7 +885,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                 }
                 if j < bytes.len() && matches!(bytes[j], b'(' | b'{') {
                     let close = if bytes[j] == b'(' { b')' } else { b'}' };
-                    if let Some(end_delim) = find_matching_delimited(bytes, j, bytes[j], close) {
+                    if let Some(end_delim) = find_matching_delimited(bytes, j, bytes[j], close, 0) {
                         let inner = input[j + 1..end_delim].trim();
                         out.push_str(prefix);
                         out.push('(');
@@ -863,42 +982,117 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
     out
 }
 
-fn redact_prefixed_token(input: &str, prefix_lower: &str, keep_prefix: bool) -> String {
-    let plen = prefix_lower.len();
-    let mut out = String::with_capacity(input.len());
-    let mut rest = input;
-    while rest.len() >= plen {
-        let Some(idx) = rest
-            .as_bytes()
-            .windows(plen)
-            .position(|w| w.eq_ignore_ascii_case(prefix_lower.as_bytes()))
-        else {
-            break;
-        };
-        out.push_str(&rest[..idx]);
-        let matched_prefix = &rest[idx..idx + plen];
-        let after = rest[idx + plen..].trim_start_matches(' ');
-        if let Some(stripped) = after.strip_prefix(REDACTED_MARKER) {
-            if keep_prefix {
-                out.push_str(matched_prefix);
-            }
-            out.push_str(REDACTED_MARKER);
-            rest = stripped;
-            continue;
-        }
-        let byte_len: usize = after
-            .chars()
-            .take_while(|&c| is_token_char(c))
-            .map(char::len_utf8)
-            .sum();
-        if keep_prefix {
-            out.push_str(matched_prefix);
-        }
-        if byte_len > 0 || !keep_prefix {
-            out.push_str(REDACTED_MARKER);
-        }
-        rest = &after[byte_len..];
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn b1_json_escaped_preimage_secret_and_non_sk_api_key_redacted() {
+        let escaped_preimage = r#"line {\"preimage_secret\":\"leakval9988\"} end"#;
+        let scrubbed_preimage = redact_secrets(escaped_preimage, None);
+        assert!(
+            !scrubbed_preimage.contains("leakval9988"),
+            "escaped preimage_secret leaked: {scrubbed_preimage}"
+        );
+        assert_eq!(
+            scrubbed_preimage,
+            r#"line {\"preimage_secret\":\"<REDACTED_API_KEY>\"} end"#
+        );
+
+        let escaped_api_key = r#"outer {\"api_key\":\"plainNonSkSecret42\"} tail"#;
+        let scrubbed_api_key = redact_secrets(escaped_api_key, None);
+        assert!(
+            !scrubbed_api_key.contains("plainNonSkSecret42"),
+            "escaped non-sk api_key leaked: {scrubbed_api_key}"
+        );
+        assert_eq!(
+            scrubbed_api_key,
+            r#"outer {\"api_key\":\"<REDACTED_API_KEY>\"} tail"#
+        );
+
+        // Nested serialized JSON string remains valid JSON after redaction.
+        let inner = serde_json::json!({
+            "preimage_secret": "nestedLeak777",
+            "api_key": "plainInnerNonSkKey"
+        })
+        .to_string();
+        let outer = serde_json::json!({ "err": inner }).to_string();
+        let scrubbed_outer = redact_secrets(&outer, None);
+        assert!(!scrubbed_outer.contains("nestedLeak777"));
+        assert!(!scrubbed_outer.contains("plainInnerNonSkKey"));
+        let reparsed_outer: serde_json::Value = serde_json::from_str(&scrubbed_outer)
+            .unwrap_or_else(|e| panic!("outer JSON broken: {e}: {scrubbed_outer}"));
+        let reparsed_inner: serde_json::Value = reparsed_outer["err"]
+            .as_str()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_else(|| panic!("inner JSON broken: {reparsed_outer}"));
+        assert_eq!(reparsed_inner["preimage_secret"], REDACTED_MARKER);
+        assert_eq!(reparsed_inner["api_key"], REDACTED_MARKER);
+
+        // Escaped nested JSON object with `}` inside string value, and double-escaped JSON (`\\\"`).
+        let escaped_obj =
+            r#"wrap {\"private_mandate\":{\"note\":\"x}\",\"secret\":\"nestedObjLeak99\"}} end"#;
+        let scrubbed_obj = redact_secrets(escaped_obj, None);
+        assert!(!scrubbed_obj.contains("nestedObjLeak99"), "{scrubbed_obj}");
+        assert!(
+            scrubbed_obj.ends_with("} end"),
+            "outer escaped object closing brace eaten: {scrubbed_obj}"
+        );
+
+        let double_escaped = r#"lvl2 \\\"preimage_secret\\\":\\\"doubleEscapedLeak11\\\" end"#;
+        let scrubbed_double = redact_secrets(double_escaped, None);
+        assert!(
+            !scrubbed_double.contains("doubleEscapedLeak11"),
+            "{scrubbed_double}"
+        );
+        assert_eq!(
+            scrubbed_double,
+            r#"lvl2 \\\"preimage_secret\\\":\\\"<REDACTED_API_KEY>\\\" end"#
+        );
     }
-    out.push_str(rest);
-    out
+
+    #[test]
+    fn b2_xrpl_seed_straddling_4kib_cap_offsets_1_to_30_leaves_zero_partial_seed() {
+        let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
+        for seed in [ed_seed, secp_seed] {
+            for offset in 1..=30_usize {
+                let prefix_len = MAX_REDACTION_SCAN_BYTES - offset;
+                // Place a delimiter right before the seed so the boundary precedes `s`.
+                let body = format!("{}:{seed} trailing_payload", "a".repeat(prefix_len - 1));
+                for scrubbed in [
+                    redact_secrets(&body, None),
+                    redact_and_truncate(&body, None, MAX_REDACTION_SCAN_BYTES + 64),
+                ] {
+                    assert!(
+                        !scrubbed.contains("sEd"),
+                        "offset {offset}: partial ed seed prefix survived: tail={:?}",
+                        &scrubbed[scrubbed.len().saturating_sub(48)..]
+                    );
+                    assert!(
+                        !scrubbed.contains(&seed[..4]),
+                        "offset {offset}: partial seed survived in {scrubbed:?}"
+                    );
+                    assert!(
+                        scrubbed.contains(REDACTED_MARKER),
+                        "offset {offset}: expected redaction marker in {scrubbed:?}"
+                    );
+                    if offset <= seed.len() {
+                        assert!(
+                            scrubbed.ends_with(REDACTED_MARKER),
+                            "offset {offset}: expected marker at cap, got tail={:?}",
+                            &scrubbed[scrubbed.len().saturating_sub(48)..]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn c1_bearer_followed_by_tab_is_redacted() {
+        let scrubbed = redact_secrets("Authorization: Bearer\ttab_secret_token_999\tend", None);
+        assert!(!scrubbed.contains("tab_secret_token_999"), "{scrubbed}");
+        assert_eq!(scrubbed, "Authorization: Bearer\t<REDACTED_API_KEY>\tend");
+    }
 }

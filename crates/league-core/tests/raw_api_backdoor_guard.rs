@@ -2205,10 +2205,15 @@ fn check_workspace_manifests_and_crate_sources(
                 }
                 // C1: Card 7 plans to add `league-core` to `league-relay` and must explicitly
                 // transition `league-relay` onto the structural seat-side rule in the same PR.
-                if crate_name == "league-relay" && code_part.contains("league-core") {
-                    return Err(
-                        "league-relay/Cargo.toml must not depend on `league-core`".to_owned()
-                    );
+                // Leaf crate `league-error` and `league-ledger` must never depend on `league-core`.
+                if (crate_name == "league-error"
+                    || crate_name == "league-ledger"
+                    || crate_name == "league-relay")
+                    && code_part.contains("league-core")
+                {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml must not depend on `league-core`"
+                    ));
                 }
                 if crate_name == "league-tui" && code_part.contains("league-standalone") {
                     return Err(
@@ -2255,6 +2260,7 @@ fn check_workspace_manifests_and_crate_sources(
     let seen: BTreeSet<&str> = checked_crates.iter().map(String::as_str).collect();
     for expected in [
         "league-core",
+        "league-error",
         "league-gen",
         "league-ledger",
         "league-relay",
@@ -2315,6 +2321,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
     fs::create_dir_all(root)?;
     let member_names = [
         "league-core",
+        "league-error",
         "league-gen",
         "league-ledger",
         "league-relay",
@@ -2344,6 +2351,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         "[dependencies]\nleague-core = { path = \"../league-core\", features = [\"engine-internals\"] }\n",
     )?;
     for name in [
+        "league-error",
         "league-gen",
         "league-ledger",
         "league-relay",
@@ -2400,6 +2408,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         Ok(crates) => crates,
         Err(err) => panic!("workspace engine-internals isolation check failed: {err}"),
     };
+    assert!(checked_crates.contains(&"league-error".to_owned()));
     assert!(checked_crates.contains(&"league-tui".to_owned()));
     assert!(checked_crates.contains(&"league-relay".to_owned()));
 
@@ -2879,6 +2888,7 @@ fn planted_c2_workspace_member_outside_crates_dir_fails_when_violating_guard() {
         r#"[workspace]
 members = [
     "crates/league-core",
+    "crates/league-error",
     "crates/league-gen",
     "crates/league-ledger",
     "crates/league-relay",
@@ -2923,5 +2933,55 @@ members = [
         "unexpected error: {bad_err}"
     );
 
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn planted_leaf_error_control_1_engine_internals_in_manifest_fails() {
+    let root = unique_tmp_dir("leaf_err_engine_internals");
+    if let Err(err) = write_minimal_workspace_tree(&root) {
+        panic!("setup workspace: {err}");
+    }
+    if let Err(err) = check_workspace_manifests_and_crate_sources(&root) {
+        panic!("clean minimal workspace should pass guard: {err}");
+    }
+    if let Err(err) = fs::write(
+        root.join("crates/league-error/Cargo.toml"),
+        "[package]\nname = \"league-error\"\n[features]\nengine-internals = []\n",
+    ) {
+        panic!("write league-error Cargo.toml: {err}");
+    }
+    let err = check_workspace_manifests_and_crate_sources(&root)
+        .err()
+        .unwrap_or_else(|| panic!("engine-internals in league-error/Cargo.toml must fail guard"));
+    assert!(
+        err.contains("league-error/Cargo.toml") && err.contains("engine-internals"),
+        "unexpected error: {err}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn planted_leaf_error_control_2_league_core_dep_in_manifest_fails() {
+    let root = unique_tmp_dir("leaf_err_league_core_dep");
+    if let Err(err) = write_minimal_workspace_tree(&root) {
+        panic!("setup workspace: {err}");
+    }
+    if let Err(err) = check_workspace_manifests_and_crate_sources(&root) {
+        panic!("clean minimal workspace should pass guard: {err}");
+    }
+    if let Err(err) = fs::write(
+        root.join("crates/league-error/Cargo.toml"),
+        "[package]\nname = \"league-error\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+    ) {
+        panic!("write league-error Cargo.toml: {err}");
+    }
+    let err = check_workspace_manifests_and_crate_sources(&root)
+        .err()
+        .unwrap_or_else(|| panic!("league-core dep in league-error/Cargo.toml must fail guard"));
+    assert!(
+        err.contains("league-error/Cargo.toml") && err.contains("league-core"),
+        "unexpected error: {err}"
+    );
     let _ = fs::remove_dir_all(&root);
 }
