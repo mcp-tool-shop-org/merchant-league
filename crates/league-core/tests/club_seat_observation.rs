@@ -13,18 +13,19 @@
 //!   `EngineError::UnsupportedReplayVersion`, `pre-version` reads).
 //! - Club vs Eval mutual refusal & `SeedPool::Dev` + reserved-seed rejection tests.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use league_core::{
     AiPreviewRequest, AssetId, AtomicSwapProposal, CharterBidOrder, CharterRole, CheckProposal,
     ContractDeliveryOrder, ConverterRunOrder, CounterpartyAssumptions, DEFAULT_SHOCK_DRAW_TURNS,
     DEV_LAYOUT_SEED_MAX, DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES,
     DrandSchedule, DualEscrowProposal, EngineError, EngineState, EscrowFinishUnlock,
-    EscrowProposal, FillKind, HARD_TURN_CAP, HumanWhatIfRequest, LoggedTurn, MarketAction,
-    OfferProposal, OfferSide, OrderReveal, PREVIEW_NEUTRAL_BEACON_SEED, PreviewTieMode,
-    ProjectDeliveryOrder, PublicCheckOutcome, PublicSwapOutcome, REPLAY_FORMAT_VERSION,
-    RESERVED_TEST_LAYOUT_SEEDS, RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeedError,
-    ReplayOutcome, ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle,
+    EscrowProposal, FillKind, HARD_TURN_CAP, HumanWhatIfRequest, IntentTarget, LoggedTurn,
+    MarketAction, OfferProposal, OfferSide, OrderReveal, PREVIEW_NEUTRAL_BEACON_SEED,
+    PreviewTieMode, ProjectDeliveryOrder, PublicCheckOrderPreview, PublicCheckOutcome,
+    PublicSwapOrderPreview, PublicSwapOutcome, REPLAY_FORMAT_VERSION, RESERVED_TEST_LAYOUT_SEEDS,
+    RefusedActionPreview, RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeedError, ReplayOutcome,
+    ReplayRecord, RevealSalt, ScheduledShockSpec, SealedEvalSeed, SealedOrderBundle,
     SeasonReplayLog, Seat, SeatIdentity, SeatObservation, ShockKind, StructuredError, SweepReceipt,
     TableId, TableMode, TableSpec, ToStructuredError, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
     WhatIfPreview, attach_state_predicates, check_replay_format_version_slice,
@@ -212,71 +213,178 @@ fn push_candidate_digest(
 
 /// Computes canonical `EngineState` digests across every phase state a seat could compare against
 /// during a turn (`B3`): the current state, turn-start `TalkAndMarket`, cancel-locked
-/// `TalkAndMarket`, `Commit` entry and commitment-prefix states, `Reveal` entry and reveal-prefix
-/// states, and post-Sweep close phases (`AwaitingMandateReveal`, `Completed`).
-fn candidate_phase_digests(engine_state: &EngineState) -> Result<Vec<([u8; 32], String)>, Leak> {
-    let mut out = Vec::new();
-    push_candidate_digest(&mut out, engine_state)?;
+/// Computes canonical `EngineState` digests across every phase state a seat could compare against
+/// during a turn (`B3`, `B5`): the current state, pre-`TownImport` unwound states for current-turn
+/// Phase-1 imports, turn-start `TalkAndMarket`, cancel-locked `TalkAndMarket`, `Commit` entry and
+/// commitment-prefix states, `Reveal` entry and reveal-prefix states, and post-Sweep close phases
+/// (`AwaitingMandateReveal`, `Completed`).
+fn push_phase_digests_for_base(
+    out: &mut Vec<([u8; 32], String)>,
+    base_state: &EngineState,
+) -> Result<(), Leak> {
+    push_candidate_digest(out, base_state)?;
 
     // Turn-start `TalkAndMarket` and post-Pass-A cancel-locked `TalkAndMarket`.
     for cancel_locked in [false, true] {
-        let mut s = engine_state.clone();
+        let mut s = base_state.clone();
         s.phase = TurnPhase::TalkAndMarket;
         s.cancel_locked = cancel_locked;
         s.turn_commits.clear();
         s.turn_reveals.clear();
-        push_candidate_digest(&mut out, &s)?;
+        push_candidate_digest(out, &s)?;
     }
 
     // `Commit` entry and cumulative submission prefixes of `turn_commits`.
     {
-        let mut s = engine_state.clone();
+        let mut s = base_state.clone();
         s.phase = TurnPhase::Commit;
         s.cancel_locked = false;
         s.turn_commits.clear();
         s.turn_reveals.clear();
-        push_candidate_digest(&mut out, &s)?;
-        for (&seat_idx, &commit_hash) in &engine_state.turn_commits {
+        push_candidate_digest(out, &s)?;
+        for (&seat_idx, &commit_hash) in &base_state.turn_commits {
             s.turn_commits.insert(seat_idx, commit_hash);
-            push_candidate_digest(&mut out, &s)?;
+            push_candidate_digest(out, &s)?;
         }
     }
 
     // `Reveal` entry (both with empty and full `turn_commits`) and cumulative `turn_reveals`.
     for keep_commits in [true, false] {
-        let mut s = engine_state.clone();
+        let mut s = base_state.clone();
         s.phase = TurnPhase::Reveal;
         s.cancel_locked = false;
         if !keep_commits {
             s.turn_commits.clear();
         }
         s.turn_reveals.clear();
-        push_candidate_digest(&mut out, &s)?;
-        for (&seat_idx, rev) in &engine_state.turn_reveals {
+        push_candidate_digest(out, &s)?;
+        for (&seat_idx, rev) in &base_state.turn_reveals {
             s.turn_reveals.insert(seat_idx, rev.clone());
-            push_candidate_digest(&mut out, &s)?;
+            push_candidate_digest(out, &s)?;
         }
     }
 
     // Post-Sweep close phases (`AwaitingMandateReveal` and `Completed`).
     {
-        let n = engine_state.seats.len();
-        let mut s = engine_state.clone();
+        let n = base_state.seats.len();
+        let mut s = base_state.clone();
         s.phase = TurnPhase::AwaitingMandateReveal;
         s.cancel_locked = false;
         s.turn_commits.clear();
         s.turn_reveals.clear();
-        push_candidate_digest(&mut out, &s)?;
+        push_candidate_digest(out, &s)?;
 
         s.mandate_reveals = vec![None; n];
-        push_candidate_digest(&mut out, &s)?;
+        push_candidate_digest(out, &s)?;
 
         s.phase = TurnPhase::Completed;
-        s.mandate_reveals = engine_state.mandate_reveals.clone();
-        push_candidate_digest(&mut out, &s)?;
+        s.mandate_reveals = base_state.mandate_reveals.clone();
+        push_candidate_digest(out, &s)?;
+    }
+
+    Ok(())
+}
+
+fn candidate_phase_digests(engine_state: &EngineState) -> Result<Vec<([u8; 32], String)>, Leak> {
+    let mut out = Vec::new();
+    push_phase_digests_for_base(&mut out, engine_state)?;
+
+    // Unwind current-turn `TownImport` fill-log entries stepwise so start-of-turn and mid-turn
+    // pre-action `post_state_digest`s are also caught deterministically after market actions (`B5`).
+    let mut unwound = engine_state.clone();
+    while let Some(pos) = unwound
+        .fill_log
+        .iter()
+        .rposition(|r| r.turn == engine_state.turn && r.kind == FillKind::TownImport)
+    {
+        let rec = unwound.fill_log.remove(pos);
+        if let Some(seat_state) = unwound.seats.get_mut(usize::from(rec.to)) {
+            seat_state.cred = seat_state.cred.saturating_add(rec.cred_amount);
+            match rec.good {
+                Some(AssetId::Raw(g)) => {
+                    if let Some(slot) = seat_state.raw.get_mut(usize::from(g)) {
+                        *slot = slot.saturating_sub(rec.net_units);
+                    }
+                }
+                Some(AssetId::Refined(m)) => {
+                    if let Some(slot) = seat_state.refined.get_mut(usize::from(m)) {
+                        *slot = slot.saturating_sub(rec.net_units);
+                    }
+                }
+                _ => {}
+            }
+        }
+        unwound.pending_town_import_cred_spent = unwound
+            .pending_town_import_cred_spent
+            .saturating_sub(rec.cred_amount);
+        push_phase_digests_for_base(&mut out, &unwound)?;
     }
 
     Ok(out)
+}
+
+fn allowed_public_32byte_values(engine_state: &EngineState) -> BTreeSet<[u8; 32]> {
+    let mut allowed = BTreeSet::new();
+    if let Some(pk) = engine_state.spec.eval_vrf_pubkey {
+        allowed.insert(pk);
+    }
+    for escrow in engine_state.escrows.values() {
+        if let Some(hash) = escrow.condition_hash {
+            allowed.insert(hash.0);
+        }
+    }
+    for pledge in engine_state.pledges.values() {
+        allowed.insert(pledge.memo_digest);
+        if let IntentTarget::RevealPreimage { condition, .. } = pledge.target {
+            allowed.insert(condition.0);
+        }
+    }
+    allowed
+}
+
+fn decode_hex_32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (idx, chunk) in s.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        let pair = std::str::from_utf8(chunk).ok()?;
+        out[idx] = u8::from_str_radix(pair, 16).ok()?;
+    }
+    Some(out)
+}
+
+fn contains_unlisted_32byte_digest(
+    value: &serde_json::Value,
+    allowed: &BTreeSet<[u8; 32]>,
+) -> bool {
+    match value {
+        serde_json::Value::String(s) => {
+            decode_hex_32(s).is_some_and(|digest| !allowed.contains(&digest))
+        }
+        serde_json::Value::Array(items) => {
+            if items.len() == 32
+                && let Some(bytes_vec) = items
+                    .iter()
+                    .map(|v| v.as_u64().and_then(|u| u8::try_from(u).ok()))
+                    .collect::<Option<Vec<u8>>>()
+            {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes_vec);
+                let strictly_increasing = items.windows(2).all(|w| w[0].as_u64() < w[1].as_u64());
+                if !strictly_increasing && !allowed.contains(&arr) {
+                    return true;
+                }
+            }
+            items
+                .iter()
+                .any(|child| contains_unlisted_32byte_digest(child, allowed))
+        }
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|child| contains_unlisted_32byte_digest(child, allowed)),
+        _ => false,
+    }
 }
 
 fn contains_digest_value(value: &serde_json::Value, digest: &[u8; 32], digest_hex: &str) -> bool {
@@ -302,18 +410,19 @@ fn contains_digest_value(value: &serde_json::Value, digest: &[u8; 32], digest_he
     }
 }
 
-/// Pure redaction guard verifying a serialized seat view against ground-truth `engine_state` (`B-N2`, `B3`).
-///
-/// Inspects serialized JSON **values** only (never field names, and never searching `"magnitude"`):
-/// - `(i)` forbids any shock record before `forecast_turn` completes (permitting at most one clean
-///   `AuditorShockHint` strictly during `[hint_turn, forecast_turn)` when the observer holds active
-///   `OracleAuditor`);
-/// - `(ii)` classifies any record carrying `magnitude_bps` by record shape/turn values, forbidding
-///   drawn, forecast, or Auditor-hint magnitudes anywhere and forbidding any magnitude before
-///   `realize_turn` completes (while allowing realized `ActiveShock` records from `realize_turn` on);
-/// - `(iii)` forbids `post_state_digest` across all turn-phase state digests (`candidate_phase_digests`)
-///   anywhere in the serialized view as either `[u8; 32]` or hex.
+/// Pure redaction guard verifying a serialized seat view against ground-truth `engine_state`
+/// (`B-N2`, `B3`, `B5`).
 pub fn check_seat_view(view_json: &str, engine_state: &EngineState) -> Result<(), Leak> {
+    check_seat_view_with_history(view_json, engine_state, &[])
+}
+
+/// Pure redaction guard verifying a serialized seat view against ground-truth `engine_state` and
+/// optional prior turn/phase digests (`B-N2`, `B3`, `B5`).
+pub fn check_seat_view_with_history(
+    view_json: &str,
+    engine_state: &EngineState,
+    historical_post_state_digests: &[[u8; 32]],
+) -> Result<(), Leak> {
     let root: serde_json::Value =
         serde_json::from_str(view_json).map_err(|err| Leak::InvalidViewJson(err.to_string()))?;
     let observer_seat = root
@@ -322,11 +431,22 @@ pub fn check_seat_view(view_json: &str, engine_state: &EngineState) -> Result<()
         .and_then(|s| u8::try_from(s).ok())
         .ok_or_else(|| Leak::InvalidViewJson("missing u8 observer seat".to_owned()))?;
 
-    // Check (iii) first across every phase state digest the seat could compare against (`B3`).
+    // Check (iii) across recorded historical digests, phase/market-action-unwound candidate
+    // digests, AND any 32-byte/64-hex value outside public `eval_vrf_pubkey`/escrow/pledge hashes.
+    for digest in historical_post_state_digests {
+        let digest_hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        if contains_digest_value(&root, digest, &digest_hex) {
+            return Err(Leak::PostStateDigest);
+        }
+    }
     for (digest, digest_hex) in candidate_phase_digests(engine_state)? {
         if contains_digest_value(&root, &digest, &digest_hex) {
             return Err(Leak::PostStateDigest);
         }
+    }
+    let allowed_32 = allowed_public_32byte_values(engine_state);
+    if contains_unlisted_32byte_digest(&root, &allowed_32) {
+        return Err(Leak::PostStateDigest);
     }
 
     let is_active_turn = matches!(
@@ -1030,6 +1150,188 @@ fn planted_guard_control_4_post_state_digest_in_commit_phase_err() {
     );
 }
 
+#[test]
+fn planted_guard_control_5_post_state_digest_after_market_action_err() {
+    let tid = TableId(202_623);
+    let n = 4_u8;
+    let eval_seed = eval_seed_from(0x5D);
+    let (spec, deal, eval_seed) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            tid,
+            n,
+            1,
+            [0x47; 32],
+            &seat_salts(n, 0x14),
+            eval_seed,
+        ),
+        "club spec",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec), "TurnEngine::new");
+    for s in 0..n {
+        let rev = &deal.seat_reveals[usize::from(s)];
+        let mc = must_ok(compute_mandate_commitment(tid, Seat(s), rev), "mc");
+        must_ok(engine.submit_mandate_commitment(Seat(s), mc), "submit mc");
+    }
+
+    let mut raw_receipts = Vec::new();
+    for t in 1..=2_u8 {
+        commit_and_reveal_subset(&mut engine, tid, t, &BTreeMap::new());
+        let (_, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove_turn");
+        raw_receipts.push(must_ok(engine.sweep_turn_with_eval_vrf(&proof), "sweep"));
+    }
+
+    // Turn 3: apply a `TownImport` market action and then a `PostOffer` market action before
+    // observing (`TalkAndMarket`, and then `Commit`); Turn-2 `post_state_digest` must be rejected!
+    must_ok(
+        engine.apply_market_action(MarketAction::TownImport {
+            seat: 1,
+            good: AssetId::Raw(1),
+            amount: 200,
+        }),
+        "town import",
+    );
+    let clean_after_import = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(check_seat_view(&clean_after_import, engine.state()), Ok(()));
+    let leaky_after_import =
+        observe_seat_leak_post_state_digest_json(&engine, Seat(0), &raw_receipts[1..]);
+    assert_eq!(
+        check_seat_view(&leaky_after_import, engine.state()),
+        Err(Leak::PostStateDigest),
+        "Turn-2 post_state_digest leaked after Turn-3 TownImport must fail check_seat_view"
+    );
+
+    let buy_good = AssetId::Raw(2);
+    let bid_price = engine.state().parities.asset_parity(buy_good) + 100;
+    must_ok(
+        engine.apply_market_action(MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: buy_good,
+                amount: 300,
+                price_per_unit_cred: bid_price,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        }),
+        "post offer",
+    );
+    let clean_after_offer = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(check_seat_view(&clean_after_offer, engine.state()), Ok(()));
+    let leaky_after_offer =
+        observe_seat_leak_post_state_digest_json(&engine, Seat(0), &raw_receipts[1..]);
+    assert_eq!(
+        check_seat_view(&leaky_after_offer, engine.state()),
+        Err(Leak::PostStateDigest),
+        "Turn-2 post_state_digest leaked after Turn-3 PostOffer must fail check_seat_view"
+    );
+
+    must_ok(engine.advance_to_commit(), "advance_to_commit");
+    let clean_commit_after_actions = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(
+        check_seat_view(&clean_commit_after_actions, engine.state()),
+        Ok(())
+    );
+    let t2_hex: String = raw_receipts[1]
+        .post_state_digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let hex_leak_after_actions = serde_json::json!({
+        "seat": 0,
+        "observation": must_ok(engine.observe_seat(Seat(0)), "obs"),
+        "leaked_hex_digest": t2_hex,
+    })
+    .to_string();
+    assert_eq!(
+        check_seat_view(&hex_leak_after_actions, engine.state()),
+        Err(Leak::PostStateDigest),
+        "Turn-2 hex digest leaked in Commit after Phase-1 actions must fail check_seat_view"
+    );
+}
+
+#[test]
+fn planted_guard_control_6_older_turn_post_state_digest_err() {
+    let tid = TableId(202_624);
+    let n = 4_u8;
+    let eval_seed = eval_seed_from(0x5E);
+    let (spec, deal, eval_seed) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            tid,
+            n,
+            1,
+            [0x48; 32],
+            &seat_salts(n, 0x15),
+            eval_seed,
+        ),
+        "club spec",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec), "TurnEngine::new");
+    for s in 0..n {
+        let rev = &deal.seat_reveals[usize::from(s)];
+        let mc = must_ok(compute_mandate_commitment(tid, Seat(s), rev), "mc");
+        must_ok(engine.submit_mandate_commitment(Seat(s), mc), "submit mc");
+    }
+
+    let mut raw_receipts = Vec::new();
+    for t in 1..=4_u8 {
+        commit_and_reveal_subset(&mut engine, tid, t, &BTreeMap::new());
+        let (_, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove_turn");
+        raw_receipts.push(must_ok(engine.sweep_turn_with_eval_vrf(&proof), "sweep"));
+    }
+
+    // Turn 5: apply a market action so state diverges from all prior turns, then test leaking
+    // Turn-1 (`raw_receipts[0]`) and Turn-2 (`raw_receipts[1]`) digests in both `[u8; 32]` and hex.
+    must_ok(
+        engine.apply_market_action(MarketAction::TownImport {
+            seat: 2,
+            good: AssetId::Raw(2),
+            amount: 150,
+        }),
+        "turn 5 market action",
+    );
+    let clean_t5 = observe_seat_clean_json(&engine, Seat(0));
+    let past_digests: Vec<[u8; 32]> = raw_receipts.iter().map(|r| r.post_state_digest).collect();
+    assert_eq!(
+        check_seat_view_with_history(&clean_t5, engine.state(), &past_digests),
+        Ok(())
+    );
+    assert_eq!(check_seat_view(&clean_t5, engine.state()), Ok(()));
+
+    for older_idx in [0_usize, 1_usize] {
+        let older_slice = &raw_receipts[older_idx..=older_idx];
+        let leaky_bytes = observe_seat_leak_post_state_digest_json(&engine, Seat(0), older_slice);
+        assert_eq!(
+            check_seat_view(&leaky_bytes, engine.state()),
+            Err(Leak::PostStateDigest),
+            "older turn {} byte-array digest must fail check_seat_view on Turn 5",
+            older_idx + 1
+        );
+        assert_eq!(
+            check_seat_view_with_history(&leaky_bytes, engine.state(), &past_digests),
+            Err(Leak::PostStateDigest)
+        );
+
+        let older_hex: String = older_slice[0]
+            .post_state_digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let leaky_hex = serde_json::json!({
+            "seat": 0,
+            "observation": must_ok(engine.observe_seat(Seat(0)), "obs"),
+            "leaked_older_digest": older_hex,
+        })
+        .to_string();
+        assert_eq!(
+            check_seat_view(&leaky_hex, engine.state()),
+            Err(Leak::PostStateDigest),
+            "older turn {} hex digest must fail check_seat_view on Turn 5",
+            older_idx + 1
+        );
+    }
+}
+
 // =================================================================================================
 // 2. §2.5 Steps 0–7 Equivalence `proptest` (All-Committed and Regent-Modeled Turns)
 // =================================================================================================
@@ -1037,6 +1339,7 @@ fn planted_guard_control_4_post_state_digest_in_commit_phase_err() {
 struct LiveStep0To7Ref<'a> {
     obs: &'a SeatObservation,
     expected_ref: &'a league_core::BundlePreview,
+    expected_refused: &'a [RefusedActionPreview],
     pre_live_seat_state: &'a league_core::SeatState,
     post_market_live_seat_state: &'a league_core::SeatState,
     live_engine: &'a TurnEngine,
@@ -1046,34 +1349,53 @@ struct LiveStep0To7Ref<'a> {
 }
 
 fn assert_step0_to_7_matches_live(preview: &WhatIfPreview, live: &LiveStep0To7Ref<'_>) {
-    assert_eq!(preview.seat, live.seat);
-    assert_eq!(preview.turn, live.live_receipt.turn);
-    assert_eq!(&preview.baseline_predicates, &live.obs.baseline_predicates);
-    assert_eq!(&preview.pre_seat_state, live.pre_live_seat_state);
-    assert_eq!(
-        &preview.post_market_seat_state,
-        live.post_market_live_seat_state
+    let expected_swap_orders: Vec<PublicSwapOrderPreview> = live
+        .expected_ref
+        .swap_orders
+        .iter()
+        .map(|s| PublicSwapOrderPreview {
+            swap_id: s.swap_id,
+            maker: s.maker,
+            taker: s.taker,
+            outcome: match s.outcome {
+                league_core::SwapPreviewOutcome::Settled => PublicSwapOutcome::Settled,
+                league_core::SwapPreviewOutcome::UnmatchedOrInsufficientBalance => {
+                    PublicSwapOutcome::UnmatchedOrInsufficientBalance
+                }
+            },
+        })
+        .collect();
+    let expected_check_orders: Vec<PublicCheckOrderPreview> = live
+        .expected_ref
+        .check_orders
+        .iter()
+        .map(|c| PublicCheckOrderPreview {
+            check_id: c.check_id,
+            outcome: match c.outcome {
+                league_core::CheckPreviewOutcome::Cashed => PublicCheckOutcome::Cashed,
+                league_core::CheckPreviewOutcome::Bounced => PublicCheckOutcome::Bounced,
+                league_core::CheckPreviewOutcome::NotEligibleOrIgnored => {
+                    PublicCheckOutcome::IneligibleOrIgnored
+                }
+            },
+        })
+        .collect();
+
+    // `PreviewSteps0To7` omits Step-8 `activate_shocks_for_turn(turn + 1)` while running identical
+    // deterministic expiry (`expires_after_turn > turn`) at Step 8 cleanup. Reconstruct that exact
+    // post-Steps-0-7 active shock slice so `post_sweep_predicates` compares bit-for-bit (`B6`).
+    let mut expected_post_state = live.live_engine.state().clone();
+    expected_post_state.active_shocks = live
+        .obs
+        .active_shocks
+        .iter()
+        .copied()
+        .filter(|s| s.expires_after_turn > live.live_receipt.turn)
+        .collect();
+    let expected_post_sweep_predicates = must_ok(
+        league_core::compute_seat_state_predicates(&expected_post_state, Seat(live.seat)),
+        "expected post_sweep_predicates",
     );
-    assert_eq!(
-        preview.post_sweep_seat_state,
-        live.live_engine.state().seats[usize::from(live.seat)],
-        "full SeatState mismatch at turn {} seat {}",
-        live.live_receipt.turn,
-        live.seat
-    );
-    assert_eq!(
-        preview.close_mark_caveat,
-        league_core::HYPOTHETICAL_CLOSE_MARK_CAVEAT
-    );
-    assert_eq!(preview.converter_orders, live.expected_ref.converter_orders);
-    assert_eq!(preview.project_orders, live.expected_ref.project_orders);
-    assert_eq!(preview.escrow_orders, live.expected_ref.escrow_orders);
-    assert_eq!(preview.upkeep, live.expected_ref.upkeep);
-    assert_eq!(
-        preview.spoilage.perishable_spoiled_units,
-        live.expected_ref.seat_spoilage_clawed_back
-    );
-    assert_eq!(preview.public_fills, live.live_receipt.fills);
 
     let mut expected_summary =
         league_core::Step0To7SweepSummary::from_sweep_receipt(live.live_receipt);
@@ -1110,9 +1432,32 @@ fn assert_step0_to_7_matches_live(preview: &WhatIfPreview, live: &LiveStep0To7Re
                 .retain(|&s| s != absent_seat);
         }
     }
+
+    let expected_what_if = WhatIfPreview {
+        seat: live.seat,
+        turn: live.live_receipt.turn,
+        baseline_predicates: live.obs.baseline_predicates.clone(),
+        pre_seat_state: live.pre_live_seat_state.clone(),
+        post_market_seat_state: live.post_market_live_seat_state.clone(),
+        post_sweep_seat_state: live.live_engine.state().seats[usize::from(live.seat)].clone(),
+        post_sweep_predicates: expected_post_sweep_predicates,
+        close_mark_caveat: league_core::HYPOTHETICAL_CLOSE_MARK_CAVEAT.to_owned(),
+        refused_market_actions: live.expected_refused.to_vec(),
+        converter_orders: live.expected_ref.converter_orders.clone(),
+        project_orders: live.expected_ref.project_orders.clone(),
+        swap_orders: expected_swap_orders,
+        check_orders: expected_check_orders,
+        escrow_orders: live.expected_ref.escrow_orders.clone(),
+        upkeep: live.expected_ref.upkeep,
+        spoilage: league_core::SeatSpoilagePreview {
+            perishable_spoiled_units: live.expected_ref.seat_spoilage_clawed_back,
+        },
+        public_fills: live.live_receipt.fills.clone(),
+        step0_to_7_receipt: expected_summary,
+    };
     assert_eq!(
-        preview.step0_to_7_receipt, expected_summary,
-        "full Step 0-7 summary mismatch at turn {} seat {}",
+        preview, &expected_what_if,
+        "full 18-field WhatIfPreview mismatch at turn {} seat {}",
         live.live_receipt.turn, live.seat
     );
 }
@@ -1132,6 +1477,8 @@ proptest! {
         let n = 4 + (seed % 3) as u8;
         let actor = seat_offset % n;
         let peer_absent = (actor + 1) % n;
+        let peer2 = (actor + 2) % n;
+        let peer3 = (actor + 3) % n;
         let eval_seed = eval_seed_from(((seed % 200) + 1) as u8);
         let tid = TableId(50_000 + seed);
 
@@ -1178,8 +1525,10 @@ proptest! {
         }
 
         let mut engine = must_ok(TurnEngine::new(spec), "TurnEngine::new");
+        let mut pending_due_check_id: Option<u64> = None;
+
         // Advance through Turn 4 (election) and Turn 6 (charter auction + post-Turn-2 shock draw)
-        // checking equivalence on Turns 1..=6.
+        // checking full 18-field `WhatIfPreview` equivalence on Turns 1..=6.
         for t in 1..=6_u8 {
             if engine.state().phase != TurnPhase::TalkAndMarket {
                 break;
@@ -1218,17 +1567,75 @@ proptest! {
                     },
                 }
             };
+            let mut actor_market_actions = vec![action.clone()];
+            if t == 3 {
+                // Deliberately include a refused Phase-1 action so `refused_market_actions` is checked.
+                actor_market_actions.push(MarketAction::CancelOffer {
+                    seat: actor,
+                    offer_id: 999_999,
+                });
+            }
+
             let peer_action = MarketAction::TownImport {
-                seat: (actor + 2) % n,
-                good: AssetId::Raw((actor + 2) % n),
+                seat: peer2,
+                good: AssetId::Raw(peer2),
                 amount: 200,
             };
+            let mut peer_market_actions = vec![peer_action.clone()];
+            let mut regent_phase1_context = vec![action.clone(), peer_action.clone()];
+            let mut created_check_this_turn = false;
+            if t == 2 {
+                let check_action = MarketAction::CreateCheck {
+                    seat: peer2,
+                    check: CheckProposal {
+                        payee: actor,
+                        asset: AssetId::Cred,
+                        send_max: 200,
+                        deliver_min: 200,
+                        due_turn: 3,
+                        expiration_turn: 5,
+                    },
+                };
+                peer_market_actions.push(check_action.clone());
+                regent_phase1_context.push(check_action);
+                created_check_this_turn = true;
+            }
 
             let mut actor_bundle = SealedOrderBundle::default();
             actor_bundle.converter_runs.push(ConverterRunOrder {
                 recipe_idx: 0,
                 runs: 1,
             });
+            let mut assumed_cosigned_swaps = Vec::new();
+            if t == 3 {
+                if let Some(cid) = pending_due_check_id.take() {
+                    actor_bundle.check_cashes.push(cid);
+                }
+                actor_bundle.check_cashes.push(999_999);
+                let swap_settled = AtomicSwapProposal {
+                    swap_id: 301,
+                    maker: actor,
+                    taker: peer2,
+                    maker_asset: AssetId::Cred,
+                    maker_amount: 100,
+                    taker_asset: AssetId::Raw(peer2),
+                    taker_amount: 100,
+                    domain_id: None,
+                };
+                let swap_unmatched = AtomicSwapProposal {
+                    swap_id: 302,
+                    maker: actor,
+                    taker: peer3,
+                    maker_asset: AssetId::Cred,
+                    maker_amount: 50,
+                    taker_asset: AssetId::Raw(peer3),
+                    taker_amount: 50,
+                    domain_id: None,
+                };
+                actor_bundle.atomic_swaps.push(swap_settled.clone());
+                actor_bundle.atomic_swaps.push(swap_unmatched);
+                assumed_cosigned_swaps.push(swap_settled);
+            }
             if t % 4 == 0 {
                 actor_bundle.council_vote = Some(league_core::CouncilVoteBallot {
                     trade_minister: actor,
@@ -1256,7 +1663,7 @@ proptest! {
                         engine.preview_regent_bundle_after_step0(
                             Turn(t),
                             Seat(p),
-                            &[action.clone(), peer_action.clone()],
+                            &regent_phase1_context,
                             turn_beacon,
                         ),
                         "preview_regent_bundle_after_step0",
@@ -1270,20 +1677,32 @@ proptest! {
                         recipe_idx: 0,
                         runs: 1,
                     });
-                    committed_bundles.insert(p, pb.clone());
-                    assumed_peer_bundles.insert(p, pb);
+                    assumed_peer_bundles.insert(p, pb.clone());
+                    if t == 3 && p == peer2 {
+                        pb.atomic_swaps.extend(assumed_cosigned_swaps.iter().cloned());
+                    }
+                    committed_bundles.insert(p, pb);
                 }
+            }
+            let mut ref_peer_bundles = assumed_peer_bundles.clone();
+            if t == 3 {
+                ref_peer_bundles
+                    .entry(peer2)
+                    .or_default()
+                    .atomic_swaps
+                    .extend(assumed_cosigned_swaps.iter().cloned());
             }
 
             let req = HumanWhatIfRequest {
                 seat: actor,
-                market_actions: vec![action.clone()],
-                cancel_lock_at: Some(1),
+                market_actions: actor_market_actions.clone(),
+                cancel_lock_at: Some(actor_market_actions.len()),
                 bundle: actor_bundle.clone(),
                 tie_mode: PreviewTieMode::NeutralSeed,
                 assumptions: CounterpartyAssumptions {
-                    assumed_peer_market_actions: vec![peer_action.clone()],
+                    assumed_peer_market_actions: peer_market_actions.clone(),
                     assumed_peer_bundles: assumed_peer_bundles.clone(),
+                    assumed_cosigned_swaps: assumed_cosigned_swaps.clone(),
                     ..CounterpartyAssumptions::default()
                 },
             };
@@ -1291,15 +1710,39 @@ proptest! {
                 preview_what_if_with_beacon(&pub_state, &req, turn_beacon),
                 "preview_what_if_with_beacon",
             );
+            if t == 3 {
+                prop_assert!(!preview.refused_market_actions.is_empty());
+                prop_assert_eq!(preview.check_orders.len(), 2);
+                prop_assert_eq!(preview.swap_orders.len(), 2);
+            }
 
             // Apply identical Phase-1 actions, cancel lock, and reference Steps 0–7 preview before
             // live commit/reveal & sweep.
             let absent_was_human_at_turn_start =
                 engine.state().seats[usize::from(peer_absent)].identity == SeatIdentity::Human;
             let pre_live_seat_state = engine.state().seats[usize::from(actor)].clone();
-            must_ok(engine.apply_market_action(action), "live action");
+            let mut live_refused = Vec::new();
+            for (idx, act) in actor_market_actions.iter().enumerate() {
+                if let Err(err) = engine.apply_market_action(act.clone()) {
+                    let msg = err.to_string();
+                    live_refused.push(RefusedActionPreview {
+                        action_index: idx,
+                        error_code: err.code().to_owned(),
+                        message: scrub_secret_text(&msg),
+                    });
+                }
+            }
             must_ok(engine.begin_cancel_lock(), "live cancel_lock");
-            must_ok(engine.apply_market_action(peer_action), "live peer_action");
+            let mut created_check_id_now = None;
+            for peer_act in &peer_market_actions {
+                if matches!(peer_act, MarketAction::CreateCheck { .. }) {
+                    created_check_id_now = Some(engine.state().next_check_id);
+                }
+                must_ok(engine.apply_market_action(peer_act.clone()), "live peer_action");
+            }
+            if created_check_this_turn {
+                pending_due_check_id = created_check_id_now;
+            }
             let post_market_live_seat_state = engine.state().seats[usize::from(actor)].clone();
 
             let expected_ref = must_ok(
@@ -1308,7 +1751,7 @@ proptest! {
                     Seat(actor),
                     &[],
                     &actor_bundle,
-                    &assumed_peer_bundles,
+                    &ref_peer_bundles,
                     turn_beacon,
                     engine_internals::SweepMode::PreviewSteps0To7,
                 ),
@@ -1325,6 +1768,7 @@ proptest! {
                     &LiveStep0To7Ref {
                         obs: &obs,
                         expected_ref: &expected_ref,
+                        expected_refused: &live_refused,
                         pre_live_seat_state: &pre_live_seat_state,
                         post_market_live_seat_state: &post_market_live_seat_state,
                         live_engine: &engine,
@@ -1335,7 +1779,7 @@ proptest! {
                 );
             } else {
                 // Case (b): uncommitted peer_absent is Regent-modeled; full SeatState, full
-                // WhatIfPreview fields, and all Step 0-7 receipt fields (except Step-1
+                // 18-field WhatIfPreview, and all Step 0-7 receipt fields (except Step-1
                 // `non_reveal_seats` and `regent_acted_seats` for `peer_absent`, which differ by
                 // construction) match bit-for-bit!
                 assert_step0_to_7_matches_live(
@@ -1343,6 +1787,7 @@ proptest! {
                     &LiveStep0To7Ref {
                         obs: &obs,
                         expected_ref: &expected_ref,
+                        expected_refused: &live_refused,
                         pre_live_seat_state: &pre_live_seat_state,
                         post_market_live_seat_state: &post_market_live_seat_state,
                         live_engine: &engine,

@@ -69,6 +69,18 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
+      - name: Standalone seat-crate feature check
+        run: |
+          cargo build -p league-tui --locked
+          if cargo tree -p league-tui -e features --locked | grep -q 'engine-internals'; then
+            echo "ERROR: league-tui enabled league-core/engine-internals in standalone build"
+            exit 1
+          fi
+          if cargo tree -p league-gen -e features --locked | grep -q 'engine-internals'; then
+            echo "ERROR: league-gen enabled league-core/engine-internals in standalone build"
+            exit 1
+          fi
+
       - name: Test
         run: cargo test --workspace --locked
 
