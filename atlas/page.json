@@ -93,141 +93,24 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 18,
-      "changed": 24,
-      "moved": 16,
-      "parts": 11,
-      "removed": 1
+      "added": 0,
+      "changed": 14,
+      "moved": 0,
+      "parts": 6,
+      "removed": 0
     },
     "items": [
       {
-        "kind": "import-added",
-        "sentence": "league-core now imports league-error.",
-        "subjects": [
-          "league-core",
-          "league-error"
-        ]
-      },
-      {
-        "kind": "import-added",
-        "sentence": "league-core now imports league-seat-types.",
-        "subjects": [
-          "league-core",
-          "league-seat-types"
-        ]
-      },
-      {
-        "kind": "import-added",
-        "sentence": "league-gen now imports league-seat-types.",
-        "subjects": [
-          "league-gen",
-          "league-seat-types"
-        ]
-      },
-      {
-        "kind": "import-added",
-        "sentence": "And 9 more new imports between parts.",
-        "subjects": []
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-core/src/observation.rs, crates/league-seat-types/src/lib.rs and crates/league-seat-ui/.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-core/src/observation.rs",
-          "crates/league-seat-types/src/lib.rs",
-          "crates/league-seat-ui/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also checks crates/league-seat-ui/src/lib.rs and crates/league-tui/src/main.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-seat-ui/src/lib.rs",
-          "crates/league-tui/src/main.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI no longer checks crates/league-tui/src/lib.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-tui/src/lib.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "And 1 more change to a door.",
-        "subjects": []
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-core/ is now also read by crates/league-tui/Cargo.toml.",
-        "subjects": [
-          "crates/league-core/",
-          "crates/league-tui/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-error/ is now also read by crates/league-seat-types/Cargo.toml and crates/league-tui/Cargo.toml.",
-        "subjects": [
-          "crates/league-error/",
-          "crates/league-seat-types/Cargo.toml",
-          "crates/league-tui/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-gen/ is now also read by crates/league-tui/Cargo.toml.",
-        "subjects": [
-          "crates/league-gen/",
-          "crates/league-tui/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 4 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
-        "kind": "part",
-        "sentence": "league-error is a new part, drawn from `crates/league-error/**`.",
-        "subjects": [
-          "league-error"
-        ]
-      },
-      {
-        "kind": "part",
-        "sentence": "league-relay is a new part, drawn from `crates/league-relay/**`.",
-        "subjects": [
-          "league-relay"
-        ]
-      },
-      {
-        "kind": "part",
-        "sentence": "league-seat-types is a new part, drawn from `crates/league-seat-types/**`.",
-        "subjects": [
-          "league-seat-types"
-        ]
-      },
-      {
-        "kind": "part",
-        "sentence": "And 1 more change to the parts.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "18 files added, 1 removed, 16 moved and 24 changed content, across 11 parts.",
+        "sentence": "Nothing structural changed since 2026-11-18; 14 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "284973c7afcecae564a2f3d6d737dcc306c321db",
-      "generatedAt": "2026-11-18T15:14:24.438Z"
+      "commit": "4cead9a1c8fcd3b75656e01143773caab17b6698",
+      "generatedAt": "2026-11-18T18:16:47.867Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -308,10 +191,10 @@
   ],
   "changesTogetherNote": [
     "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
-    "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
+    "Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "4cead9a1c8fcd3b75656e01143773caab17b6698",
+  "commit": "f08874354a1922e1b4b8289fb31741bcba494699",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (368 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -728,7 +611,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-18T18:16:47.867Z",
+  "generatedAt": "2026-11-18T19:59:13.504Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",

@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "59c7987b1d70ccdad9f78b0f22061db1a813c0d3fe95b75cf0ee897a693d9170",
+          "hash": "18d961eeed4914e166b3e5cddba797ce1f5d8f06edaa8b1d759d7424ed6fc329",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -399,130 +399,130 @@
             {
               "in": "mandate_for_seat",
               "kind": "err",
-              "line": 390
+              "line": 405
             },
             {
               "in": "finalize_club_season",
               "kind": "err",
-              "line": 528
+              "line": 543
             },
             {
               "in": "finalize_club_season",
               "kind": "err",
-              "line": 546
+              "line": 561
             },
             {
               "in": "finalize_club_season",
               "kind": "err",
-              "line": 551
+              "line": 566
             },
             {
               "in": "finalize_club_season",
               "kind": "err",
-              "line": 564
+              "line": 579
             },
             {
               "in": "export_replay_log",
               "kind": "err",
-              "line": 577
+              "line": 592
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 680
+              "line": 695
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 689
+              "line": 704
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 697
+              "line": 712
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 706
+              "line": 721
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 713
+              "line": 728
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 720
+              "line": 735
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 732
+              "line": 747
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 740
+              "line": 755
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 759
+              "line": 774
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 765
+              "line": 780
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 770
+              "line": 785
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 793
+              "line": 808
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 834
+              "line": 849
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 835
+              "line": 850
             },
             {
               "in": "wipe_seal_file",
               "kind": "err",
-              "line": 835
+              "line": 850
             },
             {
               "in": "write_atomic_bytes",
               "kind": "match-err",
-              "line": 877
-            },
-            {
-              "in": "write_atomic_bytes",
-              "kind": "err",
-              "line": 884
-            },
-            {
-              "in": "write_atomic_bytes",
-              "kind": "match-err",
-              "line": 890
-            },
-            {
-              "in": "write_atomic_bytes",
-              "kind": "err",
               "line": 892
+            },
+            {
+              "in": "write_atomic_bytes",
+              "kind": "err",
+              "line": 899
+            },
+            {
+              "in": "write_atomic_bytes",
+              "kind": "match-err",
+              "line": 905
+            },
+            {
+              "in": "write_atomic_bytes",
+              "kind": "err",
+              "line": 907
             }
           ],
-          "hash": "9136af4040555faf7daf70955ddc5bbd598a7d6aaf966a85d3a7603d844adcab",
+          "hash": "7b30dd7a006f32903d528940ec8490abe590e3c32238b33ae0609c65f3c612b6",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -760,87 +760,77 @@
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 538
+              "line": 550
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 548
+              "line": 560
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 554
+              "line": 566
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 557
+              "line": 569
             },
             {
               "in": "begin_cancel_lock",
               "kind": "err",
-              "line": 570
+              "line": 582
             },
             {
               "in": "apply_market_action",
               "kind": "err",
-              "line": 583
+              "line": 595
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 601
+              "line": 613
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 616
+              "line": 628
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 646
+              "line": 658
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 651
+              "line": 663
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 670
+              "line": 682
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 684
+              "line": 696
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 699
+              "line": 711
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 706
+              "line": 718
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 713
-            },
-            {
-              "in": "apply_market_action_inner",
-              "kind": "err",
-              "line": 728
-            },
-            {
-              "in": "apply_market_action_inner",
-              "kind": "err",
-              "line": 733
+              "line": 725
             },
             {
               "in": "apply_market_action_inner",
@@ -850,47 +840,47 @@
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 768
+              "line": 745
+            },
+            {
+              "in": "apply_market_action_inner",
+              "kind": "err",
+              "line": 752
+            },
+            {
+              "in": "apply_market_action_inner",
+              "kind": "err",
+              "line": 780
             },
             {
               "in": "advance_to_commit",
               "kind": "err",
-              "line": 787
+              "line": 799
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 803
+              "line": 815
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 809
+              "line": 821
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 814
+              "line": 826
             },
             {
               "in": "advance_to_reveal",
               "kind": "err",
-              "line": 823
+              "line": 835
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 842
-            },
-            {
-              "in": "submit_order_reveal",
-              "kind": "err",
-              "line": 848
-            },
-            {
-              "in": "submit_order_reveal",
-              "kind": "err",
-              "line": 857
+              "line": 854
             },
             {
               "in": "submit_order_reveal",
@@ -898,247 +888,257 @@
               "line": 860
             },
             {
+              "in": "submit_order_reveal",
+              "kind": "err",
+              "line": 869
+            },
+            {
+              "in": "submit_order_reveal",
+              "kind": "err",
+              "line": 872
+            },
+            {
               "in": "preview_regent_bundle_for_seat",
               "kind": "err",
-              "line": 877
+              "line": 889
             },
             {
               "in": "preview_regent_bundle_after_step0",
               "kind": "err",
-              "line": 905
+              "line": 917
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "err",
-              "line": 1026
+              "line": 1038
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "match-err",
-              "line": 1059
+              "line": 1071
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "err",
-              "line": 1076
+              "line": 1088
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1191
+              "line": 1203
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1197
+              "line": 1209
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1204
+              "line": 1216
             },
             {
               "in": "sweep_turn_seeded",
               "kind": "err",
-              "line": 1215
+              "line": 1227
             },
             {
               "in": "sweep_turn_seeded",
               "kind": "err",
-              "line": 1220
+              "line": 1232
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1244
+              "line": 1256
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1249
+              "line": 1261
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1254
+              "line": 1266
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1290
+              "line": 1302
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1295
+              "line": 1307
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1300
+              "line": 1312
             },
             {
               "in": "sweep_turn_detailed_with_mode",
               "kind": "err",
-              "line": 1328
+              "line": 1340
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1524
+              "line": 1536
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1537
+              "line": 1549
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1544
+              "line": 1556
             },
             {
               "in": "submit_mandate_reveal",
-              "kind": "err",
-              "line": 1553
-            },
-            {
-              "in": "finalize_season",
               "kind": "err",
               "line": 1565
             },
             {
+              "in": "finalize_season",
+              "kind": "err",
+              "line": 1577
+            },
+            {
               "in": "ensure_seat",
               "kind": "err",
-              "line": 1578
+              "line": 1590
             },
             {
               "in": "ensure_valid_asset",
               "kind": "err",
-              "line": 1587
+              "line": 1599
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1594
+              "line": 1606
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1598
+              "line": 1610
             },
             {
               "in": "validate_bundle_orders",
               "kind": "err",
-              "line": 1615
+              "line": 1627
             },
             {
               "in": "validate_bundle_orders",
               "kind": "err",
-              "line": 1637
+              "line": 1649
             },
             {
               "in": "adjust_free_balance",
               "kind": "err",
-              "line": 1699
+              "line": 1711
             },
             {
               "in": "handle_town_import",
               "kind": "err",
-              "line": 1746
+              "line": 1758
             },
             {
               "in": "handle_town_import",
               "kind": "match-err",
-              "line": 1753
+              "line": 1765
             },
             {
               "in": "handle_town_import",
               "kind": "err",
-              "line": 1755
+              "line": 1767
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1779
+              "line": 1791
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1784
+              "line": 1796
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1802
+              "line": 1814
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1811
+              "line": 1823
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 2110
+              "line": 2122
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 2114
+              "line": 2126
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2132
+              "line": 2144
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2142
+              "line": 2154
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2149
+              "line": 2161
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2156
+              "line": 2168
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2167
+              "line": 2179
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2221
+              "line": 2233
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2227
+              "line": 2239
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2232
+              "line": 2244
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2237
+              "line": 2249
             },
             {
               "in": "step2_settle_atomic_swaps",
               "kind": "err",
-              "line": 2983
+              "line": 2995
             }
           ],
-          "hash": "e5c3881c2ec10b0634aa441c50ed371bd83c27b2a1a4b676c44489237006aa3b",
+          "hash": "c7490434a4bc19ae30429b4068f1e917df58b755986dd4313912ef7cb797cd3d",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/commit.rs",
@@ -1215,25 +1215,25 @@
             {
               "in": "preview_state_to_engine",
               "kind": "err",
-              "line": 239
+              "line": 244
             },
             {
               "in": "preview_state_to_engine",
               "kind": "err",
-              "line": 245
+              "line": 250
             },
             {
               "in": "preview_what_if",
               "kind": "err",
-              "line": 526
+              "line": 531
             },
             {
               "in": "preview_seat_bundle",
               "kind": "err",
-              "line": 543
+              "line": 548
             }
           ],
-          "hash": "b2145693940bbea4e2f1727ee6504b9baaa4dddb443c216a738a5d5c02634712",
+          "hash": "90de41524e7dcd7453dad3b3aa7ff9d95bdf632ca3b0fde3077bec20c025177b",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/commit.rs",
@@ -1879,7 +1879,7 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "d45866ce5dd7d990ac4398632f6a2fc0635f221e022e4febdbbc935f4a6cb83e",
+          "hash": "ab9fa856f2f9bda158d453cee48c28f9b4885901ef6f498a29dd77076e2aad65",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1923,7 +1923,7 @@
           "testsInside": true
         },
         {
-          "hash": "8ba7bff164052941b9a5fd95bd4a7400af2201cc21da2b58c685a3c2e132d32d",
+          "hash": "03b304698333d3fdaef034b04d5d03e1db2f3411a68152d59c66c5c7ef48aa57",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1941,7 +1941,7 @@
           "testsInside": true
         },
         {
-          "hash": "e3c1d124c2c37ef04f9a7f7e805d3c04cece4b2f5de624959e44b2d501f1c323",
+          "hash": "05b690879a17a9a2b0242de5712f699574729644f3b7520199f6649fd7c1a97c",
           "importOrder": [
             "crates/league-core/src/observation.rs",
             "crates/league-core/src/lib.rs"
@@ -2766,7 +2766,7 @@
           "testsInside": true
         },
         {
-          "hash": "f64d67a407fcdebd645c91e97afd9a3bb4b166cb0274152a742304cd9294ad5f",
+          "hash": "a80c3306bc9c1148ddc6e46176516558ee750551816f7ae636f96d6abd279192",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-gen/src/lib.rs"
@@ -6626,7 +6626,7 @@
           "path": "crates/league-seat-types/Cargo.toml"
         },
         {
-          "hash": "95e91531c0d64734909fb0e7d4b58c5903f354f5c97b32236508e8ab1a2b3d45",
+          "hash": "c9b12ad7f7f111096984ca579a93935f59c27f9329a477ec8e12cf00bab163ea",
           "path": "crates/league-seat-types/clippy.toml"
         },
         {
@@ -6720,7 +6720,7 @@
           "path": "crates/league-seat-types/src/engine_types.rs"
         },
         {
-          "hash": "e47726bbe0b3899f23565e440ece92d4a652f653ba74704e20f8529070dc082a",
+          "hash": "50f28934bd52d98beb3018f5e9597e8cfd788f3da8ae9be0befc11e8b0c36cf1",
           "importOrder": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6749,7 +6749,7 @@
           "testsInside": true
         },
         {
-          "hash": "fc27eaefb6532d15fc3e6f9b6fe5b2fae879d1c3b1748406bcd937b211959bea",
+          "hash": "ba9708db317ad84f1938e937860e51ef6420eac821bd3f5a0fd6ef17a88b739c",
           "importsFiles": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6845,7 +6845,7 @@
           "path": "crates/league-seat-ui/Cargo.toml"
         },
         {
-          "hash": "95e91531c0d64734909fb0e7d4b58c5903f354f5c97b32236508e8ab1a2b3d45",
+          "hash": "c9b12ad7f7f111096984ca579a93935f59c27f9329a477ec8e12cf00bab163ea",
           "path": "crates/league-seat-ui/clippy.toml"
         },
         {
@@ -6857,7 +6857,7 @@
             "render_seat",
             "render_seat_with_commodities"
           ],
-          "hash": "6cbfdfbec2ff67dca654c9cc617f17635491e41ca30b8e07862525c0b6d7468a",
+          "hash": "7d9b9690f623ee419a0bea1c1f3586cb5a10ba8dfd3fccaa1c5b3ff58a463900",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs"
           ],
@@ -6866,7 +6866,7 @@
             {
               "calls": [
                 {
-                  "line": 97,
+                  "line": 109,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6883,7 +6883,7 @@
             {
               "calls": [
                 {
-                  "line": 97,
+                  "line": 109,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6900,7 +6900,7 @@
             {
               "calls": [
                 {
-                  "line": 97,
+                  "line": 109,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -7484,7 +7484,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "6230670ad5c207c8906d7bd458aa2f7848db0b15dd1f8988ebed7a5f2e6778d6",
+          "hash": "5fec8a0f7bd8d9305019bf6f297d7c167ff970404aa2f099d7d55062427d96ea",
           "path": "CHANGELOG.md"
         },
         {
@@ -8888,7 +8888,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "4cead9a1c8fcd3b75656e01143773caab17b6698",
+    "commit": "f08874354a1922e1b4b8289fb31741bcba494699",
     "tracked": 569
   },
   "landings": [

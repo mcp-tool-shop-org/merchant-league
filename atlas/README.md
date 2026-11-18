@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-18 from commit 4cead9a by Atlas 1.26.0.
+Mapped at 2026-11-18 from commit f088743 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,25 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 14 parts, mostly Rust (368 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-18 (284973c)
+## What changed since 2026-11-18 (4cead9a)
 
-- league-core now imports league-error.
-- league-core now imports league-seat-types.
-- league-gen now imports league-seat-types.
-- And 9 more new imports between parts.
-- CI now also runs crates/league-core/src/observation.rs, crates/league-seat-types/src/lib.rs and crates/league-seat-ui/.
-- CI now also checks crates/league-seat-ui/src/lib.rs and crates/league-tui/src/main.rs.
-- CI no longer checks crates/league-tui/src/lib.rs.
-- And 1 more change to a door.
-- crates/league-core/ is now also read by crates/league-tui/Cargo.toml.
-- crates/league-error/ is now also read by crates/league-seat-types/Cargo.toml and crates/league-tui/Cargo.toml.
-- crates/league-gen/ is now also read by crates/league-tui/Cargo.toml.
-- And 4 more new writers and readers of places.
-- league-error is a new part, drawn from `crates/league-error/**`.
-- league-relay is a new part, drawn from `crates/league-relay/**`.
-- league-seat-types is a new part, drawn from `crates/league-seat-types/**`.
-- And 1 more change to the parts.
-- 18 files added, 1 removed, 16 moved and 24 changed content, across 11 parts.
+Nothing structural changed since 2026-11-18; 14 files changed content.
 
 ## What comes in
 
@@ -85,7 +69,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
