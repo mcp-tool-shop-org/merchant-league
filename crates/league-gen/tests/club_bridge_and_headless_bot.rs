@@ -628,7 +628,7 @@ fn display_text_paths_never_pass_through_secret_scrubber() {
 
     let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x31 + i; 32])).collect();
     let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x77; 32]), "eval_seed");
-    let (spec, cmap, deal, eval_seed) = must_ok(
+    let (_spec, cmap, _deal, _eval_seed) = must_ok(
         ring_table_to_table_spec_with_explicit_entropy(
             &table,
             TableId(810_001),
@@ -639,6 +639,7 @@ fn display_text_paths_never_pass_through_secret_scrubber() {
         ),
         "bridge",
     );
+    let display_map = cmap.to_display_map();
     for asset in [
         AssetId::Cred,
         AssetId::Raw(0),
@@ -646,72 +647,98 @@ fn display_text_paths_never_pass_through_secret_scrubber() {
         AssetId::Raw(3),
         AssetId::Refined(3),
     ] {
-        let formatted = cmap.format_asset(asset, false).unwrap_or_default();
+        let formatted = must_ok(
+            cmap.format_asset(asset, false)
+                .ok_or_else(|| format!("missing asset {asset:?}")),
+            "TableCommodityMap::format_asset",
+        );
+        let ui_formatted = must_ok(
+            display_map
+                .format_asset(asset, false)
+                .ok_or_else(|| format!("missing display asset {asset:?}")),
+            "CommodityDisplayMap::format_asset",
+        );
+        assert_eq!(formatted, ui_formatted);
         assert!(!formatted.contains("[REDACTED]"));
         assert_eq!(scrub_secret_text(&formatted), formatted);
     }
+    let display_json = must_ok(
+        serde_json::to_string(&display_map),
+        "serialize CommodityDisplayMap",
+    );
+    assert!(display_json.contains(&display_map.numeraire_label));
+    for s in &display_map.seats {
+        assert!(display_json.contains(&s.raw_label));
+        assert!(display_json.contains(&s.refined_label));
+    }
+    assert!(!display_json.contains("[REDACTED]") && !display_json.contains("<REDACTED_API_KEY>"));
 
-    let mut host = must_ok(
-        ClubHost::new(spec, layout_seed, deal, eval_seed, 42),
-        "ClubHost::new",
+    // Note (PR #81 B2 fix): `RingTable -> TableSpec` intentionally drops free-text project names
+    // (`ProjectRecipe` stores only `id`, `inputs`, and `equity_points`), and `league-core` carries
+    // no free player-supplied text other than error refusal messages (`RefusedActionPreview.message`,
+    // tested below as the explicit error-string exemption). End-to-end rendered UI phrase
+    // preservation tests move to `league-seat-ui` in Card 5 Part B.
+    println!(
+        "DISPLAY_TEXT_PATH league-gen RingTable+CommodityCatalog+CommodityDisplayMap bytes={} clean=true",
+        display_json.len()
     );
-    let obs_t1 = must_ok(host.observe_seat(Seat(0)), "observe t1");
-    let pub_prev = obs_t1.to_public_preview_state();
-    let ai_req = AiPreviewRequest {
-        seat: 0,
-        market_actions: Vec::new(),
-        bundle: SealedOrderBundle::default(),
-    };
-    let ai_prev = must_ok(
-        preview_seat_bundle(&pub_prev, &ai_req),
-        "preview_seat_bundle",
+    let _ = layout_seed;
+}
+
+#[test]
+fn refused_action_preview_message_documents_error_string_scrubber_exemption() {
+    // `RefusedActionPreview.message` (`crates/league-core/src/engine.rs`) is the sole
+    // player-visible `league-core` string routed through `scrub_secret_text`. Because it carries
+    // an error message (never player/in-world copy), it is explicitly permitted under the
+    // error-string scrubber exemption (`docs/club-mode-design.md` §2.4).
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x88; 32]), "eval_seed");
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(810_002), 4, 1, [0x66; 32], &salts, eval_seed, 42),
+        "ClubHost::from_explicit_setup",
     );
-    let human_req = HumanWhatIfRequest {
+    let obs = must_ok(host.observe_seat(Seat(0)), "observe Seat(0)");
+    let pub_prev = obs.to_public_preview_state();
+
+    // Case 1: Refusal due to active cancel lock (`CANCEL_LOCKED`).
+    let locked_req = HumanWhatIfRequest {
         seat: 0,
-        market_actions: Vec::new(),
-        cancel_lock_at: None,
+        market_actions: vec![league_core::MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 999_999,
+        }],
+        cancel_lock_at: Some(0),
         bundle: SealedOrderBundle::default(),
         tie_mode: PreviewTieMode::NeutralSeed,
         assumptions: CounterpartyAssumptions::default(),
     };
-    let human_prev = must_ok(preview_what_if(&pub_prev, &human_req), "preview_what_if");
-
-    must_ok(
-        host.commit_and_reveal_all(&BTreeMap::new()),
-        "commit_and_reveal_all",
-    );
-    let receipt = must_ok(host.sweep_turn(), "sweep_turn");
-    let obs_t2 = must_ok(host.observe_seat(Seat(0)), "observe t2");
-    let snap = must_ok(host.public_save_snapshot(), "snapshot");
-
-    for (label, rendered_json) in [
-        ("obs_t1", must_ok(serde_json::to_string(&obs_t1), "obs_t1")),
-        (
-            "ai_prev",
-            must_ok(serde_json::to_string(&ai_prev), "ai_prev"),
-        ),
-        (
-            "human_prev",
-            must_ok(serde_json::to_string(&human_prev), "human_prev"),
-        ),
-        (
-            "receipt",
-            must_ok(serde_json::to_string(&receipt), "receipt"),
-        ),
-        ("obs_t2", must_ok(serde_json::to_string(&obs_t2), "obs_t2")),
-        ("snap", must_ok(serde_json::to_string(&snap), "snap")),
-    ] {
-        assert!(
-            !rendered_json.contains("[REDACTED]") && !rendered_json.contains("<REDACTED_API_KEY>"),
-            "rendered {label} unexpectedly contained redaction marker: {rendered_json}"
-        );
-        println!(
-            "DISPLAY_TEXT_PATH {label} bytes={} clean=true",
-            rendered_json.len()
-        );
-    }
+    let locked_prev = must_ok(preview_what_if(&pub_prev, &locked_req), "locked preview");
+    assert_eq!(locked_prev.refused_market_actions.len(), 1);
+    let refused_locked = &locked_prev.refused_market_actions[0];
+    assert_eq!(refused_locked.action_index, 0);
+    assert_eq!(refused_locked.error_code, "CANCEL_LOCKED");
+    assert!(!refused_locked.message.is_empty());
     assert_eq!(
-        scrub_secret_text(&human_prev.close_mark_caveat),
-        human_prev.close_mark_caveat
+        scrub_secret_text(&refused_locked.message),
+        refused_locked.message
     );
+
+    // Case 2: Refusal due to unknown offer via AI solo bundle preview (`UNKNOWN_OBJECT`).
+    let ai_req = AiPreviewRequest {
+        seat: 0,
+        market_actions: vec![league_core::MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 999_999,
+        }],
+        bundle: SealedOrderBundle::default(),
+    };
+    let ai_prev = must_ok(
+        preview_seat_bundle(&pub_prev, &ai_req),
+        "ai refused preview",
+    );
+    assert_eq!(ai_prev.refused_market_actions.len(), 1);
+    let refused_ai = &ai_prev.refused_market_actions[0];
+    assert_eq!(refused_ai.error_code, "UNKNOWN_OBJECT");
+    assert!(!refused_ai.message.is_empty());
+    assert_eq!(scrub_secret_text(&refused_ai.message), refused_ai.message);
 }

@@ -28,6 +28,7 @@ use crate::contracts::{
 use crate::engine::{SeatState, ShockForecastEvent, TurnEngine, TurnPhase};
 use crate::observation::{
     PublicSweepReceipt, PublicTableSpec, SeatObservation, compute_public_forecasts,
+    public_sweep_receipt_from_raw, public_table_spec_from_raw,
 };
 use crate::predicates::{SeatSeasonMetrics, StatePredicateSection, compute_season_metrics};
 use crate::replay::{
@@ -44,7 +45,9 @@ use crate::types::{
 pub const CLUB_SAVE_FORMAT_VERSION: u32 = 1;
 
 /// Current schema version for private `.seal` sidecar payloads written by [`ClubHost`].
-pub const CLUB_SEAL_FORMAT_VERSION: u32 = 1;
+///
+/// Bumped to `2` in Fix 1 (`C3`) now that `live_state_digests` is required rather than `#[serde(default)]`.
+pub const CLUB_SEAL_FORMAT_VERSION: u32 = 2;
 
 /// Default Standing Regent fallback initialized on `Human` Club seats (`docs/club-mode-design.md` §1.2).
 pub const DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE: RegentDoctrine = RegentDoctrine {
@@ -141,7 +144,6 @@ struct ClubSealPayload {
     current_commitments: BTreeMap<u8, CommitmentHash>,
     current_reveals: BTreeMap<u8, OrderReveal>,
     bot_tie_seed: u64,
-    #[serde(default)]
     live_state_digests: Vec<[u8; 32]>,
 }
 
@@ -339,7 +341,7 @@ impl ClubHost {
     /// Projects the public [`PublicTableSpec`] without hidden `shocks` or `dealt_mandate_commits`.
     #[must_use]
     pub fn public_spec(&self) -> PublicTableSpec {
-        PublicTableSpec::from_table_spec(&self.engine.state().spec)
+        public_table_spec_from_raw(&self.engine.state().spec)
     }
 
     /// Returns the seat-safe 30-field [`PublicSweepReceipt`] history from live sweeps.
@@ -354,18 +356,18 @@ impl ClubHost {
     /// Host-only persistence byte helpers (`to_save_and_seal_bytes`, `from_save_and_seal_bytes`)
     /// are `pub(crate)`, and `own_mandate` is removed from [`ClubHost`]:
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0624
     /// use league_core::{ClubHost, TableId};
     /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
     /// let _ = host.to_save_and_seal_bytes();
     /// ```
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0624
     /// use league_core::ClubHost;
     /// let _ = ClubHost::from_save_and_seal_bytes(&[], &[]);
     /// ```
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0599
     /// use league_core::{ClubHost, Seat, TableId};
     /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
     /// let _ = host.own_mandate(Seat(0));
@@ -491,7 +493,7 @@ impl ClubHost {
             &proof,
         )?;
         let raw_receipt = self.engine.sweep_turn_with_eval_vrf(&proof)?;
-        let public_receipt = PublicSweepReceipt::from_sweep_receipt(&raw_receipt);
+        let public_receipt = public_sweep_receipt_from_raw(&raw_receipt);
         self.live_state_digests.push(raw_receipt.post_state_digest);
         self.logged_turns.push(LoggedTurn {
             turn,
@@ -606,7 +608,7 @@ impl ClubHost {
             cancel_locked: state.cancel_locked,
             trade_minister: state.trade_minister,
             cartel_chair: state.cartel_chair,
-            spec: PublicTableSpec::from_table_spec(&state.spec),
+            spec: public_table_spec_from_raw(&state.spec),
             parities: state.parities.clone(),
             seats: state.seats.clone(),
             offers: state.offers.clone(),
@@ -668,6 +670,18 @@ impl ClubHost {
         save_bytes: &[u8],
         seal_bytes: &[u8],
     ) -> Result<Self, EngineError> {
+        #[derive(serde::Deserialize)]
+        struct FormatVersionHeader {
+            format_version: u32,
+        }
+        if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(save_bytes)
+            && hdr.format_version != CLUB_SAVE_FORMAT_VERSION
+        {
+            return Err(EngineError::UnsupportedReplayVersion {
+                found: hdr.format_version,
+                newest_known: CLUB_SAVE_FORMAT_VERSION,
+            });
+        }
         let save: ClubSaveSnapshot = serde_json::from_slice(save_bytes).map_err(|err| {
             EngineError::InvalidConfig(format!("Club save JSON does not parse: {err}"))
         })?;
@@ -675,6 +689,14 @@ impl ClubHost {
             return Err(EngineError::UnsupportedReplayVersion {
                 found: save.format_version,
                 newest_known: CLUB_SAVE_FORMAT_VERSION,
+            });
+        }
+        if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(seal_bytes)
+            && hdr.format_version != CLUB_SEAL_FORMAT_VERSION
+        {
+            return Err(EngineError::UnsupportedReplayVersion {
+                found: hdr.format_version,
+                newest_known: CLUB_SEAL_FORMAT_VERSION,
             });
         }
         let seal: ClubSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {

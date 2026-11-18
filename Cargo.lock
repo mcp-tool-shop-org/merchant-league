@@ -1419,6 +1419,7 @@ dependencies = [
  "hkdf",
  "league-core",
  "league-error",
+ "league-seat-types",
  "proptest",
  "rand_chacha 0.3.1",
  "serde",
@@ -1440,6 +1441,7 @@ name = "league-gen"
 version = "0.0.0"
 dependencies = [
  "league-core",
+ "league-seat-types",
  "proptest",
  "serde",
  "serde_json",
@@ -1482,6 +1484,24 @@ name = "league-season"
 version = "0.0.0"
 
 [[package]]
+name = "league-seat-types"
+version = "0.0.0"
+dependencies = [
+ "league-error",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "league-seat-ui"
+version = "0.0.0"
+dependencies = [
+ "crossterm",
+ "league-seat-types",
+ "ratatui",
+]
+
+[[package]]
 name = "league-standalone"
 version = "0.0.0"
 dependencies = [
@@ -1502,6 +1522,11 @@ name = "league-tui"
 version = "0.0.0"
 dependencies = [
  "crossterm",
+ "league-core",
+ "league-error",
+ "league-gen",
+ "league-seat-types",
+ "league-seat-ui",
  "ratatui",
 ]
 

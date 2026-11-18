@@ -1,6 +1,6 @@
 [package]
 name = "league-tui"
-description = "Merchant League terminal client (ratatui and crossterm): a stub until the rules exist"
+description = "Merchant League terminal host binary owning ClubHost and driving league-seat-ui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,18 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "league-tui"
+path = "src/main.rs"
+
 [dependencies]
-ratatui.workspace = true
 crossterm.workspace = true
+league-core = { path = "../league-core" }
+league-error = { path = "../league-error" }
+league-gen = { path = "../league-gen" }
+league-seat-types = { path = "../league-seat-types" }
+league-seat-ui = { path = "../league-seat-ui" }
+ratatui.workspace = true
 
 [lints]
 workspace = true

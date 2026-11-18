@@ -12,6 +12,10 @@ boundaries:
     globs:
       - crates/league-core/**
     role: code
+  - name: league-error
+    globs:
+      - crates/league-error/**
+    role: code
   - name: league-gen
     globs:
       - crates/league-gen/**
@@ -20,9 +24,21 @@ boundaries:
     globs:
       - crates/league-ledger/**
     role: code
+  - name: league-relay
+    globs:
+      - crates/league-relay/**
+    role: code
   - name: league-season
     globs:
       - crates/league-season/**
+    role: code
+  - name: league-seat-types
+    globs:
+      - crates/league-seat-types/**
+    role: code
+  - name: league-seat-ui
+    globs:
+      - crates/league-seat-ui/**
     role: code
   - name: league-standalone
     globs:

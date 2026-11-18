@@ -3,8 +3,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+pub use league_seat_types::{
+    BrokenPromiseRecord, ConverterOrderPreview, EscrowOrderPreview, ProjectOrderPreview, SeatState,
+    SeatUpkeepPreview, ShockForecastEvent, TurnPhase,
+};
 
 use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform,
@@ -23,7 +28,10 @@ use crate::contracts::{
     WashFreezeSettlement, audit_wash_freeze, check_offer_domain_access,
     effective_export_tariff_bps,
 };
-use crate::observation::{PublicSweepReceipt, RefusedActionPreview, SeatObservation};
+use crate::observation::{
+    PublicSweepReceipt, RefusedActionPreview, SeatObservation,
+    build_seat_observation_from_engine_state, public_sweep_receipt_from_raw,
+};
 use crate::predicates::compute_seat_state_predicates;
 use crate::scoring::{
     FinalScoreboard, FundamentalParities, compute_final_scoreboard, compute_pbrs_reward,
@@ -41,81 +49,9 @@ type PoliticsOutcome = (Option<(u8, Option<u8>)>, Vec<(CharterRole, u8)>, Units)
 type Step1Outcome = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<SealedOrderBundle>, Vec<bool>);
 
 pub(crate) mod delivery_ledger_serde {
-    use super::*;
-
-    type LedgerMap = BTreeMap<(u8, u8, AssetId), Units>;
-    type LedgerEntry = ((u8, u8, AssetId), Units);
-
-    pub fn serialize<S: Serializer>(map: &LedgerMap, serializer: S) -> Result<S::Ok, S::Error> {
-        let entries: Vec<LedgerEntry> = map.iter().map(|(&k, &v)| (k, v)).collect();
-        entries.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<LedgerMap, D::Error> {
-        let entries = Vec::<LedgerEntry>::deserialize(deserializer)?;
-        let mut map = LedgerMap::new();
-        for (k, v) in entries {
-            if map.insert(k, v).is_some() {
-                return Err(serde::de::Error::custom("duplicate key in delivery_ledger"));
-            }
-        }
-        Ok(map)
-    }
-}
-
-/// Active phase within a simultaneous turn or season close lifecycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TurnPhase {
-    /// Phase 1: open `CRED` market quotes, Track-2 checks/pledges, and Track-1 `TokenEscrow` setup.
-    TalkAndMarket,
-    /// Phase 2: sealed cryptographic commitment submission for simultaneous actions.
-    Commit,
-    /// Reveal gate: seats submit plaintext bundles + salts matching Phase 2 commitments.
-    Reveal,
-    /// Closing bell sounded on Turn `24..=32`; waiting for Turn-1 Private Mandate reveals.
-    AwaitingMandateReveal,
-    /// Season finalized cleanly; [`FinalScoreboard`] computed.
-    Completed,
-}
-
-/// Per-seat mutable ledger-mirror state maintained deterministically across turns.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SeatState {
-    /// Seat index (`0..seat_count`).
-    pub seat: u8,
-    /// Current disclosed identity (`Human` or converted `AiSyndicate`).
-    pub identity: SeatIdentity,
-    /// Free `CRED` balance (excluding DEX buy locks and `TokenEscrow` vaults).
-    pub cred: Units,
-    /// Unpaid `CRED` auto-debt principal + accrued interest owed to Authority.
-    pub cred_debt: Units,
-    /// Free raw commodity balances `raw[0..N]` (perishable).
-    pub raw: Vec<Units>,
-    /// Free refined commodity balances `refined[0..N]`.
-    pub refined: Vec<Units>,
-    /// Irreversible Tier-3 Syndicate Project Equity points earned.
-    pub project_equity: Units,
-    /// Current export `TransferRate` tariff on `Raw(seat)` (`0..=3_500 bps`).
-    pub raw_tariff_bps: Bps,
-    /// Current export `TransferRate` tariff on `Refined(seat)` (`0..=3_500 bps`).
-    pub refined_tariff_bps: Bps,
-    /// Current Hard Credit Solvency tier (`Aaa..D`).
-    pub credit_tier: CreditTier,
-    /// Count of `CheckCash` bounces causing Hard Credit Defaults.
-    pub hard_credit_defaults: u32,
-    /// Count of defaulted Steward-refereed delivery bonds.
-    pub bond_breaches: u32,
-    /// Count of Soft Diplomatic Honor promise breaches detected by deterministic audit.
-    pub broken_promises: u32,
-    /// Cumulative honor penalty weight.
-    pub honor_penalties: Units,
-    /// Consecutive turns with missing/invalid Phase 2 reveal (`3` triggers AI conversion).
-    pub consecutive_misses: u8,
-    /// Consecutive turns with zero executed converter runs (`3` counts as missed; `C1`, `2026-11-15`).
-    #[serde(default)]
-    pub consecutive_zero_production_turns: u8,
-    /// Turn through which `CustomsInspector` wash-freeze blocks new offers/swaps (`0` = none).
-    pub wash_frozen_until_turn: u8,
+    pub(crate) use league_seat_types::wire_serde::{
+        deserialize_delivery_ledger as deserialize, serialize_delivery_ledger as serialize,
+    };
 }
 
 /// Complete deterministic engine snapshot serializable for replay and digest checks.
@@ -202,30 +138,6 @@ pub struct EngineState {
     pub pending_wash_freezes: Vec<PendingWashFreeze>,
 }
 
-/// Audited broken-promise record emitted when a seat violates an anchored `IntentPledge`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BrokenPromiseRecord {
-    /// Violated pledge ID.
-    pub pledge_id: u64,
-    /// Promisor seat penalized.
-    pub promisor: u8,
-    /// Counterparty affected.
-    pub counterparty: u8,
-    /// Penalty honor weight charged.
-    pub weight: Units,
-}
-
-/// Publicly narrowed forecast emitted in Sweep Step 8 (`forecast_turn`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ShockForecastEvent {
-    /// Seat whose commodity sector is forecasted to shift next turn.
-    pub target_seat: u8,
-    /// Forecasted shock category.
-    pub kind: ShockKind,
-    /// Forecasted shock turn (`realize_turn`).
-    pub realize_turn: u8,
-}
-
 /// Deterministic audit receipt capturing every sub-step executed during a Turn Sweep.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SweepReceipt {
@@ -302,34 +214,6 @@ pub struct SweepReceipt {
     pub post_state_digest: [u8; 32],
 }
 
-/// Preview breakdown of one [`ConverterRunOrder`] simulated inside
-/// [`crate::preview_seat_bundle`] or [`crate::preview_what_if`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConverterOrderPreview {
-    /// Converter recipe index requested.
-    pub recipe_idx: usize,
-    /// Original run count submitted in the bundle.
-    pub requested_runs: u32,
-    /// Whole runs executed after capacity and inventory clamping.
-    pub executed_runs: u32,
-    /// `true` if clamped (`0 < executed_runs < requested_runs`).
-    pub clamped: bool,
-}
-
-/// Preview breakdown of one [`ProjectDeliveryOrder`] simulated inside
-/// [`crate::preview_seat_bundle`] or [`crate::preview_what_if`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectOrderPreview {
-    /// Target Syndicate Project ID requested.
-    pub project_id: u16,
-    /// Original batch count submitted in the bundle.
-    pub requested_batches: u32,
-    /// Whole batches executed after refined-inventory clamping.
-    pub executed_batches: u32,
-    /// `true` if clamped (`0 < executed_batches < requested_batches`).
-    pub clamped: bool,
-}
-
 /// Outcome of an [`AtomicSwapProposal`] simulated in [`crate::preview_seat_bundle`] or
 /// [`crate::preview_what_if`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -372,32 +256,6 @@ pub struct CheckOrderPreview {
     pub check_id: u64,
     /// Predicted Step-3 check clearing status.
     pub outcome: CheckPreviewOutcome,
-}
-
-/// Preview breakdown of one `EscrowFinish` unlock request in Step 2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EscrowOrderPreview {
-    /// Escrow vault identifier.
-    pub escrow_id: u64,
-    /// `true` if the escrow unlocked and released funds to its destination.
-    pub unlocked: bool,
-}
-
-/// Per-seat Step-2 debt repayment and Step-5 upkeep/interest accounting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SeatUpkeepPreview {
-    /// Refined commodity index consumed as periodic upkeep.
-    pub upkeep_good: u8,
-    /// Total upkeep units due each turn.
-    pub upkeep_required: Units,
-    /// Refined units deducted toward upkeep.
-    pub paid_with_refined: Units,
-    /// Existing `cred_debt` interest accrued this turn before upkeep shortfall.
-    pub debt_interest_accrued: Units,
-    /// Newly issued shortfall debt from unpaid upkeep.
-    pub new_shortfall_debt: Units,
-    /// Voluntary debt repaid during Step 2.
-    pub debt_repaid_cred: Units,
 }
 
 /// Side-effect-free simulation result returned by the internal preview helpers behind
@@ -607,7 +465,7 @@ impl TurnEngine {
     }
 
     /// Projects [`SeatObservation`] for `seat`, filtering caller-supplied raw [`SweepReceipt`]s
-    /// through [`PublicSweepReceipt::from_sweep_receipt`] (retaining only `r.turn <= last_swept_turn`
+    /// through `public_sweep_receipt_from_raw` (retaining only `r.turn <= last_swept_turn`
     /// and dropping `newly_drawn_shocks` and `post_state_digest`).
     pub fn observe_seat_with_receipts(
         &self,
@@ -625,7 +483,7 @@ impl TurnEngine {
         self.ensure_seat(seat.0)?;
         let baseline_predicates = compute_seat_state_predicates(&self.state, seat)?;
         let is_auditor = self.has_active_charter(seat.0, CharterRole::OracleAuditor);
-        Ok(SeatObservation::from_engine_state(
+        Ok(build_seat_observation_from_engine_state(
             &self.state,
             seat,
             is_auditor,
@@ -1644,7 +1502,7 @@ impl TurnEngine {
         };
         if sweep_mode == SweepMode::Live {
             self.public_receipts
-                .push(PublicSweepReceipt::from_sweep_receipt(&receipt));
+                .push(public_sweep_receipt_from_raw(&receipt));
         }
         let details = SweepSeatDetails {
             converter_orders_by_seat,

@@ -106,13 +106,14 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 27] = [
 
 const TUI_HOST_MODULES: [&str; 2] = ["src/host.rs", "src/main.rs"];
 
-const NON_SEAT_WORKSPACE_CRATES: [&str; 6] = [
+const NON_SEAT_WORKSPACE_CRATES: [&str; 7] = [
     "league-core",
     "league-standalone",
     "league-error",
     "league-ledger",
     "league-season",
     "league-gen",
+    "league-tui",
 ];
 
 const ALLOWED_SEAT_TYPES: &[&str] = &[
@@ -222,6 +223,9 @@ const ALLOWED_SEAT_TYPES: &[&str] = &[
     "ToStructuredError",
     "CommodityCatalog",
     "CommodityEntry",
+    "CommodityDisplayEntry",
+    "CommodityDisplayMap",
+    "SeatCommodityDisplay",
     "CurrencyCode",
     "TableCommodityMap",
     "SeatCommodityAssignment",
@@ -357,6 +361,196 @@ const ALLOWED_SEAT_TYPES: &[&str] = &[
     "Sha256",
     "Digest",
     "CodePointSetData",
+];
+
+/// Concrete allow-listed public surface types permitted in `crates/league-seat-ui`.
+///
+/// Explicitly excludes `dyn`, `impl Trait`, `Fn*`, generic type parameters, `Box`, `Any`,
+/// `File`/`OpenOptions`/`Path`/`PathBuf`, and raw/bot/host types (`docs/club-mode-design.md` §2.3).
+const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
+    // `league-seat-types` observation, preview, predicate, value, and display types
+    "SeatObservation",
+    "PublicSweepReceipt",
+    "PublicPreviewState",
+    "WhatIfPreview",
+    "HumanWhatIfRequest",
+    "AiPreviewRequest",
+    "CounterpartyAssumptions",
+    "PreviewTieMode",
+    "PublicTableSpec",
+    "PublicCheckOrderPreview",
+    "PublicCheckOutcome",
+    "PublicSwapOrderPreview",
+    "PublicSwapOutcome",
+    "AuditorShockHint",
+    "RefusedActionPreview",
+    "Step0To7SweepSummary",
+    "SeatSpoilagePreview",
+    "SeatUpkeepPreview",
+    "ConverterOrderPreview",
+    "ProjectOrderPreview",
+    "EscrowOrderPreview",
+    "SeatStatePredicates",
+    "UpkeepAndDebt",
+    "SpoilageAndConversion",
+    "RecipeCover",
+    "GoodScarcity",
+    "HoldingMark",
+    "ProjectCover",
+    "ProjectInputCover",
+    "CoalitionReach",
+    "SeasonEndAndMarks",
+    "SeatSeasonMetrics",
+    "StatePredicateSection",
+    "TurnPredicateRecord",
+    "SeatSweepOutcome",
+    "FinalScoreboard",
+    "SeatScoreEntry",
+    "FundamentalParities",
+    "ParitySpecSource",
+    "SeatState",
+    "SeatConfig",
+    "SeatIdentity",
+    "RegentDoctrine",
+    "ConverterRecipe",
+    "ProjectRecipe",
+    "GradedMandateCard",
+    "PrivateMandate",
+    "MandateKind",
+    "CreditTier",
+    "SealedOrderBundle",
+    "ConverterRunOrder",
+    "ProjectDeliveryOrder",
+    "CharterBidOrder",
+    "CouncilVoteBallot",
+    "CouncilPlatform",
+    "ContractDeliveryOrder",
+    "AtomicSwapProposal",
+    "DualEscrowProposal",
+    "EscrowFinishUnlock",
+    "PreimageSecret",
+    "CommitmentHash",
+    "IntentPledge",
+    "IntentTarget",
+    "MarketAction",
+    "OfferProposal",
+    "OfferSide",
+    "CredOffer",
+    "CreditCheck",
+    "CheckProposal",
+    "CheckStatus",
+    "TokenEscrowVault",
+    "DualEscrowVault",
+    "EscrowProposal",
+    "EscrowStatus",
+    "BondProposal",
+    "BondSpec",
+    "BondSettlementMode",
+    "CartelDomain",
+    "ActiveCharter",
+    "CharterRole",
+    "ActiveShock",
+    "ShockKind",
+    "ShockForecastEvent",
+    "FillRecord",
+    "FillKind",
+    "BrokenPromiseRecord",
+    "PendingWashFreeze",
+    "WashFreezeSettlement",
+    "TurnPhase",
+    "AssetId",
+    "Seat",
+    "Turn",
+    "MarketDay",
+    "SeasonId",
+    "TableId",
+    "TableMode",
+    "Units",
+    "Bps",
+    "EngineError",
+    "StructuredError",
+    "ToStructuredError",
+    "CommodityDisplayEntry",
+    "CommodityDisplayMap",
+    "SeatCommodityDisplay",
+    "NUMERAIRE_CODE",
+    "NUMERAIRE_DISPLAY_LABEL",
+    "NUMERAIRE_PLAIN_LABEL",
+    // Concrete `ratatui` / `crossterm` UI types (never `Terminal`/`TestBackend`/`Box`/`dyn`)
+    "Action",
+    "Frame",
+    "Rect",
+    "Buffer",
+    "Style",
+    "Color",
+    "Modifier",
+    "Line",
+    "Span",
+    "Text",
+    "Paragraph",
+    "Block",
+    "Borders",
+    "BorderType",
+    "Alignment",
+    "Layout",
+    "Constraint",
+    "Direction",
+    "Margin",
+    "Table",
+    "Row",
+    "Cell",
+    "List",
+    "ListItem",
+    "ListState",
+    "TableState",
+    "Tabs",
+    "Gauge",
+    "Clear",
+    "Wrap",
+    "KeyEvent",
+    "KeyCode",
+    "KeyModifiers",
+    "KeyEventKind",
+    "Event",
+    "MouseEvent",
+    // Concrete standard value & collection types
+    "bool",
+    "char",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "f32",
+    "f64",
+    "str",
+    "String",
+    "Vec",
+    "VecDeque",
+    "BTreeMap",
+    "BTreeSet",
+    "HashMap",
+    "HashSet",
+    "Option",
+    "Result",
+    "Cow",
+    "PhantomData",
+    "Ordering",
+    "Duration",
+    "Instant",
+    "Range",
+    "RangeInclusive",
+    "Formatter",
+    "Debug",
+    "Display",
+    "Error",
 ];
 
 const SEAT_PRIMARY_PARAM_TYPES: [&str; 6] = [
@@ -1047,10 +1241,11 @@ struct ExpandedUse {
     alias: Option<String>,
 }
 
-fn expand_use_tree(
+fn expand_use_tree_inner(
     rel_path: &str,
     tokens: &[Tok],
     prefix: &str,
+    allow_glob: bool,
     out: &mut Vec<ExpandedUse>,
 ) -> Result<(), String> {
     let mut parts: Vec<String> = if prefix.is_empty() {
@@ -1059,13 +1254,19 @@ fn expand_use_tree(
         vec![prefix.to_owned()]
     };
     let mut pending_alias: Option<String> = None;
+    let mut saw_glob = false;
     let mut i = 0_usize;
     while i < tokens.len() {
         match &tokens[i] {
             Tok::Other('*') => {
-                return Err(format!(
-                    "{rel_path}: glob `use *` is forbidden in guarded modules"
-                ));
+                if !allow_glob {
+                    return Err(format!(
+                        "{rel_path}: glob `use *` is forbidden in guarded modules"
+                    ));
+                }
+                saw_glob = true;
+                i += 1;
+                continue;
             }
             Tok::Ident(kw) if kw == "as" => {
                 if let Some(Tok::Ident(alias_name)) = tokens.get(i + 1) {
@@ -1107,10 +1308,11 @@ fn expand_use_tree(
                         Tok::RBrace => sub_depth = sub_depth.saturating_sub(1),
                         Tok::Other(',') if sub_depth == 0 => {
                             if item_start < pos {
-                                expand_use_tree(
+                                expand_use_tree_inner(
                                     rel_path,
                                     &inner[item_start..pos],
                                     &group_prefix,
+                                    allow_glob,
                                     out,
                                 )?;
                             }
@@ -1120,18 +1322,25 @@ fn expand_use_tree(
                     }
                 }
                 if item_start < inner.len() {
-                    expand_use_tree(rel_path, &inner[item_start..], &group_prefix, out)?;
+                    expand_use_tree_inner(
+                        rel_path,
+                        &inner[item_start..],
+                        &group_prefix,
+                        allow_glob,
+                        out,
+                    )?;
                 }
                 return Ok(());
             }
             Tok::Other(',') => {
-                if !parts.is_empty() {
+                if !saw_glob && !parts.is_empty() {
                     out.push(ExpandedUse {
                         canonical_path: parts.join("::"),
                         alias: pending_alias.take(),
                     });
                 }
                 pending_alias = None;
+                saw_glob = false;
                 parts = if prefix.is_empty() {
                     Vec::new()
                 } else {
@@ -1144,13 +1353,276 @@ fn expand_use_tree(
             }
         }
     }
-    if !parts.is_empty() {
+    if !saw_glob && !parts.is_empty() {
         out.push(ExpandedUse {
             canonical_path: parts.join("::"),
             alias: pending_alias,
         });
     }
     Ok(())
+}
+
+fn expand_use_tree(
+    rel_path: &str,
+    tokens: &[Tok],
+    prefix: &str,
+    out: &mut Vec<ExpandedUse>,
+) -> Result<(), String> {
+    expand_use_tree_inner(rel_path, tokens, prefix, false, out)
+}
+
+fn expand_use_tree_allow_glob(rel_path: &str, tokens: &[Tok], out: &mut Vec<ExpandedUse>) {
+    let _ = expand_use_tree_inner(rel_path, tokens, "", true, out);
+}
+
+#[derive(Default, Clone)]
+struct FileAliasTable {
+    map: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl FileAliasTable {
+    fn insert_edge(&mut self, local: String, target: String) {
+        if local != target {
+            self.map.entry(local).or_default().insert(target);
+        }
+    }
+
+    fn resolve(&self, ident: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut stack = vec![ident.to_owned()];
+        while let Some(cur) = stack.pop() {
+            if out.insert(cur.clone())
+                && let Some(targets) = self.map.get(&cur)
+            {
+                for target in targets {
+                    if !out.contains(target) {
+                        stack.push(target.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn merge_from(&mut self, other: &Self) {
+        for (k, vs) in &other.map {
+            let entry = self.map.entry(k.clone()).or_default();
+            for v in vs {
+                if v != k {
+                    entry.insert(v.clone());
+                }
+            }
+        }
+    }
+}
+
+fn build_file_alias_table(rel_path: &str, tokens: &[Tok]) -> FileAliasTable {
+    let mut table = FileAliasTable::default();
+    let mut scopes = vec![ScopeKind::Root { public: true }];
+    let mut attrs = AttrFlags::default();
+    let mut i = 0_usize;
+
+    while i < tokens.len() {
+        let in_cfg_test = scopes.iter().any(|s| match s {
+            ScopeKind::Root { .. } => false,
+            ScopeKind::Module { cfg_test, .. }
+            | ScopeKind::InherentImpl { cfg_test, .. }
+            | ScopeKind::TraitImpl { cfg_test, .. }
+            | ScopeKind::Block { cfg_test } => *cfg_test,
+        });
+        let in_trait_impl = scopes
+            .iter()
+            .any(|s| matches!(s, ScopeKind::TraitImpl { .. }));
+
+        match &tokens[i] {
+            Tok::Pound => {
+                i = parse_tok_attr(tokens, i, &mut attrs);
+                continue;
+            }
+            Tok::RBrace => {
+                if scopes.len() > 1 {
+                    scopes.pop();
+                }
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::LBrace => {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::Semi => {
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if in_cfg_test || attrs.cfg_test {
+            if matches!(
+                tokens[i],
+                Tok::Ident(ref s)
+                    if matches!(s.as_str(), "mod" | "fn" | "impl" | "struct" | "enum" | "trait")
+            ) {
+                let mut j = i + 1;
+                while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                    j += 1;
+                }
+                if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                    scopes.push(ScopeKind::Block { cfg_test: true });
+                    attrs = AttrFlags::default();
+                    i = j + 1;
+                    continue;
+                }
+                attrs = AttrFlags::default();
+                i = (j + 1).min(tokens.len());
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        let after_vis = if matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+            if i + 1 < tokens.len() && matches!(tokens[i + 1], Tok::LParen) {
+                find_matching_paren(tokens, i + 1) + 1
+            } else {
+                i + 1
+            }
+        } else {
+            i
+        };
+
+        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "impl") {
+            let mut j = after_vis + 1;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                j += 1;
+            }
+            let header = &tokens[after_vis + 1..j];
+            let mut saw_for = false;
+            let mut depth_a = 0_usize;
+            let mut depth_p = 0_usize;
+            let mut depth_b = 0_usize;
+            for (pos, tok) in header.iter().enumerate() {
+                match tok {
+                    Tok::Other('<') => depth_a += 1,
+                    Tok::Other('>')
+                        if !matches!(
+                            header.get(pos.saturating_sub(1)),
+                            Some(Tok::Other('-') | Tok::Other('='))
+                        ) =>
+                    {
+                        depth_a = depth_a.saturating_sub(1);
+                    }
+                    Tok::LParen => depth_p += 1,
+                    Tok::RParen => depth_p = depth_p.saturating_sub(1),
+                    Tok::LBracket => depth_b += 1,
+                    Tok::RBracket => depth_b = depth_b.saturating_sub(1),
+                    Tok::Ident(s) if depth_a == 0 && depth_p == 0 && depth_b == 0 && s == "for" => {
+                        saw_for = true;
+                        break;
+                    }
+                    Tok::Ident(s)
+                        if depth_a == 0 && depth_p == 0 && depth_b == 0 && s == "where" =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                scopes.push(if saw_for {
+                    ScopeKind::TraitImpl {
+                        mentions_host: false,
+                        self_type: None,
+                        cfg_test: attrs.cfg_test,
+                    }
+                } else {
+                    ScopeKind::InherentImpl {
+                        type_name: String::new(),
+                        cfg_test: attrs.cfg_test,
+                    }
+                });
+                attrs = AttrFlags::default();
+                i = j + 1;
+                continue;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "use") {
+            let mut j = after_vis + 1;
+            while j < tokens.len() && !matches!(tokens[j], Tok::Semi) {
+                j += 1;
+            }
+            let mut expanded = Vec::new();
+            expand_use_tree_allow_glob(rel_path, &tokens[after_vis + 1..j], &mut expanded);
+            for item in expanded {
+                let leaf = item
+                    .canonical_path
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(&item.canonical_path);
+                let local = item.alias.as_deref().unwrap_or(leaf);
+                table.insert_edge(local.to_owned(), leaf.to_owned());
+                if item.canonical_path.contains("engine_internals") {
+                    table.insert_edge(local.to_owned(), "engine_internals".to_owned());
+                }
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if !in_trait_impl
+            && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "type")
+            && let Some(Tok::Ident(alias_name)) = tokens.get(after_vis + 1)
+        {
+            let mut j = after_vis + 2;
+            while j < tokens.len() && !matches!(tokens[j], Tok::Semi | Tok::LBrace) {
+                j += 1;
+            }
+            let stmt = &tokens[after_vis + 2..j];
+            let eq_start = skip_angle_generics(stmt, 0);
+            if let Some(rel_eq) = stmt[eq_start..]
+                .iter()
+                .position(|t| matches!(t, Tok::Other('=')))
+            {
+                let rhs_start = eq_start + rel_eq + 1;
+                let mut prev_was_quote = false;
+                for tok in &stmt[rhs_start..] {
+                    match tok {
+                        Tok::Ident(kw) if kw == "where" && !prev_was_quote => break,
+                        Tok::Ident(id) => {
+                            if prev_was_quote {
+                                prev_was_quote = false;
+                            } else if !TYPE_KEYWORDS_SKIP.contains(&id.as_str()) {
+                                table.insert_edge(alias_name.clone(), id.clone());
+                            }
+                        }
+                        Tok::Other('\'') => prev_was_quote = true,
+                        _ => prev_was_quote = false,
+                    }
+                }
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if !matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+            attrs = AttrFlags::default();
+        }
+        i += 1;
+    }
+
+    table
 }
 
 fn find_matching_brace(tokens: &[Tok], open_brace_idx: usize) -> usize {
@@ -1194,6 +1666,7 @@ fn check_pub_fn_body_and_return(
     fn_name: &str,
     ret_tokens: &[Tok],
     body_tokens: &[Tok],
+    aliases: &FileAliasTable,
 ) -> Result<(), String> {
     // B4 structural body ban: no `pub fn` outside `engine_internals` may invoke `SweepMode::Live`
     // (except the four `TurnEngine::sweep_turn*` live execution entrypoints) or raw internal
@@ -1209,7 +1682,7 @@ fn check_pub_fn_body_and_return(
         );
     if !allowed_live_sweep {
         for w in body_tokens.windows(4) {
-            if matches!(&w[0], Tok::Ident(a) if a == "SweepMode")
+            if matches!(&w[0], Tok::Ident(a) if a == "SweepMode" || aliases.resolve(a).contains("SweepMode"))
                 && matches!(w[1], Tok::Other(':'))
                 && matches!(w[2], Tok::Other(':'))
                 && matches!(&w[3], Tok::Ident(b) if b == "Live")
@@ -1221,19 +1694,23 @@ fn check_pub_fn_body_and_return(
         }
     }
     for tok in body_tokens {
-        if let Tok::Ident(ident) = tok
-            && (ident == "preview_bundle_with_context_internal"
-                || ident == "sweep_turn_detailed_with_mode"
-                || FORBIDDEN_RAW_FNS.contains(&ident.as_str()))
-        {
-            return Err(format!(
-                "{rel_path}: `pub fn {scope_name}::{fn_name}` calls restricted internal `{ident}` outside `engine_internals`"
-            ));
+        if let Tok::Ident(ident) = tok {
+            let resolved = aliases.resolve(ident);
+            for r in &resolved {
+                if r == "preview_bundle_with_context_internal"
+                    || r == "sweep_turn_detailed_with_mode"
+                    || FORBIDDEN_RAW_FNS.contains(&r.as_str())
+                {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` calls restricted internal `{r}` outside `engine_internals`"
+                    ));
+                }
+            }
         }
     }
 
-    // B4 structural return-type ban: forbid renamed public wrappers returning raw state, engine,
-    // receipt, bundle preview, or unredacted shock specs.
+    // B4 structural return-type ban: forbid renamed/aliased public wrappers returning raw state,
+    // engine, receipt, bundle preview, or unredacted shock specs.
     let mut prev_was_quote = false;
     for tok in ret_tokens {
         if let Tok::Ident(ident) = tok {
@@ -1241,44 +1718,60 @@ fn check_pub_fn_body_and_return(
                 prev_was_quote = false;
                 continue;
             }
-            if ident == "BundlePreview" {
-                return Err(format!(
-                    "{rel_path}: `pub fn {scope_name}::{fn_name}` must not return raw `BundlePreview` outside `engine_internals`"
-                ));
-            }
-            if ident == "EngineState" && !(scope_name == "TurnEngine" && fn_name == "state") {
-                return Err(format!(
-                    "{rel_path}: `pub fn {scope_name}::{fn_name}` must not return raw `EngineState`"
-                ));
-            }
-            if ident == "TurnEngine"
-                && !((scope_name == "TurnEngine" && fn_name == "new")
-                    || (scope_name == "PublicPreviewState" && fn_name == "to_engine"))
-            {
-                return Err(format!(
-                    "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose `TurnEngine`"
-                ));
-            }
-            if ident == "SweepReceipt"
-                && !(scope_name == "TurnEngine"
-                    && matches!(
-                        fn_name,
-                        "sweep_turn"
-                            | "sweep_turn_seeded"
-                            | "sweep_turn_with_eval_vrf"
-                            | "sweep_turn_with_drand"
-                    ))
-            {
-                return Err(format!(
-                    "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose raw `SweepReceipt`"
-                ));
-            }
-            if ident == "ScheduledShockSpec"
-                && !(rel_path == "commit.rs" && fn_name == "draw_shocks_for_turn")
-            {
-                return Err(format!(
-                    "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose unredacted `ScheduledShockSpec`"
-                ));
+            for resolved_ident in aliases.resolve(ident) {
+                let via_note = if resolved_ident == *ident {
+                    String::new()
+                } else {
+                    format!(" (via `{ident}`)")
+                };
+                if resolved_ident == "BundlePreview" {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not return raw `BundlePreview`{via_note} outside `engine_internals`"
+                    ));
+                }
+                if resolved_ident == "EngineState"
+                    && !(scope_name == "TurnEngine" && fn_name == "state")
+                {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not return raw `EngineState`{via_note}"
+                    ));
+                }
+                if resolved_ident == "TurnEngine"
+                    && !(scope_name == "TurnEngine" && fn_name == "new")
+                {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose `TurnEngine`{via_note}"
+                    ));
+                }
+                if resolved_ident == "SweepReceipt"
+                    && !(scope_name == "TurnEngine"
+                        && matches!(
+                            fn_name,
+                            "sweep_turn"
+                                | "sweep_turn_seeded"
+                                | "sweep_turn_with_eval_vrf"
+                                | "sweep_turn_with_drand"
+                        ))
+                {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose raw `SweepReceipt`{via_note}"
+                    ));
+                }
+                if resolved_ident == "ScheduledShockSpec"
+                    && !(rel_path == "commit.rs" && fn_name == "draw_shocks_for_turn")
+                {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose unredacted `ScheduledShockSpec`{via_note}"
+                    ));
+                }
+                if matches!(
+                    resolved_ident.as_str(),
+                    "SweepMode" | "ClubSealPayload" | "engine_internals"
+                ) {
+                    return Err(format!(
+                        "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose `{resolved_ident}`{via_note}"
+                    ));
+                }
             }
         }
         prev_was_quote = matches!(tok, Tok::Other('\''));
@@ -1287,11 +1780,12 @@ fn check_pub_fn_body_and_return(
     Ok(())
 }
 
-fn check_tokens_no_raw_types(
+fn check_tokens_no_raw_types_resolved(
     rel_path: &str,
     context: &str,
     tokens: &[Tok],
     banned: &[&str],
+    aliases: &FileAliasTable,
 ) -> Result<(), String> {
     let mut prev_was_quote = false;
     for tok in tokens {
@@ -1300,10 +1794,17 @@ fn check_tokens_no_raw_types(
                 prev_was_quote = false;
                 continue;
             }
-            if banned.contains(&ident.as_str()) {
-                return Err(format!(
-                    "{rel_path}: {context} must not reference raw engine/host type `{ident}`"
-                ));
+            for resolved in aliases.resolve(ident) {
+                if banned.contains(&resolved.as_str()) {
+                    if resolved == *ident {
+                        return Err(format!(
+                            "{rel_path}: {context} must not reference raw engine/host type `{resolved}`"
+                        ));
+                    }
+                    return Err(format!(
+                        "{rel_path}: {context} must not reference raw engine/host type `{resolved}` (via `{ident}`)"
+                    ));
+                }
             }
         }
         prev_was_quote = matches!(tok, Tok::Other('\''));
@@ -1334,7 +1835,10 @@ fn skip_angle_generics(tokens: &[Tok], mut idx: usize) -> usize {
     idx
 }
 
-fn parse_impl_header(header: &[Tok]) -> (bool, Vec<String>, Option<String>, bool) {
+fn parse_impl_header(
+    header: &[Tok],
+    aliases: &FileAliasTable,
+) -> (bool, Vec<String>, Option<String>, bool) {
     let mut i = 0_usize;
     let mut impl_generics = Vec::new();
     if matches!(header.get(i), Some(Tok::Other('<'))) {
@@ -1420,10 +1924,32 @@ fn parse_impl_header(header: &[Tok]) -> (bool, Vec<String>, Option<String>, bool
             _ => {}
         }
     }
-    let self_type = self_idents.last().cloned();
-    let mentions_host = header
-        .iter()
-        .any(|t| matches!(t, Tok::Ident(s) if s == "ClubHost" || s == "ClubSaveSnapshot"));
+    let self_type = self_idents.last().cloned().map(|raw_name| {
+        let resolved = aliases.resolve(&raw_name);
+        if resolved.contains("ClubHost") {
+            "ClubHost".to_owned()
+        } else if resolved.contains("TurnEngine") {
+            "TurnEngine".to_owned()
+        } else {
+            raw_name
+        }
+    });
+    let mut prev_was_quote = false;
+    let mut mentions_host = false;
+    for tok in header {
+        if let Tok::Ident(s) = tok {
+            if prev_was_quote {
+                prev_was_quote = false;
+                continue;
+            }
+            let resolved = aliases.resolve(s);
+            if resolved.contains("ClubHost") || resolved.contains("ClubSaveSnapshot") {
+                mentions_host = true;
+                break;
+            }
+        }
+        prev_was_quote = matches!(tok, Tok::Other('\''));
+    }
     (saw_for, impl_generics, self_type, mentions_host)
 }
 
@@ -1440,42 +1966,7 @@ fn check_struct_fields_not_public(
     if matches!(open, Some(Tok::LBrace)) {
         let close = find_matching_brace(tokens, body_start);
         let body = &tokens[body_start + 1..close];
-        let mut seg_start = 0_usize;
-        let mut angle = 0_usize;
-        let mut paren = 0_usize;
-        let mut bracket = 0_usize;
-        let mut brace = 0_usize;
-        let mut segments: Vec<&[Tok]> = Vec::new();
-        for (pos, tok) in body.iter().enumerate() {
-            match tok {
-                Tok::Other('<') => angle += 1,
-                Tok::Other('>')
-                    if !matches!(
-                        body.get(pos.saturating_sub(1)),
-                        Some(Tok::Other('-') | Tok::Other('='))
-                    ) =>
-                {
-                    angle = angle.saturating_sub(1);
-                }
-                Tok::LParen => paren += 1,
-                Tok::RParen => paren = paren.saturating_sub(1),
-                Tok::LBracket => bracket += 1,
-                Tok::RBracket => bracket = bracket.saturating_sub(1),
-                Tok::LBrace => brace += 1,
-                Tok::RBrace => brace = brace.saturating_sub(1),
-                Tok::Other(',') if angle == 0 && paren == 0 && bracket == 0 && brace == 0 => {
-                    if seg_start < pos {
-                        segments.push(&body[seg_start..pos]);
-                    }
-                    seg_start = pos + 1;
-                }
-                _ => {}
-            }
-        }
-        if seg_start < body.len() {
-            segments.push(&body[seg_start..]);
-        }
-        for seg in segments {
+        for seg in split_top_level_comma(body) {
             let mut k = 0_usize;
             while k < seg.len() {
                 if matches!(seg[k], Tok::Pound) {
@@ -1485,13 +1976,23 @@ fn check_struct_fields_not_public(
                 }
             }
             if matches!(seg.get(k), Some(Tok::Ident(s)) if s == "pub") {
-                let field_name = seg
+                let (restricted, name_start) = if matches!(seg.get(k + 1), Some(Tok::LParen)) {
+                    (true, find_matching_paren(seg, k + 1) + 1)
+                } else {
+                    (false, k + 1)
+                };
+                let field_name = seg[name_start..]
                     .iter()
                     .find_map(|t| match t {
-                        Tok::Ident(id) if id != "pub" => Some(id.as_str()),
+                        Tok::Ident(id) => Some(id.as_str()),
                         _ => None,
                     })
                     .unwrap_or("<field>");
+                if restricted {
+                    return Err(format!(
+                        "{rel_path}: `{struct_name}` must not have restricted `pub(...)` field `{field_name}`"
+                    ));
+                }
                 return Err(format!(
                     "{rel_path}: `{struct_name}` must not have pub field `{field_name}`"
                 ));
@@ -1512,12 +2013,307 @@ fn check_struct_fields_not_public(
     Ok(())
 }
 
+fn check_public_struct_no_raw_pub_fields(
+    rel_path: &str,
+    struct_name: &str,
+    is_core_crate: bool,
+    tokens: &[Tok],
+    body_start: usize,
+    aliases: &FileAliasTable,
+) -> Result<(), String> {
+    const ALWAYS_BANNED_CORE_PUB_FIELDS: [&str; 8] = [
+        "TurnEngine",
+        "EngineState",
+        "SweepMode",
+        "ClubHost",
+        "ClubSaveSnapshot",
+        "ClubSealPayload",
+        "SealedEvalSeed",
+        "engine_internals",
+    ];
+    const SECONDARY_CORE_PUB_FIELDS: [&str; 5] = [
+        "SweepReceipt",
+        "BundlePreview",
+        "ScheduledShockSpec",
+        "SealedMandateDeal",
+        "TableSpec",
+    ];
+    let allow_secondary = is_core_crate
+        && (matches!(
+            struct_name,
+            "EngineState" | "SweepReceipt" | "BundlePreview" | "TableSpec"
+        ) || (rel_path == "replay.rs"
+            && matches!(
+                struct_name,
+                "LoggedTurn" | "SeasonReplayLog" | "ReplayOutcome"
+            )));
+
+    let open = tokens.get(body_start);
+    if matches!(open, Some(Tok::LBrace)) {
+        let close = find_matching_brace(tokens, body_start);
+        for seg in split_top_level_comma(&tokens[body_start + 1..close]) {
+            let mut k = 0_usize;
+            while k < seg.len() {
+                if matches!(seg[k], Tok::Pound) {
+                    k = parse_tok_attr(seg, k, &mut AttrFlags::default());
+                } else {
+                    break;
+                }
+            }
+            // Only unrestricted `pub` fields expose raw types outside the module/crate
+            // (`ClubHost`/`TurnEngine` already forbid `pub(...)` above).
+            if matches!(seg.get(k), Some(Tok::Ident(s)) if s == "pub")
+                && !matches!(seg.get(k + 1), Some(Tok::LParen))
+            {
+                let rest = &seg[k + 1..];
+                let field_name = match rest.first() {
+                    Some(Tok::Ident(f)) => f.as_str(),
+                    _ => "<field>",
+                };
+                let Some(colon_pos) = rest.iter().position(|t| matches!(t, Tok::Other(':'))) else {
+                    continue;
+                };
+                let ty_tokens = &rest[colon_pos + 1..];
+                if !is_core_crate {
+                    check_tokens_no_raw_types_resolved(
+                        rel_path,
+                        &format!("`pub struct {struct_name}` `pub` field `{field_name}`"),
+                        ty_tokens,
+                        &RAW_ENGINE_AND_HOST_TYPES,
+                        aliases,
+                    )?;
+                } else {
+                    check_tokens_no_raw_types_resolved(
+                        rel_path,
+                        &format!("`pub struct {struct_name}` `pub` field `{field_name}`"),
+                        ty_tokens,
+                        &ALWAYS_BANNED_CORE_PUB_FIELDS,
+                        aliases,
+                    )?;
+                    if !allow_secondary {
+                        check_tokens_no_raw_types_resolved(
+                            rel_path,
+                            &format!("`pub struct {struct_name}` `pub` field `{field_name}`"),
+                            ty_tokens,
+                            &SECONDARY_CORE_PUB_FIELDS,
+                            aliases,
+                        )?;
+                    }
+                }
+            }
+        }
+    } else if matches!(open, Some(Tok::LParen)) {
+        let close = find_matching_paren(tokens, body_start);
+        for (idx, seg) in split_top_level_comma(&tokens[body_start + 1..close])
+            .into_iter()
+            .enumerate()
+        {
+            let mut k = 0_usize;
+            while k < seg.len() {
+                if matches!(seg[k], Tok::Pound) {
+                    k = parse_tok_attr(seg, k, &mut AttrFlags::default());
+                } else {
+                    break;
+                }
+            }
+            if matches!(seg.get(k), Some(Tok::Ident(s)) if s == "pub")
+                && !matches!(seg.get(k + 1), Some(Tok::LParen))
+            {
+                let ty_tokens = &seg[k + 1..];
+                if !is_core_crate {
+                    check_tokens_no_raw_types_resolved(
+                        rel_path,
+                        &format!("`pub struct {struct_name}` `pub` tuple field .{idx}"),
+                        ty_tokens,
+                        &RAW_ENGINE_AND_HOST_TYPES,
+                        aliases,
+                    )?;
+                } else {
+                    check_tokens_no_raw_types_resolved(
+                        rel_path,
+                        &format!("`pub struct {struct_name}` `pub` tuple field .{idx}"),
+                        ty_tokens,
+                        &ALWAYS_BANNED_CORE_PUB_FIELDS,
+                        aliases,
+                    )?;
+                    if !allow_secondary {
+                        check_tokens_no_raw_types_resolved(
+                            rel_path,
+                            &format!("`pub struct {struct_name}` `pub` tuple field .{idx}"),
+                            ty_tokens,
+                            &SECONDARY_CORE_PUB_FIELDS,
+                            aliases,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_crate_restricted_aliases_from_files(files: &[(String, String)]) -> FileAliasTable {
+    let mut crate_aliases = FileAliasTable::default();
+    for (rel_path, source) in files {
+        let tokens = tokenize_rust(source);
+        let mut scopes = vec![ScopeKind::Root { public: true }];
+        let mut attrs = AttrFlags::default();
+        let mut i = 0_usize;
+        while i < tokens.len() {
+            let in_cfg_test = scopes.iter().any(|s| match s {
+                ScopeKind::Root { .. } => false,
+                ScopeKind::Module { cfg_test, .. }
+                | ScopeKind::InherentImpl { cfg_test, .. }
+                | ScopeKind::TraitImpl { cfg_test, .. }
+                | ScopeKind::Block { cfg_test } => *cfg_test,
+            });
+            match &tokens[i] {
+                Tok::Pound => {
+                    i = parse_tok_attr(&tokens, i, &mut attrs);
+                    continue;
+                }
+                Tok::RBrace => {
+                    if scopes.len() > 1 {
+                        scopes.pop();
+                    }
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                Tok::LBrace => {
+                    scopes.push(ScopeKind::Block {
+                        cfg_test: attrs.cfg_test,
+                    });
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                Tok::Semi => {
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            if in_cfg_test || attrs.cfg_test {
+                if matches!(
+                    tokens[i],
+                    Tok::Ident(ref s)
+                        if matches!(s.as_str(), "mod" | "fn" | "impl" | "struct" | "enum" | "trait")
+                ) {
+                    let mut j = i + 1;
+                    while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                        j += 1;
+                    }
+                    if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                        scopes.push(ScopeKind::Block { cfg_test: true });
+                        attrs = AttrFlags::default();
+                        i = j + 1;
+                        continue;
+                    }
+                    attrs = AttrFlags::default();
+                    i = (j + 1).min(tokens.len());
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            let (vis, after_vis) = if matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+                if i + 1 < tokens.len() && matches!(tokens[i + 1], Tok::LParen) {
+                    (
+                        Visibility::CrateOrRestricted,
+                        find_matching_paren(&tokens, i + 1) + 1,
+                    )
+                } else {
+                    (Visibility::Public, i + 1)
+                }
+            } else {
+                (Visibility::Private, i)
+            };
+            if matches!(vis, Visibility::CrateOrRestricted | Visibility::Public) {
+                if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "use") {
+                    let mut j = after_vis + 1;
+                    while j < tokens.len() && !matches!(tokens[j], Tok::Semi) {
+                        j += 1;
+                    }
+                    let mut expanded = Vec::new();
+                    expand_use_tree_allow_glob(rel_path, &tokens[after_vis + 1..j], &mut expanded);
+                    for item in expanded {
+                        if let Some(alias) = &item.alias {
+                            let leaf = item
+                                .canonical_path
+                                .rsplit("::")
+                                .next()
+                                .unwrap_or(&item.canonical_path);
+                            crate_aliases.insert_edge(alias.clone(), leaf.to_owned());
+                        }
+                    }
+                    attrs = AttrFlags::default();
+                    i = (j + 1).min(tokens.len());
+                    continue;
+                }
+                if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "type")
+                    && let Some(Tok::Ident(alias_name)) = tokens.get(after_vis + 1)
+                {
+                    let mut j = after_vis + 2;
+                    while j < tokens.len() && !matches!(tokens[j], Tok::Semi | Tok::LBrace) {
+                        j += 1;
+                    }
+                    let stmt = &tokens[after_vis + 2..j];
+                    let eq_start = skip_angle_generics(stmt, 0);
+                    if let Some(rel_eq) = stmt[eq_start..]
+                        .iter()
+                        .position(|t| matches!(t, Tok::Other('=')))
+                    {
+                        let rhs_start = eq_start + rel_eq + 1;
+                        let mut prev_was_quote = false;
+                        for tok in &stmt[rhs_start..] {
+                            match tok {
+                                Tok::Ident(kw) if kw == "where" && !prev_was_quote => break,
+                                Tok::Ident(id) => {
+                                    if prev_was_quote {
+                                        prev_was_quote = false;
+                                    } else if !TYPE_KEYWORDS_SKIP.contains(&id.as_str()) {
+                                        crate_aliases.insert_edge(alias_name.clone(), id.clone());
+                                    }
+                                }
+                                Tok::Other('\'') => prev_was_quote = true,
+                                _ => prev_was_quote = false,
+                            }
+                        }
+                    }
+                    attrs = AttrFlags::default();
+                    i = (j + 1).min(tokens.len());
+                    continue;
+                }
+            }
+            if !matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+                attrs = AttrFlags::default();
+            }
+            i += 1;
+        }
+    }
+    crate_aliases
+}
+
+#[allow(dead_code)]
 fn scan_file_public_api(
     rel_path: &str,
     source: &str,
     is_lib_rs: bool,
 ) -> Result<CoreFileScan, String> {
+    scan_file_public_api_with_crate_aliases(rel_path, source, is_lib_rs, &FileAliasTable::default())
+}
+
+fn scan_file_public_api_with_crate_aliases(
+    rel_path: &str,
+    source: &str,
+    is_lib_rs: bool,
+    crate_aliases: &FileAliasTable,
+) -> Result<CoreFileScan, String> {
     let tokens = tokenize_rust(source);
+    let mut alias_table = build_file_alias_table(rel_path, &tokens);
+    alias_table.merge_from(crate_aliases);
     let mut scopes = vec![ScopeKind::Root { public: true }];
     let mut attrs = AttrFlags::default();
     let mut seen_engine_internals_mod = false;
@@ -1555,6 +2351,7 @@ fn scan_file_public_api(
                 ..
             })
         );
+        let in_any_trait_impl = matches!(scopes.last(), Some(ScopeKind::TraitImpl { .. }));
         let in_engine_internals_mod = scopes.iter().any(|s| {
             matches!(
                 s,
@@ -1646,13 +2443,14 @@ fn scan_file_public_api(
                 j += 1;
             }
             let header = &tokens[after_vis + 1..j];
-            let (saw_for, _, self_type, mentions_host) = parse_impl_header(header);
+            let (saw_for, _, self_type, mentions_host) = parse_impl_header(header, &alias_table);
             if mentions_host && saw_for {
-                check_tokens_no_raw_types(
+                check_tokens_no_raw_types_resolved(
                     rel_path,
                     "trait `impl` on `ClubHost`",
                     header,
                     &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
                 )?;
             }
             if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
@@ -1739,21 +2537,24 @@ fn scan_file_public_api(
                 for item in &expanded {
                     let path = item.canonical_path.as_str();
                     let leaf = path.rsplit("::").next().unwrap_or(path);
-                    if leaf == "SweepMode"
-                        || leaf == "engine_internals"
-                        || path.contains("engine_internals")
-                        || FORBIDDEN_RAW_FNS.contains(&leaf)
+                    let resolved_leaf = alias_table.resolve(leaf);
+                    if resolved_leaf.iter().any(|r| {
+                        r == "SweepMode"
+                            || r == "engine_internals"
+                            || FORBIDDEN_RAW_FNS.contains(&r.as_str())
+                    }) || path.contains("engine_internals")
                     {
                         return Err(format!(
                             "{rel_path}: public `pub use` re-exports restricted item `{path}` outside `engine_internals`"
                         ));
                     }
                     if let Some(alias_name) = &item.alias {
-                        if RAW_ENGINE_ONLY_TYPES.contains(&leaf)
-                            || matches!(leaf, "ClubHost" | "ClubSaveSnapshot")
-                        {
+                        if let Some(raw) = resolved_leaf.iter().find(|r| {
+                            RAW_ENGINE_ONLY_TYPES.contains(&r.as_str())
+                                || matches!(r.as_str(), "ClubHost" | "ClubSaveSnapshot")
+                        }) {
                             return Err(format!(
-                                "{rel_path}: public `pub use {path} as {alias_name}` must not alias raw engine/host type `{leaf}`"
+                                "{rel_path}: public `pub use {path} as {alias_name}` must not alias raw engine/host type `{raw}`"
                             ));
                         }
                         if is_lib_rs {
@@ -1762,9 +2563,13 @@ fn scan_file_public_api(
                             ));
                         }
                     }
-                    if !is_lib_rs && RAW_ENGINE_ONLY_TYPES.contains(&leaf) {
+                    if !is_lib_rs
+                        && let Some(raw) = resolved_leaf
+                            .iter()
+                            .find(|r| RAW_ENGINE_ONLY_TYPES.contains(&r.as_str()))
+                    {
                         return Err(format!(
-                            "{rel_path}: submodule `pub use` must not re-export raw engine type `{path}`"
+                            "{rel_path}: submodule `pub use` must not re-export raw engine type `{path}` (resolves to `{raw}`)"
                         ));
                     }
                     if is_lib_rs && matches!(scopes.last(), Some(ScopeKind::Root { .. })) {
@@ -1827,17 +2632,19 @@ fn scan_file_public_api(
             };
 
             if in_host_trait_impl && !in_engine_internals_mod {
-                check_tokens_no_raw_types(
+                check_tokens_no_raw_types_resolved(
                     rel_path,
                     &format!("trait `impl` method `{fn_name}` parameter on `ClubHost`"),
                     param_tokens,
                     &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
                 )?;
-                check_tokens_no_raw_types(
+                check_tokens_no_raw_types_resolved(
                     rel_path,
                     &format!("trait `impl` method `{fn_name}` return on `ClubHost`"),
                     ret_slice,
                     &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
                 )?;
             }
 
@@ -1875,6 +2682,7 @@ fn scan_file_public_api(
                         fn_name,
                         ret_slice,
                         body_slice,
+                        &alias_table,
                     )?;
                 }
                 if attrs.cfg_engine_internals && !in_engine_internals_mod {
@@ -1908,22 +2716,28 @@ fn scan_file_public_api(
                     j += 1;
                 }
                 let type_stmt = &tokens[after_vis + 2..j];
-                if let Some(eq_pos) = type_stmt.iter().position(|t| matches!(t, Tok::Other('='))) {
-                    let rhs = &type_stmt[eq_pos + 1..];
-                    if in_host_trait_impl && !in_engine_internals_mod {
-                        check_tokens_no_raw_types(
+                let eq_start = skip_angle_generics(type_stmt, 0);
+                if let Some(rel_eq) = type_stmt[eq_start..]
+                    .iter()
+                    .position(|t| matches!(t, Tok::Other('=')))
+                {
+                    let rhs = &type_stmt[eq_start + rel_eq + 1..];
+                    if in_any_trait_impl && !in_engine_internals_mod {
+                        check_tokens_no_raw_types_resolved(
                             rel_path,
-                            &format!("trait `impl` associated `type {item_name}` on `ClubHost`"),
+                            &format!("trait `impl` associated `type {item_name}`"),
                             rhs,
-                            &RAW_ENGINE_ONLY_TYPES,
+                            &RAW_ENGINE_AND_HOST_TYPES,
+                            &alias_table,
                         )?;
                     }
                     if matches!(vis, Visibility::Public) && !in_engine_internals_mod {
-                        check_tokens_no_raw_types(
+                        check_tokens_no_raw_types_resolved(
                             rel_path,
                             &format!("`pub type {item_name}` alias"),
                             rhs,
                             &RAW_ENGINE_AND_HOST_TYPES,
+                            &alias_table,
                         )?;
                     }
                 }
@@ -1947,6 +2761,16 @@ fn scan_file_public_api(
                 }
                 if k < tokens.len() {
                     check_struct_fields_not_public(rel_path, item_name, &tokens, k)?;
+                    if matches!(vis, Visibility::Public) {
+                        check_public_struct_no_raw_pub_fields(
+                            rel_path,
+                            item_name,
+                            true,
+                            &tokens,
+                            k,
+                            &alias_table,
+                        )?;
+                    }
                 }
             }
             let mut j = after_vis + 2;
@@ -2809,7 +3633,8 @@ fn scan_seat_fns_in_file(
                 j += 1;
             }
             let header = &tokens[after_vis + 1..j];
-            let (saw_for, impl_gens_vec, self_type, mentions_host) = parse_impl_header(header);
+            let (saw_for, impl_gens_vec, self_type, mentions_host) =
+                parse_impl_header(header, &FileAliasTable::default());
             let impl_gens: BTreeSet<String> = impl_gens_vec.into_iter().collect();
             if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
                 let scope = match self_type {
@@ -3060,25 +3885,76 @@ fn scan_seat_files_two_pass(
 
 fn scan_tui_host_module_source(rel_path: &str, source: &str) -> Result<(), String> {
     let tokens = tokenize_rust(source);
+    let aliases = build_file_alias_table(rel_path, &tokens);
+    let mut prev_was_quote = false;
     for tok in &tokens {
-        if let Tok::Ident(ident) = tok
-            && RAW_ENGINE_TYPES_FOR_HOST_MODULES.contains(&ident.as_str())
-        {
-            return Err(format!(
-                "{rel_path}: TUI host module references forbidden raw engine symbol `{ident}`"
-            ));
+        if let Tok::Ident(ident) = tok {
+            if prev_was_quote {
+                prev_was_quote = false;
+                continue;
+            }
+            for resolved in aliases.resolve(ident) {
+                if RAW_ENGINE_TYPES_FOR_HOST_MODULES.contains(&resolved.as_str()) {
+                    if resolved == *ident {
+                        return Err(format!(
+                            "{rel_path}: TUI host module references forbidden raw engine symbol `{resolved}`"
+                        ));
+                    }
+                    return Err(format!(
+                        "{rel_path}: TUI host module references forbidden raw engine symbol `{resolved}` (via `{ident}`)"
+                    ));
+                }
+            }
         }
+        prev_was_quote = matches!(tok, Tok::Other('\''));
     }
-    scan_non_core_crate_aliases_and_reexports(rel_path, false, source, true)
+    scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+        rel_path,
+        false,
+        source,
+        true,
+        &FileAliasTable::default(),
+    )
 }
 
+#[allow(dead_code)]
 fn scan_non_core_crate_aliases_and_reexports(
     rel_path: &str,
     is_lib_rs: bool,
     source: &str,
     forbid_host_reexports: bool,
 ) -> Result<(), String> {
+    scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+        rel_path,
+        is_lib_rs,
+        source,
+        forbid_host_reexports,
+        &FileAliasTable::default(),
+    )
+}
+
+fn scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+    rel_path: &str,
+    is_lib_rs: bool,
+    source: &str,
+    forbid_host_reexports: bool,
+    crate_aliases: &FileAliasTable,
+) -> Result<(), String> {
+    const NON_CORE_PUB_FN_BANNED_RETURNS: [&str; 10] = [
+        "TurnEngine",
+        "EngineState",
+        "SweepMode",
+        "SweepReceipt",
+        "BundlePreview",
+        "ScheduledShockSpec",
+        "ClubHost",
+        "ClubSaveSnapshot",
+        "ClubSealPayload",
+        "engine_internals",
+    ];
     let tokens = tokenize_rust(source);
+    let mut alias_table = build_file_alias_table(rel_path, &tokens);
+    alias_table.merge_from(crate_aliases);
     let mut scopes = vec![ScopeKind::Root { public: true }];
     let mut attrs = AttrFlags::default();
     let mut i = 0_usize;
@@ -3091,6 +3967,14 @@ fn scan_non_core_crate_aliases_and_reexports(
             | ScopeKind::TraitImpl { cfg_test, .. }
             | ScopeKind::Block { cfg_test } => *cfg_test,
         });
+        let in_host_trait_impl = matches!(
+            scopes.last(),
+            Some(ScopeKind::TraitImpl {
+                mentions_host: true,
+                ..
+            })
+        );
+        let in_any_trait_impl = matches!(scopes.last(), Some(ScopeKind::TraitImpl { .. }));
 
         match &tokens[i] {
             Tok::Pound => {
@@ -3158,6 +4042,50 @@ fn scan_non_core_crate_aliases_and_reexports(
             (Visibility::Private, i)
         };
 
+        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "impl") {
+            let mut j = after_vis + 1;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                j += 1;
+            }
+            let header = &tokens[after_vis + 1..j];
+            let (saw_for, _, self_type, mentions_host) = parse_impl_header(header, &alias_table);
+            if mentions_host && saw_for {
+                check_tokens_no_raw_types_resolved(
+                    rel_path,
+                    "trait `impl` on `ClubHost`",
+                    header,
+                    &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
+                )?;
+            }
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                scopes.push(if !saw_for {
+                    if let Some(tname) = self_type {
+                        ScopeKind::InherentImpl {
+                            type_name: tname,
+                            cfg_test: attrs.cfg_test,
+                        }
+                    } else {
+                        ScopeKind::Block {
+                            cfg_test: attrs.cfg_test,
+                        }
+                    }
+                } else {
+                    ScopeKind::TraitImpl {
+                        mentions_host,
+                        self_type,
+                        cfg_test: attrs.cfg_test,
+                    }
+                });
+                attrs = AttrFlags::default();
+                i = j + 1;
+                continue;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
         if matches!(vis, Visibility::Public)
             && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "use")
         {
@@ -3171,26 +4099,34 @@ fn scan_non_core_crate_aliases_and_reexports(
             for item in &expanded {
                 let path = item.canonical_path.as_str();
                 let leaf = path.rsplit("::").next().unwrap_or(path);
-                let banned = if is_lib_rs || forbid_host_reexports {
-                    RAW_ENGINE_AND_HOST_TYPES.contains(&leaf)
-                        || FORBIDDEN_RAW_FNS.contains(&leaf)
-                        || path.contains("engine_internals")
-                } else {
-                    RAW_ENGINE_ONLY_TYPES
-                        .iter()
-                        .any(|t| *t == leaf && *t != "SealedMandateDeal" && *t != "SealedEvalSeed")
-                        || matches!(leaf, "ClubHost" | "ClubSaveSnapshot")
-                        || FORBIDDEN_RAW_FNS.contains(&leaf)
-                        || path.contains("engine_internals")
-                };
-                if banned {
+                let resolved_leaf = alias_table.resolve(leaf);
+                let matched_raw = resolved_leaf.iter().find(|r| {
+                    let r_str = r.as_str();
+                    if is_lib_rs || forbid_host_reexports {
+                        RAW_ENGINE_AND_HOST_TYPES.contains(&r_str)
+                            || FORBIDDEN_RAW_FNS.contains(&r_str)
+                            || r_str == "engine_internals"
+                    } else {
+                        RAW_ENGINE_ONLY_TYPES.iter().any(|t| {
+                            *t == r_str && *t != "SealedMandateDeal" && *t != "SealedEvalSeed"
+                        }) || matches!(r_str, "ClubHost" | "ClubSaveSnapshot")
+                            || FORBIDDEN_RAW_FNS.contains(&r_str)
+                            || r_str == "engine_internals"
+                    }
+                });
+                if let Some(raw) = matched_raw.cloned() {
                     let alias_note = item
                         .alias
                         .as_deref()
                         .map(|a| format!(" as {a}"))
                         .unwrap_or_default();
                     return Err(format!(
-                        "{rel_path}: `pub use {path}{alias_note}` must not re-export raw engine or host item `{leaf}`"
+                        "{rel_path}: `pub use {path}{alias_note}` must not re-export raw engine or host item `{raw}`"
+                    ));
+                }
+                if path.contains("engine_internals") {
+                    return Err(format!(
+                        "{rel_path}: `pub use {path}` must not re-export `engine_internals`"
                     ));
                 }
             }
@@ -3199,22 +4135,156 @@ fn scan_non_core_crate_aliases_and_reexports(
             continue;
         }
 
-        if matches!(vis, Visibility::Public)
-            && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "type")
-            && let Some(Tok::Ident(alias_name)) = tokens.get(after_vis + 1)
+        let mut fn_kw = after_vis;
+        loop {
+            match tokens.get(fn_kw) {
+                Some(Tok::Ident(s))
+                    if matches!(s.as_str(), "const" | "async" | "unsafe" | "extern") =>
+                {
+                    fn_kw += 1;
+                    if s == "extern" && matches!(tokens.get(fn_kw), Some(Tok::Str(_))) {
+                        fn_kw += 1;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if matches!(tokens.get(fn_kw), Some(Tok::Ident(s)) if s == "fn")
+            && let Some(Tok::Ident(fn_name)) = tokens.get(fn_kw + 1)
         {
-            let mut j = after_vis + 2;
-            while j < tokens.len() && !matches!(tokens[j], Tok::Semi | Tok::LBrace) {
+            let sig_idx = skip_angle_generics(&tokens, fn_kw + 2);
+            let (param_tokens, ret_start) = if matches!(tokens.get(sig_idx), Some(Tok::LParen)) {
+                let close = find_matching_paren(&tokens, sig_idx);
+                (&tokens[sig_idx + 1..close], close + 1)
+            } else {
+                (&[][..], sig_idx)
+            };
+            let mut j = ret_start;
+            let mut arrow_pos = None;
+            let mut where_pos = None;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                if arrow_pos.is_none()
+                    && j + 1 < tokens.len()
+                    && matches!(tokens[j], Tok::Other('-'))
+                    && matches!(tokens[j + 1], Tok::Other('>'))
+                {
+                    arrow_pos = Some(j + 2);
+                }
+                if where_pos.is_none() && matches!(tokens[j], Tok::Ident(ref w) if w == "where") {
+                    where_pos = Some(j);
+                }
                 j += 1;
             }
-            let stmt = &tokens[after_vis + 2..j];
-            if let Some(eq_pos) = stmt.iter().position(|t| matches!(t, Tok::Other('='))) {
-                check_tokens_no_raw_types(
+            let ret_slice = match arrow_pos {
+                Some(rs) => {
+                    let re = where_pos.unwrap_or(j).min(j);
+                    if rs <= re { &tokens[rs..re] } else { &[] }
+                }
+                None => &[],
+            };
+            if in_host_trait_impl {
+                check_tokens_no_raw_types_resolved(
                     rel_path,
-                    &format!("`pub type {alias_name}` alias"),
-                    &stmt[eq_pos + 1..],
-                    &RAW_ENGINE_AND_HOST_TYPES,
+                    &format!("trait `impl` method `{fn_name}` parameter on `ClubHost`"),
+                    param_tokens,
+                    &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
                 )?;
+                check_tokens_no_raw_types_resolved(
+                    rel_path,
+                    &format!("trait `impl` method `{fn_name}` return on `ClubHost`"),
+                    ret_slice,
+                    &RAW_ENGINE_ONLY_TYPES,
+                    &alias_table,
+                )?;
+            }
+            if matches!(vis, Visibility::Public) {
+                check_tokens_no_raw_types_resolved(
+                    rel_path,
+                    &format!("`pub fn {fn_name}` return type"),
+                    ret_slice,
+                    &NON_CORE_PUB_FN_BANNED_RETURNS,
+                    &alias_table,
+                )?;
+            }
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i = j + 1;
+                continue;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if let Some(Tok::Ident(item_kw)) = tokens.get(after_vis)
+            && matches!(item_kw.as_str(), "type" | "struct")
+            && let Some(Tok::Ident(item_name)) = tokens.get(after_vis + 1)
+        {
+            if item_kw == "type" {
+                let mut j = after_vis + 2;
+                while j < tokens.len() && !matches!(tokens[j], Tok::Semi | Tok::LBrace) {
+                    j += 1;
+                }
+                let stmt = &tokens[after_vis + 2..j];
+                let eq_start = skip_angle_generics(stmt, 0);
+                if let Some(rel_eq) = stmt[eq_start..]
+                    .iter()
+                    .position(|t| matches!(t, Tok::Other('=')))
+                {
+                    let rhs = &stmt[eq_start + rel_eq + 1..];
+                    if in_any_trait_impl {
+                        check_tokens_no_raw_types_resolved(
+                            rel_path,
+                            &format!("trait `impl` associated `type {item_name}`"),
+                            rhs,
+                            &RAW_ENGINE_AND_HOST_TYPES,
+                            &alias_table,
+                        )?;
+                    }
+                    if matches!(vis, Visibility::Public) {
+                        check_tokens_no_raw_types_resolved(
+                            rel_path,
+                            &format!("`pub type {item_name}` alias"),
+                            rhs,
+                            &RAW_ENGINE_AND_HOST_TYPES,
+                            &alias_table,
+                        )?;
+                    }
+                }
+                attrs = AttrFlags::default();
+                i = (j + 1).min(tokens.len());
+                continue;
+            }
+
+            // `struct`: check `pub` fields on public structs against raw types (resolved through aliases).
+            let body_start = skip_angle_generics(&tokens, after_vis + 2);
+            let mut k = body_start;
+            while k < tokens.len() && !matches!(tokens[k], Tok::LBrace | Tok::LParen | Tok::Semi) {
+                k += 1;
+            }
+            if k < tokens.len() && matches!(vis, Visibility::Public) {
+                check_public_struct_no_raw_pub_fields(
+                    rel_path,
+                    item_name,
+                    false,
+                    &tokens,
+                    k,
+                    &alias_table,
+                )?;
+            }
+            let mut j = after_vis + 2;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                j += 1;
+            }
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                let close = find_matching_brace(&tokens, j);
+                attrs = AttrFlags::default();
+                i = close + 1;
+                continue;
             }
             attrs = AttrFlags::default();
             i = (j + 1).min(tokens.len());
@@ -3225,6 +4295,945 @@ fn scan_non_core_crate_aliases_and_reexports(
             attrs = AttrFlags::default();
         }
         i += 1;
+    }
+
+    Ok(())
+}
+
+fn check_no_non_lifetime_generics(
+    rel_path: &str,
+    item_desc: &str,
+    tokens: &[Tok],
+    gen_start: usize,
+    where_slice: &[Tok],
+) -> Result<(), String> {
+    let after_gen = skip_angle_generics(tokens, gen_start);
+    if after_gen > gen_start {
+        let gen_inner = &tokens[gen_start + 1..after_gen - 1];
+        for seg in split_top_level_comma(gen_inner) {
+            if !matches!(seg.first(), Some(Tok::Other('\''))) {
+                let hint = seg
+                    .iter()
+                    .find_map(|t| match t {
+                        Tok::Ident(s) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or("<param>");
+                return Err(format!(
+                    "{rel_path}: `{item_desc}` must not declare generic type or const parameter `{hint}` in `league-seat-ui` (lifetimes only)"
+                ));
+            }
+        }
+    }
+    let mut prev_was_quote = false;
+    for tok in where_slice {
+        if let Tok::Ident(id) = tok {
+            if prev_was_quote {
+                prev_was_quote = false;
+                continue;
+            }
+            return Err(format!(
+                "{rel_path}: `{item_desc}` must not declare non-lifetime `where` bound referencing `{id}` in `league-seat-ui`"
+            ));
+        }
+        prev_was_quote = matches!(tok, Tok::Other('\''));
+    }
+    Ok(())
+}
+
+fn check_seat_ui_surface_type_tokens(
+    rel_path: &str,
+    ctx: &str,
+    ty_tokens: &[Tok],
+    local_types: &BTreeSet<String>,
+) -> Result<(), String> {
+    let mut bracket_stack: Vec<bool> = Vec::new();
+    let mut prev_was_quote = false;
+    let mut idx = 0_usize;
+    while idx < ty_tokens.len() {
+        match &ty_tokens[idx] {
+            Tok::LBracket => {
+                bracket_stack.push(false);
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            Tok::RBracket => {
+                bracket_stack.pop();
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            Tok::Semi => {
+                if let Some(last) = bracket_stack.last_mut() {
+                    *last = true;
+                }
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if bracket_stack.last().copied().unwrap_or(false) {
+            prev_was_quote = matches!(ty_tokens[idx], Tok::Other('\''));
+            idx += 1;
+            continue;
+        }
+        if let Tok::Ident(ident) = &ty_tokens[idx] {
+            if prev_was_quote {
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            if matches!(
+                ident.as_str(),
+                "dyn" | "impl" | "Fn" | "FnMut" | "FnOnce" | "fn" | "Box" | "Any"
+            ) {
+                return Err(format!(
+                    "{rel_path}: {ctx} uses forbidden non-concrete/trait/closure type `{ident}` in `league-seat-ui`"
+                ));
+            }
+            if matches!(
+                ident.as_str(),
+                "league_core"
+                    | "league_gen"
+                    | "league_standalone"
+                    | "host"
+                    | "engine_internals"
+                    | "fs"
+                    | "env"
+                    | "process"
+            ) {
+                return Err(format!(
+                    "{rel_path}: {ctx} references forbidden crate/module `{ident}` in `league-seat-ui`"
+                ));
+            }
+            let is_path_prefix = matches!(
+                (ty_tokens.get(idx + 1), ty_tokens.get(idx + 2)),
+                (Some(Tok::Other(':')), Some(Tok::Other(':')))
+            );
+            if is_path_prefix {
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            if FORBIDDEN_SEAT_IDENTIFIERS.contains(&ident.as_str()) {
+                return Err(format!(
+                    "{rel_path}: {ctx} references forbidden raw engine/host symbol `{ident}`"
+                ));
+            }
+            let is_assoc_binding = matches!(ty_tokens.get(idx + 1), Some(Tok::Other('=')))
+                && !matches!(ty_tokens.get(idx + 2), Some(Tok::Other('=')));
+            if is_assoc_binding {
+                prev_was_quote = false;
+                idx += 1;
+                continue;
+            }
+            if !TYPE_KEYWORDS_SKIP.contains(&ident.as_str())
+                && !ALLOWED_SEAT_UI_PUBLIC_TYPES.contains(&ident.as_str())
+                && !local_types.contains(ident.as_str())
+            {
+                return Err(format!(
+                    "{rel_path}: {ctx} uses non-allow-listed type `{ident}` in `league-seat-ui` (concrete allow-listed UI/seat types only)"
+                ));
+            }
+        }
+        prev_was_quote = matches!(ty_tokens[idx], Tok::Other('\''));
+        idx += 1;
+    }
+    Ok(())
+}
+
+fn collect_seat_ui_local_types(files: &[(String, String)]) -> BTreeSet<String> {
+    let mut local_types = BTreeSet::new();
+    for (_, source) in files {
+        let tokens = tokenize_rust(source);
+        let mut scopes = vec![ScopeKind::Root { public: true }];
+        let mut attrs = AttrFlags::default();
+        let mut i = 0_usize;
+        while i < tokens.len() {
+            let in_cfg_test = scopes.iter().any(|s| match s {
+                ScopeKind::Root { .. } => false,
+                ScopeKind::Module { cfg_test, .. }
+                | ScopeKind::InherentImpl { cfg_test, .. }
+                | ScopeKind::TraitImpl { cfg_test, .. }
+                | ScopeKind::Block { cfg_test } => *cfg_test,
+            });
+            match &tokens[i] {
+                Tok::Pound => {
+                    i = parse_tok_attr(&tokens, i, &mut attrs);
+                    continue;
+                }
+                Tok::RBrace => {
+                    if scopes.len() > 1 {
+                        scopes.pop();
+                    }
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                Tok::LBrace => {
+                    scopes.push(ScopeKind::Block {
+                        cfg_test: attrs.cfg_test,
+                    });
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                Tok::Semi => {
+                    attrs = AttrFlags::default();
+                    i += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            if in_cfg_test || attrs.cfg_test {
+                if matches!(
+                    tokens[i],
+                    Tok::Ident(ref s)
+                        if matches!(s.as_str(), "mod" | "fn" | "impl" | "struct" | "enum" | "trait")
+                ) {
+                    let mut j = i + 1;
+                    while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                        j += 1;
+                    }
+                    if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                        scopes.push(ScopeKind::Block { cfg_test: true });
+                        attrs = AttrFlags::default();
+                        i = j + 1;
+                        continue;
+                    }
+                    attrs = AttrFlags::default();
+                    i = (j + 1).min(tokens.len());
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            let after_vis = if matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+                if i + 1 < tokens.len() && matches!(tokens[i + 1], Tok::LParen) {
+                    find_matching_paren(&tokens, i + 1) + 1
+                } else {
+                    i + 1
+                }
+            } else {
+                i
+            };
+            if let Some(Tok::Ident(kw)) = tokens.get(after_vis)
+                && matches!(kw.as_str(), "struct" | "enum" | "type")
+                && let Some(Tok::Ident(name)) = tokens.get(after_vis + 1)
+            {
+                local_types.insert(name.clone());
+                attrs = AttrFlags::default();
+                i = after_vis + 2;
+                continue;
+            }
+            if !matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+                attrs = AttrFlags::default();
+            }
+            i += 1;
+        }
+    }
+    local_types
+}
+
+fn check_seat_ui_public_surface(
+    rel_path: &str,
+    source: &str,
+    local_types: &BTreeSet<String>,
+) -> Result<(), String> {
+    let tokens = tokenize_rust(source);
+    let mut scopes = vec![ScopeKind::Root { public: true }];
+    let mut attrs = AttrFlags::default();
+    let mut i = 0_usize;
+
+    while i < tokens.len() {
+        let in_cfg_test = scopes.iter().any(|s| match s {
+            ScopeKind::Root { .. } => false,
+            ScopeKind::Module { cfg_test, .. }
+            | ScopeKind::InherentImpl { cfg_test, .. }
+            | ScopeKind::TraitImpl { cfg_test, .. }
+            | ScopeKind::Block { cfg_test } => *cfg_test,
+        });
+
+        if matches!(&tokens[i], Tok::Pound) {
+            if tokens.get(i + 1) == Some(&Tok::LBracket) {
+                let mut d = 1_usize;
+                let mut j = i + 2;
+                while j < tokens.len() && d > 0 {
+                    match tokens[j] {
+                        Tok::LBracket => d += 1,
+                        Tok::RBracket => d -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let attr_inner = &tokens[i + 2..j.saturating_sub(1)];
+                if attr_inner
+                    .iter()
+                    .any(|t| matches!(t, Tok::Ident(s) if s == "macro_export"))
+                {
+                    return Err(format!(
+                        "{rel_path}: `#[macro_export]` is forbidden in `league-seat-ui`"
+                    ));
+                }
+            }
+            i = parse_tok_attr(&tokens, i, &mut attrs);
+            continue;
+        }
+
+        match &tokens[i] {
+            Tok::RBrace => {
+                if scopes.len() > 1 {
+                    scopes.pop();
+                }
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::LBrace => {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::Semi => {
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if in_cfg_test || attrs.cfg_test {
+            if matches!(
+                tokens[i],
+                Tok::Ident(ref s)
+                    if matches!(s.as_str(), "mod" | "fn" | "impl" | "struct" | "enum" | "trait")
+            ) {
+                let mut j = i + 1;
+                while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                    j += 1;
+                }
+                if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                    scopes.push(ScopeKind::Block { cfg_test: true });
+                    attrs = AttrFlags::default();
+                    i = j + 1;
+                    continue;
+                }
+                attrs = AttrFlags::default();
+                i = (j + 1).min(tokens.len());
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Tok::Ident(ident) = &tokens[i]
+            && FORBIDDEN_SEAT_IDENTIFIERS.contains(&ident.as_str())
+        {
+            return Err(format!(
+                "{rel_path}: `league-seat-ui` references forbidden engine/host symbol `{ident}`"
+            ));
+        }
+
+        let (vis, after_vis) = if matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+            if i + 1 < tokens.len() && matches!(tokens[i + 1], Tok::LParen) {
+                (
+                    Visibility::CrateOrRestricted,
+                    find_matching_paren(&tokens, i + 1) + 1,
+                )
+            } else {
+                (Visibility::Public, i + 1)
+            }
+        } else {
+            (Visibility::Private, i)
+        };
+
+        if matches!(vis, Visibility::Public)
+            && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "use")
+        {
+            let mut j = after_vis + 1;
+            while j < tokens.len() && !matches!(tokens[j], Tok::Semi) {
+                j += 1;
+            }
+            let mut expanded = Vec::new();
+            expand_use_tree(rel_path, &tokens[after_vis + 1..j], "", &mut expanded)?;
+            for item in &expanded {
+                if item.canonical_path.split("::").any(|seg| {
+                    matches!(
+                        seg,
+                        "league_core" | "league_gen" | "league_standalone" | "host"
+                    )
+                }) {
+                    return Err(format!(
+                        "{rel_path}: `pub use {}` is forbidden in `league-seat-ui`",
+                        item.canonical_path
+                    ));
+                }
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if matches!(vis, Visibility::Public)
+            && (matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "trait")
+                || (matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "unsafe")
+                    && matches!(tokens.get(after_vis + 1), Some(Tok::Ident(s)) if s == "trait")))
+        {
+            return Err(format!(
+                "{rel_path}: `pub trait` is forbidden in `league-seat-ui` public API"
+            ));
+        }
+
+        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "impl") {
+            let mut j = after_vis + 1;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                j += 1;
+            }
+            let header = &tokens[after_vis + 1..j];
+            let where_slice = header
+                .iter()
+                .position(|t| matches!(t, Tok::Ident(w) if w == "where"))
+                .map(|wp| &header[wp + 1..])
+                .unwrap_or(&[]);
+            check_no_non_lifetime_generics(
+                rel_path,
+                "impl block",
+                &tokens,
+                after_vis + 1,
+                where_slice,
+            )?;
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i = j + 1;
+                continue;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        let mut fn_kw = after_vis;
+        loop {
+            match tokens.get(fn_kw) {
+                Some(Tok::Ident(s))
+                    if matches!(s.as_str(), "const" | "async" | "unsafe" | "extern") =>
+                {
+                    fn_kw += 1;
+                    if s == "extern" && matches!(tokens.get(fn_kw), Some(Tok::Str(_))) {
+                        fn_kw += 1;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if matches!(tokens.get(fn_kw), Some(Tok::Ident(s)) if s == "fn")
+            && let Some(Tok::Ident(fn_name)) = tokens.get(fn_kw + 1)
+        {
+            let gen_start = fn_kw + 2;
+            let sig_idx = skip_angle_generics(&tokens, gen_start);
+            let (params, ret_start) = if matches!(tokens.get(sig_idx), Some(Tok::LParen)) {
+                let close = find_matching_paren(&tokens, sig_idx);
+                (&tokens[sig_idx + 1..close], close + 1)
+            } else {
+                (&[][..], sig_idx)
+            };
+            let mut j = ret_start;
+            let mut arrow_pos = None;
+            let mut where_pos = None;
+            while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                if arrow_pos.is_none()
+                    && j + 1 < tokens.len()
+                    && matches!(tokens[j], Tok::Other('-'))
+                    && matches!(tokens[j + 1], Tok::Other('>'))
+                {
+                    arrow_pos = Some(j + 2);
+                }
+                if where_pos.is_none() && matches!(tokens[j], Tok::Ident(ref w) if w == "where") {
+                    where_pos = Some(j);
+                }
+                j += 1;
+            }
+            let where_slice = where_pos.map(|wp| &tokens[wp + 1..j]).unwrap_or(&[]);
+            check_no_non_lifetime_generics(
+                rel_path,
+                &format!("fn {fn_name}"),
+                &tokens,
+                gen_start,
+                where_slice,
+            )?;
+            let ret_slice = match arrow_pos {
+                Some(rs) => {
+                    let re = where_pos.unwrap_or(j).min(j);
+                    if rs <= re { &tokens[rs..re] } else { &[] }
+                }
+                None => &[],
+            };
+            if matches!(vis, Visibility::Public) {
+                for seg in split_top_level_comma(params) {
+                    let clean = strip_leading_attrs_and_vis(seg);
+                    if let Some(colon_pos) = clean.iter().position(|t| matches!(t, Tok::Other(':')))
+                    {
+                        check_seat_ui_surface_type_tokens(
+                            rel_path,
+                            &format!("`pub fn {fn_name}` parameter"),
+                            &clean[colon_pos + 1..],
+                            local_types,
+                        )?;
+                    }
+                }
+                if !ret_slice.is_empty() {
+                    check_seat_ui_surface_type_tokens(
+                        rel_path,
+                        &format!("`pub fn {fn_name}` return type"),
+                        ret_slice,
+                        local_types,
+                    )?;
+                }
+            }
+            if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i = j + 1;
+                continue;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if matches!(vis, Visibility::Public)
+            && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "const" || s == "static")
+        {
+            let mut k = after_vis + 1;
+            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "mut") {
+                k += 1;
+            }
+            let item_name = match tokens.get(k) {
+                Some(Tok::Ident(n)) => n.as_str(),
+                _ => "<const>",
+            };
+            let mut j = k;
+            while j < tokens.len() && !matches!(tokens[j], Tok::Semi) {
+                j += 1;
+            }
+            let stmt = &tokens[k..j];
+            if let Some(colon_pos) = stmt.iter().position(|t| matches!(t, Tok::Other(':'))) {
+                let end_ty = stmt[colon_pos + 1..]
+                    .iter()
+                    .position(|t| matches!(t, Tok::Other('=')))
+                    .map(|p| colon_pos + 1 + p)
+                    .unwrap_or(stmt.len());
+                check_seat_ui_surface_type_tokens(
+                    rel_path,
+                    &format!(
+                        "`pub {} {item_name}`",
+                        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "static") {
+                            "static"
+                        } else {
+                            "const"
+                        }
+                    ),
+                    &stmt[colon_pos + 1..end_ty],
+                    local_types,
+                )?;
+            }
+            attrs = AttrFlags::default();
+            i = (j + 1).min(tokens.len());
+            continue;
+        }
+
+        if let Some(Tok::Ident(item_kw)) = tokens.get(after_vis)
+            && matches!(item_kw.as_str(), "struct" | "enum" | "type")
+            && let Some(Tok::Ident(item_name)) = tokens.get(after_vis + 1)
+        {
+            let gen_start = after_vis + 2;
+            let after_gen = skip_angle_generics(&tokens, gen_start);
+            if item_kw == "type" {
+                let mut j = after_gen;
+                while j < tokens.len() && !matches!(tokens[j], Tok::Semi) {
+                    j += 1;
+                }
+                let where_pos = tokens[after_gen..j]
+                    .iter()
+                    .position(|t| matches!(t, Tok::Ident(w) if w == "where"));
+                let eq_pos = tokens[after_gen..j]
+                    .iter()
+                    .position(|t| matches!(t, Tok::Other('=')));
+                let where_slice = match (where_pos, eq_pos) {
+                    (Some(wp), Some(ep)) if wp < ep => &tokens[after_gen + wp + 1..after_gen + ep],
+                    (Some(wp), _) => &tokens[after_gen + wp + 1..j],
+                    _ => &[],
+                };
+                check_no_non_lifetime_generics(
+                    rel_path,
+                    &format!("type {item_name}"),
+                    &tokens,
+                    gen_start,
+                    where_slice,
+                )?;
+                if matches!(vis, Visibility::Public)
+                    && let Some(ep) = eq_pos
+                {
+                    let end_rhs = where_pos
+                        .filter(|&wp| wp > ep)
+                        .map(|wp| after_gen + wp)
+                        .unwrap_or(j);
+                    check_seat_ui_surface_type_tokens(
+                        rel_path,
+                        &format!("`pub type {item_name}`"),
+                        &tokens[after_gen + ep + 1..end_rhs],
+                        local_types,
+                    )?;
+                }
+                attrs = AttrFlags::default();
+                i = (j + 1).min(tokens.len());
+                continue;
+            }
+
+            let mut body_pos = after_gen;
+            let mut where_pos = None;
+            while body_pos < tokens.len()
+                && !matches!(tokens[body_pos], Tok::LBrace | Tok::LParen | Tok::Semi)
+            {
+                if where_pos.is_none()
+                    && matches!(tokens[body_pos], Tok::Ident(ref w) if w == "where")
+                {
+                    where_pos = Some(body_pos);
+                }
+                body_pos += 1;
+            }
+            let where_slice = where_pos.map(|wp| &tokens[wp + 1..body_pos]).unwrap_or(&[]);
+            check_no_non_lifetime_generics(
+                rel_path,
+                &format!("{item_kw} {item_name}"),
+                &tokens,
+                gen_start,
+                where_slice,
+            )?;
+
+            if item_kw == "struct" && body_pos < tokens.len() {
+                if matches!(tokens[body_pos], Tok::LBrace) {
+                    let close = find_matching_brace(&tokens, body_pos);
+                    for seg in split_top_level_comma(&tokens[body_pos + 1..close]) {
+                        let clean = strip_leading_attrs_and_vis(seg);
+                        if let Some(cpos) = clean.iter().position(|t| matches!(t, Tok::Other(':')))
+                        {
+                            check_seat_ui_surface_type_tokens(
+                                rel_path,
+                                &format!("struct `{item_name}` field"),
+                                &clean[cpos + 1..],
+                                local_types,
+                            )?;
+                        }
+                    }
+                    attrs = AttrFlags::default();
+                    i = close + 1;
+                    continue;
+                } else if matches!(tokens[body_pos], Tok::LParen) {
+                    let close = find_matching_paren(&tokens, body_pos);
+                    for seg in split_top_level_comma(&tokens[body_pos + 1..close]) {
+                        let clean = strip_leading_attrs_and_vis(seg);
+                        check_seat_ui_surface_type_tokens(
+                            rel_path,
+                            &format!("struct `{item_name}` tuple field"),
+                            clean,
+                            local_types,
+                        )?;
+                    }
+                    let mut semi = close + 1;
+                    while semi < tokens.len() && !matches!(tokens[semi], Tok::Semi) {
+                        semi += 1;
+                    }
+                    attrs = AttrFlags::default();
+                    i = (semi + 1).min(tokens.len());
+                    continue;
+                }
+            }
+
+            if item_kw == "enum"
+                && body_pos < tokens.len()
+                && matches!(tokens[body_pos], Tok::LBrace)
+            {
+                let close = find_matching_brace(&tokens, body_pos);
+                for seg in split_top_level_comma(&tokens[body_pos + 1..close]) {
+                    let clean = strip_leading_attrs_and_vis(seg);
+                    if let Some(open_brace) = clean.iter().position(|t| matches!(t, Tok::LBrace)) {
+                        let v_close = find_matching_brace(clean, open_brace);
+                        for fseg in split_top_level_comma(&clean[open_brace + 1..v_close]) {
+                            let fclean = strip_leading_attrs_and_vis(fseg);
+                            if let Some(cpos) =
+                                fclean.iter().position(|t| matches!(t, Tok::Other(':')))
+                            {
+                                check_seat_ui_surface_type_tokens(
+                                    rel_path,
+                                    &format!("enum `{item_name}` variant field"),
+                                    &fclean[cpos + 1..],
+                                    local_types,
+                                )?;
+                            }
+                        }
+                    } else if let Some(open_paren) =
+                        clean.iter().position(|t| matches!(t, Tok::LParen))
+                    {
+                        let v_close = find_matching_paren(clean, open_paren);
+                        for fseg in split_top_level_comma(&clean[open_paren + 1..v_close]) {
+                            let fclean = strip_leading_attrs_and_vis(fseg);
+                            check_seat_ui_surface_type_tokens(
+                                rel_path,
+                                &format!("enum `{item_name}` tuple variant field"),
+                                fclean,
+                                local_types,
+                            )?;
+                        }
+                    }
+                }
+                attrs = AttrFlags::default();
+                i = close + 1;
+                continue;
+            }
+        }
+
+        if !matches!(tokens[i], Tok::Ident(ref s) if s == "pub") {
+            attrs = AttrFlags::default();
+        }
+        i += 1;
+    }
+
+    Ok(())
+}
+
+fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Result<(), String> {
+    let clippy_path = crate_dir.join("clippy.toml");
+    let clippy_toml = fs::read_to_string(&clippy_path)
+        .map_err(|err| format!("{crate_name}: missing or unreadable clippy.toml ({err})"))?;
+    for required in [
+        "std::fs::File",
+        "std::fs::read",
+        "std::fs::read_to_string",
+        "std::env::var",
+        "std::process::Command",
+        "std::include",
+        "std::include_str",
+        "std::include_bytes",
+    ] {
+        if !clippy_toml.contains(required) {
+            return Err(format!(
+                "{crate_name}/clippy.toml must list `{required}` under disallowed rules"
+            ));
+        }
+    }
+
+    if crate_dir.join("build.rs").exists() {
+        return Err(format!(
+            "{crate_name}: seat crate must not define `build.rs`"
+        ));
+    }
+
+    let lib_rs_path = crate_dir.join("src/lib.rs");
+    let lib_src = fs::read_to_string(&lib_rs_path)
+        .map_err(|err| format!("{crate_name}/src/lib.rs: failed to read ({err})"))?;
+    let lib_tokens = tokenize_rust(&lib_src);
+    let mut denied_lints = BTreeSet::new();
+    let mut idx = 0_usize;
+    while idx + 2 < lib_tokens.len() {
+        if matches!(lib_tokens[idx], Tok::Pound)
+            && matches!(lib_tokens[idx + 1], Tok::Bang)
+            && matches!(lib_tokens[idx + 2], Tok::LBracket)
+        {
+            let mut d = 1_usize;
+            let start = idx + 3;
+            let mut end = start;
+            while end < lib_tokens.len() && d > 0 {
+                match lib_tokens[end] {
+                    Tok::LBracket => d += 1,
+                    Tok::RBracket => d -= 1,
+                    _ => {}
+                }
+                end += 1;
+            }
+            let inner = &lib_tokens[start..end.saturating_sub(1)];
+            if matches!(inner.first(), Some(Tok::Ident(s)) if s == "deny") {
+                for w in inner.windows(4) {
+                    if matches!(&w[0], Tok::Ident(a) if a == "clippy")
+                        && matches!(w[1], Tok::Other(':'))
+                        && matches!(w[2], Tok::Other(':'))
+                        && let Tok::Ident(lint) = &w[3]
+                    {
+                        denied_lints.insert(lint.clone());
+                    }
+                }
+            }
+            idx = end;
+        } else {
+            idx += 1;
+        }
+    }
+    for req_lint in [
+        "disallowed_methods",
+        "disallowed_types",
+        "disallowed_macros",
+    ] {
+        if !denied_lints.contains(req_lint) {
+            return Err(format!(
+                "{crate_name}/src/lib.rs must enforce `#![deny(clippy::{req_lint})]`"
+            ));
+        }
+    }
+
+    let mut all_rs_files = Vec::new();
+    for subdir in ["src", "tests"] {
+        let root = crate_dir.join(subdir);
+        if !root.exists() {
+            continue;
+        }
+        let mut stack = vec![root];
+        while let Some(dir) = stack.pop() {
+            let entries = fs::read_dir(&dir)
+                .map_err(|err| format!("{crate_name}: failed to read {}: {err}", dir.display()))?;
+            for entry in entries {
+                let entry = entry
+                    .map_err(|err| format!("{crate_name}: failed to read dir entry: {err}"))?;
+                let path = entry.path();
+                let meta = fs::symlink_metadata(&path).map_err(|err| {
+                    format!("{crate_name}: failed to stat {}: {err}", path.display())
+                })?;
+                if meta.file_type().is_symlink() {
+                    return Err(format!(
+                        "{crate_name}: symlinks are forbidden inside seat crate ({})",
+                        path.display()
+                    ));
+                }
+                if meta.is_dir() {
+                    stack.push(path);
+                } else if meta.is_file() {
+                    if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                        return Err(format!(
+                            "{crate_name}: non-.rs source file is forbidden inside seat crate ({})",
+                            path.display()
+                        ));
+                    }
+                    all_rs_files.push(path);
+                }
+            }
+        }
+    }
+    all_rs_files.sort();
+
+    for rs_path in all_rs_files {
+        let rel = rs_path
+            .strip_prefix(crate_dir)
+            .ok()
+            .and_then(|p| p.to_str())
+            .map(|s| s.replace('\\', "/"))
+            .unwrap_or_else(|| rs_path.display().to_string());
+        let src = fs::read_to_string(&rs_path)
+            .map_err(|err| format!("{crate_name}/{rel}: failed to read: {err}"))?;
+        if src.contains("allow(clippy::disallowed_") {
+            return Err(format!(
+                "{crate_name}/{rel}: must not suppress `clippy::disallowed_*` lints"
+            ));
+        }
+        let tokens = tokenize_rust(&src);
+        let mut k = 0_usize;
+        while k < tokens.len() {
+            // Ban `#[path = ...]` / `#![path = ...]`.
+            if matches!(tokens[k], Tok::Pound) {
+                let b_idx = if matches!(tokens.get(k + 1), Some(Tok::Bang)) {
+                    k + 2
+                } else {
+                    k + 1
+                };
+                if matches!(tokens.get(b_idx), Some(Tok::LBracket))
+                    && matches!(tokens.get(b_idx + 1), Some(Tok::Ident(s)) if s == "path")
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `#[path]` attribute is forbidden in seat crates"
+                    ));
+                }
+            }
+
+            // Ban `include!`, `include_str!`, `include_bytes!`, `env!`, `option_env!`.
+            if let Some(Tok::Ident(m)) = tokens.get(k)
+                && matches!(
+                    m.as_str(),
+                    "include" | "include_str" | "include_bytes" | "env" | "option_env"
+                )
+                && matches!(tokens.get(k + 1), Some(Tok::Bang))
+            {
+                return Err(format!(
+                    "{crate_name}/{rel}: macro `{m}!` is forbidden in seat crates"
+                ));
+            }
+
+            // Ban `fs::`, `env::`, `process::` module paths.
+            if let Some(Tok::Ident(seg)) = tokens.get(k)
+                && matches!(seg.as_str(), "fs" | "env" | "process")
+                && matches!(
+                    (tokens.get(k + 1), tokens.get(k + 2)),
+                    (Some(Tok::Other(':')), Some(Tok::Other(':')))
+                )
+            {
+                return Err(format!(
+                    "{crate_name}/{rel}: `{seg}::` I/O or process access is forbidden in seat crates"
+                ));
+            }
+
+            // Ban `File`, `OpenOptions`, `ReadDir`, `DirBuilder`, `Command` identifiers.
+            if let Some(Tok::Ident(id)) = tokens.get(k)
+                && matches!(
+                    id.as_str(),
+                    "File" | "OpenOptions" | "ReadDir" | "DirBuilder" | "Command"
+                )
+            {
+                return Err(format!(
+                    "{crate_name}/{rel}: forbidden filesystem/process type `{id}` in seat crates"
+                ));
+            }
+
+            // Ban `use std::fs`, `use std::env`, `use std::process`, `use core::include*`.
+            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "use") {
+                let mut end = k + 1;
+                while end < tokens.len() && !matches!(tokens[end], Tok::Semi) {
+                    end += 1;
+                }
+                let mut expanded = Vec::new();
+                expand_use_tree_allow_glob(&rel, &tokens[k + 1..end], &mut expanded);
+                for item in expanded {
+                    for seg in item.canonical_path.split("::") {
+                        if matches!(
+                            seg,
+                            "fs" | "env"
+                                | "process"
+                                | "File"
+                                | "OpenOptions"
+                                | "ReadDir"
+                                | "DirBuilder"
+                                | "Command"
+                                | "include"
+                                | "include_str"
+                                | "include_bytes"
+                        ) {
+                            return Err(format!(
+                                "{crate_name}/{rel}: `use {}` is forbidden in seat crates",
+                                item.canonical_path
+                            ));
+                        }
+                    }
+                }
+            }
+
+            k += 1;
+        }
     }
 
     Ok(())
@@ -3290,14 +5299,7 @@ fn scan_league_core_src_tree_with_surface(
     collect_rs_files_recursive(src_root, &mut files);
     files.sort();
 
-    let mut visited = Vec::with_capacity(files.len());
-    let mut saw_engine_internals = false;
-    let mut observation_checked = false;
-    let mut saw_preview_what_if = false;
-    let mut saw_preview_seat_bundle = false;
-    let mut bot_seat_files: Vec<(String, String)> = Vec::new();
-    let mut club_seat_files: Vec<(String, String)> = Vec::new();
-
+    let mut loaded_files = Vec::with_capacity(files.len());
     for path in files {
         let rel = path
             .strip_prefix(src_root)
@@ -3307,8 +5309,22 @@ fn scan_league_core_src_tree_with_surface(
             .unwrap_or_else(|| path.display().to_string());
         let source = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        loaded_files.push((rel, source));
+    }
+    let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded_files);
+
+    let mut visited = Vec::with_capacity(loaded_files.len());
+    let mut saw_engine_internals = false;
+    let mut observation_checked = false;
+    let mut saw_preview_what_if = false;
+    let mut saw_preview_seat_bundle = false;
+    let mut bot_seat_files: Vec<(String, String)> = Vec::new();
+    let mut club_seat_files: Vec<(String, String)> = Vec::new();
+
+    for (rel, source) in loaded_files {
         let is_lib_rs = rel == "lib.rs";
-        let scan = scan_file_public_api(&rel, &source, is_lib_rs)?;
+        let scan =
+            scan_file_public_api_with_crate_aliases(&rel, &source, is_lib_rs, &crate_aliases)?;
 
         if scan.seen_engine_internals_mod {
             saw_engine_internals = true;
@@ -4136,10 +6152,14 @@ fn parse_workspace_crate_edges(
                             if norm != norm_crate_dir {
                                 if let Some(ws_name) = known_ws_dirs.get(&norm) {
                                     push_edge(ws_name.clone(), &sec);
-                                } else if norm.file_name().and_then(|s| s.to_str())
-                                    == Some("league-core")
+                                } else if let Some(fname) =
+                                    norm.file_name().and_then(|s| s.to_str())
+                                    && matches!(
+                                        fname,
+                                        "league-core" | "league-gen" | "league-standalone"
+                                    )
                                 {
-                                    push_edge("league-core".to_owned(), &sec);
+                                    push_edge(fname.to_owned(), &sec);
                                 }
                             }
                         }
@@ -4171,10 +6191,14 @@ fn parse_workspace_crate_edges(
                                 if norm != norm_crate_dir {
                                     if let Some(ws_name) = known_ws_dirs.get(&norm) {
                                         push_edge(ws_name.clone(), &sec);
-                                    } else if norm.file_name().and_then(|s| s.to_str())
-                                        == Some("league-core")
+                                    } else if let Some(fname) =
+                                        norm.file_name().and_then(|s| s.to_str())
+                                        && matches!(
+                                            fname,
+                                            "league-core" | "league-gen" | "league-standalone"
+                                        )
                                     {
-                                        push_edge("league-core".to_owned(), &sec);
+                                        push_edge(fname.to_owned(), &sec);
                                     }
                                 }
                             }
@@ -4189,8 +6213,10 @@ fn parse_workspace_crate_edges(
                     if norm != norm_crate_dir {
                         if let Some(ws_name) = known_ws_dirs.get(&norm) {
                             push_edge(ws_name.clone(), &sec);
-                        } else if norm.file_name().and_then(|s| s.to_str()) == Some("league-core") {
-                            push_edge("league-core".to_owned(), &sec);
+                        } else if let Some(fname) = norm.file_name().and_then(|s| s.to_str())
+                            && matches!(fname, "league-core" | "league-gen" | "league-standalone")
+                        {
+                            push_edge(fname.to_owned(), &sec);
                         }
                     }
                 }
@@ -4203,18 +6229,20 @@ fn parse_workspace_crate_edges(
     Ok(edges)
 }
 
-fn find_dep_path_to_league_core(
+fn find_dep_path_to_forbidden(
     start: &str,
     edges: &BTreeMap<String, Vec<(String, String)>>,
-) -> Option<(Vec<String>, String)> {
+    forbidden: &[&str],
+) -> Option<(Vec<String>, String, String)> {
     let mut visited = BTreeSet::new();
     let mut queue = std::collections::VecDeque::new();
     if let Some(direct) = edges.get(start) {
         for (target, sec) in direct {
-            if target == "league-core" {
+            if forbidden.contains(&target.as_str()) {
                 return Some((
-                    vec![start.to_owned(), "league-core".to_owned()],
+                    vec![start.to_owned(), target.clone()],
                     sec.clone(),
+                    target.clone(),
                 ));
             }
             if visited.insert(target.clone()) {
@@ -4231,8 +6259,8 @@ fn find_dep_path_to_league_core(
             for (target, sec) in nexts {
                 let mut next_chain = chain.clone();
                 next_chain.push(target.clone());
-                if target == "league-core" {
-                    return Some((next_chain, format!("{first_sec} -> {sec}")));
+                if forbidden.contains(&target.as_str()) {
+                    return Some((next_chain, format!("{first_sec} -> {sec}"), target.clone()));
                 }
                 if visited.insert(target.clone()) {
                     queue.push_back((target.clone(), next_chain, first_sec.clone()));
@@ -4241,6 +6269,342 @@ fn find_dep_path_to_league_core(
         }
     }
     None
+}
+
+fn toml_snippet_has_key(snippet: &str, target_key: &str) -> bool {
+    let bytes = snippet.as_bytes();
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut escape = false;
+    let mut i = 0_usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if escape {
+            escape = false;
+            i += 1;
+            continue;
+        }
+        if in_double {
+            if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_double = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_single {
+            if b == b'\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' => {
+                in_double = true;
+                i += 1;
+            }
+            b'\'' => {
+                in_single = true;
+                i += 1;
+            }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'-' => {
+                let start = i;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-')
+                {
+                    i += 1;
+                }
+                if &snippet[start..i] == target_key {
+                    let mut j = i;
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j < bytes.len() && matches!(bytes[j], b'=' | b'.') {
+                        return true;
+                    }
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    false
+}
+
+fn check_seat_crate_manifest(
+    crate_name: &str,
+    manifest: &str,
+    allowed_deps: &[(&str, Option<&str>)],
+) -> Result<(), String> {
+    let allowed_names: Vec<&str> = allowed_deps.iter().map(|(n, _)| *n).collect();
+    for raw_line in manifest.lines() {
+        let code_part = strip_toml_comment(raw_line).trim();
+        if code_part.contains("engine-internals") {
+            return Err(format!(
+                "{crate_name}/Cargo.toml must not enable or define `engine-internals`"
+            ));
+        }
+    }
+
+    let mut section = String::new();
+    let mut subtable_dep: Option<String> = None;
+    let mut brace_depth = 0_usize;
+    let mut bracket_depth = 0_usize;
+
+    for raw_line in manifest.lines() {
+        let code_part = strip_toml_comment(raw_line).trim();
+        if code_part.is_empty() {
+            continue;
+        }
+        let was_depth_zero = brace_depth == 0 && bracket_depth == 0;
+        if was_depth_zero && code_part.starts_with('[') && code_part.ends_with(']') {
+            section = code_part.to_owned();
+            subtable_dep = None;
+            if matches!(section.as_str(), "[package]" | "[dependencies]" | "[lints]") {
+                continue;
+            }
+            let inner = &code_part[1..code_part.len() - 1];
+            let segs = split_toml_dotted_segments(inner);
+            if segs.len() == 2 && segs[0] == "dependencies" {
+                let dep_name = segs[1].as_str();
+                if !allowed_names.contains(&dep_name) {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml dependency `{dep_name}` is not in allow-list `{allowed_names:?}`"
+                    ));
+                }
+                subtable_dep = Some(dep_name.to_owned());
+                continue;
+            }
+            return Err(format!(
+                "{crate_name}/Cargo.toml defines forbidden section `{section}`; only `[package]`, `[dependencies]`, and `[lints]` are permitted"
+            ));
+        }
+        if section.is_empty() && was_depth_zero {
+            return Err(format!(
+                "{crate_name}/Cargo.toml contains entry `{code_part}` before any `[section]` header"
+            ));
+        }
+        if section == "[package]" && was_depth_zero && toml_snippet_has_key(code_part, "build") {
+            return Err(format!(
+                "{crate_name}/Cargo.toml must not define `build` script"
+            ));
+        }
+        if section == "[dependencies]" || subtable_dep.is_some() {
+            for forbidden_kw in [
+                "league-core",
+                "league-gen",
+                "league-standalone",
+                "league-tui",
+            ] {
+                if code_part.contains(forbidden_kw) {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml must not depend on `{forbidden_kw}`"
+                    ));
+                }
+            }
+            let current_dep = if let Some(ref sd) = subtable_dep {
+                Some(sd.clone())
+            } else if was_depth_zero {
+                code_part.split_once('=').and_then(|(lhs, _)| {
+                    let segs = split_toml_dotted_segments(lhs);
+                    segs.first().cloned()
+                })
+            } else {
+                None
+            };
+            if let Some(ref dep_key) = current_dep
+                && !allowed_names.contains(&dep_key.as_str())
+            {
+                return Err(format!(
+                    "{crate_name}/Cargo.toml dependency `{dep_key}` is not in allow-list `{allowed_names:?}`"
+                ));
+            }
+            if toml_snippet_has_key(code_part, "git")
+                || toml_snippet_has_key(code_part, "package")
+                || toml_snippet_has_key(code_part, "optional")
+            {
+                return Err(format!(
+                    "{crate_name}/Cargo.toml dependency entries must not set `git`, `package`, or `optional` (`{code_part}`)"
+                ));
+            }
+            let expected_path = current_dep.as_deref().and_then(|dk| {
+                allowed_deps
+                    .iter()
+                    .find(|(n, _)| *n == dk)
+                    .and_then(|(_, p)| *p)
+            });
+            for rel_path in extract_toml_key_quoted_values(code_part, "path") {
+                match expected_path {
+                    Some(exp) if rel_path == exp => {}
+                    Some(exp) => {
+                        return Err(format!(
+                            "{crate_name}/Cargo.toml path dependency must point to `{exp}`, found `{rel_path}`"
+                        ));
+                    }
+                    None => {
+                        return Err(format!(
+                            "{crate_name}/Cargo.toml external dependency must not use `path` override (`{rel_path}`)"
+                        ));
+                    }
+                }
+            }
+            if let Some((_, rhs)) = code_part.split_once('=')
+                && was_depth_zero
+                && subtable_dep.as_deref().is_some()
+                && code_part.starts_with("path")
+            {
+                for rel_path in extract_quoted_strings(rhs) {
+                    match expected_path {
+                        Some(exp) if rel_path == exp => {}
+                        _ => {
+                            return Err(format!(
+                                "{crate_name}/Cargo.toml unexpected path `{rel_path}`"
+                            ));
+                        }
+                    }
+                }
+            }
+            update_toml_depths(code_part, &mut brace_depth, &mut bracket_depth);
+        } else if section == "[lints]" && code_part != "workspace = true" {
+            return Err(format!(
+                "{crate_name}/Cargo.toml `[lints]` only permits `workspace = true`, found `{code_part}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_tui_main_no_pub_items_and_no_macros(rel_path: &str, source: &str) -> Result<(), String> {
+    let tokens = tokenize_rust(source);
+    let mut scopes = vec![ScopeKind::Root { public: true }];
+    let mut attrs = AttrFlags::default();
+    let mut i = 0_usize;
+
+    while i < tokens.len() {
+        let in_cfg_test = scopes.iter().any(|s| match s {
+            ScopeKind::Root { .. } => false,
+            ScopeKind::Module { cfg_test, .. }
+            | ScopeKind::InherentImpl { cfg_test, .. }
+            | ScopeKind::TraitImpl { cfg_test, .. }
+            | ScopeKind::Block { cfg_test } => *cfg_test,
+        });
+
+        if matches!(&tokens[i], Tok::Pound) {
+            if !in_cfg_test && !attrs.cfg_test && tokens.get(i + 1) == Some(&Tok::LBracket) {
+                let mut d = 1_usize;
+                let mut j = i + 2;
+                while j < tokens.len() && d > 0 {
+                    match tokens[j] {
+                        Tok::LBracket => d += 1,
+                        Tok::RBracket => d -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let inner = &tokens[i + 2..j.saturating_sub(1)];
+                if inner
+                    .iter()
+                    .any(|t| matches!(t, Tok::Ident(s) if s == "macro_export"))
+                {
+                    return Err(format!(
+                        "{rel_path}: `#[macro_export]` is forbidden in `league-tui` host binary"
+                    ));
+                }
+            }
+            i = parse_tok_attr(&tokens, i, &mut attrs);
+            continue;
+        }
+
+        match &tokens[i] {
+            Tok::RBrace => {
+                if scopes.len() > 1 {
+                    scopes.pop();
+                }
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::LBrace => {
+                scopes.push(ScopeKind::Block {
+                    cfg_test: attrs.cfg_test,
+                });
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            Tok::Semi => {
+                attrs = AttrFlags::default();
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if in_cfg_test || attrs.cfg_test {
+            if matches!(
+                tokens[i],
+                Tok::Ident(ref s)
+                    if matches!(s.as_str(), "mod" | "fn" | "impl" | "struct" | "enum" | "trait")
+            ) {
+                let mut j = i + 1;
+                while j < tokens.len() && !matches!(tokens[j], Tok::LBrace | Tok::Semi) {
+                    j += 1;
+                }
+                if j < tokens.len() && matches!(tokens[j], Tok::LBrace) {
+                    scopes.push(ScopeKind::Block { cfg_test: true });
+                    attrs = AttrFlags::default();
+                    i = j + 1;
+                    continue;
+                }
+                attrs = AttrFlags::default();
+                i = (j + 1).min(tokens.len());
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if matches!(&tokens[i], Tok::Ident(s) if s == "macro_rules")
+            && matches!(tokens.get(i + 1), Some(Tok::Bang))
+        {
+            return Err(format!(
+                "{rel_path}: `macro_rules!` is forbidden in `league-tui` host binary"
+            ));
+        }
+
+        if rel_path == "src/main.rs"
+            && matches!(&tokens[i], Tok::Ident(s) if s == "pub")
+            && !matches!(tokens.get(i + 1), Some(Tok::LParen))
+        {
+            return Err(format!(
+                "{rel_path}: `league-tui` crate root `src/main.rs` must not expose `pub` items outside `#[cfg(test)]`"
+            ));
+        }
+
+        i += 1;
+    }
+
+    Ok(())
+}
+
+fn load_crate_rs_files(crate_dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let mut rs_files = Vec::new();
+    collect_rs_files_recursive(crate_dir, &mut rs_files);
+    rs_files.sort();
+    let mut loaded = Vec::with_capacity(rs_files.len());
+    for rs_path in rs_files {
+        let src = fs::read_to_string(&rs_path)
+            .map_err(|err| format!("failed to read {}: {err}", rs_path.display()))?;
+        let rel_in_crate = rs_path
+            .strip_prefix(crate_dir)
+            .ok()
+            .and_then(|p| p.to_str())
+            .map(|s| s.replace('\\', "/"))
+            .unwrap_or_else(|| rs_path.display().to_string());
+        loaded.push((rel_in_crate, src));
+    }
+    Ok(loaded)
 }
 
 fn check_workspace_manifests_and_crate_sources(
@@ -4287,28 +6651,120 @@ fn check_workspace_manifests_and_crate_sources(
                         .to_owned(),
                 );
             }
-            let mut rs_files = Vec::new();
-            collect_rs_files_recursive(&crate_dir, &mut rs_files);
-            rs_files.sort();
-            for rs_path in rs_files {
-                let src = fs::read_to_string(&rs_path)
-                    .map_err(|err| format!("failed to read {}: {err}", rs_path.display()))?;
-                let rel_in_crate = rs_path
-                    .strip_prefix(&crate_dir)
-                    .ok()
-                    .and_then(|p| p.to_str())
-                    .map(|s| s.replace('\\', "/"))
-                    .unwrap_or_else(|| rs_path.display().to_string());
-                scan_non_core_crate_aliases_and_reexports(
-                    &rel_in_crate,
+            let loaded = load_crate_rs_files(&crate_dir)?;
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
+            for (rel_in_crate, src) in &loaded {
+                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+                    rel_in_crate,
                     rel_in_crate == "src/lib.rs",
-                    &src,
+                    src,
                     false,
+                    &crate_aliases,
                 )?;
+            }
+        } else if crate_name == "league-seat-types" {
+            check_seat_crate_manifest(
+                "league-seat-types",
+                &manifest,
+                &[
+                    ("league-error", Some("../league-error")),
+                    ("serde", None),
+                    ("serde_json", None),
+                ],
+            )?;
+            if let Some((chain, edge_secs, hit)) = find_dep_path_to_forbidden(
+                &crate_name,
+                &all_edges,
+                &["league-core", "league-gen", "league-standalone"],
+            ) {
+                if chain.len() == 2 {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml must not depend on `{hit}` on any dependency edge (found in `{edge_secs}`)"
+                    ));
+                }
+                return Err(format!(
+                    "{crate_name}/Cargo.toml must not reach `{hit}` transitively via workspace dependencies ({} via `{edge_secs}`)",
+                    chain.join(" -> ")
+                ));
+            }
+            check_seat_crate_no_io_or_includes(&crate_name, &crate_dir)?;
+            let loaded = load_crate_rs_files(&crate_dir)?;
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
+            for (rel_in_crate, src) in &loaded {
+                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+                    rel_in_crate,
+                    rel_in_crate == "src/lib.rs",
+                    src,
+                    true,
+                    &crate_aliases,
+                )?;
+                for tok in tokenize_rust(src) {
+                    if let Tok::Ident(ident) = tok
+                        && FORBIDDEN_SEAT_IDENTIFIERS.contains(&ident.as_str())
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_in_crate}: references forbidden engine/host symbol `{ident}`"
+                        ));
+                    }
+                }
+            }
+        } else if crate_name == "league-seat-ui" {
+            check_seat_crate_manifest(
+                "league-seat-ui",
+                &manifest,
+                &[
+                    ("crossterm", None),
+                    ("league-seat-types", Some("../league-seat-types")),
+                    ("ratatui", None),
+                ],
+            )?;
+            if let Some((chain, edge_secs, hit)) = find_dep_path_to_forbidden(
+                &crate_name,
+                &all_edges,
+                &["league-core", "league-gen", "league-standalone"],
+            ) {
+                if chain.len() == 2 {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml must not depend on `{hit}` on any dependency edge (found in `{edge_secs}`)"
+                    ));
+                }
+                return Err(format!(
+                    "{crate_name}/Cargo.toml must not reach `{hit}` transitively via workspace dependencies ({} via `{edge_secs}`)",
+                    chain.join(" -> ")
+                ));
+            }
+            check_seat_crate_no_io_or_includes(&crate_name, &crate_dir)?;
+            let loaded = load_crate_rs_files(&crate_dir)?;
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
+            let local_types = collect_seat_ui_local_types(&loaded);
+            for (rel_in_crate, src) in &loaded {
+                for tok in tokenize_rust(src) {
+                    if let Tok::Ident(ident) = tok
+                        && FORBIDDEN_SEAT_IDENTIFIERS.contains(&ident.as_str())
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_in_crate}: references forbidden engine/host symbol `{ident}`"
+                        ));
+                    }
+                }
+                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+                    rel_in_crate,
+                    rel_in_crate == "src/lib.rs",
+                    src,
+                    true,
+                    &crate_aliases,
+                )?;
+                check_seat_ui_public_surface(rel_in_crate, src, &local_types)?;
             }
         } else {
             if crate_name == "league-error" {
                 check_league_error_leaf_manifest(&manifest)?;
+            }
+            if crate_name == "league-tui" && crate_dir.join("src/lib.rs").exists() {
+                return Err(
+                    "league-tui must be a binary host crate without `src/lib.rs` (seat code lives in `league-seat-ui`)"
+                        .to_owned(),
+                );
             }
             let mut section = String::new();
             for raw_line in manifest.lines() {
@@ -4336,6 +6792,12 @@ fn check_workspace_manifests_and_crate_sources(
                         "{crate_name}/Cargo.toml must not depend on or reference `league-core` (in `{section}`)"
                     ));
                 }
+                if crate_name == "league-tui" && section == "[lib]" {
+                    return Err(
+                        "league-tui/Cargo.toml must be binary-only (`[lib]` is forbidden)"
+                            .to_owned(),
+                    );
+                }
                 if crate_name == "league-tui" && code_part.contains("league-standalone") {
                     return Err(
                         "league-tui/Cargo.toml must not depend on `league-standalone`".to_owned(),
@@ -4343,45 +6805,51 @@ fn check_workspace_manifests_and_crate_sources(
                 }
             }
 
-            if (crate_name == "league-ledger" || crate_name == "league-relay")
-                && let Some((chain, edge_secs)) =
-                    find_dep_path_to_league_core(&crate_name, &all_edges)
+            let forbidden_for_crate: &[&str] = if crate_name == "league-error" {
+                &["league-core", "league-gen", "league-standalone"]
+            } else if crate_name == "league-ledger" || crate_name == "league-relay" {
+                &["league-core"]
+            } else {
+                &[]
+            };
+            if !forbidden_for_crate.is_empty()
+                && let Some((chain, edge_secs, hit)) =
+                    find_dep_path_to_forbidden(&crate_name, &all_edges, forbidden_for_crate)
             {
                 if chain.len() == 2 {
                     return Err(format!(
-                        "{crate_name}/Cargo.toml must not depend on `league-core` on any dependency edge (found in `{edge_secs}`)"
+                        "{crate_name}/Cargo.toml must not depend on `{hit}` on any dependency edge (found in `{edge_secs}`)"
                     ));
                 }
                 return Err(format!(
-                    "{crate_name}/Cargo.toml must not reach `league-core` transitively via workspace dependencies ({} via `{edge_secs}`)",
+                    "{crate_name}/Cargo.toml must not reach `{hit}` transitively via workspace dependencies ({} via `{edge_secs}`)",
                     chain.join(" -> ")
                 ));
             }
 
-            let mut rs_files = Vec::new();
-            collect_rs_files_recursive(&crate_dir, &mut rs_files);
-            rs_files.sort();
+            let loaded = load_crate_rs_files(&crate_dir)?;
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
             let is_non_seat_crate = NON_SEAT_WORKSPACE_CRATES.contains(&crate_name.as_str());
             let mut seat_files: Vec<(String, String)> = Vec::new();
 
-            for rs_path in rs_files {
-                let src = fs::read_to_string(&rs_path)
-                    .map_err(|err| format!("failed to read {}: {err}", rs_path.display()))?;
-                let rel_in_crate = rs_path
-                    .strip_prefix(&crate_dir)
-                    .ok()
-                    .and_then(|p| p.to_str())
-                    .map(|s| s.replace('\\', "/"))
-                    .unwrap_or_else(|| rs_path.display().to_string());
-
-                scan_non_core_crate_aliases_and_reexports(
+            for (rel_in_crate, src) in loaded {
+                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
                     &rel_in_crate,
                     rel_in_crate == "src/lib.rs",
                     &src,
-                    !is_non_seat_crate,
+                    !is_non_seat_crate || crate_name == "league-tui",
+                    &crate_aliases,
                 )?;
 
-                if is_non_seat_crate {
+                if crate_name == "league-tui" {
+                    if !is_tui_host_module(&rel_in_crate) && !rel_in_crate.starts_with("tests/") {
+                        return Err(format!(
+                            "league-tui/{rel_in_crate}: unexpected non-host module in `league-tui` binary host (seat logic belongs in `league-seat-ui`)"
+                        ));
+                    }
+                    scan_tui_host_module_source(&rel_in_crate, &src)?;
+                    check_tui_main_no_pub_items_and_no_macros(&rel_in_crate, &src)?;
+                } else if is_non_seat_crate {
                     for tok in tokenize_rust(&src) {
                         if let Tok::Ident(ident) = tok
                             && (ident == "engine_internals"
@@ -4389,13 +6857,10 @@ fn check_workspace_manifests_and_crate_sources(
                                 || FORBIDDEN_RAW_FNS.contains(&ident.as_str()))
                         {
                             return Err(format!(
-                                "{} references forbidden engine-internal symbol `{ident}`",
-                                rs_path.display()
+                                "{crate_name}/{rel_in_crate} references forbidden engine-internal symbol `{ident}`"
                             ));
                         }
                     }
-                } else if crate_name == "league-tui" && is_tui_host_module(&rel_in_crate) {
-                    scan_tui_host_module_source(&rel_in_crate, &src)?;
                 } else {
                     seat_files.push((rel_in_crate, src));
                 }
@@ -4417,6 +6882,8 @@ fn check_workspace_manifests_and_crate_sources(
         "league-ledger",
         "league-relay",
         "league-season",
+        "league-seat-types",
+        "league-seat-ui",
         "league-standalone",
         "league-tui",
     ] {
@@ -4478,6 +6945,8 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         "league-ledger",
         "league-relay",
         "league-season",
+        "league-seat-types",
+        "league-seat-ui",
         "league-standalone",
         "league-tui",
     ];
@@ -4489,10 +6958,39 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         root.join("Cargo.toml"),
         format!("[workspace]\nmembers = [\n{members_toml}]\n"),
     )?;
+    let seat_clippy_toml = concat!(
+        "disallowed-types = [\n",
+        "    { path = \"std::fs::File\" },\n",
+        "    { path = \"std::process::Command\" },\n",
+        "]\n",
+        "disallowed-methods = [\n",
+        "    { path = \"std::fs::read\" },\n",
+        "    { path = \"std::fs::read_to_string\" },\n",
+        "    { path = \"std::env::var\" },\n",
+        "]\n",
+        "disallowed-macros = [\n",
+        "    { path = \"std::include\" },\n",
+        "    { path = \"std::include_str\" },\n",
+        "    { path = \"std::include_bytes\" },\n",
+        "]\n",
+    );
+    let seat_lib_stub = concat!(
+        "#![deny(clippy::disallowed_methods)]\n",
+        "#![deny(clippy::disallowed_types)]\n",
+        "#![deny(clippy::disallowed_macros)]\n",
+        "pub fn ok() {}\n",
+    );
     for name in member_names {
         let crate_dir = root.join("crates").join(name);
         fs::create_dir_all(crate_dir.join("src"))?;
-        fs::write(crate_dir.join("src/lib.rs"), "// clean stub\n")?;
+        if name == "league-tui" {
+            fs::write(crate_dir.join("src/main.rs"), "fn main() {}\n")?;
+        } else if name == "league-seat-types" || name == "league-seat-ui" {
+            fs::write(crate_dir.join("clippy.toml"), seat_clippy_toml)?;
+            fs::write(crate_dir.join("src/lib.rs"), seat_lib_stub)?;
+        } else {
+            fs::write(crate_dir.join("src/lib.rs"), "// clean stub\n")?;
+        }
     }
     fs::write(
         root.join("crates/league-core/Cargo.toml"),
@@ -4506,18 +7004,29 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         root.join("crates/league-gen/Cargo.toml"),
         "[package]\nname = \"league-gen\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
     )?;
+    fs::write(
+        root.join("crates/league-seat-types/Cargo.toml"),
+        "[package]\nname = \"league-seat-types\"\n[dependencies]\nleague-error = { path = \"../league-error\" }\n",
+    )?;
+    fs::write(
+        root.join("crates/league-seat-ui/Cargo.toml"),
+        "[package]\nname = \"league-seat-ui\"\n[dependencies]\nleague-seat-types = { path = \"../league-seat-types\" }\n",
+    )?;
     for name in [
         "league-error",
         "league-ledger",
         "league-relay",
         "league-season",
-        "league-tui",
     ] {
         fs::write(
             root.join("crates").join(name).join("Cargo.toml"),
             format!("[package]\nname = \"{name}\"\n"),
         )?;
     }
+    fs::write(
+        root.join("crates/league-tui/Cargo.toml"),
+        "[package]\nname = \"league-tui\"\n[[bin]]\nname = \"league-tui\"\npath = \"src/main.rs\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\nleague-seat-ui = { path = \"../league-seat-ui\" }\n",
+    )?;
     Ok(())
 }
 
@@ -4564,6 +7073,8 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         Err(err) => panic!("workspace engine-internals isolation check failed: {err}"),
     };
     assert!(checked_crates.contains(&"league-error".to_owned()));
+    assert!(checked_crates.contains(&"league-seat-types".to_owned()));
+    assert!(checked_crates.contains(&"league-seat-ui".to_owned()));
     assert!(checked_crates.contains(&"league-tui".to_owned()));
     assert!(checked_crates.contains(&"league-relay".to_owned()));
 
@@ -4676,22 +7187,22 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     }
     assert!(check_workspace_manifests_and_crate_sources(&case_g2).is_err());
 
-    // Control H: `league-tui/src/lib.rs` imports `engine_internals` -> Err; comment near-miss -> Ok.
+    // Control H: `league-seat-ui/src/lib.rs` imports `engine_internals` -> Err; comment near-miss -> Ok.
     let case_h = tmp_root.join("case_h");
     if let Err(err) = write_minimal_workspace_tree(&case_h) {
         panic!("setup case_h: {err}");
     }
     if let Err(err) = fs::write(
-        case_h.join("crates/league-tui/src/lib.rs"),
-        "// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
+        case_h.join("crates/league-seat-ui/src/lib.rs"),
+        "#![deny(clippy::disallowed_methods)]\n#![deny(clippy::disallowed_types)]\n#![deny(clippy::disallowed_macros)]\n// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
     ) {
         panic!("write case_h ok: {err}");
     }
     assert!(check_workspace_manifests_and_crate_sources(&case_h).is_ok());
 
     if let Err(err) = fs::write(
-        case_h.join("crates/league-tui/src/lib.rs"),
-        "use league_core::engine_internals;\n",
+        case_h.join("crates/league-seat-ui/src/lib.rs"),
+        "#![deny(clippy::disallowed_methods)]\n#![deny(clippy::disallowed_types)]\n#![deny(clippy::disallowed_macros)]\nuse league_core::engine_internals;\n",
     ) {
         panic!("write case_h bad: {err}");
     }
@@ -4707,7 +7218,7 @@ fn planted_seat_control_1_names_turn_engine_fails() {
         panic!("setup workspace: {err}");
     }
     if let Err(err) = fs::write(
-        root.join("crates/league-tui/src/ui.rs"),
+        root.join("crates/league-seat-ui/src/ui.rs"),
         "pub fn render_bad(engine: &league_core::TurnEngine) {}\n",
     ) {
         panic!("write ui.rs: {err}");
@@ -4744,7 +7255,7 @@ fn planted_seat_control_2_names_engine_state_fails() {
     if let Err(err) = write_minimal_workspace_tree(&root) {
         panic!("setup workspace: {err}");
     }
-    let screens_dir = root.join("crates/league-tui/src/screens");
+    let screens_dir = root.join("crates/league-seat-ui/src/screens");
     if let Err(err) = fs::create_dir_all(&screens_dir) {
         panic!("create screens_dir: {err}");
     }
@@ -4787,8 +7298,8 @@ fn planted_seat_control_3_names_engine_internals_fails() {
         panic!("setup workspace: {err}");
     }
     if let Err(err) = fs::write(
-        root.join("crates/league-tui/src/render.rs"),
-        "pub fn peek_hints() { let _ = std::any::type_name::<fn()>(); let _ = league_core::engine_internals::SweepMode::Live; }\n",
+        root.join("crates/league-seat-ui/src/render.rs"),
+        "pub fn peek_hints() { let _ = league_core::engine_internals::SweepMode::Live; }\n",
     ) {
         panic!("write render.rs: {err}");
     }
@@ -5048,6 +7559,8 @@ members = [
     "crates/league-ledger",
     "crates/league-relay",
     "crates/league-season",
+    "crates/league-seat-types",
+    "crates/league-seat-ui",
     "crates/league-standalone",
     "crates/league-tui",
     "tools/extra-seat",
@@ -5236,7 +7749,7 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
     );
     let _ = fs::write(
         root.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         root.join("crates/league-relay/Cargo.toml"),
@@ -5276,13 +7789,15 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
 
 #[test]
 fn planted_b1_tui_host_module_separation_and_4_club_host_routes_fail() {
-    // Positive check: `src/host.rs` and `src/main.rs` MAY touch `ClubHost`, `ClubSaveSnapshot`,
-    // `mandate_for_seat`, and `write_save_and_seal` / `read_save_and_seal` / `wipe_seal_file`.
+    // Positive check: `league-tui` binary host (`src/host.rs` and `src/main.rs`) MAY touch
+    // `ClubHost`, `ClubSaveSnapshot`, `mandate_for_seat`, and `write_save_and_seal` /
+    // `read_save_and_seal` / `wipe_seal_file` while seat rendering lives cleanly in `league-seat-ui`.
     let clean_host_ws = unique_tmp_dir("tui_host_modules_ok");
     if let Err(err) = write_minimal_workspace_tree(&clean_host_ws) {
         panic!("setup workspace: {err}");
     }
     let tui_src = clean_host_ws.join("crates/league-tui/src");
+    let seat_ui_src = clean_host_ws.join("crates/league-seat-ui/src");
     let _ = fs::write(
         tui_src.join("host.rs"),
         "use league_core::{ClubHost, ClubSaveSnapshot, Seat};\npub fn run_host(h: &mut ClubHost) { let _ = h.mandate_for_seat(Seat(0)); }\npub fn io_snap(s: &ClubSaveSnapshot) { let _ = s; }\n",
@@ -5292,14 +7807,14 @@ fn planted_b1_tui_host_module_separation_and_4_club_host_routes_fail() {
         "use league_core::ClubHost;\nfn main() { let _ = std::mem::size_of::<ClubHost>(); }\n",
     );
     let _ = fs::write(
-        tui_src.join("app.rs"),
-        "use league_core::{PublicSweepReceipt, SeatObservation};\npub struct AppState { pub seat_idx: u8 }\nimpl AppState { pub fn render(&self, _obs: &SeatObservation, _r: &PublicSweepReceipt) {} }\n",
+        seat_ui_src.join("app.rs"),
+        "use league_seat_types::{PublicSweepReceipt, SeatObservation};\npub struct AppState { pub seat_idx: u8 }\nimpl AppState { pub fn render(&self, _obs: &SeatObservation, _r: &PublicSweepReceipt) {} }\n",
     );
     if let Err(err) = check_workspace_manifests_and_crate_sources(&clean_host_ws) {
-        panic!("named TUI host modules (host.rs, main.rs) + clean seat app.rs must pass: {err}");
+        panic!("binary TUI host (host.rs, main.rs) + clean seat UI crate must pass: {err}");
     }
 
-    // Even in `src/host.rs`, raw engine types & raw seal byte helpers stay blocked.
+    // Even in `league-tui/src/host.rs`, raw engine types & raw seal byte helpers stay blocked.
     let _ = fs::write(
         tui_src.join("host.rs"),
         "pub fn bad_seal(h: &league_core::ClubHost) { let _ = h.to_save_and_seal_bytes(); }\n",
@@ -5312,9 +7827,40 @@ fn planted_b1_tui_host_module_separation_and_4_club_host_routes_fail() {
         host_seal_err.contains("to_save_and_seal_bytes"),
         "{host_seal_err}"
     );
+    let _ = fs::write(tui_src.join("host.rs"), "pub fn clean_host() {}\n");
+
+    // Host `#[macro_export]` macro and `main.rs` `pub fn` and `src/lib.rs` in `league-tui` all fail.
+    let _ = fs::write(
+        tui_src.join("host.rs"),
+        "#[macro_export]\nmacro_rules! rival { ($s:expr) => { $s }; }\n",
+    );
+    let macro_err = check_workspace_manifests_and_crate_sources(&clean_host_ws)
+        .err()
+        .unwrap_or_else(|| panic!("league-tui macro_export must fail guard"));
+    println!("PLANTED_HOST_MOD_MACRO_EXPORT => {macro_err}");
+    assert!(macro_err.contains("macro_export"), "{macro_err}");
+    let _ = fs::write(tui_src.join("host.rs"), "pub fn clean_host() {}\n");
+
+    let _ = fs::write(
+        tui_src.join("main.rs"),
+        "pub fn host_ref() -> &'static league_core::ClubHost { loop {} }\nfn main() {}\n",
+    );
+    let main_pub_err = check_workspace_manifests_and_crate_sources(&clean_host_ws)
+        .err()
+        .unwrap_or_else(|| panic!("league-tui/src/main.rs pub fn must fail guard"));
+    println!("PLANTED_TUI_MAIN_PUB_FN => {main_pub_err}");
+    assert!(main_pub_err.contains("src/main.rs"), "{main_pub_err}");
+    let _ = fs::write(tui_src.join("main.rs"), "fn main() {}\n");
+
+    let _ = fs::write(tui_src.join("lib.rs"), "pub fn sneak() {}\n");
+    let lib_err = check_workspace_manifests_and_crate_sources(&clean_host_ws)
+        .err()
+        .unwrap_or_else(|| panic!("league-tui src/lib.rs must fail binary-only guard"));
+    println!("PLANTED_TUI_BIN_ONLY_LIB_RS => {lib_err}");
+    assert!(lib_err.contains("src/lib.rs"), "{lib_err}");
     let _ = fs::remove_dir_all(&clean_host_ws);
 
-    // 4 planted `ClubHost` routes in non-host TUI files (including `src/app.rs` & `src/widgets/`).
+    // 4 planted `ClubHost` routes in seat crate `league-seat-ui`.
     let club_host_routes: [(&str, &str, &str); 4] = [
         (
             "route1_named_in_seat_module",
@@ -5339,18 +7885,18 @@ fn planted_b1_tui_host_module_separation_and_4_club_host_routes_fail() {
     ];
 
     for (label, rel_file, source) in club_host_routes {
-        let root = unique_tmp_dir(&format!("b1_tui_{label}"));
+        let root = unique_tmp_dir(&format!("b1_seat_{label}"));
         if let Err(err) = write_minimal_workspace_tree(&root) {
             panic!("setup workspace: {err}");
         }
-        let target = root.join("crates/league-tui").join(rel_file);
+        let target = root.join("crates/league-seat-ui").join(rel_file);
         if let Some(parent) = target.parent() {
             let _ = fs::create_dir_all(parent);
         }
         let _ = fs::write(&target, source);
         let err = check_workspace_manifests_and_crate_sources(&root)
             .err()
-            .unwrap_or_else(|| panic!("TUI ClubHost route `{label}` must fail guard"));
+            .unwrap_or_else(|| panic!("seat UI ClubHost route `{label}` must fail guard"));
         println!("PLANTED_CLUB_HOST_ROUTE {label} ({rel_file}) => {err}");
         assert!(
             err.contains("ClubHost"),
@@ -5359,22 +7905,22 @@ fn planted_b1_tui_host_module_separation_and_4_club_host_routes_fail() {
         let _ = fs::remove_dir_all(&root);
     }
 
-    // Two-file route 3: `App` defined in `src/state.rs` (holds `ClubHost`), `impl App { pub fn x(&self) {} }` in `src/render.rs`.
-    let split_root = unique_tmp_dir("b1_tui_split_self");
+    // Two-file route 3: `App` defined in `src/state.rs` (holds `ClubHost`), `impl App` in `src/render.rs`.
+    let split_root = unique_tmp_dir("b1_seat_split_self");
     if let Err(err) = write_minimal_workspace_tree(&split_root) {
         panic!("setup workspace: {err}");
     }
     let _ = fs::write(
-        split_root.join("crates/league-tui/src/state.rs"),
+        split_root.join("crates/league-seat-ui/src/state.rs"),
         "pub struct App { host: league_core::ClubHost }\n",
     );
     let _ = fs::write(
-        split_root.join("crates/league-tui/src/render.rs"),
+        split_root.join("crates/league-seat-ui/src/render.rs"),
         "use crate::state::App;\nimpl App { pub fn x(&self) {} }\n",
     );
     let split_err = check_workspace_manifests_and_crate_sources(&split_root)
         .err()
-        .unwrap_or_else(|| panic!("two-file tainted &self method must fail guard"));
+        .unwrap_or_else(|| panic!("two-file ClubHost struct in seat UI must fail guard"));
     println!("PLANTED_CLUB_HOST_ROUTE split_self_method => {split_err}");
     assert!(split_err.contains("ClubHost"), "{split_err}");
     let _ = fs::remove_dir_all(&split_root);
@@ -5415,7 +7961,7 @@ fn planted_b1_rival_mandate_and_save_fork_routes_in_seat_code_fail() {
         if let Err(err) = write_minimal_workspace_tree(&root) {
             panic!("setup workspace: {err}");
         }
-        let target = root.join("crates/league-tui").join(rel_file);
+        let target = root.join("crates/league-seat-ui").join(rel_file);
         if let Some(parent) = target.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -5628,7 +8174,7 @@ fn planted_c3_league_relay_and_future_ai_seat_crate_enforced_by_seat_rule() {
     );
     let _ = fs::write(
         seat_ws.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         ai_seat_dir.join("src/lib.rs"),
@@ -5647,4 +8193,358 @@ fn planted_c3_league_relay_and_future_ai_seat_crate_enforced_by_seat_rule() {
     println!("PLANTED_C3 future_ai_seat_ClubHost => {err}");
     assert!(err.contains("ClubHost"), "unexpected error: {err}");
     let _ = fs::remove_dir_all(&seat_ws);
+}
+
+#[test]
+fn planted_item4_seat_crates_forbidden_dep_edges_all_fail() {
+    let base_deps = |seat_crate: &str| -> &'static str {
+        if seat_crate == "league-seat-types" {
+            "league-error = { path = \"../league-error\" }\n"
+        } else {
+            "league-seat-types = { path = \"../league-seat-types\" }\n"
+        }
+    };
+
+    let dep_routes: [(&str, &str); 11] = [
+        (
+            "normal_league_core",
+            "[dependencies]\n{base}league-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "normal_league_gen",
+            "[dependencies]\n{base}league-gen = { path = \"../league-gen\" }\n",
+        ),
+        (
+            "normal_league_standalone",
+            "[dependencies]\n{base}league-standalone = { path = \"../league-standalone\" }\n",
+        ),
+        (
+            "dev_dep_league_core",
+            "[dependencies]\n{base}[dev-dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "build_dep_league_core",
+            "[dependencies]\n{base}[build-dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "target_windows_league_core",
+            "[dependencies]\n{base}[target.'cfg(windows)'.dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "target_linux_league_core",
+            "[dependencies]\n{base}[target.'cfg(linux)'.dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "optional_league_core",
+            "[dependencies]\n{base}league-core = { path = \"../league-core\", optional = true }\n",
+        ),
+        (
+            "optional_serde_flag",
+            "[dependencies]\n{base}serde = { version = \"1.0.229\", optional = true }\n",
+        ),
+        (
+            "renamed_package_league_core",
+            "[dependencies]\n{base}lc = { package = \"league-core\", path = \"../league-core\" }\n",
+        ),
+        (
+            "indirect_via_league_season",
+            "[dependencies]\n{base}league-season = { path = \"../league-season\" }\n",
+        ),
+    ];
+
+    for seat_crate in ["league-seat-types", "league-seat-ui"] {
+        for (label, template) in dep_routes {
+            let root = unique_tmp_dir(&format!("item4_{seat_crate}_{label}"));
+            if let Err(err) = write_minimal_workspace_tree(&root) {
+                panic!("setup workspace: {err}");
+            }
+            if label == "indirect_via_league_season" {
+                let _ = fs::write(
+                    root.join("crates/league-season/Cargo.toml"),
+                    "[package]\nname = \"league-season\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+                );
+            }
+            let manifest = format!(
+                "[package]\nname = \"{seat_crate}\"\n{}",
+                template.replace("{base}", base_deps(seat_crate))
+            );
+            let _ = fs::write(
+                root.join("crates").join(seat_crate).join("Cargo.toml"),
+                manifest,
+            );
+            let err = check_workspace_manifests_and_crate_sources(&root)
+                .err()
+                .unwrap_or_else(|| panic!("{seat_crate} `{label}` must fail guard"));
+            println!("PLANTED_SEAT_DEP {seat_crate}:{label} => {err}");
+            assert!(err.contains(seat_crate), "unexpected error: {err}");
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+}
+
+#[test]
+fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() {
+    let hdr = concat!(
+        "#![deny(clippy::disallowed_methods)]\n",
+        "#![deny(clippy::disallowed_types)]\n",
+        "#![deny(clippy::disallowed_macros)]\n",
+        "use league_seat_types::SeatObservation;\n",
+        "use ratatui::Frame;\n",
+    );
+
+    // Lifetimes ARE allowed on both structs and public functions.
+    let ok_root = unique_tmp_dir("item5_lifetimes_ok");
+    if let Err(err) = write_minimal_workspace_tree(&ok_root) {
+        panic!("setup workspace: {err}");
+    }
+    let _ = fs::write(
+        ok_root.join("crates/league-seat-ui/src/lib.rs"),
+        format!(
+            "{hdr}pub struct SeatPanel<'a> {{ pub obs: &'a SeatObservation }}\npub fn render_panel<'a>(_frame: &mut Frame<'_>, _p: SeatPanel<'a>) {{}}\n"
+        ),
+    );
+    if let Err(err) = check_workspace_manifests_and_crate_sources(&ok_root) {
+        panic!("lifetime-only public surface in league-seat-ui must pass: {err}");
+    }
+    let _ = fs::remove_dir_all(&ok_root);
+
+    let bad_surfaces: [(&str, &str); 8] = [
+        ("generic_struct", "pub struct App<T> { pub inner: T }\n"),
+        ("generic_pub_fn", "pub fn render_generic<T>(_x: T) {}\n"),
+        (
+            "box_dyn_field",
+            "pub struct DynApp { inner: Box<dyn std::fmt::Display> }\n",
+        ),
+        (
+            "dyn_param",
+            "pub fn render_dyn(_x: &dyn std::fmt::Display) {}\n",
+        ),
+        (
+            "impl_trait_param",
+            "pub fn render_impl(_x: impl std::fmt::Display) {}\n",
+        ),
+        (
+            "closure_box_dyn_fn_field",
+            "pub struct ClosureApp { f: Box<dyn Fn(u8) -> String> }\n",
+        ),
+        (
+            "fn_mut_param",
+            "pub fn render_fn_mut(_f: &mut dyn FnMut(u8)) {}\n",
+        ),
+        (
+            "pub_trait_decl",
+            "pub trait Peek { fn rival(&self, seat: u8) -> String; }\n",
+        ),
+    ];
+
+    for (label, body) in bad_surfaces {
+        let root = unique_tmp_dir(&format!("item5_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-seat-ui/src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("item5 `{label}` must fail league-seat-ui surface guard"));
+        println!("PLANTED_ITEM5_SURFACE {label} => {err}");
+        assert!(!err.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn planted_item6_seat_crates_ban_fs_env_process_include_and_path_attr() {
+    let hdr = concat!(
+        "#![deny(clippy::disallowed_methods)]\n",
+        "#![deny(clippy::disallowed_types)]\n",
+        "#![deny(clippy::disallowed_macros)]\n",
+    );
+
+    type IoPlant<'a> = (&'a str, Option<(&'a str, &'a str)>, &'a str);
+    let io_plants: [IoPlant<'_>; 9] = [
+        (
+            "std_fs_read_seal",
+            None,
+            "pub fn peek_seal() -> Vec<u8> { std::fs::read(\"x.seal\").unwrap_or_default() }\n",
+        ),
+        ("use_std_fs_file", None, "use std::fs::File;\n"),
+        (
+            "std_env_var",
+            None,
+            "pub fn read_env() { let _ = std::env::var(\"KEY\"); }\n",
+        ),
+        ("std_process_command", None, "use std::process::Command;\n"),
+        ("include_macro", None, "include!(\"peek.inc\");\n"),
+        (
+            "include_str_macro",
+            None,
+            "pub const S: &str = include_str!(\"peek.inc\");\n",
+        ),
+        (
+            "include_bytes_macro",
+            None,
+            "pub const B: &[u8] = include_bytes!(\"peek.inc\");\n",
+        ),
+        ("path_attr", None, "#[path = \"peek.inc\"]\nmod r_path;\n"),
+        (
+            "non_rs_file_in_src",
+            Some(("src/peek.inc", "pub fn leak() {}\n")),
+            "pub fn ok() {}\n",
+        ),
+    ];
+
+    for seat_crate in ["league-seat-types", "league-seat-ui"] {
+        for (label, extra_file, lib_body) in io_plants {
+            let root = unique_tmp_dir(&format!("item6_{seat_crate}_{label}"));
+            if let Err(err) = write_minimal_workspace_tree(&root) {
+                panic!("setup workspace: {err}");
+            }
+            let crate_dir = root.join("crates").join(seat_crate);
+            let _ = fs::write(crate_dir.join("src/lib.rs"), format!("{hdr}{lib_body}"));
+            if let Some((rel, content)) = extra_file {
+                let _ = fs::write(crate_dir.join(rel), content);
+            }
+            let err = check_workspace_manifests_and_crate_sources(&root)
+                .err()
+                .unwrap_or_else(|| panic!("{seat_crate} `{label}` must fail I/O & include guard"));
+            println!("PLANTED_ITEM6_IO {seat_crate}:{label} => {err}");
+            assert!(err.contains(seat_crate), "unexpected error: {err}");
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+}
+
+#[test]
+fn planted_item7_a2_alias_routes_x3_x3b_x3c_y1_y2_y5_x5_x5b_and_c1_y6_all_fail() {
+    let strict_surface = ExpectedCoreSurface {
+        enforce_exact_surface: true,
+        required_pub_mods: &["club", "engine", "observation"],
+        allowed_pub_mods: &["club", "engine", "observation"],
+        allowed_reexports: &[],
+        allowed_turn_engine_pub_fns: &["observe_seat"],
+        allowed_club_host_pub_fns: Some(&["from_standard_setup"]),
+        allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
+    };
+    let setup_host_core = |dir: &Path| {
+        if let Err(err) = write_minimal_clean_core_tree(dir) {
+            panic!("setup core tree: {err}");
+        }
+        let _ = fs::write(
+            dir.join("lib.rs"),
+            "pub mod club;\npub mod engine;\npub mod observation;\n#[cfg(feature = \"engine-internals\")]\n#[doc(hidden)]\npub mod engine_internals {}\n",
+        );
+        let _ = fs::create_dir_all(dir.join("club"));
+        let _ = fs::write(
+            dir.join("club/mod.rs"),
+            "pub mod host;\npub use host::ClubHost;\n",
+        );
+        let _ = fs::write(
+            dir.join("club/host.rs"),
+            "use crate::TurnEngine;\npub struct ClubHost { engine: TurnEngine }\nimpl ClubHost { pub fn from_standard_setup() {} }\n",
+        );
+    };
+
+    let core_a2_cases: [(&str, &str, &str, &str); 9] = [
+        (
+            "X3_private_use_alias_in_pub_type",
+            "observation.rs",
+            "use crate::engine::EngineState as Es;\npub type SeatView2 = Es;\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "EngineState",
+        ),
+        (
+            "X3_chained_private_type_alias_in_pub_type",
+            "observation.rs",
+            "use crate::engine::EngineState as Es;\ntype Mid = Es;\npub type SeatView3 = Mid;\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "EngineState",
+        ),
+        (
+            "X3c_assoc_type_in_non_host_trait_impl",
+            "observation.rs",
+            "pub trait Peek { type T; }\nimpl Peek for SeatObservation { type T = crate::engine::EngineState; }\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "EngineState",
+        ),
+        (
+            "Y1_type_alias_Hh_for_ClubHost_impl_AsRef",
+            "club/host.rs",
+            "use crate::TurnEngine;\ntype Hh = ClubHost;\npub struct ClubHost { engine: TurnEngine }\nimpl ClubHost { pub fn from_standard_setup() {} }\nimpl AsRef<crate::EngineState> for Hh { fn as_ref(&self) -> &crate::EngineState { loop {} } }\n",
+            "EngineState",
+        ),
+        (
+            "Y2_private_alias_Es_in_AsRef_for_ClubHost",
+            "club/host.rs",
+            "use crate::TurnEngine;\nuse crate::engine::EngineState as Es;\npub struct ClubHost { engine: TurnEngine }\nimpl ClubHost { pub fn from_standard_setup() {} }\nimpl AsRef<Es> for ClubHost { fn as_ref(&self) -> &Es { loop {} } }\n",
+            "EngineState",
+        ),
+        (
+            "Y5_private_alias_Es2_in_Deref_Target",
+            "club/host.rs",
+            "use crate::TurnEngine;\nuse crate::engine::TurnEngine as Es2;\npub struct ClubHost { engine: TurnEngine }\nimpl ClubHost { pub fn from_standard_setup() {} }\nimpl std::ops::Deref for ClubHost { type Target = Es2; fn deref(&self) -> &Self::Target { &self.engine } }\n",
+            "TurnEngine",
+        ),
+        (
+            "X5_pub_tuple_struct_raw_field",
+            "observation.rs",
+            "pub struct Wrap(pub crate::engine::TurnEngine);\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "TurnEngine",
+        ),
+        (
+            "X5_pub_named_struct_aliased_raw_field",
+            "observation.rs",
+            "use crate::engine::EngineState as Es;\npub struct Wrap2 { pub e: Es }\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "EngineState",
+        ),
+        (
+            "C1_Y6_pub_crate_engine_field_message",
+            "club/host.rs",
+            "use crate::TurnEngine;\npub struct ClubHost { pub(crate) engine: TurnEngine }\nimpl ClubHost { pub fn from_standard_setup() {} }\n",
+            "field `engine`",
+        ),
+    ];
+
+    for (label, rel_file, content, expected_substr) in core_a2_cases {
+        let dir = unique_tmp_dir(&format!("item7_{label}"));
+        setup_host_core(&dir);
+        let _ = fs::write(dir.join(rel_file), content);
+        let err = scan_league_core_src_tree_with_surface(&dir, &strict_surface)
+            .err()
+            .unwrap_or_else(|| panic!("item7 `{label}` must fail core guard"));
+        println!("PLANTED_ITEM7_A2 {label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // X3b & X5b in `league-gen` (workspace crate where `league-core` IS visible).
+    for (label, snippet, expected_substr) in [
+        (
+            "X3b_league_gen_private_use_alias_in_pub_type",
+            "use league_core::TurnEngine as Te;\npub type Eng2 = Te;\n",
+            "TurnEngine",
+        ),
+        (
+            "X5b_league_gen_pub_struct_raw_pub_field",
+            "use league_core::EngineState as Es;\npub struct GenWrap { pub e: Es }\n",
+            "EngineState",
+        ),
+    ] {
+        let root = unique_tmp_dir(&format!("item7_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(root.join("crates/league-gen/src/lib.rs"), snippet);
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("item7 `{label}` must fail workspace guard"));
+        println!("PLANTED_ITEM7_A2 {label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 }

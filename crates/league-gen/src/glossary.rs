@@ -6,12 +6,9 @@
 //! `"Clearinghouse Marks [CRED]"`), keeping ledger/engine codes and `GENERATOR_VERSION` unchanged.
 
 use crate::schema::{ALLOWED_COMMODITY_GLOSSARY, CurrencyCode};
-
-/// Default numeraire display label shown when in-world names are enabled.
-pub const NUMERAIRE_DISPLAY_LABEL: &str = "Clearinghouse Marks [CRED]";
-
-/// Plain-code numeraire label shown when `--plain-codes` / plain-code mode is toggled on.
-pub const NUMERAIRE_PLAIN_LABEL: &str = "CRED";
+pub use league_seat_types::{
+    COMMODITY_DISPLAY_CATALOG, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL,
+};
 
 /// Role-qualified display entry for one allow-listed 3-letter commodity code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,15 +218,43 @@ const ENTRIES: [CommodityEntry; 61] = [
     entry(*b"ZNC", "zinc", "Roasted Zinc Ore", "Cast Guild Zinc"),
 ];
 
+const fn str_eq(a: &str, b: &str) -> bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < ab.len() {
+        if ab[i] != bb[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 const fn catalog_aligned_with_glossary() -> bool {
-    if ENTRIES.len() != ALLOWED_COMMODITY_GLOSSARY.len() {
+    if ENTRIES.len() != ALLOWED_COMMODITY_GLOSSARY.len()
+        || ENTRIES.len() != COMMODITY_DISPLAY_CATALOG.len()
+    {
         return false;
     }
     let mut i = 0;
     while i < ENTRIES.len() {
         let a = ENTRIES[i].code.as_bytes();
         let b = ALLOWED_COMMODITY_GLOSSARY[i].0;
+        let c = &COMMODITY_DISPLAY_CATALOG[i];
         if a[0] != b[0] || a[1] != b[1] || a[2] != b[2] {
+            return false;
+        }
+        if a[0] != c.code_bytes[0] || a[1] != c.code_bytes[1] || a[2] != c.code_bytes[2] {
+            return false;
+        }
+        if !str_eq(ENTRIES[i].glossary_word, c.glossary_word)
+            || !str_eq(ENTRIES[i].raw_name, c.raw_name)
+            || !str_eq(ENTRIES[i].refined_name, c.refined_name)
+        {
             return false;
         }
         i += 1;

@@ -194,7 +194,7 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
         "tampered turn in .save.json must be rejected",
     );
 
-    let mut bad_seal = seal_json;
+    let mut bad_seal = seal_json.clone();
     bad_seal["layout_seed"] = serde_json::json!(8);
     let bad_seal_bytes = must_ok(serde_json::to_vec(&bad_seal), "serialize bad_seal");
     let bad_seal_path = tmp_dir.join("bad-seal.seal");
@@ -205,6 +205,32 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
     let _ = must_err(
         ClubHost::read_save_and_seal(&save_path, &bad_seal_path),
         "tampered layout_seed in .seal must be rejected",
+    );
+
+    // Nit C3: pre-fix v1 seals (lacking `live_state_digests`) must be rejected with
+    // `UnsupportedReplayVersion` rather than silently accepted or failing ambiguously.
+    let mut v1_seal = seal_json;
+    v1_seal["format_version"] = serde_json::json!(1);
+    if let Some(obj) = v1_seal.as_object_mut() {
+        obj.remove("live_state_digests");
+    }
+    let v1_seal_bytes = must_ok(serde_json::to_vec(&v1_seal), "serialize v1_seal");
+    let v1_seal_path = tmp_dir.join("v1-seal.seal");
+    must_ok(
+        std::fs::write(&v1_seal_path, &v1_seal_bytes),
+        "write v1_seal",
+    );
+    let v1_err = must_err(
+        ClubHost::read_save_and_seal(&save_path, &v1_seal_path),
+        "v1 .seal without live_state_digests must be rejected",
+    );
+    assert_eq!(CLUB_SEAL_FORMAT_VERSION, 2);
+    assert_eq!(
+        v1_err,
+        league_core::EngineError::UnsupportedReplayVersion {
+            found: 1,
+            newest_known: 2,
+        }
     );
 
     // Resume via `read_save_and_seal` and drive to close (`24..=32` turns), then compare.
