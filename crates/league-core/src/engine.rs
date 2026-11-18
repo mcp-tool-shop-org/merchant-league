@@ -2591,7 +2591,7 @@ impl TurnEngine {
                                 ob.honor_penalties.saturating_add(vault.amount_cred);
                             self.state.fill_log.push(FillRecord {
                                 turn,
-                                kind: FillKind::EscrowForfeited,
+                                kind: FillKind::EscrowBreachRefunded,
                                 good: Some(AssetId::Cred),
                                 from: Some(vault.sender),
                                 to: vault.sender,

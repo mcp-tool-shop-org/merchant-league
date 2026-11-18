@@ -29,76 +29,30 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 3,
-      "changed": 3,
+      "added": 1,
+      "changed": 6,
       "moved": 0,
       "parts": 3,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI's push trigger now also names `.github/audit-allowlist.json`.",
-        "subjects": [
-          ".github/workflows/ci.yml"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also runs scripts/check-audit-allowlist.mjs and scripts/check-audit-allowlist.test.mjs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "scripts/check-audit-allowlist.mjs",
-          "scripts/check-audit-allowlist.test.mjs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "site/audit-report.json is now written by .github/workflows/ci.yml.",
-        "subjects": [
-          "site/audit-report.json",
-          ".github/workflows/ci.yml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": ".github/audit-allowlist.json is now read by .github/workflows/ci.yml and scripts/check-audit-allowlist.test.mjs.",
-        "subjects": [
-          ".github/audit-allowlist.json",
-          ".github/workflows/ci.yml",
-          "scripts/check-audit-allowlist.test.mjs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": ".github/workflows/ci.yml is now read by scripts/check-audit-allowlist.test.mjs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "scripts/check-audit-allowlist.test.mjs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 2 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "3 files added and 3 changed content, across 3 parts.",
+        "sentence": "Nothing structural changed since 2026-11-17; 1 file added and 6 changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "a006c74825a91e6129058500c4694144d99afb2a",
-      "generatedAt": "2026-11-17T15:50:04.965Z"
+      "commit": "7dca819bf8e0d3ecfeb8112922481e2e69c8499d",
+      "generatedAt": "2026-11-17T18:43:05.882Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
       "a": "crates/league-core/src/replay.rs",
       "b": "crates/league-core/tests/replay_invariants.rs",
-      "either": 7,
+      "either": 8,
       "partLabels": [
         "league-core",
         "league-core"
@@ -176,7 +130,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "7dca819bf8e0d3ecfeb8112922481e2e69c8499d",
+  "commit": "7fdad1877ac5047c950e16f8e3112faba14ff7a0",
   "defaultBranch": "main",
   "derived": "10 parts, mostly Rust (341 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -428,7 +382,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-17T18:43:05.882Z",
+  "generatedAt": "2026-11-18T01:45:44.262Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write and 4 reads use paths built at run time and are not named here.",
