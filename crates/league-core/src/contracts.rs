@@ -434,8 +434,14 @@ pub enum FillKind {
     CheckCashed,
     /// Track-1 `TokenEscrow` or `DualEscrow` vault unlocked cleanly in Step 2.
     EscrowFinished,
-    /// Track-1 `TokenEscrow` or `DualEscrow` vault forfeited or expired in Step 2 (or Phase 1).
+    /// Track-1 `SellerPerformanceBond` (`TokenEscrow`) or `DualEscrow` bond `CRED` forfeited to
+    /// the counterparty seat (`from != to`) on a Step 2 delivery or buyer top-up default.
     EscrowForfeited,
+    /// Escrowed `CRED` returned to its own sender (`from == to`) because the bond missed its
+    /// deadline in Step 2; the bond default is recorded on the obligor (`bond_breaches += 1`,
+    /// honour penalty via `honor_penalties`), distinct from [`Self::EscrowForfeited`] (value moves
+    /// to another seat) and [`Self::EscrowRefunded`] (a clean cancel or expiry, no breach).
+    EscrowBreachRefunded,
     /// Escrowed funds returned to their own sender (`from == to`) when a `TokenEscrow` is
     /// cancelled or expires unfinished; a refund, not a forfeit (`2026-11-17`).
     EscrowRefunded,

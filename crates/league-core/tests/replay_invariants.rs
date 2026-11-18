@@ -14,9 +14,9 @@ use league_core::{
     DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED,
     DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_PERIOD_SECS, DRAND_QUICKNET_SIGNATURE_BYTES,
     DrandBeaconAuthStatus, DrandSchedule, DualEscrowProposal, EngineError, EngineState,
-    EscrowFinishUnlock, EscrowProposal, EscrowStatus, FinalScoreboard, FundamentalParities,
-    GradedMandateCard, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, IntentPledge, IntentTarget,
-    LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
+    EscrowFinishUnlock, EscrowProposal, EscrowStatus, FillKind, FinalScoreboard,
+    FundamentalParities, GradedMandateCard, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, IntentPledge,
+    IntentTarget, LoggedTurn, MAX_CARTEL_DOMAINS, MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS,
     MIN_MANDATE_BONUS_EQUITY, MandateKind, MandateReveal, MarketAction, OfferProposal, OfferSide,
     OrderReveal, PreimageSecret, PrivateMandate, ProjectDeliveryOrder, ProjectOrderPreview,
     ProjectRecipe, RegentDoctrine, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError,
@@ -6201,6 +6201,24 @@ fn c2_buyer_dvp_and_cosigned_dual_escrow_delivery_defaults_and_lock_cap() {
     );
     let r3 = must_ok(eng2.sweep_turn_seeded(3), "sweep t3 eng2");
     assert!(!r3.escrows_cancelled_or_forfeited.is_empty());
+    assert!(r3.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowBreachRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(0)
+            && f.to == 0
+            && f.units == 1_000
+            && f.net_units == 1_000
+            && f.cred_amount == 1_000
+    }));
+    assert!(r3.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowForfeited
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(1)
+            && f.to == 0
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
+    }));
     assert!(
         eng2.state().seats[1].bond_breaches >= 1,
         "defaulted Seller on DvP/DualEscrow must record bond breach"
@@ -6299,6 +6317,15 @@ fn c2_buyer_dvp_and_cosigned_dual_escrow_delivery_defaults_and_lock_cap() {
             .escrows_cancelled_or_forfeited
             .contains(&expected_eid_88)
     );
+    assert!(r_def.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowForfeited
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(0)
+            && f.to == 1
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
+    }));
     assert_eq!(
         eng3.state().dual_escrows[&expected_eid_88].status,
         EscrowStatus::Cancelled
