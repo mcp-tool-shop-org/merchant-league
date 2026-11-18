@@ -40,7 +40,11 @@
       "externals": 0,
       "files": [
         {
-          "hash": "89af2a5ca62afc07ba2b97019b84f3da9662c0cd65e95aa6ed50903994b2ef83",
+          "hash": "1f29c4cd6e12b6f632cf18761d3b038af787ed883db226088971c1dffdcaaa50",
+          "path": "docs/club-mode-design.md"
+        },
+        {
+          "hash": "789d8ad6845599f02ab6cca7305908db4fc5b5537b2e1f62c023f2c02d73b39d",
           "path": "docs/design-v2.md"
         },
         {
@@ -605,7 +609,7 @@
               "line": 415
             }
           ],
-          "hash": "93690dbc87cb55fd2d57d73af720fb8a8ba92f76d2713a9578fd2a03a955a58b",
+          "hash": "cc348583f9bebf6e3abe881c94e328ab007db6e29c6bd9f9e6a321e27fe92887",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/scoring.rs",
@@ -995,7 +999,7 @@
               "line": 2816
             }
           ],
-          "hash": "4ade2e56b70ed6f58d62d4b68de2b9f8d5337fcad19664334af5dde53adc670d",
+          "hash": "f97b3efa253d3ead423f0988708e4f5a7af1a1c5e560bfc26106a391843dd330",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1547,7 +1551,7 @@
           "testsInside": true
         },
         {
-          "hash": "95ffcc616cc1f2bdeaca618b91bf42fe4977bbe7b550df0f3409cda1144832b4",
+          "hash": "4af9ad4b2514740c6f1a571dd28e9fdb9d0763f080be8dc688eeeb3ec71fc65a",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1565,7 +1569,7 @@
           "testsInside": true
         },
         {
-          "hash": "2da1a6a745200934fcbf8863f874caeebcfc632461bc126ab001d9550e842a7d",
+          "hash": "553373d06c28cc9a352b675d419f0ef13bc4752d558be90457d185d894e39b82",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -3079,7 +3083,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "c7584137102c067c3793c6925867e2f69b4465871700391afa30bfbae856f0e5",
+          "hash": "853dac6b0664fe823ed225d2831efb44523358d256a6e5eb0b7662e46e2c9278",
           "path": "CHANGELOG.md"
         },
         {
@@ -4182,8 +4186,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "7dca819bf8e0d3ecfeb8112922481e2e69c8499d",
-    "tracked": 534
+    "commit": "7fdad1877ac5047c950e16f8e3112faba14ff7a0",
+    "tracked": 535
   },
   "landings": [
     {
