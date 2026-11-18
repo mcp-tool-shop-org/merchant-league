@@ -776,5 +776,36 @@
       "ledger_9818e991": false,
       "relay_9818e991": false
     }
+  },
+  {
+    "id": "standalone_lib_not_standalone_combined",
+    "source": "9818e991:crates/league-standalone/src/lib.rs:422",
+    "input": "rejected Bearer tok_xyz sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r sp5fghtJtpUorTwvof1NpDXAzNwf5 OPENROUTER_API_KEY=sk-or-secret999",
+    "secret_needles": [
+      "tok_xyz",
+      "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+      "sp5fghtJtpUorTwvof1NpDXAzNwf5",
+      "sk-or-secret999"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": false,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
+  },
+  {
+    "id": "relay_int_panic_mock_bearer_and_key",
+    "source": "f0cffd59:crates/league-relay/tests/relay_integration.rs:2744",
+    "input": "mock transport boom with Bearer sk-or-v1-planted-fake-secret-998877665544332211 and PlainPanicSecretKey_ABCDEFGH_987654321",
+    "secret_needles": [
+      "planted-fake-secret-998877665544332211"
+    ],
+    "expect_unchanged": false,
+    "redacted_by": {
+      "core_7fd3b481": true,
+      "ledger_9818e991": true,
+      "relay_9818e991": true
+    }
   }
 ]

@@ -37,7 +37,9 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
     for (s_idx, bot) in bots.iter().enumerate().take(usize::from(n)) {
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass A");
-        let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass A");
+        let mandate = obs
+            .own_mandate
+            .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass A"));
         for action in bot.plan_pass_a(&obs, &mandate) {
             if host.apply_market_action(action).is_err() {
                 refused += 1;
@@ -52,7 +54,9 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
     for (s_idx, bot) in bots.iter().enumerate().take(usize::from(n)) {
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass B");
-        let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass B");
+        let mandate = obs
+            .own_mandate
+            .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass B"));
         let (pass_b_actions, bundle) = bot.plan_pass_b_and_bundle(&obs, &mandate);
         for action in pass_b_actions {
             if host.apply_market_action(action).is_err() {
@@ -156,6 +160,7 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
         "last_turn_beacon",
         "last_closing_roll_bps",
         "post_state_digest",
+        "live_state_digests",
         "logged_turns",
     ] {
         assert!(
@@ -175,20 +180,30 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
         Some(u64::from(CLUB_SEAL_FORMAT_VERSION))
     );
 
-    // Tamper checks: mismatched `.save.json` vs `.seal` turn or layout_seed must fail.
+    // Tamper checks via public `read_save_and_seal`: mismatched turn or layout_seed must fail.
     let mut bad_save = save_json.clone();
     bad_save["turn"] = serde_json::json!(99);
     let bad_save_bytes = must_ok(serde_json::to_vec(&bad_save), "serialize bad_save");
+    let bad_save_path = tmp_dir.join("bad-save.json");
+    must_ok(
+        std::fs::write(&bad_save_path, &bad_save_bytes),
+        "write bad_save",
+    );
     let _ = must_err(
-        ClubHost::from_save_and_seal_bytes(&bad_save_bytes, seal_text.as_bytes()),
+        ClubHost::read_save_and_seal(&bad_save_path, &seal_path),
         "tampered turn in .save.json must be rejected",
     );
 
     let mut bad_seal = seal_json;
     bad_seal["layout_seed"] = serde_json::json!(8);
     let bad_seal_bytes = must_ok(serde_json::to_vec(&bad_seal), "serialize bad_seal");
+    let bad_seal_path = tmp_dir.join("bad-seal.seal");
+    must_ok(
+        std::fs::write(&bad_seal_path, &bad_seal_bytes),
+        "write bad_seal",
+    );
     let _ = must_err(
-        ClubHost::from_save_and_seal_bytes(save_text.as_bytes(), &bad_seal_bytes),
+        ClubHost::read_save_and_seal(&save_path, &bad_seal_path),
         "tampered layout_seed in .seal must be rejected",
     );
 
@@ -264,7 +279,9 @@ fn club_bot_determinism_and_phase_lock_freeze_compliance() {
     assert_eq!(bot.bot_tie_seed(), 777);
 
     let obs_t1 = must_ok(host.observe_seat(Seat(0)), "observe t1");
-    let mandate = *must_ok(host.own_mandate(Seat(0)), "mandate");
+    let mandate = obs_t1
+        .own_mandate
+        .unwrap_or_else(|| panic!("Seat(0) SeatObservation missing own_mandate"));
     let d1 = bot.decide_full_turn(&obs_t1, &mandate);
     let d2 = bot.decide_full_turn(&obs_t1, &mandate);
     assert_eq!(d1, d2, "ClubBot decisions must be strictly deterministic");
@@ -307,4 +324,67 @@ fn club_bot_determinism_and_phase_lock_freeze_compliance() {
 
 fn obs_t1_clone(obs: &league_core::SeatObservation) -> league_core::SeatObservation {
     obs.clone()
+}
+
+#[test]
+fn seat_observation_carries_only_own_mandate_and_never_rival_mandates() {
+    let eval_seed = must_ok(
+        SealedEvalSeed::try_from_bytes([0x5A; 32]),
+        "SealedEvalSeed::try_from_bytes",
+    );
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x81 + i; 32])).collect();
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(903_003), 4, 7, [0x4D; 32], &salts, eval_seed, 99),
+        "ClubHost::from_explicit_setup",
+    );
+    let mandates: Vec<_> = (0..4_u8)
+        .map(|s| *must_ok(host.mandate_for_seat(Seat(s)), "host mandate_for_seat"))
+        .collect();
+    assert!(
+        mandates.windows(2).any(|w| w[0] != w[1]),
+        "setup should yield distinct mandates across seats"
+    );
+
+    let snap_json = must_ok(
+        serde_json::to_string(&must_ok(host.public_save_snapshot(), "snapshot")),
+        "serialize snapshot",
+    );
+    assert!(!snap_json.contains("own_mandate"));
+
+    for s in 0..4_u8 {
+        let obs = must_ok(host.observe_seat(Seat(s)), "observe_seat");
+        assert_eq!(obs.own_mandate(), Some(&mandates[usize::from(s)]));
+
+        let obs_json = must_ok(serde_json::to_string(&obs), "serialize SeatObservation");
+        let own_json = must_ok(
+            serde_json::to_string(&mandates[usize::from(s)]),
+            "serialize own mandate",
+        );
+        assert!(obs_json.contains(&own_json));
+
+        for r in 0..4_u8 {
+            if r != s && mandates[usize::from(r)] != mandates[usize::from(s)] {
+                let rival_json = must_ok(
+                    serde_json::to_string(&mandates[usize::from(r)]),
+                    "serialize rival mandate",
+                );
+                assert!(
+                    !obs_json.contains(&rival_json),
+                    "seat {s} SeatObservation leaked rival seat {r}'s mandate"
+                );
+            }
+        }
+        let salt_hex: String = salts[usize::from(s)]
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert!(!obs_json.contains(&salt_hex));
+
+        let pub_preview_json = must_ok(
+            serde_json::to_string(&obs.to_public_preview_state()),
+            "serialize PublicPreviewState",
+        );
+        assert!(!pub_preview_json.contains("own_mandate"));
+    }
 }

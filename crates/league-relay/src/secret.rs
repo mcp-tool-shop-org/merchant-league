@@ -369,12 +369,13 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
     let bytes = window.as_bytes();
     let mut effective_cut = cut;
 
-    // 1. XRPL family seed starting < cut and straddling past cut (B2).
+    // 1. XRPL family seed starting < cut and straddling past cut (B2 / PR #80 B1).
     let mut b58_start = cut;
     while b58_start > 0 && league_error::is_base58_byte(bytes[b58_start - 1]) {
         b58_start -= 1;
     }
-    if b58_start < cut && bytes[b58_start] == b's' && league_error::is_at_boundary(bytes, b58_start)
+    if let Some(seed_start) =
+        (b58_start..cut).find(|&p| bytes[p] == b's' && league_error::is_at_boundary(bytes, p))
     {
         let mut b58_end = cut;
         while b58_end < bytes.len() && league_error::is_base58_byte(bytes[b58_end]) {
@@ -383,7 +384,7 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
         let boundary_after = b58_end == bytes.len() || !bytes[b58_end].is_ascii_alphanumeric();
         if b58_end > cut
             && boundary_after
-            && league_error::looks_like_xrpl_family_seed(&bytes[b58_start..b58_end])
+            && league_error::looks_like_xrpl_family_seed(&bytes[seed_start..b58_end])
         {
             effective_cut = effective_cut.max(b58_end);
         }
@@ -1098,37 +1099,57 @@ mod tests {
     #[test]
     fn b2_xrpl_seed_straddling_4kib_cap_offsets_1_to_30_leaves_zero_partial_seed() {
         let ed_seed = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let sn_seed = "sn3nAkU7v8w9xPy1z2A3B4C5D6E7F";
         let secp_seed = "sp5fghtJtpUorTwvof1NpDXAzNwf5";
-        for seed in [ed_seed, secp_seed] {
-            for offset in 1..=30_usize {
-                let prefix_len = MAX_REDACTION_SCAN_BYTES - offset;
-                // Place a delimiter right before the seed so the boundary precedes `s`.
-                let body = format!("{}:{seed} trailing_payload", "a".repeat(prefix_len - 1));
-                for scrubbed in [
-                    redact_secrets(&body, None),
-                    redact_and_truncate(&body, None, MAX_REDACTION_SCAN_BYTES + 64),
-                ] {
-                    assert!(
-                        !scrubbed.contains("sEd"),
-                        "offset {offset}: partial ed seed prefix survived: tail={:?}",
-                        &scrubbed[scrubbed.len().saturating_sub(48)..]
-                    );
-                    assert!(
-                        !scrubbed.contains(&seed[..4]),
-                        "offset {offset}: partial seed survived in {scrubbed:?}"
-                    );
-                    assert!(
-                        scrubbed.contains(REDACTED_MARKER),
-                        "offset {offset}: expected redaction marker in {scrubbed:?}"
-                    );
-                    if offset <= seed.len() {
+        let contexts: [(&str, &str); 10] = [
+            ("space", " "),
+            ("colon", ":"),
+            ("esc_quote", "\\\""),
+            ("esc_nl", "\\n"),
+            ("esc_tab", "\\t"),
+            ("esc_cr", "\\r"),
+            ("pct_3d", "%3D"),
+            ("esc_b", "\\b"),
+            ("esc_f", "\\f"),
+            ("esc_u000a", "\\u000a"),
+        ];
+        for (seed_name, seed) in [("ed", ed_seed), ("sn", sn_seed), ("secp", secp_seed)] {
+            for (ctx_name, delim) in contexts {
+                for offset in 1..=30_usize {
+                    let prefix_len = MAX_REDACTION_SCAN_BYTES - offset;
+                    let pad_len = prefix_len - delim.len();
+                    let body = format!("{}{delim}{seed} trailing_payload", "a".repeat(pad_len));
+                    for scrubbed in [
+                        redact_secrets(&body, None),
+                        redact_and_truncate(&body, None, MAX_REDACTION_SCAN_BYTES + 64),
+                    ] {
                         assert!(
-                            scrubbed.ends_with(REDACTED_MARKER),
-                            "offset {offset}: expected marker at cap, got tail={:?}",
+                            !scrubbed.contains("sEd")
+                                && !scrubbed.contains("sn3n")
+                                && !scrubbed.contains("sp5f"),
+                            "{seed_name} {ctx_name} offset {offset}: partial seed prefix survived: tail={:?}",
                             &scrubbed[scrubbed.len().saturating_sub(48)..]
                         );
+                        assert!(
+                            !scrubbed.contains(&seed[..4]),
+                            "{seed_name} {ctx_name} offset {offset}: partial seed survived in {scrubbed:?}"
+                        );
+                        assert!(
+                            scrubbed.contains(REDACTED_MARKER),
+                            "{seed_name} {ctx_name} offset {offset}: expected redaction marker in {scrubbed:?}"
+                        );
+                        if offset <= seed.len() {
+                            assert!(
+                                scrubbed.ends_with(REDACTED_MARKER),
+                                "{seed_name} {ctx_name} offset {offset}: expected marker at cap, got tail={:?}",
+                                &scrubbed[scrubbed.len().saturating_sub(48)..]
+                            );
+                        }
                     }
                 }
+                println!(
+                    "CAP_SWEEP seed={seed_name} ctx={ctx_name} offsets=1..=30 partial_leaks=0"
+                );
             }
         }
     }

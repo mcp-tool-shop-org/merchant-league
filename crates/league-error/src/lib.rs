@@ -36,13 +36,27 @@ pub const fn is_base58_byte(b: u8) -> bool {
 }
 
 /// Returns `true` if byte offset `i` is at a word boundary, including immediately after a
-/// preceding JSON escape (`\n`, `\t`, `\r`, `\"`, `\/`) or URL percent-encoded byte (`%xx`).
+/// preceding JSON escape (`\n`, `\t`, `\r`, `\b`, `\f`, `\"`, `\/`, `\uXXXX`) or URL
+/// percent-encoded byte (`%xx`).
 #[must_use]
 pub const fn is_at_boundary(bytes: &[u8], i: usize) -> bool {
     if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
         return true;
     }
-    if i >= 2 && bytes[i - 2] == b'\\' && matches!(bytes[i - 1], b'n' | b't' | b'r' | b'"' | b'/') {
+    if i >= 2
+        && bytes[i - 2] == b'\\'
+        && matches!(bytes[i - 1], b'n' | b't' | b'r' | b'b' | b'f' | b'"' | b'/')
+    {
+        return true;
+    }
+    if i >= 6
+        && bytes[i - 6] == b'\\'
+        && bytes[i - 5] == b'u'
+        && bytes[i - 4].is_ascii_hexdigit()
+        && bytes[i - 3].is_ascii_hexdigit()
+        && bytes[i - 2].is_ascii_hexdigit()
+        && bytes[i - 1].is_ascii_hexdigit()
+    {
         return true;
     }
     i >= 3
@@ -533,6 +547,36 @@ mod tests {
         assert_eq!(
             scrub_secret_text("\\nOPENROUTER_API_KEY=leakEnvNL"),
             "\\nOPENROUTER_API_KEY=[REDACTED]"
+        );
+
+        // PR #80 C1: `\uXXXX`, `\b`, and `\f` escapes act as word boundaries too.
+        assert_eq!(
+            scrub_secret_text("\\u000aOPENROUTER_API_KEY=leakUnicodeEsc1"),
+            "\\u000aOPENROUTER_API_KEY=[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\u000asEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"),
+            "\\u000a[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\u001Bsp5fghtJtpUorTwvof1NpDXAzNwf5"),
+            "\\u001B[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\bOPENROUTER_API_KEY=leakBackspaceEsc1"),
+            "\\bOPENROUTER_API_KEY=[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\bsn3nAkU7v8w9xPy1z2A3B4C5D6E7F"),
+            "\\b[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\fsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"),
+            "\\f[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\fANTHROPIC_API_KEY=leakFormfeedEsc1"),
+            "\\fANTHROPIC_API_KEY=[REDACTED]"
         );
 
         assert_eq!(scrub_secret_text(&scrubbed), scrubbed);

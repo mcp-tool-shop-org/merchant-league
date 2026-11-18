@@ -12,18 +12,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use league_core::{
-    AssetId, ClubBot, ClubHost, DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE, HARD_TURN_CAP, OrderReveal,
-    RESERVED_TEST_LAYOUT_SEEDS, RevealSalt, SealedEvalSeed, SeasonReplayLog, Seat, SeatIdentity,
-    TableId, TableMode, ToStructuredError as _, TurnPhase, compute_season_metrics,
-    replay_club_season, replay_season_with_state_predicates,
+    AiPreviewRequest, AssetId, ClubBot, ClubHost, CounterpartyAssumptions,
+    DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE, HARD_TURN_CAP, HumanWhatIfRequest, OrderReveal,
+    PreviewTieMode, RESERVED_TEST_LAYOUT_SEEDS, RevealSalt, SealedEvalSeed, SealedOrderBundle,
+    SeasonReplayLog, Seat, SeatIdentity, TableId, TableMode, ToStructuredError as _, TurnPhase,
+    compute_season_metrics, preview_seat_bundle, preview_what_if, replay_club_season,
+    replay_season_with_state_predicates, scrub_secret_text,
 };
 use league_gen::{
     ALLOWED_COMMODITY_GLOSSARY, CommodityCatalog, CurrencyCode, FeasibilityError,
     GENERATOR_VERSION, GenError, GeneratorConfig, LpError, NUMERAIRE_DISPLAY_LABEL,
     NUMERAIRE_PLAIN_LABEL, RecordedLayoutSeedError, SeatCount, SeedPool, TablePurpose,
-    TableSetupOptions, generate_ring_table_for_setup, is_reserved_test_seed,
-    ring_table_to_table_spec, ring_table_to_table_spec_with_explicit_entropy, sealed_seed_sha256,
-    seed_pool,
+    TableSetupOptions, default_projects_for_seats, generate_ring_table_for_setup,
+    is_reserved_test_seed, ring_table_to_table_spec,
+    ring_table_to_table_spec_with_explicit_entropy, sealed_seed_sha256, seed_pool,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -442,7 +444,9 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                 for s_idx in 0..n {
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass A");
-                    let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass A");
+                    let mandate = obs
+                        .own_mandate
+                        .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass A"));
                     for act in bots[usize::from(s_idx)].plan_pass_a(&obs, &mandate) {
                         must_ok(
                             host.apply_market_action(act),
@@ -458,7 +462,9 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                 for s_idx in 0..n {
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass B");
-                    let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass B");
+                    let mandate = obs
+                        .own_mandate
+                        .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass B"));
                     let (pass_b_actions, bundle) =
                         bots[usize::from(s_idx)].plan_pass_b_and_bundle(&obs, &mandate);
                     for act in pass_b_actions {
@@ -538,4 +544,174 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
     }
 
     assert_eq!(seasons_tested, 6);
+}
+
+#[test]
+fn display_text_paths_never_pass_through_secret_scrubber() {
+    let over_redaction_phrases = [
+        "risk-or-reward",
+        "ask-or-tell",
+        "desk-proj-alpha",
+        "SKU SK-PROJ-1234",
+        "class=\"btn-bearer active\"",
+        "the standard bearer of",
+    ];
+    for phrase in over_redaction_phrases {
+        assert_ne!(
+            scrub_secret_text(phrase),
+            phrase,
+            "expected scrubber error-only rule to trigger on `{phrase}`"
+        );
+    }
+
+    // 1. `league-gen` glossary, catalogue, numeraire labels, and default project titles.
+    for entry in CommodityCatalog::entries() {
+        for text in [
+            entry.glossary_word.to_owned(),
+            entry.raw_name.to_owned(),
+            entry.refined_name.to_owned(),
+            entry.raw_display(false),
+            entry.raw_display(true),
+            entry.refined_display(false),
+            entry.refined_display(true),
+        ] {
+            assert!(!text.contains("[REDACTED]") && !text.contains("<REDACTED_API_KEY>"));
+            assert_eq!(
+                scrub_secret_text(&text),
+                text,
+                "glossary text tripped scrubber: {text}"
+            );
+        }
+    }
+    for numeraire in [
+        NUMERAIRE_DISPLAY_LABEL,
+        NUMERAIRE_PLAIN_LABEL,
+        CommodityCatalog::format_numeraire(false),
+        CommodityCatalog::format_numeraire(true),
+    ] {
+        assert!(!numeraire.contains("[REDACTED]") && !numeraire.contains("<REDACTED_API_KEY>"));
+    }
+    for seat_count in [SeatCount::Four, SeatCount::Five, SeatCount::Six] {
+        let (_seed, t) = dev_table_for_seat_count(seat_count, 1);
+        for proj in default_projects_for_seats(&t.seats) {
+            assert!(!proj.name.contains("[REDACTED]"));
+            assert_eq!(scrub_secret_text(&proj.name), proj.name);
+        }
+    }
+
+    // 2. Player-facing `league-gen` table text + `league-core` observation, receipt, and preview
+    //    summaries preserve every over-redaction phrase verbatim when placed in player-facing text.
+    let (layout_seed, mut table) = dev_table_for_seat_count(SeatCount::Four, 1);
+    let proj_count = table.projects.len();
+    for p in &mut table.projects {
+        p.name.clear();
+    }
+    for (idx, phrase) in over_redaction_phrases.iter().enumerate() {
+        if let Some(proj) = table.projects.get_mut(idx % proj_count) {
+            if !proj.name.is_empty() {
+                proj.name.push_str(" / ");
+            }
+            proj.name.push_str(phrase);
+        }
+    }
+    let table_json = must_ok(serde_json::to_string(&table), "serialize RingTable");
+    for phrase in over_redaction_phrases {
+        let escaped = must_ok(serde_json::to_string(phrase), "json string");
+        let inner = &escaped[1..escaped.len() - 1];
+        assert!(
+            table_json.contains(inner) || table.projects.iter().any(|p| p.name == phrase),
+            "RingTable lost over-redaction phrase `{phrase}`"
+        );
+    }
+    assert!(!table_json.contains("[REDACTED]"));
+    assert!(!table_json.contains("<REDACTED_API_KEY>"));
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x31 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x77; 32]), "eval_seed");
+    let (spec, cmap, deal, eval_seed) = must_ok(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &table,
+            TableId(810_001),
+            &[0],
+            [0x55; 32],
+            &salts,
+            eval_seed,
+        ),
+        "bridge",
+    );
+    for asset in [
+        AssetId::Cred,
+        AssetId::Raw(0),
+        AssetId::Refined(0),
+        AssetId::Raw(3),
+        AssetId::Refined(3),
+    ] {
+        let formatted = cmap.format_asset(asset, false).unwrap_or_default();
+        assert!(!formatted.contains("[REDACTED]"));
+        assert_eq!(scrub_secret_text(&formatted), formatted);
+    }
+
+    let mut host = must_ok(
+        ClubHost::new(spec, layout_seed, deal, eval_seed, 42),
+        "ClubHost::new",
+    );
+    let obs_t1 = must_ok(host.observe_seat(Seat(0)), "observe t1");
+    let pub_prev = obs_t1.to_public_preview_state();
+    let ai_req = AiPreviewRequest {
+        seat: 0,
+        market_actions: Vec::new(),
+        bundle: SealedOrderBundle::default(),
+    };
+    let ai_prev = must_ok(
+        preview_seat_bundle(&pub_prev, &ai_req),
+        "preview_seat_bundle",
+    );
+    let human_req = HumanWhatIfRequest {
+        seat: 0,
+        market_actions: Vec::new(),
+        cancel_lock_at: None,
+        bundle: SealedOrderBundle::default(),
+        tie_mode: PreviewTieMode::NeutralSeed,
+        assumptions: CounterpartyAssumptions::default(),
+    };
+    let human_prev = must_ok(preview_what_if(&pub_prev, &human_req), "preview_what_if");
+
+    must_ok(
+        host.commit_and_reveal_all(&BTreeMap::new()),
+        "commit_and_reveal_all",
+    );
+    let receipt = must_ok(host.sweep_turn(), "sweep_turn");
+    let obs_t2 = must_ok(host.observe_seat(Seat(0)), "observe t2");
+    let snap = must_ok(host.public_save_snapshot(), "snapshot");
+
+    for (label, rendered_json) in [
+        ("obs_t1", must_ok(serde_json::to_string(&obs_t1), "obs_t1")),
+        (
+            "ai_prev",
+            must_ok(serde_json::to_string(&ai_prev), "ai_prev"),
+        ),
+        (
+            "human_prev",
+            must_ok(serde_json::to_string(&human_prev), "human_prev"),
+        ),
+        (
+            "receipt",
+            must_ok(serde_json::to_string(&receipt), "receipt"),
+        ),
+        ("obs_t2", must_ok(serde_json::to_string(&obs_t2), "obs_t2")),
+        ("snap", must_ok(serde_json::to_string(&snap), "snap")),
+    ] {
+        assert!(
+            !rendered_json.contains("[REDACTED]") && !rendered_json.contains("<REDACTED_API_KEY>"),
+            "rendered {label} unexpectedly contained redaction marker: {rendered_json}"
+        );
+        println!(
+            "DISPLAY_TEXT_PATH {label} bytes={} clean=true",
+            rendered_json.len()
+        );
+    }
+    assert_eq!(
+        scrub_secret_text(&human_prev.close_mark_caveat),
+        human_prev.close_mark_caveat
+    );
 }

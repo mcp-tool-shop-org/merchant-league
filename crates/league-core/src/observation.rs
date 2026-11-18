@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::commit::{
     AtomicSwapProposal, CommitmentHash, ContractDeliveryOrder, CouncilPlatform, DrandSchedule,
-    DualEscrowProposal, EscrowFinishUnlock, IntentPledge, SealedOrderBundle, derive_turn_beacon,
+    DualEscrowProposal, EscrowFinishUnlock, IntentPledge, PrivateMandate, SealedOrderBundle,
+    derive_turn_beacon,
 };
 use crate::contracts::{
     ActiveCharter, CartelDomain, CredOffer, CreditCheck, DualEscrowVault, FillRecord, MarketAction,
@@ -340,6 +341,10 @@ pub struct SeatObservation {
     pub baseline_predicates: SeatStatePredicates,
     /// Seat-safe 30-field historical Sweep receipts through `last_swept_turn`.
     pub public_receipts: Vec<PublicSweepReceipt>,
+    /// Dealt Turn-1 [`PrivateMandate`] belonging solely to `seat`, populated by
+    /// [`crate::ClubHost::observe_seat`] (never carries reveal salts or rival seats' mandates).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_mandate: Option<PrivateMandate>,
 }
 
 pub(crate) fn compute_public_forecasts(state: &EngineState) -> (u8, bool, Vec<ShockForecastEvent>) {
@@ -447,6 +452,7 @@ impl SeatObservation {
             eval_vrf_pubkey: state.spec.eval_vrf_pubkey,
             baseline_predicates,
             public_receipts,
+            own_mandate: None,
         }
     }
 
@@ -458,6 +464,20 @@ impl SeatObservation {
     #[must_use]
     pub fn auditor_hints(&self) -> &[AuditorShockHint] {
         &self.auditor_hints
+    }
+
+    /// Returns this seat's own dealt Turn-1 [`PrivateMandate`] when populated by
+    /// [`crate::ClubHost::observe_seat`] (never carries reveal salts or rival seats' mandates).
+    #[must_use]
+    pub const fn own_mandate(&self) -> Option<&PrivateMandate> {
+        self.own_mandate.as_ref()
+    }
+
+    /// Attaches `mandate` as this seat's own [`PrivateMandate`] inside this observation.
+    #[must_use]
+    pub const fn with_own_mandate(mut self, mandate: PrivateMandate) -> Self {
+        self.own_mandate = Some(mandate);
+        self
     }
 
     /// Exports a sanitized [`PublicPreviewState`] containing strictly public Steps 0–7 simulation

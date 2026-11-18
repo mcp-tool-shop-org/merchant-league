@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-18 from commit 53b2505 by Atlas 1.26.0.
+Mapped at 2026-11-18 from commit 284973c by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,16 +8,14 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 10 parts, mostly Rust (355 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-18 (9818e99)
+## What changed since 2026-11-18 (53b2505)
 
-- crates/league-error/tests/scrubber_superset_corpus.json is now read by crates/league-error/tests/superset_corpus.rs and crates/league-relay/tests/cli_hygiene.rs.
-- crates/league-error/tests/scrubber_superset_corpus.json is new and belongs to no part, so atlas check fails on it against the previous map.
-- crates/league-error/tests/superset_corpus.rs is new and belongs to no part, so atlas check fails on it against the previous map.
-- 2 files added and 7 changed content, across 3 parts.
+- CI now also runs crates/league-core/src/club/host.rs.
+- 13 files changed content, across 5 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 46 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 47 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 4. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
@@ -27,7 +25,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs 5 files in scripts, 12 files in league-core, 9 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 15 files in 8 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs 5 files in scripts, 13 files in league-core, 9 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 15 files in 8 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results
@@ -55,7 +53,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 ## What tends to change together
 
-- **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 6 of 6 commits.
+- **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 5 commits.
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
 - **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 18 of 22 commits.
 - **crates/league-core/src/lib.rs** and **crates/league-core/src/replay.rs** changed together in 9 of 11 commits, inside the league-core part.
@@ -63,7 +61,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 

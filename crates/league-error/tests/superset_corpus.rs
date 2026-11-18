@@ -15,7 +15,7 @@ fn a1_shared_scrubber_catches_union_of_all_old_copies_plus_a1_b3_c1() {
     let raw = include_str!("scrubber_superset_corpus.json");
     let entries: Vec<Value> =
         serde_json::from_str(raw).unwrap_or_else(|e| panic!("invalid corpus json: {e}"));
-    assert_eq!(entries.len(), 55, "expected all 55 shared corpus entries");
+    assert_eq!(entries.len(), 57, "expected all 57 shared corpus entries");
 
     for entry in &entries {
         let id = entry["id"].as_str().unwrap_or("");

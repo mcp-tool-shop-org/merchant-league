@@ -69,6 +69,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
+      # B4 note: league-gen already carries a league-core dependency; this -p league-tui
+      # standalone feature check is structural preparation that starts to count once Card 5 Part B
+      # adds league-core to crates/league-tui/Cargo.toml.
       - name: Standalone seat-crate feature check
         run: |
           cargo build -p league-tui --locked
@@ -83,8 +86,8 @@ jobs:
 
       - name: No league-core dependency in relay or ledger
         run: |
-          cargo tree -p league-relay -p league-ledger -e normal --locked
-          if cargo tree -p league-relay -p league-ledger -e normal --locked | grep -q 'league-core'; then
+          cargo tree -p league-relay -p league-ledger -e normal,build,dev --target all --locked
+          if cargo tree -p league-relay -p league-ledger -e normal,build,dev --target all --locked | grep -q 'league-core'; then
             echo "ERROR: league-relay or league-ledger depends on league-core"
             exit 1
           fi
