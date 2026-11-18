@@ -28,7 +28,7 @@ use league_core::{
     SeasonReplayLog, Seat, SeatIdentity, SeatObservation, ShockKind, StructuredError, SweepReceipt,
     TableId, TableMode, TableSpec, ToStructuredError, Turn, TurnEngine, TurnPhase, UNIT_SCALE,
     WhatIfPreview, attach_state_predicates, check_replay_format_version_slice,
-    compute_mandate_commitment, compute_order_commitment, derive_turn_beacon,
+    compute_mandate_commitment, compute_order_commitment, derive_turn_beacon, engine_internals,
     is_reserved_layout_test_seed, preview_neutral_beacon, preview_seat_bundle, preview_what_if,
     preview_what_if_with_beacon, replay_club_season, replay_eval_season, replay_season,
     replay_season_with_state_predicates, scrub_secret_text, validate_club_dev_seed,
@@ -198,6 +198,87 @@ fn canonical_state_digest(engine_state: &EngineState) -> Result<[u8; 32], Leak> 
     Ok(hasher.finalize().into())
 }
 
+fn push_candidate_digest(
+    out: &mut Vec<([u8; 32], String)>,
+    state: &EngineState,
+) -> Result<(), Leak> {
+    let digest = canonical_state_digest(state)?;
+    if out.iter().all(|(existing, _)| existing != &digest) {
+        let digest_hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        out.push((digest, digest_hex));
+    }
+    Ok(())
+}
+
+/// Computes canonical `EngineState` digests across every phase state a seat could compare against
+/// during a turn (`B3`): the current state, turn-start `TalkAndMarket`, cancel-locked
+/// `TalkAndMarket`, `Commit` entry and commitment-prefix states, `Reveal` entry and reveal-prefix
+/// states, and post-Sweep close phases (`AwaitingMandateReveal`, `Completed`).
+fn candidate_phase_digests(engine_state: &EngineState) -> Result<Vec<([u8; 32], String)>, Leak> {
+    let mut out = Vec::new();
+    push_candidate_digest(&mut out, engine_state)?;
+
+    // Turn-start `TalkAndMarket` and post-Pass-A cancel-locked `TalkAndMarket`.
+    for cancel_locked in [false, true] {
+        let mut s = engine_state.clone();
+        s.phase = TurnPhase::TalkAndMarket;
+        s.cancel_locked = cancel_locked;
+        s.turn_commits.clear();
+        s.turn_reveals.clear();
+        push_candidate_digest(&mut out, &s)?;
+    }
+
+    // `Commit` entry and cumulative submission prefixes of `turn_commits`.
+    {
+        let mut s = engine_state.clone();
+        s.phase = TurnPhase::Commit;
+        s.cancel_locked = false;
+        s.turn_commits.clear();
+        s.turn_reveals.clear();
+        push_candidate_digest(&mut out, &s)?;
+        for (&seat_idx, &commit_hash) in &engine_state.turn_commits {
+            s.turn_commits.insert(seat_idx, commit_hash);
+            push_candidate_digest(&mut out, &s)?;
+        }
+    }
+
+    // `Reveal` entry (both with empty and full `turn_commits`) and cumulative `turn_reveals`.
+    for keep_commits in [true, false] {
+        let mut s = engine_state.clone();
+        s.phase = TurnPhase::Reveal;
+        s.cancel_locked = false;
+        if !keep_commits {
+            s.turn_commits.clear();
+        }
+        s.turn_reveals.clear();
+        push_candidate_digest(&mut out, &s)?;
+        for (&seat_idx, rev) in &engine_state.turn_reveals {
+            s.turn_reveals.insert(seat_idx, rev.clone());
+            push_candidate_digest(&mut out, &s)?;
+        }
+    }
+
+    // Post-Sweep close phases (`AwaitingMandateReveal` and `Completed`).
+    {
+        let n = engine_state.seats.len();
+        let mut s = engine_state.clone();
+        s.phase = TurnPhase::AwaitingMandateReveal;
+        s.cancel_locked = false;
+        s.turn_commits.clear();
+        s.turn_reveals.clear();
+        push_candidate_digest(&mut out, &s)?;
+
+        s.mandate_reveals = vec![None; n];
+        push_candidate_digest(&mut out, &s)?;
+
+        s.phase = TurnPhase::Completed;
+        s.mandate_reveals = engine_state.mandate_reveals.clone();
+        push_candidate_digest(&mut out, &s)?;
+    }
+
+    Ok(out)
+}
+
 fn contains_digest_value(value: &serde_json::Value, digest: &[u8; 32], digest_hex: &str) -> bool {
     match value {
         serde_json::Value::String(s) => s.eq_ignore_ascii_case(digest_hex),
@@ -221,7 +302,7 @@ fn contains_digest_value(value: &serde_json::Value, digest: &[u8; 32], digest_he
     }
 }
 
-/// Pure redaction guard verifying a serialized seat view against ground-truth `engine_state` (`B-N2`).
+/// Pure redaction guard verifying a serialized seat view against ground-truth `engine_state` (`B-N2`, `B3`).
 ///
 /// Inspects serialized JSON **values** only (never field names, and never searching `"magnitude"`):
 /// - `(i)` forbids any shock record before `forecast_turn` completes (permitting at most one clean
@@ -230,7 +311,8 @@ fn contains_digest_value(value: &serde_json::Value, digest: &[u8; 32], digest_he
 /// - `(ii)` classifies any record carrying `magnitude_bps` by record shape/turn values, forbidding
 ///   drawn, forecast, or Auditor-hint magnitudes anywhere and forbidding any magnitude before
 ///   `realize_turn` completes (while allowing realized `ActiveShock` records from `realize_turn` on);
-/// - `(iii)` forbids `post_state_digest` anywhere in the serialized view as either `[u8; 32]` or hex.
+/// - `(iii)` forbids `post_state_digest` across all turn-phase state digests (`candidate_phase_digests`)
+///   anywhere in the serialized view as either `[u8; 32]` or hex.
 pub fn check_seat_view(view_json: &str, engine_state: &EngineState) -> Result<(), Leak> {
     let root: serde_json::Value =
         serde_json::from_str(view_json).map_err(|err| Leak::InvalidViewJson(err.to_string()))?;
@@ -240,11 +322,11 @@ pub fn check_seat_view(view_json: &str, engine_state: &EngineState) -> Result<()
         .and_then(|s| u8::try_from(s).ok())
         .ok_or_else(|| Leak::InvalidViewJson("missing u8 observer seat".to_owned()))?;
 
-    // Check (iii) first using canonical EngineState digest bytes/hex anywhere in JSON values.
-    let digest = canonical_state_digest(engine_state)?;
-    let digest_hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    if contains_digest_value(&root, &digest, &digest_hex) {
-        return Err(Leak::PostStateDigest);
+    // Check (iii) first across every phase state digest the seat could compare against (`B3`).
+    for (digest, digest_hex) in candidate_phase_digests(engine_state)? {
+        if contains_digest_value(&root, &digest, &digest_hex) {
+            return Err(Leak::PostStateDigest);
+        }
     }
 
     let is_active_turn = matches!(
@@ -836,32 +918,203 @@ fn planted_guard_control_3_post_state_digest_err() {
     );
 }
 
+#[test]
+fn planted_guard_control_4_post_state_digest_in_commit_phase_err() {
+    let tid = TableId(202_622);
+    let n = 4_u8;
+    let eval_seed = eval_seed_from(0x5C);
+    let (spec, deal, eval_seed) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            tid,
+            n,
+            1,
+            [0x46; 32],
+            &seat_salts(n, 0x13),
+            eval_seed,
+        ),
+        "club spec",
+    );
+    let mut engine = must_ok(TurnEngine::new(spec), "TurnEngine::new");
+    for s in 0..n {
+        let rev = &deal.seat_reveals[usize::from(s)];
+        let mc = must_ok(compute_mandate_commitment(tid, Seat(s), rev), "mc");
+        must_ok(engine.submit_mandate_commitment(Seat(s), mc), "submit mc");
+    }
+
+    let mut raw_receipts = Vec::new();
+    for t in 1..=2_u8 {
+        commit_and_reveal_subset(&mut engine, tid, t, &BTreeMap::new());
+        let (_, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove_turn");
+        raw_receipts.push(must_ok(engine.sweep_turn_with_eval_vrf(&proof), "sweep"));
+    }
+
+    // Turn 3: advance to `TurnPhase::Commit` — the leaked Turn-2 `post_state_digest` (whose phase
+    // was TalkAndMarket at Turn 3 start) MUST return `Err(Leak::PostStateDigest)`!
+    must_ok(engine.advance_to_commit(), "advance_to_commit");
+    assert_eq!(engine.state().turn, 3);
+    assert_eq!(engine.state().phase, TurnPhase::Commit);
+    let commit_entry_digest = must_ok(engine.state_digest(), "commit_entry_digest");
+
+    let clean_commit = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(check_seat_view(&clean_commit, engine.state()), Ok(()));
+
+    let leaky_commit = observe_seat_leak_post_state_digest_json(&engine, Seat(0), &raw_receipts);
+    assert_eq!(
+        check_seat_view(&leaky_commit, engine.state()),
+        Err(Leak::PostStateDigest),
+        "leaked previous-sweep post_state_digest during Commit phase must be rejected"
+    );
+
+    // Also reject hex-encoded leaked `post_state_digest` during `Commit`.
+    let r2_digest_hex: String = raw_receipts[1]
+        .post_state_digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let hex_leak_commit = serde_json::json!({
+        "seat": 0,
+        "observation": must_ok(engine.observe_seat(Seat(0)), "obs"),
+        "leaked_hex_digest": r2_digest_hex,
+    })
+    .to_string();
+    assert_eq!(
+        check_seat_view(&hex_leak_commit, engine.state()),
+        Err(Leak::PostStateDigest)
+    );
+
+    // Submit a peer commitment in `Commit`: clean view passes; leaking prior receipt digest or
+    // `Commit`-entry digest or post-peer-commit digest MUST all return `Err(Leak::PostStateDigest)`.
+    let peer_rev = OrderReveal {
+        bundle: SealedOrderBundle::default(),
+        salt: RevealSalt([0x7A; 32]),
+    };
+    let peer_commit = must_ok(
+        compute_order_commitment(tid, Turn(3), Seat(1), &peer_rev),
+        "peer commit",
+    );
+    must_ok(
+        engine.submit_order_commitment(Seat(1), peer_commit),
+        "submit peer commit",
+    );
+    let clean_after_peer_commit = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(
+        check_seat_view(&clean_after_peer_commit, engine.state()),
+        Ok(())
+    );
+    let leaky_after_peer_commit =
+        observe_seat_leak_post_state_digest_json(&engine, Seat(0), &raw_receipts);
+    assert_eq!(
+        check_seat_view(&leaky_after_peer_commit, engine.state()),
+        Err(Leak::PostStateDigest)
+    );
+    let leaky_commit_entry = serde_json::json!({
+        "seat": 0,
+        "observation": must_ok(engine.observe_seat(Seat(0)), "obs"),
+        "leaked_digest": commit_entry_digest,
+    })
+    .to_string();
+    assert_eq!(
+        check_seat_view(&leaky_commit_entry, engine.state()),
+        Err(Leak::PostStateDigest)
+    );
+
+    // Advance to `TurnPhase::Reveal` and submit peer reveal: leaking `r2.post_state_digest` still fails.
+    must_ok(engine.advance_to_reveal(), "advance_to_reveal");
+    must_ok(engine.submit_order_reveal(Seat(1), peer_rev), "peer rev");
+    let clean_reveal = observe_seat_clean_json(&engine, Seat(0));
+    assert_eq!(check_seat_view(&clean_reveal, engine.state()), Ok(()));
+    let leaky_reveal = observe_seat_leak_post_state_digest_json(&engine, Seat(0), &raw_receipts);
+    assert_eq!(
+        check_seat_view(&leaky_reveal, engine.state()),
+        Err(Leak::PostStateDigest)
+    );
+}
+
 // =================================================================================================
 // 2. §2.5 Steps 0–7 Equivalence `proptest` (All-Committed and Regent-Modeled Turns)
 // =================================================================================================
 
-fn assert_step0_to_7_matches_live(
-    preview: &WhatIfPreview,
-    live_engine: &TurnEngine,
-    live_receipt: &SweepReceipt,
+struct LiveStep0To7Ref<'a> {
+    obs: &'a SeatObservation,
+    expected_ref: &'a league_core::BundlePreview,
+    pre_live_seat_state: &'a league_core::SeatState,
+    post_market_live_seat_state: &'a league_core::SeatState,
+    live_engine: &'a TurnEngine,
+    live_receipt: &'a SweepReceipt,
     seat: u8,
-) {
-    assert_eq!(preview.seat, seat);
-    assert_eq!(preview.turn, live_receipt.turn);
+    regent_absent_peer: Option<(u8, bool)>,
+}
+
+fn assert_step0_to_7_matches_live(preview: &WhatIfPreview, live: &LiveStep0To7Ref<'_>) {
+    assert_eq!(preview.seat, live.seat);
+    assert_eq!(preview.turn, live.live_receipt.turn);
+    assert_eq!(&preview.baseline_predicates, &live.obs.baseline_predicates);
+    assert_eq!(&preview.pre_seat_state, live.pre_live_seat_state);
+    assert_eq!(
+        &preview.post_market_seat_state,
+        live.post_market_live_seat_state
+    );
     assert_eq!(
         preview.post_sweep_seat_state,
-        live_engine.state().seats[usize::from(seat)],
+        live.live_engine.state().seats[usize::from(live.seat)],
         "full SeatState mismatch at turn {} seat {}",
-        live_receipt.turn,
-        seat
+        live.live_receipt.turn,
+        live.seat
     );
-    let expected_summary = league_core::Step0To7SweepSummary::from_sweep_receipt(live_receipt);
+    assert_eq!(
+        preview.close_mark_caveat,
+        league_core::HYPOTHETICAL_CLOSE_MARK_CAVEAT
+    );
+    assert_eq!(preview.converter_orders, live.expected_ref.converter_orders);
+    assert_eq!(preview.project_orders, live.expected_ref.project_orders);
+    assert_eq!(preview.escrow_orders, live.expected_ref.escrow_orders);
+    assert_eq!(preview.upkeep, live.expected_ref.upkeep);
+    assert_eq!(
+        preview.spoilage.perishable_spoiled_units,
+        live.expected_ref.seat_spoilage_clawed_back
+    );
+    assert_eq!(preview.public_fills, live.live_receipt.fills);
+
+    let mut expected_summary =
+        league_core::Step0To7SweepSummary::from_sweep_receipt(live.live_receipt);
+    if let Some((absent_seat, absent_was_human_at_turn_start)) = live.regent_absent_peer {
+        assert!(
+            preview.step0_to_7_receipt.non_reveal_seats.is_empty(),
+            "preview normalizes absent peers into synthetic valid reveals"
+        );
+        assert_eq!(
+            live.live_receipt.non_reveal_seats,
+            vec![absent_seat],
+            "live turn must record absent Regent peer in non_reveal_seats"
+        );
+        if absent_was_human_at_turn_start {
+            assert!(
+                live.live_receipt.regent_acted_seats.contains(&absent_seat),
+                "live turn must record absent Human Regent peer in regent_acted_seats"
+            );
+        }
+        // Only Step-1 `non_reveal_seats` and `regent_acted_seats` for `absent_seat` differ by
+        // construction in Case (b) (Step-4 C1a takeover entries on any seat, including other
+        // seats, are preserved identically across both); all 24 other `Step0To7SweepSummary`
+        // fields MUST match bit-for-bit!
+        expected_summary
+            .non_reveal_seats
+            .retain(|&s| s != absent_seat);
+        if !preview
+            .step0_to_7_receipt
+            .regent_acted_seats
+            .contains(&absent_seat)
+        {
+            expected_summary
+                .regent_acted_seats
+                .retain(|&s| s != absent_seat);
+        }
+    }
     assert_eq!(
         preview.step0_to_7_receipt, expected_summary,
-        "Step 0-7 summary mismatch at turn {} seat {}",
-        live_receipt.turn, seat
+        "full Step 0-7 summary mismatch at turn {} seat {}",
+        live.live_receipt.turn, live.seat
     );
-    assert_eq!(preview.public_fills, live_receipt.fills);
 }
 
 proptest! {
@@ -931,6 +1184,7 @@ proptest! {
             if engine.state().phase != TurnPhase::TalkAndMarket {
                 break;
             }
+            let regent_absent_this_turn = regent_missing_peer && ((t + (seed as u8 & 1)) % 2 == 1);
             let (turn_beacon, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove_turn");
             let obs = must_ok(engine.observe_seat(Seat(actor)), "observe_seat");
             let pub_state = obs.to_public_preview_state();
@@ -996,7 +1250,7 @@ proptest! {
                 if p == actor {
                     continue;
                 }
-                if regent_missing_peer && p == peer_absent {
+                if regent_absent_this_turn && p == peer_absent {
                     // Case (b): uncommitted Human peer modeled via Standing Regent helper!
                     let preview_regent = must_ok(
                         engine.preview_regent_bundle_after_step0(
@@ -1038,51 +1292,64 @@ proptest! {
                 "preview_what_if_with_beacon",
             );
 
-            // Apply identical Phase-1 actions, cancel lock, and Phase-2 commit/reveal subset on live engine.
+            // Apply identical Phase-1 actions, cancel lock, and reference Steps 0–7 preview before
+            // live commit/reveal & sweep.
+            let absent_was_human_at_turn_start =
+                engine.state().seats[usize::from(peer_absent)].identity == SeatIdentity::Human;
+            let pre_live_seat_state = engine.state().seats[usize::from(actor)].clone();
             must_ok(engine.apply_market_action(action), "live action");
             must_ok(engine.begin_cancel_lock(), "live cancel_lock");
             must_ok(engine.apply_market_action(peer_action), "live peer_action");
+            let post_market_live_seat_state = engine.state().seats[usize::from(actor)].clone();
+
+            let expected_ref = must_ok(
+                engine_internals::preview_bundle_with_context_and_mode(
+                    &engine,
+                    Seat(actor),
+                    &[],
+                    &actor_bundle,
+                    &assumed_peer_bundles,
+                    turn_beacon,
+                    engine_internals::SweepMode::PreviewSteps0To7,
+                ),
+                "ref steps 0-7 preview",
+            );
+
             commit_and_reveal_subset(&mut engine, tid, t, &committed_bundles);
             let live_receipt = must_ok(engine.sweep_turn_with_eval_vrf(&proof), "live sweep");
 
-            if !regent_missing_peer {
-                assert!(live_receipt.non_reveal_seats.is_empty());
-                assert_step0_to_7_matches_live(&preview, &engine, &live_receipt, actor);
+            if !regent_absent_this_turn {
+                prop_assert!(live_receipt.non_reveal_seats.is_empty());
+                assert_step0_to_7_matches_live(
+                    &preview,
+                    &LiveStep0To7Ref {
+                        obs: &obs,
+                        expected_ref: &expected_ref,
+                        pre_live_seat_state: &pre_live_seat_state,
+                        post_market_live_seat_state: &post_market_live_seat_state,
+                        live_engine: &engine,
+                        live_receipt: &live_receipt,
+                        seat: actor,
+                        regent_absent_peer: None,
+                    },
+                );
             } else {
-                // In Case (b) where peer_absent omitted reveal and its Regent acted, seat state
-                // and Step 0-7 economic/political counters match identically!
-                prop_assert_eq!(
-                    &preview.post_sweep_seat_state,
-                    &engine.state().seats[usize::from(actor)]
-                );
-                prop_assert_eq!(preview.public_fills, live_receipt.fills);
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.batch_trades_cleared,
-                    live_receipt.batch_trades_cleared
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.converter_batches_run,
-                    live_receipt.converter_batches_run
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.total_upkeep_shortfall_debt,
-                    live_receipt.total_upkeep_shortfall_debt
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.total_spoilage_clawed_back,
-                    live_receipt.total_spoilage_clawed_back
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.elected_officers,
-                    live_receipt.elected_officers
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.charters_awarded,
-                    live_receipt.charters_awarded
-                );
-                prop_assert_eq!(
-                    preview.step0_to_7_receipt.town_import_cred_spent,
-                    live_receipt.town_import_cred_spent
+                // Case (b): uncommitted peer_absent is Regent-modeled; full SeatState, full
+                // WhatIfPreview fields, and all Step 0-7 receipt fields (except Step-1
+                // `non_reveal_seats` and `regent_acted_seats` for `peer_absent`, which differ by
+                // construction) match bit-for-bit!
+                assert_step0_to_7_matches_live(
+                    &preview,
+                    &LiveStep0To7Ref {
+                        obs: &obs,
+                        expected_ref: &expected_ref,
+                        pre_live_seat_state: &pre_live_seat_state,
+                        post_market_live_seat_state: &post_market_live_seat_state,
+                        live_engine: &engine,
+                        live_receipt: &live_receipt,
+                        seat: actor,
+                        regent_absent_peer: Some((peer_absent, absent_was_human_at_turn_start)),
+                    },
                 );
             }
         }
@@ -1090,8 +1357,29 @@ proptest! {
 }
 
 // =================================================================================================
-// 3. Secret Non-Interference & `Commit`/`Reveal` Isolation `proptest` (§2.5 item 2, C4, B1)
+// 3. Secret Non-Interference & `Commit`/`Reveal` Isolation `proptest` (§2.5 item 2, C4, B1, B5)
 // =================================================================================================
+
+fn mutate_drawn_shocks_in_engine(
+    engine: &TurnEngine,
+    mutate: impl FnOnce(&mut Vec<ScheduledShockSpec>),
+) -> TurnEngine {
+    let mut val = must_ok(serde_json::to_value(engine), "engine to value");
+    let shocks_val = val
+        .get_mut("state")
+        .and_then(|st| st.get_mut("drawn_shocks"))
+        .unwrap_or_else(|| panic!("missing state.drawn_shocks"));
+    let mut drawn: Vec<ScheduledShockSpec> = must_ok(
+        serde_json::from_value(shocks_val.clone()),
+        "parse drawn_shocks",
+    );
+    mutate(&mut drawn);
+    *shocks_val = must_ok(
+        serde_json::to_value(&drawn),
+        "serialize mutated drawn_shocks",
+    );
+    must_ok(serde_json::from_value(val), "reconstruct TurnEngine")
+}
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
@@ -1099,6 +1387,8 @@ proptest! {
     #[test]
     fn proptest_secret_non_interference_and_commit_reveal_isolation(
         raw_seed in 0_u64..10_000,
+        use_club in any::<bool>(),
+        club_stage in 0_u8..3,
         phase_pick in 0_u8..3,
         alt_byte in 1_u8..=250,
     ) {
@@ -1120,79 +1410,192 @@ proptest! {
             "spec2",
         );
 
-        // Unforecast pre-seeded shocks (`forecast_turn >= turn = 1`) must also remain non-interfering
-        // on Turn 1 (even for an active OracleAuditor if hint_turn > turn).
-        spec1.mode = TableMode::Eval;
-        spec2.mode = TableMode::Eval;
-        spec1.shocks = vec![ScheduledShockSpec {
-            hint_turn: 2,
-            forecast_turn: 3,
-            realize_turn: 4,
-            target_seat: 2,
-            kind: ShockKind::SupplyFreeze,
-            magnitude_bps: 2_500,
-        }];
-        spec2.shocks = vec![ScheduledShockSpec {
-            hint_turn: 2,
-            forecast_turn: 3,
-            realize_turn: 4,
-            target_seat: 3,
-            kind: ShockKind::TariffHoliday,
-            magnitude_bps: 7_500,
-        }];
+        let (mut e1, mut e2, observer_seat, target_turn) = if !use_club {
+            // Eval path (Turn 1): vary pre-seeded `spec.shocks` (`hint_turn > turn = 1`),
+            // `dealt_mandate_commits`, and rival `mandate_commits`.
+            spec1.mode = TableMode::Eval;
+            spec2.mode = TableMode::Eval;
+            spec1.shocks = vec![ScheduledShockSpec {
+                hint_turn: 2,
+                forecast_turn: 3,
+                realize_turn: 4,
+                target_seat: 2,
+                kind: ShockKind::SupplyFreeze,
+                magnitude_bps: 2_500,
+            }];
+            spec2.shocks = vec![ScheduledShockSpec {
+                hint_turn: 2,
+                forecast_turn: 3,
+                realize_turn: 4,
+                target_seat: 3,
+                kind: ShockKind::TariffHoliday,
+                magnitude_bps: 7_500,
+            }];
+            let mut e1 = must_ok(TurnEngine::new(spec1), "e1");
+            let mut e2 = must_ok(TurnEngine::new(spec2), "e2");
+            for s in 0..n {
+                let c1 = must_ok(
+                    compute_mandate_commitment(tid, Seat(s), &deal1.seat_reveals[usize::from(s)]),
+                    "c1",
+                );
+                must_ok(e1.submit_mandate_commitment(Seat(s), c1), "e1 mc");
+                let c2 = must_ok(
+                    compute_mandate_commitment(tid, Seat(s), &deal2.seat_reveals[usize::from(s)]),
+                    "c2",
+                );
+                must_ok(e2.submit_mandate_commitment(Seat(s), c2), "e2 mc");
+            }
+            (e1, e2, 0_u8, 1_u8)
+        } else {
+            // Club path (`TableMode::Club`, empty `spec.shocks`): vary Turn-1 `dealt_mandate_commits`
+            // and `mandate_commits`, advance through real VRF Sweeps to Turn 3 (`club_stage == 0`,
+            // after Turn-2 draw) or Turn 8 (`club_stage` 1 & 2, after Turn-6 OracleAuditor win and
+            // Turn-7 draw), and vary `state.drawn_shocks` between `e1` and `e2`.
+            prop_assert_eq!(spec1.mode, TableMode::Club);
+            prop_assert!(spec1.shocks.is_empty());
+            let mut e1 = must_ok(TurnEngine::new(spec1), "club e1");
+            let mut e2 = must_ok(TurnEngine::new(spec2), "club e2");
+            for s in 0..n {
+                let c1 = must_ok(
+                    compute_mandate_commitment(tid, Seat(s), &deal1.seat_reveals[usize::from(s)]),
+                    "c1",
+                );
+                must_ok(e1.submit_mandate_commitment(Seat(s), c1), "e1 mc");
+                let c2 = must_ok(
+                    compute_mandate_commitment(tid, Seat(s), &deal2.seat_reveals[usize::from(s)]),
+                    "c2",
+                );
+                must_ok(e2.submit_mandate_commitment(Seat(s), c2), "e2 mc");
+            }
+            let (target_turn, observer_seat) = match club_stage {
+                0 => (3_u8, 0_u8),
+                1 => (8_u8, 0_u8),
+                _ => (8_u8, 1_u8),
+            };
+            for t in 1..target_turn {
+                let mut bundles = BTreeMap::new();
+                if t == 6 {
+                    let mut b1 = SealedOrderBundle::default();
+                    b1.charter_bids.push(CharterBidOrder {
+                        role: CharterRole::OracleAuditor,
+                        bid_cred: 300,
+                    });
+                    bundles.insert(1_u8, b1);
+                }
+                commit_and_reveal_subset(&mut e1, tid, t, &bundles);
+                commit_and_reveal_subset(&mut e2, tid, t, &bundles);
+                let (_, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove");
+                must_ok(e1.sweep_turn_with_eval_vrf(&proof), "e1 sweep");
+                must_ok(e2.sweep_turn_with_eval_vrf(&proof), "e2 sweep");
+            }
 
-        let mut e1 = must_ok(TurnEngine::new(spec1), "e1");
-        let mut e2 = must_ok(TurnEngine::new(spec2), "e2");
+            let mutated_e2 = mutate_drawn_shocks_in_engine(&e2, |drawn| {
+                let alt_kind = match alt_byte % 4 {
+                    0 => ShockKind::DemandSurge,
+                    1 => ShockKind::SupplyFreeze,
+                    2 => ShockKind::TariffHoliday,
+                    _ => ShockKind::SpoilageSpike,
+                };
+                if club_stage == 0 {
+                    // Turn 3 after Turn-2 draw (hint 3, forecast 4, realize 5): mutate unforecast
+                    // shock completely while observing non-Auditor Seat 0.
+                    if let Some(last) = drawn.last_mut() {
+                        last.target_seat = (last.target_seat + 1 + (alt_byte % 3)) % n;
+                        last.kind = alt_kind;
+                        last.magnitude_bps = 1_000 + u16::from(alt_byte) * 20;
+                    }
+                } else if club_stage == 1 {
+                    // Turn 8 after Turn-7 draw (hint 8, forecast 9, realize 10): mutate Turn-7
+                    // drawn shock and append a future hint_turn = 9 shock; observe non-Auditor Seat 0.
+                    if let Some(last) = drawn.last_mut() {
+                        last.target_seat = (last.target_seat + 1 + (alt_byte % 3)) % n;
+                        last.kind = alt_kind;
+                        last.magnitude_bps = 1_000 + u16::from(alt_byte) * 20;
+                    }
+                    drawn.push(ScheduledShockSpec {
+                        hint_turn: 9,
+                        forecast_turn: 10,
+                        realize_turn: 11,
+                        target_seat: alt_byte % n,
+                        kind: alt_kind,
+                        magnitude_bps: 3_333,
+                    });
+                } else {
+                    // Turn 8 observing active `OracleAuditor` Seat 1: vary `magnitude_bps` on the
+                    // active Turn-7 shock (`hint_turn = 8, forecast_turn = 9`) AND vary a future
+                    // `hint_turn = 9 > 8` shock in `drawn_shocks`!
+                    if let Some(last) = drawn.last_mut() {
+                        last.magnitude_bps = 1_200 + u16::from(alt_byte) * 25;
+                    }
+                    drawn.push(ScheduledShockSpec {
+                        hint_turn: 9,
+                        forecast_turn: 10,
+                        realize_turn: 11,
+                        target_seat: alt_byte % n,
+                        kind: alt_kind,
+                        magnitude_bps: 4_444,
+                    });
+                }
+            });
+            (e1, mutated_e2, observer_seat, target_turn)
+        };
 
-        // Submit differing mandate commits for peers 1..n.
-        for s in 0..n {
-            let rev1 = &deal1.seat_reveals[usize::from(s)];
-            let c1 = must_ok(compute_mandate_commitment(tid, Seat(s), rev1), "c1");
-            must_ok(e1.submit_mandate_commitment(Seat(s), c1), "e1 mc");
-            let rev2 = &deal2.seat_reveals[usize::from(s)];
-            let c2 = must_ok(compute_mandate_commitment(tid, Seat(s), rev2), "c2");
-            must_ok(e2.submit_mandate_commitment(Seat(s), c2), "e2 mc");
-        }
-
-        // Across TalkAndMarket, Commit (only peer 1 committed in e1, none in e2), and
-        // Reveal (peer 1 reveals a converter+project bundle in e1 vs different bundle in e2),
-        // Seat 0's SeatObservation, PublicPreviewState, preview_what_if, and preview_seat_bundle
-        // MUST stay byte-identical!
+        // Across TalkAndMarket, Commit (differing peer commitments), and Reveal (differing peer
+        // reveals), `observer_seat`'s `SeatObservation`, `PublicPreviewState`, `preview_what_if`,
+        // and `preview_seat_bundle` MUST stay byte-identical!
+        let peer_a = (observer_seat + 1) % n;
+        let peer_b = (observer_seat + 2) % n;
         if phase_pick >= 1 {
             must_ok(e1.advance_to_commit(), "e1 commit");
             must_ok(e2.advance_to_commit(), "e2 commit");
-            let b_peer1 = SealedOrderBundle {
-                converter_runs: vec![ConverterRunOrder { recipe_idx: 0, runs: 2 }],
+            let b_peer_a = SealedOrderBundle {
+                converter_runs: vec![ConverterRunOrder {
+                    recipe_idx: 0,
+                    runs: 2,
+                }],
                 ..SealedOrderBundle::default()
             };
-            let rev_p1 = OrderReveal {
-                bundle: b_peer1.clone(),
+            let rev_pa = OrderReveal {
+                bundle: b_peer_a,
                 salt: RevealSalt([0x77; 32]),
             };
-            let c_p1 = must_ok(compute_order_commitment(tid, Turn(1), Seat(1), &rev_p1), "c_p1");
-            must_ok(e1.submit_order_commitment(Seat(1), c_p1), "e1 submit p1");
+            let c_pa = must_ok(
+                compute_order_commitment(tid, Turn(target_turn), Seat(peer_a), &rev_pa),
+                "c_pa",
+            );
+            must_ok(e1.submit_order_commitment(Seat(peer_a), c_pa), "e1 submit pa");
 
-            let b_peer2 = SealedOrderBundle {
-                converter_runs: vec![ConverterRunOrder { recipe_idx: 0, runs: 1 }],
+            let b_peer_b = SealedOrderBundle {
+                converter_runs: vec![ConverterRunOrder {
+                    recipe_idx: 0,
+                    runs: 1,
+                }],
                 ..SealedOrderBundle::default()
             };
-            let rev_p2 = OrderReveal {
-                bundle: b_peer2,
+            let rev_pb = OrderReveal {
+                bundle: b_peer_b,
                 salt: RevealSalt([alt_byte; 32]),
             };
-            let c_p2 = must_ok(compute_order_commitment(tid, Turn(1), Seat(2), &rev_p2), "c_p2");
-            must_ok(e2.submit_order_commitment(Seat(2), c_p2), "e2 submit p2");
+            let c_pb = must_ok(
+                compute_order_commitment(tid, Turn(target_turn), Seat(peer_b), &rev_pb),
+                "c_pb",
+            );
+            must_ok(e2.submit_order_commitment(Seat(peer_b), c_pb), "e2 submit pb");
 
             if phase_pick == 2 {
                 must_ok(e1.advance_to_reveal(), "e1 reveal");
                 must_ok(e2.advance_to_reveal(), "e2 reveal");
-                must_ok(e1.submit_order_reveal(Seat(1), rev_p1), "e1 rev p1");
-                must_ok(e2.submit_order_reveal(Seat(2), rev_p2), "e2 rev p2");
+                must_ok(e1.submit_order_reveal(Seat(peer_a), rev_pa), "e1 rev pa");
+                must_ok(e2.submit_order_reveal(Seat(peer_b), rev_pb), "e2 rev pb");
             }
         }
 
-        let obs1 = must_ok(e1.observe_seat(Seat(0)), "obs1");
-        let obs2 = must_ok(e2.observe_seat(Seat(0)), "obs2");
+        let obs1 = must_ok(e1.observe_seat(Seat(observer_seat)), "obs1");
+        let obs2 = must_ok(e2.observe_seat(Seat(observer_seat)), "obs2");
+        if use_club && club_stage == 2 {
+            prop_assert!(!obs1.auditor_hints().is_empty());
+        }
+        prop_assert_eq!(obs1.auditor_hints(), obs2.auditor_hints());
         prop_assert_eq!(
             must_ok(serde_json::to_vec(&obs1), "ser obs1"),
             must_ok(serde_json::to_vec(&obs2), "ser obs2")
@@ -1206,10 +1609,13 @@ proptest! {
         );
 
         let ai_req = AiPreviewRequest {
-            seat: 0,
+            seat: observer_seat,
             market_actions: Vec::new(),
             bundle: SealedOrderBundle {
-                converter_runs: vec![ConverterRunOrder { recipe_idx: 0, runs: 1 }],
+                converter_runs: vec![ConverterRunOrder {
+                    recipe_idx: 0,
+                    runs: 1,
+                }],
                 ..SealedOrderBundle::default()
             },
         };
@@ -1221,7 +1627,7 @@ proptest! {
         );
 
         let human_req = HumanWhatIfRequest {
-            seat: 0,
+            seat: observer_seat,
             market_actions: Vec::new(),
             cancel_lock_at: None,
             bundle: ai_req.bundle,
@@ -1596,10 +2002,50 @@ fn replay_format_version_current_reads_newer_refused_by_name_and_pre_version_rea
     );
 
     // Version 0 and non-numeric format_version / serde deserialize rejections also surface clearly.
-    assert!(check_replay_format_version_slice(br#"{"format_version":0}"#).is_err());
+    assert_eq!(
+        must_err(
+            check_replay_format_version_slice(br#"{"format_version":0}"#),
+            "version 0 header"
+        ),
+        EngineError::UnsupportedReplayVersion {
+            found: 0,
+            newest_known: REPLAY_FORMAT_VERSION,
+        }
+    );
     assert!(check_replay_format_version_slice(br#"{"format_version":"2"}"#).is_err());
     assert!(serde_json::from_slice::<SeasonReplayLog>(&future_log_bytes).is_err());
     assert!(serde_json::from_slice::<ReplayOutcome>(&future_out_bytes).is_err());
+
+    // SeasonReplayLog::from_eval_json_slice & SeasonReplayLog::from_club_json_slice reject version 0
+    // and mismatched modes (`C5`).
+    val["log"]["format_version"] = serde_json::json!(0);
+    let v0_log_bytes = must_ok(serde_json::to_vec(&val["log"]), "v0 log bytes");
+    assert_eq!(
+        must_err(SeasonReplayLog::from_json_slice(&v0_log_bytes), "v0 log"),
+        EngineError::UnsupportedReplayVersion {
+            found: 0,
+            newest_known: REPLAY_FORMAT_VERSION,
+        }
+    );
+    assert_eq!(
+        must_err(
+            SeasonReplayLog::from_eval_json_slice(&v0_log_bytes),
+            "v0 eval log"
+        ),
+        EngineError::UnsupportedReplayVersion {
+            found: 0,
+            newest_known: REPLAY_FORMAT_VERSION,
+        }
+    );
+    assert!(SeasonReplayLog::from_eval_json_slice(&cur_log_bytes).is_ok());
+    assert_eq!(
+        must_err(
+            SeasonReplayLog::from_club_json_slice(&cur_log_bytes),
+            "club rejects eval log"
+        )
+        .code(),
+        "INVALID_CONFIG"
+    );
 }
 
 // =================================================================================================
@@ -1910,4 +2356,210 @@ fn what_if_counterparty_assumptions_pessimistic_ties_and_ai_preview_note_ban() {
     let mut bad_pub = obs0.to_public_preview_state();
     bad_pub.seats.pop();
     assert!(bad_pub.to_engine().is_err());
+}
+
+#[test]
+fn card2b_c2_c3_c5_and_auditor_accessor_regressions() {
+    // 1. C2: TurnEngine omits `public_receipts` before first sweep, serializes it afterward while
+    // preserving `state_digest()`, and still deserializes pre-Card-2 JSON without `public_receipts`.
+    let tid = TableId(90_002);
+    let (club_spec, deal, eval_seed) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_setup(tid, 4, 2),
+        "club setup",
+    );
+    let mut eng = must_ok(TurnEngine::new(club_spec), "new");
+    let pre_sweep_val = must_ok(serde_json::to_value(&eng), "pre-sweep engine json");
+    assert!(pre_sweep_val.get("public_receipts").is_none());
+
+    for s in 0..4_u8 {
+        let mc = must_ok(
+            compute_mandate_commitment(tid, Seat(s), &deal.seat_reveals[usize::from(s)]),
+            "mc",
+        );
+        must_ok(eng.submit_mandate_commitment(Seat(s), mc), "submit mc");
+    }
+
+    for t in 1..=2_u8 {
+        let mut bundles = BTreeMap::new();
+        if t == 2 {
+            // Let Seat 1 win OracleAuditor later? Not needed here; test Sweep 1 & 2 receipts.
+            bundles.insert(0, SealedOrderBundle::default());
+        }
+        commit_and_reveal_subset(&mut eng, tid, t, &bundles);
+        let (_, proof) = must_ok(eval_seed.prove_turn(tid, Turn(t)), "prove");
+        must_ok(eng.sweep_turn_with_eval_vrf(&proof), "sweep");
+    }
+    assert_eq!(eng.public_receipts().len(), 2);
+    let digest_live = must_ok(eng.state_digest(), "digest_live");
+    let mut post_val = must_ok(serde_json::to_value(&eng), "post-sweep engine json");
+    assert!(post_val.get("public_receipts").is_some());
+    let roundtrip: TurnEngine = must_ok(serde_json::from_value(post_val.clone()), "rt engine");
+    assert_eq!(roundtrip, eng);
+    assert_eq!(roundtrip.public_receipts(), eng.public_receipts());
+    assert_eq!(must_ok(roundtrip.state_digest(), "rt digest"), digest_live);
+
+    if let Some(obj) = post_val.as_object_mut() {
+        obj.remove("public_receipts");
+    }
+    let pre_card2_compat: TurnEngine = must_ok(
+        serde_json::from_value(post_val),
+        "pre-card2 TurnEngine json",
+    );
+    assert!(pre_card2_compat.public_receipts().is_empty());
+    assert_eq!(
+        must_ok(pre_card2_compat.state_digest(), "compat digest"),
+        digest_live
+    );
+
+    // 2. C5: `SeasonReplayLog::from_club_json_slice` accepts Club logs and rejects Eval logs.
+    let club_log = must_ok(
+        SeasonReplayLog::from_rig_seed(
+            eng.state().spec.clone(),
+            2,
+            deal,
+            vec![None; 4],
+            Vec::new(),
+            vec![None; 4],
+        ),
+        "club log",
+    );
+    let club_bytes = must_ok(serde_json::to_vec(&club_log), "club bytes");
+    assert!(SeasonReplayLog::from_club_json_slice(&club_bytes).is_ok());
+    assert_eq!(
+        must_err(
+            SeasonReplayLog::from_eval_json_slice(&club_bytes),
+            "eval rejects club log"
+        )
+        .code(),
+        "INVALID_CONFIG"
+    );
+
+    // 3. `SeatObservation::auditor_hints` + `engine_internals::preview_bundle_in_mode` B2 forecast
+    // check (`PreviewSteps0To7` omits the premature Turn-8 forecast while `Live` shows it).
+    let (mut eval_spec, _, eval_seed2) = must_ok(
+        TableSpec::standard_eval_chiral_ring_with_setup(TableId(90_003), 4, 3),
+        "eval spec",
+    );
+    eval_spec.shocks = vec![ScheduledShockSpec {
+        hint_turn: 7,
+        forecast_turn: 8,
+        realize_turn: 9,
+        target_seat: 2,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 2_200,
+    }];
+    let mut e_sh = must_ok(TurnEngine::new(eval_spec), "e_sh");
+    for t in 1..=6_u8 {
+        let mut b = BTreeMap::new();
+        if t == 6 {
+            let mut b1 = SealedOrderBundle::default();
+            b1.charter_bids.push(CharterBidOrder {
+                role: CharterRole::OracleAuditor,
+                bid_cred: 300,
+            });
+            b.insert(1, b1);
+        }
+        commit_and_reveal_subset(&mut e_sh, TableId(90_003), t, &b);
+        let (_, proof) = must_ok(eval_seed2.prove_turn(TableId(90_003), Turn(t)), "prove sh");
+        must_ok(e_sh.sweep_turn_with_eval_vrf(&proof), "sweep sh");
+    }
+    // Turn 7 (`hint_turn == 7 < forecast_turn == 8`): Seat 1 holds OracleAuditor and sees 1
+    // redacted hint (no magnitude), while Seat 0 sees empty.
+    let obs_t7_s1 = must_ok(e_sh.observe_seat(Seat(1)), "obs_t7_s1");
+    let obs_t7_s0 = must_ok(e_sh.observe_seat(Seat(0)), "obs_t7_s0");
+    assert_eq!(obs_t7_s1.auditor_hints().len(), 1);
+    assert_eq!(obs_t7_s1.auditor_hints()[0].hint_turn, 7);
+    assert_eq!(obs_t7_s1.auditor_hints()[0].forecast_turn, 8);
+    assert_eq!(obs_t7_s1.auditor_hints()[0].realize_turn, 9);
+    assert!(obs_t7_s0.auditor_hints().is_empty());
+
+    // Sweep Turn 7 -> Turn 8 (`forecast_turn == 8`): Turn-7 Auditor window has closed, and Turn-8
+    // forecast must NOT appear prematurely in `SeatObservation` or `PreviewSteps0To7`!
+    commit_and_reveal_subset(&mut e_sh, TableId(90_003), 7, &BTreeMap::new());
+    let (_, proof7) = must_ok(eval_seed2.prove_turn(TableId(90_003), Turn(7)), "prove 7");
+    must_ok(e_sh.sweep_turn_with_eval_vrf(&proof7), "sweep 7");
+
+    let obs_t8 = must_ok(e_sh.observe_seat(Seat(1)), "obs_t8");
+    assert!(obs_t8.auditor_hints().is_empty());
+    assert!(obs_t8.public_forecasts.is_empty());
+    let prev_safe = must_ok(
+        engine_internals::preview_bundle_in_mode(
+            &e_sh,
+            Seat(1),
+            &[],
+            &SealedOrderBundle::default(),
+            engine_internals::SweepMode::PreviewSteps0To7,
+        ),
+        "preview_bundle_in_mode safe",
+    );
+    assert!(prev_safe.sweep_receipt.public_forecasts.is_empty());
+    let prev_live = must_ok(
+        engine_internals::preview_bundle_in_mode(
+            &e_sh,
+            Seat(1),
+            &[],
+            &SealedOrderBundle::default(),
+            engine_internals::SweepMode::Live,
+        ),
+        "preview_bundle_in_mode live",
+    );
+    assert_eq!(prev_live.sweep_receipt.public_forecasts.len(), 1);
+
+    // 4. C3: Zero-unit `EscrowRefunded` fills are skipped at both DualEscrow default and expired
+    // TokenEscrow refund sites (via synthetic zero-bond vault in deserialized TurnEngine state).
+    let base_spec = must_ok(
+        TableSpec::standard_chiral_ring(TableId(90_004), 4, 1),
+        "spec",
+    );
+    let zero_eng = must_ok(TurnEngine::new(base_spec), "zero_eng");
+    let mut eng_val = must_ok(serde_json::to_value(&zero_eng), "eng_val");
+    eng_val["state"]["dual_escrows"] = serde_json::json!({
+        "1": {
+            "escrow_id": 1,
+            "buyer": 0,
+            "seller": 1,
+            "good": { "Raw": 1 },
+            "required_units": 500,
+            "payment_cred": 500,
+            "buyer_bond_cred": 0,
+            "seller_bond_cred": 250,
+            "baseline_delivered": 0,
+            "deadline_turn": 1,
+            "domain_id": null,
+            "status": "Locked"
+        }
+    });
+    eng_val["state"]["escrows"] = serde_json::json!({
+        "2": {
+            "escrow_id": 2,
+            "sender": 2,
+            "destination": 3,
+            "amount_cred": 0,
+            "finish_after_turn": null,
+            "cancel_after_turn": 1,
+            "condition_hash": null,
+            "bond": null,
+            "status": "Locked"
+        }
+    });
+    let mut patched_eng: TurnEngine = must_ok(serde_json::from_value(eng_val), "patched_eng");
+    commit_and_reveal_subset(&mut patched_eng, TableId(90_004), 1, &BTreeMap::new());
+    let zero_rec = must_ok(
+        patched_eng.sweep_turn(derive_turn_beacon(1, TableId(90_004), Turn(1))),
+        "zero sweep",
+    );
+    assert!(
+        zero_rec
+            .fills
+            .iter()
+            .any(|f| f.kind == FillKind::EscrowForfeited && f.units == 250)
+    );
+    assert!(
+        !zero_rec
+            .fills
+            .iter()
+            .any(|f| f.kind == FillKind::EscrowRefunded && f.units == 0),
+        "zero-unit EscrowRefunded fill must be skipped (C3): {:?}",
+        zero_rec.fills
+    );
 }

@@ -28,8 +28,8 @@ use crate::types::{
 /// Current replay serialization format version written on [`SeasonReplayLog`] and [`ReplayOutcome`].
 ///
 /// Pre-version logs without `"format_version"` still deserialize cleanly for backwards compatibility;
-/// payloads declaring a newer or unknown `"format_version"` are refused by name via
-/// [`EngineError::UnsupportedReplayVersion`].
+/// payloads declaring any unsupported `"format_version"` other than [`REPLAY_FORMAT_VERSION`]
+/// (including `0` or newer versions) are refused by name via [`EngineError::UnsupportedReplayVersion`].
 pub const REPLAY_FORMAT_VERSION: u32 = 1;
 
 #[derive(Deserialize)]
@@ -733,13 +733,44 @@ impl SeasonReplayLog {
     }
 
     /// Parses a serialized [`SeasonReplayLog`] JSON slice after verifying its `format_version`,
-    /// accepting pre-version logs and [`REPLAY_FORMAT_VERSION`] while refusing unknown newer
-    /// versions via [`EngineError::UnsupportedReplayVersion`].
+    /// accepting pre-version logs (absent `format_version`) and [`REPLAY_FORMAT_VERSION`] while
+    /// refusing any unsupported version (`0`, newer, or unknown) via
+    /// [`EngineError::UnsupportedReplayVersion`].
+    ///
+    /// Note: this generic parser accepts `Game`, `Eval`, and `Club` logs for Steward inspection;
+    /// automated Evaluation dataset pipelines must call [`Self::from_eval_json_slice`] so Club logs
+    /// are rejected (`C5`).
     pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
         check_replay_format_version_slice(bytes)?;
         serde_json::from_slice(bytes).map_err(|err| {
             EngineError::InvalidConfig(format!("season replay log does not parse: {err}"))
         })
+    }
+
+    /// Parses a [`SeasonReplayLog`] strictly for Evaluation Mode (`TableMode::Eval`), refusing Club
+    /// and Game logs so offline Club seasons can never enter Evaluation datasets (`Q2`, `C5`).
+    pub fn from_eval_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        let log = Self::from_json_slice(bytes)?;
+        if log.mode != TableMode::Eval || log.spec.mode != TableMode::Eval {
+            return Err(EngineError::InvalidConfig(format!(
+                "Eval replay log loader refuses {:?} log; TableMode::Eval is required",
+                log.mode
+            )));
+        }
+        Ok(log)
+    }
+
+    /// Parses a [`SeasonReplayLog`] strictly for Club Mode (`TableMode::Club`), refusing Eval and
+    /// Game logs (`Q2`, `C5`).
+    pub fn from_club_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        let log = Self::from_json_slice(bytes)?;
+        if log.mode != TableMode::Club || log.spec.mode != TableMode::Club {
+            return Err(EngineError::InvalidConfig(format!(
+                "Club replay log loader refuses {:?} log; TableMode::Club is required",
+                log.mode
+            )));
+        }
+        Ok(log)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -900,8 +931,9 @@ impl<'de> Deserialize<'de> for ReplayOutcome {
 
 impl ReplayOutcome {
     /// Parses a serialized [`ReplayOutcome`] JSON slice after verifying its `format_version`,
-    /// accepting pre-version outcomes and [`REPLAY_FORMAT_VERSION`] while refusing unknown newer
-    /// versions via [`EngineError::UnsupportedReplayVersion`].
+    /// accepting pre-version outcomes (absent `format_version`) and [`REPLAY_FORMAT_VERSION`] while
+    /// refusing any unsupported version (`0`, newer, or unknown) via
+    /// [`EngineError::UnsupportedReplayVersion`].
     pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
         check_replay_format_version_slice(bytes)?;
         serde_json::from_slice(bytes).map_err(|err| {
@@ -939,6 +971,10 @@ impl ReplayRecord {
     /// Reads a record written as JSON: checks `format_version` first, then reads the bare log
     /// (unknown keys ignored) plus the optional section. A bare log reads as a record without a
     /// section.
+    ///
+    /// Note: this generic loader accepts `Game`, `Eval`, and `Club` records for Steward inspection;
+    /// automated Evaluation dataset pipelines must call [`Self::from_eval_json_slice`] so Club
+    /// records are refused (`C5`).
     pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
         check_replay_format_version_slice(bytes)?;
         let log: SeasonReplayLog = serde_json::from_slice(bytes).map_err(|err| {
@@ -998,6 +1034,9 @@ impl ReplayRecord {
 
 /// Replays an entire season deterministically from `log`, verifying every phase transition,
 /// cryptographic commitment, 8-step Sweep, closing bell roll, and final scoreboard.
+///
+/// Note: this generic entry point accepts `Game`, `Eval`, and `Club` logs for Steward inspection;
+/// automated Evaluation pipelines must use [`replay_eval_season`] so Club logs are refused (`C5`).
 pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
     replay_season_inner(log, None)
 }
@@ -1030,7 +1069,9 @@ pub fn replay_club_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, Engine
 /// start of every turn, each Sweep's per-seat outcome, and every seat's predicates at the close.
 ///
 /// Deriving the section reads the engine state and changes nothing: the returned
-/// [`ReplayOutcome`] equals [`replay_season`]'s for the same log.
+/// [`ReplayOutcome`] equals [`replay_season`]'s for the same log. Like [`replay_season`], this
+/// generic audit entry point accepts `Game`, `Eval`, and `Club` logs; automated Eval loaders must
+/// use [`replay_eval_season`] (`C5`).
 pub fn replay_season_with_state_predicates(
     log: &SeasonReplayLog,
 ) -> Result<(ReplayOutcome, StatePredicateSection), EngineError> {
@@ -1045,6 +1086,9 @@ pub fn replay_season_with_state_predicates(
 }
 
 /// Replays `log` and returns it as a [`ReplayRecord`] carrying the state-predicate section.
+///
+/// Accepts `Game`, `Eval`, and `Club` logs for Steward audit; automated Eval loaders must use
+/// [`ReplayRecord::from_eval_json_slice`] / [`replay_eval_season`] (`C5`).
 pub fn attach_state_predicates(log: &SeasonReplayLog) -> Result<ReplayRecord, EngineError> {
     let (_, section) = replay_season_with_state_predicates(log)?;
     Ok(ReplayRecord {

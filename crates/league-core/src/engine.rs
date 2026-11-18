@@ -302,7 +302,8 @@ pub struct SweepReceipt {
     pub post_state_digest: [u8; 32],
 }
 
-/// Preview breakdown of one [`ConverterRunOrder`] simulated inside [`TurnEngine::preview_bundle`].
+/// Preview breakdown of one [`ConverterRunOrder`] simulated inside
+/// [`crate::preview_seat_bundle`] or [`crate::preview_what_if`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConverterOrderPreview {
     /// Converter recipe index requested.
@@ -315,7 +316,8 @@ pub struct ConverterOrderPreview {
     pub clamped: bool,
 }
 
-/// Preview breakdown of one [`ProjectDeliveryOrder`] simulated inside [`TurnEngine::preview_bundle`].
+/// Preview breakdown of one [`ProjectDeliveryOrder`] simulated inside
+/// [`crate::preview_seat_bundle`] or [`crate::preview_what_if`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectOrderPreview {
     /// Target Syndicate Project ID requested.
@@ -328,7 +330,8 @@ pub struct ProjectOrderPreview {
     pub clamped: bool,
 }
 
-/// Outcome of an [`AtomicSwapProposal`] simulated in [`TurnEngine::preview_bundle`].
+/// Outcome of an [`AtomicSwapProposal`] simulated in [`crate::preview_seat_bundle`] or
+/// [`crate::preview_what_if`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SwapPreviewOutcome {
     /// Counterparty co-signed and both parties satisfied domain/balance checks.
@@ -350,7 +353,8 @@ pub struct SwapOrderPreview {
     pub outcome: SwapPreviewOutcome,
 }
 
-/// Outcome of a `CheckCash` request simulated in [`TurnEngine::preview_bundle`].
+/// Outcome of a `CheckCash` request simulated in [`crate::preview_seat_bundle`] or
+/// [`crate::preview_what_if`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckPreviewOutcome {
     /// Check cleared on Step 3 and credited the payee.
@@ -396,8 +400,9 @@ pub struct SeatUpkeepPreview {
     pub debt_repaid_cred: Units,
 }
 
-/// Side-effect-free simulation result returned by [`TurnEngine::preview_bundle`] and
-/// [`TurnEngine::preview_bundle_with_context`].
+/// Side-effect-free simulation result returned by the internal preview helpers behind
+/// `league_core::engine_internals` (host/conformance use only). Seat-facing callers must use
+/// [`crate::WhatIfPreview`] via [`crate::preview_what_if`] or [`crate::preview_seat_bundle`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BundlePreview {
     /// Previewed seat index.
@@ -443,21 +448,34 @@ pub(crate) struct SweepSeatDetails {
     pub(crate) spoilage_by_seat: Vec<Units>,
 }
 
-/// Controls whether a Turn Sweep executes the full 8-step live turn (including Step-8 stochastic
-/// shock draws, forecasts, next-turn shock activation, closing bell roll, and `state_digest`) or
-/// only deterministic Steps 0–7 plus Step-8 end-of-turn cleanup for previews (`B3`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SweepMode {
-    /// Full live 8-step Sweep (draws shocks, emits forecasts, activates next-turn shocks, evaluates
-    /// Closing Bell, computes `post_state_digest`, and records a [`PublicSweepReceipt`]).
-    #[default]
-    Live,
-    /// Preview-only Steps 0–7 plus Step-8 deterministic expiry/wash-freeze cleanup (omits shock
-    /// draws, `forecast_turn == turn` forecast emission, closing roll, and next-turn activation).
-    PreviewSteps0To7,
+pub(crate) mod sweep_mode {
+    use serde::{Deserialize, Serialize};
+
+    /// Controls whether a Turn Sweep executes the full 8-step live turn (including Step-8
+    /// stochastic shock draws, forecasts, next-turn shock activation, closing bell roll, and
+    /// `state_digest`) or only deterministic Steps 0–7 plus Step-8 end-of-turn cleanup for
+    /// previews (`B2`, `B3`). Defaults to [`Self::PreviewSteps0To7`].
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum SweepMode {
+        /// Full live 8-step Sweep (draws shocks, emits forecasts, activates next-turn shocks,
+        /// evaluates Closing Bell, computes `post_state_digest`, and records a
+        /// [`crate::PublicSweepReceipt`]).
+        Live,
+        /// Preview-only Steps 0–7 plus Step-8 deterministic expiry/wash-freeze cleanup (omits shock
+        /// draws, `forecast_turn == turn` forecast emission, closing roll, and next-turn activation).
+        #[default]
+        PreviewSteps0To7,
+    }
 }
 
+pub(crate) use sweep_mode::SweepMode;
+
 /// Deterministic pure-state v2 Turn Engine.
+///
+/// Serializes `state` together with `public_receipts` when non-empty (`#[serde(default,
+/// skip_serializing_if = "Vec::is_empty")]`) so engine round-trips preserve
+/// [`TurnEngine::public_receipts`], while [`TurnEngine::state_digest`] hashes [`EngineState`]
+/// alone (keeping all state digests unchanged and pre-Card-2 JSON payloads readable).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnEngine {
     state: EngineState,
@@ -567,6 +585,23 @@ impl TurnEngine {
 
     /// Projects the sole seat-safe read boundary [`SeatObservation`] for `seat` from live state
     /// and this engine's recorded public receipts (`A1`, `C4`).
+    ///
+    /// Raw engine inspection (`private_hints_for_auditor`) and raw live previews (`preview_bundle`)
+    /// are non-public on [`TurnEngine`]:
+    ///
+    /// ```compile_fail
+    /// use league_core::{Seat, TableId, TableSpec, TurnEngine};
+    /// let spec = TableSpec::standard_chiral_ring(TableId(1), 4, 1).unwrap();
+    /// let engine = TurnEngine::new(spec).unwrap();
+    /// let _ = engine.private_hints_for_auditor(Seat(0));
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use league_core::{SealedOrderBundle, Seat, TableId, TableSpec, TurnEngine};
+    /// let spec = TableSpec::standard_chiral_ring(TableId(1), 4, 1).unwrap();
+    /// let engine = TurnEngine::new(spec).unwrap();
+    /// let _ = engine.preview_bundle(Seat(0), &[], &SealedOrderBundle::default());
+    /// ```
     pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
         self.observe_seat_internal(seat, None)
     }
@@ -612,7 +647,10 @@ impl TurnEngine {
     }
 
     /// Returns any Turn `t` private Horizon Shock hints visible exclusively to the `OracleAuditor`.
-    pub fn private_hints_for_auditor(
+    /// Non-public to seat code (`B1`); host/test callers go through `league_core::engine_internals`
+    /// while seats use [`TurnEngine::observe_seat`] and [`SeatObservation::auditor_hints`].
+    #[cfg(feature = "engine-internals")]
+    pub(crate) fn private_hints_for_auditor(
         &self,
         seat: Seat,
     ) -> Result<Vec<ScheduledShockSpec>, EngineError> {
@@ -1021,10 +1059,11 @@ impl TurnEngine {
         sim.preview_regent_bundle_for_seat(turn, seat)
     }
 
-    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` on a cloned engine
-    /// assuming empty peer bundles and a deterministic preview beacon (`derive_turn_beacon(0, ...)`).
-    /// Never modifies `self`.
-    pub fn preview_bundle(
+    /// Side-effect-free live-mode simulation of `market_actions` and `bundle` for `seat` on a
+    /// cloned engine assuming empty peer bundles and the neutral preview beacon. Non-public to seat
+    /// code (`B2`); host/conformance callers use `league_core::engine_internals`.
+    #[cfg(feature = "engine-internals")]
+    pub(crate) fn preview_bundle_live(
         &self,
         seat: Seat,
         market_actions: &[MarketAction],
@@ -1035,7 +1074,8 @@ impl TurnEngine {
 
     /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` in the specified
     /// [`SweepMode`], assuming empty peer bundles and the neutral beacon (`derive_turn_beacon(0, ...)`).
-    pub fn preview_bundle_in_mode(
+    #[cfg(feature = "engine-internals")]
+    pub(crate) fn preview_bundle_in_mode(
         &self,
         seat: Seat,
         market_actions: &[MarketAction],
@@ -1053,9 +1093,11 @@ impl TurnEngine {
         )
     }
 
-    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` given explicit
-    /// `peer_bundles` and `turn_beacon`. Leaves `self` untouched.
-    pub fn preview_bundle_with_context(
+    /// Side-effect-free live-mode simulation of `market_actions` and `bundle` for `seat` given
+    /// explicit `peer_bundles` and `turn_beacon`. Leaves `self` untouched. Non-public to seat code
+    /// (`B2`); host/conformance callers use `league_core::engine_internals`.
+    #[cfg(feature = "engine-internals")]
+    pub(crate) fn preview_bundle_with_context_live(
         &self,
         seat: Seat,
         market_actions: &[MarketAction],
@@ -1076,7 +1118,8 @@ impl TurnEngine {
     /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` given explicit
     /// `peer_bundles`, `turn_beacon`, and [`SweepMode`], normalizing peer commits and reveals
     /// across `TalkAndMarket`, `Commit`, and `Reveal` (`B1`, `B3`).
-    pub fn preview_bundle_with_context_and_mode(
+    #[cfg(feature = "engine-internals")]
+    pub(crate) fn preview_bundle_with_context_and_mode(
         &self,
         seat: Seat,
         market_actions: &[MarketAction],
@@ -2341,17 +2384,19 @@ impl TurnEngine {
             slot.status = EscrowStatus::Cancelled;
         }
         self.adjust_free_balance(escrow.sender, AssetId::Cred, escrow.amount_cred)?;
-        self.state.fill_log.push(FillRecord {
-            turn: self.state.turn,
-            kind: FillKind::EscrowRefunded,
-            good: Some(AssetId::Cred),
-            from: Some(escrow.sender),
-            to: escrow.sender,
-            units: escrow.amount_cred,
-            net_units: escrow.amount_cred,
-            cred_amount: escrow.amount_cred,
-            unit_price_cred: None,
-        });
+        if escrow.amount_cred > 0 {
+            self.state.fill_log.push(FillRecord {
+                turn: self.state.turn,
+                kind: FillKind::EscrowRefunded,
+                good: Some(AssetId::Cred),
+                from: Some(escrow.sender),
+                to: escrow.sender,
+                units: escrow.amount_cred,
+                net_units: escrow.amount_cred,
+                cred_amount: escrow.amount_cred,
+                unit_price_cred: None,
+            });
+        }
         Ok(())
     }
 
@@ -2755,17 +2800,19 @@ impl TurnEngine {
             cred_amount: forfeited_bond,
             unit_price_cred: None,
         });
-        self.state.fill_log.push(FillRecord {
-            turn,
-            kind: FillKind::EscrowRefunded,
-            good: Some(AssetId::Cred),
-            from: Some(counterparty),
-            to: counterparty,
-            units: refunded_bond,
-            net_units: refunded_bond,
-            cred_amount: refunded_bond,
-            unit_price_cred: None,
-        });
+        if refunded_bond > 0 {
+            self.state.fill_log.push(FillRecord {
+                turn,
+                kind: FillKind::EscrowRefunded,
+                good: Some(AssetId::Cred),
+                from: Some(counterparty),
+                to: counterparty,
+                units: refunded_bond,
+                net_units: refunded_bond,
+                cred_amount: refunded_bond,
+                unit_price_cred: None,
+            });
+        }
     }
 
     fn step2b_evaluate_bonds_and_expired_escrows(

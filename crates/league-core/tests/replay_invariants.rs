@@ -864,11 +864,33 @@ fn politics_charters_pledge_audits_hybrid_bridge_and_all_four_shocks_work() {
 
         if t == 8 {
             // OracleAuditor (Seat 1) sees private shock hint scheduled for hint_turn = 8; non-auditor Seat 0 sees empty.
-            let hints_1 = must_ok(engine.private_hints_for_auditor(Seat(1)), "hints 1");
-            let hints_0 = must_ok(engine.private_hints_for_auditor(Seat(0)), "hints 0");
+            let hints_1 = must_ok(
+                league_core::engine_internals::private_hints_for_auditor(&engine, Seat(1)),
+                "hints 1",
+            );
+            let hints_0 = must_ok(
+                league_core::engine_internals::private_hints_for_auditor(&engine, Seat(0)),
+                "hints 0",
+            );
             assert_eq!(hints_1.len(), 1);
             assert_eq!(hints_1[0].kind, ShockKind::TariffHoliday);
             assert!(hints_0.is_empty());
+
+            // Seat-safe path via SeatObservation::auditor_hints omits magnitude_bps before realize.
+            let obs_1 = must_ok(engine.observe_seat(Seat(1)), "obs 1");
+            let obs_0 = must_ok(engine.observe_seat(Seat(0)), "obs 0");
+            assert_eq!(obs_1.auditor_hints().len(), 1);
+            assert_eq!(obs_1.auditor_hints()[0].kind, ShockKind::TariffHoliday);
+            assert_eq!(obs_1.auditor_hints()[0].hint_turn, hints_1[0].hint_turn);
+            assert_eq!(
+                obs_1.auditor_hints()[0].forecast_turn,
+                hints_1[0].forecast_turn
+            );
+            assert_eq!(
+                obs_1.auditor_hints()[0].realize_turn,
+                hints_1[0].realize_turn
+            );
+            assert!(obs_0.auditor_hints().is_empty());
 
             // Readmit Seat 3 back into Domain 0 on Turn 8 via StandForOffice platform.
             must_ok(
@@ -1408,7 +1430,7 @@ fn validation_error_paths_fixed_point_helpers_and_debug_redaction_are_sound() {
     let valid_spec = must_ok(TableSpec::standard_chiral_ring(TableId(6), 4, 1), "valid");
     let mut eng = must_ok(TurnEngine::new(valid_spec), "new");
     assert!(matches!(
-        eng.private_hints_for_auditor(Seat(9)),
+        league_core::engine_internals::private_hints_for_auditor(&eng, Seat(9)),
         Err(EngineError::InvalidSeat(9))
     ));
     assert!(matches!(
@@ -3535,7 +3557,7 @@ fn hand_checked_turn_math_golden_digest_bond_swap_order_and_charter_expiry() {
                 "freeze active on turn 12",
             );
             let hints = must_ok(
-                eng_ch.private_hints_for_auditor(Seat(1)),
+                league_core::engine_internals::private_hints_for_auditor(&eng_ch, Seat(1)),
                 "auditor active on turn 12",
             );
             assert_eq!(hints.len(), 1);
@@ -4155,9 +4177,9 @@ fn b1_4_preview_bundle_leaves_state_digest_unchanged_and_matches_real_sweep() {
     let digest_before = must_ok(eng.state_digest(), "digest before preview");
     let turn_beacon = derive_turn_beacon(9, tid, Turn(2));
 
-    // 1. Standalone default preview leaves engine bit-identical.
+    // 1. Standalone default live preview leaves engine bit-identical.
     let solo_preview: BundlePreview = must_ok(
-        eng.preview_bundle(Seat(0), &actions, &bundle_0),
+        league_core::engine_internals::preview_bundle_live(&eng, Seat(0), &actions, &bundle_0),
         "solo preview",
     );
     assert_eq!(solo_preview.refused_market_actions.len(), 1);
@@ -4167,9 +4189,10 @@ fn b1_4_preview_bundle_leaves_state_digest_unchanged_and_matches_real_sweep() {
         digest_before
     );
 
-    // 2. Context-aware preview also leaves engine untouched and matches the real Sweep bit-for-bit.
+    // 2. Context-aware live preview also leaves engine untouched and matches the real Sweep bit-for-bit.
     let ctx_preview = must_ok(
-        eng.preview_bundle_with_context(
+        league_core::engine_internals::preview_bundle_with_context_live(
+            &eng,
             Seat(0),
             &pre_raw_buy,
             &bundle_0,
@@ -7278,11 +7301,11 @@ fn deserializing_numeric_sealed_seed_or_malformed_digest_is_refused_by_name() {
 }
 
 #[test]
-fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
+fn non_sealed_log_json_and_replay_outcome_match_v1_wire_schema_and_read_pre_version() {
     use sha2::{Digest as _, Sha256};
 
     #[derive(serde::Serialize)]
-    struct MainSeasonReplayLog<'a> {
+    struct ExpectedV1SeasonReplayLog<'a> {
         format_version: u32,
         spec: &'a TableSpec,
         mode: TableMode,
@@ -7309,9 +7332,9 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
     }
 
     #[derive(serde::Serialize)]
-    struct MainReplayRecord<'a, S: serde::Serialize> {
+    struct ExpectedV1ReplayRecord<'a, S: serde::Serialize> {
         #[serde(flatten)]
-        log: MainSeasonReplayLog<'a>,
+        log: ExpectedV1SeasonReplayLog<'a>,
         #[serde(skip_serializing_if = "Option::is_none")]
         state_predicates: Option<&'a S>,
     }
@@ -7350,7 +7373,7 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
         let eval_pk_hex = log
             .eval_vrf_pubkey
             .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
-        let main_log = MainSeasonReplayLog {
+        let expected_v1_log = ExpectedV1SeasonReplayLog {
             format_version: league_core::REPLAY_FORMAT_VERSION,
             spec: &log.spec,
             mode: log.mode,
@@ -7374,11 +7397,14 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
             mandate_reveals: &log.mandate_reveals,
         };
 
-        let main_bytes = must_ok(serde_json::to_vec(&main_log), "serialize main_log");
+        let expected_v1_bytes = must_ok(
+            serde_json::to_vec(&expected_v1_log),
+            "serialize expected_v1_log",
+        );
         let new_bytes = must_ok(serde_json::to_vec(&log), "serialize log");
         assert_eq!(
-            new_bytes, main_bytes,
-            "clear ({seats}, {clear_seed}) bare SeasonReplayLog JSON drifted from main"
+            new_bytes, expected_v1_bytes,
+            "clear ({seats}, {clear_seed}) bare SeasonReplayLog JSON drifted from v1 schema"
         );
 
         let val: serde_json::Value = must_ok(serde_json::from_slice(&new_bytes), "parse log json");
@@ -7394,13 +7420,26 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
         };
         let bare_record_bytes = must_ok(serde_json::to_vec(&bare_record), "bare record bytes");
         assert_eq!(
-            bare_record_bytes, main_bytes,
-            "clear ({seats}, {clear_seed}) bare ReplayRecord drifted from main"
+            bare_record_bytes, expected_v1_bytes,
+            "clear ({seats}, {clear_seed}) bare ReplayRecord drifted from v1 schema"
         );
 
         let pre_version_bytes = must_ok(
             serde_json::to_vec(&pre_version_log),
             "serialize pre_version_log",
+        );
+        let prefix = format!(
+            "{{\"format_version\":{},",
+            league_core::REPLAY_FORMAT_VERSION
+        );
+        assert!(
+            new_bytes.starts_with(prefix.as_bytes()),
+            "clear ({seats}, {clear_seed}) log must start with leading format_version field"
+        );
+        assert_eq!(
+            &new_bytes[prefix.len()..],
+            &pre_version_bytes[1..],
+            "clear ({seats}, {clear_seed}) body after format_version must stay byte-identical to pre-version schema"
         );
         let rt_from_pre: SeasonReplayLog = must_ok(
             SeasonReplayLog::from_json_slice(&pre_version_bytes),
@@ -7413,16 +7452,16 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
         );
         assert_eq!(rt_rec_from_pre, bare_record);
 
-        let rt_from_main: SeasonReplayLog =
-            must_ok(serde_json::from_slice(&main_bytes), "parse main_bytes");
-        assert_eq!(rt_from_main, log);
-        let rt_rec_from_main = must_ok(
-            ReplayRecord::from_json_slice(&main_bytes),
-            "ReplayRecord::from_json_slice(main_bytes)",
+        let rt_from_v1: SeasonReplayLog =
+            must_ok(serde_json::from_slice(&expected_v1_bytes), "parse v1_bytes");
+        assert_eq!(rt_from_v1, log);
+        let rt_rec_from_v1 = must_ok(
+            ReplayRecord::from_json_slice(&expected_v1_bytes),
+            "ReplayRecord::from_json_slice(v1_bytes)",
         );
-        assert_eq!(rt_rec_from_main, bare_record);
+        assert_eq!(rt_rec_from_v1, bare_record);
 
-        let out = must_ok(replay_season(&rt_from_main), "replay clear log");
+        let out = must_ok(replay_season(&rt_from_v1), "replay clear log");
         assert_eq!(out.scoreboard, live_board);
         assert_eq!(out.state_digests, live_digests);
 
@@ -7434,19 +7473,22 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
 
         let attached_record = must_ok(attach_state_predicates(&log), "attach_state_predicates");
         let attached_bytes = must_ok(serde_json::to_vec(&attached_record), "attached_bytes");
-        let main_record = MainReplayRecord {
-            log: main_log,
+        let expected_v1_record = ExpectedV1ReplayRecord {
+            log: expected_v1_log,
             state_predicates: Some(&section),
         };
-        let main_record_bytes = must_ok(serde_json::to_vec(&main_record), "main_record_bytes");
+        let expected_v1_record_bytes = must_ok(
+            serde_json::to_vec(&expected_v1_record),
+            "expected_v1_record_bytes",
+        );
         assert_eq!(
-            attached_bytes, main_record_bytes,
-            "clear ({seats}, {clear_seed}) ReplayRecord with predicates drifted from main"
+            attached_bytes, expected_v1_record_bytes,
+            "clear ({seats}, {clear_seed}) ReplayRecord with predicates drifted from v1 schema"
         );
 
         let out_bytes = must_ok(serde_json::to_vec(&out), "serialize ReplayOutcome");
         println!(
-            "byte-identical non-sealed ({seats}, {clear_seed}): log_sha256={} outcome_sha256={}",
+            "v1-schema non-sealed ({seats}, {clear_seed}): log_sha256={} outcome_sha256={}",
             sha256_hex(&new_bytes),
             sha256_hex(&out_bytes)
         );
