@@ -532,6 +532,9 @@ pub struct SeatConfig {
     /// Baseline per-turn perishable `Clawback` decay rate in basis points (`< 10_000`).
     pub perishable_decay_bps: Bps,
     /// Optional Standing Regent doctrine (`None` disables automatic non-reveal fallback).
+    ///
+    /// Intentionally public table configuration (`C4`): exposed through `PublicTableSpec` and
+    /// `SeatObservation` so every seat can see upfront which seats have Standing Regent fallback.
     pub regent: Option<RegentDoctrine>,
     /// Converter recipes owned by this seat.
     pub converters: Vec<ConverterRecipe>,
@@ -1295,7 +1298,8 @@ pub enum EngineError {
     CancelLocked,
     /// Season replay log was incomplete or inconsistent with closed status.
     SeasonEnded(String),
-    /// Persisted replay payload declared a format version unknown to or newer than this reader.
+    /// Persisted replay payload declared an unsupported `format_version` (`!= REPLAY_FORMAT_VERSION`,
+    /// such as `0` or a newer unknown version).
     UnsupportedReplayVersion {
         /// Version number found in the serialized payload.
         found: u32,

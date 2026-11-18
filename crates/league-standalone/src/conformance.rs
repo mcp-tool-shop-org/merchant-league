@@ -336,19 +336,19 @@ pub fn run_core_offer_spend_down() -> Result<(bool, Units, Units), StandAloneErr
     bundle_seat2.atomic_swaps.push(swap);
     let mut peer_bundles = BTreeMap::new();
     peer_bundles.insert(2, bundle_seat2);
-    let preview = engine
-        .preview_bundle_with_context(
-            Seat(0),
-            &[],
-            &bundle_seat0,
-            &peer_bundles,
-            derive_turn_beacon(
-                CONFORMANCE_BEACON_SEED + 1,
-                engine.state().table_id,
-                Turn(2),
-            ),
-        )
-        .map_err(map_core_err)?;
+    let preview = league_core::engine_internals::preview_bundle_with_context_live(
+        &engine,
+        Seat(0),
+        &[],
+        &bundle_seat0,
+        &peer_bundles,
+        derive_turn_beacon(
+            CONFORMANCE_BEACON_SEED + 1,
+            engine.state().table_id,
+            Turn(2),
+        ),
+    )
+    .map_err(map_core_err)?;
     let swap_behind_allowed = preview
         .swap_orders
         .iter()
@@ -532,9 +532,13 @@ pub fn run_core_preimage_escrow(
             escrow_id: 1,
             preimage: Some(secret_obj),
         });
-    let early_preview = engine
-        .preview_bundle(Seat(1), &[], &valid_escrow1_bundle)
-        .map_err(map_core_err)?;
+    let early_preview = league_core::engine_internals::preview_bundle_live(
+        &engine,
+        Seat(1),
+        &[],
+        &valid_escrow1_bundle,
+    )
+    .map_err(map_core_err)?;
     let finish_before_after_unlocked = early_preview
         .escrow_orders
         .first()
@@ -564,9 +568,13 @@ pub fn run_core_preimage_escrow(
             escrow_id: 1,
             preimage: Some(PreimageSecret(*wrong_secret)),
         });
-    let wrong_preview = engine
-        .preview_bundle(Seat(1), &[], &wrong_escrow1_bundle)
-        .map_err(map_core_err)?;
+    let wrong_preview = league_core::engine_internals::preview_bundle_live(
+        &engine,
+        Seat(1),
+        &[],
+        &wrong_escrow1_bundle,
+    )
+    .map_err(map_core_err)?;
     let finish_wrong_secret_unlocked = wrong_preview
         .escrow_orders
         .first()
@@ -595,9 +603,13 @@ pub fn run_core_preimage_escrow(
             escrow_id: 2,
             preimage: Some(PreimageSecret(*secret)),
         });
-    let expired_preview = engine
-        .preview_bundle(Seat(1), &[], &valid_escrow2_bundle)
-        .map_err(map_core_err)?;
+    let expired_preview = league_core::engine_internals::preview_bundle_live(
+        &engine,
+        Seat(1),
+        &[],
+        &valid_escrow2_bundle,
+    )
+    .map_err(map_core_err)?;
     let finish_at_or_after_expiry_unlocked = expired_preview
         .escrow_orders
         .first()

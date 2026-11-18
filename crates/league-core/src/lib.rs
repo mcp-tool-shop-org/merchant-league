@@ -44,8 +44,8 @@ pub use contracts::{
 pub use engine::{
     BrokenPromiseRecord, BundlePreview, CheckOrderPreview, CheckPreviewOutcome,
     ConverterOrderPreview, EngineState, EscrowOrderPreview, ProjectOrderPreview, SeatState,
-    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepMode,
-    SweepReceipt, TurnEngine, TurnPhase,
+    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepReceipt,
+    TurnEngine, TurnPhase,
 };
 pub use error::{StructuredError, ToStructuredError, scrub_secret_text};
 pub use observation::{
@@ -97,6 +97,94 @@ pub use types::{
     floor_bps_part, half_up_bps, is_reserved_layout_test_seed, mul_units_parity, scale_bps_signed,
     town_import_cost_cred, validate_club_dev_seed,
 };
+
+/// Host- and conformance-only raw engine inspection and full-Sweep preview entry points.
+///
+/// Gated behind the non-default `engine-internals` Cargo feature and forbidden in all
+/// seat-facing crates (`league-tui`, `league-relay`, etc.). Seat-facing code must read
+/// `OracleAuditor` hints via [`TurnEngine::observe_seat`] -> [`SeatObservation::auditor_hints`]
+/// and run previews via [`preview_what_if`], [`preview_what_if_with_beacon`], or
+/// [`preview_seat_bundle`].
+#[cfg(feature = "engine-internals")]
+#[doc(hidden)]
+pub mod engine_internals {
+    use std::collections::BTreeMap;
+
+    use crate::commit::SealedOrderBundle;
+    use crate::contracts::MarketAction;
+    use crate::engine::{BundlePreview, TurnEngine};
+    use crate::types::{EngineError, ScheduledShockSpec, Seat};
+
+    pub use crate::engine::sweep_mode::SweepMode;
+
+    /// Host/test-only raw Auditor hint accessor returning full [`ScheduledShockSpec`]s
+    /// (including `magnitude_bps` before `realize_turn`). Forbidden in seat-facing code (`B1`).
+    pub fn private_hints_for_auditor(
+        engine: &TurnEngine,
+        seat: Seat,
+    ) -> Result<Vec<ScheduledShockSpec>, EngineError> {
+        engine.private_hints_for_auditor(seat)
+    }
+
+    /// Host/conformance-only raw live-Sweep solo preview (`B2`).
+    pub fn preview_bundle_live(
+        engine: &TurnEngine,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+    ) -> Result<BundlePreview, EngineError> {
+        engine.preview_bundle_live(seat, market_actions, bundle)
+    }
+
+    /// Host/test-only raw solo preview in an explicit [`SweepMode`] (`B2`).
+    pub fn preview_bundle_in_mode(
+        engine: &TurnEngine,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        mode: SweepMode,
+    ) -> Result<BundlePreview, EngineError> {
+        engine.preview_bundle_in_mode(seat, market_actions, bundle, mode)
+    }
+
+    /// Host/conformance-only raw live-Sweep context-aware preview (`B2`).
+    pub fn preview_bundle_with_context_live(
+        engine: &TurnEngine,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
+        turn_beacon: [u8; 32],
+    ) -> Result<BundlePreview, EngineError> {
+        engine.preview_bundle_with_context_live(
+            seat,
+            market_actions,
+            bundle,
+            peer_bundles,
+            turn_beacon,
+        )
+    }
+
+    /// Host/test-only raw context-aware preview in an explicit [`SweepMode`] (`B2`).
+    pub fn preview_bundle_with_context_and_mode(
+        engine: &TurnEngine,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
+        turn_beacon: [u8; 32],
+        mode: SweepMode,
+    ) -> Result<BundlePreview, EngineError> {
+        engine.preview_bundle_with_context_and_mode(
+            seat,
+            market_actions,
+            bundle,
+            peer_bundles,
+            turn_beacon,
+            mode,
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {

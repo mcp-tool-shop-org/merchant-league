@@ -175,6 +175,10 @@ pub struct PublicTableSpec {
     /// Number of seats (`4`, `5`, or `6`).
     pub seat_count: u8,
     /// Per-seat economic definitions.
+    ///
+    /// Note: [`SeatConfig::regent`] (`Option<RegentDoctrine>`) is intentionally public table
+    /// configuration visible to every seat so all seats see upfront which seats carry Standing
+    /// Regent fallback settings (`C4`).
     pub seats: Vec<SeatConfig>,
     /// Available Tier-3 Syndicate Project sinks.
     pub projects: Vec<ProjectRecipe>,
@@ -440,6 +444,16 @@ impl SeatObservation {
             baseline_predicates,
             public_receipts,
         }
+    }
+
+    /// Returns the seat-safe `OracleAuditor` private shock hints (`hint_turn <= turn < forecast_turn`)
+    /// for this observing seat, with `magnitude_bps` redacted until `realize_turn` (`B1`).
+    ///
+    /// Realized shocks carry public `magnitude_bps` in [`Self::active_shocks`] and
+    /// [`PublicSweepReceipt::newly_activated_shocks`] from `realize_turn` onward.
+    #[must_use]
+    pub fn auditor_hints(&self) -> &[AuditorShockHint] {
+        &self.auditor_hints
     }
 
     /// Exports a sanitized [`PublicPreviewState`] containing strictly public Steps 0–7 simulation
@@ -1039,8 +1053,9 @@ pub fn preview_what_if_with_beacon(
     Ok(run_what_if_inner(state, request, turn_beacon)?.0)
 }
 
-/// Runs a human What-If Sandbox simulation over [`PublicPreviewState`] (`preview_bundle_with_context`
-/// + counterparty assumptions + pre/post [`SeatStatePredicates`]) under `request.tie_mode`.
+/// Runs a human What-If Sandbox simulation over [`PublicPreviewState`] in
+/// `SweepMode::PreviewSteps0To7` (counterparty assumptions + pre/post [`SeatStatePredicates`])
+/// under `request.tie_mode`.
 pub fn preview_what_if(
     state: &PublicPreviewState,
     request: &HumanWhatIfRequest,
@@ -1077,8 +1092,9 @@ pub fn preview_what_if(
     }
 }
 
-/// Runs an AI-seat simulation over [`PublicPreviewState`] (`preview_bundle` semantics: asking
-/// seat's own `market_actions` and `bundle` only, empty peers, neutral beacon, zero assumptions).
+/// Runs an AI-seat simulation over [`PublicPreviewState`] in `SweepMode::PreviewSteps0To7`
+/// (asking seat's own `market_actions` and `bundle` only, empty peers, neutral beacon, zero
+/// assumptions).
 pub fn preview_seat_bundle(
     state: &PublicPreviewState,
     request: &AiPreviewRequest,

@@ -8,6 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Host- and harness-only raw engine inspection and full-Sweep preview entry points for
+# `league-core` integration tests and `league-standalone` conformance checks.
+# Forbidden in seat-facing crates (`league-tui`, `league-relay`, etc.).
+engine-internals = []
+
 [dependencies]
 getrandom = "0.3.4"
 hex = "0.4.3"
@@ -19,6 +25,7 @@ sha2 = "0.10.9"
 vrf-r255 = "0.1.0"
 
 [dev-dependencies]
+league-core = { path = ".", features = ["engine-internals"] }
 proptest = "1.12.0"
 
 [lints]
