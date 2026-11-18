@@ -21,7 +21,50 @@ use crate::predicates::{
     TurnPredicateRecord, compute_seat_state_predicates,
 };
 use crate::scoring::FinalScoreboard;
-use crate::types::{EngineError, ScheduledShockSpec, Seat, TableMode, TableSpec, Turn};
+use crate::types::{
+    EngineError, ScheduledShockSpec, Seat, TableMode, TableSpec, Turn, validate_club_dev_seed,
+};
+
+/// Current replay serialization format version written on [`SeasonReplayLog`] and [`ReplayOutcome`].
+///
+/// Pre-version logs without `"format_version"` still deserialize cleanly for backwards compatibility;
+/// payloads declaring a newer or unknown `"format_version"` are refused by name via
+/// [`EngineError::UnsupportedReplayVersion`].
+pub const REPLAY_FORMAT_VERSION: u32 = 1;
+
+#[derive(Deserialize)]
+struct FormatVersionHeader {
+    #[serde(default)]
+    format_version: Option<u32>,
+}
+
+/// Inspects `format_version` in a serialized JSON replay payload, accepting absent (pre-version) or
+/// [`REPLAY_FORMAT_VERSION`] and refusing any other version via
+/// [`EngineError::UnsupportedReplayVersion`].
+pub fn check_replay_format_version_slice(bytes: &[u8]) -> Result<u32, EngineError> {
+    let header: FormatVersionHeader = serde_json::from_slice(bytes).map_err(|err| {
+        EngineError::InvalidConfig(format!("replay payload JSON header does not parse: {err}"))
+    })?;
+    match header.format_version {
+        None => Ok(REPLAY_FORMAT_VERSION),
+        Some(v) if v == REPLAY_FORMAT_VERSION => Ok(v),
+        Some(found) => Err(EngineError::UnsupportedReplayVersion {
+            found,
+            newest_known: REPLAY_FORMAT_VERSION,
+        }),
+    }
+}
+
+fn validate_format_version<E: de::Error>(version: Option<u32>) -> Result<(), E> {
+    match version {
+        None => Ok(()),
+        Some(v) if v == REPLAY_FORMAT_VERSION => Ok(()),
+        Some(found) => Err(E::custom(EngineError::UnsupportedReplayVersion {
+            found,
+            newest_known: REPLAY_FORMAT_VERSION,
+        })),
+    }
+}
 
 /// Inclusive lower bound (`2^63`) of the `sealed` layout-seed pool (`2^63..=2^64 - 1`),
 /// matching `league_gen::SEALED_SEED_MIN`.
@@ -65,6 +108,19 @@ pub enum ReplayLayoutSeedError {
         /// Clear non-sealed seed (`< 2^63`).
         seed: u64,
     },
+}
+
+impl ReplayLayoutSeedError {
+    /// Returns the stable `SCREAMING_SNAKE_CASE` error identifier for this error variant.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::SealedSeedInClear { .. } => "SEALED_SEED_IN_CLEAR",
+            Self::InvalidSealedPool { .. } => "INVALID_SEALED_SEED_POOL",
+            Self::InvalidSealedDigest => "INVALID_SEALED_SEED_DIGEST",
+            Self::NonSealedSeedInSealed { .. } => "NON_SEALED_SEED_IN_SEALED",
+        }
+    }
 }
 
 impl fmt::Display for ReplayLayoutSeedError {
@@ -410,38 +466,6 @@ impl<'de> Deserialize<'de> for ReplayLayoutSeed {
     }
 }
 
-mod opt_hex32_pub {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(
-        value: &Option<[u8; 32]>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(bytes) => serializer.serialize_some(&hex::encode(bytes)),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<[u8; 32]>, D::Error> {
-        let opt = Option::<String>::deserialize(deserializer)?;
-        match opt {
-            None => Ok(None),
-            Some(s) => {
-                let decoded = hex::decode(&s).map_err(serde::de::Error::custom)?;
-                if decoded.len() != 32 {
-                    return Err(serde::de::Error::custom("expected 32 hex-encoded bytes"));
-                }
-                let mut out = [0u8; 32];
-                out.copy_from_slice(&decoded);
-                Ok(Some(out))
-            }
-        }
-    }
-}
-
 /// Verification mode for per-turn beacons during [`replay_season`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplayBeaconMode {
@@ -498,11 +522,11 @@ pub struct LoggedTurn {
 }
 
 /// Complete portable audit log replaying an entire season without any ledger I/O.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeasonReplayLog {
     /// Immutable table specification (`4..=6` seats).
     pub spec: TableSpec,
-    /// Required execution mode matching `spec.mode` (`Game` or `Eval`; prevents mode switches).
+    /// Required execution mode matching `spec.mode` (`Game`, `Eval`, or `Club`; prevents mode switches).
     pub mode: TableMode,
     /// Layout seed field (`ReplayLayoutSeed`): clear `u64` for non-`sealed` pools (`< 2^63`), or
     /// redacted `{"pool":"sealed","digest":...,"independence_checked_at_write_unverified":...}`
@@ -512,8 +536,7 @@ pub struct SeasonReplayLog {
     /// Verification rule applied to each logged turn beacon.
     pub beacon_mode: ReplayBeaconMode,
     /// Optional 32-byte `ristretto255` VRF public key (RFC 9381 ECVRF construction with C2SP's
-    /// `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) required in `Eval` mode.
-    #[serde(default, with = "opt_hex32_pub")]
+    /// `c2sp.org/vrf-r255` ciphersuite, `vrf-r255 0.1.0`) required in `Eval` and `Club` modes.
     pub eval_vrf_pubkey: Option<[u8; 32]>,
     /// Sealed OS-entropy Turn-1 mandate deal and per-seat salts bound to `spec.dealt_mandate_commits` (`M3`).
     pub sealed_mandate_deal: SealedMandateDeal,
@@ -523,6 +546,73 @@ pub struct SeasonReplayLog {
     pub turns: Vec<LoggedTurn>,
     /// Terminal Private Charter Mandate reveals per seat (`0..seat_count`).
     pub mandate_reveals: Vec<Option<MandateReveal>>,
+}
+
+#[derive(Serialize)]
+struct SeasonReplayLogSer<'a> {
+    format_version: u32,
+    spec: &'a TableSpec,
+    mode: TableMode,
+    seed: &'a ReplayLayoutSeed,
+    beacon_mode: ReplayBeaconMode,
+    #[serde(with = "crate::types::opt_hex32")]
+    eval_vrf_pubkey: &'a Option<[u8; 32]>,
+    sealed_mandate_deal: &'a SealedMandateDeal,
+    mandate_commits: &'a [Option<CommitmentHash>],
+    turns: &'a [LoggedTurn],
+    mandate_reveals: &'a [Option<MandateReveal>],
+}
+
+#[derive(Deserialize)]
+struct SeasonReplayLogDe {
+    #[serde(default)]
+    format_version: Option<u32>,
+    spec: TableSpec,
+    mode: TableMode,
+    seed: ReplayLayoutSeed,
+    beacon_mode: ReplayBeaconMode,
+    #[serde(default, with = "crate::types::opt_hex32")]
+    eval_vrf_pubkey: Option<[u8; 32]>,
+    sealed_mandate_deal: SealedMandateDeal,
+    mandate_commits: Vec<Option<CommitmentHash>>,
+    turns: Vec<LoggedTurn>,
+    mandate_reveals: Vec<Option<MandateReveal>>,
+}
+
+impl Serialize for SeasonReplayLog {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SeasonReplayLogSer {
+            format_version: REPLAY_FORMAT_VERSION,
+            spec: &self.spec,
+            mode: self.mode,
+            seed: &self.seed,
+            beacon_mode: self.beacon_mode,
+            eval_vrf_pubkey: &self.eval_vrf_pubkey,
+            sealed_mandate_deal: &self.sealed_mandate_deal,
+            mandate_commits: &self.mandate_commits,
+            turns: &self.turns,
+            mandate_reveals: &self.mandate_reveals,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SeasonReplayLog {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let de = SeasonReplayLogDe::deserialize(deserializer)?;
+        validate_format_version(de.format_version)?;
+        Ok(Self {
+            spec: de.spec,
+            mode: de.mode,
+            seed: de.seed,
+            beacon_mode: de.beacon_mode,
+            eval_vrf_pubkey: de.eval_vrf_pubkey,
+            sealed_mandate_deal: de.sealed_mandate_deal,
+            mandate_commits: de.mandate_commits,
+            turns: de.turns,
+            mandate_reveals: de.mandate_reveals,
+        })
+    }
 }
 
 fn layout_seed_beacon_candidates(seed: u64) -> [[u8; 32]; 2] {
@@ -642,6 +732,16 @@ impl SeasonReplayLog {
         )
     }
 
+    /// Parses a serialized [`SeasonReplayLog`] JSON slice after verifying its `format_version`,
+    /// accepting pre-version logs and [`REPLAY_FORMAT_VERSION`] while refusing unknown newer
+    /// versions via [`EngineError::UnsupportedReplayVersion`].
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        check_replay_format_version_slice(bytes)?;
+        serde_json::from_slice(bytes).map_err(|err| {
+            EngineError::InvalidConfig(format!("season replay log does not parse: {err}"))
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_checked(
         spec: TableSpec,
@@ -666,6 +766,33 @@ impl SeasonReplayLog {
                 };
                 validate_eval_vrf_pubkey(spec_pk)?;
                 check_eval_vrf_independence(candidates, spec_pk, sealed_context)?;
+                (ReplayBeaconMode::EvalVrf, Some(spec_pk))
+            }
+            TableMode::Club => {
+                if sealed_context || seed.is_sealed() {
+                    return Err(EngineError::InvalidConfig(
+                        "SEED_POOL_MISMATCH: TableMode::Club forbids sealed-range layout seeds"
+                            .to_owned(),
+                    ));
+                }
+                validate_club_dev_seed(raw_seed)?;
+                if spec.drand_schedule.is_some() {
+                    return Err(EngineError::InvalidConfig(
+                        "Club mode replay log must not carry drand_schedule".to_owned(),
+                    ));
+                }
+                if !spec.shocks.is_empty() {
+                    return Err(EngineError::InvalidConfig(
+                        "Club mode replay refuses pre-seeded shocks".to_owned(),
+                    ));
+                }
+                let Some(spec_pk) = spec.eval_vrf_pubkey else {
+                    return Err(EngineError::InvalidConfig(
+                        "EvalVrf replay requires TableSpec::eval_vrf_pubkey".to_owned(),
+                    ));
+                };
+                validate_eval_vrf_pubkey(spec_pk)?;
+                check_eval_vrf_independence(candidates, spec_pk, false)?;
                 (ReplayBeaconMode::EvalVrf, Some(spec_pk))
             }
         };
@@ -702,7 +829,7 @@ pub struct TurnRejectedActions {
 }
 
 /// Complete verified artifacts emitted by replaying a [`SeasonReplayLog`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayOutcome {
     /// Per-turn deterministic 8-step Sweep receipts in chronological order.
     pub receipts: Vec<SweepReceipt>,
@@ -712,12 +839,75 @@ pub struct ReplayOutcome {
     pub scoreboard: FinalScoreboard,
     /// Per-turn rejected Phase-1 market action indices and error codes (omitted when empty so clean
     /// logs serialize byte-identically).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rejected_market_actions: Vec<TurnRejectedActions>,
     /// `#29` drand `quicknet` authentication status for `Game`-mode (`ExternalDrand`) seasons,
-    /// omitted (`None`) for `Eval`-mode seasons.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// omitted (`None`) for `Eval`- and `Club`-mode seasons.
     pub drand_beacon_auth_status: Option<DrandBeaconAuthStatus>,
+}
+
+#[derive(Serialize)]
+struct ReplayOutcomeSer<'a> {
+    format_version: u32,
+    receipts: &'a [SweepReceipt],
+    state_digests: &'a [[u8; 32]],
+    scoreboard: &'a FinalScoreboard,
+    #[serde(skip_serializing_if = "<[TurnRejectedActions]>::is_empty")]
+    rejected_market_actions: &'a [TurnRejectedActions],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drand_beacon_auth_status: &'a Option<DrandBeaconAuthStatus>,
+}
+
+#[derive(Deserialize)]
+struct ReplayOutcomeDe {
+    #[serde(default)]
+    format_version: Option<u32>,
+    receipts: Vec<SweepReceipt>,
+    state_digests: Vec<[u8; 32]>,
+    scoreboard: FinalScoreboard,
+    #[serde(default)]
+    rejected_market_actions: Vec<TurnRejectedActions>,
+    #[serde(default)]
+    drand_beacon_auth_status: Option<DrandBeaconAuthStatus>,
+}
+
+impl Serialize for ReplayOutcome {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ReplayOutcomeSer {
+            format_version: REPLAY_FORMAT_VERSION,
+            receipts: &self.receipts,
+            state_digests: &self.state_digests,
+            scoreboard: &self.scoreboard,
+            rejected_market_actions: &self.rejected_market_actions,
+            drand_beacon_auth_status: &self.drand_beacon_auth_status,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReplayOutcome {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let de = ReplayOutcomeDe::deserialize(deserializer)?;
+        validate_format_version(de.format_version)?;
+        Ok(Self {
+            receipts: de.receipts,
+            state_digests: de.state_digests,
+            scoreboard: de.scoreboard,
+            rejected_market_actions: de.rejected_market_actions,
+            drand_beacon_auth_status: de.drand_beacon_auth_status,
+        })
+    }
+}
+
+impl ReplayOutcome {
+    /// Parses a serialized [`ReplayOutcome`] JSON slice after verifying its `format_version`,
+    /// accepting pre-version outcomes and [`REPLAY_FORMAT_VERSION`] while refusing unknown newer
+    /// versions via [`EngineError::UnsupportedReplayVersion`].
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        check_replay_format_version_slice(bytes)?;
+        serde_json::from_slice(bytes).map_err(|err| {
+            EngineError::InvalidConfig(format!("replay outcome does not parse: {err}"))
+        })
+    }
 }
 
 /// A replay record: the [`SeasonReplayLog`] plus the optional, additive state-predicate section.
@@ -746,9 +936,11 @@ struct SectionOnly {
 }
 
 impl ReplayRecord {
-    /// Reads a record written as JSON: the bare log (unknown keys ignored, as any reader of the bare
-    /// log does) plus the optional section. A bare log reads as a record without a section.
+    /// Reads a record written as JSON: checks `format_version` first, then reads the bare log
+    /// (unknown keys ignored) plus the optional section. A bare log reads as a record without a
+    /// section.
     pub fn from_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        check_replay_format_version_slice(bytes)?;
         let log: SeasonReplayLog = serde_json::from_slice(bytes).map_err(|err| {
             EngineError::InvalidConfig(format!("replay record log does not parse: {err}"))
         })?;
@@ -776,12 +968,62 @@ impl ReplayRecord {
             state_predicates: extra.state_predicates,
         })
     }
+
+    /// Parses a [`ReplayRecord`] strictly for Evaluation Mode (`TableMode::Eval`), refusing Club
+    /// and Game records so Club games can never enter automated Evaluation datasets (`Q2`).
+    pub fn from_eval_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        let record = Self::from_json_slice(bytes)?;
+        if record.log.mode != TableMode::Eval || record.log.spec.mode != TableMode::Eval {
+            return Err(EngineError::InvalidConfig(format!(
+                "Eval replay record loader refuses {:?} log; TableMode::Eval is required",
+                record.log.mode
+            )));
+        }
+        Ok(record)
+    }
+
+    /// Parses a [`ReplayRecord`] strictly for Club Mode (`TableMode::Club`), refusing Eval and
+    /// Game records (`Q2`).
+    pub fn from_club_json_slice(bytes: &[u8]) -> Result<Self, EngineError> {
+        let record = Self::from_json_slice(bytes)?;
+        if record.log.mode != TableMode::Club || record.log.spec.mode != TableMode::Club {
+            return Err(EngineError::InvalidConfig(format!(
+                "Club replay record loader refuses {:?} log; TableMode::Club is required",
+                record.log.mode
+            )));
+        }
+        Ok(record)
+    }
 }
 
 /// Replays an entire season deterministically from `log`, verifying every phase transition,
 /// cryptographic commitment, 8-step Sweep, closing bell roll, and final scoreboard.
 pub fn replay_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
     replay_season_inner(log, None)
+}
+
+/// Replays strictly a [`TableMode::Eval`] season log, refusing [`TableMode::Club`] and
+/// [`TableMode::Game`] logs so offline Club seasons cannot enter Eval pipelines (`Q2`).
+pub fn replay_eval_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
+    if log.mode != TableMode::Eval || log.spec.mode != TableMode::Eval {
+        return Err(EngineError::InvalidConfig(format!(
+            "Eval replay loader refuses {:?} log; TableMode::Eval is required",
+            log.mode
+        )));
+    }
+    replay_season(log)
+}
+
+/// Replays strictly a [`TableMode::Club`] season log, refusing [`TableMode::Eval`] and
+/// [`TableMode::Game`] logs (`Q2`).
+pub fn replay_club_season(log: &SeasonReplayLog) -> Result<ReplayOutcome, EngineError> {
+    if log.mode != TableMode::Club || log.spec.mode != TableMode::Club {
+        return Err(EngineError::InvalidConfig(format!(
+            "Club replay loader refuses {:?} log; TableMode::Club is required",
+            log.mode
+        )));
+    }
+    replay_season(log)
 }
 
 /// [`replay_season`], also deriving the state-predicate section: every seat's predicates at the
@@ -845,6 +1087,11 @@ fn replay_season_inner(
                 "Eval mode replay refuses non-VRF beacon_mode; EvalVrf is required".to_owned(),
             ));
         }
+        TableMode::Club if log.beacon_mode != ReplayBeaconMode::EvalVrf => {
+            return Err(EngineError::InvalidConfig(
+                "Club mode replay refuses non-VRF beacon_mode; EvalVrf is required".to_owned(),
+            ));
+        }
         _ => {}
     }
 
@@ -868,12 +1115,23 @@ fn replay_season_inner(
         ));
     }
     let clear_layout_candidates = match &log.seed.0 {
-        ReplayLayoutSeedRepr::Clear(clear_seed) => Some(check_deal_seed_independence(
-            *clear_seed,
-            &log.sealed_mandate_deal,
-            false,
-        )?),
+        ReplayLayoutSeedRepr::Clear(clear_seed) => {
+            if log.mode == TableMode::Club {
+                validate_club_dev_seed(*clear_seed)?;
+            }
+            Some(check_deal_seed_independence(
+                *clear_seed,
+                &log.sealed_mandate_deal,
+                false,
+            )?)
+        }
         ReplayLayoutSeedRepr::Sealed(sealed) => {
+            if log.mode == TableMode::Club {
+                return Err(EngineError::InvalidConfig(
+                    "SEED_POOL_MISMATCH: TableMode::Club replay refuses sealed-range layout seeds"
+                        .to_owned(),
+                ));
+            }
             if sealed.pool != SEALED_SEED_POOL_NAME {
                 return Err(EngineError::InvalidConfig(
                     ReplayLayoutSeedError::InvalidSealedPool {
@@ -911,7 +1169,7 @@ fn replay_season_inner(
             schedule.validate()?;
             (Some(schedule), None)
         }
-        TableMode::Eval => {
+        TableMode::Eval | TableMode::Club => {
             let Some(spec_pk) = log.spec.eval_vrf_pubkey else {
                 return Err(EngineError::InvalidConfig(
                     "EvalVrf replay requires TableSpec::eval_vrf_pubkey".to_owned(),
@@ -968,11 +1226,11 @@ fn replay_season_inner(
             )));
         }
         let verified_source = match log.mode {
-            TableMode::Eval => {
+            TableMode::Eval | TableMode::Club => {
                 if logged.drand_round.is_some() || logged.drand_signature.is_some() {
                     return Err(EngineError::InvalidOrder(format!(
-                        "turn {} carries drand fields in Eval mode",
-                        logged.turn
+                        "turn {} carries drand fields in {:?} mode",
+                        logged.turn, log.mode
                     )));
                 }
                 let Some(ref vrf_proof) = logged.eval_vrf_proof else {

@@ -29,24 +29,33 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 6,
+      "added": 4,
+      "changed": 11,
       "moved": 0,
       "parts": 3,
       "removed": 0
     },
     "items": [
       {
+        "kind": "landing",
+        "sentence": "crates/league-core/tests/fixtures/pre_card1_94c73626_replay_bundle.json is now read by crates/league-core/tests/club_seat_observation.rs and crates/league-core/tests/wave1_rules.rs.",
+        "subjects": [
+          "crates/league-core/tests/fixtures/pre_card1_94c73626_replay_bundle.json",
+          "crates/league-core/tests/club_seat_observation.rs",
+          "crates/league-core/tests/wave1_rules.rs"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-17; 1 file added and 6 changed content.",
+        "sentence": "4 files added and 11 changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "7dca819bf8e0d3ecfeb8112922481e2e69c8499d",
-      "generatedAt": "2026-11-17T18:43:05.882Z"
+      "commit": "7fdad1877ac5047c950e16f8e3112faba14ff7a0",
+      "generatedAt": "2026-11-18T01:45:44.262Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -130,9 +139,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 3 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "7fdad1877ac5047c950e16f8e3112faba14ff7a0",
+  "commit": "f6e4faf9cfd2c4d05072ef48ad60b4a3c82ef5cd",
   "defaultBranch": "main",
-  "derived": "10 parts, mostly Rust (341 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "10 parts, mostly Rust (344 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -151,7 +160,7 @@
         {
           "boundary": "league-core",
           "depth": 0,
-          "files": 13
+          "files": 16
         },
         {
           "boundary": "league-gen",
@@ -214,7 +223,7 @@
         "site/src/"
       ],
       "runsCount": 27,
-      "runsMore": 37,
+      "runsMore": 38,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -382,7 +391,7 @@
   "edges": [],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-18T01:45:44.262Z",
+  "generatedAt": "2026-11-18T03:11:10.415Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "1 write and 4 reads use paths built at run time and are not named here.",
@@ -430,9 +439,9 @@
   "startReason": "This path follows league-relay (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 42,
+  "testFiles": 44,
   "testedBy": {
-    "league-core": 9,
+    "league-core": 10,
     "league-gen": 8,
     "league-ledger": 8,
     "league-season": 1,

@@ -8,6 +8,8 @@
 pub mod commit;
 pub mod contracts;
 pub mod engine;
+pub mod error;
+pub mod observation;
 pub mod predicates;
 pub mod replay;
 pub mod scoring;
@@ -42,8 +44,18 @@ pub use contracts::{
 pub use engine::{
     BrokenPromiseRecord, BundlePreview, CheckOrderPreview, CheckPreviewOutcome,
     ConverterOrderPreview, EngineState, EscrowOrderPreview, ProjectOrderPreview, SeatState,
-    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepReceipt,
-    TurnEngine, TurnPhase,
+    SeatUpkeepPreview, ShockForecastEvent, SwapOrderPreview, SwapPreviewOutcome, SweepMode,
+    SweepReceipt, TurnEngine, TurnPhase,
+};
+pub use error::{StructuredError, ToStructuredError, scrub_secret_text};
+pub use observation::{
+    AiPreviewRequest, AuditorShockHint, CounterpartyAssumptions, DEALT_MANDATE_COMMIT_SENTINEL,
+    HYPOTHETICAL_CLOSE_MARK_CAVEAT, HumanWhatIfRequest, PREVIEW_NEUTRAL_BEACON_SEED,
+    PreviewTieMode, PublicCheckOrderPreview, PublicCheckOutcome, PublicPreviewState,
+    PublicSwapOrderPreview, PublicSwapOutcome, PublicSweepReceipt, PublicTableSpec,
+    RefusedActionPreview, SeatObservation, SeatSpoilagePreview, Step0To7SweepSummary,
+    WhatIfPreview, preview_neutral_beacon, preview_seat_bundle, preview_what_if,
+    preview_what_if_with_beacon,
 };
 pub use predicates::{
     CoalitionReach, GoodScarcity, HoldingMark, ProjectCover, ProjectInputCover, RecipeCover,
@@ -56,10 +68,11 @@ pub use predicates::{
     stranded_stock_at_close, upkeep_and_debt,
 };
 pub use replay::{
-    LoggedTurn, RejectedMarketAction, ReplayBeaconMode, ReplayLayoutSeed, ReplayLayoutSeedError,
-    ReplayOutcome, ReplayRecord, SEALED_LAYOUT_SEED_MIN, SEALED_SEED_POOL_NAME, SealedReplaySeed,
-    SeasonReplayLog, TurnRejectedActions, attach_state_predicates, layout_seed_digest,
-    replay_season, replay_season_with_state_predicates,
+    LoggedTurn, REPLAY_FORMAT_VERSION, RejectedMarketAction, ReplayBeaconMode, ReplayLayoutSeed,
+    ReplayLayoutSeedError, ReplayOutcome, ReplayRecord, SEALED_LAYOUT_SEED_MIN,
+    SEALED_SEED_POOL_NAME, SealedReplaySeed, SeasonReplayLog, TurnRejectedActions,
+    attach_state_predicates, check_replay_format_version_slice, layout_seed_digest,
+    replay_club_season, replay_eval_season, replay_season, replay_season_with_state_predicates,
 };
 pub use scoring::{
     FinalScoreboard, FundamentalParities, SeatScoreEntry, compute_final_marked_net_asset_equity,
@@ -74,14 +87,15 @@ pub use types::{
     CharterRole, ConverterRecipe, CreditTier, DEFAULT_CANCEL_LOCK_BPS, DEFAULT_CLOSING_HAZARD_BPS,
     DEFAULT_MANDATE_ALPHA_BPS, DEFAULT_PBRS_GAMMA_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS,
     DEFAULT_WASH_FREEZE_BOND_CRED, DEFAULT_WASH_FREEZE_BOUNTY_CRED,
-    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, EngineError,
-    HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, MANDATE_STARTING_NW_FLOOR_BPS,
+    DEFAULT_WASH_ROUND_TRIP_MIN_UNITS, DEFAULT_WORKS_STIPEND_PER_UNIT_CRED, DEV_LAYOUT_SEED_MAX,
+    EngineError, HARD_TURN_CAP, IDLE_MISS_TAKEOVER_TURNS, MANDATE_STARTING_NW_FLOOR_BPS,
     MAX_MANDATE_BONUS_EQUITY, MAX_TARIFF_BPS, MIN_MANDATE_BONUS_EQUITY, MarketDay, ProjectRecipe,
-    RegentDoctrine, ScheduledShockSpec, SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind,
-    TableId, TableMode, TableSpec, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
-    cap_reach_probability, ceil_bps_fee, ceil_units_parity, checked_ceil_units_parity,
-    checked_mul_units_parity, expected_season_length_turns, floor_bps_part, half_up_bps,
-    mul_units_parity, scale_bps_signed, town_import_cost_cred,
+    RESERVED_TEST_LAYOUT_SEEDS, RegentDoctrine, ScheduledShockSpec, SeasonId, Seat, SeatConfig,
+    SeatIdentity, ShockKind, TableId, TableMode, TableSpec, Turn, UNIT_SCALE,
+    UNSOLD_EXCESS_PARITY_BPS, Units, cap_reach_probability, ceil_bps_fee, ceil_units_parity,
+    checked_ceil_units_parity, checked_mul_units_parity, expected_season_length_turns,
+    floor_bps_part, half_up_bps, is_reserved_layout_test_seed, mul_units_parity, scale_bps_signed,
+    town_import_cost_cred, validate_club_dev_seed,
 };
 
 #[cfg(test)]

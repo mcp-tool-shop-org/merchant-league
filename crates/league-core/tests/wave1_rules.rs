@@ -18,11 +18,11 @@ use league_core::{
     DEFAULT_CANCEL_LOCK_BPS, DEFAULT_TOWN_IMPORT_PREMIUM_BPS, DEFAULT_WASH_FREEZE_BOND_CRED,
     DEFAULT_WASH_FREEZE_BOUNTY_CRED, DEFAULT_WASH_ROUND_TRIP_MIN_UNITS,
     DRAND_QUICKNET_GENESIS_UNIX, DRAND_QUICKNET_SIGNATURE_BYTES, DrandBeaconAuthStatus,
-    DrandSchedule, DualEscrowProposal, EngineError, EngineState, EscrowProposal, EscrowStatus,
-    FillKind, FillRecord, FundamentalParities, HARD_TURN_CAP, LoggedTurn, MarketAction,
-    OfferProposal, OfferSide, OrderReveal, ReplayBeaconMode, ReplayLayoutSeed, ReplayOutcome,
-    ReplayRecord, RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat, SweepReceipt, TableId,
-    TableMode, TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, attach_state_predicates,
+    DrandSchedule, DualEscrowProposal, EngineError, EscrowProposal, EscrowStatus, FillKind,
+    FillRecord, FundamentalParities, HARD_TURN_CAP, LoggedTurn, MarketAction, OfferProposal,
+    OfferSide, OrderReveal, ReplayBeaconMode, ReplayLayoutSeed, ReplayOutcome, ReplayRecord,
+    RevealSalt, SealedOrderBundle, SeasonReplayLog, Seat, SweepReceipt, TableId, TableMode,
+    TableSpec, Turn, TurnEngine, TurnPhase, UNIT_SCALE, Units, attach_state_predicates,
     audit_wash_freeze, break_tie_with_turn_beacon, compute_order_commitment, derive_drand_beacon,
     derive_turn_beacon, mark_good_holding_at_close, replay_season, town_import_cost_cred,
 };
@@ -108,10 +108,22 @@ fn b1_engine_error_codes_cover_every_variant_and_cancel_lock_state_lifecycle() {
         EngineError::DomainAccessDenied("d".to_owned()),
         EngineError::CancelLocked,
         EngineError::SeasonEnded("s".to_owned()),
+        EngineError::UnsupportedReplayVersion {
+            found: 2,
+            newest_known: 1,
+        },
     ];
     let codes: BTreeSet<&'static str> = all_variants.iter().map(EngineError::code).collect();
     assert_eq!(codes.len(), all_variants.len());
     assert_eq!(EngineError::CancelLocked.code(), "CANCEL_LOCKED");
+    assert_eq!(
+        EngineError::UnsupportedReplayVersion {
+            found: 2,
+            newest_known: 1,
+        }
+        .code(),
+        "UNSUPPORTED_REPLAY_VERSION"
+    );
 
     let mut disabled_spec = must_ok(TableSpec::standard_chiral_ring(TableId(601), 4, 1), "spec");
     assert_eq!(disabled_spec.cancel_lock_bps, DEFAULT_CANCEL_LOCK_BPS);
@@ -1858,56 +1870,88 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     let out_rec = must_ok(replay_season(&parsed_record.log), "replay record");
     assert_eq!(out_rec.receipts, live_receipts);
 
-    // 4. Pre-Card-1 persisted FillRecord / SweepReceipt / ReplayOutcome / EngineState / TurnEngine
-    //    JSON payloads carrying "escrow_forfeited" for the Turn-2 breach refund still deserialize.
-    let breach_fill_json = must_ok(
-        serde_json::to_string(t2_breach_fills[0]),
-        "serialize breach fill",
+    // Keep eng_t2 in scope to verify Turn-2 balances without mutating persisted payloads via `.replace`.
+    let _ = eng_t2;
+
+    // 4. Committed pre-Card-1 fixture captured from base sha 94c73626f8cf1555a1f6f58da4f0cbe8fdcba80e
+    //    (pre-version JSON with no `format_version`, carrying `"escrow_forfeited"` for the Turn-2
+    //    DvP breach refund) deserializes cleanly and replays with identical digests and scoreboard.
+    const PRE_CARD1_FIXTURE: &str = include_str!("fixtures/pre_card1_94c73626_replay_bundle.json");
+    let fixture_val: serde_json::Value = must_ok(
+        serde_json::from_str(PRE_CARD1_FIXTURE),
+        "parse pre-Card-1 fixture JSON",
     );
-    assert!(breach_fill_json.contains("\"escrow_breach_refunded\""));
-    let old_fill_json = breach_fill_json.replace("escrow_breach_refunded", "escrow_forfeited");
-    let old_fill: FillRecord = must_ok(serde_json::from_str(&old_fill_json), "old fill");
+    assert_eq!(
+        fixture_val["base_sha"].as_str(),
+        Some("94c73626f8cf1555a1f6f58da4f0cbe8fdcba80e")
+    );
+    assert!(fixture_val["log"].get("format_version").is_none());
+    assert!(fixture_val["record"].get("format_version").is_none());
+    assert!(fixture_val["outcome"].get("format_version").is_none());
+    assert!(!PRE_CARD1_FIXTURE.contains("escrow_breach_refunded"));
+    assert!(PRE_CARD1_FIXTURE.contains("\"escrow_forfeited\""));
+
+    let old_log_bytes = must_ok(serde_json::to_vec(&fixture_val["log"]), "old log bytes");
+    let old_record_bytes = must_ok(
+        serde_json::to_vec(&fixture_val["record"]),
+        "old record bytes",
+    );
+    let old_outcome_bytes = must_ok(
+        serde_json::to_vec(&fixture_val["outcome"]),
+        "old outcome bytes",
+    );
+    let old_fill_bytes = must_ok(
+        serde_json::to_vec(&fixture_val["outcome"]["receipts"][1]["fills"][0]),
+        "old fill bytes",
+    );
+    let old_r2_bytes = must_ok(
+        serde_json::to_vec(&fixture_val["outcome"]["receipts"][1]),
+        "old r2 bytes",
+    );
+
+    let old_fill: FillRecord = must_ok(serde_json::from_slice(&old_fill_bytes), "parse old fill");
     assert_eq!(old_fill.kind, FillKind::EscrowForfeited);
-
-    let r2_json = must_ok(serde_json::to_string(r2), "serialize r2");
-    assert!(r2_json.contains("\"escrow_breach_refunded\""));
-    let old_r2: SweepReceipt = must_ok(
-        serde_json::from_str(&r2_json.replace("escrow_breach_refunded", "escrow_forfeited")),
-        "old receipt",
-    );
+    let old_r2: SweepReceipt = must_ok(serde_json::from_slice(&old_r2_bytes), "parse old receipt");
     assert_eq!(old_r2.fills[0].kind, FillKind::EscrowForfeited);
-
-    let out_json = must_ok(serde_json::to_string(&out_live), "serialize ReplayOutcome");
-    assert!(out_json.contains("\"escrow_breach_refunded\""));
     let old_out: ReplayOutcome = must_ok(
-        serde_json::from_str(&out_json.replace("escrow_breach_refunded", "escrow_forfeited")),
-        "old outcome",
+        ReplayOutcome::from_json_slice(&old_outcome_bytes),
+        "parse old outcome",
     );
     assert_eq!(old_out.receipts[1].fills[0].kind, FillKind::EscrowForfeited);
-
-    let state_json = must_ok(
-        serde_json::to_string(eng_t2.state()),
-        "serialize EngineState",
+    let old_log: SeasonReplayLog = must_ok(
+        SeasonReplayLog::from_json_slice(&old_log_bytes),
+        "parse old log",
     );
-    assert!(state_json.contains("\"escrow_breach_refunded\""));
-    let old_state: EngineState = must_ok(
-        serde_json::from_str(&state_json.replace("escrow_breach_refunded", "escrow_forfeited")),
-        "old EngineState",
+    let old_record: ReplayRecord = must_ok(
+        ReplayRecord::from_json_slice(&old_record_bytes),
+        "parse old record",
     );
-    assert_eq!(old_state.fill_log[0].kind, FillKind::EscrowForfeited);
-
-    let eng_json = must_ok(serde_json::to_string(&eng_t2), "serialize TurnEngine");
-    assert!(eng_json.contains("\"escrow_breach_refunded\""));
-    let old_eng: TurnEngine = must_ok(
-        serde_json::from_str(&eng_json.replace("escrow_breach_refunded", "escrow_forfeited")),
-        "old TurnEngine",
+    let replayed_old = must_ok(replay_season(&old_log), "replay pre-Card-1 log");
+    // Turn 1 digest matches identically; from Turn 2 onward Card 1 emits `EscrowBreachRefunded`
+    // in `EngineState::fill_log` where pre-Card-1 recorded `EscrowForfeited`, while all
+    // balances and the terminal scoreboard stay identical.
+    assert_eq!(replayed_old.state_digests[0], old_out.state_digests[0]);
+    assert_eq!(replayed_old.scoreboard, old_out.scoreboard);
+    assert_eq!(replayed_old.receipts.len(), old_out.receipts.len());
+    assert_eq!(
+        replayed_old.receipts[1].fills[0].kind,
+        FillKind::EscrowBreachRefunded
     );
-    assert_eq!(old_eng.state().fill_log[0].kind, FillKind::EscrowForfeited);
+    assert_eq!(old_out.receipts[1].fills[0].kind, FillKind::EscrowForfeited);
+    assert_eq!(
+        replayed_old.receipts[1].fills[0].cred_amount,
+        old_out.receipts[1].fills[0].cred_amount
+    );
+    let replayed_old_record = must_ok(replay_season(&old_record.log), "replay pre-Card-1 record");
+    assert_eq!(replayed_old_record, replayed_old);
 
-    // 5. Remaining true-forfeit DualEscrow sites stay EscrowForfeited (from != to):
-    //    - engine.rs:2690 (Step 2b DualEscrow deadline buyer top-up default after unlinked delivery)
-    //    - engine.rs:2449 (Step 2 linked ContractDeliveryOrder buyer top-up default)
-    //    - engine.rs:2716 (Step 2b DualEscrow seller delivery deadline miss)
+    // 5. All three DualEscrow forfeit sites emit BOTH EscrowForfeited (from != to) for the defaulter's
+    //    forfeited bond AND EscrowRefunded (from == to) for the counterparty's returned bond, with
+    //    unchanged seat balances (Card 1 review B2 + Card 2 Must item 6 & 7):
+    //    - step2b_evaluate_bonds_and_expired_escrows buyer top-up default after unlinked delivery
+    //    - step2_settle_contract_deliveries linked ContractDeliveryOrder buyer top-up default
+    //      (distinguished by setting deadline_turn = 4 > turn 2 so step2b cannot fire on Turn 2)
+    //    - step2b_evaluate_bonds_and_expired_escrows seller delivery deadline miss
     let (mut spec_dual, _) = must_ok(
         TableSpec::standard_chiral_ring_with_mandates(TableId(651), 4, 1),
         "spec dual",
@@ -1922,6 +1966,8 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     );
     must_ok(eng_dual.sweep_turn_seeded(1), "sweep t1 eng dual");
 
+    let dual_buyer0_before = eng_dual.state().seats[0].cred;
+    let dual_seller1_before = eng_dual.state().seats[1].cred;
     let dual_step2b = DualEscrowProposal {
         proposal_id: 91,
         buyer: 0,
@@ -1938,7 +1984,7 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     b_step2b[0].dual_escrows.push(dual_step2b.clone());
     b_step2b[1].dual_escrows.push(dual_step2b);
     // Unlinked delivery satisfies required_units in delivery_ledger before Step 2b evaluates the
-    // DualEscrow; Buyer locked 500 CRED and has only 200 (< 500 top-up), hitting engine.rs:2690.
+    // DualEscrow; Buyer locked 500 CRED and has only 200 (< 500 top-up), hitting step2b.
     b_step2b[1].contract_deliveries.push(ContractDeliveryOrder {
         counterparty: 0,
         good: AssetId::Raw(1),
@@ -1948,17 +1994,37 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     });
     commit_and_reveal_all(&mut eng_dual, TableId(651), 2, b_step2b);
     let r_step2b = must_ok(eng_dual.sweep_turn_seeded(2), "sweep t2 eng dual");
+    assert!(
+        r_step2b
+            .fills
+            .iter()
+            .any(|f| { f.kind == FillKind::ContractDelivery && f.good == Some(AssetId::Raw(1)) })
+    );
     assert!(r_step2b.fills.iter().any(|f| {
         f.kind == FillKind::EscrowForfeited
+            && f.good == Some(AssetId::Cred)
             && f.from == Some(0)
             && f.to == 1
             && f.units == 500
+            && f.net_units == 500
             && f.cred_amount == 500
     }));
+    assert!(r_step2b.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(1)
+            && f.to == 1
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
+    }));
+    assert_eq!(eng_dual.state().seats[0].cred, dual_buyer0_before - 500);
+    assert_eq!(eng_dual.state().seats[1].cred, dual_seller1_before + 500);
     assert_eq!(eng_dual.state().seats[0].bond_breaches, 1);
 
-    // Also verify engine.rs:2449 (linked ContractDeliveryOrder buyer top-up default) and
-    // engine.rs:2716 (Step 2b DualEscrow seller default) emit EscrowForfeited with from != to.
+    // Distinct proof for `step2_settle_contract_deliveries` vs `step2b_evaluate_bonds_and_expired_escrows`:
+    // `dual_buyer_def` has `deadline_turn: 4` while swept on Turn 2 (`turn < deadline_turn`), so
+    // `step2b` cannot touch it on Turn 2; cancellation + empty `delivery_ledger` prove Step 2 ran.
     let (mut spec_both, _) = must_ok(
         TableSpec::standard_chiral_ring_with_mandates(TableId(652), 4, 1),
         "spec both",
@@ -1973,6 +2039,10 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     );
     must_ok(eng_both.sweep_turn_seeded(1), "sweep t1 eng both");
 
+    let both_b0_before = eng_both.state().seats[0].cred;
+    let both_s1_before = eng_both.state().seats[1].cred;
+    let both_b2_before = eng_both.state().seats[2].cred;
+    let both_s3_before = eng_both.state().seats[3].cred;
     let eid_buyer_def = eng_both.state().next_escrow_id;
     let dual_buyer_def = DualEscrowProposal {
         proposal_id: 92,
@@ -1983,7 +2053,7 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
         payment_cred: 1_000,
         buyer_bond_cred: 500,
         seller_bond_cred: 500,
-        deadline_turn: 2,
+        deadline_turn: 4,
         domain_id: None,
     };
     let dual_seller_def = DualEscrowProposal {
@@ -2012,12 +2082,67 @@ fn escrow_breach_refunded_forfeited_and_refunded_fills_and_old_log_compat() {
     b_both[3].dual_escrows.push(dual_seller_def);
     commit_and_reveal_all(&mut eng_both, TableId(652), 2, b_both);
     let r_both = must_ok(eng_both.sweep_turn_seeded(2), "sweep t2 eng both");
+    // Step 2 site check: `eid_buyer_def` cancelled on Turn 2 despite `deadline_turn == 4`, with 0 Raw(1) delivered.
+    assert!(
+        r_both
+            .escrows_cancelled_or_forfeited
+            .contains(&eid_buyer_def)
+    );
+    assert_eq!(
+        eng_both.state().dual_escrows[&eid_buyer_def].status,
+        EscrowStatus::Cancelled
+    );
+    assert!(eng_both.state().delivery_ledger.is_empty());
+    assert_eq!(eng_both.state().seats[0].raw[1], 0);
+    assert!(
+        !r_both
+            .fills
+            .iter()
+            .any(|f| f.kind == FillKind::ContractDelivery)
+    );
+    // Buyer-default fills at Step 2 (`step2_settle_contract_deliveries`):
     assert!(r_both.fills.iter().any(|f| {
-        f.kind == FillKind::EscrowForfeited && f.from == Some(0) && f.to == 1 && f.units == 500
+        f.kind == FillKind::EscrowForfeited
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(0)
+            && f.to == 1
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
     }));
     assert!(r_both.fills.iter().any(|f| {
-        f.kind == FillKind::EscrowForfeited && f.from == Some(3) && f.to == 2 && f.units == 600
+        f.kind == FillKind::EscrowRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(1)
+            && f.to == 1
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
     }));
+    // Seller-default fills at Step 2b (`step2b_evaluate_bonds_and_expired_escrows`):
+    assert!(r_both.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowForfeited
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(3)
+            && f.to == 2
+            && f.units == 600
+            && f.net_units == 600
+            && f.cred_amount == 600
+    }));
+    assert!(r_both.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(2)
+            && f.to == 2
+            && f.units == 400
+            && f.net_units == 400
+            && f.cred_amount == 400
+    }));
+    // Balances remain identical before and after adding the counterparty EscrowRefunded fill.
+    assert_eq!(eng_both.state().seats[0].cred, both_b0_before - 500);
+    assert_eq!(eng_both.state().seats[1].cred, both_s1_before + 500);
+    assert_eq!(eng_both.state().seats[2].cred, both_b2_before + 600);
+    assert_eq!(eng_both.state().seats[3].cred, both_s3_before - 600);
     assert_eq!(eng_both.state().seats[0].bond_breaches, 1);
     assert_eq!(eng_both.state().seats[3].bond_breaches, 1);
 }

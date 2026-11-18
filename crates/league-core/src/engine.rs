@@ -23,6 +23,8 @@ use crate::contracts::{
     WashFreezeSettlement, audit_wash_freeze, check_offer_domain_access,
     effective_export_tariff_bps,
 };
+use crate::observation::{PublicSweepReceipt, RefusedActionPreview, SeatObservation};
+use crate::predicates::compute_seat_state_predicates;
 use crate::scoring::{
     FinalScoreboard, FundamentalParities, compute_final_scoreboard, compute_pbrs_reward,
     compute_potential,
@@ -38,7 +40,7 @@ use crate::types::{
 type PoliticsOutcome = (Option<(u8, Option<u8>)>, Vec<(CharterRole, u8)>, Units);
 type Step1Outcome = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<SealedOrderBundle>, Vec<bool>);
 
-mod delivery_ledger_serde {
+pub(crate) mod delivery_ledger_serde {
     use super::*;
 
     type LedgerMap = BTreeMap<(u8, u8, AssetId), Units>;
@@ -441,10 +443,26 @@ pub(crate) struct SweepSeatDetails {
     pub(crate) spoilage_by_seat: Vec<Units>,
 }
 
+/// Controls whether a Turn Sweep executes the full 8-step live turn (including Step-8 stochastic
+/// shock draws, forecasts, next-turn shock activation, closing bell roll, and `state_digest`) or
+/// only deterministic Steps 0–7 plus Step-8 end-of-turn cleanup for previews (`B3`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SweepMode {
+    /// Full live 8-step Sweep (draws shocks, emits forecasts, activates next-turn shocks, evaluates
+    /// Closing Bell, computes `post_state_digest`, and records a [`PublicSweepReceipt`]).
+    #[default]
+    Live,
+    /// Preview-only Steps 0–7 plus Step-8 deterministic expiry/wash-freeze cleanup (omits shock
+    /// draws, `forecast_turn == turn` forecast emission, closing roll, and next-turn activation).
+    PreviewSteps0To7,
+}
+
 /// Deterministic pure-state v2 Turn Engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnEngine {
     state: EngineState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    public_receipts: Vec<PublicSweepReceipt>,
 }
 
 impl TurnEngine {
@@ -515,6 +533,7 @@ impl TurnEngine {
                 fill_log: Vec::new(),
                 pending_wash_freezes: Vec::new(),
             },
+            public_receipts: Vec::new(),
         };
         engine.activate_shocks_for_turn(1);
         let initial_pots: Vec<Units> = (0..n as u8)
@@ -524,10 +543,61 @@ impl TurnEngine {
         Ok(engine)
     }
 
+    pub(crate) fn from_sanitized_state(
+        state: EngineState,
+        public_receipts: Vec<PublicSweepReceipt>,
+    ) -> Self {
+        Self {
+            state,
+            public_receipts,
+        }
+    }
+
     /// Returns an immutable reference to the full engine state snapshot.
     #[must_use]
     pub const fn state(&self) -> &EngineState {
         &self.state
+    }
+
+    /// Returns the recorded seat-safe [`PublicSweepReceipt`] history from live sweeps.
+    #[must_use]
+    pub fn public_receipts(&self) -> &[PublicSweepReceipt] {
+        &self.public_receipts
+    }
+
+    /// Projects the sole seat-safe read boundary [`SeatObservation`] for `seat` from live state
+    /// and this engine's recorded public receipts (`A1`, `C4`).
+    pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
+        self.observe_seat_internal(seat, None)
+    }
+
+    /// Projects [`SeatObservation`] for `seat`, filtering caller-supplied raw [`SweepReceipt`]s
+    /// through [`PublicSweepReceipt::from_sweep_receipt`] (retaining only `r.turn <= last_swept_turn`
+    /// and dropping `newly_drawn_shocks` and `post_state_digest`).
+    pub fn observe_seat_with_receipts(
+        &self,
+        seat: Seat,
+        receipts: &[SweepReceipt],
+    ) -> Result<SeatObservation, EngineError> {
+        self.observe_seat_internal(seat, Some(receipts))
+    }
+
+    fn observe_seat_internal(
+        &self,
+        seat: Seat,
+        caller_receipts: Option<&[SweepReceipt]>,
+    ) -> Result<SeatObservation, EngineError> {
+        self.ensure_seat(seat.0)?;
+        let baseline_predicates = compute_seat_state_predicates(&self.state, seat)?;
+        let is_auditor = self.has_active_charter(seat.0, CharterRole::OracleAuditor);
+        Ok(SeatObservation::from_engine_state(
+            &self.state,
+            seat,
+            is_auditor,
+            baseline_predicates,
+            &self.public_receipts,
+            caller_receipts,
+        ))
     }
 
     /// Computes canonical SHA-256 digest of the serialized [`EngineState`].
@@ -898,6 +968,59 @@ impl TurnEngine {
         Ok(())
     }
 
+    /// Computes the deterministic Standing Regent [`SealedOrderBundle`] for `seat` at `turn`
+    /// without mutating `self`, returning `Ok(None)` when `seat` is `AiSyndicate` or has `regent: None`
+    /// (`B3`).
+    pub fn preview_regent_bundle_for_seat(
+        &self,
+        turn: Turn,
+        seat: Seat,
+    ) -> Result<Option<SealedOrderBundle>, EngineError> {
+        self.ensure_seat(seat.0)?;
+        if turn.0 == 0 || turn.0 > HARD_TURN_CAP {
+            return Err(EngineError::InvalidOrder(format!(
+                "regent preview turn must lie in 1..={HARD_TURN_CAP}, got {}",
+                turn.0
+            )));
+        }
+        let idx = usize::from(seat.0);
+        if self.state.seats[idx].identity != SeatIdentity::Human {
+            return Ok(None);
+        }
+        let Some(doctrine) = self.state.spec.seats[idx].regent else {
+            return Ok(None);
+        };
+        Ok(Some(
+            self.synthesize_regent_bundle(turn.0, seat.0, &doctrine),
+        ))
+    }
+
+    /// Computes the Standing Regent [`SealedOrderBundle`] for `seat` at `turn` after applying
+    /// valid `market_actions` and Step-0 DEX batch clearing on a cloned engine (`B3`).
+    pub fn preview_regent_bundle_after_step0(
+        &self,
+        turn: Turn,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        turn_beacon: [u8; 32],
+    ) -> Result<Option<SealedOrderBundle>, EngineError> {
+        self.ensure_seat(seat.0)?;
+        if turn.0 == 0 || turn.0 > HARD_TURN_CAP {
+            return Err(EngineError::InvalidOrder(format!(
+                "regent preview turn must lie in 1..={HARD_TURN_CAP}, got {}",
+                turn.0
+            )));
+        }
+        let mut sim = self.clone();
+        if sim.state.phase == TurnPhase::TalkAndMarket {
+            for action in market_actions {
+                let _ = sim.apply_market_action(action.clone());
+            }
+        }
+        sim.step0_clear_phase1_offer_batch(turn.0, turn_beacon)?;
+        sim.preview_regent_bundle_for_seat(turn, seat)
+    }
+
     /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` on a cloned engine
     /// assuming empty peer bundles and a deterministic preview beacon (`derive_turn_beacon(0, ...)`).
     /// Never modifies `self`.
@@ -907,8 +1030,27 @@ impl TurnEngine {
         market_actions: &[MarketAction],
         bundle: &SealedOrderBundle,
     ) -> Result<BundlePreview, EngineError> {
+        self.preview_bundle_in_mode(seat, market_actions, bundle, SweepMode::Live)
+    }
+
+    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` in the specified
+    /// [`SweepMode`], assuming empty peer bundles and the neutral beacon (`derive_turn_beacon(0, ...)`).
+    pub fn preview_bundle_in_mode(
+        &self,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        mode: SweepMode,
+    ) -> Result<BundlePreview, EngineError> {
         let beacon = derive_turn_beacon(0, self.state.table_id, Turn(self.state.turn));
-        self.preview_bundle_with_context(seat, market_actions, bundle, &BTreeMap::new(), beacon)
+        self.preview_bundle_with_context_and_mode(
+            seat,
+            market_actions,
+            bundle,
+            &BTreeMap::new(),
+            beacon,
+            mode,
+        )
     }
 
     /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` given explicit
@@ -921,6 +1063,57 @@ impl TurnEngine {
         peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
         turn_beacon: [u8; 32],
     ) -> Result<BundlePreview, EngineError> {
+        self.preview_bundle_with_context_and_mode(
+            seat,
+            market_actions,
+            bundle,
+            peer_bundles,
+            turn_beacon,
+            SweepMode::Live,
+        )
+    }
+
+    /// Side-effect-free simulation of `market_actions` and `bundle` for `seat` given explicit
+    /// `peer_bundles`, `turn_beacon`, and [`SweepMode`], normalizing peer commits and reveals
+    /// across `TalkAndMarket`, `Commit`, and `Reveal` (`B1`, `B3`).
+    pub fn preview_bundle_with_context_and_mode(
+        &self,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
+        turn_beacon: [u8; 32],
+        mode: SweepMode,
+    ) -> Result<BundlePreview, EngineError> {
+        let (preview, _, _) = self.preview_bundle_with_context_internal(
+            seat,
+            market_actions,
+            None,
+            &[],
+            &[],
+            bundle,
+            peer_bundles,
+            &[],
+            turn_beacon,
+            mode,
+        )?;
+        Ok(preview)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn preview_bundle_with_context_internal(
+        &self,
+        seat: Seat,
+        market_actions: &[MarketAction],
+        cancel_lock_at: Option<usize>,
+        assumed_cancelled_offer_ids: &[u64],
+        assumed_peer_market_actions: &[MarketAction],
+        bundle: &SealedOrderBundle,
+        peer_bundles: &BTreeMap<u8, SealedOrderBundle>,
+        assumed_bounced_check_ids: &[u64],
+        turn_beacon: [u8; 32],
+        mode: SweepMode,
+    ) -> Result<(BundlePreview, EngineState, Vec<RefusedActionPreview>), EngineError> {
         self.ensure_seat(seat.0)?;
         for &peer in peer_bundles.keys() {
             self.ensure_seat(peer)?;
@@ -946,11 +1139,37 @@ impl TurnEngine {
         let mut sim = self.clone();
         let pre_seat_state = sim.state.seats[seat_idx].clone();
         let mut refused_market_actions = Vec::new();
+        let mut refused_details = Vec::new();
         if was_talk_and_market {
-            for (idx, action) in market_actions.iter().enumerate() {
-                if let Err(err) = sim.apply_market_action(action.clone()) {
-                    refused_market_actions.push((idx, err.to_string()));
+            if !sim.state.cancel_locked {
+                for &offer_id in assumed_cancelled_offer_ids {
+                    if let Some(maker) = sim.state.offers.get(&offer_id).map(|o| o.maker) {
+                        let _ = sim.apply_market_action(MarketAction::CancelOffer {
+                            seat: maker,
+                            offer_id,
+                        });
+                    }
                 }
+            }
+            for (idx, action) in market_actions.iter().enumerate() {
+                if cancel_lock_at == Some(idx) {
+                    let _ = sim.begin_cancel_lock();
+                }
+                if let Err(err) = sim.apply_market_action(action.clone()) {
+                    let msg = err.to_string();
+                    refused_details.push(RefusedActionPreview {
+                        action_index: idx,
+                        error_code: err.code().to_owned(),
+                        message: crate::error::scrub_secret_text(&msg),
+                    });
+                    refused_market_actions.push((idx, msg));
+                }
+            }
+            if cancel_lock_at == Some(market_actions.len()) {
+                let _ = sim.begin_cancel_lock();
+            }
+            for action in assumed_peer_market_actions {
+                let _ = sim.apply_market_action(action.clone());
             }
         } else if !market_actions.is_empty() {
             return Err(EngineError::InvalidPhase(
@@ -958,6 +1177,20 @@ impl TurnEngine {
             ));
         }
         let post_market_seat_state = sim.state.seats[seat_idx].clone();
+
+        for &check_id in assumed_bounced_check_ids {
+            if let Some(check) = sim.state.checks.get_mut(&check_id)
+                && check.status == CheckStatus::Open
+                && check.drawer != seat.0
+            {
+                check.deliver_min = i64::MAX;
+            }
+        }
+
+        // B1 normalization: clear any existing Phase-2 commits or reveals across TalkAndMarket,
+        // Commit, and Reveal so uncommitted peers or partial revealers never distort preview state.
+        sim.state.turn_commits.clear();
+        sim.state.turn_reveals.clear();
 
         let preview_salt = RevealSalt([0xA5; 32]);
         let mut insert_preview_reveal = |s: u8, b: &SealedOrderBundle| -> Result<(), EngineError> {
@@ -977,18 +1210,16 @@ impl TurnEngine {
                 insert_preview_reveal(peer_s, peer_bundle)?;
             }
         }
-        if was_talk_and_market {
-            let empty = SealedOrderBundle::default();
-            for s in 0..n as u8 {
-                if s != seat.0 && !peer_bundles.contains_key(&s) {
-                    insert_preview_reveal(s, &empty)?;
-                }
+        let empty = SealedOrderBundle::default();
+        for s in 0..n as u8 {
+            if s != seat.0 && !peer_bundles.contains_key(&s) {
+                insert_preview_reveal(s, &empty)?;
             }
         }
         sim.state.cancel_locked = false;
         sim.state.phase = TurnPhase::Reveal;
 
-        let (sweep_receipt, details) = sim.sweep_turn_detailed(turn_beacon)?;
+        let (sweep_receipt, details) = sim.sweep_turn_detailed_with_mode(turn_beacon, mode)?;
         let post_seat_state = sim.state.seats[seat_idx].clone();
         let swap_orders = bundle
             .atomic_swaps
@@ -1027,7 +1258,7 @@ impl TurnEngine {
             })
             .collect();
 
-        Ok(BundlePreview {
+        let preview = BundlePreview {
             seat: seat.0,
             turn,
             refused_market_actions,
@@ -1043,21 +1274,30 @@ impl TurnEngine {
             seat_spoilage_clawed_back: details.spoilage_by_seat[seat_idx],
             seat_pbrs_delta: sweep_receipt.pbrs_deltas[seat_idx],
             sweep_receipt,
-        })
+        };
+        Ok((preview, sim.state, refused_details))
     }
 
     /// Executes the 8-step deterministic `Sweep` for the current standalone Eval-mode turn using
     /// `turn_beacon`.
     ///
-    /// Refuses `TableMode::Game` tables (which must sweep via [`TurnEngine::sweep_turn_with_drand`])
-    /// and refuses `TableMode::Eval` tables bound to an `eval_vrf_pubkey` (which must sweep via
-    /// [`TurnEngine::sweep_turn_with_eval_vrf`], `B-3`).
+    /// Refuses `TableMode::Game` tables (which must sweep via [`TurnEngine::sweep_turn_with_drand`]),
+    /// refuses `TableMode::Club` tables (which must sweep via [`TurnEngine::sweep_turn_with_eval_vrf`]),
+    /// and refuses `TableMode::Eval` tables bound to an `eval_vrf_pubkey` (`B-3`).
     pub fn sweep_turn(&mut self, turn_beacon: [u8; 32]) -> Result<SweepReceipt, EngineError> {
-        if self.state.spec.mode != TableMode::Eval {
-            return Err(EngineError::InvalidConfig(
-                "Game mode requires sweep_turn_with_drand with scheduled round and signature"
-                    .to_owned(),
-            ));
+        match self.state.spec.mode {
+            TableMode::Game => {
+                return Err(EngineError::InvalidConfig(
+                    "Game mode requires sweep_turn_with_drand with scheduled round and signature"
+                        .to_owned(),
+                ));
+            }
+            TableMode::Club => {
+                return Err(EngineError::InvalidConfig(
+                    "Club mode requires sweep_turn_with_eval_vrf".to_owned(),
+                ));
+            }
+            TableMode::Eval => {}
         }
         if self.state.spec.eval_vrf_pubkey.is_some() {
             return Err(EngineError::InvalidConfig(
@@ -1084,7 +1324,7 @@ impl TurnEngine {
         self.sweep_turn(beacon)
     }
 
-    /// Executes the 8-step deterministic `Sweep` for an Eval-mode turn by verifying an
+    /// Executes the 8-step deterministic `Sweep` for an Eval- or Club-mode turn by verifying an
     /// `EVAL_VRF_PROOF_BYTES` proof (RFC 9381 ECVRF construction with C2SP's `ristretto255`
     /// ciphersuite, `vrf-r255 0.1.0`) against `spec.eval_vrf_pubkey` (`#31` comment).
     pub fn sweep_turn_with_eval_vrf(
@@ -1099,9 +1339,9 @@ impl TurnEngine {
         &mut self,
         vrf_proof: &[u8],
     ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
-        if self.state.spec.mode != TableMode::Eval {
+        if !matches!(self.state.spec.mode, TableMode::Eval | TableMode::Club) {
             return Err(EngineError::InvalidConfig(
-                "sweep_turn_with_eval_vrf requires TableMode::Eval".to_owned(),
+                "sweep_turn_with_eval_vrf requires TableMode::Eval or TableMode::Club".to_owned(),
             ));
         }
         if self.state.phase != TurnPhase::Reveal {
@@ -1174,6 +1414,14 @@ impl TurnEngine {
     fn sweep_turn_detailed(
         &mut self,
         turn_beacon: [u8; 32],
+    ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
+        self.sweep_turn_detailed_with_mode(turn_beacon, SweepMode::Live)
+    }
+
+    fn sweep_turn_detailed_with_mode(
+        &mut self,
+        turn_beacon: [u8; 32],
+        sweep_mode: SweepMode,
     ) -> Result<(SweepReceipt, SweepSeatDetails), EngineError> {
         if self.state.phase != TurnPhase::Reveal {
             return Err(EngineError::InvalidPhase(
@@ -1274,7 +1522,13 @@ impl TurnEngine {
 
         // Step 8: Advance Horizon Shocks and evaluate stochastic close roll (Turns 24..=32).
         let (newly_drawn_shocks, public_forecasts, newly_activated_shocks, season_closed) =
-            self.step8_shocks_and_close(turn, turn_beacon);
+            match sweep_mode {
+                SweepMode::Live => self.step8_shocks_and_close(turn, turn_beacon),
+                SweepMode::PreviewSteps0To7 => {
+                    self.step8_deterministic_cleanup_only(turn);
+                    (Vec::new(), Vec::new(), Vec::new(), false)
+                }
+            };
 
         // Compute dense PBRS deltas using updated post-Sweep potentials.
         let mut pbrs_deltas = Vec::with_capacity(n);
@@ -1293,8 +1547,10 @@ impl TurnEngine {
         if season_closed {
             self.state.phase = TurnPhase::AwaitingMandateReveal;
         } else {
-            self.state.turn = turn + 1;
-            self.activate_shocks_for_turn(turn + 1);
+            self.state.turn = turn.saturating_add(1);
+            if sweep_mode == SweepMode::Live {
+                self.activate_shocks_for_turn(turn + 1);
+            }
             self.state.phase = TurnPhase::TalkAndMarket;
         }
 
@@ -1305,7 +1561,10 @@ impl TurnEngine {
             .filter(|r| r.turn == turn)
             .cloned()
             .collect();
-        let post_state_digest = self.state_digest()?;
+        let post_state_digest = match sweep_mode {
+            SweepMode::Live => self.state_digest()?,
+            SweepMode::PreviewSteps0To7 => [0u8; 32],
+        };
         let receipt = SweepReceipt {
             turn,
             non_reveal_seats,
@@ -1340,6 +1599,10 @@ impl TurnEngine {
             pbrs_deltas,
             post_state_digest,
         };
+        if sweep_mode == SweepMode::Live {
+            self.public_receipts
+                .push(PublicSweepReceipt::from_sweep_receipt(&receipt));
+        }
         let details = SweepSeatDetails {
             converter_orders_by_seat,
             project_orders_by_seat,
@@ -2432,29 +2695,14 @@ impl TurnEngine {
                     finished.push(eid);
                 } else {
                     // Buyer lacks top-up CRED at delivery: Seller keeps goods & collects buyer bond.
-                    let _ = self.adjust_free_balance(
-                        dual.seller,
-                        AssetId::Cred,
-                        dual.seller_bond_cred.saturating_add(dual.buyer_bond_cred),
-                    );
-                    if let Some(slot) = self.state.dual_escrows.get_mut(&eid) {
-                        slot.status = EscrowStatus::Cancelled;
-                    }
-                    let b_seat = &mut self.state.seats[usize::from(dual.buyer)];
-                    b_seat.bond_breaches += 1;
-                    b_seat.honor_penalties =
-                        b_seat.honor_penalties.saturating_add(dual.buyer_bond_cred);
-                    self.state.fill_log.push(FillRecord {
+                    self.settle_dual_escrow_default(
                         turn,
-                        kind: FillKind::EscrowForfeited,
-                        good: Some(AssetId::Cred),
-                        from: Some(dual.buyer),
-                        to: dual.seller,
-                        units: dual.buyer_bond_cred,
-                        net_units: dual.buyer_bond_cred,
-                        cred_amount: dual.buyer_bond_cred,
-                        unit_price_cred: None,
-                    });
+                        eid,
+                        dual.buyer,
+                        dual.seller,
+                        dual.buyer_bond_cred,
+                        dual.seller_bond_cred,
+                    );
                     cancelled.push(eid);
                 }
             } else {
@@ -2474,6 +2722,50 @@ impl TurnEngine {
                 });
             }
         }
+    }
+
+    fn settle_dual_escrow_default(
+        &mut self,
+        turn: u8,
+        eid: u64,
+        defaulter: u8,
+        counterparty: u8,
+        forfeited_bond: Units,
+        refunded_bond: Units,
+    ) {
+        let _ = self.adjust_free_balance(
+            counterparty,
+            AssetId::Cred,
+            refunded_bond.saturating_add(forfeited_bond),
+        );
+        if let Some(slot) = self.state.dual_escrows.get_mut(&eid) {
+            slot.status = EscrowStatus::Cancelled;
+        }
+        let d_seat = &mut self.state.seats[usize::from(defaulter)];
+        d_seat.bond_breaches += 1;
+        d_seat.honor_penalties = d_seat.honor_penalties.saturating_add(forfeited_bond);
+        self.state.fill_log.push(FillRecord {
+            turn,
+            kind: FillKind::EscrowForfeited,
+            good: Some(AssetId::Cred),
+            from: Some(defaulter),
+            to: counterparty,
+            units: forfeited_bond,
+            net_units: forfeited_bond,
+            cred_amount: forfeited_bond,
+            unit_price_cred: None,
+        });
+        self.state.fill_log.push(FillRecord {
+            turn,
+            kind: FillKind::EscrowRefunded,
+            good: Some(AssetId::Cred),
+            from: Some(counterparty),
+            to: counterparty,
+            units: refunded_bond,
+            net_units: refunded_bond,
+            cred_amount: refunded_bond,
+            unit_price_cred: None,
+        });
     }
 
     fn step2b_evaluate_bonds_and_expired_escrows(
@@ -2673,55 +2965,25 @@ impl TurnEngine {
                     });
                     finished.push(eid);
                 } else if dual.deadline_turn <= turn {
-                    let _ = self.adjust_free_balance(
-                        dual.seller,
-                        AssetId::Cred,
-                        dual.seller_bond_cred.saturating_add(dual.buyer_bond_cred),
-                    );
-                    if let Some(slot) = self.state.dual_escrows.get_mut(&eid) {
-                        slot.status = EscrowStatus::Cancelled;
-                    }
-                    let b_seat = &mut self.state.seats[usize::from(dual.buyer)];
-                    b_seat.bond_breaches += 1;
-                    b_seat.honor_penalties =
-                        b_seat.honor_penalties.saturating_add(dual.buyer_bond_cred);
-                    self.state.fill_log.push(FillRecord {
+                    self.settle_dual_escrow_default(
                         turn,
-                        kind: FillKind::EscrowForfeited,
-                        good: Some(AssetId::Cred),
-                        from: Some(dual.buyer),
-                        to: dual.seller,
-                        units: dual.buyer_bond_cred,
-                        net_units: dual.buyer_bond_cred,
-                        cred_amount: dual.buyer_bond_cred,
-                        unit_price_cred: None,
-                    });
+                        eid,
+                        dual.buyer,
+                        dual.seller,
+                        dual.buyer_bond_cred,
+                        dual.seller_bond_cred,
+                    );
                     cancelled.push(eid);
                 }
             } else if dual.deadline_turn <= turn {
-                let _ = self.adjust_free_balance(
-                    dual.buyer,
-                    AssetId::Cred,
-                    dual.buyer_bond_cred.saturating_add(dual.seller_bond_cred),
-                );
-                if let Some(slot) = self.state.dual_escrows.get_mut(&eid) {
-                    slot.status = EscrowStatus::Cancelled;
-                }
-                let s_seat = &mut self.state.seats[usize::from(dual.seller)];
-                s_seat.bond_breaches += 1;
-                s_seat.honor_penalties =
-                    s_seat.honor_penalties.saturating_add(dual.seller_bond_cred);
-                self.state.fill_log.push(FillRecord {
+                self.settle_dual_escrow_default(
                     turn,
-                    kind: FillKind::EscrowForfeited,
-                    good: Some(AssetId::Cred),
-                    from: Some(dual.seller),
-                    to: dual.buyer,
-                    units: dual.seller_bond_cred,
-                    net_units: dual.seller_bond_cred,
-                    cred_amount: dual.seller_bond_cred,
-                    unit_price_cred: None,
-                });
+                    eid,
+                    dual.seller,
+                    dual.buyer,
+                    dual.seller_bond_cred,
+                    dual.buyer_bond_cred,
+                );
                 cancelled.push(eid);
             }
         }
@@ -3801,15 +4063,7 @@ impl TurnEngine {
                 });
             }
         }
-        self.state
-            .active_shocks
-            .retain(|s| s.expires_after_turn > turn);
-
-        for seat in &mut self.state.seats {
-            if seat.wash_frozen_until_turn <= turn {
-                seat.wash_frozen_until_turn = 0;
-            }
-        }
+        self.step8_deterministic_cleanup_only(turn);
 
         let season_closed = if turn >= HARD_TURN_CAP {
             self.state.last_closing_roll_bps = None;
@@ -3828,6 +4082,19 @@ impl TurnEngine {
             newly_activated,
             season_closed,
         )
+    }
+
+    fn step8_deterministic_cleanup_only(&mut self, turn: u8) {
+        self.state
+            .active_shocks
+            .retain(|s| s.expires_after_turn > turn);
+
+        for seat in &mut self.state.seats {
+            if seat.wash_frozen_until_turn <= turn {
+                seat.wash_frozen_until_turn = 0;
+            }
+        }
+        self.state.last_closing_roll_bps = None;
     }
 }
 
