@@ -357,6 +357,25 @@ pub enum MarketAction {
     },
 }
 
+impl MarketAction {
+    /// Returns the acting seat index for this Phase-1 [`MarketAction`].
+    #[must_use]
+    pub const fn actor_seat(&self) -> u8 {
+        match *self {
+            Self::PostOffer { seat, .. }
+            | Self::CancelOffer { seat, .. }
+            | Self::CreateCheck { seat, .. }
+            | Self::CancelCheck { seat, .. }
+            | Self::CreateEscrow { seat, .. }
+            | Self::CancelExpiredEscrow { seat, .. }
+            | Self::RecordIntentPledge { seat, .. }
+            | Self::StandForOffice { seat, .. }
+            | Self::TownImport { seat, .. } => seat,
+            Self::FlagWashFreeze { inspector, .. } => inspector,
+        }
+    }
+}
+
 /// Validates and computes required tariff rate (`bps`) for a commodity transfer between two seats.
 #[must_use]
 pub fn effective_export_tariff_bps(
@@ -443,7 +462,8 @@ pub enum FillKind {
     /// to another seat) and [`Self::EscrowRefunded`] (a clean cancel or expiry, no breach).
     EscrowBreachRefunded,
     /// Escrowed funds returned to their own sender (`from == to`) when a `TokenEscrow` is
-    /// cancelled or expires unfinished; a refund, not a forfeit (`2026-11-17`).
+    /// cancelled or expires unfinished, or when the non-breaching counterparty recovers its own
+    /// bond (`from == to`) on a `DualEscrow` default in Step 2; a refund, not a forfeit (`2026-11-17`).
     EscrowRefunded,
     /// Authority emergency commodity purchase executed via `MarketAction::TownImport` (`C1`).
     TownImport,

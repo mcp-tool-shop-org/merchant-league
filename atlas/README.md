@@ -1,20 +1,21 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-18 from commit 7fdad18 by Atlas 1.26.0.
+Mapped at 2026-11-18 from commit f6e4faf by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-10 parts, mostly Rust (341 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+10 parts, mostly Rust (344 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 7 doors; the busiest is CI, which reaches 7 parts. It deploys a site to GitHub Pages. People run league-relay. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-17 (7dca819)
+## What changed since 2026-11-18 (7fdad18)
 
-Nothing structural changed since 2026-11-17; 1 file added and 6 changed content.
+- crates/league-core/tests/fixtures/pre_card1_94c73626_replay_bundle.json is now read by crates/league-core/tests/club_seat_observation.rs and crates/league-core/tests/wave1_rules.rs.
+- 4 files added and 11 changed content, across 3 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 37 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 38 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`). Runs crates/league-ledger/examples/testnet_escrow_expiry.rs.
 4. **testnet_proof** (a command people run with `cargo run --example testnet_proof`). Runs crates/league-ledger/examples/testnet_proof.rs.
@@ -24,7 +25,7 @@ Nothing structural changed since 2026-11-17; 1 file added and 6 changed content.
 
 ## What happens through CI
 
-1. The workflow runs 5 files in scripts, 8 files in league-core, 8 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 11 files in 6 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. The workflow runs 5 files in scripts, 9 files in league-core, 8 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, crates/league-season/ in league-season, and 11 files in 6 more places; it checks crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results

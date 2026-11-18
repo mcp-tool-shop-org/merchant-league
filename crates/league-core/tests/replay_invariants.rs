@@ -6219,6 +6219,15 @@ fn c2_buyer_dvp_and_cosigned_dual_escrow_delivery_defaults_and_lock_cap() {
             && f.net_units == 500
             && f.cred_amount == 500
     }));
+    assert!(r3.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(0)
+            && f.to == 0
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
+    }));
     assert!(
         eng2.state().seats[1].bond_breaches >= 1,
         "defaulted Seller on DvP/DualEscrow must record bond breach"
@@ -6321,6 +6330,15 @@ fn c2_buyer_dvp_and_cosigned_dual_escrow_delivery_defaults_and_lock_cap() {
         f.kind == FillKind::EscrowForfeited
             && f.good == Some(AssetId::Cred)
             && f.from == Some(0)
+            && f.to == 1
+            && f.units == 500
+            && f.net_units == 500
+            && f.cred_amount == 500
+    }));
+    assert!(r_def.fills.iter().any(|f| {
+        f.kind == FillKind::EscrowRefunded
+            && f.good == Some(AssetId::Cred)
+            && f.from == Some(1)
             && f.to == 1
             && f.units == 500
             && f.net_units == 500
@@ -7265,6 +7283,20 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
 
     #[derive(serde::Serialize)]
     struct MainSeasonReplayLog<'a> {
+        format_version: u32,
+        spec: &'a TableSpec,
+        mode: TableMode,
+        seed: u64,
+        beacon_mode: ReplayBeaconMode,
+        eval_vrf_pubkey: Option<String>,
+        sealed_mandate_deal: &'a league_core::SealedMandateDeal,
+        mandate_commits: &'a [Option<CommitmentHash>],
+        turns: &'a [LoggedTurn],
+        mandate_reveals: &'a [Option<MandateReveal>],
+    }
+
+    #[derive(serde::Serialize)]
+    struct PreVersionSeasonReplayLog<'a> {
         spec: &'a TableSpec,
         mode: TableMode,
         seed: u64,
@@ -7319,6 +7351,18 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
             .eval_vrf_pubkey
             .map(|bytes| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
         let main_log = MainSeasonReplayLog {
+            format_version: league_core::REPLAY_FORMAT_VERSION,
+            spec: &log.spec,
+            mode: log.mode,
+            seed: clear_seed,
+            beacon_mode: log.beacon_mode,
+            eval_vrf_pubkey: eval_pk_hex.clone(),
+            sealed_mandate_deal: &log.sealed_mandate_deal,
+            mandate_commits: &log.mandate_commits,
+            turns: &log.turns,
+            mandate_reveals: &log.mandate_reveals,
+        };
+        let pre_version_log = PreVersionSeasonReplayLog {
             spec: &log.spec,
             mode: log.mode,
             seed: clear_seed,
@@ -7339,6 +7383,10 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
 
         let val: serde_json::Value = must_ok(serde_json::from_slice(&new_bytes), "parse log json");
         assert_eq!(val["seed"], serde_json::json!(clear_seed));
+        assert_eq!(
+            val["format_version"],
+            serde_json::json!(league_core::REPLAY_FORMAT_VERSION)
+        );
 
         let bare_record = ReplayRecord {
             log: log.clone(),
@@ -7349,6 +7397,21 @@ fn non_sealed_log_json_and_replay_outcome_are_byte_identical_to_main() {
             bare_record_bytes, main_bytes,
             "clear ({seats}, {clear_seed}) bare ReplayRecord drifted from main"
         );
+
+        let pre_version_bytes = must_ok(
+            serde_json::to_vec(&pre_version_log),
+            "serialize pre_version_log",
+        );
+        let rt_from_pre: SeasonReplayLog = must_ok(
+            SeasonReplayLog::from_json_slice(&pre_version_bytes),
+            "parse pre_version_bytes",
+        );
+        assert_eq!(rt_from_pre, log);
+        let rt_rec_from_pre = must_ok(
+            ReplayRecord::from_json_slice(&pre_version_bytes),
+            "ReplayRecord::from_json_slice(pre_version_bytes)",
+        );
+        assert_eq!(rt_rec_from_pre, bare_record);
 
         let rt_from_main: SeasonReplayLog =
             must_ok(serde_json::from_slice(&main_bytes), "parse main_bytes");

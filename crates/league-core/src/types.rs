@@ -12,7 +12,7 @@ use crate::commit::{
     default_graded_mandate_deck, validate_eval_vrf_pubkey,
 };
 
-mod opt_hex32 {
+pub(crate) mod opt_hex32 {
     use super::*;
 
     pub fn serialize<S: Serializer>(
@@ -546,6 +546,73 @@ pub enum TableMode {
     /// proofs under the RFC 9381 ECVRF construction with C2SP's `ristretto255` ciphersuite
     /// (`c2sp.org/vrf-r255`, `vrf-r255 0.1.0`; not registered in RFC 9381) in replay logs (`#31`).
     Eval,
+    /// Offline Club Mode (`v0.1.0`): local hot-seat humans and deterministic rules-only bots on one
+    /// machine, paired strictly with `ReplayBeaconMode::EvalVrf` proofs over OS-CSPRNG
+    /// `SealedEvalSeed` and clear `SeedPool::Dev` (`0..=9_999`) layout seeds (`#68`).
+    Club,
+}
+
+/// Inclusive upper bound of the `dev` layout-seed pool (`0..=9_999`, matching `league_gen::DEV_SEED_MAX`).
+pub const DEV_LAYOUT_SEED_MAX: u64 = 9_999;
+
+/// Reserved probe, held-out, and sealed test layout seeds forbidden for real or Club tables
+/// (matching `league_gen::is_reserved_test_seed`).
+pub const RESERVED_TEST_LAYOUT_SEEDS: [u64; 7] = [
+    1_000_000,
+    1_099_999,
+    2_000_000,
+    2_099_999,
+    1_u64 << 63,
+    u64::MAX,
+    (1_u64 << 63) | 42,
+];
+
+/// Returns `true` when `seed` is one of the reserved test layout seeds that must never be
+/// scheduled for Club or real tables.
+#[must_use]
+pub const fn is_reserved_layout_test_seed(seed: u64) -> bool {
+    let mut idx = 0;
+    while idx < RESERVED_TEST_LAYOUT_SEEDS.len() {
+        if seed == RESERVED_TEST_LAYOUT_SEEDS[idx] {
+            return true;
+        }
+        idx += 1;
+    }
+    false
+}
+
+/// Validates that `seed` lies in clear `SeedPool::Dev` (`0..=9_999`) and is not a reserved test
+/// seed before starting or replaying a [`TableMode::Club`] table.
+///
+/// Sealed-range values (`>= 2^63`) are redacted to their SHA-256 digest in error messages.
+pub fn validate_club_dev_seed(seed: u64) -> Result<(), EngineError> {
+    if is_reserved_layout_test_seed(seed) {
+        let desc = if seed >= (1_u64 << 63) {
+            format!(
+                "sealed-range digest={}",
+                crate::replay::layout_seed_digest(seed)
+            )
+        } else {
+            seed.to_string()
+        };
+        return Err(EngineError::InvalidConfig(format!(
+            "RESERVED_SEED_FORBIDDEN: layout seed {desc} is a reserved test seed and cannot be used for TableMode::Club"
+        )));
+    }
+    if seed > DEV_LAYOUT_SEED_MAX {
+        let desc = if seed >= (1_u64 << 63) {
+            format!(
+                "sealed-range seed (digest={})",
+                crate::replay::layout_seed_digest(seed)
+            )
+        } else {
+            seed.to_string()
+        };
+        return Err(EngineError::InvalidConfig(format!(
+            "SEED_POOL_MISMATCH: TableMode::Club requires clear SeedPool::Dev (0..={DEV_LAYOUT_SEED_MAX}), got {desc}"
+        )));
+    }
+    Ok(())
 }
 
 /// Full deterministic rule specification for a v2 chiral table.
@@ -553,7 +620,7 @@ pub enum TableMode {
 pub struct TableSpec {
     /// Unique table identifier.
     pub table_id: TableId,
-    /// Required execution mode (`Game` or `Eval`) binding live sweeps and replay logs.
+    /// Required execution mode (`Game`, `Eval`, or `Club`) binding live sweeps and replay logs.
     pub mode: TableMode,
     /// Number of seats (`4`, `5`, or `6`).
     pub seat_count: u8,
@@ -713,6 +780,24 @@ impl TableSpec {
                     validate_eval_vrf_pubkey(pk)?;
                 }
             }
+            TableMode::Club => {
+                if self.drand_schedule.is_some() {
+                    return Err(EngineError::InvalidConfig(
+                        "Club mode TableSpec must not carry drand_schedule".to_owned(),
+                    ));
+                }
+                if !self.shocks.is_empty() {
+                    return Err(EngineError::InvalidConfig(
+                        "Club mode TableSpec forbids pre-seeded shocks; shocks must draw from verified EvalVrf beacons".to_owned(),
+                    ));
+                }
+                let Some(pk) = self.eval_vrf_pubkey else {
+                    return Err(EngineError::InvalidConfig(
+                        "Club mode TableSpec requires eval_vrf_pubkey".to_owned(),
+                    ));
+                };
+                validate_eval_vrf_pubkey(pk)?;
+            }
         }
         if self.mandate_alpha_bps == 0 || i128::from(self.mandate_alpha_bps) > BPS_SCALE {
             return Err(EngineError::InvalidConfig(format!(
@@ -783,6 +868,91 @@ impl TableSpec {
             )));
         }
         Ok(())
+    }
+
+    /// Constructs the canonical Club-mode `TableSpec` over a validated `SeedPool::Dev` seed
+    /// (`0..=9_999`, `!is_reserved_layout_test_seed`) together with OS-CSPRNG Turn-1 mandates
+    /// (`SealedMandateDeal`) and `SealedEvalSeed`.
+    pub fn standard_club_chiral_ring_with_setup(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+    ) -> Result<(Self, SealedMandateDeal, SealedEvalSeed), EngineError> {
+        validate_club_dev_seed(seed)?;
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) =
+            deal_graded_mandates(table_id, seat_count, &mandate_deck)?;
+        let eval_seed = SealedEvalSeed::generate()?;
+        let eval_pk = eval_seed.public_key_bytes()?;
+        let (mut spec, deal) = Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            TableMode::Club,
+            None,
+            Some(eval_pk),
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )?;
+        for s in &mut spec.seats {
+            s.regent = match s.identity {
+                SeatIdentity::Human => Some(RegentDoctrine {
+                    risk_tolerance_bps: 5_000,
+                    min_raw_reserve: UNIT_SCALE,
+                    auto_cash_due_claims: true,
+                }),
+                SeatIdentity::AiSyndicate => None,
+            };
+        }
+        spec.validate()?;
+        Ok((spec, deal, eval_seed))
+    }
+
+    /// Constructs the canonical Club-mode `TableSpec` from caller-supplied 256-bit `deal_seed`,
+    /// per-seat `seat_salts`, and 256-bit `eval_seed` for reproducible Club tests, enforcing
+    /// `SeedPool::Dev` (`0..=9_999`).
+    pub fn standard_club_chiral_ring_with_explicit_setup(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[RevealSalt],
+        eval_seed: SealedEvalSeed,
+    ) -> Result<(Self, SealedMandateDeal, SealedEvalSeed), EngineError> {
+        validate_club_dev_seed(seed)?;
+        let mandate_deck = default_graded_mandate_deck(seat_count);
+        let (dealt_mandate_commits, sealed_deal) = deal_graded_mandates_with_entropy(
+            table_id,
+            seat_count,
+            deal_seed,
+            seat_salts,
+            &mandate_deck,
+        )?;
+        let eval_pk = eval_seed.public_key_bytes()?;
+        let (mut spec, deal) = Self::build_chiral_ring_spec_with_deal(
+            table_id,
+            TableMode::Club,
+            None,
+            Some(eval_pk),
+            seat_count,
+            seed,
+            mandate_deck,
+            dealt_mandate_commits,
+            sealed_deal,
+        )?;
+        for s in &mut spec.seats {
+            s.regent = match s.identity {
+                SeatIdentity::Human => Some(RegentDoctrine {
+                    risk_tolerance_bps: 5_000,
+                    min_raw_reserve: UNIT_SCALE,
+                    auto_cash_due_claims: true,
+                }),
+                SeatIdentity::AiSyndicate => None,
+            };
+        }
+        spec.validate()?;
+        Ok((spec, deal, eval_seed))
     }
 
     /// Constructs the canonical Eval-mode `TableSpec` together with both sealed orchestrator
@@ -1125,6 +1295,13 @@ pub enum EngineError {
     CancelLocked,
     /// Season replay log was incomplete or inconsistent with closed status.
     SeasonEnded(String),
+    /// Persisted replay payload declared a format version unknown to or newer than this reader.
+    UnsupportedReplayVersion {
+        /// Version number found in the serialized payload.
+        found: u32,
+        /// Newest replay format version known to this reader ([`crate::REPLAY_FORMAT_VERSION`]).
+        newest_known: u32,
+    },
 }
 
 impl EngineError {
@@ -1145,6 +1322,7 @@ impl EngineError {
             Self::DomainAccessDenied(_) => "DOMAIN_ACCESS_DENIED",
             Self::CancelLocked => "CANCEL_LOCKED",
             Self::SeasonEnded(_) => "SEASON_ENDED",
+            Self::UnsupportedReplayVersion { .. } => "UNSUPPORTED_REPLAY_VERSION",
         }
     }
 }
@@ -1171,6 +1349,13 @@ impl fmt::Display for EngineError {
             Self::DomainAccessDenied(msg) => write!(f, "cartel domain access denied: {msg}"),
             Self::CancelLocked => write!(f, "Phase-1 cancel lock is active"),
             Self::SeasonEnded(msg) => write!(f, "season replay/lifecycle error: {msg}"),
+            Self::UnsupportedReplayVersion {
+                found,
+                newest_known,
+            } => write!(
+                f,
+                "UNSUPPORTED_REPLAY_VERSION: replay format version {found} is not supported by this reader (newest known version is {newest_known})"
+            ),
         }
     }
 }
