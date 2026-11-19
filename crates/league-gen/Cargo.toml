@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 league-core = { path = "../league-core" }
+league-seat-types = { path = "../league-seat-types" }
 serde = { version = "1.0.229", features = ["derive"] }
 sha2 = "0.10.9"
 

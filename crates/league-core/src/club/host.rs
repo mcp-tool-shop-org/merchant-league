@@ -28,6 +28,7 @@ use crate::contracts::{
 use crate::engine::{SeatState, ShockForecastEvent, TurnEngine, TurnPhase};
 use crate::observation::{
     PublicSweepReceipt, PublicTableSpec, SeatObservation, compute_public_forecasts,
+    public_sweep_receipt_from_raw, public_table_spec_from_raw,
 };
 use crate::predicates::{SeatSeasonMetrics, StatePredicateSection, compute_season_metrics};
 use crate::replay::{
@@ -44,7 +45,9 @@ use crate::types::{
 pub const CLUB_SAVE_FORMAT_VERSION: u32 = 1;
 
 /// Current schema version for private `.seal` sidecar payloads written by [`ClubHost`].
-pub const CLUB_SEAL_FORMAT_VERSION: u32 = 1;
+///
+/// Bumped to `2` in Fix 1 (`C3`) now that `live_state_digests` is required rather than `#[serde(default)]`.
+pub const CLUB_SEAL_FORMAT_VERSION: u32 = 2;
 
 /// Default Standing Regent fallback initialized on `Human` Club seats (`docs/club-mode-design.md` §1.2).
 pub const DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE: RegentDoctrine = RegentDoctrine {
@@ -141,6 +144,7 @@ struct ClubSealPayload {
     current_commitments: BTreeMap<u8, CommitmentHash>,
     current_reveals: BTreeMap<u8, OrderReveal>,
     bot_tie_seed: u64,
+    live_state_digests: Vec<[u8; 32]>,
 }
 
 /// Exclusive Club Mode host wrapper owning [`TurnEngine`], pre-derived VRF proofs, sealed Turn-1
@@ -158,6 +162,7 @@ pub struct ClubHost {
     mandate_commits: Vec<Option<CommitmentHash>>,
     mandate_reveals: Vec<Option<MandateReveal>>,
     logged_turns: Vec<LoggedTurn>,
+    live_state_digests: Vec<[u8; 32]>,
     current_market_actions: Vec<MarketAction>,
     current_cancel_lock_at: Option<u32>,
     current_commitments: BTreeMap<u8, CommitmentHash>,
@@ -248,6 +253,7 @@ impl ClubHost {
             mandate_commits,
             mandate_reveals: vec![None; n],
             logged_turns: Vec::new(),
+            live_state_digests: Vec::new(),
             current_market_actions: Vec::new(),
             current_cancel_lock_at: None,
             current_commitments: BTreeMap::new(),
@@ -335,7 +341,7 @@ impl ClubHost {
     /// Projects the public [`PublicTableSpec`] without hidden `shocks` or `dealt_mandate_commits`.
     #[must_use]
     pub fn public_spec(&self) -> PublicTableSpec {
-        PublicTableSpec::from_table_spec(&self.engine.state().spec)
+        public_table_spec_from_raw(&self.engine.state().spec)
     }
 
     /// Returns the seat-safe 30-field [`PublicSweepReceipt`] history from live sweeps.
@@ -344,13 +350,81 @@ impl ClubHost {
         self.engine.public_receipts()
     }
 
-    /// Projects the sole seat-safe read boundary [`SeatObservation`] for `seat`.
+    /// Projects the sole seat-safe read boundary [`SeatObservation`] for `seat`, carrying only
+    /// `seat`'s own dealt [`PrivateMandate`] (never reveal salts or rival seats' mandates).
+    ///
+    /// Host-only persistence byte helpers (`to_save_and_seal_bytes`, `from_save_and_seal_bytes`)
+    /// are `pub(crate)`, and `own_mandate` is removed from [`ClubHost`]:
+    ///
+    /// ```compile_fail,E0624
+    /// use league_core::{ClubHost, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let _ = host.to_save_and_seal_bytes();
+    /// ```
+    ///
+    /// ```compile_fail,E0624
+    /// use league_core::ClubHost;
+    /// let _ = ClubHost::from_save_and_seal_bytes(&[], &[]);
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use league_core::{ClubHost, Seat, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let _ = host.own_mandate(Seat(0));
+    /// ```
+    ///
+    /// `SeatObservation::own_mandate` cannot be overwritten or forged outside host construction:
+    ///
+    /// ```compile_fail,E0616
+    /// use league_core::{ClubHost, Seat, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let mut obs = host.observe_seat(Seat(0)).unwrap();
+    /// obs.own_mandate = None;
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use league_core::{ClubHost, Seat, TableId};
+    /// let host = ClubHost::from_standard_setup(TableId(1), 4, 1, 0).unwrap();
+    /// let obs = host.observe_seat(Seat(0)).unwrap();
+    /// let m = obs.own_mandate().copied().unwrap();
+    /// let _ = obs.with_own_mandate(m);
+    /// ```
+    ///
+    /// `SeatObservation` intentionally omits `Deserialize` (`B1`) so neither save files,
+    /// replay logs, nor host wrappers can forge `own_mandate` via a serde round-trip:
+    ///
+    /// ```compile_fail,E0277
+    /// use league_core::SeatObservation;
+    /// let _: Result<SeatObservation, _> = serde_json::from_str("{}");
+    /// ```
+    ///
+    /// `TurnEngine::observe_seat_with_mandate` is `pub(crate)` and unreachable outside `league-core`:
+    ///
+    /// ```compile_fail,E0624
+    /// use league_core::{
+    ///     CreditTier, MandateKind, PrivateMandate, Seat, TableId, TableSpec, TurnEngine,
+    /// };
+    /// let spec = TableSpec::standard_chiral_ring(TableId(1), 4, 1).unwrap();
+    /// let engine = TurnEngine::new(spec).unwrap();
+    /// let mandate = PrivateMandate {
+    ///     kind: MandateKind::MaintainCleanCredit {
+    ///         min_tier: CreditTier::Aaa,
+    ///     },
+    ///     bonus_equity: 3_000,
+    /// };
+    /// let _ = engine.observe_seat_with_mandate(Seat(0), mandate);
+    /// ```
     pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
-        self.engine.observe_seat(seat)
+        let mandate = *self.mandate_for_seat(seat)?;
+        self.engine.observe_seat_with_mandate(seat, mandate)
     }
 
-    /// Returns `seat`'s own dealt [`PrivateMandate`] (never exposing salts or rival seats' mandates).
-    pub fn own_mandate(&self, seat: Seat) -> Result<&PrivateMandate, EngineError> {
+    /// Host-only lookup returning `seat`'s dealt [`PrivateMandate`] (without its reveal salt).
+    ///
+    /// This method returns **any** seat's mandate and is forbidden in seat-side modules and UI
+    /// screens (`raw_api_backdoor_guard`). Seats must read only their own mandate embedded in
+    /// [`SeatObservation::own_mandate`] from [`Self::observe_seat`].
+    pub fn mandate_for_seat(&self, seat: Seat) -> Result<&PrivateMandate, EngineError> {
         let n = self.seat_count();
         if seat.0 >= n {
             return Err(EngineError::InvalidSeat(seat.0));
@@ -459,7 +533,8 @@ impl ClubHost {
             &proof,
         )?;
         let raw_receipt = self.engine.sweep_turn_with_eval_vrf(&proof)?;
-        let public_receipt = PublicSweepReceipt::from_sweep_receipt(&raw_receipt);
+        let public_receipt = public_sweep_receipt_from_raw(&raw_receipt);
+        self.live_state_digests.push(raw_receipt.post_state_digest);
         self.logged_turns.push(LoggedTurn {
             turn,
             market_actions: std::mem::take(&mut self.current_market_actions),
@@ -512,6 +587,26 @@ impl ClubHost {
                 "replayed scoreboard diverged from live ClubHost scoreboard".to_owned(),
             ));
         }
+        if replay_out.state_digests.len() != self.live_state_digests.len() {
+            return Err(EngineError::SeasonEnded(format!(
+                "replayed state digest count {} diverged from live ClubHost turn count {}",
+                replay_out.state_digests.len(),
+                self.live_state_digests.len()
+            )));
+        }
+        for (idx, (replayed_digest, live_digest)) in replay_out
+            .state_digests
+            .iter()
+            .zip(self.live_state_digests.iter())
+            .enumerate()
+        {
+            if replayed_digest != live_digest {
+                return Err(EngineError::SeasonEnded(format!(
+                    "replayed post_state_digest diverged from live ClubHost digest at turn {}",
+                    idx + 1
+                )));
+            }
+        }
         let metrics = compute_season_metrics(&section);
         Ok((scoreboard, log, section, metrics))
     }
@@ -553,7 +648,7 @@ impl ClubHost {
             cancel_locked: state.cancel_locked,
             trade_minister: state.trade_minister,
             cartel_chair: state.cartel_chair,
-            spec: PublicTableSpec::from_table_spec(&state.spec),
+            spec: public_table_spec_from_raw(&state.spec),
             parities: state.parities.clone(),
             seats: state.seats.clone(),
             offers: state.offers.clone(),
@@ -580,8 +675,9 @@ impl ClubHost {
         })
     }
 
-    /// Serializes the public `.save.json` projection and private `.seal` sidecar bytes.
-    pub fn to_save_and_seal_bytes(&self) -> Result<(Vec<u8>, Vec<u8>), EngineError> {
+    /// Serializes the public `.save.json` projection and private `.seal` sidecar bytes
+    /// (host-only `pub(crate)` helper behind [`Self::write_save_and_seal`]).
+    pub(crate) fn to_save_and_seal_bytes(&self) -> Result<(Vec<u8>, Vec<u8>), EngineError> {
         let save = self.public_save_snapshot()?;
         let save_bytes = serde_json::to_vec_pretty(&save).map_err(|err| {
             EngineError::InvalidConfig(format!("failed to serialize ClubSaveSnapshot: {err}"))
@@ -600,6 +696,7 @@ impl ClubHost {
             current_commitments: self.current_commitments.clone(),
             current_reveals: self.current_reveals.clone(),
             bot_tie_seed: self.bot_tie_seed,
+            live_state_digests: self.live_state_digests.clone(),
         };
         let seal_bytes = serde_json::to_vec(&seal).map_err(|err| {
             EngineError::InvalidConfig(format!("failed to serialize Club seal sidecar: {err}"))
@@ -607,11 +704,24 @@ impl ClubHost {
         Ok((save_bytes, seal_bytes))
     }
 
-    /// Reconstructs and validates a [`ClubHost`] from `.save.json` and `.seal` sidecar bytes.
-    pub fn from_save_and_seal_bytes(
+    /// Reconstructs and validates a [`ClubHost`] from `.save.json` and `.seal` sidecar bytes
+    /// (host-only `pub(crate)` helper behind [`Self::read_save_and_seal`]).
+    pub(crate) fn from_save_and_seal_bytes(
         save_bytes: &[u8],
         seal_bytes: &[u8],
     ) -> Result<Self, EngineError> {
+        #[derive(serde::Deserialize)]
+        struct FormatVersionHeader {
+            format_version: u32,
+        }
+        if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(save_bytes)
+            && hdr.format_version != CLUB_SAVE_FORMAT_VERSION
+        {
+            return Err(EngineError::UnsupportedReplayVersion {
+                found: hdr.format_version,
+                newest_known: CLUB_SAVE_FORMAT_VERSION,
+            });
+        }
         let save: ClubSaveSnapshot = serde_json::from_slice(save_bytes).map_err(|err| {
             EngineError::InvalidConfig(format!("Club save JSON does not parse: {err}"))
         })?;
@@ -619,6 +729,14 @@ impl ClubHost {
             return Err(EngineError::UnsupportedReplayVersion {
                 found: save.format_version,
                 newest_known: CLUB_SAVE_FORMAT_VERSION,
+            });
+        }
+        if let Ok(hdr) = serde_json::from_slice::<FormatVersionHeader>(seal_bytes)
+            && hdr.format_version != CLUB_SEAL_FORMAT_VERSION
+        {
+            return Err(EngineError::UnsupportedReplayVersion {
+                found: hdr.format_version,
+                newest_known: CLUB_SEAL_FORMAT_VERSION,
             });
         }
         let seal: ClubSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {
@@ -688,6 +806,13 @@ impl ClubHost {
                 "ClubHost seal mandate commit/reveal lengths do not match seat_count".to_owned(),
             ));
         }
+        if seal.live_state_digests.len() != seal.logged_turns.len() {
+            return Err(EngineError::InvalidConfig(format!(
+                "ClubHost seal live_state_digests len {} does not match logged_turns len {}",
+                seal.live_state_digests.len(),
+                seal.logged_turns.len()
+            )));
+        }
 
         let host = Self {
             layout_seed: seal.layout_seed,
@@ -698,6 +823,7 @@ impl ClubHost {
             mandate_commits: seal.mandate_commits,
             mandate_reveals: seal.mandate_reveals,
             logged_turns: seal.logged_turns,
+            live_state_digests: seal.live_state_digests,
             current_market_actions: seal.current_market_actions,
             current_cancel_lock_at: seal.current_cancel_lock_at,
             current_commitments: seal.current_commitments,
@@ -810,4 +936,328 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), EngineError> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn must_ok_host<T, E: fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
+        match res {
+            Ok(v) => v,
+            Err(err) => panic!("{ctx}: {err}"),
+        }
+    }
+
+    #[test]
+    fn planted_b3_perturbed_live_state_digest_makes_finalize_club_season_refuse() {
+        let eval_seed = must_ok_host(
+            SealedEvalSeed::try_from_bytes([0x6F; 32]),
+            "SealedEvalSeed::try_from_bytes",
+        );
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
+        let mut host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                TableId(905_001),
+                4,
+                7,
+                [0x4B; 32],
+                &salts,
+                eval_seed,
+                77,
+            ),
+            "ClubHost::from_explicit_setup",
+        );
+        for _ in 1..=HARD_TURN_CAP {
+            if host.phase() != TurnPhase::TalkAndMarket {
+                break;
+            }
+            must_ok_host(
+                host.commit_and_reveal_all(&BTreeMap::new()),
+                "commit_and_reveal_all",
+            );
+            let _ = must_ok_host(host.sweep_turn(), "sweep_turn");
+        }
+        assert_eq!(host.phase(), TurnPhase::AwaitingMandateReveal);
+        assert_eq!(host.live_state_digests.len(), host.logged_turns.len());
+
+        let (save_bytes, seal_bytes) = must_ok_host(host.to_save_and_seal_bytes(), "save bytes");
+        let mut host_clean = must_ok_host(
+            ClubHost::from_save_and_seal_bytes(&save_bytes, &seal_bytes),
+            "clean clone via bytes",
+        );
+        let _ = must_ok_host(host_clean.finalize_club_season(), "clean finalize passes");
+
+        let mut host_perturbed = must_ok_host(
+            ClubHost::from_save_and_seal_bytes(&save_bytes, &seal_bytes),
+            "perturbed clone via bytes",
+        );
+        host_perturbed.live_state_digests[2][0] ^= 0x01;
+        let err = match host_perturbed.finalize_club_season() {
+            Ok(_) => panic!("perturbed live post_state_digest must fail finalize_club_season"),
+            Err(err) => err,
+        };
+        let msg = err.to_string();
+        assert!(
+            matches!(err, EngineError::SeasonEnded(_)) && msg.contains("turn 3"),
+            "unexpected digest mismatch error: {err}"
+        );
+        println!("PLANTED_B3_DIGEST_PERTURBATION_RESULT: {err}");
+    }
+
+    #[test]
+    fn to_and_from_save_and_seal_bytes_reject_live_state_digests_count_mismatch() {
+        let eval_seed = must_ok_host(
+            SealedEvalSeed::try_from_bytes([0x6E; 32]),
+            "SealedEvalSeed::try_from_bytes",
+        );
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x51 + i; 32])).collect();
+        let mut host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                TableId(905_002),
+                4,
+                7,
+                [0x4C; 32],
+                &salts,
+                eval_seed,
+                88,
+            ),
+            "ClubHost::from_explicit_setup",
+        );
+        must_ok_host(
+            host.commit_and_reveal_all(&BTreeMap::new()),
+            "commit_and_reveal_all",
+        );
+        let _ = must_ok_host(host.sweep_turn(), "sweep_turn");
+        let (save_bytes, seal_bytes) = must_ok_host(host.to_save_and_seal_bytes(), "save bytes");
+        let mut seal_json: serde_json::Value =
+            must_ok_host(serde_json::from_slice(&seal_bytes), "parse seal");
+        seal_json["live_state_digests"] = serde_json::json!([]);
+        let bad_seal = must_ok_host(serde_json::to_vec(&seal_json), "serialize bad seal");
+        let err = match ClubHost::from_save_and_seal_bytes(&save_bytes, &bad_seal) {
+            Ok(_) => panic!("mismatched live_state_digests len must be rejected"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("live_state_digests"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn club_host_new_validation_accessors_debug_and_premature_phase_errors() {
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x61 + i; 32])).collect();
+        let tid = TableId(905_101);
+        let host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                tid,
+                4,
+                7,
+                [0x4D; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7C; 32]), "eval"),
+                88,
+            ),
+            "host setup",
+        );
+
+        assert_eq!(host.layout_seed(), 7);
+        assert_eq!(host.bot_tie_seed(), 88);
+        assert_eq!(host.table_id(), tid);
+        assert!(!host.cancel_locked());
+        assert_eq!(host.public_spec().table_id, tid);
+        assert!(host.public_receipts().is_empty());
+        assert!(format!("{host:?}").contains("<hidden>"));
+        assert!(host.mandate_for_seat(Seat(99)).is_err());
+        assert!(host.observe_seat(Seat(99)).is_err());
+        assert!(host.preview_regent_bundle_for_seat(Seat(0)).is_ok());
+
+        let mut host_mut = host;
+        assert!(matches!(
+            host_mut.finalize_club_season(),
+            Err(EngineError::InvalidPhase(_))
+        ));
+        assert!(matches!(
+            host_mut.export_replay_log(),
+            Err(EngineError::InvalidPhase(_))
+        ));
+
+        let (base_spec, base_deal, base_eval) = must_ok_host(
+            TableSpec::standard_club_chiral_ring_with_explicit_setup(
+                TableId(905_102),
+                4,
+                7,
+                [0x4E; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval2"),
+            ),
+            "base spec",
+        );
+
+        let mut wrong_mode = base_spec.clone();
+        wrong_mode.mode = TableMode::Eval;
+        assert!(
+            ClubHost::new(
+                wrong_mode,
+                7,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        assert!(
+            ClubHost::new(
+                base_spec.clone(),
+                1_u64 << 63,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        let mut no_pk = base_spec.clone();
+        no_pk.eval_vrf_pubkey = None;
+        assert!(
+            ClubHost::new(
+                no_pk,
+                7,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        let mismatched_eval = must_ok_host(SealedEvalSeed::try_from_bytes([0x7E; 32]), "eval3");
+        assert!(
+            ClubHost::new(base_spec.clone(), 7, base_deal.clone(), mismatched_eval, 1).is_err()
+        );
+
+        let mut bad_commits = base_spec;
+        bad_commits.dealt_mandate_commits[0].0[0] ^= 0x01;
+        assert!(ClubHost::new(bad_commits, 7, base_deal, base_eval, 1).is_err());
+    }
+
+    #[test]
+    fn from_save_and_seal_bytes_rejects_corrupted_headers_versions_proofs_and_mismatches() {
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x71 + i; 32])).collect();
+        let mut host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                TableId(905_103),
+                4,
+                7,
+                [0x5E; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7F; 32]), "eval"),
+                99,
+            ),
+            "host setup",
+        );
+        must_ok_host(
+            host.commit_and_reveal_all(&BTreeMap::new()),
+            "commit_and_reveal_all",
+        );
+        let _ = must_ok_host(host.sweep_turn(), "sweep_turn");
+        let (save_bytes, seal_bytes) = must_ok_host(host.to_save_and_seal_bytes(), "save_seal");
+
+        let save_val: serde_json::Value =
+            must_ok_host(serde_json::from_slice(&save_bytes), "parse save");
+        let seal_val: serde_json::Value =
+            must_ok_host(serde_json::from_slice(&seal_bytes), "parse seal");
+
+        let mut bad_save_ver = save_val.clone();
+        bad_save_ver["format_version"] = serde_json::json!(99);
+        assert!(matches!(
+            ClubHost::from_save_and_seal_bytes(
+                &must_ok_host(serde_json::to_vec(&bad_save_ver), "s"),
+                &seal_bytes,
+            ),
+            Err(EngineError::UnsupportedReplayVersion { found: 99, .. })
+        ));
+        assert!(ClubHost::from_save_and_seal_bytes(b"{not-json", &seal_bytes).is_err());
+
+        let mut bad_seal_ver = seal_val.clone();
+        bad_seal_ver["format_version"] = serde_json::json!(99);
+        assert!(matches!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_seal_ver), "s"),
+            ),
+            Err(EngineError::UnsupportedReplayVersion { found: 99, .. })
+        ));
+        assert!(ClubHost::from_save_and_seal_bytes(&save_bytes, b"{not-json").is_err());
+
+        let mut mismatch_seed = seal_val.clone();
+        mismatch_seed["layout_seed"] = serde_json::json!(9);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&mismatch_seed), "s"),
+            )
+            .is_err()
+        );
+
+        let mut short_proofs = seal_val.clone();
+        if let Some(arr) = short_proofs["vrf_proofs"].as_array_mut() {
+            arr.pop();
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&short_proofs), "s"),
+            )
+            .is_err()
+        );
+
+        let mut wrong_len_proof = seal_val.clone();
+        wrong_len_proof["vrf_proofs"][0] = serde_json::json!(vec![0_u8; 4]);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&wrong_len_proof), "s"),
+            )
+            .is_err()
+        );
+
+        let mut bad_proof_byte = seal_val.clone();
+        if let Some(first) = bad_proof_byte["vrf_proofs"][0]
+            .as_array_mut()
+            .and_then(|a| a.first_mut())
+            && let Some(b) = first.as_u64()
+        {
+            *first = serde_json::json!(b ^ 1);
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_proof_byte), "s"),
+            )
+            .is_err()
+        );
+
+        let mut bad_commits_len = seal_val;
+        if let Some(arr) = bad_commits_len["mandate_commits"].as_array_mut() {
+            arr.pop();
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_commits_len), "s"),
+            )
+            .is_err()
+        );
+
+        let mut mismatched_turn_save = save_val;
+        mismatched_turn_save["turn"] = serde_json::json!(99);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &must_ok_host(serde_json::to_vec(&mismatched_turn_save), "s"),
+                &seal_bytes,
+            )
+            .is_err()
+        );
+    }
 }

@@ -145,7 +145,7 @@ out their marks at the end."
 run_case $c fail "$tui" "// Pay out of your purse."
 # The README's disclaimer turned into a claim.
 run_replace $c fail README.md "no real money" "real money prizes"
-run_replace $c fail crates/league-tui/src/lib.rs "No real money." "Win real money."
+run_replace $c fail crates/league-seat-ui/src/lib.rs "No real money." "Win real money."
 # Near misses that must pass: trading language, disclaimers, game nouns.
 for phrase in "Choose which goods to buy in town." "You cannot buy in Varn today." \
   "Sell salt at a profit." "A profitable trade route." "Profit on the north road is in salt." \

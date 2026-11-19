@@ -1,12 +1,24 @@
+#![no_std]
+#![forbid(unsafe_code)]
+#![forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 //! Shared canonical [`StructuredError`], [`ToStructuredError`], and secret scrubber
-//! (`SHIP_GATE.md` `:26`) for Merchant League crates.
+//! (`SHIP_GATE.md` `:26`).
 //!
-//! Kept as a leaf crate depending only on `serde` and `serde_json` so every workspace crate
-//! (`league-core`, `league-ledger`, `league-relay`, `league-standalone`, and `league-gen` via
-//! `league-core`) shares one concrete error representation and scrubber without introducing a
-//! `league-core` dependency in `league-relay` or `league-ledger`.
+//! Kept as a `no_std` + `alloc` leaf crate depending only on `serde` and `serde_json` so every
+//! workspace crate (`league-core`, `league-ledger`, `league-relay`, `league-standalone`,
+//! `league-seat-types`, and `league-gen` via `league-core`) shares one concrete error
+//! representation and scrubber without introducing a `league-core` dependency in seat crates,
+//! `league-relay`, or `league-ledger`.
 
-use std::fmt;
+extern crate alloc;
+
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 use serde::ser::SerializeStruct as _;
 use serde::{Serialize, Serializer};
@@ -36,13 +48,27 @@ pub const fn is_base58_byte(b: u8) -> bool {
 }
 
 /// Returns `true` if byte offset `i` is at a word boundary, including immediately after a
-/// preceding JSON escape (`\n`, `\t`, `\r`, `\"`, `\/`) or URL percent-encoded byte (`%xx`).
+/// preceding JSON escape (`\n`, `\t`, `\r`, `\b`, `\f`, `\"`, `\/`, `\uXXXX`) or URL
+/// percent-encoded byte (`%xx`).
 #[must_use]
 pub const fn is_at_boundary(bytes: &[u8], i: usize) -> bool {
     if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
         return true;
     }
-    if i >= 2 && bytes[i - 2] == b'\\' && matches!(bytes[i - 1], b'n' | b't' | b'r' | b'"' | b'/') {
+    if i >= 2
+        && bytes[i - 2] == b'\\'
+        && matches!(bytes[i - 1], b'n' | b't' | b'r' | b'b' | b'f' | b'"' | b'/')
+    {
+        return true;
+    }
+    if i >= 6
+        && bytes[i - 6] == b'\\'
+        && bytes[i - 5] == b'u'
+        && bytes[i - 4].is_ascii_hexdigit()
+        && bytes[i - 3].is_ascii_hexdigit()
+        && bytes[i - 2].is_ascii_hexdigit()
+        && bytes[i - 1].is_ascii_hexdigit()
+    {
         return true;
     }
     i >= 3
@@ -311,7 +337,7 @@ impl fmt::Display for StructuredError {
     }
 }
 
-impl std::error::Error for StructuredError {}
+impl core::error::Error for StructuredError {}
 
 /// Conversion trait projecting crate error enums onto [`StructuredError`].
 pub trait ToStructuredError {
@@ -321,6 +347,9 @@ pub trait ToStructuredError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::string::ToString;
+
     use super::*;
 
     #[test]
@@ -533,6 +562,36 @@ mod tests {
         assert_eq!(
             scrub_secret_text("\\nOPENROUTER_API_KEY=leakEnvNL"),
             "\\nOPENROUTER_API_KEY=[REDACTED]"
+        );
+
+        // PR #80 C1: `\uXXXX`, `\b`, and `\f` escapes act as word boundaries too.
+        assert_eq!(
+            scrub_secret_text("\\u000aOPENROUTER_API_KEY=leakUnicodeEsc1"),
+            "\\u000aOPENROUTER_API_KEY=[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\u000asEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"),
+            "\\u000a[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\u001Bsp5fghtJtpUorTwvof1NpDXAzNwf5"),
+            "\\u001B[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\bOPENROUTER_API_KEY=leakBackspaceEsc1"),
+            "\\bOPENROUTER_API_KEY=[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\bsn3nAkU7v8w9xPy1z2A3B4C5D6E7F"),
+            "\\b[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\fsEdSKaCy2JT7JaM7v95H9SxkhP9wS2r"),
+            "\\f[REDACTED]"
+        );
+        assert_eq!(
+            scrub_secret_text("\\fANTHROPIC_API_KEY=leakFormfeedEsc1"),
+            "\\fANTHROPIC_API_KEY=[REDACTED]"
         );
 
         assert_eq!(scrub_secret_text(&scrubbed), scrubbed);

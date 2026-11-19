@@ -97,6 +97,33 @@ impl TableCommodityMap {
                 .map(|s| CommodityCatalog::format_refined(s.refined_code, plain_codes)),
         }
     }
+
+    /// Exports a seat-safe [`league_seat_types::CommodityDisplayMap`] without depending on
+    /// `league-gen` inside UI crates.
+    #[must_use]
+    pub fn to_display_map(&self) -> league_seat_types::CommodityDisplayMap {
+        league_seat_types::CommodityDisplayMap {
+            numeraire_code: self.numeraire_code.clone(),
+            numeraire_label: self.numeraire_label.clone(),
+            seats: self
+                .seats
+                .iter()
+                .map(|s| league_seat_types::SeatCommodityDisplay {
+                    seat: s.seat,
+                    raw_code: s.raw_code.as_str().to_owned(),
+                    raw_label: s.raw_label.clone(),
+                    refined_code: s.refined_code.as_str().to_owned(),
+                    refined_label: s.refined_label.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&TableCommodityMap> for league_seat_types::CommodityDisplayMap {
+    fn from(map: &TableCommodityMap) -> Self {
+        map.to_display_map()
+    }
 }
 
 fn validate_club_bridge_inputs(table: &RingTable, human_seats: &[u8]) -> Result<(), GenError> {

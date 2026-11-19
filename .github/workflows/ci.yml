@@ -69,7 +69,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
-      - name: Standalone seat-crate feature check
+      - name: No-std target gate (seat crates and league-error)
+        run: |
+          rustup target add thumbv7em-none-eabi
+          cargo build -p league-error -p league-seat-types -p league-seat-ui --target thumbv7em-none-eabi --locked
+
+      # B4 note: league-tui is now the binary host crate depending on league-core (owning ClubHost
+      # and building per-seat SeatObservation values passed to league-seat-ui), and league-gen
+      # also carries a league-core dependency. This standalone check ensures neither crate enables
+      # `league-core/engine-internals`; seat crates (league-seat-types, league-seat-ui) cannot
+      # depend on league-core at all (enforced in the next step).
+      - name: Standalone host/gen feature check
         run: |
           cargo build -p league-tui --locked
           if cargo tree -p league-tui -e features --locked | grep -q 'engine-internals'; then
@@ -81,11 +91,23 @@ jobs:
             exit 1
           fi
 
-      - name: No league-core dependency in relay or ledger
+      - name: No league-core dependency in relay, ledger, or seat crates
         run: |
-          cargo tree -p league-relay -p league-ledger -e normal --locked
-          if cargo tree -p league-relay -p league-ledger -e normal --locked | grep -q 'league-core'; then
-            echo "ERROR: league-relay or league-ledger depends on league-core"
+          cargo tree -p league-relay -p league-ledger -p league-seat-types -p league-seat-ui -e normal,build,dev --target all --locked
+          if cargo tree -p league-relay -p league-ledger -p league-seat-types -p league-seat-ui -e normal,build,dev --target all --locked | grep -q 'league-core'; then
+            echo "ERROR: relay, ledger, or a seat crate depends on league-core"
+            exit 1
+          fi
+          if cargo tree -p league-relay -p league-ledger -p league-seat-types -p league-seat-ui -e normal,build,dev --target all --all-features --locked | grep -q 'league-core'; then
+            echo "ERROR: relay, ledger, or a seat crate optionally depends on league-core"
+            exit 1
+          fi
+          if cargo tree -p league-seat-types -p league-seat-ui -e normal,build,dev --target all --all-features --locked | grep -Eq 'league-core|league-gen|league-standalone'; then
+            echo "ERROR: seat crate depends on league-core, league-gen, or league-standalone"
+            exit 1
+          fi
+          if cargo tree -p league-seat-ui -e normal,build,dev --target all --all-features --locked | grep -Eq 'ratatui|crossterm'; then
+            echo "ERROR: league-seat-ui depends on ratatui or crossterm"
             exit 1
           fi
 

@@ -12,8 +12,11 @@ use league_relay::cli::{
 use league_relay::{
     ApiKey, CallLogEntry, CostUnit, EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR,
     EXIT_USER_ERROR, ErrorFormat, FORBIDDEN_LOCAL_KEY_ENVS, LEAGUE_LOG_LEVEL_ENV, LogLevel,
-    OPENROUTER_API_KEY_ENV, REDACTED_MARKER, RelayError, Round, SeatOutcome, SeatReport,
-    StructuredError, ToStructuredError, TransportError, TurnSummary,
+    MODEL_FACING_WORDING, NegotiationInputs, OPENROUTER_API_KEY_ENV, REDACTED_MARKER,
+    RawHttpResponse, RelayError, Round, SeatFile, SeatOutcome, SeatReport, StructuredError,
+    ToStructuredError, Transport, TransportError, TurnConfig, TurnSummary, UntrustedWhisper,
+    extract_scratchpad_update, format_negotiation_block, render_json_escaped_whisper_line,
+    run_turn, sanitize_scratchpad_for_prompt, sanitize_whisper, wording_slot,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -2068,10 +2071,10 @@ fn b2_cli_redacts_xrpl_seed_straddling_4kib_cap_across_offsets_1_to_30() -> Test
 
 #[test]
 fn fix2_relay_redacts_a1_b3_c1_full_superset_corpus_and_b2_json_edge_cases() -> TestResult {
-    // 1. Full 55-entry superset corpus from `league-error` plus all 6 relay sealed-secret cases.
+    // 1. Full 57-entry superset corpus from `league-error` plus all 6 relay sealed-secret cases.
     let corpus_raw = include_str!("../../league-error/tests/scrubber_superset_corpus.json");
     let entries: Vec<serde_json::Value> = serde_json::from_str(corpus_raw)?;
-    assert_eq!(entries.len(), 55);
+    assert_eq!(entries.len(), 57);
 
     for entry in &entries {
         let id = entry["id"].as_str().ok_or("missing id")?;
@@ -2156,5 +2159,215 @@ fn fix2_relay_redacts_a1_b3_c1_full_superset_corpus_and_b2_json_edge_cases() -> 
     assert_eq!(out_cap.matches("api_key").count(), 1);
     assert!(!out_cap.contains("cutCap"));
     assert!(!out_cap.contains("7766"));
+    Ok(())
+}
+
+#[test]
+fn relay_wording_and_seat_prompt_paths_preserve_over_redaction_phrases_unchanged() -> TestResult {
+    let phrases = [
+        "risk-or-reward",
+        "ask-or-tell",
+        "desk-proj-alpha",
+        "SKU SK-PROJ-1234",
+        "class=\"btn-bearer active\"",
+        "the standard bearer of",
+    ];
+    for phrase in phrases {
+        assert_ne!(
+            league_error::scrub_secret_text(phrase),
+            phrase,
+            "expected shared error scrubber to trigger on `{phrase}`"
+        );
+    }
+
+    // 1. All model-facing wording slots remain intact without redaction markers.
+    for entry in MODEL_FACING_WORDING {
+        let rendered = wording_slot(entry.slot);
+        assert!(
+            !rendered.contains("[REDACTED]") && !rendered.contains(REDACTED_MARKER),
+            "wording slot `{}` contained redaction marker: {rendered}",
+            entry.slot
+        );
+    }
+
+    // 2. Wording sanitizers, negotiation block, and scratchpad round-trips never scrub display text.
+    let combined = phrases.join(" | ");
+    let whisper = UntrustedWhisper {
+        from_guild: "Foundry".to_owned(),
+        intent_header: Some(json!({ "summary": combined })),
+        body: combined.clone(),
+    };
+    let sanitized_w = sanitize_whisper(&whisper);
+    let whisper_line = render_json_escaped_whisper_line(&sanitized_w);
+    let neg_block = format_negotiation_block(
+        &NegotiationInputs {
+            batna: combined.clone(),
+            whispers: vec![whisper],
+        },
+        &["Foundry", "Saltworks"],
+    )?;
+    let scratch_prompt = sanitize_scratchpad_for_prompt(&combined);
+    let scratch_reply = format!("{{\"notes\":\"{}\"}}", combined.replace('"', "\\\""));
+    let extracted_scratch = extract_scratchpad_update(&scratch_reply)
+        .ok_or("expected scratchpad update from JSON reply")?;
+
+    for phrase in phrases {
+        assert!(
+            sanitized_w.capped_body.contains(phrase),
+            "{:?}",
+            sanitized_w
+        );
+        assert!(
+            neg_block.contains(phrase) || neg_block.contains(&phrase.replace('"', "\\\"")),
+            "{neg_block}"
+        );
+        assert!(
+            whisper_line.contains(phrase) || whisper_line.contains(&phrase.replace('"', "\\\"")),
+            "{whisper_line}"
+        );
+        assert!(scratch_prompt.contains(phrase), "{scratch_prompt}");
+        assert!(extracted_scratch.contains(phrase), "{extracted_scratch}");
+    }
+
+    // 3. Full `run_turn` pipeline preserves all 6 phrases in outbound wrapper/prompt/negotiation
+    //    AND inbound reply written to `from-seat/`.
+    struct CaptureTransport {
+        bodies: std::sync::Mutex<Vec<String>>,
+        reply_text: String,
+    }
+    impl Transport for CaptureTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: std::time::Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            if let Ok(mut guard) = self.bodies.lock() {
+                guard.push(body.to_owned());
+            }
+            Ok(RawHttpResponse {
+                status: 200,
+                body: serde_json::to_string(&json!({
+                    "id": "mock-display-text",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{
+                        "message": { "role": "assistant", "content": self.reply_text }
+                    }],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 8,
+                        "total_tokens": 18,
+                        "cost": 0.001
+                    }
+                }))
+                .unwrap_or_default(),
+            })
+        }
+    }
+
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("display_text_game");
+    fs::create_dir_all(game_dir.join("to-seat"))?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, format!("WRAPPER {combined}"))?;
+    let seats_path = tmp.path().join("display_seats.json");
+    fs::write(
+        &seats_path,
+        serde_json::to_string(&json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                {
+                    "guild": "Foundry",
+                    "backend": "file",
+                    "model": "manual-foundry"
+                }
+            ]
+        }))?,
+    )?;
+    let seats = SeatFile::load(&seats_path, None)?;
+    fs::write(
+        game_dir.join("to-seat").join("day-01-talk-Saltworks.md"),
+        format!("TURN PROMPT {combined}"),
+    )?;
+    fs::write(
+        game_dir
+            .join("to-seat")
+            .join("day-01-talk-Saltworks.negotiation.json"),
+        serde_json::to_string(&json!({
+            "batna": combined,
+            "whispers": [{
+                "from_guild": "Foundry",
+                "intent_header": { "topic": combined },
+                "body": combined
+            }]
+        }))?,
+    )?;
+
+    let transport = CaptureTransport {
+        bodies: std::sync::Mutex::new(Vec::new()),
+        reply_text: format!("Reply echoing {combined}"),
+    };
+    let summary = run_turn(
+        &TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats,
+            Some(wrapper),
+            false,
+            Some(1.0),
+        ),
+        &transport,
+        None,
+    )?;
+    assert!(
+        summary.all_clean(),
+        "run_turn summary not clean: {summary:?}"
+    );
+
+    let captured = transport
+        .bodies
+        .lock()
+        .map_err(|_| "lock poisoned")?
+        .clone();
+    assert_eq!(captured.len(), 1);
+    let parsed_req: serde_json::Value = serde_json::from_str(&captured[0])?;
+    let sys_text = parsed_req["messages"][0]["content"]
+        .as_str()
+        .ok_or("missing system content")?;
+    let user_text = parsed_req["messages"][1]["content"]
+        .as_str()
+        .ok_or("missing user content")?;
+    let written_reply =
+        fs::read_to_string(game_dir.join("from-seat").join("day-01-talk-Saltworks.md"))?;
+    for phrase in phrases {
+        assert!(sys_text.contains(phrase), "system prompt lost `{phrase}`");
+        assert!(
+            user_text.contains(phrase) || user_text.contains(&phrase.replace('"', "\\\"")),
+            "user prompt lost `{phrase}`: {user_text}"
+        );
+        assert!(
+            written_reply.contains(phrase),
+            "written seat reply lost `{phrase}`: {written_reply}"
+        );
+    }
+    assert!(!sys_text.contains("[REDACTED]") && !sys_text.contains(REDACTED_MARKER));
+    assert!(!user_text.contains("[REDACTED]") && !user_text.contains(REDACTED_MARKER));
+    assert!(!written_reply.contains("[REDACTED]") && !written_reply.contains(REDACTED_MARKER));
+    println!(
+        "DISPLAY_TEXT_PATH relay_wording_and_run_turn phrases={} sys_bytes={} user_bytes={} reply_bytes={} clean=true",
+        phrases.len(),
+        sys_text.len(),
+        user_text.len(),
+        written_reply.len()
+    );
     Ok(())
 }

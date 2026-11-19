@@ -37,7 +37,10 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
     for (s_idx, bot) in bots.iter().enumerate().take(usize::from(n)) {
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass A");
-        let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass A");
+        let mandate = obs
+            .own_mandate()
+            .copied()
+            .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass A"));
         for action in bot.plan_pass_a(&obs, &mandate) {
             if host.apply_market_action(action).is_err() {
                 refused += 1;
@@ -52,7 +55,10 @@ fn drive_club_turn_with_bots(host: &mut ClubHost, bots: &[ClubBot], turn_tag: u8
     for (s_idx, bot) in bots.iter().enumerate().take(usize::from(n)) {
         let seat = Seat(s_idx as u8);
         let obs = must_ok(host.observe_seat(seat), "observe Pass B");
-        let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass B");
+        let mandate = obs
+            .own_mandate()
+            .copied()
+            .unwrap_or_else(|| panic!("seat {s_idx} SeatObservation missing own_mandate Pass B"));
         let (pass_b_actions, bundle) = bot.plan_pass_b_and_bundle(&obs, &mandate);
         for action in pass_b_actions {
             if host.apply_market_action(action).is_err() {
@@ -156,6 +162,7 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
         "last_turn_beacon",
         "last_closing_roll_bps",
         "post_state_digest",
+        "live_state_digests",
         "logged_turns",
     ] {
         assert!(
@@ -175,21 +182,57 @@ fn club_host_save_resume_parity_secret_isolation_and_tamper_rejection() {
         Some(u64::from(CLUB_SEAL_FORMAT_VERSION))
     );
 
-    // Tamper checks: mismatched `.save.json` vs `.seal` turn or layout_seed must fail.
+    // Tamper checks via public `read_save_and_seal`: mismatched turn or layout_seed must fail.
     let mut bad_save = save_json.clone();
     bad_save["turn"] = serde_json::json!(99);
     let bad_save_bytes = must_ok(serde_json::to_vec(&bad_save), "serialize bad_save");
+    let bad_save_path = tmp_dir.join("bad-save.json");
+    must_ok(
+        std::fs::write(&bad_save_path, &bad_save_bytes),
+        "write bad_save",
+    );
     let _ = must_err(
-        ClubHost::from_save_and_seal_bytes(&bad_save_bytes, seal_text.as_bytes()),
+        ClubHost::read_save_and_seal(&bad_save_path, &seal_path),
         "tampered turn in .save.json must be rejected",
     );
 
-    let mut bad_seal = seal_json;
+    let mut bad_seal = seal_json.clone();
     bad_seal["layout_seed"] = serde_json::json!(8);
     let bad_seal_bytes = must_ok(serde_json::to_vec(&bad_seal), "serialize bad_seal");
+    let bad_seal_path = tmp_dir.join("bad-seal.seal");
+    must_ok(
+        std::fs::write(&bad_seal_path, &bad_seal_bytes),
+        "write bad_seal",
+    );
     let _ = must_err(
-        ClubHost::from_save_and_seal_bytes(save_text.as_bytes(), &bad_seal_bytes),
+        ClubHost::read_save_and_seal(&save_path, &bad_seal_path),
         "tampered layout_seed in .seal must be rejected",
+    );
+
+    // Nit C3: pre-fix v1 seals (lacking `live_state_digests`) must be rejected with
+    // `UnsupportedReplayVersion` rather than silently accepted or failing ambiguously.
+    let mut v1_seal = seal_json;
+    v1_seal["format_version"] = serde_json::json!(1);
+    if let Some(obj) = v1_seal.as_object_mut() {
+        obj.remove("live_state_digests");
+    }
+    let v1_seal_bytes = must_ok(serde_json::to_vec(&v1_seal), "serialize v1_seal");
+    let v1_seal_path = tmp_dir.join("v1-seal.seal");
+    must_ok(
+        std::fs::write(&v1_seal_path, &v1_seal_bytes),
+        "write v1_seal",
+    );
+    let v1_err = must_err(
+        ClubHost::read_save_and_seal(&save_path, &v1_seal_path),
+        "v1 .seal without live_state_digests must be rejected",
+    );
+    assert_eq!(CLUB_SEAL_FORMAT_VERSION, 2);
+    assert_eq!(
+        v1_err,
+        league_core::EngineError::UnsupportedReplayVersion {
+            found: 1,
+            newest_known: 2,
+        }
     );
 
     // Resume via `read_save_and_seal` and drive to close (`24..=32` turns), then compare.
@@ -264,7 +307,10 @@ fn club_bot_determinism_and_phase_lock_freeze_compliance() {
     assert_eq!(bot.bot_tie_seed(), 777);
 
     let obs_t1 = must_ok(host.observe_seat(Seat(0)), "observe t1");
-    let mandate = *must_ok(host.own_mandate(Seat(0)), "mandate");
+    let mandate = obs_t1
+        .own_mandate()
+        .copied()
+        .unwrap_or_else(|| panic!("Seat(0) SeatObservation missing own_mandate"));
     let d1 = bot.decide_full_turn(&obs_t1, &mandate);
     let d2 = bot.decide_full_turn(&obs_t1, &mandate);
     assert_eq!(d1, d2, "ClubBot decisions must be strictly deterministic");
@@ -307,4 +353,489 @@ fn club_bot_determinism_and_phase_lock_freeze_compliance() {
 
 fn obs_t1_clone(obs: &league_core::SeatObservation) -> league_core::SeatObservation {
     obs.clone()
+}
+
+#[test]
+fn seat_observation_carries_only_own_mandate_and_never_rival_mandates() {
+    let eval_seed = must_ok(
+        SealedEvalSeed::try_from_bytes([0x5A; 32]),
+        "SealedEvalSeed::try_from_bytes",
+    );
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x81 + i; 32])).collect();
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(903_003), 4, 7, [0x4D; 32], &salts, eval_seed, 99),
+        "ClubHost::from_explicit_setup",
+    );
+    let mandates: Vec<_> = (0..4_u8)
+        .map(|s| *must_ok(host.mandate_for_seat(Seat(s)), "host mandate_for_seat"))
+        .collect();
+    assert!(
+        mandates.windows(2).any(|w| w[0] != w[1]),
+        "setup should yield distinct mandates across seats"
+    );
+
+    let snap_json = must_ok(
+        serde_json::to_string(&must_ok(host.public_save_snapshot(), "snapshot")),
+        "serialize snapshot",
+    );
+    assert!(!snap_json.contains("own_mandate"));
+
+    for s in 0..4_u8 {
+        let obs = must_ok(host.observe_seat(Seat(s)), "observe_seat");
+        assert_eq!(obs.own_mandate(), Some(&mandates[usize::from(s)]));
+
+        let obs_json = must_ok(serde_json::to_string(&obs), "serialize SeatObservation");
+        let own_json = must_ok(
+            serde_json::to_string(&mandates[usize::from(s)]),
+            "serialize own mandate",
+        );
+        assert!(obs_json.contains(&own_json));
+
+        for r in 0..4_u8 {
+            if r != s && mandates[usize::from(r)] != mandates[usize::from(s)] {
+                let rival_json = must_ok(
+                    serde_json::to_string(&mandates[usize::from(r)]),
+                    "serialize rival mandate",
+                );
+                assert!(
+                    !obs_json.contains(&rival_json),
+                    "seat {s} SeatObservation leaked rival seat {r}'s mandate"
+                );
+            }
+        }
+        let salt_hex: String = salts[usize::from(s)]
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert!(!obs_json.contains(&salt_hex));
+
+        let pub_preview_json = must_ok(
+            serde_json::to_string(&obs.to_public_preview_state()),
+            "serialize PublicPreviewState",
+        );
+        assert!(!pub_preview_json.contains("own_mandate"));
+    }
+}
+
+#[test]
+fn club_bot_exercises_stale_cancels_debt_repay_checks_close_variety_council_charter_and_import() {
+    use league_core::{
+        CheckStatus, CredOffer, CreditCheck, CreditTier, MandateKind, MarketAction, OfferSide,
+    };
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x81 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x8F; 32]), "eval_seed");
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(81_801), 4, 7, [0x71; 32], &salts, eval_seed, 5),
+        "host setup",
+    );
+
+    let bot = ClubBot::new(11);
+    let base_obs = must_ok(host.observe_seat(Seat(0)), "observe(0)");
+    let mandate = base_obs
+        .own_mandate()
+        .copied()
+        .unwrap_or_else(|| panic!("Seat(0) missing own_mandate"));
+
+    // Case A: wash-frozen seat cancels stale Buy/Raw Sell and own upkeep Sell, then returns early.
+    let mut frozen_obs = base_obs.clone();
+    let upkeep_g = frozen_obs.spec.seats[0].upkeep_good;
+    frozen_obs.turn = 3;
+    frozen_obs.seats[0].wash_frozen_until_turn = 3;
+    frozen_obs.offers.insert(
+        101,
+        CredOffer {
+            offer_id: 101,
+            maker: 0,
+            side: OfferSide::Buy,
+            good: AssetId::Raw(1),
+            remaining_units: 500,
+            price_per_unit_cred: 1_000,
+            locked_cred: 500,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 1,
+        },
+    );
+    frozen_obs.offers.insert(
+        102,
+        CredOffer {
+            offer_id: 102,
+            maker: 0,
+            side: OfferSide::Sell,
+            good: AssetId::Raw(0),
+            remaining_units: 500,
+            price_per_unit_cred: 1_000,
+            locked_cred: 0,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 1,
+        },
+    );
+    frozen_obs.offers.insert(
+        103,
+        CredOffer {
+            offer_id: 103,
+            maker: 0,
+            side: OfferSide::Sell,
+            good: AssetId::Refined(upkeep_g),
+            remaining_units: 400,
+            price_per_unit_cred: 1_000,
+            locked_cred: 0,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 3,
+        },
+    );
+    let pass_a_frozen = bot.plan_pass_a(&frozen_obs, &mandate);
+    assert_eq!(pass_a_frozen.len(), 3);
+    assert!(
+        pass_a_frozen
+            .iter()
+            .all(|a| matches!(a, MarketAction::CancelOffer { seat: 0, .. }))
+    );
+
+    // Case B: near close, due check, CRED debt, turn-12 council vote + charter bid, variety buffer.
+    let mut rich_obs = base_obs.clone();
+    rich_obs.turn = 12;
+    rich_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 2;
+    rich_obs.seats[0].cred = 50_000;
+    rich_obs.seats[0].cred_debt = 3_000;
+    rich_obs.seats[0].raw[0] = 20_000;
+    rich_obs.seats[0].refined[0] = 20_000;
+    rich_obs.seats[0].refined[1] = 20_000;
+    rich_obs.checks.insert(
+        77,
+        CreditCheck {
+            check_id: 77,
+            drawer: 1,
+            payee: 0,
+            asset: AssetId::Cred,
+            send_max: 500,
+            deliver_min: 100,
+            due_turn: 10,
+            expiration_turn: 15,
+            status: CheckStatus::Open,
+        },
+    );
+    let variety_mandate = league_core::PrivateMandate {
+        kind: MandateKind::MinRefinedVariety {
+            distinct_goods: 2,
+            min_each: 1_500,
+        },
+        bonus_equity: 4_500,
+    };
+    let decision = bot.decide_full_turn(&rich_obs, &variety_mandate);
+    assert!(!decision.pass_a_actions.is_empty());
+    assert!(decision.bundle.check_cashes.contains(&77));
+    assert_eq!(decision.bundle.debt_repayment_cred, 3_000);
+    assert!(decision.bundle.council_vote.is_some());
+    assert_eq!(decision.bundle.charter_bids.len(), 1);
+
+    // Case C: Pass B TownImport triggers under long horizon + CreditTier::D, skipped at horizon 1.
+    let mut import_obs = base_obs;
+    import_obs.seats[0].cred = 50_000;
+    import_obs.seats[0].credit_tier = CreditTier::D;
+    import_obs.seats[0].refined[usize::from(upkeep_g)] = 0;
+    import_obs.baseline_predicates.upkeep.shortfall_units = 1_000;
+    import_obs.baseline_predicates.upkeep.owed_units = 1_000;
+    import_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 10;
+    let (pass_b_import, _) = bot.plan_pass_b_and_bundle(&import_obs, &mandate);
+    assert!(
+        pass_b_import
+            .iter()
+            .any(|a| matches!(a, MarketAction::TownImport { seat: 0, .. }))
+    );
+
+    import_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 1;
+    let (pass_b_skip, _) = bot.plan_pass_b_and_bundle(&import_obs, &mandate);
+    assert!(pass_b_skip.is_empty());
+}
+
+#[test]
+fn replay_layout_seed_errors_and_sealed_accessors_round_trip() {
+    use league_core::{
+        ReplayLayoutSeed, ReplayLayoutSeedError, SEALED_LAYOUT_SEED_MIN, SealedReplaySeed,
+        SeasonReplayLog, TableSpec, layout_seed_digest,
+    };
+
+    let sealed_digest = layout_seed_digest(SEALED_LAYOUT_SEED_MIN);
+    let variants = [
+        (
+            ReplayLayoutSeedError::SealedSeedInClear {
+                seed_digest: sealed_digest.clone(),
+            },
+            "SEALED_SEED_IN_CLEAR",
+        ),
+        (
+            ReplayLayoutSeedError::InvalidSealedPool {
+                pool: "dev".to_owned(),
+            },
+            "INVALID_SEALED_SEED_POOL",
+        ),
+        (
+            ReplayLayoutSeedError::InvalidSealedDigest,
+            "INVALID_SEALED_SEED_DIGEST",
+        ),
+        (
+            ReplayLayoutSeedError::NonSealedSeedInSealed { seed: 42 },
+            "NON_SEALED_SEED_IN_SEALED",
+        ),
+    ];
+    for (err, expected_code) in variants {
+        assert_eq!(err.code(), expected_code);
+        assert!(err.to_string().contains(expected_code));
+    }
+
+    let valid_json = format!(
+        r#"{{"pool":"sealed","digest":"{sealed_digest}","independence_checked_at_write_unverified":true}}"#
+    );
+    let seed: ReplayLayoutSeed = must_ok(serde_json::from_str(&valid_json), "valid sealed json");
+    assert!(seed.is_sealed());
+    assert_eq!(seed.clear_seed(), None);
+    assert_eq!(seed.pool(), Some("sealed"));
+    assert_eq!(seed.sealed_digest(), Some(sealed_digest.as_str()));
+    assert_eq!(seed.independence_checked_at_write_unverified(), Some(true));
+    let inner: &SealedReplaySeed = seed
+        .sealed()
+        .unwrap_or_else(|| panic!("sealed() should be Some"));
+    assert_eq!(inner.pool(), "sealed");
+    assert_eq!(inner.digest(), sealed_digest);
+    assert!(inner.independence_checked_at_write_unverified());
+
+    let bad_pool = format!(r#"{{"pool":"dev","digest":"{sealed_digest}"}}"#);
+    assert!(serde_json::from_str::<ReplayLayoutSeed>(&bad_pool).is_err());
+    let bad_digest = r#"{"pool":"sealed","digest":"not-hex"}"#;
+    assert!(serde_json::from_str::<ReplayLayoutSeed>(bad_digest).is_err());
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x91 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x9A; 32]), "eval_seed");
+    let (spec, deal, _) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            TableId(81_802),
+            4,
+            1,
+            [0x61; 32],
+            &salts,
+            eval_seed,
+        ),
+        "spec setup",
+    );
+    let err_new_sealed = must_err(
+        SeasonReplayLog::new_sealed(spec, 1, deal, vec![], vec![], vec![]),
+        "clear seed < 2^63 must fail new_sealed",
+    );
+    assert!(
+        err_new_sealed
+            .to_string()
+            .contains("NON_SEALED_SEED_IN_SEALED")
+    );
+}
+
+#[test]
+fn table_spec_validation_math_helpers_and_persistence_error_branches() {
+    use league_core::types::*;
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0xA1 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0xAA; 32]), "eval_seed");
+    let (base_spec, _, _) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            TableId(81_901),
+            4,
+            1,
+            [0x72; 32],
+            &salts,
+            eval_seed,
+        ),
+        "base_spec",
+    );
+    assert!(base_spec.validate().is_ok());
+
+    let mut s = base_spec.clone();
+    s.seat_count = 3;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats.pop();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects.clear();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects[0].equity_points = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects[0].inputs = vec![(99, 100)];
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.closing_hazard_bps[0] = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mode = TableMode::Eval;
+    s.shocks.push(ScheduledShockSpec {
+        hint_turn: 0,
+        forecast_turn: 2,
+        realize_turn: 4,
+        target_seat: 0,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 100,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.dealt_mandate_commits.pop();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.dealt_mandate_commits[0] = league_core::CommitmentHash([0; 32]);
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mode = TableMode::Game;
+    s.drand_schedule = None;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.drand_schedule = Some(league_core::DrandSchedule {
+        turn_1_close_unix: 1_700_000_000,
+        turn_period_secs: 30,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.shocks.push(ScheduledShockSpec {
+        hint_turn: 1,
+        forecast_turn: 2,
+        realize_turn: 3,
+        target_seat: 0,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 100,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_alpha_bps = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_deck.truncate(1);
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_deck[0].difficulty_completion_bps = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.town_import_premium_bps = 10_000;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.works_stipend_per_unit_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.cancel_lock_bps = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_round_trip_min_units = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_freeze_bond_cred = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_freeze_bounty_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].seat = 9;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].initial_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].upkeep_good = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].initial_raw_tariff_bps = 9_999;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters.clear();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters[0].owner = 3;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters[0].inputs = vec![(99, 100)];
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec;
+    s.seats[0].converters[0].inputs = vec![(0, 100)];
+    assert!(s.validate().is_err());
+
+    // Arithmetic & seed validation branches in `league_core::types`.
+    assert!(town_import_cost_cred(0, 1_000, 22_500).is_err());
+    assert!(town_import_cost_cred(1_000, 1_000, 10_000).is_err());
+    assert!(town_import_cost_cred(i64::MAX, i64::MAX, 22_500).is_err());
+    assert_eq!(ceil_bps_fee(0, 100), 0);
+    assert_eq!(floor_bps_part(0, 100), 0);
+    assert_eq!(floor_bps_part(1_000, 20_000), 1_000);
+    assert_eq!(half_up_bps(0, 100), 0);
+    assert_eq!(half_up_bps(1_000, 250), 25);
+    assert_eq!(mul_units_parity(0, 1_000), 0);
+    assert_eq!(ceil_units_parity(0, 1_000), 0);
+    assert!(checked_mul_units_parity(-1, 100).is_err());
+    assert_eq!(checked_mul_units_parity(0, 100), Ok(0));
+    assert!(checked_mul_units_parity(i64::MAX, i64::MAX).is_err());
+    assert!(checked_ceil_units_parity(-1, 100).is_err());
+    assert_eq!(checked_ceil_units_parity(0, 100), Ok(0));
+    assert!(checked_ceil_units_parity(i64::MAX, i64::MAX).is_err());
+    assert_eq!(scale_bps_signed(-500, 10_000), -500);
+    assert!(scale_bps_signed(-500, 9_500) <= -475);
+
+    assert!(validate_club_dev_seed(1_000_000).is_err());
+    assert!(validate_club_dev_seed(1_u64 << 63).is_err());
+    assert!(validate_club_dev_seed(10_000).is_err());
+    assert!(validate_club_dev_seed((1_u64 << 63) | 7).is_err());
+
+    // Persistence missing-file error paths + idempotent wipe_seal_file + from_standard_setup.
+    let tmp = std::env::temp_dir().join("ml_card5_missing_save_seal_probe");
+    let _ = std::fs::remove_dir_all(&tmp);
+    must_ok(std::fs::create_dir_all(&tmp), "mkdir tmp");
+    let save_p = tmp.join("missing.save.json");
+    let seal_p = tmp.join("missing.seal");
+    assert!(ClubHost::read_save_and_seal(&save_p, &seal_p).is_err());
+    must_ok(std::fs::write(&save_p, b"{}"), "write save dummy");
+    assert!(ClubHost::read_save_and_seal(&save_p, &seal_p).is_err());
+    must_ok(ClubHost::wipe_seal_file(&seal_p), "wipe absent seal ok");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let std_host = must_ok(
+        ClubHost::from_standard_setup(TableId(81_999), 4, 1, 0),
+        "from_standard_setup",
+    );
+    assert_eq!(std_host.seat_count(), 4);
 }

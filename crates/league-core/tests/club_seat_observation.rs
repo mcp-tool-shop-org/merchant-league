@@ -1397,8 +1397,7 @@ fn assert_step0_to_7_matches_live(preview: &WhatIfPreview, live: &LiveStep0To7Re
         "expected post_sweep_predicates",
     );
 
-    let mut expected_summary =
-        league_core::Step0To7SweepSummary::from_sweep_receipt(live.live_receipt);
+    let mut expected_summary = league_core::Step0To7SweepSummary::from(live.live_receipt);
     if let Some((absent_seat, absent_was_human_at_turn_start)) = live.regent_absent_peer {
         assert!(
             preview.step0_to_7_receipt.non_reveal_seats.is_empty(),
@@ -2800,7 +2799,17 @@ fn what_if_counterparty_assumptions_pessimistic_ties_and_ai_preview_note_ban() {
     );
     let mut bad_pub = obs0.to_public_preview_state();
     bad_pub.seats.pop();
-    assert!(bad_pub.to_engine().is_err());
+    assert!(
+        preview_seat_bundle(
+            &bad_pub,
+            &AiPreviewRequest {
+                seat: 0,
+                market_actions: Vec::new(),
+                bundle: SealedOrderBundle::default(),
+            },
+        )
+        .is_err()
+    );
 }
 
 #[test]

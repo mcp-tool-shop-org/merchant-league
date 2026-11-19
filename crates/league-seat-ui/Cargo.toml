@@ -1,0 +1,18 @@
+[package]
+name = "league-seat-ui"
+description = "Seat-safe no_std view-model builder projecting SeatObservation onto plain data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+league-seat-types = { path = "../league-seat-types" }
+
+[lints]
+workspace = true

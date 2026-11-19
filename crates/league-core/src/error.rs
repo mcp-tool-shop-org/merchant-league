@@ -4,55 +4,6 @@
 pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 
 use crate::replay::ReplayLayoutSeedError;
-use crate::types::EngineError;
-
-impl ToStructuredError for EngineError {
-    fn to_structured_error(&self) -> StructuredError {
-        let hint = match self {
-            Self::InvalidConfig(_) => {
-                "check TableSpec, mode, seed pool, and replay fields against table validation rules"
-            }
-            Self::InvalidPhase(_) => {
-                "submit the operation during the matching TurnPhase (TalkAndMarket, Commit, Reveal, or AwaitingMandateReveal)"
-            }
-            Self::InvalidSeat(_) => "use a valid zero-based seat index in 0..seat_count",
-            Self::InvalidOrder(_) => {
-                "adjust quantities, deadlines, assets, or VRF/replay parameters to satisfy rule bounds"
-            }
-            Self::UnknownObject(_) => {
-                "verify the offer, check, escrow, project, or cartel domain ID exists in current state"
-            }
-            Self::Unauthorized(_) => {
-                "ensure the acting seat owns the object, holds the required charter, and is not wash-frozen"
-            }
-            Self::PerishableEscrowForbidden => {
-                "lock CRED collateral rather than perishable raw commodities inside TokenEscrow"
-            }
-            Self::InsufficientBalance(_) => {
-                "reduce the order size or acquire enough free CRED or commodity units first"
-            }
-            Self::AlreadySubmitted(_) => {
-                "wait for the next turn or phase rather than submitting a duplicate commitment or reveal"
-            }
-            Self::CommitmentMismatch(_) => {
-                "reveal the exact SealedOrderBundle or Mandate and RevealSalt committed earlier"
-            }
-            Self::DomainAccessDenied(_) => {
-                "obtain cartel domain membership or an active ClearinghouseBroker charter before accessing this domain"
-            }
-            Self::CancelLocked => {
-                "cancel resting offers before Phase-1 cancel lock engages; late cancellations are rejected"
-            }
-            Self::SeasonEnded(_) => {
-                "verify the replay log contains a complete closed season from Turn 1 through AwaitingMandateReveal"
-            }
-            Self::UnsupportedReplayVersion { .. } => {
-                "upgrade the reader to support this replay format_version before loading the file"
-            }
-        };
-        StructuredError::new(self.code(), self.to_string(), hint, false)
-    }
-}
 
 impl ToStructuredError for ReplayLayoutSeedError {
     fn to_structured_error(&self) -> StructuredError {
@@ -77,6 +28,7 @@ impl ToStructuredError for ReplayLayoutSeedError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::EngineError;
     use std::any::TypeId;
 
     #[test]

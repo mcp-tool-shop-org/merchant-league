@@ -1,0 +1,33 @@
+disallowed-types = [
+    { path = "core::cell::Cell", reason = "seat crates must not use interior mutability" },
+    { path = "core::cell::RefCell", reason = "seat crates must not use interior mutability" },
+    { path = "core::cell::UnsafeCell", reason = "seat crates must not use interior mutability" },
+    { path = "core::cell::OnceCell", reason = "seat crates must not use interior mutability" },
+    { path = "core::cell::LazyCell", reason = "seat crates must not use interior mutability" },
+    { path = "core::sync::atomic::AtomicBool", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicI8", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicI16", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicI32", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicI64", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicIsize", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicU8", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicU16", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicU32", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicU64", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicUsize", reason = "seat crates must not use shared atomic channels" },
+    { path = "core::sync::atomic::AtomicPtr", reason = "seat crates must not use shared atomic channels" },
+    { path = "alloc::rc::Rc", reason = "seat crates must not use shared reference-counted handles" },
+    { path = "alloc::rc::Weak", reason = "seat crates must not use shared weak handles" },
+    { path = "alloc::sync::Arc", reason = "seat crates must not use shared reference-counted channels" },
+    { path = "alloc::sync::Weak", reason = "seat crates must not use shared weak channels" },
+]
+
+disallowed-methods = []
+
+disallowed-macros = [
+    { path = "core::include", reason = "seat crates must not pull in external files via include!" },
+    { path = "core::include_str", reason = "seat crates must not embed files via include_str!" },
+    { path = "core::include_bytes", reason = "seat crates must not embed files via include_bytes!" },
+    { path = "core::env", reason = "seat crates must not read build/host env! variables" },
+    { path = "core::option_env", reason = "seat crates must not read build/host option_env! variables" },
+]

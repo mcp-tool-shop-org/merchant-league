@@ -12,18 +12,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use league_core::{
-    AssetId, ClubBot, ClubHost, DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE, HARD_TURN_CAP, OrderReveal,
-    RESERVED_TEST_LAYOUT_SEEDS, RevealSalt, SealedEvalSeed, SeasonReplayLog, Seat, SeatIdentity,
-    TableId, TableMode, ToStructuredError as _, TurnPhase, compute_season_metrics,
-    replay_club_season, replay_season_with_state_predicates,
+    AiPreviewRequest, AssetId, ClubBot, ClubHost, CounterpartyAssumptions,
+    DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE, HARD_TURN_CAP, HumanWhatIfRequest, OrderReveal,
+    PreviewTieMode, RESERVED_TEST_LAYOUT_SEEDS, RevealSalt, SealedEvalSeed, SealedOrderBundle,
+    SeasonReplayLog, Seat, SeatIdentity, TableId, TableMode, ToStructuredError as _, TurnPhase,
+    compute_season_metrics, preview_seat_bundle, preview_what_if, replay_club_season,
+    replay_season_with_state_predicates, scrub_secret_text,
 };
 use league_gen::{
     ALLOWED_COMMODITY_GLOSSARY, CommodityCatalog, CurrencyCode, FeasibilityError,
     GENERATOR_VERSION, GenError, GeneratorConfig, LpError, NUMERAIRE_DISPLAY_LABEL,
     NUMERAIRE_PLAIN_LABEL, RecordedLayoutSeedError, SeatCount, SeedPool, TablePurpose,
-    TableSetupOptions, generate_ring_table_for_setup, is_reserved_test_seed,
-    ring_table_to_table_spec, ring_table_to_table_spec_with_explicit_entropy, sealed_seed_sha256,
-    seed_pool,
+    TableSetupOptions, default_projects_for_seats, generate_ring_table_for_setup,
+    is_reserved_test_seed, ring_table_to_table_spec,
+    ring_table_to_table_spec_with_explicit_entropy, sealed_seed_sha256, seed_pool,
 };
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -442,7 +444,10 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                 for s_idx in 0..n {
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass A");
-                    let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass A");
+                    let mandate = obs
+                        .own_mandate()
+                        .copied()
+                        .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass A"));
                     for act in bots[usize::from(s_idx)].plan_pass_a(&obs, &mandate) {
                         must_ok(
                             host.apply_market_action(act),
@@ -458,7 +463,10 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
                 for s_idx in 0..n {
                     let seat = Seat(s_idx);
                     let obs = must_ok(host.observe_seat(seat), "observe Pass B");
-                    let mandate = *must_ok(host.own_mandate(seat), "own_mandate Pass B");
+                    let mandate = obs
+                        .own_mandate()
+                        .copied()
+                        .unwrap_or_else(|| panic!("seat {s_idx} missing own_mandate Pass B"));
                     let (pass_b_actions, bundle) =
                         bots[usize::from(s_idx)].plan_pass_b_and_bundle(&obs, &mandate);
                     for act in pass_b_actions {
@@ -538,4 +546,328 @@ fn headless_club_bot_seasons_24_to_32_turns_across_n4_to_6_zero_refused_zero_sho
     }
 
     assert_eq!(seasons_tested, 6);
+}
+
+#[test]
+fn display_text_paths_never_pass_through_secret_scrubber() {
+    let over_redaction_phrases = [
+        "risk-or-reward",
+        "ask-or-tell",
+        "desk-proj-alpha",
+        "SKU SK-PROJ-1234",
+        "class=\"btn-bearer active\"",
+        "the standard bearer of",
+    ];
+    for phrase in over_redaction_phrases {
+        assert_ne!(
+            scrub_secret_text(phrase),
+            phrase,
+            "expected scrubber error-only rule to trigger on `{phrase}`"
+        );
+    }
+
+    // 1. `league-gen` glossary, catalogue, numeraire labels, and default project titles.
+    for entry in CommodityCatalog::entries() {
+        for text in [
+            entry.glossary_word.to_owned(),
+            entry.raw_name.to_owned(),
+            entry.refined_name.to_owned(),
+            entry.raw_display(false),
+            entry.raw_display(true),
+            entry.refined_display(false),
+            entry.refined_display(true),
+        ] {
+            assert!(!text.contains("[REDACTED]") && !text.contains("<REDACTED_API_KEY>"));
+            assert_eq!(
+                scrub_secret_text(&text),
+                text,
+                "glossary text tripped scrubber: {text}"
+            );
+        }
+    }
+    for numeraire in [
+        NUMERAIRE_DISPLAY_LABEL,
+        NUMERAIRE_PLAIN_LABEL,
+        CommodityCatalog::format_numeraire(false),
+        CommodityCatalog::format_numeraire(true),
+    ] {
+        assert!(!numeraire.contains("[REDACTED]") && !numeraire.contains("<REDACTED_API_KEY>"));
+    }
+    for seat_count in [SeatCount::Four, SeatCount::Five, SeatCount::Six] {
+        let (_seed, t) = dev_table_for_seat_count(seat_count, 1);
+        for proj in default_projects_for_seats(&t.seats) {
+            assert!(!proj.name.contains("[REDACTED]"));
+            assert_eq!(scrub_secret_text(&proj.name), proj.name);
+        }
+    }
+
+    // 2. Player-facing `league-gen` table text + `league-core` observation, receipt, and preview
+    //    summaries preserve every over-redaction phrase verbatim when placed in player-facing text.
+    let (layout_seed, mut table) = dev_table_for_seat_count(SeatCount::Four, 1);
+    let proj_count = table.projects.len();
+    for p in &mut table.projects {
+        p.name.clear();
+    }
+    for (idx, phrase) in over_redaction_phrases.iter().enumerate() {
+        if let Some(proj) = table.projects.get_mut(idx % proj_count) {
+            if !proj.name.is_empty() {
+                proj.name.push_str(" / ");
+            }
+            proj.name.push_str(phrase);
+        }
+    }
+    let table_json = must_ok(serde_json::to_string(&table), "serialize RingTable");
+    for phrase in over_redaction_phrases {
+        let escaped = must_ok(serde_json::to_string(phrase), "json string");
+        let inner = &escaped[1..escaped.len() - 1];
+        assert!(
+            table_json.contains(inner) || table.projects.iter().any(|p| p.name == phrase),
+            "RingTable lost over-redaction phrase `{phrase}`"
+        );
+    }
+    assert!(!table_json.contains("[REDACTED]"));
+    assert!(!table_json.contains("<REDACTED_API_KEY>"));
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x31 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x77; 32]), "eval_seed");
+    let (_spec, cmap, _deal, _eval_seed) = must_ok(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &table,
+            TableId(810_001),
+            &[0],
+            [0x55; 32],
+            &salts,
+            eval_seed,
+        ),
+        "bridge",
+    );
+    let display_map = cmap.to_display_map();
+    for asset in [
+        AssetId::Cred,
+        AssetId::Raw(0),
+        AssetId::Refined(0),
+        AssetId::Raw(3),
+        AssetId::Refined(3),
+    ] {
+        let formatted = must_ok(
+            cmap.format_asset(asset, false)
+                .ok_or_else(|| format!("missing asset {asset:?}")),
+            "TableCommodityMap::format_asset",
+        );
+        let ui_formatted = must_ok(
+            display_map
+                .format_asset(asset, false)
+                .ok_or_else(|| format!("missing display asset {asset:?}")),
+            "CommodityDisplayMap::format_asset",
+        );
+        assert_eq!(formatted, ui_formatted);
+        assert!(!formatted.contains("[REDACTED]"));
+        assert_eq!(scrub_secret_text(&formatted), formatted);
+    }
+    let display_json = must_ok(
+        serde_json::to_string(&display_map),
+        "serialize CommodityDisplayMap",
+    );
+    assert!(display_json.contains(&display_map.numeraire_label));
+    for s in &display_map.seats {
+        assert!(display_json.contains(&s.raw_label));
+        assert!(display_json.contains(&s.refined_label));
+    }
+    assert!(!display_json.contains("[REDACTED]") && !display_json.contains("<REDACTED_API_KEY>"));
+
+    // Note (PR #81 B2 fix): `RingTable -> TableSpec` intentionally drops free-text project names
+    // (`ProjectRecipe` stores only `id`, `inputs`, and `equity_points`), and `league-core` carries
+    // no free player-supplied text other than error refusal messages (`RefusedActionPreview.message`,
+    // tested below as the explicit error-string exemption). End-to-end rendered UI phrase
+    // preservation tests move to `league-seat-ui` in Card 5 Part B.
+    println!(
+        "DISPLAY_TEXT_PATH league-gen RingTable+CommodityCatalog+CommodityDisplayMap bytes={} clean=true",
+        display_json.len()
+    );
+    let _ = layout_seed;
+}
+
+#[test]
+fn refused_action_preview_message_documents_error_string_scrubber_exemption() {
+    // `RefusedActionPreview.message` (`crates/league-core/src/engine.rs`) is the sole
+    // player-visible `league-core` string routed through `scrub_secret_text`. Because it carries
+    // an error message (never player/in-world copy), it is explicitly permitted under the
+    // error-string scrubber exemption (`docs/club-mode-design.md` §2.4).
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x88; 32]), "eval_seed");
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(810_002), 4, 1, [0x66; 32], &salts, eval_seed, 42),
+        "ClubHost::from_explicit_setup",
+    );
+    let obs = must_ok(host.observe_seat(Seat(0)), "observe Seat(0)");
+    let pub_prev = obs.to_public_preview_state();
+
+    // Case 1: Refusal due to active cancel lock (`CANCEL_LOCKED`).
+    let locked_req = HumanWhatIfRequest {
+        seat: 0,
+        market_actions: vec![league_core::MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 999_999,
+        }],
+        cancel_lock_at: Some(0),
+        bundle: SealedOrderBundle::default(),
+        tie_mode: PreviewTieMode::NeutralSeed,
+        assumptions: CounterpartyAssumptions::default(),
+    };
+    let locked_prev = must_ok(preview_what_if(&pub_prev, &locked_req), "locked preview");
+    assert_eq!(locked_prev.refused_market_actions.len(), 1);
+    let refused_locked = &locked_prev.refused_market_actions[0];
+    assert_eq!(refused_locked.action_index, 0);
+    assert_eq!(refused_locked.error_code, "CANCEL_LOCKED");
+    assert!(!refused_locked.message.is_empty());
+    assert_eq!(
+        scrub_secret_text(&refused_locked.message),
+        refused_locked.message
+    );
+
+    // Case 2: Refusal due to unknown offer via AI solo bundle preview (`UNKNOWN_OBJECT`).
+    let ai_req = AiPreviewRequest {
+        seat: 0,
+        market_actions: vec![league_core::MarketAction::CancelOffer {
+            seat: 0,
+            offer_id: 999_999,
+        }],
+        bundle: SealedOrderBundle::default(),
+    };
+    let ai_prev = must_ok(
+        preview_seat_bundle(&pub_prev, &ai_req),
+        "ai refused preview",
+    );
+    assert_eq!(ai_prev.refused_market_actions.len(), 1);
+    let refused_ai = &ai_prev.refused_market_actions[0];
+    assert_eq!(refused_ai.error_code, "UNKNOWN_OBJECT");
+    assert!(!refused_ai.message.is_empty());
+    assert_eq!(scrub_secret_text(&refused_ai.message), refused_ai.message);
+}
+
+#[test]
+fn club_bridge_validation_errors_and_display_map_conversions() {
+    use sha2::{Digest, Sha256};
+
+    let (_seed, valid_table) = dev_table_for_seat_count(SeatCount::Four, 1);
+
+    let mut reserved_probe_tbl = valid_table.clone();
+    reserved_probe_tbl.seed = RESERVED_TEST_LAYOUT_SEEDS[0];
+    let err_reserved_probe = must_err(
+        ring_table_to_table_spec(&reserved_probe_tbl, TableId(81_700), &[0]),
+        "non-dev reserved seed must be rejected",
+    );
+    assert!(
+        err_reserved_probe
+            .to_string()
+            .contains("SEED_POOL_MISMATCH"),
+        "unexpected non-dev reserved err: {err_reserved_probe}"
+    );
+
+    if let Some(dev_reserved) = RESERVED_TEST_LAYOUT_SEEDS
+        .iter()
+        .copied()
+        .find(|&s| seed_pool(s) == SeedPool::Dev)
+    {
+        let mut reserved_tbl = valid_table.clone();
+        reserved_tbl.seed = dev_reserved;
+        let err_reserved = must_err(
+            ring_table_to_table_spec(&reserved_tbl, TableId(81_701), &[0]),
+            "dev reserved seed must be rejected",
+        );
+        assert!(
+            err_reserved.to_string().contains("RESERVED_SEED_FORBIDDEN"),
+            "unexpected reserved err: {err_reserved}"
+        );
+    }
+
+    let mut sealed_tbl = valid_table.clone();
+    sealed_tbl.seed = 1_u64 << 63;
+    let _ = must_err(
+        ring_table_to_table_spec(&sealed_tbl, TableId(81_702), &[0]),
+        "sealed seed must be rejected",
+    );
+
+    let mut ver_tbl = valid_table.clone();
+    ver_tbl.generator_version = "wrong-gen-v0".to_owned();
+    let err_ver = must_err(
+        ring_table_to_table_spec(&ver_tbl, TableId(81_703), &[0]),
+        "wrong generator_version must be rejected",
+    );
+    assert!(err_ver.to_string().contains("generator_version"));
+
+    let mut num_tbl = valid_table.clone();
+    num_tbl.numeraire_code = "USD".to_owned();
+    let err_num = must_err(
+        ring_table_to_table_spec(&num_tbl, TableId(81_704), &[0]),
+        "wrong numeraire_code must be rejected",
+    );
+    assert!(err_num.to_string().contains("numeraire_code"));
+
+    let err_oob_seat = must_err(
+        ring_table_to_table_spec(&valid_table, TableId(81_705), &[99]),
+        "out-of-range human seat must be rejected",
+    );
+    assert!(err_oob_seat.to_string().contains("out of range"));
+
+    let err_dup_seat = must_err(
+        ring_table_to_table_spec(&valid_table, TableId(81_706), &[0, 0]),
+        "duplicate human seat must be rejected",
+    );
+    assert!(err_dup_seat.to_string().contains("duplicate"));
+
+    // Explicit entropy bridge rejects padded and hashed deal_seed/eval_seed couplings.
+    let mut padded = [0u8; 32];
+    padded[..8].copy_from_slice(&valid_table.seed.to_le_bytes());
+    let hashed: [u8; 32] = Sha256::digest(valid_table.seed.to_le_bytes()).into();
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x21 + i; 32])).collect();
+    let eval_good = must_ok(SealedEvalSeed::try_from_bytes([0x7A; 32]), "eval_good");
+    let err_deal = must_err(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &valid_table,
+            TableId(81_707),
+            &[0],
+            padded,
+            &salts,
+            eval_good,
+        ),
+        "coupled deal_seed must fail",
+    );
+    assert!(err_deal.to_string().contains("deal_seed"));
+
+    let eval_coupled = must_ok(SealedEvalSeed::try_from_bytes(hashed), "eval_coupled");
+    let err_eval = must_err(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &valid_table,
+            TableId(81_708),
+            &[0],
+            [0x3B; 32],
+            &salts,
+            eval_coupled,
+        ),
+        "coupled eval_seed must fail",
+    );
+    assert!(err_eval.to_string().contains("eval_seed"));
+
+    // Exercise TableCommodityMap::format_asset and CommodityDisplayMap::from conversion.
+    let cmap = league_gen::TableCommodityMap::from_ring_table(&valid_table);
+    assert_eq!(
+        cmap.format_asset(AssetId::Cred, false).as_deref(),
+        Some(NUMERAIRE_DISPLAY_LABEL)
+    );
+    assert_eq!(
+        cmap.format_asset(AssetId::Cred, true).as_deref(),
+        Some(NUMERAIRE_PLAIN_LABEL)
+    );
+    let raw0 = cmap.format_asset(AssetId::Raw(0), false);
+    let raw0_plain = cmap.format_asset(AssetId::Raw(0), true);
+    let ref0 = cmap.format_asset(AssetId::Refined(0), false);
+    let ref0_plain = cmap.format_asset(AssetId::Refined(0), true);
+    assert!(raw0.is_some() && raw0_plain.is_some());
+    assert!(ref0.is_some() && ref0_plain.is_some());
+    assert_eq!(cmap.format_asset(AssetId::Raw(99), false), None);
+    assert_eq!(cmap.format_asset(AssetId::Refined(99), true), None);
+
+    let dmap_from = league_seat_types::CommodityDisplayMap::from(&cmap);
+    assert_eq!(dmap_from, cmap.to_display_map());
 }
