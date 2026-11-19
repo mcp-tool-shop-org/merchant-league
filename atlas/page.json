@@ -94,31 +94,23 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 15,
+      "changed": 4,
       "moved": 0,
-      "parts": 8,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-seat-types/src/view.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-seat-types/src/view.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "15 files changed content, across 8 parts.",
+        "sentence": "Nothing structural changed since 2026-11-19; 4 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "01df1621705d40f9638de23ea3f68504cf248898",
-      "generatedAt": "2026-11-19T08:47:15.082Z"
+      "commit": "ad88f572b8cd5419729dd30d65e653d7ef2b06fe",
+      "generatedAt": "2026-11-19T10:52:44.945Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -202,7 +194,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "ad88f572b8cd5419729dd30d65e653d7ef2b06fe",
+  "commit": "09ec4f9a97d82b6fda999d3bce8f48a437e1ea62",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -619,9 +611,9 @@
       "to": "league-seat-ui"
     }
   ],
-  "engine": "1.26.0",
+  "engine": "1.23.0",
   "generated": [],
-  "generatedAt": "2026-11-19T10:52:44.945Z",
+  "generatedAt": "2026-11-19T18:46:06.448Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",
@@ -678,7 +670,6 @@
     "league-tui": 2,
     "scripts": 1
   },
-  "testedCodeParts": 11,
   "testedInside": [
     "league-season",
     "league-seat-ui",
