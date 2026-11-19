@@ -1,6 +1,6 @@
 # Vendored: xrpl-rust 1.3.0, patched
 
-This folder is **xrpl-rust 1.3.0 as published on crates.io**, with four changes on top. The workspace uses it through `[patch.crates-io]` in the root `Cargo.toml`.
+This folder is **xrpl-rust 1.3.0 as published on crates.io**, with five changes on top. The workspace uses it through `[patch.crates-io]` in the root `Cargo.toml`.
 
 ## Where it comes from
 
@@ -45,6 +45,11 @@ xrpl-rust 1.3.0 depends directly on crypto-bigint 0.5, which has an advisory wit
    - `[dependencies.chrono]` and `"chrono/std"` are removed from `Cargo.toml` and `Cargo.toml.orig`.
    - `serde_with` is set to `default-features = false` and `features = ["macros"]` in both manifests: `xrpl-rust` uses only `serde_with::skip_serializing_none`, while `serde_with`'s default `std` and `alloc` features carry weak `chrono_0_4?/...` references that otherwise keep `chrono` in `Cargo.lock`.
    - Upstream's `README.md` (lines 756–772 of the vendored copy) still shows the removed functions and is left untouched.
+5. **Drop `heapless` 0.8.0 (nine `unsound` advisories, `RUSTSEC-2026-0574` to `RUSTSEC-2026-0582`, all fixed in `heapless` 0.9.4):**
+   - `heapless` 0.8.0 reached `Cargo.lock` two ways, both through this crate: `embassy-sync` 0.6.2 (a required dependency), and `embedded-websocket-embedded-io` 0.1.0, an optional dependency meant for the `websocket` feature, which the league never enables. It was locked anyway because the `std` feature, which the league does enable, listed `"embedded-websocket-embedded-io/std"`, and a `dep/feature` entry turns the optional dependency on. `cargo audit` reads `Cargo.lock`, so leaving `websocket` off was not enough. Measured on this change: with the dependency kept and that `std` line removed, it leaves `Cargo.lock`; with the weak form `"embedded-websocket-embedded-io?/std"` it stays in `Cargo.lock` (Cargo resolves the lockfile without regard to the `?`), so the weak form was not a fix.
+   - `embassy-sync` goes from `0.6.0` to `0.8.0` in `Cargo.toml` and `Cargo.toml.orig`. 0.8.0 requires `heapless` `^0.9`; 0.6.2 and 0.7.2 require `^0.8`, so a `[patch]` could not move them.
+   - The `"embedded-websocket-embedded-io/std"` line and the `embedded-websocket-embedded-io` dependency itself are removed from both manifests (removing the line alone would have been enough to clear the audit; the dependency goes too, so that nothing can bring `heapless` 0.8.0 back), and `"websocket"` is removed from the `default` feature list in both. The `websocket` feature name stays defined, without that dependency, so the `cfg(feature = "websocket")` lines in `src/` are still known to the compiler. **The vendored crate's `websocket` feature no longer builds.** Nothing in the league uses it.
+   - `src/` is untouched. Outside the `websocket` module, this crate uses `embassy-sync` only for `Mutex` and the raw mutex types (`src/asynch/clients/` and `src/clients/`); `Channel` is used only in `src/asynch/clients/websocket/`.
 
 Upstream main (`b345290`, 2026-11-14) has neither the TokenEscrow nor the DomainID change. Offering them upstream is approved, after a Carbon review, and the Director is told before the PR opens.
 

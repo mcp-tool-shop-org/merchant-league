@@ -66,7 +66,6 @@ default = [
     "utils",
     "helpers",
     "json-rpc",
-    "websocket",
     "cli",
 ]
 embassy-rt = ["dep:embassy-time"]
@@ -95,7 +94,6 @@ std = [
     "serde/std",
     "indexmap/std",
     "secp256k1/std",
-    "embedded-websocket-embedded-io/std",
     "reqwest",
     "tokio",
     "tokio-tungstenite",
@@ -108,7 +106,6 @@ websocket = [
     "models",
     "futures",
     "embedded-io-async",
-    "embedded-websocket-embedded-io",
 ]
 
 [lib]
@@ -169,7 +166,7 @@ default-features = false
 version = "0.1.1"
 
 [dependencies.embassy-sync]
-version = "0.6.0"
+version = "0.8.0"
 
 [dependencies.embassy-time]
 version = "0.3.2"
@@ -182,12 +179,6 @@ optional = true
 [dependencies.embedded-nal-async]
 version = "0.8.0"
 optional = true
-
-[dependencies.embedded-websocket-embedded-io]
-version = "0.1.0"
-features = ["embedded-io-async"]
-optional = true
-default-features = false
 
 [dependencies.fnv]
 version = "1.0.7"

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Removed `heapless` 0.8.0 from `Cargo.lock` (nine `unsound` advisories published against it, `RUSTSEC-2026-0574` to `RUSTSEC-2026-0582`, fixed in 0.9.4), which had turned the required `audit` check red on `main`:
+  - It came in only through the vendored `xrpl-rust`: `embassy-sync` 0.6.2, and the optional `embedded-websocket-embedded-io` 0.1.0, which the `std` feature the league enables turned on through its `"embedded-websocket-embedded-io/std"` entry, although the league never enables `websocket`.
+  - `vendor/xrpl-rust/Cargo.toml` and `Cargo.toml.orig`: `embassy-sync` 0.6.0 → 0.8.0 (which requires `heapless` `^0.9`), and the `embedded-websocket-embedded-io` dependency removed. The vendored crate's `websocket` feature no longer builds; nothing here uses it. `vendor/xrpl-rust/VENDORED.md` records it as change 5. `src/` is untouched.
+  - No exception was added: `cargo audit --deny warnings` is clean with no ignores and no `audit.toml`.
+
 - Wave 2 Card 5 Part B1 (`league-seat-types`, `league-seat-ui`, `league-tui`, `league-core`, `docs`, `site`, `atlas`): playable Club Mode turn screens, plain seat intents, per-seat UI state, layout data, two-pass sequencing, and untimed Privacy Curtain (`2026-11-19`):
   - **Seat-to-host intent & layout view-model (`crates/league-seat-types/src/{intent,view,observation}.rs`, `crates/league-core/tests/raw_api_backdoor_guard.rs`):**
     - Added plain owned `SeatIntent`, `SeatIntentKind`, and `BundleDraftAction` (carrying `MarketAction`, all 10 `SealedOrderBundle` staging/clearing mutations, `HumanWhatIfRequest`, lock-and-hand-off, Chronicle modal open/close, and quit; `league-seat-ui` returns intents without mutating engine state, and `TuiHostSession::apply_seat_intent` validates actor seats and rules before applying).

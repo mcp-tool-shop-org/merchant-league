@@ -78,7 +78,7 @@ hashbrown = { version = "0.15.0", features = ["serde"] }
 fnv = { version = "1.0.7", default-features = false }
 derive-new = { version = "0.7.0", default-features = false }
 thiserror-no-std = "2.0.2"
-embassy-sync = "0.6.0"
+embassy-sync = "0.8.0"
 
 # networking
 url = { version = "2.2.2", default-features = false }
@@ -86,9 +86,6 @@ embedded-io-async = { version = "0.6.1", optional = true }
 futures = { version = "0.3.30", optional = true }
 tokio = { version = "1.0", optional = true, features = ["rt-multi-thread"] }
 embassy-time = { version = "0.3.2", optional = true }
-embedded-websocket-embedded-io = { version = "0.1.0", optional = true, default-features = false, features = [
-    "embedded-io-async",
-] }
 reqwless = { version = "0.13.0", optional = true }
 reqwest = { version = "0.12.7", optional = true, features = ["json"] }
 tokio-tungstenite = { version = "0.24.0", optional = true, features = [
@@ -132,7 +129,6 @@ default = [
     "utils",
     "helpers",
     "json-rpc",
-    "websocket",
     "cli",
 ]
 models = ["core"]
@@ -143,7 +139,6 @@ websocket = [
     "models",
     "futures",
     "embedded-io-async",
-    "embedded-websocket-embedded-io",
 ]
 core = ["utils"]
 utils = []
@@ -174,7 +169,6 @@ std = [
     "serde/std",
     "indexmap/std",
     "secp256k1/std",
-    "embedded-websocket-embedded-io/std",
     "reqwest",
     "tokio",
     "tokio-tungstenite",
