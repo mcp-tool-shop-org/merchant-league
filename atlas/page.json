@@ -93,54 +93,39 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
-      "changed": 7,
+      "added": 0,
+      "changed": 10,
       "moved": 0,
-      "parts": 6,
+      "parts": 5,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-19; 1 file added and 7 changed content.",
+        "sentence": "Nothing structural changed since 2026-11-19; 10 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "cd7f279a15a313efe6b0a86362f863e4f4483e09",
-      "generatedAt": "2026-11-19T02:36:19.010Z"
+      "commit": "3be43b904a587c7cdd1857e95f911238f5fef1c9",
+      "generatedAt": "2026-11-19T07:26:56.238Z"
     },
     "unchanged": true
   },
   "changesTogether": [
     {
-      "a": "crates/league-core/src/club/host.rs",
-      "b": "crates/league-gen/tests/club_bridge_and_headless_bot.rs",
-      "either": 6,
+      "a": "crates/league-relay/src/secret.rs",
+      "b": "crates/league-relay/src/transport.rs",
+      "either": 5,
       "partLabels": [
-        "league-core",
-        "league-gen"
+        "league-relay",
+        "league-relay"
       ],
       "parts": [
-        "league-core",
-        "league-gen"
+        "league-relay",
+        "league-relay"
       ],
-      "relation": "b-imports-a",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-core/tests/club_host_and_bot.rs",
-      "b": "crates/league-gen/tests/club_bridge_and_headless_bot.rs",
-      "either": 6,
-      "partLabels": [
-        "league-core",
-        "league-gen"
-      ],
-      "parts": [
-        "league-core",
-        "league-gen"
-      ],
-      "relation": "b-imports-a",
+      "relation": "inside",
       "shared": 5
     },
     {
@@ -159,21 +144,6 @@
       "shared": 5
     },
     {
-      "a": "crates/league-relay/src/secret.rs",
-      "b": "crates/league-relay/src/transport.rs",
-      "either": 6,
-      "partLabels": [
-        "league-relay",
-        "league-relay"
-      ],
-      "parts": [
-        "league-relay",
-        "league-relay"
-      ],
-      "relation": "inside",
-      "shared": 5
-    },
-    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
       "either": 22,
@@ -187,16 +157,46 @@
       ],
       "relation": "inside",
       "shared": 18
+    },
+    {
+      "a": "crates/league-core/src/lib.rs",
+      "b": "crates/league-core/src/replay.rs",
+      "either": 11,
+      "partLabels": [
+        "league-core",
+        "league-core"
+      ],
+      "parts": [
+        "league-core",
+        "league-core"
+      ],
+      "relation": "inside",
+      "shared": 9
+    },
+    {
+      "a": "crates/league-core/src/replay.rs",
+      "b": "crates/league-core/tests/replay_invariants.rs",
+      "either": 11,
+      "partLabels": [
+        "league-core",
+        "league-core"
+      ],
+      "parts": [
+        "league-core",
+        "league-core"
+      ],
+      "relation": "inside",
+      "shared": 9
     }
   ],
   "changesTogetherNote": [
     "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
-    "Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do."
+    "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "ac16d9948abe1b027714251e5e4596719550af3f",
+  "commit": "01df1621705d40f9638de23ea3f68504cf248898",
   "defaultBranch": "main",
-  "derived": "14 parts, mostly Rust (369 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -245,12 +245,12 @@
         {
           "boundary": "league-seat-types",
           "depth": 0,
-          "files": 11
+          "files": 12
         },
         {
           "boundary": "league-seat-ui",
           "depth": 0,
-          "files": 1
+          "files": 4
         },
         {
           "boundary": "league-standalone",
@@ -299,7 +299,7 @@
         "crates/league-relay/tests/",
         "crates/league-season/",
         "crates/league-seat-types/src/lib.rs",
-        "crates/league-seat-ui/",
+        "crates/league-seat-ui/src/lib.rs",
         "crates/league-standalone/",
         "crates/league-tui/",
         "site/astro.config.mjs",
@@ -358,28 +358,28 @@
           "files": 2
         },
         {
-          "boundary": "league-seat-ui",
-          "depth": 1,
-          "files": 1
-        },
-        {
           "boundary": "league-core",
-          "depth": 2,
+          "depth": 1,
           "files": 13
         },
         {
           "boundary": "league-gen",
-          "depth": 2,
+          "depth": 1,
           "files": 10
         },
         {
           "boundary": "league-seat-types",
-          "depth": 2,
-          "files": 11
+          "depth": 1,
+          "files": 12
+        },
+        {
+          "boundary": "league-seat-ui",
+          "depth": 1,
+          "files": 4
         },
         {
           "boundary": "league-error",
-          "depth": 3,
+          "depth": 2,
           "files": 1
         }
       ],
@@ -612,14 +612,14 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-19T05:05:20.196Z",
+  "generatedAt": "2026-11-19T08:47:15.082Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "13 writes and 17 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
-    "377 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 374 more.",
+    "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/ci.yml",
@@ -646,7 +646,9 @@
   "startDoor": "crates/league-tui/Cargo.toml#league-tui",
   "startHere": [
     "crates/league-tui/src/main.rs",
-    "crates/league-seat-ui/src/lib.rs",
+    "crates/league-core/src/lib.rs",
+    "crates/league-core/src/bot.rs",
+    "crates/league-core/src/commit.rs",
     "crates/league-seat-types/src/lib.rs",
     "crates/league-error/src/lib.rs"
   ],

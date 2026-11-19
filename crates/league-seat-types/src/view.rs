@@ -105,7 +105,7 @@ impl ViewStyle {
         self
     }
 
-    /// Enables or sets the bold modifier flag.
+    /// Enables the bold modifier flag.
     #[must_use]
     pub const fn bold(mut self) -> Self {
         self.bold = true;
@@ -134,7 +134,7 @@ impl ViewStyle {
     }
 }
 
-/// Horizontal alignment hint for a [`ViewPanel`].
+/// Horizontal alignment hint for a [`ViewPanel`] or table column/cell.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
 )]
@@ -148,7 +148,7 @@ pub enum ViewAlign {
     Right,
 }
 
-/// Styled owned text fragment within a [`ViewRow`].
+/// Styled owned text fragment within a [`ViewRow`], [`ViewTableCell`], or [`ViewStatusLine`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewSpan {
     /// UTF-8 label or text fragment.
@@ -207,7 +207,7 @@ impl ViewRow {
     }
 }
 
-/// Owned label string with optional style (used for panel titles and badges).
+/// Owned label string with optional style (used for panel titles, tabs, and badges).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewLabel {
     /// Displayed label text.
@@ -233,6 +233,481 @@ impl ViewLabel {
     }
 }
 
+/// Named screen zone rendered by the host layout engine without guessing splits.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum ViewZoneId {
+    /// Top turn/phase/shock/seat header bar.
+    HeaderBar,
+    /// Left public table & ledger mirror pane.
+    PublicLedger,
+    /// Center action & order composer tabs.
+    CenterTabs,
+    /// Right seat diagnostics & private vault drawer.
+    PrivateDrawer,
+    /// Bottom status and key-hint line.
+    StatusLine,
+    /// Single full-viewport panel (used by title screen, Curtain, and too-small warning).
+    #[default]
+    SingleFull,
+}
+
+/// Layout split axis for a [`ViewZoneGroup`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum ViewAxis {
+    /// Top-to-bottom stack.
+    #[default]
+    Vertical,
+    /// Left-to-right split.
+    Horizontal,
+}
+
+/// Constraint hint for a layout zone, band, or table column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ViewSizeHint {
+    /// Fixed number of rows or columns.
+    Fixed(u16),
+    /// Minimum rows or columns, expanding to take remaining space.
+    Min(u16),
+    /// Percentage (`0..=100`) of the enclosing axis.
+    Percentage(u16),
+    /// Exact rational share `num / den`.
+    Ratio {
+        /// Numerator.
+        num: u32,
+        /// Denominator (`>= 1`).
+        den: u32,
+    },
+}
+
+/// One named zone together with its size hint inside a [`ViewZoneGroup`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ViewZoneSpec {
+    /// Target zone identifier.
+    pub zone: ViewZoneId,
+    /// Size hint along the parent group's axis.
+    pub hint: ViewSizeHint,
+}
+
+/// One horizontal or vertical band of named zones in a [`ScreenLayout`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ViewZoneGroup {
+    /// Split axis across [`Self::zones`].
+    pub axis: ViewAxis,
+    /// Height hint (or width hint) of this band in the top-level vertical layout.
+    pub hint: ViewSizeHint,
+    /// Ordered child zones laid out along `axis`.
+    pub zones: Vec<ViewZoneSpec>,
+}
+
+/// Responsive layout mode chosen from [`ViewportSize`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum ViewLayoutMode {
+    /// Single full-area view (title screen or Curtain).
+    #[default]
+    SinglePanel,
+    /// Four-zone desktop layout (`>= 100x30`).
+    FourZoneWide,
+    /// Stacked four-zone fallback layout (`>= 80x24`, smaller than `100x30`).
+    StackedFallback,
+    /// Terminal below `80x24` showing a single unclipped "terminal too small" view.
+    TooSmall,
+}
+
+/// Complete host-agnostic layout specification calculated from [`ViewportSize`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ScreenLayout {
+    /// Viewport dimensions used to derive this layout.
+    pub viewport: ViewportSize,
+    /// Responsive layout mode selected for `viewport`.
+    pub mode: ViewLayoutMode,
+    /// Top-level vertical bands of named zones.
+    pub bands: Vec<ViewZoneGroup>,
+}
+
+impl ScreenLayout {
+    /// Builds a single full-viewport layout for title, Curtain, or fallback screens.
+    #[must_use]
+    pub fn single_panel(viewport: ViewportSize) -> Self {
+        Self {
+            viewport,
+            mode: ViewLayoutMode::SinglePanel,
+            bands: vec![ViewZoneGroup {
+                axis: ViewAxis::Vertical,
+                hint: ViewSizeHint::Min(1),
+                zones: vec![ViewZoneSpec {
+                    zone: ViewZoneId::SingleFull,
+                    hint: ViewSizeHint::Min(1),
+                }],
+            }],
+        }
+    }
+
+    /// Builds a single full-viewport layout with a two-row bottom [`ViewZoneId::StatusLine`]
+    /// for screens such as the Privacy Curtain and neutral standby view.
+    #[must_use]
+    pub fn single_panel_with_status(viewport: ViewportSize) -> Self {
+        Self {
+            viewport,
+            mode: ViewLayoutMode::SinglePanel,
+            bands: vec![
+                ViewZoneGroup {
+                    axis: ViewAxis::Vertical,
+                    hint: ViewSizeHint::Min(1),
+                    zones: vec![ViewZoneSpec {
+                        zone: ViewZoneId::SingleFull,
+                        hint: ViewSizeHint::Min(1),
+                    }],
+                },
+                ViewZoneGroup {
+                    axis: ViewAxis::Vertical,
+                    hint: ViewSizeHint::Fixed(2),
+                    zones: vec![ViewZoneSpec {
+                        zone: ViewZoneId::StatusLine,
+                        hint: ViewSizeHint::Fixed(2),
+                    }],
+                },
+            ],
+        }
+    }
+
+    /// Computes the responsive Club Mode turn-screen layout from `viewport`:
+    /// - `>= 100x30`: four-zone desktop layout (`HeaderBar`, `PublicLedger` / `CenterTabs` / `PrivateDrawer`, `StatusLine`);
+    /// - `>= 80x24`: stacked four-zone layout where every zone row is drawn in full height or reachable via that zone's scroll (lines wider than the zone cut at the zone's width);
+    /// - `< 80x24`: single `TooSmall` warning layout.
+    #[must_use]
+    pub fn layout_for_viewport(viewport: ViewportSize) -> Self {
+        if viewport.width >= 100 && viewport.height >= 30 {
+            Self {
+                viewport,
+                mode: ViewLayoutMode::FourZoneWide,
+                bands: vec![
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(5),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::HeaderBar,
+                            hint: ViewSizeHint::Fixed(5),
+                        }],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Horizontal,
+                        hint: ViewSizeHint::Min(20),
+                        zones: vec![
+                            ViewZoneSpec {
+                                zone: ViewZoneId::PublicLedger,
+                                hint: ViewSizeHint::Percentage(30),
+                            },
+                            ViewZoneSpec {
+                                zone: ViewZoneId::CenterTabs,
+                                hint: ViewSizeHint::Percentage(44),
+                            },
+                            ViewZoneSpec {
+                                zone: ViewZoneId::PrivateDrawer,
+                                hint: ViewSizeHint::Percentage(26),
+                            },
+                        ],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(2),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::StatusLine,
+                            hint: ViewSizeHint::Fixed(2),
+                        }],
+                    },
+                ],
+            }
+        } else if viewport.width >= 80 && viewport.height >= 24 {
+            Self {
+                viewport,
+                mode: ViewLayoutMode::StackedFallback,
+                bands: vec![
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(5),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::HeaderBar,
+                            hint: ViewSizeHint::Fixed(5),
+                        }],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(5),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::PublicLedger,
+                            hint: ViewSizeHint::Fixed(5),
+                        }],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Min(7),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::CenterTabs,
+                            hint: ViewSizeHint::Min(7),
+                        }],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(5),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::PrivateDrawer,
+                            hint: ViewSizeHint::Fixed(5),
+                        }],
+                    },
+                    ViewZoneGroup {
+                        axis: ViewAxis::Vertical,
+                        hint: ViewSizeHint::Fixed(2),
+                        zones: vec![ViewZoneSpec {
+                            zone: ViewZoneId::StatusLine,
+                            hint: ViewSizeHint::Fixed(2),
+                        }],
+                    },
+                ],
+            }
+        } else {
+            Self {
+                viewport,
+                mode: ViewLayoutMode::TooSmall,
+                bands: vec![ViewZoneGroup {
+                    axis: ViewAxis::Vertical,
+                    hint: ViewSizeHint::Min(1),
+                    zones: vec![ViewZoneSpec {
+                        zone: ViewZoneId::SingleFull,
+                        hint: ViewSizeHint::Min(1),
+                    }],
+                }],
+            }
+        }
+    }
+}
+
+/// Scroll offset and item count carried for each scrollable [`ViewPanel`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct ViewScroll {
+    /// Zero-based first visible item/row offset.
+    pub offset: usize,
+    /// Total number of scrollable items/rows in the panel.
+    pub total: usize,
+}
+
+/// Column definition inside a [`ViewTable`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ViewTableColumn {
+    /// Column header label.
+    pub header: ViewLabel,
+    /// Column width hint.
+    pub width: ViewSizeHint,
+    /// Default alignment of values in this column.
+    pub alignment: ViewAlign,
+}
+
+/// Owned styled cell in a [`ViewTableRow`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewTableCell {
+    /// Styled spans within this cell.
+    pub spans: Vec<ViewSpan>,
+    /// Cell alignment.
+    pub alignment: ViewAlign,
+}
+
+impl ViewTableCell {
+    /// Creates a plain left-aligned cell.
+    #[must_use]
+    pub fn plain(text: String) -> Self {
+        Self {
+            spans: vec![ViewSpan::plain(text)],
+            alignment: ViewAlign::Left,
+        }
+    }
+
+    /// Creates a plain cell with explicit alignment.
+    #[must_use]
+    pub fn aligned(text: String, alignment: ViewAlign, style: ViewStyle) -> Self {
+        Self {
+            spans: vec![ViewSpan::styled(text, style)],
+            alignment,
+        }
+    }
+
+    /// Concatenates the plain text of every span inside this cell.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        let mut out = String::new();
+        for span in &self.spans {
+            out.push_str(&span.text);
+        }
+        out
+    }
+}
+
+/// One row of [`ViewTableCell`]s inside a [`ViewTable`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewTableRow {
+    /// Ordered cells matching [`ViewTable::columns`].
+    pub cells: Vec<ViewTableCell>,
+    /// Row-level style applied by the host.
+    pub style: ViewStyle,
+}
+
+impl ViewTableRow {
+    /// Joins every cell's plain text with `" | "`.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        let mut out = String::new();
+        for (idx, cell) in self.cells.iter().enumerate() {
+            if idx > 0 {
+                out.push_str(" | ");
+            }
+            out.push_str(&cell.plain_text());
+        }
+        out
+    }
+}
+
+/// Structured tabular view model with typed columns, alignment, and rows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewTable {
+    /// Ordered column headers, widths, and alignments.
+    pub columns: Vec<ViewTableColumn>,
+    /// Data rows.
+    pub rows: Vec<ViewTableRow>,
+    /// Optional 0-based selected row index.
+    pub selected_row: Option<usize>,
+}
+
+impl ViewTable {
+    /// Formats column headers and rows as plain text for inspection and tests.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        let mut out = String::new();
+        if !self.columns.is_empty() {
+            for (idx, col) in self.columns.iter().enumerate() {
+                if idx > 0 {
+                    out.push_str(" | ");
+                }
+                out.push_str(&col.header.text);
+            }
+        }
+        for row in &self.rows {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&row.plain_text());
+        }
+        out
+    }
+}
+
+/// Single tab entry inside a [`ViewTabBar`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewTabItem {
+    /// Tab title label.
+    pub label: ViewLabel,
+    /// Whether this tab can be selected (`false` for disabled future tabs like Diplomatic Desk).
+    pub enabled: bool,
+}
+
+/// Tab strip metadata carried inside a tabbed [`ViewPanel`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewTabBar {
+    /// Ordered tabs left-to-right.
+    pub tabs: Vec<ViewTabItem>,
+    /// Zero-based index of the active tab.
+    pub active_index: usize,
+}
+
+impl ViewTabBar {
+    /// Concatenates tab labels with an active marker for plain-text inspection.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        let mut out = String::new();
+        for (idx, tab) in self.tabs.iter().enumerate() {
+            if idx > 0 {
+                out.push_str(" | ");
+            }
+            if idx == self.active_index {
+                out.push('[');
+                out.push_str(&tab.label.text);
+                out.push(']');
+            } else {
+                out.push_str(&tab.label.text);
+            }
+        }
+        out
+    }
+}
+
+/// Modal overlay layer rendered centered over the screen when present.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewModal {
+    /// Target modal width percentage (`1..=100`).
+    pub width_pct: u16,
+    /// Target modal height percentage (`1..=100`).
+    pub height_pct: u16,
+    /// Panel rendered inside the modal dialog.
+    pub panel: ViewPanel,
+}
+
+/// Bottom status line with optional prominent refusal/alert row plus key-hint and mode spans.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewStatusLine {
+    /// Prominent top-row refusal/error banner rendered ahead of shortcuts so it stays visible at 80x24+.
+    pub alert: Option<ViewRow>,
+    /// Left-aligned spans.
+    pub left: Vec<ViewSpan>,
+    /// Right-aligned spans.
+    pub right: Vec<ViewSpan>,
+    /// Base style for the status bar.
+    pub style: ViewStyle,
+}
+
+impl ViewStatusLine {
+    /// Joins alert, left, and right spans as plain text.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        let mut out = String::new();
+        if let Some(alert) = &self.alert {
+            out.push_str(&alert.plain_text());
+        }
+        let mut bar = String::new();
+        for span in &self.left {
+            bar.push_str(&span.text);
+        }
+        if !self.right.is_empty() {
+            if !bar.is_empty() {
+                bar.push_str(" | ");
+            }
+            for span in &self.right {
+                bar.push_str(&span.text);
+            }
+        }
+        if !bar.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&bar);
+        }
+        out
+    }
+}
+
+/// Panel bound to a named [`ViewZoneId`] inside [`SeatScreenView::zones`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub struct ViewZonePanel {
+    /// Zone identifier matching a [`ViewZoneSpec`] inside [`ScreenLayout`].
+    pub zone: ViewZoneId,
+    /// Panel contents to render inside that zone.
+    pub panel: ViewPanel,
+}
+
 /// Self-contained bordered or plain panel made purely of owned view-model data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewPanel {
@@ -242,19 +717,40 @@ pub struct ViewPanel {
     pub alignment: ViewAlign,
     /// Whether the host draws an outer box border around the panel.
     pub bordered: bool,
+    /// Optional tab bar rendered at the top of the panel.
+    pub tabs: Option<ViewTabBar>,
+    /// Optional structured table rendered inside the panel.
+    pub table: Option<ViewTable>,
     /// Ordered text rows rendered inside the panel.
     pub rows: Vec<ViewRow>,
     /// Optional 0-based selected row index highlighted by the host.
     pub selected_row: Option<usize>,
+    /// Optional scroll position and total row count for scrollable panels.
+    pub scroll: Option<ViewScroll>,
 }
 
 impl ViewPanel {
-    /// Joins every row's plain text with `"\n"` for inspection and tests.
+    /// Joins tabs, rows, and table text with `"\n"` for inspection and tests.
     #[must_use]
     pub fn plain_text(&self) -> String {
         let mut out = String::new();
-        for (idx, row) in self.rows.iter().enumerate() {
-            if idx > 0 {
+        if let Some(tabs) = &self.tabs {
+            let t = tabs.plain_text();
+            if !t.is_empty() {
+                out.push_str(&t);
+            }
+        }
+        if let Some(table) = &self.table {
+            let tbl = table.plain_text();
+            if !tbl.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&tbl);
+            }
+        }
+        for row in &self.rows {
+            if !out.is_empty() {
                 out.push('\n');
             }
             out.push_str(&row.plain_text());
@@ -266,53 +762,87 @@ impl ViewPanel {
 /// Complete plain owned view model emitted by `league-seat-ui` for `league-tui` to draw.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct SeatScreenView {
-    /// Optional top status header panel.
-    pub header: Option<ViewPanel>,
-    /// Primary content panel rendered across the main area.
-    pub main: ViewPanel,
-    /// Optional secondary side panels (e.g., diagnostics, receipts, or commodity legend).
-    pub side_panels: Vec<ViewPanel>,
+    /// Layout specification mapping viewport size onto named zones.
+    pub layout: ScreenLayout,
+    /// Ordered zone panels referenced by `layout`.
+    pub zones: Vec<ViewZonePanel>,
+    /// Optional bottom status line rendered in [`ViewZoneId::StatusLine`].
+    pub status_line: Option<ViewStatusLine>,
     /// Optional modal overlay panel rendered on top of the screen when present.
-    pub modal: Option<ViewPanel>,
+    pub modal: Option<ViewModal>,
 }
 
 impl SeatScreenView {
-    /// Wraps a single primary [`ViewPanel`] with no header, side panels, or modal.
+    /// Wraps a single primary [`ViewPanel`] in a full-viewport [`ScreenLayout::single_panel`].
     #[must_use]
-    pub const fn single_panel(main: ViewPanel) -> Self {
+    pub fn single_panel(main: ViewPanel) -> Self {
+        Self::single_panel_at(main, ViewportSize::new(80, 24))
+    }
+
+    /// Wraps a single primary [`ViewPanel`] sized for an explicit [`ViewportSize`].
+    #[must_use]
+    pub fn single_panel_at(main: ViewPanel, viewport: ViewportSize) -> Self {
         Self {
-            header: None,
-            main,
-            side_panels: Vec::new(),
+            layout: ScreenLayout::single_panel(viewport),
+            zones: vec![ViewZonePanel {
+                zone: ViewZoneId::SingleFull,
+                panel: main,
+            }],
+            status_line: None,
             modal: None,
         }
     }
 
-    /// Concatenates plain text across header, main, side panels, and modal.
+    /// Looks up the rendered [`ViewPanel`] for `zone_id`, if present.
+    #[must_use]
+    pub fn zone(&self, zone_id: ViewZoneId) -> Option<&ViewPanel> {
+        self.zones
+            .iter()
+            .find(|entry| entry.zone == zone_id)
+            .map(|entry| &entry.panel)
+    }
+
+    /// Concatenates plain text across all zones, status line, and modal.
     #[must_use]
     pub fn plain_text(&self) -> String {
         let mut out = String::new();
-        let mut first = true;
-        for panel in self
-            .header
-            .iter()
-            .chain(core::iter::once(&self.main))
-            .chain(self.side_panels.iter())
-            .chain(self.modal.iter())
-        {
+        for entry in &self.zones {
+            let panel = &entry.panel;
             if let Some(title) = &panel.title {
-                if !first {
+                if !out.is_empty() {
                     out.push('\n');
                 }
-                first = false;
                 out.push_str(&title.text);
             }
             let body = panel.plain_text();
             if !body.is_empty() {
-                if !first {
+                if !out.is_empty() {
                     out.push('\n');
                 }
-                first = false;
+                out.push_str(&body);
+            }
+        }
+        if let Some(status) = &self.status_line {
+            let st = status.plain_text();
+            if !st.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&st);
+            }
+        }
+        if let Some(modal) = &self.modal {
+            if let Some(title) = &modal.panel.title {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&title.text);
+            }
+            let body = modal.panel.plain_text();
+            if !body.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
                 out.push_str(&body);
             }
         }
@@ -410,21 +940,37 @@ impl SeatKeyModifiers {
     };
 }
 
-/// Single key press passed by value from the trusted host into `league-seat-ui`.
+/// Single key press or key auto-repeat passed by value from the trusted host into `league-seat-ui`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
 )]
 pub struct SeatKeyEvent {
-    /// Pressed key code.
+    /// Pressed or repeated key code.
     pub code: SeatKeyCode,
     /// Active key modifier flags.
     pub modifiers: SeatKeyModifiers,
+    /// `true` when emitted from terminal key auto-repeat rather than an initial key press.
+    pub is_repeat: bool,
 }
 
 impl SeatKeyEvent {
-    /// Constructs a [`SeatKeyEvent`] from its key code and modifiers.
+    /// Constructs an initial key-press [`SeatKeyEvent`] (`is_repeat = false`).
     #[must_use]
     pub const fn new(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> Self {
-        Self { code, modifiers }
+        Self {
+            code,
+            modifiers,
+            is_repeat: false,
+        }
+    }
+
+    /// Constructs a repeated [`SeatKeyEvent`] (`is_repeat = true`).
+    #[must_use]
+    pub const fn repeated(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> Self {
+        Self {
+            code,
+            modifiers,
+            is_repeat: true,
+        }
     }
 }

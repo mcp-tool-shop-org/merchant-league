@@ -18,6 +18,7 @@ mod commit;
 mod contracts;
 mod display;
 mod engine_types;
+mod intent;
 mod observation;
 mod predicates_types;
 mod scoring_types;
@@ -47,6 +48,7 @@ pub use engine_types::{
     BrokenPromiseRecord, ConverterOrderPreview, EscrowOrderPreview, ProjectOrderPreview, SeatState,
     SeatUpkeepPreview, ShockForecastEvent, TurnPhase,
 };
+pub use intent::{BundleDraftAction, SeatIntent, SeatIntentKind};
 pub use league_error::{StructuredError, ToStructuredError, scrub_secret_text};
 #[doc(hidden)]
 pub use observation::SeatObservationPublicParts;
@@ -73,8 +75,11 @@ pub use types::{
     TableMode, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
 };
 pub use view::{
-    SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView, ViewAlign, ViewColor, ViewLabel,
-    ViewPanel, ViewRow, ViewSpan, ViewStyle, ViewportSize,
+    ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView, ViewAlign, ViewAxis,
+    ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
+    ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
+    ViewTableColumn, ViewTableRow, ViewZoneGroup, ViewZoneId, ViewZonePanel, ViewZoneSpec,
+    ViewportSize,
 };
 
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical
@@ -147,18 +152,23 @@ mod tests {
     use alloc::string::ToString;
 
     use crate::{
-        AssetId, AuditorShockHint, Bps, COMMODITY_DISPLAY_CATALOG, CoalitionReach, CommitmentHash,
-        CommodityDisplayMap, ConverterRecipe, CounterpartyAssumptions, CreditTier,
-        DRAND_QUICKNET_GENESIS_UNIX, DrandSchedule, EngineError, FundamentalParities, GoodScarcity,
-        GradedMandateCard, MandateKind, MarketAction, MarketDay, NUMERAIRE_CODE,
-        NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, ParitySpecSource, PreimageSecret,
-        PreviewTieMode, PrivateMandate, PublicSweepReceipt, PublicTableSpec, RegentDoctrine,
-        STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat,
-        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatKeyCode, SeatKeyEvent,
+        AssetId, AtomicSwapProposal, AuditorShockHint, Bps, BundleDraftAction,
+        COMMODITY_DISPLAY_CATALOG, CharterBidOrder, CharterRole, CoalitionReach, CommitmentHash,
+        CommodityDisplayMap, ContractDeliveryOrder, ConverterRecipe, ConverterRunOrder,
+        CouncilVoteBallot, CounterpartyAssumptions, CreditTier, DRAND_QUICKNET_GENESIS_UNIX,
+        DrandSchedule, DualEscrowProposal, EngineError, EscrowFinishUnlock, FundamentalParities,
+        GoodScarcity, GradedMandateCard, HumanWhatIfRequest, MandateKind, MarketAction, MarketDay,
+        NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, OfferProposal, OfferSide,
+        ParitySpecSource, PreimageSecret, PreviewTieMode, PrivateMandate, ProjectDeliveryOrder,
+        PublicSweepReceipt, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
+        ScreenLayout, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat, SeatCommodityDisplay,
+        SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind, SeatKeyCode, SeatKeyEvent,
         SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatScreenView, SeatState,
         SeatStatePredicates, ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId,
-        TableMode, ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewColor,
-        ViewLabel, ViewPanel, ViewRow, ViewSpan, ViewStyle, ViewportSize,
+        TableMode, ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis,
+        ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll,
+        ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable,
+        ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize,
         drand_quicknet_round_for_close, format_numeraire_display, lookup_commodity_display,
         lookup_commodity_display_bytes,
     };
@@ -659,46 +669,135 @@ mod tests {
         ]);
         assert_eq!(row.plain_text(), "CRED: 15000");
 
+        let tabs = ViewTabBar {
+            tabs: vec![
+                ViewTabItem {
+                    label: ViewLabel::plain("Market".to_owned()),
+                    enabled: true,
+                },
+                ViewTabItem {
+                    label: ViewLabel::plain("Workshop".to_owned()),
+                    enabled: true,
+                },
+            ],
+            active_index: 0,
+        };
+        assert_eq!(tabs.plain_text(), "[Market] | Workshop");
+
+        let table = ViewTable {
+            columns: vec![
+                ViewTableColumn {
+                    header: ViewLabel::plain("Seat".to_owned()),
+                    width: ViewSizeHint::Fixed(6),
+                    alignment: ViewAlign::Left,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("CRED".to_owned()),
+                    width: ViewSizeHint::Ratio { num: 1, den: 1 },
+                    alignment: ViewAlign::Right,
+                },
+            ],
+            rows: vec![ViewTableRow {
+                cells: vec![
+                    ViewTableCell::plain("S0".to_owned()),
+                    ViewTableCell::aligned("15000".to_owned(), ViewAlign::Right, style),
+                ],
+                style: ViewStyle::plain(),
+            }],
+            selected_row: Some(0),
+        };
+        assert_eq!(table.plain_text(), "Seat | CRED\nS0 | 15000");
+
         let panel = ViewPanel {
             title: Some(ViewLabel::styled("Header".to_owned(), style)),
             alignment: ViewAlign::Center,
             bordered: true,
+            tabs: Some(tabs),
+            table: Some(table),
             rows: vec![ViewRow::from_plain("Row 1".to_owned()), row],
             selected_row: Some(0),
+            scroll: Some(ViewScroll {
+                offset: 0,
+                total: 2,
+            }),
         };
-        assert_eq!(panel.plain_text(), "Row 1\nCRED: 15000");
+        let panel_txt = panel.plain_text();
+        assert!(panel_txt.contains("[Market] | Workshop"));
+        assert!(panel_txt.contains("Seat | CRED\nS0 | 15000"));
+        assert!(panel_txt.contains("Row 1\nCRED: 15000"));
+
+        let vp = ViewportSize::new(100, 30);
+        let wide = ScreenLayout::layout_for_viewport(vp);
+        assert_eq!(wide.mode, ViewLayoutMode::FourZoneWide);
+        assert_eq!(wide.bands.len(), 3);
+        assert_eq!(wide.bands[1].axis, ViewAxis::Horizontal);
+        assert_eq!(wide.bands[1].zones.len(), 3);
+
+        let stacked = ScreenLayout::layout_for_viewport(ViewportSize::new(80, 24));
+        assert_eq!(stacked.mode, ViewLayoutMode::StackedFallback);
+        assert_eq!(stacked.bands.len(), 5);
+
+        let small = ScreenLayout::layout_for_viewport(ViewportSize::new(79, 24));
+        assert_eq!(small.mode, ViewLayoutMode::TooSmall);
+        assert_eq!(small.bands.len(), 1);
+        assert_eq!(small.bands[0].zones[0].zone, ViewZoneId::SingleFull);
 
         let view = SeatScreenView {
-            header: Some(ViewPanel {
-                title: Some(ViewLabel::plain("Top".to_owned())),
-                ..ViewPanel::default()
+            layout: wide,
+            zones: vec![
+                ViewZonePanel {
+                    zone: ViewZoneId::HeaderBar,
+                    panel: ViewPanel {
+                        title: Some(ViewLabel::plain("Top".to_owned())),
+                        ..ViewPanel::default()
+                    },
+                },
+                ViewZonePanel {
+                    zone: ViewZoneId::CenterTabs,
+                    panel: panel.clone(),
+                },
+            ],
+            status_line: Some(ViewStatusLine {
+                alert: Some(ViewRow::from_plain(
+                    "REFUSED [SAMPLE]: check alert".to_owned(),
+                )),
+                left: vec![ViewSpan::plain("Keys".to_owned())],
+                right: vec![ViewSpan::plain("Ready".to_owned())],
+                style: ViewStyle::plain(),
             }),
-            main: panel.clone(),
-            side_panels: vec![ViewPanel {
-                rows: vec![ViewRow::from_plain("Side".to_owned())],
-                ..ViewPanel::default()
-            }],
-            modal: Some(ViewPanel {
-                title: Some(ViewLabel::plain("Chronicle".to_owned())),
-                rows: vec![ViewRow::from_plain("Body".to_owned())],
-                ..ViewPanel::default()
+            modal: Some(ViewModal {
+                width_pct: 80,
+                height_pct: 80,
+                panel: ViewPanel {
+                    title: Some(ViewLabel::plain("Chronicle".to_owned())),
+                    rows: vec![ViewRow::from_plain("Body".to_owned())],
+                    ..ViewPanel::default()
+                },
             }),
         };
+        assert!(view.zone(ViewZoneId::HeaderBar).is_some());
+        assert!(view.zone(ViewZoneId::PrivateDrawer).is_none());
         let flat = view.plain_text();
         assert!(flat.contains("Top"));
         assert!(flat.contains("Header"));
         assert!(flat.contains("Row 1\nCRED: 15000"));
-        assert!(flat.contains("Side"));
+        assert!(flat.contains("REFUSED [SAMPLE]: check alert"));
+        assert!(flat.contains("Keys | Ready"));
         assert!(flat.contains("Chronicle\nBody"));
 
-        let single = SeatScreenView::single_panel(panel);
-        assert!(single.header.is_none());
-        assert!(single.side_panels.is_empty());
-        assert!(single.modal.is_none());
+        let single_status = ScreenLayout::single_panel_with_status(ViewportSize::new(90, 25));
+        assert_eq!(single_status.mode, ViewLayoutMode::SinglePanel);
+        assert_eq!(single_status.bands.len(), 2);
 
-        let vp = ViewportSize::new(100, 30);
-        assert_eq!(vp.width, 100);
-        assert_eq!(vp.height, 30);
+        let rep = SeatKeyEvent::repeated(SeatKeyCode::Down, SeatKeyModifiers::NONE);
+        assert!(rep.is_repeat);
+        assert!(!SeatKeyEvent::new(SeatKeyCode::Down, SeatKeyModifiers::NONE).is_repeat);
+
+        let single = SeatScreenView::single_panel(panel);
+        assert_eq!(single.layout.mode, ViewLayoutMode::SinglePanel);
+        assert_eq!(single.zones.len(), 1);
+        assert!(single.status_line.is_none());
+        assert!(single.modal.is_none());
 
         let ev_q = SeatKeyEvent::new(SeatKeyCode::Char('q'), SeatKeyModifiers::NONE);
         let ev_ctrl = SeatKeyEvent::new(SeatKeyCode::Char('c'), SeatKeyModifiers::CTRL);
@@ -708,5 +807,231 @@ mod tests {
         assert_eq!(SeatKeyEvent::default().code, SeatKeyCode::Unmapped);
         assert_eq!(ViewColor::default().to_owned(), ViewColor::Reset);
         assert_eq!(ViewLabel::plain("ok".to_owned()).text.to_string(), "ok");
+    }
+
+    #[test]
+    fn seat_intent_and_bundle_draft_actions_cover_all_bundle_fields() {
+        let mut bundle = SealedOrderBundle::default();
+
+        BundleDraftAction::SetConverterRun(ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 2,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::SetConverterRun(ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 3,
+        })
+        .apply_to(&mut bundle);
+        assert_eq!(bundle.converter_runs.len(), 1);
+        assert_eq!(bundle.converter_runs[0].runs, 3);
+        BundleDraftAction::SetConverterRun(ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 0,
+        })
+        .apply_to(&mut bundle);
+        assert!(bundle.converter_runs.is_empty());
+        BundleDraftAction::SetConverterRun(ConverterRunOrder {
+            recipe_idx: 1,
+            runs: 1,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::ClearConverterRuns.apply_to(&mut bundle);
+        assert!(bundle.converter_runs.is_empty());
+
+        BundleDraftAction::SetProjectDelivery(ProjectDeliveryOrder {
+            project_id: 1,
+            batches: 2,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::SetProjectDelivery(ProjectDeliveryOrder {
+            project_id: 1,
+            batches: 4,
+        })
+        .apply_to(&mut bundle);
+        assert_eq!(bundle.project_deliveries[0].batches, 4);
+        BundleDraftAction::SetProjectDelivery(ProjectDeliveryOrder {
+            project_id: 1,
+            batches: 0,
+        })
+        .apply_to(&mut bundle);
+        assert!(bundle.project_deliveries.is_empty());
+        BundleDraftAction::SetProjectDelivery(ProjectDeliveryOrder {
+            project_id: 2,
+            batches: 1,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::ClearProjectDeliveries.apply_to(&mut bundle);
+        assert!(bundle.project_deliveries.is_empty());
+
+        let swap = AtomicSwapProposal {
+            swap_id: 9,
+            maker: 0,
+            taker: 1,
+            maker_asset: AssetId::Raw(0),
+            maker_amount: 500,
+            taker_asset: AssetId::Refined(1),
+            taker_amount: 500,
+            domain_id: None,
+        };
+        BundleDraftAction::StageAtomicSwap(swap.clone()).apply_to(&mut bundle);
+        BundleDraftAction::StageAtomicSwap(swap).apply_to(&mut bundle);
+        assert_eq!(bundle.atomic_swaps.len(), 1);
+        BundleDraftAction::ClearAtomicSwaps(Some(0)).apply_to(&mut bundle);
+        assert!(bundle.atomic_swaps.is_empty());
+
+        let cd = ContractDeliveryOrder {
+            counterparty: 1,
+            good: AssetId::Refined(0),
+            gross_amount: 500,
+            domain_id: None,
+            dual_escrow_id: None,
+        };
+        BundleDraftAction::StageContractDelivery(cd).apply_to(&mut bundle);
+        assert_eq!(bundle.contract_deliveries.len(), 1);
+        BundleDraftAction::ClearContractDeliveries(None).apply_to(&mut bundle);
+        assert!(bundle.contract_deliveries.is_empty());
+
+        let dual = DualEscrowProposal {
+            proposal_id: 4,
+            buyer: 0,
+            seller: 1,
+            good: AssetId::Refined(1),
+            required_units: 1_000,
+            payment_cred: 2_000,
+            buyer_bond_cred: 500,
+            seller_bond_cred: 500,
+            deadline_turn: 4,
+            domain_id: None,
+        };
+        BundleDraftAction::StageDualEscrow(dual).apply_to(&mut bundle);
+        assert_eq!(bundle.dual_escrows.len(), 1);
+        BundleDraftAction::ClearDualEscrows(Some(0)).apply_to(&mut bundle);
+        assert!(bundle.dual_escrows.is_empty());
+
+        BundleDraftAction::SetDebtRepaymentCred(500).apply_to(&mut bundle);
+        assert_eq!(bundle.debt_repayment_cred, 500);
+
+        let unlock = EscrowFinishUnlock {
+            escrow_id: 1,
+            preimage: Some(PreimageSecret([0x11; 32])),
+        };
+        BundleDraftAction::StageEscrowFinish(unlock).apply_to(&mut bundle);
+        assert_eq!(bundle.escrow_finishes.len(), 1);
+        BundleDraftAction::ClearEscrowFinishes(Some(0)).apply_to(&mut bundle);
+        assert!(bundle.escrow_finishes.is_empty());
+
+        BundleDraftAction::StageCheckCash(3).apply_to(&mut bundle);
+        BundleDraftAction::StageCheckCash(3).apply_to(&mut bundle);
+        assert_eq!(bundle.check_cashes, vec![3]);
+        BundleDraftAction::ClearCheckCashes(Some(3)).apply_to(&mut bundle);
+        assert!(bundle.check_cashes.is_empty());
+
+        BundleDraftAction::SetCouncilVote(Some(CouncilVoteBallot {
+            trade_minister: 0,
+            cartel_chair: 1,
+        }))
+        .apply_to(&mut bundle);
+        assert!(bundle.council_vote.is_some());
+
+        BundleDraftAction::StageCharterBid(CharterBidOrder {
+            role: CharterRole::OracleAuditor,
+            bid_cred: 250,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::StageCharterBid(CharterBidOrder {
+            role: CharterRole::OracleAuditor,
+            bid_cred: 300,
+        })
+        .apply_to(&mut bundle);
+        assert_eq!(bundle.charter_bids.len(), 1);
+        assert_eq!(bundle.charter_bids[0].bid_cred, 300);
+        BundleDraftAction::StageCharterBid(CharterBidOrder {
+            role: CharterRole::OracleAuditor,
+            bid_cred: 0,
+        })
+        .apply_to(&mut bundle);
+        assert!(bundle.charter_bids.is_empty());
+
+        BundleDraftAction::ClearAll.apply_to(&mut bundle);
+        assert_eq!(bundle, SealedOrderBundle::default());
+
+        let intents = vec![
+            SeatIntent::submit_market_action(MarketAction::PostOffer {
+                seat: 0,
+                order: OfferProposal {
+                    side: OfferSide::Buy,
+                    good: AssetId::Raw(1),
+                    amount: 500,
+                    price_per_unit_cred: 1_000,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            }),
+            SeatIntent::update_bundle(BundleDraftAction::ClearCharterBids),
+            SeatIntent::request_what_if(HumanWhatIfRequest {
+                seat: 0,
+                market_actions: Vec::new(),
+                cancel_lock_at: None,
+                bundle: SealedOrderBundle::default(),
+                tie_mode: PreviewTieMode::NeutralSeed,
+                assumptions: CounterpartyAssumptions::default(),
+            }),
+            SeatIntent::lock_and_hand_off(),
+            SeatIntent::open_chronicle_modal(),
+            SeatIntent::close_chronicle_modal(),
+            SeatIntent::quit(),
+        ];
+        assert_eq!(intents[0].kind, SeatIntentKind::SubmitMarketAction);
+        assert_eq!(intents[1].kind, SeatIntentKind::UpdateBundle);
+        assert_eq!(intents[2].kind, SeatIntentKind::RequestWhatIf);
+        assert_eq!(intents[3].kind, SeatIntentKind::LockAndHandOff);
+        assert_eq!(intents[4].kind, SeatIntentKind::OpenChronicleModal);
+        assert_eq!(intents[5].kind, SeatIntentKind::CloseChronicleModal);
+        assert_eq!(intents[6].kind, SeatIntentKind::Quit);
+        let encoded = match serde_json::to_string(&intents) {
+            Ok(s) => s,
+            Err(err) => panic!("encode intents failed: {err}"),
+        };
+        let decoded: Vec<SeatIntent> = match serde_json::from_str(&encoded) {
+            Ok(v) => v,
+            Err(err) => panic!("decode intents failed: {err}"),
+        };
+        assert_eq!(decoded, intents);
+
+        let receipt = PublicSweepReceipt {
+            turn: 1,
+            non_reveal_seats: vec![],
+            regent_acted_seats: vec![],
+            converted_to_ai: vec![],
+            escrows_finished: vec![],
+            escrows_cancelled_or_forfeited: vec![],
+            atomic_swaps_settled: 0,
+            converter_batches_run: 0,
+            converter_orders_clamped: 0,
+            checks_cashed: vec![],
+            checks_bounced: vec![],
+            cartel_evictions: vec![],
+            projects_completed: 0,
+            project_orders_clamped: 0,
+            total_upkeep_shortfall_debt: 0,
+            total_spoilage_clawed_back: 0,
+            broken_promises: vec![],
+            elected_officers: None,
+            charters_awarded: vec![],
+            public_forecasts: vec![],
+            newly_activated_shocks: vec![],
+            cred_debt_repaid: 0,
+            charter_cred_burned: 0,
+            town_import_cred_spent: 0,
+            works_stipend_cred_minted: 0,
+            batch_trades_cleared: 0,
+            fills: vec![],
+            wash_freeze_settlements: vec![],
+            season_closed: false,
+            pbrs_deltas: vec![0; 4],
+        };
+        let json_res = receipt.to_json_string();
+        assert!(json_res.is_ok());
     }
 }

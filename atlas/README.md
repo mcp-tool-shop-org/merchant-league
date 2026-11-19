@@ -1,16 +1,16 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-19 from commit ac16d99 by Atlas 1.26.0.
+Mapped at 2026-11-19 from commit 01df162 by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-14 parts, mostly Rust (369 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-19 (cd7f279)
+## What changed since 2026-11-19 (3be43b9)
 
-Nothing structural changed since 2026-11-19; 1 file added and 7 changed content.
+Nothing structural changed since 2026-11-19; 10 files changed content.
 
 ## What comes in
 
@@ -61,15 +61,15 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 ## What tends to change together
 
-- **crates/league-core/src/club/host.rs** and **crates/league-gen/tests/club_bridge_and_headless_bot.rs** changed together in 5 of 6 commits, and the league-gen part imports the league-core part.
-- **crates/league-core/tests/club_host_and_bot.rs** and **crates/league-gen/tests/club_bridge_and_headless_bot.rs** changed together in 5 of 6 commits, and the league-gen part imports the league-core part.
+- **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 5 commits, inside the league-relay part.
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
-- **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 6 commits, inside the league-relay part.
 - **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 18 of 22 commits, inside the league-relay part.
+- **crates/league-core/src/lib.rs** and **crates/league-core/src/replay.rs** changed together in 9 of 11 commits, inside the league-core part.
+- **crates/league-core/src/replay.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 9 of 11 commits, inside the league-core part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
@@ -99,7 +99,7 @@ People write .github/, docs/ and the repository root; 23 writes with paths built
 
 ## Where to start
 
-crates/league-tui/src/main.rs → crates/league-seat-ui/src/lib.rs → crates/league-seat-types/src/lib.rs → crates/league-error/src/lib.rs
+crates/league-tui/src/main.rs → crates/league-core/src/lib.rs → crates/league-core/src/bot.rs → crates/league-core/src/commit.rs → crates/league-seat-types/src/lib.rs → crates/league-error/src/lib.rs
 
 Read those in order to follow one run of league-tui end to end. This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.
 
@@ -110,7 +110,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 13 writes and 17 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.
-- 377 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 374 more.
+- 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
 Regenerate with `npx --yes @dogfood-lab/atlas map`.
