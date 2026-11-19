@@ -1,4 +1,6 @@
-use std::fmt;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt;
 
 use league_error::{StructuredError, ToStructuredError};
 use serde::{Deserialize, Serialize};
@@ -346,7 +348,7 @@ impl fmt::Display for EngineError {
     }
 }
 
-impl std::error::Error for EngineError {}
+impl core::error::Error for EngineError {}
 
 impl ToStructuredError for EngineError {
     fn to_structured_error(&self) -> StructuredError {

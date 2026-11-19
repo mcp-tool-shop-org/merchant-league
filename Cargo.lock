@@ -1496,9 +1496,7 @@ dependencies = [
 name = "league-seat-ui"
 version = "0.0.0"
 dependencies = [
- "crossterm",
  "league-seat-types",
- "ratatui",
 ]
 
 [[package]]

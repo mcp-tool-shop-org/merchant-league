@@ -1,3 +1,4 @@
+#![no_std]
 #![forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -5,9 +6,12 @@
 )]
 //! Seat-safe value, observation, preview, error, and commodity display types for Merchant League v2.
 //!
-//! This leaf crate depends solely on `serde`, `serde_json`, and `league-error` — never on
-//! `league-core`, `league-gen`, or `league-standalone` — so `rustc` enforces the host/seat type
-//! boundary at compile time (`docs/club-mode-design.md` §2.3).
+//! This `no_std` + `alloc` leaf crate depends solely on `serde`, `serde_json`, and
+//! `league-error` — never on `league-core`, `league-gen`, or `league-standalone` — so `rustc`
+//! and target builds (`thumbv7em-none-eabi`) enforce the host/seat boundary at compile time
+//! (`docs/club-mode-design.md` §2.3).
+
+extern crate alloc;
 
 mod commit;
 mod contracts;
@@ -18,6 +22,7 @@ mod predicates_types;
 mod scoring_types;
 mod serde_helpers;
 mod types;
+mod view;
 
 pub use commit::{
     AtomicSwapProposal, CharterBidOrder, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder,
@@ -66,11 +71,15 @@ pub use types::{
     ProjectRecipe, RegentDoctrine, SeasonId, Seat, SeatConfig, SeatIdentity, ShockKind, TableId,
     TableMode, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
 };
+pub use view::{
+    SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView, ViewAlign, ViewColor, ViewLabel,
+    ViewPanel, ViewRow, ViewSpan, ViewStyle, ViewportSize,
+};
 
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical
 /// `EngineState` / `SeasonReplayLog` JSON encodings are shared.
 pub mod wire_serde {
-    use std::collections::BTreeMap;
+    use alloc::collections::BTreeMap;
 
     use serde::{Deserializer, Serializer};
 
@@ -128,7 +137,13 @@ pub mod wire_serde {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use alloc::borrow::ToOwned;
+    use alloc::collections::{BTreeMap, BTreeSet};
+    use alloc::format;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use alloc::string::ToString;
 
     use crate::{
         AssetId, AuditorShockHint, Bps, COMMODITY_DISPLAY_CATALOG, CoalitionReach, CommitmentHash,
@@ -138,11 +153,13 @@ mod tests {
         NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, ParitySpecSource, PreimageSecret,
         PreviewTieMode, PrivateMandate, PublicSweepReceipt, PublicTableSpec, RegentDoctrine,
         STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat,
-        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservation,
-        SeatObservationPublicParts, SeatState, SeatStatePredicates, ShockKind,
-        SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode, ToStructuredError, Turn,
-        TurnPhase, UpkeepAndDebt, drand_quicknet_round_for_close, format_numeraire_display,
-        lookup_commodity_display, lookup_commodity_display_bytes,
+        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatKeyCode, SeatKeyEvent,
+        SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatScreenView, SeatState,
+        SeatStatePredicates, ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId,
+        TableMode, ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewColor,
+        ViewLabel, ViewPanel, ViewRow, ViewSpan, ViewStyle, ViewportSize,
+        drand_quicknet_round_for_close, format_numeraire_display, lookup_commodity_display,
+        lookup_commodity_display_bytes,
     };
 
     #[test]
@@ -617,5 +634,78 @@ mod tests {
                 bonus_equity: 3_000,
             },
         );
+    }
+
+    #[test]
+    fn view_model_types_and_key_events_cover_plain_owned_helpers() {
+        let style = ViewStyle::plain()
+            .with_fg(ViewColor::Cyan)
+            .with_bg(ViewColor::Rgb {
+                r: 10,
+                g: 20,
+                b: 30,
+            })
+            .bold()
+            .dim()
+            .underlined()
+            .reversed();
+        assert_eq!(style.fg, ViewColor::Cyan);
+        assert!(style.bold && style.dim && style.underlined && style.reversed);
+
+        let row = ViewRow::from_spans(vec![
+            ViewSpan::plain("CRED: ".to_owned()),
+            ViewSpan::styled("15000".to_owned(), style),
+        ]);
+        assert_eq!(row.plain_text(), "CRED: 15000");
+
+        let panel = ViewPanel {
+            title: Some(ViewLabel::styled("Header".to_owned(), style)),
+            alignment: ViewAlign::Center,
+            bordered: true,
+            rows: vec![ViewRow::from_plain("Row 1".to_owned()), row],
+            selected_row: Some(0),
+        };
+        assert_eq!(panel.plain_text(), "Row 1\nCRED: 15000");
+
+        let view = SeatScreenView {
+            header: Some(ViewPanel {
+                title: Some(ViewLabel::plain("Top".to_owned())),
+                ..ViewPanel::default()
+            }),
+            main: panel.clone(),
+            side_panels: vec![ViewPanel {
+                rows: vec![ViewRow::from_plain("Side".to_owned())],
+                ..ViewPanel::default()
+            }],
+            modal: Some(ViewPanel {
+                title: Some(ViewLabel::plain("Chronicle".to_owned())),
+                rows: vec![ViewRow::from_plain("Body".to_owned())],
+                ..ViewPanel::default()
+            }),
+        };
+        let flat = view.plain_text();
+        assert!(flat.contains("Top"));
+        assert!(flat.contains("Header"));
+        assert!(flat.contains("Row 1\nCRED: 15000"));
+        assert!(flat.contains("Side"));
+        assert!(flat.contains("Chronicle\nBody"));
+
+        let single = SeatScreenView::single_panel(panel);
+        assert!(single.header.is_none());
+        assert!(single.side_panels.is_empty());
+        assert!(single.modal.is_none());
+
+        let vp = ViewportSize::new(100, 30);
+        assert_eq!(vp.width, 100);
+        assert_eq!(vp.height, 30);
+
+        let ev_q = SeatKeyEvent::new(SeatKeyCode::Char('q'), SeatKeyModifiers::NONE);
+        let ev_ctrl = SeatKeyEvent::new(SeatKeyCode::Char('c'), SeatKeyModifiers::CTRL);
+        assert_eq!(ev_q.code, SeatKeyCode::Char('q'));
+        assert!(!ev_q.modifiers.ctrl);
+        assert!(ev_ctrl.modifiers.ctrl);
+        assert_eq!(SeatKeyEvent::default().code, SeatKeyCode::Unmapped);
+        assert_eq!(ViewColor::default().to_owned(), ViewColor::Reset);
+        assert_eq!(ViewLabel::plain("ok".to_owned()).text.to_string(), "ok");
     }
 }

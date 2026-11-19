@@ -49,12 +49,12 @@
           "league-tui"
         ]
       },
-      "cohesion": 0.7822,
+      "cohesion": 0.786247,
       "cohesionDropped": false,
       "confidence": "low",
       "highWater": null,
       "name": "league-core",
-      "qualifyingSourceCommits": 17,
+      "qualifyingSourceCommits": 18,
       "rebaseline": null
     },
     {
@@ -91,7 +91,7 @@
           "league-tui"
         ]
       },
-      "cohesion": 0.720493,
+      "cohesion": 0.730855,
       "cohesionDropped": false,
       "confidence": "low",
       "highWater": null,
@@ -362,8 +362,8 @@
         "path": "SHIP_GATE.md"
       },
       {
-        "commits": 70,
-        "lines": 1465,
+        "commits": 71,
+        "lines": 1478,
         "path": "atlas/README.md"
       },
       {
@@ -372,18 +372,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 70,
-        "lines": 5250,
+        "commits": 71,
+        "lines": 5358,
         "path": "atlas/page.json"
       },
       {
-        "commits": 70,
-        "lines": 19665,
+        "commits": 71,
+        "lines": 19912,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 70,
-        "lines": 58125,
+        "commits": 71,
+        "lines": 58144,
         "path": "atlas/structure.json"
       },
       {
@@ -457,8 +457,8 @@
         "path": "crates/league-core/src/types.rs"
       },
       {
-        "commits": 5,
-        "lines": 663,
+        "commits": 6,
+        "lines": 861,
         "path": "crates/league-core/tests/club_host_and_bot.rs"
       },
       {
@@ -492,8 +492,8 @@
         "path": "crates/league-core/tests/replay_invariants.rs"
       },
       {
-        "commits": 3,
-        "lines": 1431,
+        "commits": 4,
+        "lines": 1444,
         "path": "crates/league-core/tests/seat_types_reexport_parity.rs"
       },
       {
@@ -3167,79 +3167,79 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-19T01:01:43.343Z",
+  "generatedAt": "2026-11-19T02:36:19.010Z",
   "generatedFrom": {
-    "commit": "c506c6e72a0fde4b2e0148db023c1a809394a327"
+    "commit": "cd7f279a15a313efe6b0a86362f863e4f4483e09"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 65,
+      "either": 66,
       "shared": 39,
-      "strength": 0.6
+      "strength": 0.590909
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 65,
+      "either": 66,
       "shared": 39,
-      "strength": 0.6
+      "strength": 0.590909
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 65,
+      "either": 66,
       "shared": 39,
-      "strength": 0.6
+      "strength": 0.590909
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 65,
+      "either": 66,
       "shared": 39,
-      "strength": 0.6
+      "strength": 0.590909
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 53,
-      "shared": 53,
+      "either": 54,
+      "shared": 54,
       "strength": 1
     },
     {
@@ -3259,9 +3259,9 @@
     {
       "a": "crates/league-core/src/club/host.rs",
       "b": "crates/league-core/tests/club_host_and_bot.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-core/src/club/host.rs",
@@ -3364,9 +3364,9 @@
     {
       "a": "crates/league-core/src/observation.rs",
       "b": "crates/league-core/tests/club_host_and_bot.rs",
-      "either": 7,
+      "either": 8,
       "shared": 4,
-      "strength": 0.571429
+      "strength": 0.5
     },
     {
       "a": "crates/league-core/src/observation.rs",
@@ -3399,23 +3399,23 @@
     {
       "a": "crates/league-core/tests/club_host_and_bot.rs",
       "b": "crates/league-core/tests/raw_api_backdoor_guard.rs",
-      "either": 7,
+      "either": 8,
       "shared": 5,
-      "strength": 0.714286
+      "strength": 0.625
     },
     {
       "a": "crates/league-core/tests/club_host_and_bot.rs",
       "b": "crates/league-gen/tests/club_bridge_and_headless_bot.rs",
-      "either": 5,
+      "either": 6,
       "shared": 5,
-      "strength": 1
+      "strength": 0.833333
     },
     {
       "a": "crates/league-core/tests/club_host_and_bot.rs",
       "b": "docs/club-mode-design.md",
-      "either": 8,
+      "either": 9,
       "shared": 5,
-      "strength": 0.625
+      "strength": 0.555556
     },
     {
       "a": "crates/league-core/tests/raw_api_backdoor_guard.rs",
@@ -3603,16 +3603,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-18T19:33:42-05:00",
-    "inScopeFiles": 574,
+    "headDate": "2026-11-18T20:02:12-05:00",
+    "inScopeFiles": 575,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 78,
+    "qualifyingCommits": 79,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-23T00:33:42.000Z",
+    "since": "2026-05-23T01:02:12.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

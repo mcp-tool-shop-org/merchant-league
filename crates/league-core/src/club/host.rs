@@ -389,6 +389,31 @@ impl ClubHost {
     /// let m = obs.own_mandate().copied().unwrap();
     /// let _ = obs.with_own_mandate(m);
     /// ```
+    ///
+    /// `SeatObservation` intentionally omits `Deserialize` (`B1`) so neither save files,
+    /// replay logs, nor host wrappers can forge `own_mandate` via a serde round-trip:
+    ///
+    /// ```compile_fail,E0277
+    /// use league_core::SeatObservation;
+    /// let _: Result<SeatObservation, _> = serde_json::from_str("{}");
+    /// ```
+    ///
+    /// `TurnEngine::observe_seat_with_mandate` is `pub(crate)` and unreachable outside `league-core`:
+    ///
+    /// ```compile_fail,E0624
+    /// use league_core::{
+    ///     CreditTier, MandateKind, PrivateMandate, Seat, TableId, TableSpec, TurnEngine,
+    /// };
+    /// let spec = TableSpec::standard_chiral_ring(TableId(1), 4, 1).unwrap();
+    /// let engine = TurnEngine::new(spec).unwrap();
+    /// let mandate = PrivateMandate {
+    ///     kind: MandateKind::MaintainCleanCredit {
+    ///         min_tier: CreditTier::Aaa,
+    ///     },
+    ///     bonus_equity: 3_000,
+    /// };
+    /// let _ = engine.observe_seat_with_mandate(Seat(0), mandate);
+    /// ```
     pub fn observe_seat(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
         let mandate = *self.mandate_for_seat(seat)?;
         self.engine.observe_seat_with_mandate(seat, mandate)

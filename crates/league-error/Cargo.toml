@@ -9,9 +9,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Pinned to the exact versions already locked in workspace crates (zero new crates, no proc-macros).
-serde = "1.0.229"
-serde_json = "1.0.154"
+# Pinned to the exact versions already locked in workspace crates (`no_std` + `alloc`, zero new crates).
+serde = { version = "1.0.229", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true

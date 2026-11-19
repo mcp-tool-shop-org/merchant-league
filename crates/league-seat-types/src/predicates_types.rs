@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use serde::{Deserialize, Serialize};
 
 use crate::engine_types::TurnPhase;

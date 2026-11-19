@@ -12,7 +12,7 @@ use crossterm::event::{self, Event};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use league_seat_ui::{Action, action_for, draw_title};
+use league_seat_ui::{Action, action_for};
 use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 
@@ -48,10 +48,13 @@ where
 {
     loop {
         terminal
-            .draw(draw_title)
+            .draw(|frame| {
+                let view = league_seat_ui::title_view();
+                host::draw_screen_view(frame, &view);
+            })
             .map_err(|err| io::Error::other(err.to_string()))?;
         if let Some(Event::Key(key)) = events()?
-            && action_for(key) == Action::Quit
+            && action_for(host::map_crossterm_key(key)) == Action::Quit
         {
             return Ok(());
         }

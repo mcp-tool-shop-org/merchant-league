@@ -483,37 +483,20 @@ const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
     "NUMERAIRE_CODE",
     "NUMERAIRE_DISPLAY_LABEL",
     "NUMERAIRE_PLAIN_LABEL",
-    // Concrete `ratatui` / `crossterm` UI types (never `Terminal`/`TestBackend`/`Box`/`dyn`)
-    "Action",
-    "Frame",
-    "Rect",
-    "Buffer",
-    "Style",
-    "Color",
-    "Modifier",
-    "Line",
-    "Span",
-    "Text",
-    "Paragraph",
-    "Block",
-    "Borders",
-    "BorderType",
-    "Alignment",
-    "Layout",
-    "Constraint",
-    "Direction",
-    "Margin",
-    "Tabs",
-    "Gauge",
-    "Clear",
-    "Wrap",
-    "KeyEvent",
-    "KeyCode",
-    "KeyModifiers",
-    "KeyEventKind",
-    "Event",
-    "MouseEvent",
-    // Concrete standard value & collection types
+    // Seat-safe view-model and plain key event types in `league-seat-types::view`
+    "ViewColor",
+    "ViewStyle",
+    "ViewAlign",
+    "ViewSpan",
+    "ViewRow",
+    "ViewLabel",
+    "ViewPanel",
+    "SeatScreenView",
+    "ViewportSize",
+    "SeatKeyCode",
+    "SeatKeyModifiers",
+    "SeatKeyEvent",
+    // Concrete `no_std` + `alloc` core value & collection types
     "bool",
     "char",
     "u8",
@@ -536,15 +519,12 @@ const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
     "VecDeque",
     "BTreeMap",
     "BTreeSet",
-    "HashMap",
-    "HashSet",
     "Option",
     "Result",
     "Cow",
     "PhantomData",
     "Ordering",
     "Duration",
-    "Instant",
     "Range",
     "RangeInclusive",
     "Formatter",
@@ -554,10 +534,9 @@ const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
 ];
 
 /// Strict entry-point parameter allow-list for `league-seat-ui` `pub fn` functions (`Part B` rule):
-/// accepts `league-seat-types` values, seat-ui-local UI state (`local_types`), and single scalar
-/// frame/key/mouse/state handles — never `Vec<KeyCode>`, slices, tuples, `Event` (carries
-/// `Event::Paste(String)`), `StructuredError`, `EngineError`, `RefusedActionPreview`, `char`,
-/// or free `&str`/`String`/`Cow`/`OsStr`/`CStr`.
+/// accepts `league-seat-types` observation/view-model/key values and seat-ui-local UI state —
+/// never `Vec<KeyCode>`, slices, tuples, `StructuredError`, `EngineError`,
+/// `RefusedActionPreview`, `char`, or free `&str`/`String`/`Cow`/`OsStr`/`CStr`.
 const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "SeatObservation",
     "PublicSweepReceipt",
@@ -652,16 +631,19 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "TableId",
     "TableMode",
     "CommodityDisplayMap",
+    "ViewColor",
+    "ViewStyle",
+    "ViewAlign",
+    "ViewSpan",
+    "ViewRow",
+    "ViewLabel",
+    "ViewPanel",
+    "SeatScreenView",
+    "ViewportSize",
+    "SeatKeyCode",
+    "SeatKeyModifiers",
+    "SeatKeyEvent",
     "Action",
-    "Frame",
-    "Rect",
-    "KeyEvent",
-    "KeyCode",
-    "KeyModifiers",
-    "KeyEventKind",
-    "MouseEvent",
-    "ListState",
-    "TableState",
     "bool",
     "Option",
 ];
@@ -763,16 +745,19 @@ const ALLOWED_SEAT_UI_PUB_FIELD_TYPES: &[&str] = &[
     "TableId",
     "TableMode",
     "CommodityDisplayMap",
+    "ViewColor",
+    "ViewStyle",
+    "ViewAlign",
+    "ViewSpan",
+    "ViewRow",
+    "ViewLabel",
+    "ViewPanel",
+    "SeatScreenView",
+    "ViewportSize",
+    "SeatKeyCode",
+    "SeatKeyModifiers",
+    "SeatKeyEvent",
     "Action",
-    "Frame",
-    "Rect",
-    "KeyEvent",
-    "KeyCode",
-    "KeyModifiers",
-    "KeyEventKind",
-    "MouseEvent",
-    "ListState",
-    "TableState",
     "bool",
     "u8",
     "usize",
@@ -1340,7 +1325,11 @@ fn tokenize_rust(source: &str) -> Vec<Tok> {
         if b == b'\'' {
             if i + 2 < len && bytes[i + 1] == b'\\' {
                 let mut j = i + 3;
-                while j < len && bytes[j] != b'\'' && j - i <= 8 {
+                while j < len
+                    && bytes[j] != b'\''
+                    && !matches!(bytes[j], b'\n' | b'\r')
+                    && j - i <= 32
+                {
                     j += 1;
                 }
                 if j < len && bytes[j] == b'\'' {
@@ -5034,24 +5023,6 @@ fn collect_seat_local_types(files: &[(String, String)], include_traits: bool) ->
     local_types
 }
 
-fn find_item_body_or_semi(tokens: &[Tok], start: usize) -> usize {
-    let mut paren = 0_usize;
-    let mut bracket = 0_usize;
-    let mut j = start;
-    while j < tokens.len() {
-        match tokens[j] {
-            Tok::LParen => paren += 1,
-            Tok::RParen => paren = paren.saturating_sub(1),
-            Tok::LBracket => bracket += 1,
-            Tok::RBracket => bracket = bracket.saturating_sub(1),
-            Tok::LBrace | Tok::Semi if paren == 0 && bracket == 0 => break,
-            _ => {}
-        }
-        j += 1;
-    }
-    j
-}
-
 fn find_stmt_semi(tokens: &[Tok], start: usize) -> usize {
     let mut brace = 0_usize;
     let mut paren = 0_usize;
@@ -5404,11 +5375,7 @@ fn check_seat_ui_public_surface(
                                 Tok::Ident(s)
                                     if matches!(
                                         s.as_str(),
-                                        "KeyEvent"
-                                            | "KeyCode"
-                                            | "KeyModifiers"
-                                            | "KeyEventKind"
-                                            | "MouseEvent"
+                                        "SeatKeyEvent" | "SeatKeyCode" | "SeatKeyModifiers"
                                     )
                             )
                         })
@@ -5946,6 +5913,14 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                 continue;
             }
 
+            if rel_path == "src/view.rs"
+                && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "trait")
+            {
+                return Err(format!(
+                    "{rel_path}: view-model module must not declare traits (`Item 4`)"
+                ));
+            }
+
             if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "type") {
                 let j = find_stmt_semi(&tokens, after_vis + 1);
                 attrs = AttrFlags::default();
@@ -5959,11 +5934,26 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                     j += 1;
                 }
                 let header = &tokens[after_vis + 1..j];
+                if rel_path == "src/view.rs"
+                    && parse_impl_header(header, &FileAliasTable::default()).0
+                {
+                    return Err(format!(
+                        "{rel_path}: view-model module must not implement traits beyond derives (`Item 4`)"
+                    ));
+                }
                 let where_slice = header
                     .iter()
                     .position(|t| matches!(t, Tok::Ident(w) if w == "where"))
                     .map(|wp| &header[wp + 1..])
                     .unwrap_or(&[]);
+                if rel_path == "src/view.rs"
+                    && (skip_angle_generics(&tokens, after_vis + 1) > after_vis + 1
+                        || !where_slice.is_empty())
+                {
+                    return Err(format!(
+                        "{rel_path}: view-model `impl` must not declare generics or lifetimes (`Item 4`)"
+                    ));
+                }
                 check_no_non_lifetime_generics_in_crate(
                     rel_path,
                     "league-seat-types",
@@ -6028,6 +6018,14 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                     j += 1;
                 }
                 let where_slice = where_pos.map(|wp| &tokens[wp + 1..j]).unwrap_or(&[]);
+                if rel_path == "src/view.rs"
+                    && (skip_angle_generics(&tokens, gen_start) > gen_start
+                        || !where_slice.is_empty())
+                {
+                    return Err(format!(
+                        "{rel_path}: view-model `fn {fn_name}` must not declare generics or lifetimes (`Item 4`)"
+                    ));
+                }
                 let allowed_fn_generics = parse_allowed_seat_types_fn_generics(
                     rel_path,
                     &format!("fn {fn_name}"),
@@ -6152,6 +6150,11 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                     body_pos += 1;
                 }
                 let where_slice = where_pos.map(|wp| &tokens[wp + 1..body_pos]).unwrap_or(&[]);
+                if rel_path == "src/view.rs" && (after_gen > gen_start || !where_slice.is_empty()) {
+                    return Err(format!(
+                        "{rel_path}: view-model `{item_kw} {item_name}` must not declare generics or lifetimes (`Item 4`)"
+                    ));
+                }
                 check_no_non_lifetime_generics_in_crate(
                     rel_path,
                     "league-seat-types",
@@ -6175,10 +6178,18 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                             if let Some(cpos) =
                                 clean.iter().position(|t| matches!(t, Tok::Other(':')))
                             {
+                                let field_ty = &clean[cpos + 1..];
+                                if rel_path == "src/view.rs"
+                                    && field_ty.iter().any(|t| matches!(t, Tok::Other('&')))
+                                {
+                                    return Err(format!(
+                                        "{rel_path}: view-model struct `{item_name}` field must use owned data (references are forbidden)"
+                                    ));
+                                }
                                 check_seat_surface_type_tokens(
                                     rel_path,
                                     &format!("struct `{item_name}` field"),
-                                    &clean[cpos + 1..],
+                                    field_ty,
                                     &item_env,
                                     SurfaceCheckMode::SeatTypes,
                                 )?;
@@ -6191,6 +6202,13 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                         let close = find_matching_paren(&tokens, body_pos);
                         for seg in split_top_level_comma(&tokens[body_pos + 1..close]) {
                             let clean = strip_leading_attrs_and_vis(seg);
+                            if rel_path == "src/view.rs"
+                                && clean.iter().any(|t| matches!(t, Tok::Other('&')))
+                            {
+                                return Err(format!(
+                                    "{rel_path}: view-model struct `{item_name}` field must use owned data (references are forbidden)"
+                                ));
+                            }
                             check_seat_surface_type_tokens(
                                 rel_path,
                                 &format!("struct `{item_name}` tuple field"),
@@ -6222,10 +6240,18 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                                 if let Some(cpos) =
                                     fclean.iter().position(|t| matches!(t, Tok::Other(':')))
                                 {
+                                    let field_ty = &fclean[cpos + 1..];
+                                    if rel_path == "src/view.rs"
+                                        && field_ty.iter().any(|t| matches!(t, Tok::Other('&')))
+                                    {
+                                        return Err(format!(
+                                            "{rel_path}: view-model enum `{item_name}` field must use owned data (references are forbidden)"
+                                        ));
+                                    }
                                     check_seat_surface_type_tokens(
                                         rel_path,
                                         &format!("enum `{item_name}` variant field"),
-                                        &fclean[cpos + 1..],
+                                        field_ty,
                                         &item_env,
                                         SurfaceCheckMode::SeatTypes,
                                     )?;
@@ -6237,6 +6263,13 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                             let v_close = find_matching_paren(clean, open_paren);
                             for fseg in split_top_level_comma(&clean[open_paren + 1..v_close]) {
                                 let fclean = strip_leading_attrs_and_vis(fseg);
+                                if rel_path == "src/view.rs"
+                                    && fclean.iter().any(|t| matches!(t, Tok::Other('&')))
+                                {
+                                    return Err(format!(
+                                        "{rel_path}: view-model enum `{item_name}` tuple field must use owned data (references are forbidden)"
+                                    ));
+                                }
                                 check_seat_surface_type_tokens(
                                     rel_path,
                                     &format!("enum `{item_name}` tuple variant field"),
@@ -6263,92 +6296,6 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
     Ok(())
 }
 
-const ALLOWED_SEAT_TYPES_DERIVES: &[&str] = &[
-    "Clone",
-    "Copy",
-    "Debug",
-    "Default",
-    "Deserialize",
-    "Eq",
-    "Hash",
-    "Ord",
-    "PartialEq",
-    "PartialOrd",
-    "Serialize",
-];
-
-const ALLOWED_SEAT_UI_DERIVES: &[&str] = &[
-    "Clone",
-    "Copy",
-    "Debug",
-    "Default",
-    "Eq",
-    "Hash",
-    "Ord",
-    "PartialEq",
-    "PartialOrd",
-];
-
-const ALLOWED_SEAT_TYPES_SERDE_ATTR_KEYS: &[&str] = &[
-    "default",
-    "skip_serializing_if",
-    "with",
-    "serialize_with",
-    "deserialize_with",
-    "rename_all",
-];
-
-const ALLOWED_SEAT_PROD_MACROS: &[&str] = &[
-    "vec",
-    "format",
-    "write",
-    "writeln",
-    "matches",
-    "debug_assert",
-];
-
-const ALLOWED_SEAT_TEST_MACROS: &[&str] = &["assert", "assert_eq", "assert_ne"];
-
-const ALLOWED_SEAT_CONST_TYPE_IDENTS: &[&str] = &[
-    "bool",
-    "char",
-    "u8",
-    "u16",
-    "u32",
-    "u64",
-    "u128",
-    "usize",
-    "i8",
-    "i16",
-    "i32",
-    "i64",
-    "i128",
-    "isize",
-    "str",
-    "Units",
-    "Bps",
-    "CommitmentHash",
-    "CommodityDisplayEntry",
-    "CLOSING_ROLL_WINDOW_LEN",
-];
-
-const ALLOWED_SEAT_TYPES_SUBMODS: &[&str] = &[
-    "commit",
-    "contracts",
-    "display",
-    "engine_types",
-    "observation",
-    "predicates_types",
-    "scoring_types",
-    "serde_helpers",
-    "types",
-    "wire_serde",
-    "hex32",
-    "opt_hex32",
-    "delivery_ledger_serde",
-    "tests",
-];
-
 fn parse_attr_bracket_end(tokens: &[Tok], lbracket_idx: usize) -> usize {
     let mut depth = 1_usize;
     let mut j = lbracket_idx + 1;
@@ -6361,6 +6308,10 @@ fn parse_attr_bracket_end(tokens: &[Tok], lbracket_idx: usize) -> usize {
         j += 1;
     }
     j
+}
+
+fn is_exact_seat_no_std_inner_attr(inner: &[Tok]) -> bool {
+    inner.len() == 1 && matches!(&inner[0], Tok::Ident(s) if s == "no_std")
 }
 
 fn is_exact_seat_forbid_inner_attr(inner: &[Tok]) -> bool {
@@ -6399,97 +6350,15 @@ fn is_exact_seat_forbid_inner_attr(inner: &[Tok]) -> bool {
         && lints.len() == 3
 }
 
-fn validate_seat_derive_attr(
-    crate_name: &str,
-    rel_path: &str,
-    inner: &[Tok],
-) -> Result<(), String> {
-    if inner.len() < 4
-        || !matches!(inner.get(1), Some(Tok::LParen))
-        || !matches!(inner.last(), Some(Tok::RParen))
-    {
-        return Err(format!(
-            "{crate_name}/{rel_path}: malformed `#[derive(...)]` attribute in seat crate"
-        ));
-    }
-    let allowed = if crate_name == "league-seat-types" {
-        ALLOWED_SEAT_TYPES_DERIVES
-    } else {
-        ALLOWED_SEAT_UI_DERIVES
-    };
-    let list = &inner[2..inner.len() - 1];
-    let mut saw_any = false;
-    for seg in split_top_level_comma(list) {
-        if seg.is_empty() {
-            continue;
-        }
-        if seg.len() != 1 {
-            return Err(format!(
-                "{crate_name}/{rel_path}: `#[derive(...)]` only permits bare allow-listed derive identifiers"
-            ));
-        }
-        let Tok::Ident(d) = &seg[0] else {
-            return Err(format!(
-                "{crate_name}/{rel_path}: `#[derive(...)]` contains non-identifier entry"
-            ));
-        };
-        if !allowed.contains(&d.as_str()) {
-            return Err(format!(
-                "{crate_name}/{rel_path}: derive `{d}` is not on the `{crate_name}` allow-list (`{allowed:?}`)"
-            ));
-        }
-        saw_any = true;
-    }
-    if !saw_any {
-        return Err(format!(
-            "{crate_name}/{rel_path}: empty `#[derive()]` is forbidden in seat crates"
-        ));
-    }
-    Ok(())
-}
-
-fn validate_seat_serde_attr(crate_name: &str, rel_path: &str, inner: &[Tok]) -> Result<(), String> {
-    if inner.len() < 4
-        || !matches!(inner.get(1), Some(Tok::LParen))
-        || !matches!(inner.last(), Some(Tok::RParen))
-    {
-        return Err(format!(
-            "{crate_name}/{rel_path}: malformed `#[serde(...)]` attribute"
-        ));
-    }
-    for seg in split_top_level_comma(&inner[2..inner.len() - 1]) {
-        if seg.is_empty() {
-            continue;
-        }
-        let Some(Tok::Ident(key)) = seg.first() else {
-            return Err(format!(
-                "{crate_name}/{rel_path}: `#[serde(...)]` key must be an allow-listed identifier"
-            ));
-        };
-        if !ALLOWED_SEAT_TYPES_SERDE_ATTR_KEYS.contains(&key.as_str()) {
-            return Err(format!(
-                "{crate_name}/{rel_path}: serde attribute `{key}` is not on the `league-seat-types` allow-list"
-            ));
-        }
-        if seg.len() > 1 && !matches!(seg.get(1), Some(Tok::Other('='))) {
-            return Err(format!(
-                "{crate_name}/{rel_path}: `#[serde({key}...)]` form is not on the seat-crate allow-list"
-            ));
-        }
-    }
-    Ok(())
-}
-
-struct SeatAttrScan {
-    is_attr_tok: Vec<bool>,
-    test_mod_span: Option<(usize, usize)>,
-}
-
-fn find_seat_test_mod_span_and_check_attrs(
+/// Checks attributes that `--target thumbv7em-none-eabi` cannot express on its own:
+/// exact `#![no_std]` / `#![forbid(...)]` at the top of `src/lib.rs`, at most one
+/// `#[cfg(test)] mod tests { ... }`, no other `#[cfg(...)]` or `#[cfg_attr(...)]`,
+/// no `#[path]` / `#[macro_export]` / `#[no_mangle]`, and no `clippy`/`disallowed_*` suppressions.
+fn check_seat_attrs_and_mark_spans(
     crate_name: &str,
     rel_path: &str,
     tokens: &[Tok],
-) -> Result<SeatAttrScan, String> {
+) -> Result<Vec<bool>, String> {
     let mut is_attr_tok = vec![false; tokens.len()];
     let mut test_mod_span: Option<(usize, usize)> = None;
     let mut cfg_test_seen = false;
@@ -6521,9 +6390,11 @@ fn find_seat_test_mod_span_and_check_attrs(
                         "{crate_name}/{rel_path}: inner attribute `#![...]` is only allowed at the top of `src/lib.rs`"
                     ));
                 }
-                if !is_exact_seat_forbid_inner_attr(inner) {
+                if !is_exact_seat_no_std_inner_attr(inner)
+                    && !is_exact_seat_forbid_inner_attr(inner)
+                {
                     return Err(format!(
-                        "{crate_name}/{rel_path}: inner attribute is not on the seat-crate allow-list (only `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` is allowed)"
+                        "{crate_name}/{rel_path}: inner attribute is not on the seat-crate allow-list (only `#![no_std]` and `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` are allowed)"
                     ));
                 }
                 i = end_excl;
@@ -6543,7 +6414,7 @@ fn find_seat_test_mod_span_and_check_attrs(
                         && matches!(&inner[3], Tok::RParen);
                     if !is_exact_cfg_test {
                         return Err(format!(
-                            "{crate_name}/{rel_path}: `#[cfg(...)]` is forbidden by seat-crate allow-list (only exact `#[cfg(test)]` on one `mod tests` block is allowed)"
+                            "{crate_name}/{rel_path}: `#[cfg(...)]` is forbidden in seat crates (only exact `#[cfg(test)]` on one `mod tests` block is allowed)"
                         ));
                     }
                     if cfg_test_seen {
@@ -6565,8 +6436,16 @@ fn find_seat_test_mod_span_and_check_attrs(
                     test_mod_span = Some((lbrace, rbrace));
                 }
                 Some("cfg_attr") => {
+                    if inner
+                        .iter()
+                        .any(|t| matches!(t, Tok::Ident(s) if s == "path"))
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `#[cfg_attr(..., path = ...)]` is forbidden in seat crates"
+                        ));
+                    }
                     return Err(format!(
-                        "{crate_name}/{rel_path}: `#[cfg_attr(...)]` is forbidden by seat-crate allow-list"
+                        "{crate_name}/{rel_path}: `#[cfg_attr(...)]` is forbidden in seat crates"
                     ));
                 }
                 Some("test") if inner.len() == 1 => {
@@ -6576,23 +6455,30 @@ fn find_seat_test_mod_span_and_check_attrs(
                         ));
                     }
                 }
-                Some("must_use") if inner.len() == 1 => {}
-                Some("derive") => validate_seat_derive_attr(crate_name, rel_path, inner)?,
-                Some("default") if crate_name == "league-seat-types" && inner.len() == 1 => {}
-                Some("doc")
-                    if crate_name == "league-seat-types"
-                        && inner.len() == 4
-                        && matches!(&inner[1], Tok::LParen)
-                        && matches!(&inner[2], Tok::Ident(s) if s == "hidden")
-                        && matches!(&inner[3], Tok::RParen) => {}
-                Some("serde") if crate_name == "league-seat-types" => {
-                    validate_seat_serde_attr(crate_name, rel_path, inner)?;
-                }
-                _ => {
+                Some("path" | "macro_export" | "no_mangle" | "export_name" | "link_section") => {
                     let attr_name = head.unwrap_or("<unknown>");
                     return Err(format!(
-                        "{crate_name}/{rel_path}: attribute `#[{attr_name}...]` is not on the `{crate_name}` allow-list"
+                        "{crate_name}/{rel_path}: `#[{attr_name}]` attribute is forbidden in seat crates"
                     ));
+                }
+                _ => {
+                    let has_suppression = inner.iter().any(|t| {
+                        matches!(
+                            t,
+                            Tok::Ident(s) if matches!(s.as_str(), "allow" | "expect" | "warn")
+                        )
+                    });
+                    let mentions_clippy_or_disallowed = inner.iter().any(|t| {
+                        matches!(
+                            t,
+                            Tok::Ident(s) if s == "clippy" || s.starts_with("disallowed_")
+                        )
+                    });
+                    if has_suppression && mentions_clippy_or_disallowed {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: must not suppress or downgrade `clippy`/`disallowed_*` lints via `#[allow]`/`#[expect]`"
+                        ));
+                    }
                 }
             }
             i = end_excl;
@@ -6602,795 +6488,100 @@ fn find_seat_test_mod_span_and_check_attrs(
         i += 1;
     }
 
-    Ok(SeatAttrScan {
-        is_attr_tok,
-        test_mod_span,
+    Ok(is_attr_tok)
+}
+
+fn is_forbidden_nostd_shared_state_ident(ident: &str) -> bool {
+    is_forbidden_interior_mutability_type(ident)
+}
+
+fn check_seat_observation_no_deserialize(
+    crate_name: &str,
+    rel_path: &str,
+    tokens: &[Tok],
+    is_attr_tok: &[bool],
+) -> Result<(), String> {
+    if crate_name != "league-seat-types" {
+        return Ok(());
+    }
+    for k in 0..tokens.len() {
+        if !is_attr_tok[k]
+            && matches!(&tokens[k], Tok::Ident(kw) if kw == "struct")
+            && matches!(tokens.get(k + 1), Some(Tok::Ident(nm)) if nm == "SeatObservation")
+        {
+            let mut decl_start = k;
+            if decl_start > 0 && matches!(&tokens[decl_start - 1], Tok::Ident(p) if p == "pub") {
+                decl_start -= 1;
+            } else if decl_start >= 3 && matches!(&tokens[decl_start - 1], Tok::RParen) {
+                let mut paren_depth = 1_usize;
+                let mut p = decl_start - 1;
+                while p > 0 && paren_depth > 0 {
+                    p -= 1;
+                    match tokens[p] {
+                        Tok::RParen => paren_depth += 1,
+                        Tok::LParen => paren_depth -= 1,
+                        _ => {}
+                    }
+                }
+                if p > 0 && matches!(&tokens[p - 1], Tok::Ident(kw) if kw == "pub") {
+                    decl_start = p - 1;
+                }
+            }
+            let mut back = decl_start;
+            while back > 0 && is_attr_tok[back - 1] {
+                back -= 1;
+            }
+            if tokens[back..decl_start]
+                .iter()
+                .any(|t| matches!(t, Tok::Ident(a) if a == "Deserialize"))
+            {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: `SeatObservation` must not derive `Deserialize` (`B1` host-only mandate isolation)"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn has_default_features_false(snippet: &str) -> bool {
+    let mut part_start = 0_usize;
+    let mut in_quote: Option<char> = None;
+    let mut parts = Vec::new();
+    for (idx, ch) in snippet.char_indices() {
+        match in_quote {
+            Some(q) if ch == q => in_quote = None,
+            Some(_) => {}
+            None if matches!(ch, '"' | '\'') => in_quote = Some(ch),
+            None if matches!(ch, '{' | '}' | ',') => {
+                parts.push(&snippet[part_start..idx]);
+                part_start = idx + 1;
+            }
+            None => {}
+        }
+    }
+    parts.push(&snippet[part_start..]);
+    parts.into_iter().any(|part| {
+        part.split_once('=')
+            .is_some_and(|(lhs, rhs)| lhs.trim() == "default-features" && rhs.trim() == "false")
     })
 }
 
-fn is_allowed_seat_std_core_chain(chain: &[&str]) -> bool {
-    let Some((&root, rest)) = chain.split_first() else {
-        return false;
-    };
-    match (root, rest.first().copied()) {
-        ("std" | "core", Some("fmt")) => match rest.get(1).copied() {
-            None => true,
-            Some(item) => {
-                matches!(item, "Debug" | "Display" | "Formatter" | "Result" | "Write")
-                    && rest.len() == 2
-            }
-        },
-        ("std", Some("collections")) => match rest.get(1).copied() {
-            Some("BTreeMap" | "BTreeSet" | "VecDeque") => rest.len() <= 3,
-            _ => false,
-        },
-        ("std" | "core", Some("cmp")) => match rest.get(1).copied() {
-            Some("Ordering" | "max" | "min") => rest.len() == 2,
-            _ => false,
-        },
-        ("std" | "core", Some("error")) => rest.get(1).copied() == Some("Error") && rest.len() == 2,
-        _ => false,
-    }
-}
-
-fn is_allowed_seat_use_path(
-    crate_name: &str,
-    local_mods: &BTreeSet<String>,
-    canonical_path: &str,
-) -> bool {
-    let segs: Vec<&str> = canonical_path.split("::").collect();
-    if segs.is_empty() || segs.contains(&"") {
-        return false;
-    }
-    if matches!(segs[0], "crate" | "super" | "self") || local_mods.contains(segs[0]) {
-        return segs[0] != "self" || segs.len() > 1;
-    }
-    if is_allowed_seat_std_core_chain(&segs) {
-        return true;
-    }
-    if crate_name == "league-seat-types" {
-        match segs[0] {
-            "league_error" => {
-                matches!(
-                    segs.get(1).copied(),
-                    Some("StructuredError" | "ToStructuredError" | "scrub_secret_text")
-                ) && segs.len() == 2
-            }
-            "serde" => match segs.get(1).copied() {
-                Some("Deserialize" | "Deserializer" | "Serialize" | "Serializer") => {
-                    segs.len() == 2
-                }
-                Some("de") => {
-                    segs.len() <= 3 && matches!(segs.get(2).copied(), None | Some("Error"))
-                }
-                _ => false,
-            },
-            _ => false,
-        }
-    } else {
-        matches!(segs[0], "league_seat_types" | "ratatui" | "crossterm") && segs.len() >= 2
-    }
-}
-
-fn is_rust_primitive_or_self_kw(ident: &str) -> bool {
-    matches!(
-        ident,
-        "bool"
-            | "char"
-            | "str"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "self"
-            | "super"
-            | "crate"
-    )
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SeatContainerKind {
-    Module,
-    Impl,
-    StructOrEnum,
-    FnOrBlock,
-}
-
-fn validate_seat_const_item(
-    crate_name: &str,
-    rel_path: &str,
-    stmt: &[Tok],
-    local_types: &BTreeSet<String>,
-) -> Result<(), String> {
-    let Some(Tok::Ident(const_name)) = stmt.first() else {
-        return Err(format!(
-            "{crate_name}/{rel_path}: `const` item must have a named identifier in seat crates"
-        ));
-    };
-    if const_name == "_" {
-        return Err(format!(
-            "{crate_name}/{rel_path}: anonymous `const _:` item is forbidden by seat-crate allow-list"
-        ));
-    }
-    let Some(colon_pos) = stmt.iter().position(|t| matches!(t, Tok::Other(':'))) else {
-        return Err(format!(
-            "{crate_name}/{rel_path}: `const {const_name}` missing explicit type annotation"
-        ));
-    };
-    let Some(eq_rel) = stmt[colon_pos + 1..]
-        .iter()
-        .position(|t| matches!(t, Tok::Other('=')))
-    else {
-        return Err(format!(
-            "{crate_name}/{rel_path}: `const {const_name}` missing `=` initializer"
-        ));
-    };
-    let eq_pos = colon_pos + 1 + eq_rel;
-    let ty_slice = &stmt[colon_pos + 1..eq_pos];
-    let expr_slice = &stmt[eq_pos + 1..];
-    if matches!(expr_slice.first(), Some(Tok::LBrace)) {
-        return Err(format!(
-            "{crate_name}/{rel_path}: `const {const_name}` block initializer `{{ ... }}` is forbidden by seat-crate allow-list"
-        ));
-    }
-    let empty_generics = BTreeSet::new();
-    let const_env = SurfaceCheckEnv {
-        crate_name,
-        local_types,
-        allowed_types: if crate_name == "league-seat-types" {
-            ALLOWED_SEAT_TYPES_SURFACE_TYPES
-        } else {
-            ALLOWED_SEAT_UI_PUBLIC_TYPES
-        },
-        allowed_fn_generics: &empty_generics,
-    };
-    let mode = if crate_name == "league-seat-types" {
-        SurfaceCheckMode::SeatTypes
-    } else {
-        SurfaceCheckMode::UiGeneral
-    };
-    check_seat_surface_type_tokens(
-        rel_path,
-        &format!("`const {const_name}`"),
-        ty_slice,
-        &const_env,
-        mode,
-    )?;
-
-    // Ensure const type uses strictly compile-time scalar/slice/catalog value types (no heap
-    // collections like `Vec`/`String`/`BTreeMap` or ratatui widget/frame handles).
-    let mut in_array_len = 0_usize;
-    let mut prev_quote = false;
-    for tok in ty_slice {
-        match tok {
-            Tok::Semi => in_array_len += 1,
-            Tok::RBracket => in_array_len = in_array_len.saturating_sub(1),
-            Tok::Ident(id)
-                if !prev_quote
-                    && in_array_len == 0
-                    && !TYPE_KEYWORDS_SKIP.contains(&id.as_str())
-                    && !ALLOWED_SEAT_CONST_TYPE_IDENTS.contains(&id.as_str()) =>
-            {
-                return Err(format!(
-                    "{crate_name}/{rel_path}: `const {const_name}` uses type `{id}` outside constant allow-list"
-                ));
-            }
-            _ => {}
-        }
-        prev_quote = matches!(tok, Tok::Other('\''));
-    }
-    Ok(())
-}
-
-fn collect_crate_local_mods(crate_name: &str, files: &[(String, String)]) -> BTreeSet<String> {
-    let mut mods = BTreeSet::new();
-    if crate_name == "league-seat-types" {
-        for &m in ALLOWED_SEAT_TYPES_SUBMODS {
-            mods.insert(m.to_owned());
-        }
-    } else {
-        mods.insert("tests".to_owned());
-    }
-    for (rel_path, source) in files {
-        let tokens = tokenize_rust(source);
-        for w in tokens.windows(2) {
-            if matches!(&w[0], Tok::Ident(k) if k == "mod")
-                && let Tok::Ident(m_name) = &w[1]
-            {
-                mods.insert(m_name.clone());
-            }
-        }
-        if let Some(stem) = rel_path
-            .strip_prefix("src/")
-            .and_then(|s| s.strip_suffix(".rs"))
-            && stem != "lib"
-        {
-            mods.insert(stem.to_owned());
-        }
-    }
-    mods
-}
-
-fn check_seat_crate_allowlist(crate_name: &str, files: &[(String, String)]) -> Result<(), String> {
-    let local_mods = collect_crate_local_mods(crate_name, files);
-    let mut local_types = collect_seat_local_types(files, crate_name == "league-seat-types");
-    if crate_name == "league-seat-types" {
-        for (_, source) in files {
-            let toks = tokenize_rust(source);
-            for w in toks.windows(2) {
-                if matches!(&w[0], Tok::Ident(kw) if kw == "type")
-                    && let Tok::Ident(alias_name) = &w[1]
-                {
-                    local_types.insert(alias_name.clone());
-                }
-            }
-        }
-    }
-
-    for (rel_path, source) in files {
-        let tokens = tokenize_rust(source);
-        let SeatAttrScan {
-            is_attr_tok,
-            test_mod_span,
-        } = find_seat_test_mod_span_and_check_attrs(crate_name, rel_path, &tokens)?;
-
-        // Check Observation derive in `crates/league-seat-types/src/observation.rs`:
-        // `SeatObservation` must NEVER derive `Deserialize` (`B1`).
-        if crate_name == "league-seat-types" {
-            for k in 0..tokens.len() {
-                if !is_attr_tok[k]
-                    && matches!(&tokens[k], Tok::Ident(kw) if kw == "struct")
-                    && matches!(tokens.get(k + 1), Some(Tok::Ident(nm)) if nm == "SeatObservation")
-                {
-                    let mut decl_start = k;
-                    if decl_start > 0
-                        && matches!(&tokens[decl_start - 1], Tok::Ident(p) if p == "pub")
-                    {
-                        decl_start -= 1;
-                    } else if decl_start >= 3 && matches!(&tokens[decl_start - 1], Tok::RParen) {
-                        let mut paren_depth = 1_usize;
-                        let mut p = decl_start - 1;
-                        while p > 0 && paren_depth > 0 {
-                            p -= 1;
-                            match tokens[p] {
-                                Tok::RParen => paren_depth += 1,
-                                Tok::LParen => paren_depth -= 1,
-                                _ => {}
-                            }
-                        }
-                        if p > 0 && matches!(&tokens[p - 1], Tok::Ident(kw) if kw == "pub") {
-                            decl_start = p - 1;
-                        }
-                    }
-                    let mut back = decl_start;
-                    while back > 0 && is_attr_tok[back - 1] {
-                        back -= 1;
-                    }
-                    if tokens[back..decl_start]
-                        .iter()
-                        .any(|t| matches!(t, Tok::Ident(a) if a == "Deserialize"))
-                    {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `SeatObservation` must not derive `Deserialize` (`B1` host-only mandate isolation)"
-                        ));
-                    }
-                }
-            }
-        }
-
-        // Whole-file macro/keyword/token allow-list.
-        for (k, tok) in tokens.iter().enumerate() {
-            if is_attr_tok[k] {
-                continue;
-            }
-            let in_test_mod = test_mod_span.is_some_and(|(s, e)| k > s && k < e);
-            if matches!(tok, Tok::Other('$')) {
-                return Err(format!(
-                    "{crate_name}/{rel_path}: macro metavariable `$` is forbidden by seat-crate allow-list"
-                ));
-            }
-            if let Tok::Ident(id) = tok {
-                if id == "static"
-                    && !matches!(
-                        k.checked_sub(1).and_then(|p| tokens.get(p)),
-                        Some(Tok::Other('\''))
-                    )
-                {
-                    return Err(format!(
-                        "{crate_name}/{rel_path}: `static` item is forbidden by seat-crate allow-list"
-                    ));
-                }
-                if matches!(
-                    id.as_str(),
-                    "macro_rules"
-                        | "proc_macro"
-                        | "unsafe"
-                        | "async"
-                        | "extern"
-                        | "union"
-                        | "asm"
-                        | "global_asm"
-                ) {
-                    return Err(format!(
-                        "{crate_name}/{rel_path}: `{id}` is forbidden by seat-crate allow-list"
-                    ));
-                }
-                if id == "macro"
-                    && matches!(tokens.get(k + 1), Some(Tok::Ident(_)))
-                    && (k == 0 || !matches!(tokens[k - 1], Tok::Other(':')))
-                {
-                    return Err(format!(
-                        "{crate_name}/{rel_path}: `macro` definition is forbidden by seat-crate allow-list"
-                    ));
-                }
-            }
-            if matches!(tok, Tok::Bang) {
-                let prev_is_pound = k > 0 && matches!(tokens[k - 1], Tok::Pound);
-                let next_is_eq = matches!(tokens.get(k + 1), Some(Tok::Other('=')));
-                if prev_is_pound || next_is_eq {
-                    continue;
-                }
-                if let Some(Tok::Ident(macro_name)) = k.checked_sub(1).and_then(|p| tokens.get(p))
-                    && matches!(
-                        tokens.get(k + 1),
-                        Some(Tok::LParen | Tok::LBracket | Tok::LBrace)
-                    )
-                    && !matches!(
-                        macro_name.as_str(),
-                        "if" | "while" | "return" | "break" | "in" | "match" | "else" | "yield"
-                    )
-                {
-                    if k >= 3
-                        && matches!(tokens[k - 2], Tok::Other(':'))
-                        && matches!(tokens[k - 3], Tok::Other(':'))
-                    {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: path-qualified macro `{macro_name}!` is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let allowed_prod = ALLOWED_SEAT_PROD_MACROS.contains(&macro_name.as_str());
-                    let allowed_test =
-                        in_test_mod && ALLOWED_SEAT_TEST_MACROS.contains(&macro_name.as_str());
-                    if !allowed_prod && !allowed_test {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: macro `{macro_name}!` is not on the seat-crate allow-list"
-                        ));
-                    }
-                }
-            }
-        }
-
-        // Inline `::` path chain allow-list (excluding attribute tokens and `use ...;` statements).
-        let mut idx = 0_usize;
-        while idx < tokens.len() {
-            if is_attr_tok[idx] {
-                idx += 1;
-                continue;
-            }
-            if matches!(&tokens[idx], Tok::Ident(u) if u == "use") {
-                idx = find_stmt_semi(&tokens, idx + 1) + 1;
-                continue;
-            }
-            let prev_is_double_colon = idx >= 2
-                && matches!(tokens[idx - 1], Tok::Other(':'))
-                && matches!(tokens[idx - 2], Tok::Other(':'));
-            if matches!(&tokens[idx], Tok::Ident(_))
-                && !prev_is_double_colon
-                && matches!(
-                    (tokens.get(idx + 1), tokens.get(idx + 2)),
-                    (Some(Tok::Other(':')), Some(Tok::Other(':')))
-                )
-            {
-                let mut chain: Vec<&str> = Vec::new();
-                let mut pos = idx;
-                while let Some(Tok::Ident(seg)) = tokens.get(pos) {
-                    chain.push(seg.as_str());
-                    if matches!(
-                        (tokens.get(pos + 1), tokens.get(pos + 2)),
-                        (Some(Tok::Other(':')), Some(Tok::Other(':')))
-                    ) {
-                        pos += 3;
-                    } else {
-                        pos += 1;
-                        break;
-                    }
-                }
-                if chain.len() >= 2 {
-                    let seg0 = chain[0];
-                    if matches!(seg0, "std" | "core" | "alloc") {
-                        if !is_allowed_seat_std_core_chain(&chain) {
-                            return Err(format!(
-                                "{crate_name}/{rel_path}: inline std/core path `{}` is not on the seat-crate allow-list",
-                                chain.join("::")
-                            ));
-                        }
-                    } else if seg0 == "fmt" {
-                        if !matches!(
-                            chain.get(1).copied(),
-                            Some("Debug" | "Display" | "Formatter" | "Result" | "Write")
-                        ) || chain.len() > 2
-                        {
-                            return Err(format!(
-                                "{crate_name}/{rel_path}: path `{}` is not on the seat-crate allow-list",
-                                chain.join("::")
-                            ));
-                        }
-                    } else if seg0.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-                        && !is_rust_primitive_or_self_kw(seg0)
-                        && !local_mods.contains(seg0)
-                    {
-                        let allowed_external = if crate_name == "league-seat-types" {
-                            seg0 == "league_error" || seg0 == "serde"
-                        } else {
-                            matches!(seg0, "league_seat_types" | "ratatui" | "crossterm")
-                        };
-                        if !allowed_external {
-                            return Err(format!(
-                                "{crate_name}/{rel_path}: path `{}` is not on the `{crate_name}` allow-list",
-                                chain.join("::")
-                            ));
-                        }
-                    }
-                }
-                idx = pos;
-                continue;
-            }
-            if matches!(tokens[idx], Tok::Other(':'))
-                && matches!(tokens.get(idx + 1), Some(Tok::Other(':')))
-                && matches!(tokens.get(idx + 2), Some(Tok::Ident(_)))
-                && (idx == 0
-                    || !matches!(
-                        tokens[idx - 1],
-                        Tok::Ident(_) | Tok::Other('>') | Tok::RParen | Tok::RBracket
-                    ))
-            {
-                return Err(format!(
-                    "{crate_name}/{rel_path}: global-root `::` path is forbidden by seat-crate allow-list"
-                ));
-            }
-            idx += 1;
-        }
-
-        // Scope, item-kind, `const`, `type`, `trait`, `mod`, and `use` statement walk.
-        let mut scopes = vec![SeatContainerKind::Module];
-        let mut at_stmt_start = true;
-        let mut k = 0_usize;
-
-        while k < tokens.len() {
-            if is_attr_tok[k] {
-                k += 1;
-                continue;
-            }
-            let in_test_mod = test_mod_span.is_some_and(|(s, e)| k > s && k < e);
-            let cur_scope = scopes.last().copied().unwrap_or(SeatContainerKind::Module);
-
-            match &tokens[k] {
-                Tok::RBrace => {
-                    if scopes.len() > 1 {
-                        scopes.pop();
-                    }
-                    at_stmt_start = true;
-                    k += 1;
-                    continue;
-                }
-                Tok::LBrace => {
-                    if cur_scope == SeatContainerKind::StructOrEnum {
-                        scopes.push(SeatContainerKind::StructOrEnum);
-                    } else {
-                        scopes.push(SeatContainerKind::FnOrBlock);
-                    }
-                    at_stmt_start = true;
-                    k += 1;
-                    continue;
-                }
-                Tok::Semi => {
-                    at_stmt_start = true;
-                    k += 1;
-                    continue;
-                }
-                _ => {}
-            }
-
-            if matches!(cur_scope, SeatContainerKind::StructOrEnum) || !at_stmt_start {
-                k += 1;
-                continue;
-            }
-
-            // Skip visibility qualifier (`pub` or `pub(...)`) at statement/item start.
-            let mut item_pos = k;
-            if matches!(&tokens[item_pos], Tok::Ident(p) if p == "pub") {
-                if matches!(tokens.get(item_pos + 1), Some(Tok::LParen)) {
-                    item_pos = find_matching_paren(&tokens, item_pos + 1) + 1;
-                } else {
-                    item_pos += 1;
-                }
-            }
-            while item_pos < tokens.len() && is_attr_tok[item_pos] {
-                item_pos += 1;
-            }
-            let Some(Tok::Ident(kw)) = tokens.get(item_pos) else {
-                if matches!(
-                    cur_scope,
-                    SeatContainerKind::Module | SeatContainerKind::Impl
-                ) {
-                    return Err(format!(
-                        "{crate_name}/{rel_path}: unexpected non-identifier token at item start"
-                    ));
-                }
-                at_stmt_start = false;
-                k = item_pos + 1;
-                continue;
-            };
-
-            match kw.as_str() {
-                "use" => {
-                    let semi = find_stmt_semi(&tokens, item_pos + 1);
-                    let use_toks = &tokens[item_pos + 1..semi];
-                    if matches!(use_toks.first(), Some(Tok::Other(':'))) {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: global-root `use ::...` is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    if use_toks
-                        .iter()
-                        .any(|t| matches!(t, Tok::Ident(s) if s == "as"))
-                    {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `use ... as` rename is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let mut expanded = Vec::new();
-                    expand_use_tree_inner(rel_path, use_toks, "", false, &mut expanded)?;
-                    for item in &expanded {
-                        if !is_allowed_seat_use_path(crate_name, &local_mods, &item.canonical_path)
-                        {
-                            return Err(format!(
-                                "{crate_name}/{rel_path}: `use {}` is not on the `{crate_name}` allow-list",
-                                item.canonical_path
-                            ));
-                        }
-                    }
-                    at_stmt_start = true;
-                    k = (semi + 1).min(tokens.len());
-                }
-                "type" => {
-                    if crate_name == "league-seat-ui"
-                        || cur_scope != SeatContainerKind::Module
-                        || in_test_mod
-                    {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `type` item is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let semi = find_stmt_semi(&tokens, item_pos + 1);
-                    at_stmt_start = true;
-                    k = (semi + 1).min(tokens.len());
-                }
-                "trait" => {
-                    let is_allowed_parity_trait = crate_name == "league-seat-types"
-                        && rel_path == "src/scoring_types.rs"
-                        && cur_scope == SeatContainerKind::Module
-                        && !in_test_mod
-                        && matches!(
-                            tokens.get(item_pos + 1),
-                            Some(Tok::Ident(n)) if n == "ParitySpecSource"
-                        );
-                    if !is_allowed_parity_trait {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `trait` definition is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let j = find_item_body_or_semi(&tokens, item_pos + 2);
-                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
-                        scopes.push(SeatContainerKind::Impl);
-                        at_stmt_start = true;
-                        k = j + 1;
-                    } else {
-                        at_stmt_start = true;
-                        k = (j + 1).min(tokens.len());
-                    }
-                }
-                "const" if matches!(tokens.get(item_pos + 1), Some(Tok::Ident(s)) if s == "fn") => {
-                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: nested `const fn` declaration inside production function body is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let j = find_item_body_or_semi(&tokens, item_pos + 2);
-                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
-                        scopes.push(SeatContainerKind::FnOrBlock);
-                        at_stmt_start = true;
-                        k = j + 1;
-                    } else {
-                        at_stmt_start = true;
-                        k = (j + 1).min(tokens.len());
-                    }
-                }
-                "const" => {
-                    if !matches!(
-                        cur_scope,
-                        SeatContainerKind::Module | SeatContainerKind::Impl
-                    ) {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `const` item outside module/`impl` scope is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let semi = find_stmt_semi(&tokens, item_pos + 1);
-                    validate_seat_const_item(
-                        crate_name,
-                        rel_path,
-                        &tokens[item_pos + 1..semi],
-                        &local_types,
-                    )?;
-                    at_stmt_start = true;
-                    k = (semi + 1).min(tokens.len());
-                }
-                "fn" => {
-                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: nested `fn` declaration inside production function body is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
-                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
-                        scopes.push(SeatContainerKind::FnOrBlock);
-                        at_stmt_start = true;
-                        k = j + 1;
-                    } else {
-                        at_stmt_start = true;
-                        k = (j + 1).min(tokens.len());
-                    }
-                }
-                "impl" => {
-                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: nested `impl` block inside production function body is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
-                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
-                        scopes.push(SeatContainerKind::Impl);
-                        at_stmt_start = true;
-                        k = j + 1;
-                    } else {
-                        at_stmt_start = true;
-                        k = (j + 1).min(tokens.len());
-                    }
-                }
-                "mod" => {
-                    if cur_scope != SeatContainerKind::Module {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: `mod` inside function/impl body is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
-                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
-                        scopes.push(SeatContainerKind::Module);
-                        at_stmt_start = true;
-                        k = j + 1;
-                    } else {
-                        at_stmt_start = true;
-                        k = (j + 1).min(tokens.len());
-                    }
-                }
-                "struct" | "enum" => {
-                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: nested `{kw}` declaration inside production function body is forbidden by seat-crate allow-list"
-                        ));
-                    }
-                    let mut j = item_pos + 1;
-                    while j < tokens.len()
-                        && !matches!(tokens[j], Tok::LBrace | Tok::LParen | Tok::Semi)
-                    {
-                        j += 1;
-                    }
-                    match tokens.get(j) {
-                        Some(Tok::LBrace) => {
-                            scopes.push(SeatContainerKind::StructOrEnum);
-                            at_stmt_start = true;
-                            k = j + 1;
-                        }
-                        Some(Tok::LParen) => {
-                            let semi = find_stmt_semi(&tokens, j + 1);
-                            at_stmt_start = true;
-                            k = (semi + 1).min(tokens.len());
-                        }
-                        _ => {
-                            at_stmt_start = true;
-                            k = (j + 1).min(tokens.len());
-                        }
-                    }
-                }
-                other => {
-                    if matches!(
-                        cur_scope,
-                        SeatContainerKind::Module | SeatContainerKind::Impl
-                    ) {
-                        return Err(format!(
-                            "{crate_name}/{rel_path}: item kind `{other}` is not on the seat-crate allow-list"
-                        ));
-                    }
-                    at_stmt_start = false;
-                    k = item_pos + 1;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn is_forbidden_seat_type_or_channel_ident(ident: &str) -> bool {
-    matches!(
-        ident,
-        "File"
-            | "OpenOptions"
-            | "ReadDir"
-            | "DirBuilder"
-            | "DirEntry"
-            | "Metadata"
-            | "Command"
-            | "Path"
-            | "PathBuf"
-            | "Stdin"
-            | "StdinLock"
-            | "TcpStream"
-            | "TcpListener"
-            | "UdpSocket"
-            | "Incoming"
-            | "SocketAddr"
-            | "SocketAddrV4"
-            | "SocketAddrV6"
-            | "IpAddr"
-            | "Ipv4Addr"
-            | "Ipv6Addr"
-            | "AddrParseError"
-    ) || is_forbidden_interior_mutability_type(ident)
-}
-
-fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Result<(), String> {
+fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Result<(), String> {
     let clippy_path = crate_dir.join("clippy.toml");
     let clippy_toml = fs::read_to_string(&clippy_path)
         .map_err(|err| format!("{crate_name}: missing or unreadable clippy.toml ({err})"))?;
     for required in [
-        "std::fs::File",
-        "std::fs::read",
-        "std::fs::read_to_string",
-        "std::path::Path",
-        "std::path::PathBuf",
-        "std::path::Path::read_dir",
-        "std::path::Path::metadata",
-        "std::path::Path::exists",
-        "std::path::Path::try_exists",
-        "std::path::Path::canonicalize",
-        "std::net::TcpStream",
-        "std::net::TcpStream::connect",
-        "std::io::stdin",
-        "std::io::Stdin",
-        "std::env::var",
-        "std::process::Command",
-        "std::include",
-        "std::include_str",
-        "std::include_bytes",
-        "std::thread_local",
-        "std::sync::Mutex",
-        "std::sync::RwLock",
-        "std::sync::OnceLock",
-        "std::sync::LazyLock",
         "core::cell::RefCell",
         "core::cell::Cell",
         "core::sync::atomic::AtomicBool",
+        "alloc::sync::Arc",
+        "alloc::rc::Rc",
+        "core::include",
+        "core::include_str",
+        "core::include_bytes",
+        "core::env",
+        "core::option_env",
     ] {
         if !clippy_toml.contains(required) {
             return Err(format!(
@@ -7409,6 +6600,7 @@ fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Res
     let lib_src = fs::read_to_string(&lib_rs_path)
         .map_err(|err| format!("{crate_name}/src/lib.rs: failed to read ({err})"))?;
     let lib_tokens = tokenize_rust(&lib_src);
+    let mut saw_no_std = false;
     let mut forbidden_lints = BTreeSet::new();
     let mut idx = 0_usize;
     while idx + 2 < lib_tokens.len() {
@@ -7416,18 +6608,11 @@ fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Res
             && matches!(lib_tokens[idx + 1], Tok::Bang)
             && matches!(lib_tokens[idx + 2], Tok::LBracket)
         {
-            let mut d = 1_usize;
-            let start = idx + 3;
-            let mut end = start;
-            while end < lib_tokens.len() && d > 0 {
-                match lib_tokens[end] {
-                    Tok::LBracket => d += 1,
-                    Tok::RBracket => d -= 1,
-                    _ => {}
-                }
-                end += 1;
+            let end = parse_attr_bracket_end(&lib_tokens, idx + 2);
+            let inner = &lib_tokens[idx + 3..end.saturating_sub(1)];
+            if is_exact_seat_no_std_inner_attr(inner) {
+                saw_no_std = true;
             }
-            let inner = &lib_tokens[start..end.saturating_sub(1)];
             if matches!(inner.first(), Some(Tok::Ident(s)) if s == "deny")
                 && inner
                     .iter()
@@ -7452,6 +6637,9 @@ fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Res
         } else {
             idx += 1;
         }
+    }
+    if !saw_no_std {
+        return Err(format!("{crate_name}/src/lib.rs must declare `#![no_std]`"));
     }
     for req_lint in [
         "disallowed_methods",
@@ -7514,175 +6702,129 @@ fn check_seat_crate_no_io_or_includes(crate_name: &str, crate_dir: &Path) -> Res
         let src = fs::read_to_string(&rs_path)
             .map_err(|err| format!("{crate_name}/{rel}: failed to read: {err}"))?;
         let tokens = tokenize_rust(&src);
-        let mut k = 0_usize;
-        while k < tokens.len() {
-            // Check attributes: ban `#[path]`, `#[cfg_attr(..., path = ...)]`, and any
-            // `allow`/`expect`/`warn` referencing `clippy` or `disallowed_*`.
-            if matches!(tokens[k], Tok::Pound) {
-                let b_idx = if matches!(tokens.get(k + 1), Some(Tok::Bang)) {
-                    k + 2
-                } else {
-                    k + 1
-                };
-                if matches!(tokens.get(b_idx), Some(Tok::LBracket)) {
-                    let mut d = 1_usize;
-                    let attr_start = b_idx + 1;
-                    let mut attr_end = attr_start;
-                    while attr_end < tokens.len() && d > 0 {
-                        match tokens[attr_end] {
-                            Tok::LBracket => d += 1,
-                            Tok::RBracket => d -= 1,
-                            _ => {}
-                        }
-                        attr_end += 1;
-                    }
-                    let inner = &tokens[attr_start..attr_end.saturating_sub(1)];
-                    if matches!(inner.first(), Some(Tok::Ident(s)) if s == "path") {
+        let is_attr_tok = check_seat_attrs_and_mark_spans(crate_name, &rel, &tokens)?;
+        check_seat_observation_no_deserialize(crate_name, &rel, &tokens, &is_attr_tok)?;
+
+        for k in 0..tokens.len() {
+            if is_attr_tok[k] {
+                continue;
+            }
+            if let Some(Tok::Ident(id)) = tokens.get(k) {
+                // Ban `macro_rules!` / Macros 2.0 `macro` definitions so macros cannot hide
+                // `pub fn` items from the surface checker.
+                if id == "macro_rules" {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `macro_rules` is forbidden in seat crates"
+                    ));
+                }
+                if id == "macro"
+                    && matches!(tokens.get(k + 1), Some(Tok::Ident(_)))
+                    && (k == 0 || !matches!(tokens[k - 1], Tok::Other(':')))
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `macro` definition is forbidden in seat crates"
+                    ));
+                }
+
+                // Ban `extern crate` (except `extern crate alloc;` in `src/lib.rs`) and `extern { ... }`
+                // FFI blocks (leaving `extern "C" fn` pointer types to report cleanly in surface checks).
+                if id == "extern" {
+                    let is_allowed_extern_alloc = rel == "src/lib.rs"
+                        && matches!(tokens.get(k + 1), Some(Tok::Ident(c)) if c == "crate")
+                        && matches!(tokens.get(k + 2), Some(Tok::Ident(a)) if a == "alloc")
+                        && matches!(tokens.get(k + 3), Some(Tok::Semi));
+                    let is_extern_crate =
+                        matches!(tokens.get(k + 1), Some(Tok::Ident(c)) if c == "crate");
+                    let is_extern_block = matches!(tokens.get(k + 1), Some(Tok::LBrace))
+                        || (matches!(tokens.get(k + 1), Some(Tok::Str(_)))
+                            && matches!(tokens.get(k + 2), Some(Tok::LBrace)));
+                    if !is_allowed_extern_alloc && (is_extern_crate || is_extern_block) {
                         return Err(format!(
-                            "{crate_name}/{rel}: `#[path]` attribute is forbidden in seat crates"
-                        ));
-                    }
-                    let has_cfg_attr = inner
-                        .iter()
-                        .any(|t| matches!(t, Tok::Ident(s) if s == "cfg_attr"));
-                    let has_path = inner
-                        .iter()
-                        .any(|t| matches!(t, Tok::Ident(s) if s == "path"));
-                    if has_cfg_attr && has_path {
-                        return Err(format!(
-                            "{crate_name}/{rel}: `#[cfg_attr(..., path = ...)]` is forbidden in seat crates"
-                        ));
-                    }
-                    let has_suppression = inner
-                        .iter()
-                        .any(|t| matches!(t, Tok::Ident(s) if matches!(s.as_str(), "allow" | "expect" | "warn")));
-                    let mentions_clippy_or_disallowed = inner.iter().any(|t| {
-                        matches!(
-                            t,
-                            Tok::Ident(s) if s == "clippy" || s.starts_with("disallowed_")
-                        )
-                    });
-                    if has_suppression && mentions_clippy_or_disallowed {
-                        return Err(format!(
-                            "{crate_name}/{rel}: must not suppress or downgrade `clippy`/`disallowed_*` lints via `#[allow]`/`#[expect]`"
+                            "{crate_name}/{rel}: `extern` crate/FFI block is forbidden in seat crates"
                         ));
                     }
                 }
-            }
 
-            // Ban `static` items (while preserving `'static` lifetimes).
-            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "static")
-                && !matches!(
-                    k.checked_sub(1).and_then(|p| tokens.get(p)),
-                    Some(Tok::Other('\''))
-                )
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: `static` items are forbidden in seat crates"
-                ));
-            }
+                // Ban `unsafe` blocks/fns/impls/traits (leaving `unsafe fn(...)` fn pointers to
+                // surface checks so fn-pointer rejection stays explicit).
+                if id == "unsafe" {
+                    let is_unsafe_fn_ptr_ty = matches!(tokens.get(k + 1), Some(Tok::Ident(f)) if f == "fn")
+                        && matches!(tokens.get(k + 2), Some(Tok::LParen));
+                    if !is_unsafe_fn_ptr_ty {
+                        return Err(format!(
+                            "{crate_name}/{rel}: `unsafe` is forbidden in seat crates"
+                        ));
+                    }
+                }
 
-            // Ban `thread_local` macro/path anywhere in seat crates.
-            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "thread_local") {
-                return Err(format!(
-                    "{crate_name}/{rel}: `thread_local!` is forbidden in seat crates"
-                ));
-            }
+                // Ban `static` items (while preserving `'static` lifetimes).
+                if id == "static"
+                    && !matches!(
+                        k.checked_sub(1).and_then(|p| tokens.get(p)),
+                        Some(Tok::Other('\''))
+                    )
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `static` items are forbidden in seat crates"
+                    ));
+                }
 
-            // Ban `include!`, `include_str!`, `include_bytes!`, `env!`, `option_env!`.
-            if let Some(Tok::Ident(m)) = tokens.get(k)
-                && matches!(
-                    m.as_str(),
+                // Ban compile-time host file/env macros that work even in `#![no_std]`.
+                if matches!(
+                    id.as_str(),
                     "include" | "include_str" | "include_bytes" | "env" | "option_env"
-                )
-                && matches!(tokens.get(k + 1), Some(Tok::Bang))
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: macro `{m}!` is forbidden in seat crates"
-                ));
-            }
+                ) && matches!(tokens.get(k + 1), Some(Tok::Bang))
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel}: macro `{id}!` is forbidden in seat crates"
+                    ));
+                }
 
-            // Ban `fs::`, `env::`, `process::`, `net::`, `path::`, `cell::`, `atomic::`, `mpsc::`.
-            if let Some(Tok::Ident(seg)) = tokens.get(k)
-                && matches!(
-                    seg.as_str(),
-                    "fs" | "env" | "process" | "net" | "path" | "cell" | "atomic" | "mpsc"
-                )
-                && matches!(
-                    (tokens.get(k + 1), tokens.get(k + 2)),
-                    (Some(Tok::Other(':')), Some(Tok::Other(':')))
-                )
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: `{seg}::` I/O, network, path, or shared-state access is forbidden in seat crates"
-                ));
-            }
-
-            // Ban `.read_dir(` and `stdin(` / `io::stdin`.
-            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "read_dir")
-                && matches!(tokens.get(k + 1), Some(Tok::LParen))
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: `read_dir()` is forbidden in seat crates"
-                ));
-            }
-            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "stdin")
-                && (matches!(tokens.get(k + 1), Some(Tok::LParen))
-                    || matches!(
-                        (
-                            k.checked_sub(2).and_then(|p| tokens.get(p)),
-                            k.checked_sub(1).and_then(|p| tokens.get(p)),
-                        ),
+                // Ban `core::cell::` and `core::sync::atomic::` paths, plus `core`/`alloc`
+                // shared-state types (`Cell`, `RefCell`, `UnsafeCell`, `OnceCell`, `LazyCell`,
+                // `Rc`, `Arc`, `Weak`, `Atomic*`).
+                if matches!(id.as_str(), "cell" | "atomic")
+                    && matches!(
+                        (tokens.get(k + 1), tokens.get(k + 2)),
                         (Some(Tok::Other(':')), Some(Tok::Other(':')))
-                    ))
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: `stdin` input stream is forbidden in seat crates"
-                ));
-            }
+                    )
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `{id}::` shared-state access is forbidden in seat crates"
+                    ));
+                }
+                if is_forbidden_nostd_shared_state_ident(id) {
+                    return Err(format!(
+                        "{crate_name}/{rel}: forbidden shared-state / interior-mutability type `{id}` in seat crates"
+                    ));
+                }
 
-            // Ban forbidden I/O, path, net, stdin, and interior-mutability identifiers.
-            if let Some(Tok::Ident(id)) = tokens.get(k)
-                && is_forbidden_seat_type_or_channel_ident(id)
-            {
-                return Err(format!(
-                    "{crate_name}/{rel}: forbidden I/O, network, path, or interior-mutability type `{id}` in seat crates"
-                ));
-            }
-
-            // Ban `use std::fs`, `use std::net`, `use std::path`, `use std::io::stdin`, etc.
-            if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "use") {
-                let end = find_stmt_semi(&tokens, k + 1);
-                let mut expanded = Vec::new();
-                expand_use_tree_allow_glob(&rel, &tokens[k + 1..end], &mut expanded);
-                for item in expanded {
-                    for seg in item.canonical_path.split("::") {
-                        if matches!(
-                            seg,
-                            "fs" | "env"
-                                | "process"
-                                | "net"
-                                | "path"
-                                | "cell"
-                                | "atomic"
-                                | "mpsc"
-                                | "stdin"
-                                | "thread_local"
-                                | "include"
-                                | "include_str"
-                                | "include_bytes"
-                        ) || is_forbidden_seat_type_or_channel_ident(seg)
-                        {
-                            return Err(format!(
-                                "{crate_name}/{rel}: `use {}` is forbidden in seat crates",
-                                item.canonical_path
-                            ));
+                if id == "use" {
+                    let end = find_stmt_semi(&tokens, k + 1);
+                    let mut expanded = Vec::new();
+                    expand_use_tree_allow_glob(&rel, &tokens[k + 1..end], &mut expanded);
+                    for item in expanded {
+                        for seg in item.canonical_path.split("::") {
+                            if matches!(
+                                seg,
+                                "cell"
+                                    | "atomic"
+                                    | "include"
+                                    | "include_str"
+                                    | "include_bytes"
+                                    | "env"
+                                    | "option_env"
+                            ) || is_forbidden_nostd_shared_state_ident(seg)
+                            {
+                                return Err(format!(
+                                    "{crate_name}/{rel}: `use {}` is forbidden in seat crates",
+                                    item.canonical_path
+                                ));
+                            }
                         }
                     }
                 }
             }
-
-            k += 1;
         }
     }
 
@@ -8088,18 +7230,18 @@ fn check_league_error_leaf_manifest(manifest: &str) -> Result<(), String> {
     let mut section = String::new();
     let mut brace_depth = 0usize;
     let mut bracket_depth = 0usize;
+    let mut active_dep: Option<String> = None;
+    let mut serde_no_default: BTreeMap<String, bool> = BTreeMap::new();
 
     for raw_line in manifest.lines() {
         let code_part = raw_line.split('#').next().unwrap_or("").trim();
         if code_part.is_empty() {
             continue;
         }
-        if brace_depth == 0
-            && bracket_depth == 0
-            && code_part.starts_with('[')
-            && code_part.ends_with(']')
-        {
+        let was_depth_zero = brace_depth == 0 && bracket_depth == 0;
+        if was_depth_zero && code_part.starts_with('[') && code_part.ends_with(']') {
             section = code_part.to_owned();
+            active_dep = None;
             if !matches!(section.as_str(), "[package]" | "[dependencies]" | "[lints]") {
                 return Err(format!(
                     "league-error/Cargo.toml defines forbidden section `{section}`; only `[package]`, `[dependencies]`, and `[lints]` are permitted"
@@ -8113,16 +7255,15 @@ fn check_league_error_leaf_manifest(manifest: &str) -> Result<(), String> {
             ));
         }
         if section == "[dependencies]" {
-            if brace_depth == 0
-                && bracket_depth == 0
-                && let Some((lhs, _rhs)) = code_part.split_once('=')
-            {
+            if was_depth_zero && let Some((lhs, _rhs)) = code_part.split_once('=') {
                 let dep_key = lhs.trim().trim_matches('"').trim_matches('\'');
                 if !matches!(dep_key, "serde" | "serde_json") {
                     return Err(format!(
                         "league-error/Cargo.toml dependency `{dep_key}` is not in allow-list `[\"serde\", \"serde_json\"]`"
                     ));
                 }
+                active_dep = Some(dep_key.to_owned());
+                serde_no_default.entry(dep_key.to_owned()).or_insert(false);
             }
             if code_part.contains("path")
                 || code_part.contains("git")
@@ -8133,6 +7274,12 @@ fn check_league_error_leaf_manifest(manifest: &str) -> Result<(), String> {
                         .to_owned(),
                 );
             }
+            if let Some(ref dep) = active_dep
+                && matches!(dep.as_str(), "serde" | "serde_json")
+                && has_default_features_false(code_part)
+            {
+                serde_no_default.insert(dep.clone(), true);
+            }
             for ch in code_part.chars() {
                 match ch {
                     '{' => brace_depth += 1,
@@ -8142,9 +7289,19 @@ fn check_league_error_leaf_manifest(manifest: &str) -> Result<(), String> {
                     _ => {}
                 }
             }
+            if brace_depth == 0 && bracket_depth == 0 {
+                active_dep = None;
+            }
         } else if section == "[lints]" && code_part != "workspace = true" {
             return Err(format!(
                 "league-error/Cargo.toml `[lints]` only permits `workspace = true`, found `{code_part}`"
+            ));
+        }
+    }
+    for (dep_name, has_no_default) in serde_no_default {
+        if !has_no_default {
+            return Err(format!(
+                "league-error/Cargo.toml dependency `{dep_name}` must set `default-features = false` for `no_std`"
             ));
         }
     }
@@ -8832,6 +7989,9 @@ fn check_seat_crate_manifest(
 
     let mut section = String::new();
     let mut subtable_dep: Option<String> = None;
+    let mut active_inline_dep: Option<String> = None;
+    let mut saw_lib_doctest_false = false;
+    let mut serde_no_default: BTreeMap<String, bool> = BTreeMap::new();
     let mut brace_depth = 0_usize;
     let mut bracket_depth = 0_usize;
 
@@ -8844,7 +8004,11 @@ fn check_seat_crate_manifest(
         if was_depth_zero && code_part.starts_with('[') && code_part.ends_with(']') {
             section = code_part.to_owned();
             subtable_dep = None;
-            if matches!(section.as_str(), "[package]" | "[dependencies]" | "[lints]") {
+            active_inline_dep = None;
+            if matches!(
+                section.as_str(),
+                "[package]" | "[lib]" | "[dependencies]" | "[lints]"
+            ) {
                 continue;
             }
             let inner = &code_part[1..code_part.len() - 1];
@@ -8857,10 +8021,13 @@ fn check_seat_crate_manifest(
                     ));
                 }
                 subtable_dep = Some(dep_name.to_owned());
+                if matches!(dep_name, "serde" | "serde_json") {
+                    serde_no_default.entry(dep_name.to_owned()).or_insert(false);
+                }
                 continue;
             }
             return Err(format!(
-                "{crate_name}/Cargo.toml defines forbidden section `{section}`; only `[package]`, `[dependencies]`, and `[lints]` are permitted"
+                "{crate_name}/Cargo.toml defines forbidden section `{section}`; only `[package]`, `[lib]`, `[dependencies]`, and `[lints]` are permitted"
             ));
         }
         if section.is_empty() && was_depth_zero {
@@ -8872,6 +8039,18 @@ fn check_seat_crate_manifest(
             return Err(format!(
                 "{crate_name}/Cargo.toml must not define `build` script"
             ));
+        }
+        if section == "[lib]" {
+            let is_exact_doctest_false = code_part
+                .split_once('=')
+                .is_some_and(|(lhs, rhs)| lhs.trim() == "doctest" && rhs.trim() == "false");
+            if !is_exact_doctest_false {
+                return Err(format!(
+                    "{crate_name}/Cargo.toml `[lib]` only permits `doctest = false`, found `{code_part}`"
+                ));
+            }
+            saw_lib_doctest_false = true;
+            continue;
         }
         if section == "[dependencies]" || subtable_dep.is_some() {
             for forbidden_kw in [
@@ -8886,22 +8065,28 @@ fn check_seat_crate_manifest(
                     ));
                 }
             }
-            let current_dep = if let Some(ref sd) = subtable_dep {
-                Some(sd.clone())
-            } else if was_depth_zero {
-                code_part.split_once('=').and_then(|(lhs, _)| {
+            if subtable_dep.is_none() && was_depth_zero {
+                active_inline_dep = code_part.split_once('=').and_then(|(lhs, _)| {
                     let segs = split_toml_dotted_segments(lhs);
                     segs.first().cloned()
-                })
-            } else {
-                None
-            };
-            if let Some(ref dep_key) = current_dep
-                && !allowed_names.contains(&dep_key.as_str())
-            {
-                return Err(format!(
-                    "{crate_name}/Cargo.toml dependency `{dep_key}` is not in allow-list `{allowed_names:?}`"
-                ));
+                });
+            }
+            let current_dep = subtable_dep
+                .as_ref()
+                .or(active_inline_dep.as_ref())
+                .cloned();
+            if let Some(ref dep_key) = current_dep {
+                if !allowed_names.contains(&dep_key.as_str()) {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml dependency `{dep_key}` is not in allow-list `{allowed_names:?}`"
+                    ));
+                }
+                if matches!(dep_key.as_str(), "serde" | "serde_json") {
+                    serde_no_default.entry(dep_key.clone()).or_insert(false);
+                    if has_default_features_false(code_part) {
+                        serde_no_default.insert(dep_key.clone(), true);
+                    }
+                }
             }
             if toml_snippet_has_key(code_part, "git")
                 || toml_snippet_has_key(code_part, "package")
@@ -8949,9 +8134,24 @@ fn check_seat_crate_manifest(
                 }
             }
             update_toml_depths(code_part, &mut brace_depth, &mut bracket_depth);
+            if brace_depth == 0 && bracket_depth == 0 {
+                active_inline_dep = None;
+            }
         } else if section == "[lints]" && code_part != "workspace = true" {
             return Err(format!(
                 "{crate_name}/Cargo.toml `[lints]` only permits `workspace = true`, found `{code_part}`"
+            ));
+        }
+    }
+    if !saw_lib_doctest_false {
+        return Err(format!(
+            "{crate_name}/Cargo.toml must set `[lib]` with `doctest = false`"
+        ));
+    }
+    for (dep_name, has_no_default) in serde_no_default {
+        if !has_no_default {
+            return Err(format!(
+                "{crate_name}/Cargo.toml dependency `{dep_name}` must set `default-features = false` for `no_std`"
             ));
         }
     }
@@ -9170,11 +8370,10 @@ fn check_workspace_manifests_and_crate_sources(
                     chain.join(" -> ")
                 ));
             }
-            check_seat_crate_no_io_or_includes(&crate_name, &crate_dir)?;
+            check_seat_crate_nostd_and_channels(&crate_name, &crate_dir)?;
             let loaded = load_crate_rs_files(&crate_dir)?;
             for (rel_in_crate, src) in &loaded {
                 let toks = tokenize_rust(src);
-                let _ = find_seat_test_mod_span_and_check_attrs(&crate_name, rel_in_crate, &toks)?;
                 let mut from_host_parts_count = 0_usize;
                 for tok in toks {
                     if let Tok::Ident(ident) = tok {
@@ -9206,16 +8405,11 @@ fn check_workspace_manifests_and_crate_sources(
                     &crate_aliases,
                 )?;
             }
-            check_seat_crate_allowlist(&crate_name, &loaded)?;
         } else if crate_name == "league-seat-ui" {
             check_seat_crate_manifest(
                 "league-seat-ui",
                 &manifest,
-                &[
-                    ("crossterm", None),
-                    ("league-seat-types", Some("../league-seat-types")),
-                    ("ratatui", None),
-                ],
+                &[("league-seat-types", Some("../league-seat-types"))],
             )?;
             if let Some((chain, edge_secs, hit)) = find_dep_path_to_forbidden(
                 &crate_name,
@@ -9232,7 +8426,7 @@ fn check_workspace_manifests_and_crate_sources(
                     chain.join(" -> ")
                 ));
             }
-            check_seat_crate_no_io_or_includes(&crate_name, &crate_dir)?;
+            check_seat_crate_nostd_and_channels(&crate_name, &crate_dir)?;
             let loaded = load_crate_rs_files(&crate_dir)?;
             let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
             let local_types = collect_seat_local_types(&loaded, false);
@@ -9247,7 +8441,6 @@ fn check_workspace_manifests_and_crate_sources(
                         ));
                     }
                 }
-                let _ = find_seat_test_mod_span_and_check_attrs(&crate_name, rel_in_crate, &toks)?;
                 scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
                     rel_in_crate,
                     rel_in_crate == "src/lib.rs",
@@ -9257,7 +8450,6 @@ fn check_workspace_manifests_and_crate_sources(
                 )?;
                 check_seat_ui_public_surface(rel_in_crate, src, &local_types)?;
             }
-            check_seat_crate_allowlist(&crate_name, &loaded)?;
         } else {
             if crate_name == "league-error" {
                 check_league_error_leaf_manifest(&manifest)?;
@@ -9490,40 +8682,23 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
     )?;
     let seat_clippy_toml = concat!(
         "disallowed-types = [\n",
-        "    { path = \"std::fs::File\" },\n",
-        "    { path = \"std::path::Path\" },\n",
-        "    { path = \"std::path::PathBuf\" },\n",
-        "    { path = \"std::io::Stdin\" },\n",
-        "    { path = \"std::process::Command\" },\n",
-        "    { path = \"std::net::TcpStream\" },\n",
-        "    { path = \"std::sync::Mutex\" },\n",
-        "    { path = \"std::sync::RwLock\" },\n",
-        "    { path = \"std::sync::OnceLock\" },\n",
-        "    { path = \"std::sync::LazyLock\" },\n",
         "    { path = \"core::cell::RefCell\" },\n",
         "    { path = \"core::cell::Cell\" },\n",
         "    { path = \"core::sync::atomic::AtomicBool\" },\n",
+        "    { path = \"alloc::sync::Arc\" },\n",
+        "    { path = \"alloc::rc::Rc\" },\n",
         "]\n",
-        "disallowed-methods = [\n",
-        "    { path = \"std::fs::read\" },\n",
-        "    { path = \"std::fs::read_to_string\" },\n",
-        "    { path = \"std::path::Path::read_dir\" },\n",
-        "    { path = \"std::path::Path::metadata\" },\n",
-        "    { path = \"std::path::Path::exists\" },\n",
-        "    { path = \"std::path::Path::try_exists\" },\n",
-        "    { path = \"std::path::Path::canonicalize\" },\n",
-        "    { path = \"std::net::TcpStream::connect\" },\n",
-        "    { path = \"std::io::stdin\" },\n",
-        "    { path = \"std::env::var\" },\n",
-        "]\n",
+        "disallowed-methods = []\n",
         "disallowed-macros = [\n",
-        "    { path = \"std::include\" },\n",
-        "    { path = \"std::include_str\" },\n",
-        "    { path = \"std::include_bytes\" },\n",
-        "    { path = \"std::thread_local\" },\n",
+        "    { path = \"core::include\" },\n",
+        "    { path = \"core::include_str\" },\n",
+        "    { path = \"core::include_bytes\" },\n",
+        "    { path = \"core::env\" },\n",
+        "    { path = \"core::option_env\" },\n",
         "]\n",
     );
     let seat_lib_stub = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -9557,11 +8732,11 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
     )?;
     fs::write(
         root.join("crates/league-seat-types/Cargo.toml"),
-        "[package]\nname = \"league-seat-types\"\n[dependencies]\nleague-error = { path = \"../league-error\" }\n",
+        "[package]\nname = \"league-seat-types\"\n[lib]\ndoctest = false\n[dependencies]\nleague-error = { path = \"../league-error\" }\n",
     )?;
     fs::write(
         root.join("crates/league-seat-ui/Cargo.toml"),
-        "[package]\nname = \"league-seat-ui\"\n[dependencies]\nleague-seat-types = { path = \"../league-seat-types\" }\n",
+        "[package]\nname = \"league-seat-ui\"\n[lib]\ndoctest = false\n[dependencies]\nleague-seat-types = { path = \"../league-seat-types\" }\n",
     )?;
     for name in [
         "league-error",
@@ -9632,11 +8807,17 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     let ci_yml_path = workspace_root.join(".github/workflows/ci.yml");
     let ci_yml = fs::read_to_string(&ci_yml_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", ci_yml_path.display()));
+    // Check that `.github/workflows/ci.yml` enforces the no-std target build gate (`thumbv7em-none-eabi`),
+    // drops the duplicate clippy step, and keeps the `--target all` dependency checks.
+    assert!(
+        !ci_yml.contains("cargo clippy -p league-seat-types -p league-seat-ui"),
+        ".github/workflows/ci.yml must drop the duplicate seat-crate clippy step"
+    );
     assert!(
         ci_yml.contains(
-            "cargo clippy -p league-seat-types -p league-seat-ui --all-targets --locked -- -D warnings"
+            "cargo build -p league-error -p league-seat-types -p league-seat-ui --target thumbv7em-none-eabi --locked"
         ),
-        ".github/workflows/ci.yml must run `--all-targets` clippy over both seat crates"
+        ".github/workflows/ci.yml must build leaf/seat crates on thumbv7em-none-eabi"
     );
 
     assert_eq!(SweepMode::default(), SweepMode::PreviewSteps0To7);
@@ -9755,7 +8936,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     }
     if let Err(err) = fs::write(
         case_h.join("crates/league-seat-ui/src/lib.rs"),
-        "#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\n// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
+        "#![no_std]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\n// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
     ) {
         panic!("write case_h ok: {err}");
     }
@@ -9763,7 +8944,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
 
     if let Err(err) = fs::write(
         case_h.join("crates/league-seat-ui/src/lib.rs"),
-        "#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\nuse league_core::engine_internals;\n",
+        "#![no_std]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\nuse league_core::engine_internals;\n",
     ) {
         panic!("write case_h bad: {err}");
     }
@@ -10826,7 +10007,7 @@ fn planted_item4_seat_crates_forbidden_dep_edges_all_fail() {
                 );
             }
             let manifest = format!(
-                "[package]\nname = \"{seat_crate}\"\n{}",
+                "[package]\nname = \"{seat_crate}\"\n[lib]\ndoctest = false\n{}",
                 template.replace("{base}", base_deps(seat_crate))
             );
             let _ = fs::write(
@@ -10846,13 +10027,13 @@ fn planted_item4_seat_crates_forbidden_dep_edges_all_fail() {
 #[test]
 fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
         "    clippy::disallowed_macros\n",
         ")]\n",
-        "use league_seat_types::SeatObservation;\n",
-        "use ratatui::Frame;\n",
+        "use league_seat_types::{SeatObservation, SeatScreenView};\n",
     );
 
     // Lifetimes ARE allowed on both structs and public functions.
@@ -10863,7 +10044,7 @@ fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() 
     let _ = fs::write(
         ok_root.join("crates/league-seat-ui/src/lib.rs"),
         format!(
-            "{hdr}pub struct SeatPanel<'a> {{ pub obs: &'a SeatObservation }}\npub fn render_panel<'a>(_frame: &mut Frame<'_>, _p: SeatPanel<'a>) {{}}\n"
+            "{hdr}pub struct SeatPanel<'a> {{ pub obs: &'a SeatObservation }}\npub fn render_panel<'a>(_p: SeatPanel<'a>) -> SeatScreenView {{ loop {{}} }}\n"
         ),
     );
     if let Err(err) = check_workspace_manifests_and_crate_sources(&ok_root) {
@@ -10876,15 +10057,15 @@ fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() 
         ("generic_pub_fn", "pub fn render_generic<T>(_x: T) {}\n"),
         (
             "box_dyn_field",
-            "pub struct DynApp { inner: Box<dyn std::fmt::Display> }\n",
+            "pub struct DynApp { inner: Box<dyn core::fmt::Display> }\n",
         ),
         (
             "dyn_param",
-            "pub fn render_dyn(_x: &dyn std::fmt::Display) {}\n",
+            "pub fn render_dyn(_x: &dyn core::fmt::Display) {}\n",
         ),
         (
             "impl_trait_param",
-            "pub fn render_impl(_x: impl std::fmt::Display) {}\n",
+            "pub fn render_impl(_x: impl core::fmt::Display) {}\n",
         ),
         (
             "closure_box_dyn_fn_field",
@@ -10919,8 +10100,9 @@ fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() 
 }
 
 #[test]
-fn planted_item6_seat_crates_ban_fs_env_process_include_and_path_attr() {
+fn planted_item6_seat_crates_ban_compile_time_includes_env_build_rs_and_path_attr() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10928,20 +10110,8 @@ fn planted_item6_seat_crates_ban_fs_env_process_include_and_path_attr() {
         ")]\n",
     );
 
-    type IoPlant<'a> = (&'a str, Option<(&'a str, &'a str)>, &'a str);
-    let io_plants: [IoPlant<'_>; 9] = [
-        (
-            "std_fs_read_seal",
-            None,
-            "pub fn peek_seal() -> Vec<u8> { std::fs::read(\"x.seal\").unwrap_or_default() }\n",
-        ),
-        ("use_std_fs_file", None, "use std::fs::File;\n"),
-        (
-            "std_env_var",
-            None,
-            "pub fn read_env() { let _ = std::env::var(\"KEY\"); }\n",
-        ),
-        ("std_process_command", None, "use std::process::Command;\n"),
+    type HostChannelPlant<'a> = (&'a str, Option<(&'a str, &'a str)>, &'a str);
+    let plants: [HostChannelPlant<'_>; 8] = [
         ("include_macro", None, "include!(\"peek.inc\");\n"),
         (
             "include_str_macro",
@@ -10953,16 +10123,27 @@ fn planted_item6_seat_crates_ban_fs_env_process_include_and_path_attr() {
             None,
             "pub const B: &[u8] = include_bytes!(\"peek.inc\");\n",
         ),
+        ("env_macro", None, "pub const E: &str = env!(\"PATH\");\n"),
+        (
+            "option_env_macro",
+            None,
+            "pub const OE: Option<&str> = option_env!(\"KEY\");\n",
+        ),
         ("path_attr", None, "#[path = \"peek.inc\"]\nmod r_path;\n"),
         (
             "non_rs_file_in_src",
             Some(("src/peek.inc", "pub fn leak() {}\n")),
             "pub fn ok() {}\n",
         ),
+        (
+            "build_rs_script",
+            Some(("build.rs", "fn main() {}\n")),
+            "pub fn ok() {}\n",
+        ),
     ];
 
     for seat_crate in ["league-seat-types", "league-seat-ui"] {
-        for (label, extra_file, lib_body) in io_plants {
+        for (label, extra_file, lib_body) in plants {
             let root = unique_tmp_dir(&format!("item6_{seat_crate}_{label}"));
             if let Err(err) = write_minimal_workspace_tree(&root) {
                 panic!("setup workspace: {err}");
@@ -10974,8 +10155,10 @@ fn planted_item6_seat_crates_ban_fs_env_process_include_and_path_attr() {
             }
             let err = check_workspace_manifests_and_crate_sources(&root)
                 .err()
-                .unwrap_or_else(|| panic!("{seat_crate} `{label}` must fail I/O & include guard"));
-            println!("PLANTED_ITEM6_IO {seat_crate}:{label} => {err}");
+                .unwrap_or_else(|| {
+                    panic!("{seat_crate} `{label}` must fail include/env/build guard")
+                });
+            println!("PLANTED_ITEM6_HOST_ESCAPE {seat_crate}:{label} => {err}");
             assert!(err.contains(seat_crate), "unexpected error: {err}");
             let _ = fs::remove_dir_all(&root);
         }
@@ -11117,6 +10300,7 @@ fn planted_item7_a2_alias_routes_x3_x3b_x3c_y1_y2_y5_x5_x5b_and_c1_y6_all_fail()
 #[test]
 fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_and_c3_fn_ptrs() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11141,14 +10325,14 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
             "type",
         ),
         (
-            "Sh_private_type_arc_mutex",
-            "type Sh = std::sync::Arc<std::sync::Mutex<u8>>;\npub fn render_sh(_s: &Sh) {}\n",
-            "type",
+            "Sh_private_type_arc_refcell",
+            "type Sh = alloc::sync::Arc<core::cell::RefCell<u8>>;\npub fn render_sh(_s: &Sh) {}\n",
+            "shared-state",
         ),
         (
-            "use_as_rename_Mutex_Clear",
-            "use std::sync::Mutex as Clear;\npub fn render_clear(_s: &Clear<u8>) {}\n",
-            "Mutex",
+            "use_as_rename_Rc_Clear",
+            "use alloc::rc::Rc as Clear;\npub fn render_clear(_s: &Clear<u8>) {}\n",
+            "Rc",
         ),
         (
             "use_as_rename_seat_types_Clear",
@@ -11202,7 +10386,7 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
         let _ = fs::remove_dir_all(&root);
     }
 
-    // Positive check in `league-seat-types`: concrete concrete `type` RHS is allowed.
+    // Positive check in `league-seat-types`: concrete `type` RHS is allowed.
     let ok_root = unique_tmp_dir("fix2_types_ok_alias");
     if let Err(err) = write_minimal_workspace_tree(&ok_root) {
         panic!("setup workspace: {err}");
@@ -11210,7 +10394,7 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
     let _ = fs::write(
         ok_root.join("crates/league-seat-types/src/lib.rs"),
         format!(
-            "{hdr}pub struct SeatVal {{ pub x: u8 }}\ntype PrivAlias = Vec<SeatVal>;\npub type PubAlias = PrivAlias;\npub fn ok(_v: &PubAlias) {{}}\n"
+            "{hdr}extern crate alloc;\nuse alloc::vec::Vec;\npub struct SeatVal {{ pub x: u8 }}\ntype PrivAlias = Vec<SeatVal>;\npub type PubAlias = PrivAlias;\npub fn ok(_v: &PubAlias) {{}}\n"
         ),
     );
     if let Err(err) = check_workspace_manifests_and_crate_sources(&ok_root) {
@@ -11241,7 +10425,7 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
         ),
         (
             "use_as_rename_in_seat_types",
-            "use std::collections::BTreeMap as Map;\n",
+            "use alloc::collections::BTreeMap as Map;\n",
             "use ... as",
         ),
     ];
@@ -11268,8 +10452,9 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
 }
 
 #[test]
-fn planted_fix2_item2_forbid_overrides_cfg_attr_path_net_read_dir_and_stdin() {
+fn planted_fix2_item2_forbid_overrides_and_cfg_attr_path_controls() {
     let forbid_hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11277,13 +10462,14 @@ fn planted_fix2_item2_forbid_overrides_cfg_attr_path_net_read_dir_and_stdin() {
         ")]\n",
     );
     let deny_hdr = concat!(
+        "#![no_std]\n",
         "#![deny(clippy::disallowed_methods)]\n",
         "#![deny(clippy::disallowed_types)]\n",
         "#![deny(clippy::disallowed_macros)]\n",
         "pub fn ok() {}\n",
     );
 
-    let cases: [(&str, bool, &str, &str); 7] = [
+    let cases: [(&str, bool, &str, &str); 5] = [
         ("deny_instead_of_forbid", false, deny_hdr, "#![forbid("),
         (
             "allow_clippy_style",
@@ -11308,18 +10494,6 @@ fn planted_fix2_item2_forbid_overrides_cfg_attr_path_net_read_dir_and_stdin() {
             true,
             "#[cfg_attr(all(), path = \"peek.inc\")]\nmod leak;\n",
             "cfg_attr(..., path = ...)",
-        ),
-        (
-            "path_read_dir",
-            true,
-            "pub fn list_cwd() { let _ = std::path::Path::new(\".\").read_dir(); }\n",
-            "path::",
-        ),
-        (
-            "net_tcp_and_stdin",
-            true,
-            "pub fn net_and_in() { let _ = std::net::TcpStream::connect(\"127.0.0.1:1\"); let _ = std::io::stdin(); }\n",
-            "net::",
         ),
     ];
 
@@ -11349,29 +10523,12 @@ fn planted_fix2_item2_forbid_overrides_cfg_attr_path_net_read_dir_and_stdin() {
             let _ = fs::remove_dir_all(&root);
         }
     }
-
-    // Separate `std::io::stdin` check to confirm stdin is rejected independently of `net::`.
-    for seat_crate in ["league-seat-types", "league-seat-ui"] {
-        let root = unique_tmp_dir(&format!("fix2_stdin_{seat_crate}"));
-        if let Err(err) = write_minimal_workspace_tree(&root) {
-            panic!("setup workspace: {err}");
-        }
-        let _ = fs::write(
-            root.join("crates").join(seat_crate).join("src/lib.rs"),
-            format!("{forbid_hdr}pub fn read_key() {{ let _ = std::io::stdin(); }}\n"),
-        );
-        let err = check_workspace_manifests_and_crate_sources(&root)
-            .err()
-            .unwrap_or_else(|| panic!("{seat_crate} `stdin` must fail guard"));
-        println!("PLANTED_FIX2_ITEM2 {seat_crate}:stdin_only => {err}");
-        assert!(err.contains("stdin"), "{err}");
-        let _ = fs::remove_dir_all(&root);
-    }
 }
 
 #[test]
-fn planted_fix2_item3_bans_static_thread_local_interior_mut_and_partb_str_entry() {
+fn planted_fix2_item3_bans_static_nostd_shared_state_and_partb_str_entry() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11388,7 +10545,7 @@ fn planted_fix2_item3_bans_static_thread_local_interior_mut_and_partb_str_entry(
     let _ = fs::write(
         ok_root.join("crates/league-seat-ui/src/lib.rs"),
         format!(
-            "{hdr}use league_seat_types::SeatObservation;\nuse ratatui::Frame;\npub const TITLE_LINES: [&str; 1] = [\"Merchant League\"];\npub struct UiState {{ filter_buf: String, pub selected: usize }}\nfn format_priv(_s: &str) -> String {{ String::new() }}\npub fn render_ok(_frame: &mut Frame<'_>, _obs: &SeatObservation, _ui: &UiState) {{}}\n"
+            "{hdr}extern crate alloc;\nuse alloc::string::String;\nuse league_seat_types::{{SeatObservation, SeatScreenView}};\npub const TITLE_LINES: [&str; 1] = [\"Merchant League\"];\npub struct UiState {{ filter_buf: String, pub selected: usize }}\nfn format_priv(_s: &str) -> String {{ String::new() }}\npub fn render_ok(_obs: &SeatObservation, _ui: &UiState) -> SeatScreenView {{ loop {{}} }}\n"
         ),
     );
     if let Err(err) = check_workspace_manifests_and_crate_sources(&ok_root) {
@@ -11396,31 +10553,32 @@ fn planted_fix2_item3_bans_static_thread_local_interior_mut_and_partb_str_entry(
     }
     let _ = fs::remove_dir_all(&ok_root);
 
-    let channel_plants: [(&str, &str); 7] = [
-        (
-            "pub_static_mutex_ZZ_SLOT",
-            "pub static ZZ_SLOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);\n",
-        ),
+    let channel_plants: [(&str, &str); 8] = [
+        ("pub_static_slot", "pub static ZZ_SLOT: u8 = 0;\n"),
         ("private_static", "static PRIV_VAL: u8 = 0;\n"),
         (
-            "thread_local_slot",
-            "std::thread_local! { static TL: u8 = 0; }\n",
+            "core_refcell_field",
+            "pub struct BadRef { inner: core::cell::RefCell<u8> }\n",
         ),
         (
-            "refcell_field",
-            "pub struct BadRef { inner: std::cell::RefCell<u8> }\n",
+            "core_cell_field",
+            "pub struct BadCell { inner: core::cell::Cell<u8> }\n",
         ),
         (
-            "cell_field",
-            "pub struct BadCell { inner: std::cell::Cell<u8> }\n",
+            "core_oncecell_field",
+            "pub struct BadOnce { inner: core::cell::OnceCell<u8> }\n",
         ),
         (
-            "oncelock_val",
-            "pub struct BadOnce { inner: std::sync::OnceLock<u8> }\n",
+            "core_atomic_val",
+            "pub struct BadAtomic { inner: core::sync::atomic::AtomicU64 }\n",
         ),
         (
-            "atomic_val",
-            "pub struct BadAtomic { inner: std::sync::atomic::AtomicU64 }\n",
+            "alloc_arc_field",
+            "pub struct BadArc { inner: alloc::sync::Arc<u8> }\n",
+        ),
+        (
+            "alloc_rc_field",
+            "pub struct BadRc { inner: alloc::rc::Rc<u8> }\n",
         ),
     ];
 
@@ -11475,6 +10633,7 @@ fn planted_fix2_item3_bans_static_thread_local_interior_mut_and_partb_str_entry(
 #[test]
 fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11486,12 +10645,12 @@ fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
     for (label, body, expected_substr) in [
         (
             "generic_without_league_core",
-            "pub fn render_generic<T: std::fmt::Debug>(_x: &T) {}\n",
+            "pub fn render_generic<T: core::fmt::Debug>(_x: &T) {}\n",
             "must not declare generic",
         ),
         (
             "dyn_without_league_core",
-            "pub fn render_dyn(_p: &dyn std::fmt::Display) {}\n",
+            "pub fn render_dyn(_p: &dyn core::fmt::Display) {}\n",
             "forbidden non-concrete/trait/closure type `dyn`",
         ),
         (
@@ -11593,6 +10752,7 @@ fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
 #[test]
 fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11600,12 +10760,18 @@ fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
         ")]\n",
     );
 
-    // Seat-crate `#[cfg(...)]` and `#[cfg_attr(...)]` controls (every variant fails allow-list).
-    let seat_cfg_cases: [(&str, &str, &str, &str); 13] = [
+    // Seat-crate `#[cfg(...)]` and `#[cfg_attr(...)]` controls (prevents host/target divergence).
+    let seat_cfg_cases: [(&str, &str, &str, &str); 14] = [
         (
             "cfg_not_test_on_seat_ui_pub_fn",
             "league-seat-ui",
             "#[cfg(not(test))]\npub fn zz_not_test_ok() {}\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "cfg_not_target_os_none_std_escape",
+            "league-seat-ui",
+            "#[cfg(not(target_os = \"none\"))]\nextern crate std;\n",
             "#[cfg(...)]",
         ),
         (
@@ -11666,7 +10832,7 @@ fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
             "N5b_cfg_not_clippy_std_fs_read",
             "league-seat-ui",
             "#[cfg(not(clippy))]\npub fn zz_read() -> Vec<u8> { std::fs::read(\"zz.seal\").unwrap_or_default() }\n",
-            "fs::",
+            "#[cfg(...)]",
         ),
         (
             "cfg_not_clippy_on_harmless_fn",
@@ -11742,8 +10908,9 @@ fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
 }
 
 #[test]
-fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fail() {
+fn planted_fix3_item1_macros_inner_attrs_extern_unsafe_and_n5_cfg_all_fail() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11751,11 +10918,11 @@ fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fai
         ")]\n",
     );
 
-    let cases: [(&str, &str, &str, &str); 25] = [
+    let cases: [(&str, &str, &str, &str); 9] = [
         (
             "M1_macro_rules_pub_fn_ptr",
             "league-seat-ui",
-            "macro_rules! zz_mk { ($n:ident, $($t:tt)*) => { pub fn $n(_f: $($t)*, _rival: u8) -> String { String::new() } } }\nzz_mk!(zz_render_ptr, fn(u8) -> String);\n",
+            "macro_rules! zz_mk { ($n:ident, $($t:tt)*) => { pub fn $n(_f: $($t)*, _rival: u8) -> u8 { 0 } } }\nzz_mk!(zz_render_ptr, fn(u8) -> u8);\n",
             "`macro_rules` is forbidden",
         ),
         (
@@ -11771,130 +10938,10 @@ fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fai
             "macro` definition",
         ),
         (
-            "offlist_macro_concat",
-            "league-seat-ui",
-            "pub fn m() { let _ = concat!(\"a\", \"b\"); }\n",
-            "macro `concat!` is not on the seat-crate allow-list",
-        ),
-        (
-            "offlist_macro_stringify",
-            "league-seat-ui",
-            "pub fn m() { let _ = stringify!(x); }\n",
-            "macro `stringify!` is not on the seat-crate allow-list",
-        ),
-        (
-            "offlist_macro_println",
-            "league-seat-ui",
-            "pub fn m() { println!(\"peek\"); }\n",
-            "macro `println!` is not on the seat-crate allow-list",
-        ),
-        (
-            "offlist_macro_env",
-            "league-seat-types",
-            "pub fn m() { let _ = env!(\"PATH\"); }\n",
-            "macro `env!` is forbidden",
-        ),
-        (
-            "offlist_macro_assert_eq_outside_mod_tests",
-            "league-seat-ui",
-            "pub fn m() { assert_eq!(1, 1); }\n",
-            "macro `assert_eq!` is not on the seat-crate allow-list",
-        ),
-        (
-            "offlist_macro_panic_inside_mod_tests",
-            "league-seat-types",
-            "#[cfg(test)]\nmod tests { #[test] fn t() { panic!(\"nope\"); } }\n",
-            "macro `panic!` is not on the seat-crate allow-list",
-        ),
-        (
-            "offlist_macro_path_qualified_std_vec",
-            "league-seat-ui",
-            "pub fn m() { let _ = std::vec![1_u8]; }\n",
-            "path-qualified macro `vec!`",
-        ),
-        (
-            "offlist_derive_arbitrary",
-            "league-seat-ui",
-            "#[derive(Debug, Arbitrary)]\npub struct S { pub ok: bool }\n",
-            "derive `Arbitrary` is not on the `league-seat-ui` allow-list",
-        ),
-        (
-            "offlist_derive_serialize_in_seat_ui",
-            "league-seat-ui",
-            "#[derive(Debug, Serialize)]\npub struct S { pub ok: bool }\n",
-            "derive `Serialize` is not on the `league-seat-ui` allow-list",
-        ),
-        (
-            "offlist_attribute_inline",
-            "league-seat-ui",
-            "#[inline]\npub fn f() {}\n",
-            "attribute `#[inline...]` is not on the `league-seat-ui` allow-list",
-        ),
-        (
             "offlist_inner_attribute_allow",
             "league-seat-ui",
             "#![allow(dead_code)]\npub fn f() {}\n",
             "inner attribute is not on the seat-crate allow-list",
-        ),
-        (
-            "glob_use_in_prod",
-            "league-seat-ui",
-            "use league_seat_types::*;\npub fn f() {}\n",
-            "glob `use *` is forbidden",
-        ),
-        (
-            "glob_use_super_in_mod_tests",
-            "league-seat-ui",
-            "#[cfg(test)]\nmod tests { use super::*; #[test] fn t() {} }\n",
-            "glob `use *` is forbidden",
-        ),
-        (
-            "offlist_use_std_time_instant",
-            "league-seat-ui",
-            "use std::time::Instant;\npub fn f() {}\n",
-            "use std::time::Instant` is not on the `league-seat-ui` allow-list",
-        ),
-        (
-            "offlist_inline_std_time_instant",
-            "league-seat-ui",
-            "pub fn f() { let _ = std::time::Instant::now(); }\n",
-            "inline std/core path `std::time::Instant::now` is not on the seat-crate allow-list",
-        ),
-        (
-            "const_anonymous_underscore",
-            "league-seat-ui",
-            "const _: () = ();\npub fn f() {}\n",
-            "anonymous `const _:`",
-        ),
-        (
-            "const_block_initializer",
-            "league-seat-ui",
-            "pub const C: u8 = { 1 };\n",
-            "block initializer",
-        ),
-        (
-            "const_disallowed_heap_vec_type",
-            "league-seat-types",
-            "pub const V: Vec<u8> = Vec::new();\n",
-            "outside constant allow-list",
-        ),
-        (
-            "disallowed_item_union",
-            "league-seat-ui",
-            "pub union U { a: u8, b: i8 }\n",
-            "`union` is forbidden by seat-crate allow-list",
-        ),
-        (
-            "disallowed_item_private_trait_in_seat_ui",
-            "league-seat-ui",
-            "trait Peek { fn peek(&self); }\n",
-            "`trait` definition is forbidden by seat-crate allow-list",
-        ),
-        (
-            "disallowed_second_trait_in_seat_types",
-            "league-seat-types",
-            "pub trait ExtraTrait { fn x(&self) -> u8; }\n",
-            "`trait` definition is forbidden by seat-crate allow-list",
         ),
         (
             "N5_e2e_cfg_not_clippy_macro_spliced_seal_read",
@@ -11902,10 +10949,34 @@ fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fai
             "#[cfg(not(clippy))]\nmacro_rules! zz_io { ($m:ident, $f:ident) => { std::$m::$f } }\n#[cfg(not(clippy))]\npub fn zread() -> Vec<u8> { zz_io!(fs, read)(\"zz.seal\").unwrap_or_default() }\n",
             "#[cfg(...)]",
         ),
+        (
+            "extern_crate_std",
+            "league-seat-ui",
+            "extern crate std;\npub fn f() {}\n",
+            "`extern` crate/FFI block",
+        ),
+        (
+            "extern_C_block",
+            "league-seat-types",
+            "extern \"C\" { fn host_peek(); }\n",
+            "`extern` crate/FFI block",
+        ),
+        (
+            "no_mangle_attr",
+            "league-seat-ui",
+            "#[no_mangle]\npub fn zz_sym() {}\n",
+            "#[no_mangle]",
+        ),
+        (
+            "unsafe_block",
+            "league-seat-ui",
+            "pub fn f() { unsafe {} }\n",
+            "`unsafe` is forbidden",
+        ),
     ];
 
     for (label, crate_name, body, expected_substr) in cases {
-        let root = unique_tmp_dir(&format!("fix3_allow_{label}"));
+        let root = unique_tmp_dir(&format!("fix3_retain_{label}"));
         if let Err(err) = write_minimal_workspace_tree(&root) {
             panic!("setup workspace: {err}");
         }
@@ -11915,8 +10986,8 @@ fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fai
         );
         let err = check_workspace_manifests_and_crate_sources(&root)
             .err()
-            .unwrap_or_else(|| panic!("fix3 allow-list `{label}` must fail guard"));
-        println!("PLANTED_FIX3_ALLOWLIST {crate_name}:{label} => {err}");
+            .unwrap_or_else(|| panic!("fix3 retained rule `{label}` must fail guard"));
+        println!("PLANTED_FIX3_RETAINED {crate_name}:{label} => {err}");
         assert!(
             err.contains(expected_substr),
             "expected `{expected_substr}` in `{err}` for {label}"
@@ -11928,6 +10999,7 @@ fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fai
 #[test]
 fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carriers_fail() {
     let hdr = concat!(
+        "#![no_std]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11984,21 +11056,21 @@ fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carrier
         let _ = fs::remove_dir_all(&tui_root);
     }
 
-    // Item 5 (`B2`): closed host text carriers in Part B entry allow-list.
+    // Item 5 (`B2`): closed host text carriers in Part B entry allow-list (using `SeatKeyCode`/`SeatKeyEvent`).
     let b2_cases: [(&str, &str, &str); 9] = [
         (
-            "B_a_zz_render_keys_Vec_KeyCode",
-            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: Vec<KeyCode>) {}\n",
+            "B_a_zz_render_keys_Vec_SeatKeyCode",
+            "use league_seat_types::SeatKeyCode;\npub fn zz_render_keys(_k: Vec<SeatKeyCode>) {}\n",
             "non-allow-listed type `Vec`",
         ),
         (
             "B_a_zz_render_key_slice",
-            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: &[KeyCode]) {}\n",
+            "use league_seat_types::SeatKeyCode;\npub fn zz_render_keys(_k: &[SeatKeyCode]) {}\n",
             "slice or array buffer",
         ),
         (
             "B_a_zz_render_key_tuple",
-            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: (KeyCode, KeyCode)) {}\n",
+            "use league_seat_types::SeatKeyCode;\npub fn zz_render_keys(_k: (SeatKeyCode, SeatKeyCode)) {}\n",
             "tuple type",
         ),
         (
@@ -12012,23 +11084,23 @@ fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carrier
             "non-allow-listed type `EngineError`",
         ),
         (
-            "zz_render_crossterm_Event_Paste",
-            "use crossterm::event::Event;\npub fn zz_render_event(_e: Event) {}\n",
-            "non-allow-listed type `Event`",
-        ),
-        (
             "zz_render_char",
             "pub fn zz_render_char(_c: char) {}\n",
             "must not accept free `char`",
         ),
         (
-            "zz_two_key_params",
-            "use crossterm::event::KeyCode;\npub fn zz_two_keys(_a: KeyCode, _b: KeyCode) {}\n",
-            "at most one single key/mouse event parameter",
+            "zz_two_key_code_params",
+            "use league_seat_types::SeatKeyCode;\npub fn zz_two_keys(_a: SeatKeyCode, _b: SeatKeyCode) {}\n",
+            "at most one single",
         ),
         (
-            "BadUi_pub_Vec_KeyCode_field",
-            "use crossterm::event::KeyCode;\npub struct BadUi { pub keys: Vec<KeyCode> }\n",
+            "zz_two_key_event_params",
+            "use league_seat_types::SeatKeyEvent;\npub fn zz_two_events(_a: SeatKeyEvent, _b: SeatKeyEvent) {}\n",
+            "at most one single",
+        ),
+        (
+            "BadUi_pub_Vec_SeatKeyCode_field",
+            "use league_seat_types::SeatKeyCode;\npub struct BadUi { pub keys: Vec<SeatKeyCode> }\n",
             "non-allow-listed type `Vec`",
         ),
     ];
@@ -12052,43 +11124,176 @@ fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carrier
         );
         let _ = fs::remove_dir_all(&root);
     }
+}
 
-    // Disallow `serde_json` paths even inside `#[cfg(test)] mod tests` of `league-seat-types`,
-    // and disallow nested item declarations inside production function bodies.
-    let extra_cases: [(&str, &str, &str); 3] = [
+#[test]
+fn planted_fix4_nostd_manifest_doctest_view_model_and_ratatui_ban_controls() {
+    let hdr = concat!(
+        "#![no_std]\n",
+        "#![forbid(\n",
+        "    clippy::disallowed_methods,\n",
+        "    clippy::disallowed_types,\n",
+        "    clippy::disallowed_macros\n",
+        ")]\n",
+    );
+
+    // 1. Missing `#![no_std]` fails early warning in both seat crates.
+    for seat_crate in ["league-seat-types", "league-seat-ui"] {
+        let root = unique_tmp_dir(&format!("fix4_missing_nostd_{seat_crate}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates").join(seat_crate).join("src/lib.rs"),
+            "#![forbid(\n    clippy::disallowed_methods,\n    clippy::disallowed_types,\n    clippy::disallowed_macros\n)]\npub fn ok() {}\n",
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("{seat_crate} without `#![no_std]` must fail guard"));
+        println!("PLANTED_FIX4_NOSTD {seat_crate}:missing_no_std => {err}");
+        assert!(err.contains("#![no_std]"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 2. Missing `[lib] doctest = false`, `doctest = true`, and extra `[lib]` keys fail in both seat crates.
+    for seat_crate in ["league-seat-types", "league-seat-ui"] {
+        let dep_line = if seat_crate == "league-seat-types" {
+            "league-error = { path = \"../league-error\" }\n"
+        } else {
+            "league-seat-types = { path = \"../league-seat-types\" }\n"
+        };
+        for (label, lib_sec, expected_substr) in [
+            ("missing_lib_doctest_false", "", "doctest = false"),
+            ("doctest_true", "[lib]\ndoctest = true\n", "doctest = false"),
+            (
+                "extra_lib_key_proc_macro",
+                "[lib]\ndoctest = false\nproc-macro = true\n",
+                "only permits `doctest = false`",
+            ),
+            ("package_build_script", "[lib]\ndoctest = false\n", "build"),
+        ] {
+            let root = unique_tmp_dir(&format!("fix4_manifest_{seat_crate}_{label}"));
+            if let Err(err) = write_minimal_workspace_tree(&root) {
+                panic!("setup workspace: {err}");
+            }
+            let build_line = if label == "package_build_script" {
+                "build = \"build.rs\"\n"
+            } else {
+                ""
+            };
+            let _ = fs::write(
+                root.join("crates").join(seat_crate).join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{seat_crate}\"\n{build_line}{lib_sec}[dependencies]\n{dep_line}"
+                ),
+            );
+            let err = check_workspace_manifests_and_crate_sources(&root)
+                .err()
+                .unwrap_or_else(|| panic!("{seat_crate} `{label}` must fail manifest guard"));
+            println!("PLANTED_FIX4_MANIFEST {seat_crate}:{label} => {err}");
+            assert!(err.contains(expected_substr), "{err}");
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+
+    // 3. `league-seat-ui` bans `ratatui` and `crossterm` dependencies.
+    for bad_dep in ["ratatui", "crossterm"] {
+        let root = unique_tmp_dir(&format!("fix4_ui_ban_{bad_dep}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-seat-ui/Cargo.toml"),
+            format!(
+                "[package]\nname = \"league-seat-ui\"\n[lib]\ndoctest = false\n[dependencies]\nleague-seat-types = {{ path = \"../league-seat-types\" }}\n{bad_dep} = \"0.1.0\"\n"
+            ),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("league-seat-ui depending on `{bad_dep}` must fail guard"));
+        println!("PLANTED_FIX4_UI_DEP {bad_dep} => {err}");
+        assert!(err.contains("allow-list"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 4. `serde` / `serde_json` must set `default-features = false` in `league-seat-types` and `league-error`.
+    for (crate_name, manifest, expected_dep) in [
         (
-            "seat_types_serde_json_in_cfg_test",
-            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { let _ = serde_json::from_str::<u8>(\"1\"); }\n}\n",
-            "is not on the `league-seat-types` allow-list",
+            "league-seat-types",
+            "[package]\nname = \"league-seat-types\"\n[lib]\ndoctest = false\n[dependencies]\nleague-error = { path = \"../league-error\" }\nserde = { version = \"1.0.229\", features = [\"derive\"] }\n",
+            "serde",
         ),
         (
-            "seat_types_nested_struct_in_prod_fn",
-            "pub fn f() { struct Zz(u8); }\n",
-            "nested `struct` declaration inside production function body is forbidden",
+            "league-seat-types",
+            "[package]\nname = \"league-seat-types\"\n[lib]\ndoctest = false\n[dependencies]\nleague-error = { path = \"../league-error\" }\nserde = { version = \"1.0.229\", default-features = false, features = [\"alloc\", \"derive\"] }\n[dependencies.serde_json]\nversion = \"1.0.154\"\nfeatures = [\"alloc\"]\n",
+            "serde_json",
         ),
         (
-            "seat_types_nested_fn_in_prod_fn",
-            "pub fn f() { fn z() {} }\n",
-            "nested `fn` declaration inside production function body is forbidden",
+            "league-error",
+            "[package]\nname = \"league-error\"\n[dependencies]\nserde = \"1.0.229\"\nserde_json = { version = \"1.0.154\", default-features = false, features = [\"alloc\"] }\n",
+            "serde",
         ),
-    ];
-    for (label, body, expected_substr) in extra_cases {
-        let root = unique_tmp_dir(&format!("fix3_extra_{label}"));
+    ] {
+        let root = unique_tmp_dir(&format!("fix4_serde_default_{crate_name}_{expected_dep}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates").join(crate_name).join("Cargo.toml"),
+            manifest,
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("{crate_name} `{expected_dep}` without `default-features = false` must fail")
+            });
+        println!("PLANTED_FIX4_SERDE_NO_STD {crate_name}:{expected_dep} => {err}");
+        assert!(err.contains("default-features = false"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 5. `crates/league-seat-types/src/view.rs` view-model purity controls (`Item 4`).
+    for (label, view_src, expected_substr) in [
+        (
+            "view_trait_decl",
+            "pub trait BadViewTrait { fn render(&self); }\n",
+            "must not declare traits",
+        ),
+        (
+            "view_trait_impl_beyond_derives",
+            "pub struct ViewSpan { pub text: String }\nimpl core::fmt::Display for ViewSpan { fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { Ok(()) } }\n",
+            "must not implement traits beyond derives",
+        ),
+        (
+            "view_generic_struct",
+            "pub struct BadGenView<T> { pub inner: T }\n",
+            "must not declare generics or lifetimes",
+        ),
+        (
+            "view_lifetime_struct",
+            "pub struct BadBorrowedView<'a> { pub s: &'a str }\n",
+            "must not declare generics or lifetimes",
+        ),
+        (
+            "view_ref_field",
+            "pub struct BadRefView { pub s: &'static str }\n",
+            "owned data (references are forbidden)",
+        ),
+    ] {
+        let root = unique_tmp_dir(&format!("fix4_view_{label}"));
         if let Err(err) = write_minimal_workspace_tree(&root) {
             panic!("setup workspace: {err}");
         }
         let _ = fs::write(
             root.join("crates/league-seat-types/src/lib.rs"),
-            format!("{hdr}{body}"),
+            format!("{hdr}pub mod view;\n"),
         );
+        let _ = fs::write(root.join("crates/league-seat-types/src/view.rs"), view_src);
         let err = check_workspace_manifests_and_crate_sources(&root)
             .err()
-            .unwrap_or_else(|| panic!("fix3 extra `{label}` must fail guard"));
-        println!("PLANTED_FIX3_EXTRA {label} => {err}");
-        assert!(
-            err.contains(expected_substr),
-            "expected `{expected_substr}` in `{err}` for {label}"
-        );
+            .unwrap_or_else(|| panic!("view-model `{label}` must fail Item 4 check"));
+        println!("PLANTED_FIX4_VIEW_MODEL {label} => {err}");
+        assert!(err.contains(expected_substr), "{err}");
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -1,12 +1,18 @@
+#![no_std]
 //! Shared canonical [`StructuredError`], [`ToStructuredError`], and secret scrubber
-//! (`SHIP_GATE.md` `:26`) for Merchant League crates.
+//! (`SHIP_GATE.md` `:26`).
 //!
-//! Kept as a leaf crate depending only on `serde` and `serde_json` so every workspace crate
-//! (`league-core`, `league-ledger`, `league-relay`, `league-standalone`, and `league-gen` via
-//! `league-core`) shares one concrete error representation and scrubber without introducing a
-//! `league-core` dependency in `league-relay` or `league-ledger`.
+//! Kept as a `no_std` + `alloc` leaf crate depending only on `serde` and `serde_json` so every
+//! workspace crate (`league-core`, `league-ledger`, `league-relay`, `league-standalone`,
+//! `league-seat-types`, and `league-gen` via `league-core`) shares one concrete error
+//! representation and scrubber without introducing a `league-core` dependency in seat crates,
+//! `league-relay`, or `league-ledger`.
 
-use std::fmt;
+extern crate alloc;
+
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 use serde::ser::SerializeStruct as _;
 use serde::{Serialize, Serializer};
@@ -325,7 +331,7 @@ impl fmt::Display for StructuredError {
     }
 }
 
-impl std::error::Error for StructuredError {}
+impl core::error::Error for StructuredError {}
 
 /// Conversion trait projecting crate error enums onto [`StructuredError`].
 pub trait ToStructuredError {
@@ -335,6 +341,9 @@ pub trait ToStructuredError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
+    use alloc::string::ToString;
+
     use super::*;
 
     #[test]

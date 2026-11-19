@@ -1,6 +1,6 @@
 [package]
 name = "league-seat-ui"
-description = "Seat-safe terminal UI widgets and views rendered solely from SeatObservation"
+description = "Seat-safe no_std view-model builder projecting SeatObservation onto plain data"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,10 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
-crossterm.workspace = true
 league-seat-types = { path = "../league-seat-types" }
-ratatui.workspace = true
 
 [lints]
 workspace = true

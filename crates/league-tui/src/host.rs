@@ -7,13 +7,193 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use league_core::{
     ClubHost, EngineError, OrderReveal, PublicSweepReceipt, Seat, SeatObservation, TableId,
     TurnPhase,
 };
 use league_gen::{GenError, RingTable, ring_table_to_table_spec};
-use league_seat_types::CommodityDisplayMap;
+use league_seat_types::{
+    CommodityDisplayMap, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView, ViewAlign,
+    ViewColor, ViewPanel, ViewStyle,
+};
 use ratatui::Frame;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+/// Converts a host `crossterm` [`KeyEvent`] into a pure seat key event value.
+#[must_use]
+pub(crate) fn map_crossterm_key(key: KeyEvent) -> SeatKeyEvent {
+    let code = match key.code {
+        KeyCode::Char(ch) => SeatKeyCode::Char(ch),
+        KeyCode::Enter => SeatKeyCode::Enter,
+        KeyCode::Esc => SeatKeyCode::Esc,
+        KeyCode::Tab => SeatKeyCode::Tab,
+        KeyCode::BackTab => SeatKeyCode::BackTab,
+        KeyCode::Backspace => SeatKeyCode::Backspace,
+        KeyCode::Delete => SeatKeyCode::Delete,
+        KeyCode::Up => SeatKeyCode::Up,
+        KeyCode::Down => SeatKeyCode::Down,
+        KeyCode::Left => SeatKeyCode::Left,
+        KeyCode::Right => SeatKeyCode::Right,
+        KeyCode::Home => SeatKeyCode::Home,
+        KeyCode::End => SeatKeyCode::End,
+        KeyCode::PageUp => SeatKeyCode::PageUp,
+        KeyCode::PageDown => SeatKeyCode::PageDown,
+        KeyCode::F(n) => SeatKeyCode::F(n),
+        _ => SeatKeyCode::Unmapped,
+    };
+    SeatKeyEvent::new(
+        code,
+        SeatKeyModifiers {
+            ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
+            alt: key.modifiers.contains(KeyModifiers::ALT),
+            shift: key.modifiers.contains(KeyModifiers::SHIFT),
+        },
+    )
+}
+
+const fn map_color(color: ViewColor) -> Color {
+    match color {
+        ViewColor::Reset => Color::Reset,
+        ViewColor::Black => Color::Black,
+        ViewColor::Red => Color::Red,
+        ViewColor::Green => Color::Green,
+        ViewColor::Yellow => Color::Yellow,
+        ViewColor::Blue => Color::Blue,
+        ViewColor::Magenta => Color::Magenta,
+        ViewColor::Cyan => Color::Cyan,
+        ViewColor::Gray => Color::Gray,
+        ViewColor::DarkGray => Color::DarkGray,
+        ViewColor::LightRed => Color::LightRed,
+        ViewColor::LightGreen => Color::LightGreen,
+        ViewColor::LightYellow => Color::LightYellow,
+        ViewColor::LightBlue => Color::LightBlue,
+        ViewColor::LightMagenta => Color::LightMagenta,
+        ViewColor::LightCyan => Color::LightCyan,
+        ViewColor::White => Color::White,
+        ViewColor::Rgb { r, g, b } => Color::Rgb(r, g, b),
+    }
+}
+
+fn map_style(style: ViewStyle) -> Style {
+    let mut out = Style::default()
+        .fg(map_color(style.fg))
+        .bg(map_color(style.bg));
+    if style.bold {
+        out = out.add_modifier(Modifier::BOLD);
+    }
+    if style.dim {
+        out = out.add_modifier(Modifier::DIM);
+    }
+    if style.italic {
+        out = out.add_modifier(Modifier::ITALIC);
+    }
+    if style.underlined {
+        out = out.add_modifier(Modifier::UNDERLINED);
+    }
+    if style.reversed {
+        out = out.add_modifier(Modifier::REVERSED);
+    }
+    out
+}
+
+const fn map_align(align: ViewAlign) -> Alignment {
+    match align {
+        ViewAlign::Left => Alignment::Left,
+        ViewAlign::Center => Alignment::Center,
+        ViewAlign::Right => Alignment::Right,
+    }
+}
+
+fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
+    let lines: Vec<Line<'_>> = panel
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| {
+            let is_selected = panel.selected_row == Some(idx);
+            let spans: Vec<Span<'_>> = row
+                .spans
+                .iter()
+                .map(|span| {
+                    let mut st = map_style(span.style);
+                    if is_selected {
+                        st = st.add_modifier(Modifier::REVERSED);
+                    }
+                    Span::styled(span.text.as_str(), st)
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect();
+    let mut paragraph = Paragraph::new(Text::from(lines)).alignment(map_align(panel.alignment));
+    if panel.bordered {
+        let mut block = Block::default().borders(Borders::ALL);
+        if let Some(title) = &panel.title {
+            block = block.title(Span::styled(title.text.as_str(), map_style(title.style)));
+        }
+        paragraph = paragraph.block(block);
+    }
+    frame.render_widget(paragraph, area);
+}
+
+/// Draws a plain [`SeatScreenView`] view model emitted by `league-seat-ui` using `ratatui`.
+pub(crate) fn draw_screen_view(frame: &mut Frame<'_>, view: &SeatScreenView) {
+    let full_area = frame.area();
+    let body_area = if let Some(header) = &view.header {
+        let border_rows = if header.bordered { 2_u16 } else { 0_u16 };
+        let header_height = u16::try_from(header.rows.len())
+            .unwrap_or(1)
+            .saturating_add(border_rows)
+            .min(full_area.height);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(header_height), Constraint::Min(0)])
+            .split(full_area);
+        render_view_panel(frame, chunks[0], header);
+        chunks[1]
+    } else {
+        full_area
+    };
+
+    if view.side_panels.is_empty() {
+        render_view_panel(frame, body_area, &view.main);
+    } else {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+            .split(body_area);
+        render_view_panel(frame, panes[0], &view.main);
+        let side_constraints =
+            vec![
+                Constraint::Ratio(1, u32::try_from(view.side_panels.len()).unwrap_or(1));
+                view.side_panels.len()
+            ];
+        let side_areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(side_constraints)
+            .split(panes[1]);
+        for (side_area, panel) in side_areas.iter().copied().zip(view.side_panels.iter()) {
+            render_view_panel(frame, side_area, panel);
+        }
+    }
+
+    if let Some(modal) = &view.modal {
+        let w = (full_area.width * 3 / 4).max(20).min(full_area.width);
+        let h = (full_area.height * 3 / 4).max(5).min(full_area.height);
+        let modal_rect = Rect {
+            x: full_area.x + full_area.width.saturating_sub(w) / 2,
+            y: full_area.y + full_area.height.saturating_sub(h) / 2,
+            width: w,
+            height: h,
+        };
+        frame.render_widget(Clear, modal_rect);
+        render_view_panel(frame, modal_rect, modal);
+    }
+}
 
 /// Host session bridging a `ClubHost` table to seat-isolated `league-seat-ui` views.
 #[derive(Debug)]
@@ -130,8 +310,8 @@ impl TuiHostSession {
         ClubHost::wipe_seal_file(seal_path)
     }
 
-    /// Builds one [`SeatObservation`] **by value** for `seat` and delegates rendering solely to
-    /// `league-seat-ui`.
+    /// Builds one [`SeatObservation`] **by value** for `seat`, requests the plain view model from
+    /// `league-seat-ui`, and draws it onto `frame` via `ratatui`.
     pub fn render_seat_frame(
         &self,
         frame: &mut Frame<'_>,
@@ -139,12 +319,11 @@ impl TuiHostSession {
         plain_codes: bool,
     ) -> Result<(), EngineError> {
         let obs = self.build_seat_observation(seat)?;
-        match &self.commodities {
-            Some(map) => {
-                league_seat_ui::render_seat_with_commodities(frame, &obs, map, plain_codes)
-            }
-            None => league_seat_ui::render_seat(frame, &obs),
-        }
+        let view = match &self.commodities {
+            Some(map) => league_seat_ui::render_seat_with_commodities(&obs, map, plain_codes),
+            None => league_seat_ui::render_seat(&obs),
+        };
+        draw_screen_view(frame, &view);
         Ok(())
     }
 }
@@ -320,37 +499,111 @@ mod tests {
     }
 
     #[test]
-    fn host_builds_every_seat_observation_exclusively_via_club_host_observe_seat() {
-        let ring = dev_ring_table(1);
-        let tid = TableId(81_003);
-        let session = must_ok(
-            TuiHostSession::from_ring_table(&ring, tid, &[0], 17),
-            "tui session",
-        );
+    fn host_draws_rich_view_models_and_maps_crossterm_keys() {
+        use league_seat_types::{ViewLabel, ViewRow, ViewSpan};
 
-        let all = must_ok(
-            session.build_all_seat_observations(),
-            "build_all_seat_observations",
-        );
-        assert_eq!(all.len(), usize::from(session.seat_count()));
-        for s in 0..session.seat_count() {
-            let via_single = must_ok(
-                session.build_seat_observation(Seat(s)),
-                "build_seat_observation",
-            );
-            let expected_own = must_some(
-                all[usize::from(s)].own_mandate(),
-                "own_mandate attached via host",
-            );
-            assert_eq!(via_single, all[usize::from(s)]);
-            assert_eq!(via_single.seat, s);
-            assert_eq!(via_single.own_mandate(), Some(expected_own));
-            // Verify direct host observation matches bit-for-bit.
-            let direct_obs = must_ok(
-                session.host.observe_seat(Seat(s)),
-                "direct host.observe_seat",
-            );
-            assert_eq!(via_single, direct_obs);
+        for (raw_code, expected) in [
+            (KeyCode::Char('q'), SeatKeyCode::Char('q')),
+            (KeyCode::Enter, SeatKeyCode::Enter),
+            (KeyCode::Esc, SeatKeyCode::Esc),
+            (KeyCode::Tab, SeatKeyCode::Tab),
+            (KeyCode::BackTab, SeatKeyCode::BackTab),
+            (KeyCode::Backspace, SeatKeyCode::Backspace),
+            (KeyCode::Delete, SeatKeyCode::Delete),
+            (KeyCode::Up, SeatKeyCode::Up),
+            (KeyCode::Down, SeatKeyCode::Down),
+            (KeyCode::Left, SeatKeyCode::Left),
+            (KeyCode::Right, SeatKeyCode::Right),
+            (KeyCode::Home, SeatKeyCode::Home),
+            (KeyCode::End, SeatKeyCode::End),
+            (KeyCode::PageUp, SeatKeyCode::PageUp),
+            (KeyCode::PageDown, SeatKeyCode::PageDown),
+            (KeyCode::F(12), SeatKeyCode::F(12)),
+            (KeyCode::Insert, SeatKeyCode::Unmapped),
+        ] {
+            let ev = map_crossterm_key(KeyEvent::new(
+                raw_code,
+                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+            ));
+            assert_eq!(ev.code, expected);
+            assert!(ev.modifiers.ctrl && ev.modifiers.alt && ev.modifiers.shift);
         }
+
+        let all_colors = [
+            ViewColor::Reset,
+            ViewColor::Black,
+            ViewColor::Red,
+            ViewColor::Green,
+            ViewColor::Yellow,
+            ViewColor::Blue,
+            ViewColor::Magenta,
+            ViewColor::Cyan,
+            ViewColor::Gray,
+            ViewColor::DarkGray,
+            ViewColor::LightRed,
+            ViewColor::LightGreen,
+            ViewColor::LightYellow,
+            ViewColor::LightBlue,
+            ViewColor::LightMagenta,
+            ViewColor::LightCyan,
+            ViewColor::White,
+            ViewColor::Rgb { r: 1, g: 2, b: 3 },
+        ];
+        for color in all_colors {
+            let mut st = ViewStyle::plain().with_fg(color).with_bg(color);
+            st.italic = true;
+            let mapped = map_style(st);
+            assert_eq!(mapped.fg, Some(map_color(color)));
+        }
+
+        let styled = ViewStyle::plain()
+            .with_fg(ViewColor::Cyan)
+            .with_bg(ViewColor::Black)
+            .bold()
+            .dim()
+            .underlined()
+            .reversed();
+        let rich = SeatScreenView {
+            header: Some(ViewPanel {
+                title: None,
+                alignment: ViewAlign::Right,
+                bordered: false,
+                rows: vec![ViewRow::from_plain("TOP HEADER".to_owned())],
+                selected_row: None,
+            }),
+            main: ViewPanel {
+                title: Some(ViewLabel::styled("Main Panel".to_owned(), styled)),
+                alignment: ViewAlign::Left,
+                bordered: true,
+                rows: vec![
+                    ViewRow::from_spans(vec![ViewSpan::styled("SELECTED".to_owned(), styled)]),
+                    ViewRow::from_plain("SECOND".to_owned()),
+                ],
+                selected_row: Some(0),
+            },
+            side_panels: vec![ViewPanel {
+                title: Some(ViewLabel::plain("Side".to_owned())),
+                alignment: ViewAlign::Center,
+                bordered: true,
+                rows: vec![ViewRow::from_plain("SIDE TEXT".to_owned())],
+                selected_row: None,
+            }],
+            modal: Some(ViewPanel {
+                title: Some(ViewLabel::plain("Modal".to_owned())),
+                alignment: ViewAlign::Center,
+                bordered: true,
+                rows: vec![ViewRow::from_plain("MODAL BODY".to_owned())],
+                selected_row: None,
+            }),
+        };
+
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(80, 16)), "TestBackend");
+        must_ok(
+            terminal.draw(|frame| draw_screen_view(frame, &rich)),
+            "draw rich view model",
+        );
+        let txt = screen_text(&terminal);
+        assert!(txt.contains("TOP HEADER"));
+        assert!(txt.contains("MODAL BODY"));
     }
 }

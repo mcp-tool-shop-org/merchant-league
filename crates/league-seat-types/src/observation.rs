@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
@@ -181,12 +183,8 @@ impl ParitySpecSource for PublicTableSpec {
 ///
 /// Intentionally omits `serde::Deserialize` (`B1`): neither save files nor replay logs deserialize
 /// `SeatObservation`, so neither seat code nor host code can forge `own_mandate` via a serde
-/// round-trip:
-///
-/// ```compile_fail,E0277
-/// use league_seat_types::SeatObservation;
-/// let _: Result<SeatObservation, _> = serde_json::from_str("{}");
-/// ```
+/// round-trip (pinned by the `compile_fail,E0277` doctest on `league_core::ClubHost::observe_seat`,
+/// since `league-seat-types` disables doctests via `[lib] doctest = false`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SeatObservation {
     /// Observing seat index (`0..seat_count`).

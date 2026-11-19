@@ -1,3 +1,7 @@
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+
 const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
 
 pub(crate) fn hex_encode_32(bytes: &[u8; 32]) -> String {
@@ -40,6 +44,8 @@ fn decode_nibble(byte: u8, index: usize) -> Result<u8, String> {
 }
 
 pub(crate) mod hex32 {
+    use alloc::string::String;
+
     use serde::{Deserialize, Deserializer, Serializer};
 
     use super::{hex_decode_32, hex_encode_32};
@@ -60,6 +66,8 @@ pub(crate) mod hex32 {
 }
 
 pub(crate) mod opt_hex32 {
+    use alloc::string::String;
+
     use serde::{Deserialize, Deserializer, Serializer};
 
     use super::{hex_decode_32, hex_encode_32};
@@ -88,7 +96,8 @@ pub(crate) mod opt_hex32 {
 }
 
 pub(crate) mod delivery_ledger_serde {
-    use std::collections::BTreeMap;
+    use alloc::collections::BTreeMap;
+    use alloc::vec::Vec;
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

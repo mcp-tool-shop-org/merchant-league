@@ -1,23 +1,28 @@
+#![no_std]
 #![forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
-//! Seat-safe Merchant League terminal UI renderer.
+//! Seat-safe `no_std` + `alloc` Merchant League UI view-model builder.
 //!
-//! Depends strictly on `league-seat-types`, `ratatui`, and `crossterm` — never on
-//! `league-core`, `league-gen`, or `league-standalone`. Every public function takes only
-//! concrete, allow-listed types so no host capability or rival secret can cross the crate
-//! boundary (`docs/club-mode-design.md` §2.3).
+//! Depends strictly on `league-seat-types` (never on `std`, `ratatui`, `crossterm`, `league-core`,
+//! `league-gen`, or `league-standalone`). Every public entry point takes only concrete,
+//! allow-listed `league-seat-types` values and local UI state, returning plain owned view-model
+//! values ([`SeatScreenView`] / [`Action`]) for the trusted `league-tui` host to draw
+//! (`docs/club-mode-design.md` §2.3).
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+extern crate alloc;
+
+use alloc::borrow::ToOwned;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+
 use league_seat_types::{
-    AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, SeatObservation, SeatState,
+    AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, SeatKeyCode, SeatKeyEvent,
+    SeatObservation, SeatScreenView, SeatState, ViewAlign, ViewLabel, ViewPanel, ViewRow,
 };
-use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
 
 /// The title screen's lines, top to bottom.
 pub const TITLE_LINES: [&str; 3] = [
@@ -35,48 +40,50 @@ pub enum Action {
     Ignore,
 }
 
-/// Map a key press to an [`Action`]. `q`, `Esc` and Ctrl-C quit.
+/// Map a plain seat key press to an [`Action`]. `q`, `Esc` and Ctrl-C quit.
 #[must_use]
-pub fn action_for(key: KeyEvent) -> Action {
+pub const fn action_for(key: SeatKeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
+        SeatKeyCode::Char('q') | SeatKeyCode::Esc => Action::Quit,
+        SeatKeyCode::Char('c') if key.modifiers.ctrl => Action::Quit,
         _ => Action::Ignore,
     }
 }
 
-/// Draw the title screen across the whole frame.
-pub fn draw_title(frame: &mut Frame<'_>) {
-    let area: Rect = frame.area();
-    let text = Text::from(
-        TITLE_LINES
-            .iter()
-            .map(|line| Line::from(*line))
-            .collect::<Vec<_>>(),
-    );
-    let title = Paragraph::new(text)
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(title, area);
+/// Build the title screen view model as plain owned data for the host to draw.
+#[must_use]
+pub fn title_view() -> SeatScreenView {
+    let rows = TITLE_LINES
+        .iter()
+        .map(|line| ViewRow::from_plain((*line).to_owned()))
+        .collect();
+    SeatScreenView::single_panel(ViewPanel {
+        title: None,
+        alignment: ViewAlign::Center,
+        bordered: true,
+        rows,
+        selected_row: None,
+    })
 }
 
-/// Render one seat's minimal observation view from [`SeatObservation`] alone.
-pub fn render_seat(frame: &mut Frame<'_>, obs: &SeatObservation) {
-    render_seat_lines(frame, obs, NUMERAIRE_DISPLAY_LABEL, None, false);
+/// Build one seat's minimal observation view model from [`SeatObservation`] alone.
+#[must_use]
+pub fn render_seat(obs: &SeatObservation) -> SeatScreenView {
+    render_seat_view(obs, NUMERAIRE_DISPLAY_LABEL, None, false)
 }
 
-/// Render one seat's observation view alongside table commodity display names from
+/// Build one seat's observation view model alongside table commodity display names from
 /// [`CommodityDisplayMap`].
+#[must_use]
 pub fn render_seat_with_commodities(
-    frame: &mut Frame<'_>,
     obs: &SeatObservation,
     commodities: &CommodityDisplayMap,
     plain_codes: bool,
-) {
+) -> SeatScreenView {
     let cred_label = commodities
         .format_asset(AssetId::Cred, plain_codes)
         .unwrap_or_else(|| NUMERAIRE_DISPLAY_LABEL.to_owned());
-    render_seat_lines(frame, obs, &cred_label, Some(commodities), plain_codes);
+    render_seat_view(obs, &cred_label, Some(commodities), plain_codes)
 }
 
 fn format_own_mandate_line(own_mandate: Option<&league_seat_types::PrivateMandate>) -> String {
@@ -89,13 +96,12 @@ fn format_own_mandate_line(own_mandate: Option<&league_seat_types::PrivateMandat
     }
 }
 
-fn render_seat_lines(
-    frame: &mut Frame<'_>,
+fn render_seat_view(
     obs: &SeatObservation,
     cred_label: &str,
     commodities: Option<&CommodityDisplayMap>,
     plain_codes: bool,
-) {
+) -> SeatScreenView {
     let seat_state: Option<&SeatState> = obs.seats.get(usize::from(obs.seat));
     let (cred_balance, cred_debt, tier_label) = match seat_state {
         Some(s) => (s.cred, s.cred_debt, format!("{:?}", s.credit_tier)),
@@ -113,67 +119,57 @@ fn render_seat_lines(
         })
         .unwrap_or_else(|| "None".to_owned());
     let mandate_line = format_own_mandate_line(obs.own_mandate());
-    let lines = vec![
-        Line::from(format!(
+    let rows = vec![
+        ViewRow::from_plain(format!(
             "Table #{} | Turn {} ({:?}) | Seat {}",
             obs.table_id.0, obs.turn, obs.phase, obs.seat
         )),
-        Line::from(format!(
+        ViewRow::from_plain(format!(
             "{cred_label}: {cred_balance} | Debt: {cred_debt} | Tier: {tier_label}"
         )),
-        Line::from(format!("Upkeep Good: {upkeep_label}")),
-        Line::from(mandate_line),
-        Line::from(format!(
+        ViewRow::from_plain(format!("Upkeep Good: {upkeep_label}")),
+        ViewRow::from_plain(mandate_line),
+        ViewRow::from_plain(format!(
             "Receipts: {} | Forecasts: {} | Hints: {}",
             obs.public_receipts.len(),
             obs.public_forecasts.len(),
             obs.auditor_hints().len()
         )),
     ];
-    let panel = Paragraph::new(Text::from(lines)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Seat {} View", obs.seat)),
-    );
-    frame.render_widget(panel, frame.area());
+    SeatScreenView::single_panel(ViewPanel {
+        title: Some(ViewLabel::plain(format!("Seat {} View", obs.seat))),
+        alignment: ViewAlign::Left,
+        bordered: true,
+        rows,
+        selected_row: None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use alloc::borrow::ToOwned;
+    use alloc::collections::{BTreeMap, BTreeSet};
+    use alloc::vec;
+    use alloc::vec::Vec;
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use league_seat_types::{
         ActiveShock, AssetId, AuditorShockHint, COMMODITY_DISPLAY_CATALOG, CharterRole,
         CoalitionReach, CommitmentHash, CommodityDisplayMap, CreditTier, FundamentalParities,
         GoodScarcity, GradedMandateCard, MandateKind, NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL,
         PrivateMandate, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
-        SeasonEndAndMarks, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservation,
-        SeatObservationPublicParts, SeatState, SeatStatePredicates, ShockKind,
-        SpoilageAndConversion, TableId, TableMode, TurnPhase, UpkeepAndDebt,
+        SeasonEndAndMarks, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatKeyCode,
+        SeatKeyEvent, SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatState,
+        SeatStatePredicates, ShockKind, SpoilageAndConversion, TableId, TableMode, TurnPhase,
+        UpkeepAndDebt, ViewAlign,
     };
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     use crate::{
-        Action, TITLE_LINES, action_for, draw_title, format_own_mandate_line, render_seat,
-        render_seat_with_commodities,
+        Action, TITLE_LINES, action_for, format_own_mandate_line, render_seat,
+        render_seat_with_commodities, title_view,
     };
 
-    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-        KeyEvent::new(code, modifiers)
-    }
-
-    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
-        let buffer = terminal.backend().buffer();
-        (0..buffer.area.height)
-            .map(|y| {
-                (0..buffer.area.width)
-                    .map(|x| buffer[(x, y)].symbol().to_string())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+    fn key(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> SeatKeyEvent {
+        SeatKeyEvent::new(code, modifiers)
     }
 
     fn sample_seat_observation() -> SeatObservation {
@@ -349,37 +345,33 @@ mod tests {
     #[test]
     fn q_esc_and_ctrl_c_quit_and_others_ignore() {
         assert_eq!(
-            action_for(key(KeyCode::Char('q'), KeyModifiers::NONE)),
+            action_for(key(SeatKeyCode::Char('q'), SeatKeyModifiers::NONE)),
             Action::Quit
         );
         assert_eq!(
-            action_for(key(KeyCode::Esc, KeyModifiers::NONE)),
+            action_for(key(SeatKeyCode::Esc, SeatKeyModifiers::NONE)),
             Action::Quit
         );
         assert_eq!(
-            action_for(key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            action_for(key(SeatKeyCode::Char('c'), SeatKeyModifiers::CTRL)),
             Action::Quit
         );
         assert_eq!(
-            action_for(key(KeyCode::Char('c'), KeyModifiers::NONE)),
+            action_for(key(SeatKeyCode::Char('c'), SeatKeyModifiers::NONE)),
             Action::Ignore
         );
         assert_eq!(
-            action_for(key(KeyCode::Enter, KeyModifiers::NONE)),
+            action_for(key(SeatKeyCode::Enter, SeatKeyModifiers::NONE)),
             Action::Ignore
         );
     }
 
     #[test]
     fn the_title_screen_says_testnet_and_not_playable() {
-        let mut terminal = match Terminal::new(TestBackend::new(60, 7)) {
-            Ok(t) => t,
-            Err(never) => match never {},
-        };
-        if let Err(never) = terminal.draw(draw_title) {
-            match never {}
-        }
-        let screen = buffer_text(&terminal);
+        let view = title_view();
+        assert_eq!(view.main.alignment, ViewAlign::Center);
+        assert!(view.main.bordered);
+        let screen = view.plain_text();
         assert!(screen.contains(TITLE_LINES[0]));
         assert!(screen.contains(TITLE_LINES[1]));
         assert!(screen.contains(TITLE_LINES[2]));
@@ -395,14 +387,8 @@ mod tests {
         assert!(mandate_line.contains("+7250 eq"));
 
         let obs_unmandated = sample_seat_observation();
-        let mut terminal = match Terminal::new(TestBackend::new(90, 9)) {
-            Ok(t) => t,
-            Err(never) => match never {},
-        };
-        if let Err(never) = terminal.draw(|f| render_seat(f, &obs_unmandated)) {
-            match never {}
-        }
-        let screen = buffer_text(&terminal);
+        let screen = render_seat(&obs_unmandated).plain_text();
+        assert!(screen.contains("Seat 0 View"));
         assert!(screen.contains("Table #202611 | Turn 1"));
         assert!(screen.contains("Clearinghouse Marks [CRED]: 15000"));
         assert!(screen.contains("Own Mandate: none attached"));
@@ -442,31 +428,18 @@ mod tests {
             ],
         };
         let obs_without = sample_seat_observation();
-        if let Err(never) =
-            terminal.draw(|f| render_seat_with_commodities(f, &obs_without, &cmap, false))
-        {
-            match never {}
-        }
-        let named = buffer_text(&terminal);
+        let named = render_seat_with_commodities(&obs_without, &cmap, false).plain_text();
         assert!(named.contains("Wrought Guild Iron [IRN]"));
         assert!(named.contains("Own Mandate: none attached"));
 
-        if let Err(never) =
-            terminal.draw(|f| render_seat_with_commodities(f, &obs_without, &cmap, true))
-        {
-            match never {}
-        }
-        let plain = buffer_text(&terminal);
+        let plain = render_seat_with_commodities(&obs_without, &cmap, true).plain_text();
         assert!(plain.contains("CRED: 15000"));
         assert!(plain.contains("Upkeep Good: IRN"));
 
         let mut obs_empty = sample_seat_observation();
         obs_empty.seats.clear();
         obs_empty.spec.seats.clear();
-        if let Err(never) = terminal.draw(|f| render_seat(f, &obs_empty)) {
-            match never {}
-        }
-        let empty_screen = buffer_text(&terminal);
+        let empty_screen = render_seat(&obs_empty).plain_text();
         assert!(empty_screen.contains("Tier: Unknown"));
         assert!(empty_screen.contains("Upkeep Good: None"));
     }

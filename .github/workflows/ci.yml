@@ -69,8 +69,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
-      - name: Seat crates clippy (all targets)
-        run: cargo clippy -p league-seat-types -p league-seat-ui --all-targets --locked -- -D warnings
+      - name: No-std target gate (seat crates and league-error)
+        run: |
+          rustup target add thumbv7em-none-eabi
+          cargo build -p league-error -p league-seat-types -p league-seat-ui --target thumbv7em-none-eabi --locked
 
       # B4 note: league-tui is now the binary host crate depending on league-core (owning ClubHost
       # and building per-seat SeatObservation values passed to league-seat-ui), and league-gen
@@ -102,6 +104,10 @@ jobs:
           fi
           if cargo tree -p league-seat-types -p league-seat-ui -e normal,build,dev --target all --all-features --locked | grep -Eq 'league-core|league-gen|league-standalone'; then
             echo "ERROR: seat crate depends on league-core, league-gen, or league-standalone"
+            exit 1
+          fi
+          if cargo tree -p league-seat-ui -e normal,build,dev --target all --all-features --locked | grep -Eq 'ratatui|crossterm'; then
+            echo "ERROR: league-seat-ui depends on ratatui or crossterm"
             exit 1
           fi
 

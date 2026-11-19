@@ -1,3 +1,6 @@
+use alloc::vec;
+use alloc::vec::Vec;
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::{AssetId, CreditTier, SeatConfig, TableId, UNIT_SCALE, Units};
