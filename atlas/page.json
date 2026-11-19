@@ -94,31 +94,23 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 15,
+      "changed": 5,
       "moved": 0,
-      "parts": 8,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-seat-types/src/view.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-seat-types/src/view.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "15 files changed content, across 8 parts.",
+        "sentence": "Nothing structural changed since 2026-11-19; 5 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "2aefc72678d8f2307c0b52b211155244c82f420f",
-      "generatedAt": "2026-11-19T19:14:43.842Z"
+      "commit": "8602c90399bd23654481301a40275e482fef80c9",
+      "generatedAt": "2026-11-19T19:51:14.613Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -152,6 +144,21 @@
       "shared": 5
     },
     {
+      "a": "crates/league-tui/src/host.rs",
+      "b": "crates/league-tui/src/main.rs",
+      "either": 6,
+      "partLabels": [
+        "league-tui",
+        "league-tui"
+      ],
+      "parts": [
+        "league-tui",
+        "league-tui"
+      ],
+      "relation": "inside",
+      "shared": 5
+    },
+    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
       "either": 22,
@@ -180,21 +187,6 @@
       ],
       "relation": "inside",
       "shared": 9
-    },
-    {
-      "a": "crates/league-core/src/replay.rs",
-      "b": "crates/league-core/tests/replay_invariants.rs",
-      "either": 11,
-      "partLabels": [
-        "league-core",
-        "league-core"
-      ],
-      "parts": [
-        "league-core",
-        "league-core"
-      ],
-      "relation": "inside",
-      "shared": 9
     }
   ],
   "changesTogetherNote": [
@@ -202,7 +194,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "8602c90399bd23654481301a40275e482fef80c9",
+  "commit": "2b680d88fd23bd4180763504fcc8c3944ce7db91",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -621,7 +613,7 @@
   ],
   "engine": "1.23.0",
   "generated": [],
-  "generatedAt": "2026-11-19T19:51:14.613Z",
+  "generatedAt": "2026-11-19T21:02:26.744Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",
