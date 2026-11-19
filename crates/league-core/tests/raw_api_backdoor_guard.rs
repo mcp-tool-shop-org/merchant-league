@@ -6314,6 +6314,19 @@ fn is_exact_seat_no_std_inner_attr(inner: &[Tok]) -> bool {
     inner.len() == 1 && matches!(&inner[0], Tok::Ident(s) if s == "no_std")
 }
 
+fn is_exact_seat_forbid_unsafe_inner_attr(inner: &[Tok]) -> bool {
+    let body = if inner.last() == Some(&Tok::Other(',')) {
+        &inner[..inner.len() - 1]
+    } else {
+        inner
+    };
+    body.len() == 4
+        && matches!(&body[0], Tok::Ident(s) if s == "forbid")
+        && matches!(&body[1], Tok::LParen)
+        && matches!(&body[2], Tok::Ident(s) if s == "unsafe_code")
+        && matches!(&body[3], Tok::RParen)
+}
+
 fn is_exact_seat_forbid_inner_attr(inner: &[Tok]) -> bool {
     let body = if inner.last() == Some(&Tok::Other(',')) {
         &inner[..inner.len() - 1]
@@ -6351,9 +6364,10 @@ fn is_exact_seat_forbid_inner_attr(inner: &[Tok]) -> bool {
 }
 
 /// Checks attributes that `--target thumbv7em-none-eabi` cannot express on its own:
-/// exact `#![no_std]` / `#![forbid(...)]` at the top of `src/lib.rs`, at most one
-/// `#[cfg(test)] mod tests { ... }`, no other `#[cfg(...)]` or `#[cfg_attr(...)]`,
-/// no `#[path]` / `#[macro_export]` / `#[no_mangle]`, and no `clippy`/`disallowed_*` suppressions.
+/// exact `#![no_std]` / `#![forbid(unsafe_code)]` / `#![forbid(...)]` at the top of `src/lib.rs`,
+/// at most one `#[cfg(test)] mod tests { ... }`, no other `#[cfg(...)]` or `#[cfg_attr(...)]`,
+/// no `#[path]` / `#[macro_export]` / `#[no_mangle]` / `#[unsafe(...)]`, and no `clippy` /
+/// `unsafe_code` / `disallowed_*` suppressions.
 fn check_seat_attrs_and_mark_spans(
     crate_name: &str,
     rel_path: &str,
@@ -6391,10 +6405,11 @@ fn check_seat_attrs_and_mark_spans(
                     ));
                 }
                 if !is_exact_seat_no_std_inner_attr(inner)
+                    && !is_exact_seat_forbid_unsafe_inner_attr(inner)
                     && !is_exact_seat_forbid_inner_attr(inner)
                 {
                     return Err(format!(
-                        "{crate_name}/{rel_path}: inner attribute is not on the seat-crate allow-list (only `#![no_std]` and `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` are allowed)"
+                        "{crate_name}/{rel_path}: inner attribute is not on the seat-crate allow-list (only `#![no_std]`, `#![forbid(unsafe_code)]`, and `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` are allowed)"
                     ));
                 }
                 i = end_excl;
@@ -6461,6 +6476,11 @@ fn check_seat_attrs_and_mark_spans(
                         "{crate_name}/{rel_path}: `#[{attr_name}]` attribute is forbidden in seat crates"
                     ));
                 }
+                Some("unsafe") => {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: `#[unsafe(...)]` attribute is forbidden in seat crates"
+                    ));
+                }
                 _ => {
                     let has_suppression = inner.iter().any(|t| {
                         matches!(
@@ -6471,12 +6491,12 @@ fn check_seat_attrs_and_mark_spans(
                     let mentions_clippy_or_disallowed = inner.iter().any(|t| {
                         matches!(
                             t,
-                            Tok::Ident(s) if s == "clippy" || s.starts_with("disallowed_")
+                            Tok::Ident(s) if s == "clippy" || s == "unsafe_code" || s.starts_with("disallowed_")
                         )
                     });
                     if has_suppression && mentions_clippy_or_disallowed {
                         return Err(format!(
-                            "{crate_name}/{rel_path}: must not suppress or downgrade `clippy`/`disallowed_*` lints via `#[allow]`/`#[expect]`"
+                            "{crate_name}/{rel_path}: must not suppress or downgrade `clippy`/`unsafe_code`/`disallowed_*` lints via `#[allow]`/`#[expect]`"
                         ));
                     }
                 }
@@ -6601,6 +6621,7 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
         .map_err(|err| format!("{crate_name}/src/lib.rs: failed to read ({err})"))?;
     let lib_tokens = tokenize_rust(&lib_src);
     let mut saw_no_std = false;
+    let mut saw_forbid_unsafe_code = false;
     let mut forbidden_lints = BTreeSet::new();
     let mut idx = 0_usize;
     while idx + 2 < lib_tokens.len() {
@@ -6613,14 +6634,26 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
             if is_exact_seat_no_std_inner_attr(inner) {
                 saw_no_std = true;
             }
-            if matches!(inner.first(), Some(Tok::Ident(s)) if s == "deny")
-                && inner
+            if is_exact_seat_forbid_unsafe_inner_attr(inner) {
+                saw_forbid_unsafe_code = true;
+            }
+            if matches!(inner.first(), Some(Tok::Ident(s)) if s == "deny") {
+                if inner
+                    .iter()
+                    .any(|t| matches!(t, Tok::Ident(id) if id == "unsafe_code"))
+                {
+                    return Err(format!(
+                        "{crate_name}/src/lib.rs must use `#![forbid(unsafe_code)]`, never `#![deny(unsafe_code)]`"
+                    ));
+                }
+                if inner
                     .iter()
                     .any(|t| matches!(t, Tok::Ident(id) if id.starts_with("disallowed_")))
-            {
-                return Err(format!(
-                    "{crate_name}/src/lib.rs must use `#![forbid(...)]`, never `#![deny(...)]`, for `clippy::disallowed_*`"
-                ));
+                {
+                    return Err(format!(
+                        "{crate_name}/src/lib.rs must use `#![forbid(...)]`, never `#![deny(...)]`, for `clippy::disallowed_*`"
+                    ));
+                }
             }
             if matches!(inner.first(), Some(Tok::Ident(s)) if s == "forbid") {
                 for w in inner.windows(4) {
@@ -6641,6 +6674,11 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
     if !saw_no_std {
         return Err(format!("{crate_name}/src/lib.rs must declare `#![no_std]`"));
     }
+    if !saw_forbid_unsafe_code {
+        return Err(format!(
+            "{crate_name}/src/lib.rs must declare `#![forbid(unsafe_code)]`"
+        ));
+    }
     for req_lint in [
         "disallowed_methods",
         "disallowed_types",
@@ -6653,8 +6691,13 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
         }
     }
 
+    let subdirs: &[&str] = if crate_name == "league-error" {
+        &["src"]
+    } else {
+        &["src", "tests"]
+    };
     let mut all_rs_files = Vec::new();
-    for subdir in ["src", "tests"] {
+    for &subdir in subdirs {
         let root = crate_dir.join(subdir);
         if !root.exists() {
             continue;
@@ -6723,6 +6766,11 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
                 {
                     return Err(format!(
                         "{crate_name}/{rel}: `macro` definition is forbidden in seat crates"
+                    ));
+                }
+                if matches!(id.as_str(), "asm" | "global_asm" | "naked_asm") {
+                    return Err(format!(
+                        "{crate_name}/{rel}: `{id}` inline/global assembly is forbidden in seat crates"
                     ));
                 }
 
@@ -6809,6 +6857,9 @@ fn check_seat_crate_nostd_and_channels(crate_name: &str, crate_dir: &Path) -> Re
                                 seg,
                                 "cell"
                                     | "atomic"
+                                    | "asm"
+                                    | "global_asm"
+                                    | "naked_asm"
                                     | "include"
                                     | "include_str"
                                     | "include_bytes"
@@ -8520,6 +8571,9 @@ fn check_workspace_manifests_and_crate_sources(
                     chain.join(" -> ")
                 ));
             }
+            if crate_name == "league-error" {
+                check_seat_crate_nostd_and_channels(&crate_name, &crate_dir)?;
+            }
 
             let loaded = load_crate_rs_files(&crate_dir)?;
             let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
@@ -8699,6 +8753,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
     );
     let seat_lib_stub = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -8711,7 +8766,10 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         fs::create_dir_all(crate_dir.join("src"))?;
         if name == "league-tui" {
             fs::write(crate_dir.join("src/main.rs"), "fn main() {}\n")?;
-        } else if name == "league-seat-types" || name == "league-seat-ui" {
+        } else if matches!(
+            name,
+            "league-error" | "league-seat-types" | "league-seat-ui"
+        ) {
             fs::write(crate_dir.join("clippy.toml"), seat_clippy_toml)?;
             fs::write(crate_dir.join("src/lib.rs"), seat_lib_stub)?;
         } else {
@@ -8936,7 +8994,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     }
     if let Err(err) = fs::write(
         case_h.join("crates/league-seat-ui/src/lib.rs"),
-        "#![no_std]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\n// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
+        "#![no_std]\n#![forbid(unsafe_code)]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\n// Note: engine_internals and preview_bundle stay out of comments\npub fn ok() {}\n",
     ) {
         panic!("write case_h ok: {err}");
     }
@@ -8944,7 +9002,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
 
     if let Err(err) = fs::write(
         case_h.join("crates/league-seat-ui/src/lib.rs"),
-        "#![no_std]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\nuse league_core::engine_internals;\n",
+        "#![no_std]\n#![forbid(unsafe_code)]\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]\nuse league_core::engine_internals;\n",
     ) {
         panic!("write case_h bad: {err}");
     }
@@ -10028,6 +10086,7 @@ fn planted_item4_seat_crates_forbidden_dep_edges_all_fail() {
 fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10103,6 +10162,7 @@ fn planted_item5_seat_ui_public_surface_bans_dyn_impl_fn_generics_and_box_dyn() 
 fn planted_item6_seat_crates_ban_compile_time_includes_env_build_rs_and_path_attr() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10301,6 +10361,7 @@ fn planted_item7_a2_alias_routes_x3_x3b_x3c_y1_y2_y5_x5_x5b_and_c1_y6_all_fail()
 fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_and_c3_fn_ptrs() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10455,6 +10516,7 @@ fn planted_fix2_item1_seat_ui_bans_type_use_as_and_seat_types_checks_type_rhs_an
 fn planted_fix2_item2_forbid_overrides_and_cfg_attr_path_controls() {
     let forbid_hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10463,6 +10525,7 @@ fn planted_fix2_item2_forbid_overrides_and_cfg_attr_path_controls() {
     );
     let deny_hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![deny(clippy::disallowed_methods)]\n",
         "#![deny(clippy::disallowed_types)]\n",
         "#![deny(clippy::disallowed_macros)]\n",
@@ -10529,6 +10592,7 @@ fn planted_fix2_item2_forbid_overrides_and_cfg_attr_path_controls() {
 fn planted_fix2_item3_bans_static_nostd_shared_state_and_partb_str_entry() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10634,6 +10698,7 @@ fn planted_fix2_item3_bans_static_nostd_shared_state_and_partb_str_entry() {
 fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10753,6 +10818,7 @@ fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
 fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -10911,6 +10977,7 @@ fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
 fn planted_fix3_item1_macros_inner_attrs_extern_unsafe_and_n5_cfg_all_fail() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11000,6 +11067,7 @@ fn planted_fix3_item1_macros_inner_attrs_extern_unsafe_and_n5_cfg_all_fail() {
 fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carriers_fail() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11130,6 +11198,7 @@ fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carrier
 fn planted_fix4_nostd_manifest_doctest_view_model_and_ratatui_ban_controls() {
     let hdr = concat!(
         "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
         "#![forbid(\n",
         "    clippy::disallowed_methods,\n",
         "    clippy::disallowed_types,\n",
@@ -11145,7 +11214,7 @@ fn planted_fix4_nostd_manifest_doctest_view_model_and_ratatui_ban_controls() {
         }
         let _ = fs::write(
             root.join("crates").join(seat_crate).join("src/lib.rs"),
-            "#![forbid(\n    clippy::disallowed_methods,\n    clippy::disallowed_types,\n    clippy::disallowed_macros\n)]\npub fn ok() {}\n",
+            "#![forbid(unsafe_code)]\n#![forbid(\n    clippy::disallowed_methods,\n    clippy::disallowed_types,\n    clippy::disallowed_macros\n)]\npub fn ok() {}\n",
         );
         let err = check_workspace_manifests_and_crate_sources(&root)
             .err()
@@ -11295,5 +11364,138 @@ fn planted_fix4_nostd_manifest_doctest_view_model_and_ratatui_ban_controls() {
         println!("PLANTED_FIX4_VIEW_MODEL {label} => {err}");
         assert!(err.contains(expected_substr), "{err}");
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn planted_fix5_league_error_seat_rules_forbid_unsafe_code_unsafe_attrs_and_asm_controls() {
+    let hdr = concat!(
+        "#![no_std]\n",
+        "#![forbid(unsafe_code)]\n",
+        "#![forbid(\n",
+        "    clippy::disallowed_methods,\n",
+        "    clippy::disallowed_types,\n",
+        "    clippy::disallowed_macros\n",
+        ")]\n",
+    );
+
+    // 1. Item 2(a): `static AtomicU32` and host `#[cfg(...)]` / `include_str!` / `RefCell` in `league-error`.
+    for (label, body, expected_substr) in [
+        (
+            "static_atomic_u32",
+            "pub static ZZ_ATOMIC: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);\n",
+            "`static` items are forbidden",
+        ),
+        (
+            "fn_local_atomic_u32_type",
+            "pub fn zz_swap() -> u32 { let _a = core::sync::atomic::AtomicU32::new(0); 0 }\n",
+            "`atomic::` shared-state access is forbidden",
+        ),
+        (
+            "include_str_in_lib_rs",
+            "pub const S: &str = include_str!(\"x.txt\");\n",
+            "macro `include_str!` is forbidden",
+        ),
+        (
+            "refcell_in_league_error",
+            "pub struct BadCell { c: core::cell::RefCell<u8> }\n",
+            "cell::",
+        ),
+    ] {
+        let root = unique_tmp_dir(&format!("fix5_err_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-error/src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("league-error `{label}` must fail seat source guard"));
+        println!("PLANTED_FIX5 league-error:{label} => {err}");
+        assert!(err.contains(expected_substr), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 2. Across all three no-std crates (`league-error`, `league-seat-types`, `league-seat-ui`):
+    // - `#[cfg(not(target_os = "none"))] extern crate std;`
+    // - missing `#![forbid(unsafe_code)]` / `#![deny(unsafe_code)]`
+    // - `#[unsafe(no_mangle)]` and `#[unsafe(export_name = ...)]`
+    // - `global_asm!`, `asm!`, `naked_asm!`
+    for krate in ["league-error", "league-seat-types", "league-seat-ui"] {
+        for (label, use_hdr, body, expected_substr) in [
+            (
+                "cfg_not_target_os_none_extern_std",
+                true,
+                "#[cfg(not(target_os = \"none\"))]\nextern crate std;\n",
+                "#[cfg(...)]",
+            ),
+            (
+                "missing_forbid_unsafe_code",
+                false,
+                "#![no_std]\n#![forbid(\n    clippy::disallowed_methods,\n    clippy::disallowed_types,\n    clippy::disallowed_macros\n)]\npub fn ok() {}\n",
+                "#![forbid(unsafe_code)]",
+            ),
+            (
+                "deny_unsafe_code_instead_of_forbid",
+                false,
+                "#![no_std]\n#![deny(unsafe_code)]\n#![forbid(\n    clippy::disallowed_methods,\n    clippy::disallowed_types,\n    clippy::disallowed_macros\n)]\npub fn ok() {}\n",
+                "#![forbid(unsafe_code)]",
+            ),
+            (
+                "allow_unsafe_code_attr",
+                true,
+                "#[allow(unsafe_code)]\npub fn bad() {}\n",
+                "unsafe_code",
+            ),
+            (
+                "unsafe_no_mangle_attr",
+                true,
+                "#[unsafe(no_mangle)]\npub extern \"C\" fn zz_sym() {}\n",
+                "#[unsafe(...)]",
+            ),
+            (
+                "unsafe_export_name_attr",
+                true,
+                "#[unsafe(export_name = \"zz_sym2\")]\npub extern \"C\" fn zz_sym2() {}\n",
+                "#[unsafe(...)]",
+            ),
+            (
+                "global_asm_macro",
+                true,
+                "core::arch::global_asm!(\"nop\");\n",
+                "global_asm",
+            ),
+            (
+                "asm_macro",
+                true,
+                "pub fn a() { core::arch::asm!(\"nop\"); }\n",
+                "asm",
+            ),
+            (
+                "naked_asm_macro",
+                true,
+                "pub fn n() { core::arch::naked_asm!(\"nop\"); }\n",
+                "naked_asm",
+            ),
+        ] {
+            let root = unique_tmp_dir(&format!("fix5_{krate}_{label}"));
+            if let Err(err) = write_minimal_workspace_tree(&root) {
+                panic!("setup workspace: {err}");
+            }
+            let src = if use_hdr {
+                format!("{hdr}{body}")
+            } else {
+                body.to_owned()
+            };
+            let _ = fs::write(root.join("crates").join(krate).join("src/lib.rs"), src);
+            let err = check_workspace_manifests_and_crate_sources(&root)
+                .err()
+                .unwrap_or_else(|| panic!("{krate} `{label}` must fail Fix 5 guard"));
+            println!("PLANTED_FIX5 {krate}:{label} => {err}");
+            assert!(err.contains(expected_substr), "{err}");
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 }

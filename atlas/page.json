@@ -94,50 +94,29 @@
   "changes": {
     "fileCounts": {
       "added": 1,
-      "changed": 25,
+      "changed": 7,
       "moved": 0,
-      "parts": 8,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-seat-ui/src/lib.rs, `render_seat` gained a step, `from_plain`, before `plain`.",
-        "subjects": [
-          "crates/league-seat-ui/src/lib.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-seat-ui/src/lib.rs, `render_seat` gained a step, `plain`, before `single_panel`.",
-        "subjects": [
-          "crates/league-seat-ui/src/lib.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-seat-ui/src/lib.rs, `render_seat` gained a step, `single_panel`, after `plain`.",
-        "subjects": [
-          "crates/league-seat-ui/src/lib.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "1 file added and 25 changed content, across 8 parts.",
+        "sentence": "Nothing structural changed since 2026-11-19; 1 file added and 7 changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "c506c6e72a0fde4b2e0148db023c1a809394a327",
-      "generatedAt": "2026-11-19T01:01:43.343Z"
+      "commit": "cd7f279a15a313efe6b0a86362f863e4f4483e09",
+      "generatedAt": "2026-11-19T02:36:19.010Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
       "a": "crates/league-core/src/club/host.rs",
       "b": "crates/league-gen/tests/club_bridge_and_headless_bot.rs",
-      "either": 5,
+      "either": 6,
       "partLabels": [
         "league-core",
         "league-gen"
@@ -147,21 +126,6 @@
         "league-gen"
       ],
       "relation": "b-imports-a",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-core/src/club/host.rs",
-      "b": "crates/league-core/tests/club_host_and_bot.rs",
-      "either": 6,
-      "partLabels": [
-        "league-core",
-        "league-core"
-      ],
-      "parts": [
-        "league-core",
-        "league-core"
-      ],
-      "relation": "inside",
       "shared": 5
     },
     {
@@ -208,6 +172,21 @@
       ],
       "relation": "inside",
       "shared": 5
+    },
+    {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 22,
+      "partLabels": [
+        "league-relay",
+        "league-relay"
+      ],
+      "parts": [
+        "league-relay",
+        "league-relay"
+      ],
+      "relation": "inside",
+      "shared": 18
     }
   ],
   "changesTogetherNote": [
@@ -215,7 +194,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "cd7f279a15a313efe6b0a86362f863e4f4483e09",
+  "commit": "ac16d9948abe1b027714251e5e4596719550af3f",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (369 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -633,7 +612,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-19T02:36:19.010Z",
+  "generatedAt": "2026-11-19T05:05:20.196Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",

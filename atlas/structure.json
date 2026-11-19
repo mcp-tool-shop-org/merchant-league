@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "d492aa8cffbcc72f7be1aa1d5e3352f8a577f47260935c197166f2a209f54329",
+          "hash": "4ac7f17c70db9166e20ba1c52fe57c37c1cfe84e43b53f488aa4f615ead5b425",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -1924,7 +1924,7 @@
           "testsInside": true
         },
         {
-          "hash": "b260fb7e8264ccf1a641c7d4ebe8ed5b59ca9e7c53e28120a23c7c4f99d987c9",
+          "hash": "dddf2ac4720732b2aa411358152c2b980184ac66ef4defb7a96a711a6611e322",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2015,6 +2015,10 @@
           "path": "crates/league-error/Cargo.toml"
         },
         {
+          "hash": "3a1dadcb03f821ade4b882274867b459bf2939829db606f7583ff08861e8c5b2",
+          "path": "crates/league-error/clippy.toml"
+        },
+        {
           "exports": [
             "is_at_boundary",
             "is_base58_byte",
@@ -2023,7 +2027,7 @@
             "scrub_secret_text",
             "scrub_secret_text_with_marker"
           ],
-          "hash": "6d10f571ed56e68c691aef2737ca15e04db7ac8d1796f302aa808ed8707c813a",
+          "hash": "1f3a5d67a02fb6ddec6994792a73ca535b3c614c003c2b055f9bc79753258735",
           "path": "crates/league-error/src/lib.rs",
           "testsInside": true
         },
@@ -2032,7 +2036,7 @@
           "path": "crates/league-error/tests/scrubber_superset_corpus.json"
         },
         {
-          "hash": "2a2f30e71dd473257a401ab3f02a8be09ccd2f2723dd5ffd9afd913a894db27b",
+          "hash": "60274a9cc2b31ed426f0a4c4ff841549a0299c0a795d6a553965059c35055a28",
           "importsFiles": [
             "crates/league-error/src/lib.rs"
           ],
@@ -6725,7 +6729,7 @@
           "path": "crates/league-seat-types/src/engine_types.rs"
         },
         {
-          "hash": "3ec83a7d08b368d62be2b56375b987e86edf7c4805af7873e375d240ac705ad7",
+          "hash": "6ebf436342d509480381e156a10fe8be754f84a48e1b5b75bc3f0b389b7aa526",
           "importOrder": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6868,7 +6872,7 @@
             "render_seat_with_commodities",
             "title_view"
           ],
-          "hash": "56f16eaa8a4d2a7fde449c70285780606bb9f53bd21de6dc0cf2e77b92085f64",
+          "hash": "d30a8e404eef809bfc8b63a8ee537c85dc3ae3b93f15f7dc11ffb17001723fa9",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs"
           ],
@@ -6877,7 +6881,7 @@
             {
               "calls": [
                 {
-                  "line": 58,
+                  "line": 59,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -6885,7 +6889,7 @@
                   }
                 },
                 {
-                  "line": 60,
+                  "line": 61,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -6901,7 +6905,7 @@
             {
               "calls": [
                 {
-                  "line": 115,
+                  "line": 116,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6910,7 +6914,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 123,
+                  "line": 124,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -6919,7 +6923,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 140,
+                  "line": 141,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -6928,7 +6932,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -6945,7 +6949,7 @@
             {
               "calls": [
                 {
-                  "line": 115,
+                  "line": 116,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6954,7 +6958,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 123,
+                  "line": 124,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -6963,7 +6967,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 140,
+                  "line": 141,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -6972,7 +6976,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -6989,7 +6993,7 @@
             {
               "calls": [
                 {
-                  "line": 115,
+                  "line": 116,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6997,7 +7001,7 @@
                   }
                 },
                 {
-                  "line": 123,
+                  "line": 124,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -7005,7 +7009,7 @@
                   }
                 },
                 {
-                  "line": 140,
+                  "line": 141,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -7013,7 +7017,7 @@
                   }
                 },
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -7682,7 +7686,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "06595e27caabd761fb115c0b8765d4bda2e155f93181ab7327586cf2b5b3bef6",
+          "hash": "04b4e07e1d4a6af751533a9b817f4da2b71fe47a8609e480056c0cfdd0546c8c",
           "path": "CHANGELOG.md"
         },
         {
@@ -9102,8 +9106,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "cd7f279a15a313efe6b0a86362f863e4f4483e09",
-    "tracked": 570
+    "commit": "ac16d9948abe1b027714251e5e4596719550af3f",
+    "tracked": 571
   },
   "landings": [
     {

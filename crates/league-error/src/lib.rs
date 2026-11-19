@@ -1,4 +1,10 @@
 #![no_std]
+#![forbid(unsafe_code)]
+#![forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 //! Shared canonical [`StructuredError`], [`ToStructuredError`], and secret scrubber
 //! (`SHIP_GATE.md` `:26`).
 //!

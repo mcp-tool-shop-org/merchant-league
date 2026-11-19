@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::fmt;
 
 #[test]
+#[allow(clippy::disallowed_macros)]
 fn a1_shared_scrubber_catches_union_of_all_old_copies_plus_a1_b3_c1() {
     let raw = include_str!("scrubber_superset_corpus.json");
     let entries: Vec<Value> =

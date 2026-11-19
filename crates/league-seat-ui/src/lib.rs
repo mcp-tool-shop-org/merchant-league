@@ -1,4 +1,5 @@
 #![no_std]
+#![forbid(unsafe_code)]
 #![forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
