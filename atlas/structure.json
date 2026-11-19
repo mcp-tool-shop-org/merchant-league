@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "0747fd525fe667b9db51426d47bc66451025f9772e53a4cd654520944a7757ed",
+          "hash": "2ad7155e485544f756c5ef50e59078f740373df96b4373b1fc93020e64502c33",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -6902,7 +6902,7 @@
             "render_turn_screen",
             "title_view"
           ],
-          "hash": "3e2f765ad956cafd9527874524b8d9f37c8b6718030fda2987c3ab5b69e6cb2b",
+          "hash": "02d5f00ad3baa94683166206b650fd037eb5790ef8b769fa6a1735ce9147ed48",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-seat-ui/src/composer.rs",
@@ -9498,7 +9498,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d0dbe08a993fec7e283920fee7eebcc4a4bd0ec9",
+    "commit": "3be43b904a587c7cdd1857e95f911238f5fef1c9",
     "tracked": 576
   },
   "landings": [

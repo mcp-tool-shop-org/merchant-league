@@ -217,18 +217,21 @@ mod tests {
     use alloc::vec::Vec;
 
     use league_seat_types::{
-        ActiveShock, AssetId, AuditorShockHint, BundleDraftAction, COMMODITY_DISPLAY_CATALOG,
-        CharterRole, CoalitionReach, CommitmentHash, CommodityDisplayMap, CreditTier,
-        FundamentalParities, GoodScarcity, GradedMandateCard, MandateKind, MarketAction,
-        NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, PreviewTieMode, PrivateMandate,
-        PublicSweepReceipt, PublicTableSpec, RefusedActionPreview, RegentDoctrine,
+        ActiveCharter, ActiveShock, AssetId, AtomicSwapProposal, AuditorShockHint,
+        BondSettlementMode, BondSpec, BundleDraftAction, COMMODITY_DISPLAY_CATALOG, CartelDomain,
+        CharterRole, CheckStatus, CoalitionReach, CommitmentHash, CommodityDisplayMap,
+        CouncilPlatform, CredOffer, CreditCheck, CreditTier, DualEscrowProposal, DualEscrowVault,
+        EscrowStatus, FillKind, FillRecord, FundamentalParities, GoodScarcity, GradedMandateCard,
+        HoldingMark, IntentPledge, IntentTarget, MandateKind, MarketAction, NUMERAIRE_CODE,
+        NUMERAIRE_DISPLAY_LABEL, OfferSide, PreviewTieMode, PrivateMandate, PublicSweepReceipt,
+        PublicTableSpec, RecipeCover, RefusedActionPreview, RegentDoctrine,
         STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, Seat, SeatCommodityDisplay,
         SeatConfig, SeatIdentity, SeatIntentKind, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
         SeatObservation, SeatObservationPublicParts, SeatSpoilagePreview, SeatState,
-        SeatStatePredicates, SeatUpkeepPreview, ShockKind, SpoilageAndConversion,
-        Step0To7SweepSummary, TableId, TableMode, Turn, TurnPhase, UpkeepAndDebt, ViewAlign,
-        ViewLayoutMode, ViewZoneId, ViewportSize, WhatIfPreview, format_numeraire_display,
-        scrub_secret_text,
+        SeatStatePredicates, SeatUpkeepPreview, ShockForecastEvent, ShockKind,
+        SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode, TokenEscrowVault, Turn,
+        TurnPhase, UpkeepAndDebt, ViewAlign, ViewLayoutMode, ViewZoneId, ViewportSize,
+        WhatIfPreview, format_numeraire_display, scrub_secret_text,
     };
 
     use crate::{
@@ -987,5 +990,604 @@ mod tests {
         assert_eq!(s.selection(), saved_sel);
         assert!(s.what_if_preview().is_none());
         assert_eq!(s.staged_bundle(), &SealedOrderBundle::default());
+    }
+
+    #[test]
+    fn composer_navigation_field_adjustments_and_ledger_rows_exercise_all_branches() {
+        let mut base = sample_seat_observation();
+        let parts = SeatObservationPublicParts {
+            seat: 0,
+            table_id: TableId(202_611),
+            turn: 24,
+            phase: TurnPhase::TalkAndMarket,
+            cancel_locked: false,
+            trade_minister: 0,
+            cartel_chair: Some(1),
+            spec: PublicTableSpec {
+                seats: vec![
+                    SeatConfig {
+                        seat: 0,
+                        identity: SeatIdentity::Human,
+                        initial_cred: 15_000,
+                        raw_yield_per_turn: 10_000,
+                        refined_project_value: 2_000,
+                        upkeep_good: 3,
+                        upkeep_amount: 1_800,
+                        initial_raw_tariff_bps: 800,
+                        initial_refined_tariff_bps: 600,
+                        perishable_decay_bps: 2_000,
+                        regent: Some(RegentDoctrine {
+                            risk_tolerance_bps: 5_000,
+                            min_raw_reserve: 1_000,
+                            auto_cash_due_claims: true,
+                        }),
+                        converters: Vec::new(),
+                    },
+                    SeatConfig {
+                        seat: 1,
+                        identity: SeatIdentity::AiSyndicate,
+                        initial_cred: 15_000,
+                        raw_yield_per_turn: 10_000,
+                        refined_project_value: 2_000,
+                        upkeep_good: 0,
+                        upkeep_amount: 1_800,
+                        initial_raw_tariff_bps: 800,
+                        initial_refined_tariff_bps: 600,
+                        perishable_decay_bps: 2_000,
+                        regent: None,
+                        converters: Vec::new(),
+                    },
+                ],
+                ..base.spec.clone()
+            },
+            parities: base.parities.clone(),
+            seats: vec![
+                SeatState {
+                    raw: vec![500, 0, 0, 0],
+                    refined: vec![0, 200, 0, 0],
+                    wash_frozen_until_turn: 25,
+                    ..base.seats[0].clone()
+                },
+                SeatState {
+                    seat: 1,
+                    identity: SeatIdentity::AiSyndicate,
+                    credit_tier: CreditTier::D,
+                    ..base.seats[0].clone()
+                },
+            ],
+            offers: BTreeMap::from([(
+                1,
+                CredOffer {
+                    offer_id: 1,
+                    maker: 1,
+                    side: OfferSide::Sell,
+                    good: AssetId::Raw(1),
+                    remaining_units: 800,
+                    price_per_unit_cred: 1_100,
+                    locked_cred: 0,
+                    domain_id: Some(0),
+                    is_hybrid: true,
+                    created_turn: 23,
+                },
+            )]),
+            checks: BTreeMap::from([(
+                1,
+                CreditCheck {
+                    check_id: 1,
+                    drawer: 1,
+                    payee: 0,
+                    asset: AssetId::Cred,
+                    send_max: 1_000,
+                    deliver_min: 500,
+                    due_turn: 24,
+                    expiration_turn: 27,
+                    status: CheckStatus::Open,
+                },
+            )]),
+            escrows: BTreeMap::from([(
+                1,
+                TokenEscrowVault {
+                    escrow_id: 1,
+                    sender: 1,
+                    destination: 0,
+                    amount_cred: 1_500,
+                    finish_after_turn: Some(24),
+                    cancel_after_turn: 28,
+                    condition_hash: Some(CommitmentHash([0x5A; 32])),
+                    bond: Some(BondSpec {
+                        obligor: 0,
+                        beneficiary: 1,
+                        good: AssetId::Refined(0),
+                        required_units: 400,
+                        baseline_delivered: 0,
+                        deadline_turn: 26,
+                        mode: BondSettlementMode::BuyerDvpPayment,
+                    }),
+                    status: EscrowStatus::Locked,
+                },
+            )]),
+            dual_escrows: BTreeMap::from([(
+                2,
+                DualEscrowVault {
+                    escrow_id: 2,
+                    buyer: 0,
+                    seller: 1,
+                    good: AssetId::Refined(1),
+                    required_units: 600,
+                    payment_cred: 1_200,
+                    buyer_bond_cred: 300,
+                    seller_bond_cred: 300,
+                    baseline_delivered: 0,
+                    deadline_turn: 26,
+                    domain_id: None,
+                    status: EscrowStatus::Locked,
+                },
+            )]),
+            pledges: BTreeMap::from([
+                (
+                    1,
+                    IntentPledge {
+                        pledge_id: 1,
+                        promisor: 0,
+                        counterparty: 1,
+                        target: IntentTarget::VoteForSeat {
+                            office_turn: 24,
+                            candidate: 1,
+                        },
+                        honor_weight: 200,
+                        memo_digest: [0x11; 32],
+                    },
+                ),
+                (
+                    2,
+                    IntentPledge {
+                        pledge_id: 2,
+                        promisor: 1,
+                        counterparty: 0,
+                        target: IntentTarget::PreserveCartelMembership {
+                            office_turn: 24,
+                            domain_id: 0,
+                            beneficiary: 0,
+                        },
+                        honor_weight: 200,
+                        memo_digest: [0x22; 32],
+                    },
+                ),
+                (
+                    3,
+                    IntentPledge {
+                        pledge_id: 3,
+                        promisor: 0,
+                        counterparty: 1,
+                        target: IntentTarget::RevealPreimage {
+                            escrow_id: 1,
+                            condition: CommitmentHash([0x5A; 32]),
+                        },
+                        honor_weight: 200,
+                        memo_digest: [0x33; 32],
+                    },
+                ),
+            ]),
+            audited_pledges: BTreeSet::from([1]),
+            domains: vec![CartelDomain {
+                domain_id: 0,
+                members: BTreeSet::from([0, 1]),
+            }],
+            council_platforms: BTreeMap::from([(
+                0,
+                CouncilPlatform {
+                    proposed_tariffs_bps: vec![(0, (800, 600))],
+                    cartel_admissions: vec![(0, 1)],
+                    cartel_revocations: Vec::new(),
+                },
+            )]),
+            charters: vec![ActiveCharter {
+                role: CharterRole::OracleAuditor,
+                holder: 0,
+                expires_at_turn: 30,
+            }],
+            active_shocks: vec![ActiveShock {
+                target_seat: 1,
+                kind: ShockKind::DemandSurge,
+                magnitude_bps: 1_500,
+                expires_after_turn: 25,
+            }],
+            public_forecasts: vec![ShockForecastEvent {
+                target_seat: 0,
+                kind: ShockKind::SupplyFreeze,
+                realize_turn: 26,
+            }],
+            auditor_hints: base.auditor_hints.clone(),
+            next_offer_id: 2,
+            next_check_id: 2,
+            next_escrow_id: 3,
+            delivery_ledger: BTreeMap::new(),
+            last_potentials: base.last_potentials.clone(),
+            pending_town_import_cred_spent: 0,
+            fill_log: Vec::new(),
+            pending_wash_freezes: Vec::new(),
+            eval_vrf_pubkey: None,
+            baseline_predicates: SeatStatePredicates {
+                spoilage: SpoilageAndConversion {
+                    recipes: vec![RecipeCover {
+                        recipe_idx: 0,
+                        output_good: 0,
+                        output_units_per_batch: 1_000,
+                        capacity_runs_left: 2,
+                        batches_covered_by_inputs: 1,
+                    }],
+                    ..base.baseline_predicates.spoilage.clone()
+                },
+                scarcity: vec![GoodScarcity {
+                    good: AssetId::Raw(0),
+                    producer_seat: 0,
+                    own_units: 500,
+                    table_units_held: 500,
+                    open_book_units_offered: 100,
+                    open_book_units_bid: 50,
+                    domain_book_units_offered: 0,
+                    domain_book_units_bid: 0,
+                    seats_needing: 2,
+                    open_book_tariff_bps: 800,
+                }],
+                season_end: SeasonEndAndMarks {
+                    holdings: vec![HoldingMark {
+                        good: AssetId::Refined(0),
+                        units: 200,
+                        marked_value: 400,
+                        units_marked_by_bids: 100,
+                        units_at_floor: 100,
+                        value_at_floor: 100,
+                    }],
+                    ..base.baseline_predicates.season_end.clone()
+                },
+                ..base.baseline_predicates.clone()
+            },
+            public_receipts: vec![
+                PublicSweepReceipt {
+                    turn: 22,
+                    non_reveal_seats: Vec::new(),
+                    regent_acted_seats: Vec::new(),
+                    converted_to_ai: Vec::new(),
+                    escrows_finished: Vec::new(),
+                    escrows_cancelled_or_forfeited: Vec::new(),
+                    atomic_swaps_settled: 0,
+                    converter_batches_run: 0,
+                    converter_orders_clamped: 0,
+                    checks_cashed: Vec::new(),
+                    checks_bounced: Vec::new(),
+                    cartel_evictions: Vec::new(),
+                    projects_completed: 0,
+                    project_orders_clamped: 0,
+                    total_upkeep_shortfall_debt: 0,
+                    total_spoilage_clawed_back: 0,
+                    broken_promises: Vec::new(),
+                    elected_officers: None,
+                    charters_awarded: Vec::new(),
+                    public_forecasts: Vec::new(),
+                    newly_activated_shocks: Vec::new(),
+                    cred_debt_repaid: 0,
+                    charter_cred_burned: 0,
+                    town_import_cred_spent: 0,
+                    works_stipend_cred_minted: 0,
+                    batch_trades_cleared: 1,
+                    fills: vec![FillRecord {
+                        turn: 22,
+                        kind: FillKind::BatchFill,
+                        good: Some(AssetId::Raw(0)),
+                        from: Some(0),
+                        to: 1,
+                        units: 500,
+                        net_units: 460,
+                        cred_amount: 500,
+                        unit_price_cred: Some(1_000),
+                    }],
+                    wash_freeze_settlements: Vec::new(),
+                    season_closed: false,
+                    pbrs_deltas: vec![0; 4],
+                },
+                PublicSweepReceipt {
+                    turn: 23,
+                    non_reveal_seats: Vec::new(),
+                    regent_acted_seats: Vec::new(),
+                    converted_to_ai: Vec::new(),
+                    escrows_finished: Vec::new(),
+                    escrows_cancelled_or_forfeited: Vec::new(),
+                    atomic_swaps_settled: 0,
+                    converter_batches_run: 0,
+                    converter_orders_clamped: 0,
+                    checks_cashed: Vec::new(),
+                    checks_bounced: Vec::new(),
+                    cartel_evictions: Vec::new(),
+                    projects_completed: 0,
+                    project_orders_clamped: 0,
+                    total_upkeep_shortfall_debt: 0,
+                    total_spoilage_clawed_back: 0,
+                    broken_promises: Vec::new(),
+                    elected_officers: None,
+                    charters_awarded: Vec::new(),
+                    public_forecasts: Vec::new(),
+                    newly_activated_shocks: Vec::new(),
+                    cred_debt_repaid: 0,
+                    charter_cred_burned: 0,
+                    town_import_cred_spent: 0,
+                    works_stipend_cred_minted: 0,
+                    batch_trades_cleared: 0,
+                    fills: Vec::new(),
+                    wash_freeze_settlements: Vec::new(),
+                    season_closed: false,
+                    pbrs_deltas: vec![0; 4],
+                },
+            ],
+        };
+        let obs = SeatObservation::unmandated(parts);
+        let vp = ViewportSize::new(100, 30);
+        let mut s = SeatUiState::new();
+        let press =
+            |o: &SeatObservation, st: SeatUiState, code: SeatKeyCode, mods: SeatKeyModifiers| {
+                handle_seat_key(o, st, PassKind::SubPassA, None, vp, key(code, mods))
+            };
+
+        // 1. Curtain at < 80x24 + Global/Zone scrolling + Tab/BackTab + plain_codes toggle + Quits.
+        let small_curtain = curtain_view(
+            TableId(202_611),
+            Turn(24),
+            PassKind::SubPassA,
+            Seat(1),
+            ViewportSize::new(60, 15),
+            false,
+        );
+        assert_eq!(small_curtain.layout.mode, ViewLayoutMode::TooSmall);
+        for (c, mods, expected_kind) in [
+            (
+                SeatKeyCode::Char('q'),
+                SeatKeyModifiers::NONE,
+                SeatIntentKind::Quit,
+            ),
+            (
+                SeatKeyCode::Esc,
+                SeatKeyModifiers::NONE,
+                SeatIntentKind::Quit,
+            ),
+            (
+                SeatKeyCode::Char('c'),
+                SeatKeyModifiers::CTRL,
+                SeatIntentKind::Quit,
+            ),
+            (
+                SeatKeyCode::Char('l'),
+                SeatKeyModifiers::CTRL,
+                SeatIntentKind::LockAndHandOff,
+            ),
+            (
+                SeatKeyCode::Char('L'),
+                SeatKeyModifiers::NONE,
+                SeatIntentKind::LockAndHandOff,
+            ),
+        ] {
+            let step = press(&obs, s.clone(), c, mods);
+            assert_eq!(step.intent.map(|i| i.kind), Some(expected_kind));
+        }
+
+        for zone_steps in 0..2 {
+            s = press(&obs, s, SeatKeyCode::F(6), SeatKeyModifiers::NONE).state;
+            for kc in [
+                SeatKeyCode::Down,
+                SeatKeyCode::PageDown,
+                SeatKeyCode::Up,
+                SeatKeyCode::PageUp,
+                SeatKeyCode::Home,
+            ] {
+                s = press(&obs, s, kc, SeatKeyModifiers::NONE).state;
+            }
+            let _ = zone_steps;
+        }
+        s = press(&obs, s, SeatKeyCode::F(6), SeatKeyModifiers::NONE).state; // back to CenterTabs
+        s = press(&obs, s, SeatKeyCode::Char('c'), SeatKeyModifiers::NONE).state; // plain_codes=true
+        s = press(&obs, s, SeatKeyCode::Char('c'), SeatKeyModifiers::NONE).state; // plain_codes=false
+        s = press(&obs, s, SeatKeyCode::Tab, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::BackTab, SeatKeyModifiers::NONE).state;
+
+        // 2. Tab 1: cycle all 10 MarketActionKind variants and adjust every field + and - + Submit.
+        for _ in 0..10 {
+            for _ in 0..8 {
+                s = press(&obs, s, SeatKeyCode::Char('+'), SeatKeyModifiers::NONE).state;
+                s = press(&obs, s, SeatKeyCode::Char('-'), SeatKeyModifiers::NONE).state;
+                s = press(&obs, s, SeatKeyCode::Down, SeatKeyModifiers::NONE).state;
+            }
+            for _ in 0..8 {
+                s = press(&obs, s, SeatKeyCode::Up, SeatKeyModifiers::NONE).state;
+            }
+            s = press(&obs, s, SeatKeyCode::PageDown, SeatKeyModifiers::NONE).state;
+            s = press(&obs, s, SeatKeyCode::PageUp, SeatKeyModifiers::NONE).state;
+            s = press(&obs, s, SeatKeyCode::Home, SeatKeyModifiers::NONE).state;
+            let step = press(&obs, s, SeatKeyCode::Enter, SeatKeyModifiers::NONE);
+            assert_eq!(
+                step.intent.as_ref().map(|i| i.kind),
+                Some(SeatIntentKind::SubmitMarketAction)
+            );
+            s = press(
+                &obs,
+                step.state,
+                SeatKeyCode::Char(']'),
+                SeatKeyModifiers::NONE,
+            )
+            .state;
+        }
+        s = press(&obs, s, SeatKeyCode::Char('['), SeatKeyModifiers::NONE).state;
+
+        // 3. Tab 2 on Turn 12 (all 10 BundleSections visible): adjust every field + and - + Stage/Clear.
+        base.turn = 12;
+        s = press(&base, s, SeatKeyCode::Char('2'), SeatKeyModifiers::NONE).state;
+        for _ in 0..10 {
+            for _ in 0..10 {
+                s = press(&base, s, SeatKeyCode::Right, SeatKeyModifiers::NONE).state;
+                s = press(&base, s, SeatKeyCode::Left, SeatKeyModifiers::NONE).state;
+                s = press(&base, s, SeatKeyCode::Down, SeatKeyModifiers::NONE).state;
+            }
+            for _ in 0..10 {
+                s = press(&base, s, SeatKeyCode::Up, SeatKeyModifiers::NONE).state;
+            }
+            s = press(&base, s, SeatKeyCode::PageDown, SeatKeyModifiers::NONE).state;
+            s = press(&base, s, SeatKeyCode::PageUp, SeatKeyModifiers::NONE).state;
+            s = press(&base, s, SeatKeyCode::Home, SeatKeyModifiers::NONE).state;
+            let stage_step = press(&base, s, SeatKeyCode::Enter, SeatKeyModifiers::NONE);
+            assert_eq!(
+                stage_step.intent.as_ref().map(|i| i.kind),
+                Some(SeatIntentKind::UpdateBundle)
+            );
+            let clear_step = press(
+                &base,
+                stage_step.state,
+                SeatKeyCode::Delete,
+                SeatKeyModifiers::NONE,
+            );
+            assert_eq!(
+                clear_step.intent.as_ref().map(|i| i.kind),
+                Some(SeatIntentKind::UpdateBundle)
+            );
+            s = press(
+                &base,
+                clear_step.state,
+                SeatKeyCode::Char(']'),
+                SeatKeyModifiers::NONE,
+            )
+            .state;
+        }
+        s = press(&base, s, SeatKeyCode::Char('['), SeatKeyModifiers::NONE).state;
+
+        // 4. Composer free-text draft overrides & Esc cancel + Notes edit/Backspace/Esc.
+        s = press(&obs, s, SeatKeyCode::Char('e'), SeatKeyModifiers::NONE).state;
+        for ch in "amt=1500 px=1400 id=3 peer=2 runs=2 batches=2 debt=300 bid=400x".chars() {
+            s = press(&obs, s, SeatKeyCode::Char(ch), SeatKeyModifiers::NONE).state;
+        }
+        s = press(&obs, s, SeatKeyCode::Backspace, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Enter, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Char('e'), SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Esc, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Char('n'), SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Char('a'), SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Backspace, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Esc, SeatKeyModifiers::NONE).state;
+
+        // 5. Tab 3 What-If Sandbox rows (toggle all 7 rows + preview Close Marks + dual delivery).
+        let mut bundle = SealedOrderBundle::default();
+        BundleDraftAction::StageAtomicSwap(AtomicSwapProposal {
+            swap_id: 9,
+            maker: 0,
+            taker: 1,
+            maker_asset: AssetId::Refined(0),
+            maker_amount: 100,
+            taker_asset: AssetId::Refined(1),
+            taker_amount: 100,
+            domain_id: None,
+        })
+        .apply_to(&mut bundle);
+        BundleDraftAction::StageDualEscrow(DualEscrowProposal {
+            proposal_id: 9,
+            buyer: 0,
+            seller: 1,
+            good: AssetId::Refined(1),
+            required_units: 100,
+            payment_cred: 300,
+            buyer_bond_cred: 100,
+            seller_bond_cred: 100,
+            deadline_turn: 26,
+            domain_id: None,
+        })
+        .apply_to(&mut bundle);
+        s.set_staged_bundle(bundle);
+        s.set_what_if_preview(Some(WhatIfPreview {
+            seat: 0,
+            turn: 24,
+            baseline_predicates: obs.baseline_predicates.clone(),
+            pre_seat_state: obs.seats[0].clone(),
+            post_market_seat_state: obs.seats[0].clone(),
+            post_sweep_seat_state: obs.seats[0].clone(),
+            post_sweep_predicates: obs.baseline_predicates.clone(),
+            close_mark_caveat: league_seat_types::HYPOTHETICAL_CLOSE_MARK_CAVEAT.to_owned(),
+            refused_market_actions: Vec::new(),
+            converter_orders: Vec::new(),
+            project_orders: Vec::new(),
+            swap_orders: Vec::new(),
+            check_orders: Vec::new(),
+            escrow_orders: Vec::new(),
+            upkeep: SeatUpkeepPreview {
+                upkeep_good: 3,
+                upkeep_required: 1_800,
+                paid_with_refined: 1_800,
+                debt_interest_accrued: 0,
+                new_shortfall_debt: 0,
+                debt_repaid_cred: 0,
+            },
+            spoilage: SeatSpoilagePreview {
+                perishable_spoiled_units: 0,
+            },
+            public_fills: Vec::new(),
+            step0_to_7_receipt: Step0To7SweepSummary::from_public_sweep_receipt(
+                &obs.public_receipts[0],
+            ),
+        }));
+        s = press(&obs, s, SeatKeyCode::Char('3'), SeatKeyModifiers::NONE).state;
+        for _ in 0..7 {
+            s = press(&obs, s, SeatKeyCode::Char(' '), SeatKeyModifiers::NONE).state;
+            s = press(&obs, s, SeatKeyCode::Down, SeatKeyModifiers::NONE).state;
+        }
+        // Toggle last row off then back on so `toggle_u64` removal is covered too.
+        s = press(&obs, s, SeatKeyCode::Char(' '), SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Char(' '), SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::PageDown, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::PageUp, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Up, SeatKeyModifiers::NONE).state;
+        s = press(&obs, s, SeatKeyCode::Home, SeatKeyModifiers::NONE).state;
+        let wi = press(&obs, s, SeatKeyCode::Enter, SeatKeyModifiers::NONE);
+        let req = wi
+            .intent
+            .and_then(|i| i.what_if)
+            .unwrap_or_else(|| panic!("expected what_if"));
+        assert_eq!(req.market_actions.len(), 1);
+        assert_eq!(req.assumptions.assumed_cosigned_swaps.len(), 1);
+        assert_eq!(req.assumptions.assumed_cosigned_dual_escrows.len(), 1);
+        assert_eq!(req.assumptions.assumed_peer_deliveries.len(), 1);
+        assert_eq!(req.assumptions.assumed_cancelled_offer_ids, vec![1]);
+        assert_eq!(req.assumptions.assumed_bounced_check_ids, vec![1]);
+        let txt = render_turn_screen(&obs, &wi.state, PassKind::SubPassA, None, vp).plain_text();
+        assert!(txt.contains("Close Mark"));
+        assert!(txt.contains("Closing Window Active"));
+
+        // 6. Chronicle modal navigation across 2 receipts, FillRecord lines, scroll, plain codes, and close.
+        let m0 = press(
+            &obs,
+            wi.state,
+            SeatKeyCode::Char('r'),
+            SeatKeyModifiers::NONE,
+        );
+        assert!(m0.view.plain_text().contains("Receipt 2/2"));
+        let m1 = press(
+            &obs,
+            m0.state,
+            SeatKeyCode::Char('['),
+            SeatKeyModifiers::NONE,
+        );
+        assert!(m1.view.plain_text().contains("Fill T22 BatchFill"));
+        let mut ms = m1.state;
+        for kc in [
+            SeatKeyCode::Char(']'),
+            SeatKeyCode::Down,
+            SeatKeyCode::PageDown,
+            SeatKeyCode::Up,
+            SeatKeyCode::PageUp,
+            SeatKeyCode::Home,
+            SeatKeyCode::Char('c'),
+            SeatKeyCode::Char('c'),
+        ] {
+            ms = press(&obs, ms, kc, SeatKeyModifiers::NONE).state;
+        }
+        let closed = press(&obs, ms, SeatKeyCode::Esc, SeatKeyModifiers::NONE);
+        assert_eq!(
+            closed.intent.map(|i| i.kind),
+            Some(SeatIntentKind::CloseChronicleModal)
+        );
+        assert!(!closed.state.chronicle_open());
     }
 }
