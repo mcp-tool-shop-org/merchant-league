@@ -8134,7 +8134,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "4c83640448b8ae15142cd0bb73c9411f8d91704741ed765dd990e3a8a7db2642",
+          "hash": "fb6ac02e4cd663c46466dfceec69118709084764fe0a6cb2c2a4e3ecf6d0bcfe",
           "path": "CHANGELOG.md"
         },
         {
@@ -9553,7 +9553,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "ad88f572b8cd5419729dd30d65e653d7ef2b06fe",
+    "commit": "2aefc72678d8f2307c0b52b211155244c82f420f",
     "tracked": 576
   },
   "landings": [
@@ -10701,7 +10701,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "d580acf22011c627d8a5906d2b583eb56bc5b2fb901251e108c4a62b3899e424",
+      "hash": "7f8b212583e18fc313640b409f4e26e4587f662e5b876363c2b674860cfbc17d",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {

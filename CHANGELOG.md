@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 - Removed `heapless` 0.8.0 from `Cargo.lock` (nine `unsound` advisories published against it, `RUSTSEC-2026-0574` to `RUSTSEC-2026-0582`, fixed in 0.9.4), which had turned the required `audit` check red on `main`:
-  - It came in only through the vendored `xrpl-rust`: `embassy-sync` 0.6.2, and the optional `embedded-websocket-embedded-io` 0.1.0 behind the `websocket` feature that the league never enables (`Cargo.lock` lists optional dependencies regardless).
+  - It came in only through the vendored `xrpl-rust`: `embassy-sync` 0.6.2, and the optional `embedded-websocket-embedded-io` 0.1.0, which the `std` feature the league enables turned on through its `"embedded-websocket-embedded-io/std"` entry, although the league never enables `websocket`.
   - `vendor/xrpl-rust/Cargo.toml` and `Cargo.toml.orig`: `embassy-sync` 0.6.0 → 0.8.0 (which requires `heapless` `^0.9`), and the `embedded-websocket-embedded-io` dependency removed. The vendored crate's `websocket` feature no longer builds; nothing here uses it. `vendor/xrpl-rust/VENDORED.md` records it as change 5. `src/` is untouched.
   - No exception was added: `cargo audit --deny warnings` is clean with no ignores and no `audit.toml`.
 
