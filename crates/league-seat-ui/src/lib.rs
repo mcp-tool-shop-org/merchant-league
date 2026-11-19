@@ -15,14 +15,24 @@
 
 extern crate alloc;
 
+mod composer;
+mod render;
+mod state;
+
 use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 
 use league_seat_types::{
-    AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, SeatKeyCode, SeatKeyEvent,
-    SeatObservation, SeatScreenView, SeatState, ViewAlign, ViewLabel, ViewPanel, ViewRow,
+    AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, Seat, SeatKeyCode, SeatKeyEvent,
+    SeatObservation, SeatScreenView, SeatState, TableId, Turn, ViewAlign, ViewLabel, ViewPanel,
+    ViewRow, ViewportSize,
+};
+
+pub use state::{
+    BundleSection, CenterTab, FocusZone, MarketActionKind, PassKind, SeatUiSelection, SeatUiState,
+    SeatUiStep,
 };
 
 /// The title screen's lines, top to bottom.
@@ -62,9 +72,59 @@ pub fn title_view() -> SeatScreenView {
         title: None,
         alignment: ViewAlign::Center,
         bordered: true,
+        tabs: None,
+        table: None,
         rows,
         selected_row: None,
+        scroll: None,
     })
+}
+
+/// Renders one turn screen for `obs.seat` using solely [`SeatObservation`], `state`,
+/// [`CommodityDisplayMap`], and `viewport`.
+#[must_use]
+pub fn render_turn_screen(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    pass: PassKind,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    render::build_turn_screen(obs, state, pass, commodities, viewport)
+}
+
+/// Applies one single [`SeatKeyEvent`] to `state`, emitting the updated [`SeatScreenView`],
+/// updated [`SeatUiState`], and optional seat-to-host [`league_seat_types::SeatIntent`].
+#[must_use]
+pub fn handle_seat_key(
+    obs: &SeatObservation,
+    mut state: SeatUiState,
+    pass: PassKind,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+    key: SeatKeyEvent,
+) -> SeatUiStep {
+    let intent = composer::apply_seat_key(obs, &mut state, key);
+    let view = render::build_turn_screen(obs, &state, pass, commodities, viewport);
+    SeatUiStep {
+        view,
+        state,
+        intent,
+    }
+}
+
+/// Renders the untimed hot-seat Privacy Curtain holding strictly `table_id`, `turn`, `pass`,
+/// and `next_seat`'s guild name until `[Space]` then `[Enter]` confirms.
+#[must_use]
+pub fn curtain_view(
+    table_id: TableId,
+    turn: Turn,
+    pass: PassKind,
+    next_seat: Seat,
+    viewport: ViewportSize,
+    space_armed: bool,
+) -> SeatScreenView {
+    render::build_curtain_view(table_id, turn, pass, next_seat, viewport, space_armed)
 }
 
 /// Build one seat's minimal observation view model from [`SeatObservation`] alone.
@@ -141,8 +201,11 @@ fn render_seat_view(
         title: Some(ViewLabel::plain(format!("Seat {} View", obs.seat))),
         alignment: ViewAlign::Left,
         bordered: true,
+        tabs: None,
+        table: None,
         rows,
         selected_row: None,
+        scroll: None,
     })
 }
 
@@ -154,19 +217,24 @@ mod tests {
     use alloc::vec::Vec;
 
     use league_seat_types::{
-        ActiveShock, AssetId, AuditorShockHint, COMMODITY_DISPLAY_CATALOG, CharterRole,
-        CoalitionReach, CommitmentHash, CommodityDisplayMap, CreditTier, FundamentalParities,
-        GoodScarcity, GradedMandateCard, MandateKind, NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL,
-        PrivateMandate, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
-        SeasonEndAndMarks, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatKeyCode,
-        SeatKeyEvent, SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatState,
-        SeatStatePredicates, ShockKind, SpoilageAndConversion, TableId, TableMode, TurnPhase,
-        UpkeepAndDebt, ViewAlign,
+        ActiveShock, AssetId, AuditorShockHint, BundleDraftAction, COMMODITY_DISPLAY_CATALOG,
+        CharterRole, CoalitionReach, CommitmentHash, CommodityDisplayMap, CreditTier,
+        FundamentalParities, GoodScarcity, GradedMandateCard, MandateKind, MarketAction,
+        NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, PreviewTieMode, PrivateMandate,
+        PublicSweepReceipt, PublicTableSpec, RefusedActionPreview, RegentDoctrine,
+        STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, Seat, SeatCommodityDisplay,
+        SeatConfig, SeatIdentity, SeatIntentKind, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
+        SeatObservation, SeatObservationPublicParts, SeatSpoilagePreview, SeatState,
+        SeatStatePredicates, SeatUpkeepPreview, ShockKind, SpoilageAndConversion,
+        Step0To7SweepSummary, TableId, TableMode, Turn, TurnPhase, UpkeepAndDebt, ViewAlign,
+        ViewLayoutMode, ViewZoneId, ViewportSize, WhatIfPreview, format_numeraire_display,
+        scrub_secret_text,
     };
 
     use crate::{
-        Action, TITLE_LINES, action_for, format_own_mandate_line, render_seat,
-        render_seat_with_commodities, title_view,
+        Action, CenterTab, PassKind, SeatUiState, TITLE_LINES, action_for, curtain_view,
+        format_own_mandate_line, handle_seat_key, render_seat, render_seat_with_commodities,
+        render_turn_screen, title_view,
     };
 
     fn key(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> SeatKeyEvent {
@@ -370,8 +438,11 @@ mod tests {
     #[test]
     fn the_title_screen_says_testnet_and_not_playable() {
         let view = title_view();
-        assert_eq!(view.main.alignment, ViewAlign::Center);
-        assert!(view.main.bordered);
+        let main = view
+            .zone(ViewZoneId::SingleFull)
+            .unwrap_or_else(|| panic!("SingleFull zone missing"));
+        assert_eq!(main.alignment, ViewAlign::Center);
+        assert!(main.bordered);
         let screen = view.plain_text();
         assert!(screen.contains(TITLE_LINES[0]));
         assert!(screen.contains(TITLE_LINES[1]));
@@ -443,5 +514,478 @@ mod tests {
         let empty_screen = render_seat(&obs_empty).plain_text();
         assert!(empty_screen.contains("Tier: Unknown"));
         assert!(empty_screen.contains("Upkeep Good: None"));
+    }
+
+    #[test]
+    fn turn_screens_cover_responsive_viewports_and_four_zones() {
+        let obs = sample_seat_observation();
+        let state = SeatUiState::new();
+
+        let wide = render_turn_screen(
+            &obs,
+            &state,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+        );
+        assert_eq!(wide.layout.mode, ViewLayoutMode::FourZoneWide);
+        assert!(wide.zone(ViewZoneId::HeaderBar).is_some());
+        assert!(wide.zone(ViewZoneId::PublicLedger).is_some());
+        assert!(wide.zone(ViewZoneId::CenterTabs).is_some());
+        assert!(wide.zone(ViewZoneId::PrivateDrawer).is_some());
+        let wide_txt = wide.plain_text();
+        assert!(wide_txt.contains("Clearinghouse Marks [CRED]"));
+        assert!(wide_txt.contains("Diplomatic Desk (Disabled)"));
+        assert!(wide_txt.contains("OracleAuditor Hints"));
+        assert!(wide_txt.contains("T1->T2->T3 S1"));
+
+        let stacked = render_turn_screen(
+            &obs,
+            &state,
+            PassKind::SubPassB,
+            None,
+            ViewportSize::new(80, 24),
+        );
+        assert_eq!(stacked.layout.mode, ViewLayoutMode::StackedFallback);
+        assert_eq!(stacked.zones.len(), 4);
+
+        let small = render_turn_screen(
+            &obs,
+            &state,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(79, 23),
+        );
+        assert_eq!(small.layout.mode, ViewLayoutMode::TooSmall);
+        assert!(small.plain_text().contains("Terminal too small"));
+
+        let ignored = handle_seat_key(
+            &obs,
+            state.clone(),
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+            key(SeatKeyCode::Char('4'), SeatKeyModifiers::NONE),
+        );
+        assert!(ignored.intent.is_none());
+        assert_eq!(ignored.state.active_tab(), CenterTab::MarketAndContracts);
+
+        let curtain_unarmed = curtain_view(
+            TableId(202_611),
+            Turn(3),
+            PassKind::SubPassB,
+            Seat(1),
+            ViewportSize::new(100, 30),
+            false,
+        );
+        let c_txt = curtain_unarmed.plain_text();
+        assert!(c_txt.contains("Table #202611 | Turn 3"));
+        assert!(c_txt.contains("Hand keyboard to Seat 1 (Boreal Guild)"));
+        assert!(c_txt.contains("press [Space] then [Enter]"));
+
+        let curtain_armed = curtain_view(
+            TableId(202_611),
+            Turn(3),
+            PassKind::SubPassB,
+            Seat(1),
+            ViewportSize::new(100, 30),
+            true,
+        );
+        assert!(curtain_armed.plain_text().contains("HAND-OFF ARMED"));
+    }
+
+    #[test]
+    fn market_tab_builds_all_ten_variants_and_blocks_cancel_offer_when_locked() {
+        let mut obs = sample_seat_observation();
+        let mut state = SeatUiState::new();
+        let vp = ViewportSize::new(100, 30);
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            let step = handle_seat_key(
+                &obs,
+                state.clone(),
+                PassKind::SubPassA,
+                None,
+                vp,
+                key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+            );
+            let intent = step
+                .intent
+                .unwrap_or_else(|| panic!("expected MarketAction intent on Enter"));
+            assert_eq!(intent.kind, SeatIntentKind::SubmitMarketAction);
+            let act = intent
+                .market_action
+                .unwrap_or_else(|| panic!("expected market_action payload"));
+            seen.push(match act {
+                MarketAction::PostOffer { .. } => "PostOffer",
+                MarketAction::CancelOffer { .. } => "CancelOffer",
+                MarketAction::CreateCheck { .. } => "CreateCheck",
+                MarketAction::CancelCheck { .. } => "CancelCheck",
+                MarketAction::CreateEscrow { .. } => "CreateEscrow",
+                MarketAction::CancelExpiredEscrow { .. } => "CancelExpiredEscrow",
+                MarketAction::RecordIntentPledge { .. } => "RecordIntentPledge",
+                MarketAction::StandForOffice { .. } => "StandForOffice",
+                MarketAction::FlagWashFreeze { .. } => "FlagWashFreeze",
+                MarketAction::TownImport { .. } => "TownImport",
+            });
+            state = handle_seat_key(
+                &obs,
+                step.state,
+                PassKind::SubPassA,
+                None,
+                vp,
+                key(SeatKeyCode::Char(']'), SeatKeyModifiers::NONE),
+            )
+            .state;
+        }
+        assert_eq!(
+            seen,
+            vec![
+                "PostOffer",
+                "CancelOffer",
+                "CreateCheck",
+                "CancelCheck",
+                "CreateEscrow",
+                "CancelExpiredEscrow",
+                "RecordIntentPledge",
+                "StandForOffice",
+                "FlagWashFreeze",
+                "TownImport",
+            ]
+        );
+
+        obs.cancel_locked = true;
+        let locked_step = handle_seat_key(
+            &obs,
+            handle_seat_key(
+                &obs,
+                SeatUiState::new(),
+                PassKind::SubPassB,
+                None,
+                vp,
+                key(SeatKeyCode::Char(']'), SeatKeyModifiers::NONE),
+            )
+            .state,
+            PassKind::SubPassB,
+            None,
+            vp,
+            key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+        );
+        assert!(locked_step.intent.is_none());
+        assert!(
+            locked_step
+                .view
+                .plain_text()
+                .contains("CancelOffer is BLOCKED")
+        );
+    }
+
+    #[test]
+    fn bundle_tab_gates_vote_to_4n_charters_to_6n_and_builds_all_ten_fields() {
+        let mut obs = sample_seat_observation();
+        let vp = ViewportSize::new(100, 30);
+
+        let go_tab2 = |o: &SeatObservation| {
+            handle_seat_key(
+                o,
+                SeatUiState::new(),
+                PassKind::SubPassB,
+                None,
+                vp,
+                key(SeatKeyCode::Char('2'), SeatKeyModifiers::NONE),
+            )
+        };
+
+        obs.turn = 1;
+        let t1 = go_tab2(&obs).view.plain_text();
+        assert!(!t1.contains("Council Vote (Turn 4n)"));
+        assert!(!t1.contains("Charter Bids (Turn 6n)"));
+
+        obs.turn = 4;
+        let t4 = go_tab2(&obs).view.plain_text();
+        assert!(t4.contains("Council Vote (Turn 4n)"));
+        assert!(!t4.contains("Charter Bids (Turn 6n)"));
+
+        obs.turn = 6;
+        let t6 = go_tab2(&obs).view.plain_text();
+        assert!(!t6.contains("Council Vote (Turn 4n)"));
+        assert!(t6.contains("Charter Bids (Turn 6n)"));
+
+        obs.turn = 12;
+        let mut state = go_tab2(&obs).state;
+        let t12 = render_turn_screen(&obs, &state, PassKind::SubPassB, None, vp).plain_text();
+        assert!(t12.contains("Council Vote (Turn 4n)"));
+        assert!(t12.contains("Charter Bids (Turn 6n)"));
+
+        let mut staged_kinds = 0_usize;
+        for _ in 0..10 {
+            let step = handle_seat_key(
+                &obs,
+                state.clone(),
+                PassKind::SubPassB,
+                None,
+                vp,
+                key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+            );
+            let intent = step
+                .intent
+                .unwrap_or_else(|| panic!("expected UpdateBundle intent"));
+            assert_eq!(intent.kind, SeatIntentKind::UpdateBundle);
+            assert!(intent.bundle_action.is_some());
+            staged_kinds += 1;
+            state = handle_seat_key(
+                &obs,
+                step.state,
+                PassKind::SubPassB,
+                None,
+                vp,
+                key(SeatKeyCode::Char(']'), SeatKeyModifiers::NONE),
+            )
+            .state;
+        }
+        assert_eq!(staged_kinds, 10);
+
+        let cleared = handle_seat_key(
+            &obs,
+            state,
+            PassKind::SubPassB,
+            None,
+            vp,
+            key(SeatKeyCode::Char('X'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(
+            cleared.intent.and_then(|i| i.bundle_action),
+            Some(BundleDraftAction::ClearAll)
+        );
+    }
+
+    #[test]
+    fn what_if_tab_chronicle_30_fields_handoff_clear_and_scrubber_preservation() {
+        let mut obs = sample_seat_observation();
+        obs.public_receipts.push(PublicSweepReceipt {
+            turn: 1,
+            non_reveal_seats: vec![2],
+            regent_acted_seats: vec![2],
+            converted_to_ai: Vec::new(),
+            escrows_finished: vec![4],
+            escrows_cancelled_or_forfeited: Vec::new(),
+            atomic_swaps_settled: 1,
+            converter_batches_run: 2,
+            converter_orders_clamped: 0,
+            checks_cashed: vec![1],
+            checks_bounced: Vec::new(),
+            cartel_evictions: Vec::new(),
+            projects_completed: 1,
+            project_orders_clamped: 0,
+            total_upkeep_shortfall_debt: 500,
+            total_spoilage_clawed_back: 250,
+            broken_promises: Vec::new(),
+            elected_officers: None,
+            charters_awarded: Vec::new(),
+            public_forecasts: Vec::new(),
+            newly_activated_shocks: Vec::new(),
+            cred_debt_repaid: 100,
+            charter_cred_burned: 0,
+            town_import_cred_spent: 200,
+            works_stipend_cred_minted: 300,
+            batch_trades_cleared: 2,
+            fills: Vec::new(),
+            wash_freeze_settlements: Vec::new(),
+            season_closed: false,
+            pbrs_deltas: vec![10, -5, 0, -5],
+        });
+        let vp = ViewportSize::new(100, 30);
+
+        let mut state = handle_seat_key(
+            &obs,
+            SeatUiState::new(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('3'), SeatKeyModifiers::NONE),
+        )
+        .state;
+        state = handle_seat_key(
+            &obs,
+            state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char(' '), SeatKeyModifiers::NONE),
+        )
+        .state;
+        let preview_step = handle_seat_key(
+            &obs,
+            state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('p'), SeatKeyModifiers::NONE),
+        );
+        let req_intent = preview_step
+            .intent
+            .unwrap_or_else(|| panic!("expected RequestWhatIf intent"));
+        assert_eq!(req_intent.kind, SeatIntentKind::RequestWhatIf);
+        assert_eq!(
+            req_intent.what_if.as_ref().map(|r| r.tie_mode),
+            Some(PreviewTieMode::PessimisticForSeat)
+        );
+
+        state = preview_step.state;
+        let seat_state_stub = obs.seats[0].clone();
+        state.set_what_if_preview(Some(WhatIfPreview {
+            seat: 0,
+            turn: 1,
+            baseline_predicates: obs.baseline_predicates.clone(),
+            pre_seat_state: seat_state_stub.clone(),
+            post_market_seat_state: seat_state_stub.clone(),
+            post_sweep_seat_state: seat_state_stub,
+            post_sweep_predicates: obs.baseline_predicates.clone(),
+            close_mark_caveat: league_seat_types::HYPOTHETICAL_CLOSE_MARK_CAVEAT.to_owned(),
+            refused_market_actions: vec![RefusedActionPreview {
+                action_index: 0,
+                error_code: "CANCEL_LOCKED".to_owned(),
+                message: "rejected sEd7N5k8mQp2rT9vW3xY6zA4bC1d and OPENROUTER_API_KEY=secret_tok"
+                    .to_owned(),
+            }],
+            converter_orders: Vec::new(),
+            project_orders: Vec::new(),
+            swap_orders: Vec::new(),
+            check_orders: Vec::new(),
+            escrow_orders: Vec::new(),
+            upkeep: SeatUpkeepPreview {
+                upkeep_good: 3,
+                upkeep_required: 1800,
+                paid_with_refined: 1800,
+                debt_interest_accrued: 0,
+                new_shortfall_debt: 0,
+                debt_repaid_cred: 0,
+            },
+            spoilage: SeatSpoilagePreview {
+                perishable_spoiled_units: 0,
+            },
+            public_fills: Vec::new(),
+            step0_to_7_receipt: Step0To7SweepSummary::from_public_sweep_receipt(
+                &obs.public_receipts[0],
+            ),
+        }));
+        let what_if_txt =
+            render_turn_screen(&obs, &state, PassKind::SubPassA, None, vp).plain_text();
+        assert!(what_if_txt.contains("[REDACTED]"));
+        assert!(!what_if_txt.contains("sEd7N5k8mQp2rT9vW3xY6zA4bC1d"));
+        assert!(!what_if_txt.contains("secret_tok"));
+
+        // Verify all 61 glossary phrases + numeraire render without false-positive redaction.
+        for entry in COMMODITY_DISPLAY_CATALOG {
+            let raw = entry.raw_display(false);
+            let refined = entry.refined_display(false);
+            assert_eq!(scrub_secret_text(&raw), raw);
+            assert_eq!(scrub_secret_text(&refined), refined);
+        }
+        assert_eq!(
+            scrub_secret_text(format_numeraire_display(false)),
+            format_numeraire_display(false)
+        );
+
+        // Open Chronicle modal and verify all 30 seat-safe fields appear.
+        let modal_step = handle_seat_key(
+            &obs,
+            state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('r'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(
+            modal_step.intent.as_ref().map(|i| i.kind),
+            Some(SeatIntentKind::OpenChronicleModal)
+        );
+        let modal_txt = modal_step.view.plain_text();
+        for field_key in [
+            "turn:",
+            "non_reveal_seats:",
+            "regent_acted_seats:",
+            "converted_to_ai:",
+            "escrows_finished:",
+            "escrows_cancelled_or_forfeited:",
+            "atomic_swaps_settled:",
+            "converter_batches_run:",
+            "converter_orders_clamped:",
+            "checks_cashed:",
+            "checks_bounced:",
+            "cartel_evictions:",
+            "projects_completed:",
+            "project_orders_clamped:",
+            "total_upkeep_shortfall_debt:",
+            "total_spoilage_clawed_back:",
+            "broken_promises:",
+            "elected_officers:",
+            "charters_awarded:",
+            "public_forecasts:",
+            "newly_activated_shocks:",
+            "cred_debt_repaid:",
+            "charter_cred_burned:",
+            "town_import_cred_spent:",
+            "works_stipend_cred_minted:",
+            "batch_trades_cleared:",
+            "fills:",
+            "wash_freeze_settlements:",
+            "season_closed:",
+            "pbrs_deltas:",
+        ] {
+            assert!(
+                modal_txt.contains(field_key),
+                "Chronicle modal missing field `{field_key}`"
+            );
+        }
+
+        // Verify hand-off clears free text while keeping active_tab + selection.
+        let mut s = modal_step.state;
+        s = handle_seat_key(
+            &obs,
+            handle_seat_key(
+                &obs,
+                s,
+                PassKind::SubPassA,
+                None,
+                vp,
+                key(SeatKeyCode::Char('r'), SeatKeyModifiers::NONE),
+            )
+            .state,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('n'), SeatKeyModifiers::NONE),
+        )
+        .state;
+        s = handle_seat_key(
+            &obs,
+            s,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('X'), SeatKeyModifiers::NONE),
+        )
+        .state;
+        s = handle_seat_key(
+            &obs,
+            s,
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+        )
+        .state;
+        assert_eq!(s.notes_draft(), "X");
+        let saved_tab = s.active_tab();
+        let saved_sel = s.selection();
+        s.clear_for_hand_off();
+        assert_eq!(s.composer_draft(), "");
+        assert_eq!(s.whisper_draft(), "");
+        assert_eq!(s.notes_draft(), "");
+        assert_eq!(s.active_tab(), saved_tab);
+        assert_eq!(s.selection(), saved_sel);
+        assert!(s.what_if_preview().is_none());
+        assert_eq!(s.staged_bundle(), &SealedOrderBundle::default());
     }
 }

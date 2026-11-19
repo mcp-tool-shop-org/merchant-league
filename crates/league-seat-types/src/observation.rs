@@ -102,6 +102,13 @@ pub struct PublicSweepReceipt {
     pub pbrs_deltas: Vec<i64>,
 }
 
+impl PublicSweepReceipt {
+    /// Serializes this 30-field public receipt to compact canonical JSON for host comparison.
+    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
+
 /// Private Horizon Shock hint visible solely to the active `OracleAuditor` seat while
 /// `hint_turn <= turn < forecast_turn`; `magnitude_bps` is always omitted before realize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
