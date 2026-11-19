@@ -641,3 +641,201 @@ fn replay_layout_seed_errors_and_sealed_accessors_round_trip() {
             .contains("NON_SEALED_SEED_IN_SEALED")
     );
 }
+
+#[test]
+fn table_spec_validation_math_helpers_and_persistence_error_branches() {
+    use league_core::types::*;
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0xA1 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0xAA; 32]), "eval_seed");
+    let (base_spec, _, _) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            TableId(81_901),
+            4,
+            1,
+            [0x72; 32],
+            &salts,
+            eval_seed,
+        ),
+        "base_spec",
+    );
+    assert!(base_spec.validate().is_ok());
+
+    let mut s = base_spec.clone();
+    s.seat_count = 3;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats.pop();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects.clear();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects[0].equity_points = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.projects[0].inputs = vec![(99, 100)];
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.closing_hazard_bps[0] = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mode = TableMode::Eval;
+    s.shocks.push(ScheduledShockSpec {
+        hint_turn: 0,
+        forecast_turn: 2,
+        realize_turn: 4,
+        target_seat: 0,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 100,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.dealt_mandate_commits.pop();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.dealt_mandate_commits[0] = league_core::CommitmentHash([0; 32]);
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mode = TableMode::Game;
+    s.drand_schedule = None;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.drand_schedule = Some(league_core::DrandSchedule {
+        turn_1_close_unix: 1_700_000_000,
+        turn_period_secs: 30,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.shocks.push(ScheduledShockSpec {
+        hint_turn: 1,
+        forecast_turn: 2,
+        realize_turn: 3,
+        target_seat: 0,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 100,
+    });
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_alpha_bps = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_deck.truncate(1);
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.mandate_deck[0].difficulty_completion_bps = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.town_import_premium_bps = 10_000;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.works_stipend_per_unit_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.cancel_lock_bps = 10_001;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_round_trip_min_units = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_freeze_bond_cred = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.wash_freeze_bounty_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].seat = 9;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].initial_cred = -1;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].upkeep_good = 0;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].initial_raw_tariff_bps = 9_999;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters.clear();
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters[0].owner = 3;
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec.clone();
+    s.seats[0].converters[0].inputs = vec![(99, 100)];
+    assert!(s.validate().is_err());
+
+    let mut s = base_spec;
+    s.seats[0].converters[0].inputs = vec![(0, 100)];
+    assert!(s.validate().is_err());
+
+    // Arithmetic & seed validation branches in `league_core::types`.
+    assert!(town_import_cost_cred(0, 1_000, 22_500).is_err());
+    assert!(town_import_cost_cred(1_000, 1_000, 10_000).is_err());
+    assert!(town_import_cost_cred(i64::MAX, i64::MAX, 22_500).is_err());
+    assert_eq!(ceil_bps_fee(0, 100), 0);
+    assert_eq!(floor_bps_part(0, 100), 0);
+    assert_eq!(floor_bps_part(1_000, 20_000), 1_000);
+    assert_eq!(half_up_bps(0, 100), 0);
+    assert_eq!(half_up_bps(1_000, 250), 25);
+    assert_eq!(mul_units_parity(0, 1_000), 0);
+    assert_eq!(ceil_units_parity(0, 1_000), 0);
+    assert!(checked_mul_units_parity(-1, 100).is_err());
+    assert_eq!(checked_mul_units_parity(0, 100), Ok(0));
+    assert!(checked_mul_units_parity(i64::MAX, i64::MAX).is_err());
+    assert!(checked_ceil_units_parity(-1, 100).is_err());
+    assert_eq!(checked_ceil_units_parity(0, 100), Ok(0));
+    assert!(checked_ceil_units_parity(i64::MAX, i64::MAX).is_err());
+    assert_eq!(scale_bps_signed(-500, 10_000), -500);
+    assert!(scale_bps_signed(-500, 9_500) <= -475);
+
+    assert!(validate_club_dev_seed(1_000_000).is_err());
+    assert!(validate_club_dev_seed(1_u64 << 63).is_err());
+    assert!(validate_club_dev_seed(10_000).is_err());
+    assert!(validate_club_dev_seed((1_u64 << 63) | 7).is_err());
+
+    // Persistence missing-file error paths + idempotent wipe_seal_file + from_standard_setup.
+    let tmp = std::env::temp_dir().join("ml_card5_missing_save_seal_probe");
+    let _ = std::fs::remove_dir_all(&tmp);
+    must_ok(std::fs::create_dir_all(&tmp), "mkdir tmp");
+    let save_p = tmp.join("missing.save.json");
+    let seal_p = tmp.join("missing.seal");
+    assert!(ClubHost::read_save_and_seal(&save_p, &seal_p).is_err());
+    must_ok(std::fs::write(&save_p, b"{}"), "write save dummy");
+    assert!(ClubHost::read_save_and_seal(&save_p, &seal_p).is_err());
+    must_ok(ClubHost::wipe_seal_file(&seal_p), "wipe absent seal ok");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let std_host = must_ok(
+        ClubHost::from_standard_setup(TableId(81_999), 4, 1, 0),
+        "from_standard_setup",
+    );
+    assert_eq!(std_host.seat_count(), 4);
+}

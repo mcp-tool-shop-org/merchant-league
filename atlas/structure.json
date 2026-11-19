@@ -1879,9 +1879,10 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "4d5ee0bde870a0b27bd0eb5992c1473a96aa226188f0b6e139c7d917fdcb7e5a",
+          "hash": "579b2a9fae66ae7bc6d217bbd9d827577452d2efb81506e5830aba164e5c0aed",
           "importsFiles": [
-            "crates/league-core/src/lib.rs"
+            "crates/league-core/src/lib.rs",
+            "crates/league-core/src/types.rs"
           ],
           "library": "crates/league-core/src/lib.rs",
           "path": "crates/league-core/tests/club_host_and_bot.rs",
@@ -1941,14 +1942,16 @@
           "testsInside": true
         },
         {
-          "hash": "ec73a1e892d3c6a8df9ed1c097aedb56e0830c503aa226e44ec684c953a9a16b",
+          "hash": "3d8914c126a7ccc23a3c48cf5ac8bcc30e02a8989a944fe906253f1eae005c8b",
           "importOrder": [
             "crates/league-core/src/observation.rs",
-            "crates/league-core/src/lib.rs"
+            "crates/league-core/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
-            "crates/league-core/src/observation.rs"
+            "crates/league-core/src/observation.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "library": "crates/league-core/src/lib.rs",
           "path": "crates/league-core/tests/seat_types_reexport_parity.rs",
@@ -2048,7 +2051,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 6,
+      "testedBy": 7,
       "unresolvedSites": 0
     },
     {
@@ -6829,7 +6832,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 3,
+      "testedBy": 4,
       "unresolvedSites": 0
     },
     {
@@ -8905,7 +8908,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "40c793332ba78998865a377fd5c6957cc836cec3",
+    "commit": "c506c6e72a0fde4b2e0148db023c1a809394a327",
     "tracked": 569
   },
   "landings": [

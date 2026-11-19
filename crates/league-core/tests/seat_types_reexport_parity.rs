@@ -1422,4 +1422,17 @@ fn wire_serde_round_trips_and_rejects_invalid_inputs() {
         "deserialize PublicPreviewState None",
     );
     assert_eq!(prev_none_rt.spec.eval_vrf_pubkey, None);
+
+    // Exercise seat-types commodity display lookup helpers across hit/miss inputs.
+    assert!(league_seat_types::lookup_commodity_display("ALM").is_some());
+    assert!(league_seat_types::lookup_commodity_display("AB").is_none());
+    assert!(league_seat_types::lookup_commodity_display_bytes(*b"ZZZ").is_none());
+    assert_eq!(
+        league_seat_types::format_numeraire_display(false),
+        league_seat_types::NUMERAIRE_DISPLAY_LABEL
+    );
+    assert_eq!(
+        league_seat_types::format_numeraire_display(true),
+        league_seat_types::NUMERAIRE_PLAIN_LABEL
+    );
 }
