@@ -264,7 +264,9 @@ where
             }
             Some(PollEvent::Input(Event::Key(key))) => {
                 session.sync_clock(events.elapsed());
-                if let Some(mapped) = host::map_crossterm_key(key) {
+                if session.take_input_drain() {
+                    events.drain_queued_input()?;
+                } else if let Some(mapped) = host::map_crossterm_key(key) {
                     let _ = session.handle_key_event(mapped, vp);
                 }
             }
@@ -339,13 +341,17 @@ fn resolve_resume_paths(target: &Path) -> io::Result<(PathBuf, PathBuf)> {
     Ok((target.to_path_buf(), seal))
 }
 
-fn apply_cli_session_options(session: &mut host::TuiHostSession, opts: &CliOptions) {
+fn apply_cli_session_options(
+    session: &mut host::TuiHostSession,
+    opts: &CliOptions,
+    is_resume: bool,
+) {
     if opts.untimed {
         session.configure_turn_clock(None);
-    } else {
-        session.configure_turn_clock(Some(
-            opts.turn_clock_secs.unwrap_or(DEFAULT_TURN_CLOCK_SECS),
-        ));
+    } else if let Some(secs) = opts.turn_clock_secs {
+        session.configure_turn_clock(Some(secs));
+    } else if !is_resume || !session.has_saved_clock_setting() {
+        session.configure_turn_clock(Some(DEFAULT_TURN_CLOCK_SECS));
     }
     if opts.pins_enabled {
         session.enable_seat_pins();
@@ -357,7 +363,7 @@ fn build_session_for_cli(opts: &CliOptions) -> io::Result<host::TuiHostSession> 
         let (save_path, seal_path) = resolve_resume_paths(resume_target)?;
         let mut session = host::TuiHostSession::read_save_and_seal(&save_path, &seal_path, None)
             .map_err(|err| io::Error::other(scrub_secret_text(&err.to_string())))?;
-        apply_cli_session_options(&mut session, opts);
+        apply_cli_session_options(&mut session, opts, true);
         if let Some(save_dir) = &opts.save_dir {
             let (s_path, k_path) = default_save_paths(save_dir, session.table_id());
             session.enable_autosave(s_path, k_path);
@@ -369,7 +375,7 @@ fn build_session_for_cli(opts: &CliOptions) -> io::Result<host::TuiHostSession> 
     let ring = default_dev_ring_table()?;
     let mut session = host::TuiHostSession::from_ring_table(&ring, TableId(1), &[0], 1)
         .map_err(|err| io::Error::other(scrub_secret_text(&err.to_string())))?;
-    apply_cli_session_options(&mut session, opts);
+    apply_cli_session_options(&mut session, opts, false);
     let save_dir = opts.save_dir.clone().unwrap_or_else(|| PathBuf::from("."));
     let (save_path, seal_path) = default_save_paths(&save_dir, session.table_id());
     session.enable_autosave(save_path, seal_path);
@@ -802,29 +808,71 @@ mod tests {
         // 2. Curtain handoff (`Ctrl+L`, `Space`, `Enter`) with Press + Release must post zero offers.
         let mut session_curtain =
             host::TuiHostSession::from_ring_table(&ring, TableId(79), &[0], 1)?;
-        let curtain_events = vec![
-            key_with(
-                KeyCode::Char('l'),
-                KeyModifiers::CONTROL,
-                KeyEventKind::Press,
+        let mut events_curtain = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                Duration::ZERO,
+                Some(key_with(
+                    KeyCode::Char('l'),
+                    KeyModifiers::CONTROL,
+                    KeyEventKind::Press,
+                )),
+                Vec::new(),
             ),
-            key_with(
-                KeyCode::Char('l'),
-                KeyModifiers::CONTROL,
-                KeyEventKind::Release,
+            (
+                Duration::ZERO,
+                Some(key_with(
+                    KeyCode::Char('l'),
+                    KeyModifiers::CONTROL,
+                    KeyEventKind::Release,
+                )),
+                Vec::new(),
             ),
-            key_with(KeyCode::Char(' '), KeyModifiers::NONE, KeyEventKind::Press),
-            key_with(
-                KeyCode::Char(' '),
-                KeyModifiers::NONE,
-                KeyEventKind::Release,
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_with(
+                    KeyCode::Char(' '),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Press,
+                )),
+                Vec::new(),
             ),
-            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Press),
-            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release),
-            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat),
-        ]
-        .into_iter();
-        let mut events_curtain = ScriptedSessionEvents::from_events(curtain_events);
+            (
+                Duration::ZERO,
+                Some(key_with(
+                    KeyCode::Char(' '),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Release,
+                )),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_with(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    KeyEventKind::Press,
+                )),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_with(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    KeyEventKind::Release,
+                )),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_with(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                    KeyEventKind::Repeat,
+                )),
+                Vec::new(),
+            ),
+        ]);
         run_session_loop(&mut terminal, &mut session_curtain, &mut events_curtain)?;
         assert!(!session_curtain.is_curtain_open());
         let obs_curtain = session_curtain.build_seat_observation(league_core::Seat(0))?;
@@ -890,7 +938,7 @@ mod tests {
                 Vec::new(),
             ),
             (
-                Duration::from_millis(10),
+                host::CURTAIN_LIFT_DEAD_TIME,
                 Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
                 Vec::new(),
             ),
@@ -992,7 +1040,7 @@ mod tests {
                 Vec::new(),
             ),
             (
-                Duration::from_millis(10),
+                host::CURTAIN_LIFT_DEAD_TIME,
                 Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
                 Vec::new(),
             ),
@@ -1126,11 +1174,12 @@ mod tests {
         let m0_dbg = format!("{:?}", m0.kind);
         assert!(!curtain_buf.contains(&m0_dbg));
 
-        // Now unlock Seat 1 and verify Seat 1's first buffer leaks zero Seat 0 private state, while
-        // the countdown in Seat 1's header ticks down smoothly on pure `Tick`s (`67s` -> `57s`).
-        let mut s1_steps = vec![
+        // Phase 1: Unlock Seat 1 after the 400 ms Curtain-open dead time and verify the first
+        // unlocked frame displays the exact initial `pass_budget_secs` (`67s` => `01:07`) and zero
+        // Seat 0 private markers.
+        let mut events_s1 = ScriptedSessionEvents::from_timed_with_queued([
             (
-                Duration::from_millis(10),
+                host::CURTAIN_LIFT_DEAD_TIME,
                 Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
                 Vec::new(),
             ),
@@ -1139,21 +1188,46 @@ mod tests {
                 Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
                 Vec::new(),
             ),
-            (Duration::from_secs(10), None, Vec::new()),
-            (Duration::ZERO, None, Vec::new()),
-        ];
-        let mut events_s1 = ScriptedSessionEvents::from_timed_with_queued(s1_steps.drain(..));
+        ]);
+        events_s1.clock = events.elapsed();
         run_session_loop(&mut terminal, &mut session, &mut events_s1)?;
-        let s1_buf = term_capture(&terminal);
+        let s1_buf_t0 = term_capture(&terminal);
         assert!(
             !session.is_curtain_open(),
             "Seat 1 must have unlocked from Curtain"
         );
-        assert!(!s1_buf.contains("PRIVATE_BEFORE_TIMEOUT_919"));
-        assert!(!s1_buf.contains("Preview T1 S0:"));
+        assert!(!s1_buf_t0.contains("PRIVATE_BEFORE_TIMEOUT_919"));
+        assert!(!s1_buf_t0.contains("Preview T1 S0:"));
+        let budget = session
+            .pass_budget_secs()
+            .ok_or("missing Seat 1 Pass A budget")?;
+        assert_eq!(budget, 67);
+        let expected_t0 = format!("Clock: {:02}:{:02}", budget / 60, budget % 60);
         assert!(
-            s1_buf.contains("57s") || s1_buf.contains("0:57") || s1_buf.contains("Clock:"),
-            "header must display ticking Pass A countdown without key presses:\n{s1_buf}"
+            s1_buf_t0.contains(&expected_t0),
+            "first unlocked header must show `{expected_t0}` matching `pass_budget_secs == {budget}`:\n{s1_buf_t0}"
+        );
+
+        // Phase 2: Advance fake clock past lift dead time + 10s on pure `Tick`s and assert the
+        // displayed countdown decrements accurately (`67s` -> `57s` / `00:57`) with no `Clock:`
+        // fallback escape.
+        let mut events_s1_tick = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME + Duration::from_secs(10),
+                None,
+                Vec::new(),
+            ),
+            (Duration::ZERO, None, Vec::new()),
+        ]);
+        events_s1_tick.clock = events_s1.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut events_s1_tick)?;
+        let s1_buf_t1 = term_capture(&terminal);
+        let remaining = budget.saturating_sub(10);
+        assert_eq!(remaining, 57);
+        let expected_t1 = format!("Clock: {:02}:{:02}", remaining / 60, remaining % 60);
+        assert!(
+            s1_buf_t1.contains(&expected_t1) && !s1_buf_t1.contains(&expected_t0),
+            "header must display ticking Pass A countdown `{expected_t1}` (`pass_budget_secs - 10s == {remaining}`) without key presses:\n{s1_buf_t1}"
         );
 
         // Regent doctrine triggers on idle `SubPassB` timeout (`H=1`, 180s => 135s A / 45s B).
@@ -1165,7 +1239,7 @@ mod tests {
             regent_steps.push((Duration::from_secs(10), None, Vec::new()));
         }
         regent_steps.push((
-            Duration::from_millis(10),
+            host::CURTAIN_LIFT_DEAD_TIME + Duration::from_millis(10),
             Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
             Vec::new(),
         ));
@@ -1174,7 +1248,7 @@ mod tests {
             Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
             Vec::new(),
         ));
-        for _ in 0..5 {
+        for _ in 0..6 {
             regent_steps.push((Duration::from_secs(10), None, Vec::new()));
         }
         let mut regent_events = ScriptedSessionEvents::from_timed_with_queued(regent_steps);
@@ -1204,6 +1278,1042 @@ mod tests {
         assert_eq!(untimed_session.pass(), league_seat_ui::PassKind::SubPassA);
         assert!(!untimed_session.is_curtain_open());
         assert!(term_capture(&terminal).contains("Clock: Untimed"));
+
+        // C2: `.seal` checkpoint preserves timed (`240s`) and `--untimed` clock settings across
+        // `--resume` when CLI flags are omitted, while explicit CLI flags override `.seal`.
+        let ckpt_dir = std::env::temp_dir().join(format!("ml_clock_ckpt_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&ckpt_dir);
+        std::fs::create_dir_all(&ckpt_dir)?;
+        let save_timed = ckpt_dir.join("club-81505.save.json");
+        let seal_timed = ckpt_dir.join("club-81505.seal");
+        let mut timed_240 =
+            host::TuiHostSession::from_ring_table(&ring, TableId(81_505), &[0], 21)?;
+        timed_240.configure_turn_clock(Some(240));
+        timed_240
+            .write_save_and_seal(&save_timed, &seal_timed)
+            .map_err(|e| e.to_string())?;
+        let resumed_240 = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_timed.clone()),
+            ..CliOptions::default()
+        })?;
+        assert_eq!(resumed_240.pass_budget_secs(), Some(180));
+        let resumed_300_override = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_timed.clone()),
+            turn_clock_secs: Some(300),
+            ..CliOptions::default()
+        })?;
+        assert_eq!(resumed_300_override.pass_budget_secs(), Some(225));
+        let resumed_untimed_override = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_timed),
+            untimed: true,
+            ..CliOptions::default()
+        })?;
+        assert_eq!(resumed_untimed_override.pass_budget_secs(), None);
+
+        let save_untimed = ckpt_dir.join("club-81506.save.json");
+        let seal_untimed = ckpt_dir.join("club-81506.seal");
+        untimed_session
+            .write_save_and_seal(&save_untimed, &seal_untimed)
+            .map_err(|e| e.to_string())?;
+        let resumed_untimed = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_untimed.clone()),
+            ..CliOptions::default()
+        })?;
+        assert_eq!(resumed_untimed.pass_budget_secs(), None);
+        let resumed_retimed = build_session_for_cli(&CliOptions {
+            resume_path: Some(save_untimed),
+            turn_clock_secs: Some(180),
+            ..CliOptions::default()
+        })?;
+        assert_eq!(resumed_retimed.pass_budget_secs(), Some(135));
+        let _ = std::fs::remove_dir_all(&ckpt_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_with_pins_starts_behind_curtain_hides_private_markers_and_requires_pin()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_core::Seat;
+        use league_seat_types::{BundleDraftAction, SeatIntent};
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let term_capture = |term: &Terminal<TestBackend>| {
+            let buf = term.backend().buffer();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let ring = default_dev_ring_table()?;
+        let base_dir = std::env::temp_dir().join(format!("ml_resume_pins_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let dir_a = base_dir.join("case_a");
+        std::fs::create_dir_all(&dir_a)?;
+        let (save_a, seal_a) = default_save_paths(&dir_a, TableId(81_511));
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        // Sub-case A: `--pins` enabled from Turn 1 Curtain. Seat 0 sets PIN `"4829"` -> post-PIN
+        // autosave triggers while `curtain == None` -> drop immediately -> `--resume` must reopen
+        // behind Seat 0's Curtain and require `"4829"`.
+        let mut sess_a =
+            host::TuiHostSession::from_ring_table(&ring, TableId(81_511), &[0, 1], 31)?;
+        sess_a.enable_autosave(save_a.clone(), seal_a.clone());
+        sess_a.enable_seat_pins();
+        let s0a_mandate = host::mandate_short_marker(
+            sess_a
+                .build_seat_observation(Seat(0))?
+                .own_mandate()
+                .ok_or("s0a mandate")?
+                .kind,
+        );
+        let s0a_mandate_clip: String = s0a_mandate.chars().take(18).collect();
+        let mut set_pin_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('4'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('8'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('2'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('9'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        run_session_loop(&mut terminal, &mut sess_a, &mut set_pin_events)?;
+        assert!(!sess_a.is_curtain_open());
+        assert!(save_a.exists() && seal_a.exists());
+        drop(sess_a);
+
+        let mut resumed_a = build_session_for_cli(&CliOptions {
+            save_dir: Some(dir_a),
+            resume_path: Some(save_a),
+            turn_clock_secs: None,
+            untimed: false,
+            pins_enabled: true,
+        })?;
+        assert!(resumed_a.is_curtain_open());
+        assert_eq!(resumed_a.observe_seat_call_count(), 0);
+        terminal.draw(|f| {
+            let _ = resumed_a.render_current_frame(f);
+        })?;
+        let first_a = term_capture(&terminal);
+        assert!(first_a.contains("Hand keyboard to Seat 0"));
+        assert!(!first_a.contains(&s0a_mandate_clip));
+        assert!(!first_a.contains("Private Mandate"));
+        assert!(!first_a.contains("Seat 0 Private Vault"));
+
+        let mut wrong_pin_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('0'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('0'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('0'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('0'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        run_session_loop(&mut terminal, &mut resumed_a, &mut wrong_pin_events)?;
+        assert!(resumed_a.is_curtain_open());
+        assert_eq!(resumed_a.observe_seat_call_count(), 0);
+
+        let mut right_pin_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('4'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('8'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('2'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('9'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        right_pin_events.clock = wrong_pin_events.elapsed();
+        run_session_loop(&mut terminal, &mut resumed_a, &mut right_pin_events)?;
+        assert!(!resumed_a.is_curtain_open());
+        let unlocked_a = term_capture(&terminal);
+        assert!(
+            unlocked_a.contains("Seat 0 Private Vault") && unlocked_a.contains(&s0a_mandate_clip),
+            "right PIN must restore Seat 0's view:\n{unlocked_a}"
+        );
+
+        // Sub-case B: post-PIN autosave while Seat 0 holds a note + staged order + mandate, then
+        // drop immediately -> `--resume` Curtain hides all three markers until right PIN `"5193"`.
+        let dir_b = base_dir.join("case_b");
+        std::fs::create_dir_all(&dir_b)?;
+        let (save_b, seal_b) = default_save_paths(&dir_b, TableId(81_512));
+        let mut sess_b =
+            host::TuiHostSession::from_ring_table(&ring, TableId(81_512), &[0, 1], 37)?;
+        sess_b.enable_autosave(save_b.clone(), seal_b.clone());
+        let s0b_mandate = host::mandate_short_marker(
+            sess_b
+                .build_seat_observation(Seat(0))?
+                .own_mandate()
+                .ok_or("s0b mandate")?
+                .kind,
+        );
+        let s0b_mandate_clip: String = s0b_mandate.chars().take(18).collect();
+        let mut note_steps: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![(
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+            Vec::new(),
+        )];
+        for ch in "PIN_NOTE_731".chars() {
+            note_steps.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+        }
+        note_steps.push((
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+            Vec::new(),
+        ));
+        let mut note_events = ScriptedSessionEvents::from_timed_with_queued(note_steps);
+        run_session_loop(&mut terminal, &mut sess_b, &mut note_events)?;
+        sess_b
+            .apply_seat_intent(
+                Seat(0),
+                SeatIntent::update_bundle(BundleDraftAction::SetDebtRepaymentCred(731)),
+            )
+            .map_err(|e| e.to_string())?;
+        sess_b.enable_seat_pins();
+        let mut pin_b_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('5'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('1'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('9'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('3'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        pin_b_events.clock = note_events.elapsed();
+        run_session_loop(&mut terminal, &mut sess_b, &mut pin_b_events)?;
+        assert!(!sess_b.is_curtain_open());
+        drop(sess_b);
+
+        let mut resumed_b = build_session_for_cli(&CliOptions {
+            save_dir: Some(dir_b),
+            resume_path: Some(save_b),
+            turn_clock_secs: None,
+            untimed: false,
+            pins_enabled: true,
+        })?;
+        assert!(resumed_b.is_curtain_open());
+        assert_eq!(resumed_b.observe_seat_call_count(), 0);
+        terminal.draw(|f| {
+            let _ = resumed_b.render_current_frame(f);
+        })?;
+        let first_b = term_capture(&terminal);
+        assert!(first_b.contains("Hand keyboard to Seat 0"));
+        assert!(!first_b.contains(&s0b_mandate_clip));
+        assert!(!first_b.contains("731"));
+        assert!(!first_b.contains("PIN_NOTE_731"));
+        assert!(!first_b.contains("Private Mandate"));
+
+        let mut unlock_b_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('5'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('1'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('9'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('3'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        run_session_loop(&mut terminal, &mut resumed_b, &mut unlock_b_events)?;
+        assert!(!resumed_b.is_curtain_open());
+        let unlocked_b = term_capture(&terminal);
+        assert!(
+            unlocked_b.contains("Seat 0 Private Vault")
+                && unlocked_b.contains(&s0b_mandate_clip)
+                && unlocked_b.contains("PIN_NOTE_731"),
+            "right PIN must restore Seat 0's mandate and note:\n{unlocked_b}"
+        );
+        let mut tab2_b_events = ScriptedSessionEvents::from_timed_with_queued([(
+            host::CURTAIN_LIFT_DEAD_TIME,
+            Some(key_ev(KeyCode::Char('2'), KeyModifiers::NONE)),
+            Vec::new(),
+        )]);
+        tab2_b_events.clock = unlock_b_events.elapsed();
+        run_session_loop(&mut terminal, &mut resumed_b, &mut tab2_b_events)?;
+        let tab2_b_buf = term_capture(&terminal);
+        assert!(
+            tab2_b_buf.contains("debt_repay=731"),
+            "right PIN must restore Seat 0's staged bundle value on Tab 2:\n{tab2_b_buf}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_without_pins_starts_behind_curtain_and_lifts_on_space_enter()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_core::Seat;
+        use league_seat_types::{BundleDraftAction, SeatIntent};
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let term_capture = |term: &Terminal<TestBackend>| {
+            let buf = term.backend().buffer();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let ring = default_dev_ring_table()?;
+        let dir = std::env::temp_dir().join(format!("ml_resume_nopins_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let (save_path, seal_path) = default_save_paths(&dir, TableId(81_513));
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        let mut sess = host::TuiHostSession::from_ring_table(&ring, TableId(81_513), &[0, 1], 43)?;
+        let s0_mandate = host::mandate_short_marker(
+            sess.build_seat_observation(Seat(0))?
+                .own_mandate()
+                .ok_or("s0 mandate")?
+                .kind,
+        );
+        let s0_mandate_clip: String = s0_mandate.chars().take(18).collect();
+        let mut steps: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![(
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+            Vec::new(),
+        )];
+        for ch in "NOPIN_NOTE_842".chars() {
+            steps.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+        }
+        steps.push((
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+            Vec::new(),
+        ));
+        let mut note_events = ScriptedSessionEvents::from_timed_with_queued(steps);
+        run_session_loop(&mut terminal, &mut sess, &mut note_events)?;
+        sess.apply_seat_intent(
+            Seat(0),
+            SeatIntent::update_bundle(BundleDraftAction::SetDebtRepaymentCred(842)),
+        )
+        .map_err(|e| e.to_string())?;
+        sess.write_save_and_seal(&save_path, &seal_path)
+            .map_err(|e| e.to_string())?;
+        drop(sess);
+
+        let mut resumed = build_session_for_cli(&CliOptions {
+            save_dir: Some(dir.clone()),
+            resume_path: Some(save_path),
+            turn_clock_secs: None,
+            untimed: false,
+            pins_enabled: false,
+        })?;
+        assert!(resumed.is_curtain_open());
+        assert_eq!(resumed.observe_seat_call_count(), 0);
+        terminal.draw(|f| {
+            let _ = resumed.render_current_frame(f);
+        })?;
+        let curtain_buf = term_capture(&terminal);
+        assert!(curtain_buf.contains("Hand keyboard to Seat 0"));
+        assert!(!curtain_buf.contains(&s0_mandate_clip));
+        assert!(!curtain_buf.contains("842"));
+        assert!(!curtain_buf.contains("NOPIN_NOTE_842"));
+        assert!(!curtain_buf.contains("Private Mandate"));
+
+        let mut lift_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        run_session_loop(&mut terminal, &mut resumed, &mut lift_events)?;
+        assert!(!resumed.is_curtain_open());
+        let lifted_buf = term_capture(&terminal);
+        assert!(
+            lifted_buf.contains("Seat 0 Private Vault")
+                && lifted_buf.contains(&s0_mandate_clip)
+                && lifted_buf.contains("NOPIN_NOTE_842"),
+            "Space/Enter must lift Curtain into Seat 0's resumed view:\n{lifted_buf}"
+        );
+        let mut tab2_events = ScriptedSessionEvents::from_timed_with_queued([(
+            host::CURTAIN_LIFT_DEAD_TIME,
+            Some(key_ev(KeyCode::Char('2'), KeyModifiers::NONE)),
+            Vec::new(),
+        )]);
+        tab2_events.clock = lift_events.elapsed();
+        run_session_loop(&mut terminal, &mut resumed, &mut tab2_events)?;
+        let tab2_buf = term_capture(&terminal);
+        assert!(
+            tab2_buf.contains("debt_repay=842"),
+            "Space/Enter lift must restore Seat 0's staged bundle value on Tab 2:\n{tab2_buf}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_at_bot_cursor_advances_bots_to_next_human_curtain_without_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
+        use league_core::{ClubHost, SealedOrderBundle, Seat};
+        use league_gen::ring_table_to_table_spec;
+
+        let ring = default_dev_ring_table()?;
+        let dir = std::env::temp_dir().join(format!("ml_resume_bot_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let (save_path, seal_path) = default_save_paths(&dir, TableId(81_514));
+
+        // 4 seats where only Seat 2 is human => Turn 1 offset 0 is Seat 0 (bot), offset 1 is Seat 1
+        // (bot), offset 2 is Seat 2 (human). Persist a cursor pointing at offset 0 with no Curtain.
+        let (spec, _cmap, deal, eval_seed) =
+            ring_table_to_table_spec(&ring, TableId(81_514), &[2])?;
+        let mut raw_host = ClubHost::new(spec, ring.seed, deal, eval_seed, 47)?;
+        ClubSessionCheckpoint::store_on_host(
+            &mut raw_host,
+            ClubSessionCheckpoint {
+                pause_cursor: Some(ClubPauseCursor {
+                    sub_pass_b: false,
+                    pass_offset: 0,
+                    curtain_next_seat: None,
+                }),
+                pending_bundles: vec![SealedOrderBundle::default(); 4],
+                sub_pass_b_committed: vec![false; 4],
+                seat_notes: vec![String::new(); 4],
+                seat_pins: vec![None; 4],
+                pins_enabled: false,
+                turn_clock_secs: None,
+                untimed: false,
+            },
+        )?;
+        raw_host.write_save_and_seal(&save_path, &seal_path)?;
+        drop(raw_host);
+
+        let mut resumed = build_session_for_cli(&CliOptions {
+            save_dir: Some(dir.clone()),
+            resume_path: Some(save_path),
+            ..CliOptions::default()
+        })?;
+        assert!(resumed.is_curtain_open());
+        assert_eq!(resumed.active_human_seat(), None);
+        assert_eq!(resumed.observe_seat_call_count(), 0);
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|f| {
+            let _ = resumed.render_current_frame(f);
+        })?;
+        let buf = terminal.backend().buffer();
+        let screen = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            screen.contains("Table #81514 | Turn 1") && screen.contains("Hand keyboard to Seat 2"),
+            "bot-cursor resume must advance bots without input to Seat 2's Curtain:\n{screen}"
+        );
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let mut lift_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        run_session_loop(&mut terminal, &mut resumed, &mut lift_events)?;
+        assert_eq!(resumed.active_human_seat(), Some(Seat(2)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn curtain_open_discards_queued_input_and_enforces_dead_time_on_timeout_and_pass_end()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_core::Seat;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct RecordingTestBackend {
+            inner: TestBackend,
+            frames: Rc<RefCell<Vec<String>>>,
+        }
+
+        impl Backend for RecordingTestBackend {
+            type Error = <TestBackend as Backend>::Error;
+
+            fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+            where
+                I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+            {
+                self.inner.draw(content)
+            }
+
+            fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+                self.inner.hide_cursor()
+            }
+
+            fn show_cursor(&mut self) -> Result<(), Self::Error> {
+                self.inner.show_cursor()
+            }
+
+            fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+                self.inner.get_cursor_position()
+            }
+
+            fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+                &mut self,
+                position: P,
+            ) -> Result<(), Self::Error> {
+                self.inner.set_cursor_position(position)
+            }
+
+            fn clear(&mut self) -> Result<(), Self::Error> {
+                self.inner.clear()
+            }
+
+            fn clear_region(
+                &mut self,
+                clear_type: ratatui::backend::ClearType,
+            ) -> Result<(), Self::Error> {
+                self.inner.clear_region(clear_type)
+            }
+
+            fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+                self.inner.size()
+            }
+
+            fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+                self.inner.window_size()
+            }
+
+            fn flush(&mut self) -> Result<(), Self::Error> {
+                self.inner.flush()?;
+                let buf = self.inner.buffer();
+                let snap = (0..buf.area.height)
+                    .map(|y| {
+                        (0..buf.area.width)
+                            .map(|x| buf[(x, y)].symbol().to_string())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                self.frames.borrow_mut().push(snap);
+                Ok(())
+            }
+        }
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+
+        let ring = default_dev_ring_table()?;
+        let mut session =
+            host::TuiHostSession::from_ring_table(&ring, TableId(81_515), &[0, 1], 53)?;
+        session.configure_turn_clock(Some(180)); // H=2 => Pass A 67s, Pass B 22s
+        let s0_mandate = host::mandate_short_marker(
+            session
+                .build_seat_observation(Seat(0))?
+                .own_mandate()
+                .ok_or("s0 mandate")?
+                .kind,
+        );
+        let s1_mandate = host::mandate_short_marker(
+            session
+                .build_seat_observation(Seat(1))?
+                .own_mandate()
+                .ok_or("s1 mandate")?
+                .kind,
+        );
+        let s0_mandate_clip: String = s0_mandate.chars().take(18).collect();
+        let s1_mandate_clip: String = s1_mandate.chars().take(18).collect();
+        session.reset_observe_seat_calls();
+
+        let frames = Rc::new(RefCell::new(Vec::<String>::new()));
+        let mut terminal = Terminal::new(RecordingTestBackend {
+            inner: TestBackend::new(100, 30),
+            frames: Rc::clone(&frames),
+        })?;
+
+        // Setup Pass A notes on both seats (`S0_NOTE_321` and `S1_NOTE_654`) and reach Pass B
+        // with Seat 0 active.
+        let mut setup_steps: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![(
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+            Vec::new(),
+        )];
+        for ch in "S0_NOTE_321".chars() {
+            setup_steps.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+        }
+        setup_steps.extend([
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        for ch in "S1_NOTE_654".chars() {
+            setup_steps.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+        }
+        setup_steps.extend([
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        let mut setup_events = ScriptedSessionEvents::from_timed_with_queued(setup_steps);
+        run_session_loop(&mut terminal, &mut session, &mut setup_events)?;
+        assert_eq!(session.pass(), league_seat_ui::PassKind::SubPassB);
+        assert_eq!(session.active_human_seat(), Some(Seat(0)));
+
+        // Case 1 (timeout hand-off): queue `' '`, `Enter`, `'q'` right as Pass B (22s) expires.
+        let timeout_start = frames.borrow().len();
+        let mut timeout_events = ScriptedSessionEvents::from_timed_with_queued([(
+            Duration::from_secs(25),
+            None,
+            vec![
+                key_ev(KeyCode::Char(' '), KeyModifiers::NONE),
+                key_ev(KeyCode::Enter, KeyModifiers::NONE),
+                key_ev(KeyCode::Char('q'), KeyModifiers::NONE),
+            ],
+        )]);
+        timeout_events.clock = setup_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut timeout_events)?;
+        assert!(timeout_events.drain_calls >= 1);
+        assert!(session.is_curtain_open());
+        assert!(!session.quit_requested());
+        {
+            let recorded = frames.borrow();
+            let timeout_slice = &recorded[timeout_start..];
+            assert!(
+                timeout_slice
+                    .iter()
+                    .any(|f| f.contains("Hand keyboard to Seat 1"))
+            );
+            for frame in timeout_slice {
+                assert!(!frame.contains("S1_NOTE_654"));
+                assert!(!frame.contains("Seat 1 Private Vault"));
+                if s1_mandate_clip != s0_mandate_clip {
+                    assert!(!frame.contains(&s1_mandate_clip));
+                }
+            }
+        }
+
+        // Send `' '`, `Enter`, `'q'`, `Esc`, `Ctrl+C` during the 400 ms dead time after open.
+        session.reset_observe_seat_calls();
+        let timeout_dead_start = frames.borrow().len();
+        let mut timeout_dead_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char('q'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Esc, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+        ]);
+        timeout_dead_events.clock = timeout_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut timeout_dead_events)?;
+        assert!(session.is_curtain_open());
+        assert!(!session.quit_requested());
+        assert_eq!(session.observe_seat_call_count(), 0);
+        {
+            let recorded = frames.borrow();
+            for frame in &recorded[timeout_dead_start..] {
+                assert!(!frame.contains("S1_NOTE_654"));
+                assert!(!frame.contains(&s1_mandate_clip));
+                assert!(!frame.contains("Private Mandate"));
+                assert!(!frame.contains("Seat 1 Private Vault"));
+            }
+        }
+
+        // After dead time, one fresh `Space` then `Enter` lifts the Curtain cleanly onto Seat 1.
+        let s1_lift_start = frames.borrow().len();
+        let mut s1_lift_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        s1_lift_events.clock = timeout_dead_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut s1_lift_events)?;
+        assert!(!session.is_curtain_open());
+        assert_eq!(session.active_human_seat(), Some(Seat(1)));
+        {
+            let recorded = frames.borrow();
+            let last_s1 = recorded[s1_lift_start..].last().ok_or("missing s1 frame")?;
+            assert!(
+                last_s1.contains("Seat 1 Private Vault")
+                    && last_s1.contains("S1_NOTE_654")
+                    && last_s1.contains(&s1_mandate_clip),
+                "fresh Space/Enter after timeout dead time must reveal Seat 1's view:\n{last_s1}"
+            );
+        }
+
+        // Advance Seat 1 through Sweep into Turn 2 Pass A (Seat 1 active) so Case 2 tests ordinary
+        // Ctrl+L hand-off from Seat 1 -> Seat 0.
+        let mut to_turn2_s1 = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        to_turn2_s1.clock = s1_lift_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut to_turn2_s1)?;
+        assert_eq!(session.turn(), 2);
+        assert_eq!(session.active_human_seat(), Some(Seat(1)));
+
+        // Case 2 (ordinary end-of-pass Ctrl+L hand-off): queue `' '`, `Enter`, `'q'` on Ctrl+L.
+        let pass_end_start = frames.borrow().len();
+        let mut pass_end_events = ScriptedSessionEvents::from_timed_with_queued([(
+            host::CURTAIN_LIFT_DEAD_TIME,
+            Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+            vec![
+                key_ev(KeyCode::Char(' '), KeyModifiers::NONE),
+                key_ev(KeyCode::Enter, KeyModifiers::NONE),
+                key_ev(KeyCode::Char('q'), KeyModifiers::NONE),
+            ],
+        )]);
+        pass_end_events.clock = to_turn2_s1.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut pass_end_events)?;
+        assert!(pass_end_events.drain_calls >= 1);
+        assert!(session.is_curtain_open());
+        assert!(!session.quit_requested());
+        {
+            let recorded = frames.borrow();
+            let handoff_slice = &recorded[pass_end_start..];
+            assert!(
+                handoff_slice
+                    .iter()
+                    .any(|f| f.contains("Hand keyboard to Seat 0"))
+            );
+            for frame in handoff_slice {
+                assert!(!frame.contains("S0_NOTE_321"));
+                assert!(!frame.contains("Seat 0 Private Vault"));
+                if s0_mandate_clip != s1_mandate_clip {
+                    assert!(!frame.contains(&s0_mandate_clip));
+                }
+            }
+        }
+
+        // Dead-time keys `< 400 ms` after Ctrl+L Curtain open also must not lift or quit.
+        session.reset_observe_seat_calls();
+        let pass_dead_start = frames.borrow().len();
+        let mut pass_dead_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char('q'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Esc, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(50),
+                Some(key_ev(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+        ]);
+        pass_dead_events.clock = pass_end_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut pass_dead_events)?;
+        assert!(session.is_curtain_open());
+        assert!(!session.quit_requested());
+        assert_eq!(session.observe_seat_call_count(), 0);
+        {
+            let recorded = frames.borrow();
+            for frame in &recorded[pass_dead_start..] {
+                assert!(!frame.contains("S0_NOTE_321"));
+                assert!(!frame.contains(&s0_mandate_clip));
+                assert!(!frame.contains("Private Mandate"));
+                assert!(!frame.contains("Seat 0 Private Vault"));
+            }
+        }
+
+        let s0_lift_start = frames.borrow().len();
+        let mut s0_lift_events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+        s0_lift_events.clock = pass_dead_events.elapsed();
+        run_session_loop(&mut terminal, &mut session, &mut s0_lift_events)?;
+        assert!(!session.is_curtain_open());
+        assert_eq!(session.active_human_seat(), Some(Seat(0)));
+        let recorded = frames.borrow();
+        let last_s0 = recorded[s0_lift_start..].last().ok_or("missing s0 frame")?;
+        assert!(
+            last_s0.contains("Seat 0 Private Vault")
+                && last_s0.contains("S0_NOTE_321")
+                && last_s0.contains(&s0_mandate_clip),
+            "fresh Space/Enter after dead time must reveal Seat 0's view:\n{last_s0}"
+        );
         Ok(())
     }
 }

@@ -156,6 +156,10 @@ pub struct ClubSessionCheckpoint {
     pub seat_pins: Vec<Option<String>>,
     /// Whether optional table-local 4-digit Curtain PINs are enabled for this table.
     pub pins_enabled: bool,
+    /// Saved timed turn budget in whole seconds (`180..=300` when explicitly set).
+    pub turn_clock_secs: Option<u16>,
+    /// `true` when the saved session explicitly selected untimed hot-seat play.
+    pub untimed: bool,
 }
 
 impl ClubSessionCheckpoint {
@@ -178,6 +182,8 @@ impl ClubSessionCheckpoint {
         host.session_seat_notes = normalize_vec_len(checkpoint.seat_notes, n);
         host.session_seat_pins = normalize_vec_len(checkpoint.seat_pins, n);
         host.session_pins_enabled = checkpoint.pins_enabled;
+        host.session_turn_clock_secs = checkpoint.turn_clock_secs;
+        host.session_untimed = checkpoint.untimed;
         Ok(())
     }
 
@@ -191,6 +197,8 @@ impl ClubSessionCheckpoint {
             seat_notes: host.session_seat_notes.clone(),
             seat_pins: host.session_seat_pins.clone(),
             pins_enabled: host.session_pins_enabled,
+            turn_clock_secs: host.session_turn_clock_secs,
+            untimed: host.session_untimed,
         }
     }
 }
@@ -246,6 +254,18 @@ fn validate_checkpoint_shapes(
                 "Club checkpoint PIN must be exactly 4 ASCII digits".to_owned(),
             ));
         }
+    }
+    if checkpoint.untimed && checkpoint.turn_clock_secs.is_some() {
+        return Err(EngineError::InvalidConfig(
+            "Club checkpoint cannot set both untimed and turn_clock_secs".to_owned(),
+        ));
+    }
+    if let Some(secs) = checkpoint.turn_clock_secs
+        && !(180..=300).contains(&secs)
+    {
+        return Err(EngineError::InvalidConfig(format!(
+            "Club checkpoint turn_clock_secs {secs} out of range (180..=300)"
+        )));
     }
     Ok(())
 }
@@ -304,6 +324,10 @@ struct ClubSealPayload {
     session_seat_pins: Vec<Option<String>>,
     #[serde(default)]
     session_pins_enabled: bool,
+    #[serde(default)]
+    session_turn_clock_secs: Option<u16>,
+    #[serde(default)]
+    session_untimed: bool,
 }
 
 /// Exclusive Club Mode host wrapper owning [`TurnEngine`], pre-derived VRF proofs, sealed Turn-1
@@ -334,6 +358,8 @@ pub struct ClubHost {
     session_seat_notes: Vec<String>,
     session_seat_pins: Vec<Option<String>>,
     session_pins_enabled: bool,
+    session_turn_clock_secs: Option<u16>,
+    session_untimed: bool,
 }
 
 impl fmt::Debug for ClubHost {
@@ -438,6 +464,8 @@ impl ClubHost {
             session_seat_notes: vec![String::new(); n],
             session_seat_pins: vec![None; n],
             session_pins_enabled: false,
+            session_turn_clock_secs: None,
+            session_untimed: false,
         })
     }
 
@@ -893,6 +921,8 @@ impl ClubHost {
             session_seat_notes: self.session_seat_notes.clone(),
             session_seat_pins: self.session_seat_pins.clone(),
             session_pins_enabled: self.session_pins_enabled,
+            session_turn_clock_secs: self.session_turn_clock_secs,
+            session_untimed: self.session_untimed,
         };
         let seal_bytes = serde_json::to_vec(&seal).map_err(|err| {
             EngineError::InvalidConfig(format!("failed to serialize Club seal sidecar: {err}"))
@@ -1048,6 +1078,8 @@ impl ClubHost {
             seat_notes: seal.session_seat_notes,
             seat_pins: seal.session_seat_pins,
             pins_enabled: seal.session_pins_enabled,
+            turn_clock_secs: seal.session_turn_clock_secs,
+            untimed: seal.session_untimed,
         };
         validate_checkpoint_shapes(n, &ckpt)?;
 
@@ -1073,6 +1105,8 @@ impl ClubHost {
             session_seat_notes: normalize_vec_len(ckpt.seat_notes, n),
             session_seat_pins: normalize_vec_len(ckpt.seat_pins, n),
             session_pins_enabled: ckpt.pins_enabled,
+            session_turn_clock_secs: ckpt.turn_clock_secs,
+            session_untimed: ckpt.untimed,
         };
         if host.public_save_snapshot()? != save {
             return Err(EngineError::InvalidConfig(
