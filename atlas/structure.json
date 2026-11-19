@@ -3938,7 +3938,7 @@
         {
           "entry": "main",
           "entryRule": 1,
-          "hash": "fc927e08a3256b115181a01c715a6991d0c4022e7598151e6af294ef51a07122",
+          "hash": "5f9e1cb1f435a2ad9295bede047c649fbeb199dd66d0dfab2c8aa9c116a32ba1",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-gen/src/lib.rs",
@@ -5594,7 +5594,7 @@
   ],
   "engine": "1.23.0",
   "generatedFrom": {
-    "commit": "09ec4f9a97d82b6fda999d3bce8f48a437e1ea62",
+    "commit": "7b871d9c36a1887747ce5c340e029f8e9e2debce",
     "tracked": 576
   },
   "landings": [
