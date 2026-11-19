@@ -3,17 +3,105 @@ use alloc::vec::Vec;
 
 use league_seat_types::{
     AssetId, BundleDraftAction, ContractDeliveryOrder, CounterpartyAssumptions, HumanWhatIfRequest,
-    PreviewTieMode, SeatIntent, SeatKeyCode, SeatKeyEvent, SeatObservation, Units,
+    PreviewTieMode, SeatIntent, SeatKeyCode, SeatKeyEvent, SeatObservation, Units, ViewportSize,
 };
 
+use crate::render::{center_tab_total_rows, private_drawer_total_rows, public_ledger_total_rows};
 use crate::state::{
     ALL_MARKET_KINDS, BundleComposerFields, BundleSection, CenterTab, FocusZone, MarketActionKind,
     MarketComposerFields, SeatUiState, visible_bundle_sections,
 };
 
+fn is_wide_viewport(vp: ViewportSize) -> bool {
+    vp.width >= 100 && vp.height >= 30
+}
+
+fn ledger_inner_height(vp: ViewportSize) -> usize {
+    if is_wide_viewport(vp) {
+        usize::from(vp.height.saturating_sub(9)).max(1)
+    } else {
+        3
+    }
+}
+
+fn drawer_inner_height(vp: ViewportSize) -> usize {
+    ledger_inner_height(vp)
+}
+
+fn center_body_height(vp: ViewportSize) -> usize {
+    let (inner_w, inner_h) = if is_wide_viewport(vp) {
+        (
+            ((usize::from(vp.width) * 44) / 100).saturating_sub(2),
+            usize::from(vp.height.saturating_sub(9)).max(1),
+        )
+    } else {
+        (
+            usize::from(vp.width).saturating_sub(2),
+            usize::from(vp.height.saturating_sub(19)).max(1),
+        )
+    };
+    let chip_widths = [23_usize, 31, 20, 31];
+    let mut lines = 1_usize;
+    let mut line_w = 0_usize;
+    for cw in chip_widths {
+        let sep = if line_w > 0 { 3 } else { 0 };
+        if line_w > 0 && line_w + sep + cw > inner_w && lines < inner_h {
+            lines += 1;
+            line_w = 0;
+        }
+        if line_w > 0 {
+            line_w += 3;
+        }
+        line_w += cw;
+    }
+    inner_h.saturating_sub(lines.min(inner_h)).max(1)
+}
+
+fn ensure_row_visible(row: usize, scroll: &mut usize, view_rows: usize, total: usize) {
+    let max_off = total.saturating_sub(1);
+    let vr = view_rows.max(1);
+    let target = row.min(max_off);
+    if target < *scroll {
+        *scroll = target;
+    } else if target >= *scroll + vr {
+        *scroll = target + 1 - vr;
+    }
+    *scroll = (*scroll).min(max_off);
+}
+
+fn sync_public_scroll(
+    ledger_idx: usize,
+    public_scroll: &mut usize,
+    table_len: usize,
+    inner_h: usize,
+    total: usize,
+) {
+    let max_off = total.saturating_sub(1);
+    let r = ledger_idx.min(max_off);
+    if r < table_len {
+        let data_cap = inner_h.saturating_sub(1).max(1);
+        if r < *public_scroll {
+            *public_scroll = r;
+        } else if r >= *public_scroll + data_cap {
+            *public_scroll = r + 1 - data_cap;
+        }
+    } else {
+        if *public_scroll < table_len {
+            *public_scroll = table_len;
+        }
+        if r < *public_scroll {
+            *public_scroll = r;
+        } else if r >= *public_scroll + inner_h.max(1) {
+            *public_scroll = r + 1 - inner_h.max(1);
+        }
+    }
+    *public_scroll = (*public_scroll).min(max_off);
+}
+
 pub(crate) fn apply_seat_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
+    viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     if state.chronicle_open {
@@ -26,11 +114,61 @@ pub(crate) fn apply_seat_key(
         return handle_notes_text_key(state, key);
     }
 
+    if key.is_repeat {
+        return match key.code {
+            SeatKeyCode::Char('1') => {
+                state.active_tab = CenterTab::MarketAndContracts;
+                state.selection.focus_zone = FocusZone::CenterTabs;
+                None
+            }
+            SeatKeyCode::Char('2') => {
+                state.active_tab = CenterTab::WorkshopDealsPolitics;
+                state.selection.focus_zone = FocusZone::CenterTabs;
+                clamp_bundle_section_idx(obs, state);
+                None
+            }
+            SeatKeyCode::Char('3') => {
+                state.active_tab = CenterTab::WhatIfSandbox;
+                state.selection.focus_zone = FocusZone::CenterTabs;
+                None
+            }
+            SeatKeyCode::Tab => {
+                state.active_tab = state.active_tab.cycle(true);
+                state.selection.focus_zone = FocusZone::CenterTabs;
+                clamp_bundle_section_idx(obs, state);
+                None
+            }
+            SeatKeyCode::BackTab => {
+                state.active_tab = state.active_tab.cycle(false);
+                state.selection.focus_zone = FocusZone::CenterTabs;
+                clamp_bundle_section_idx(obs, state);
+                None
+            }
+            SeatKeyCode::F(6) => {
+                state.selection.focus_zone = state.selection.focus_zone.next();
+                None
+            }
+            SeatKeyCode::Char('q')
+            | SeatKeyCode::Esc
+            | SeatKeyCode::Char('c')
+            | SeatKeyCode::Char('l')
+            | SeatKeyCode::Char('L')
+            | SeatKeyCode::Char('r')
+            | SeatKeyCode::F(2)
+            | SeatKeyCode::Char('4')
+            | SeatKeyCode::Char('e')
+            | SeatKeyCode::Char('n')
+            | SeatKeyCode::Char('p') => None,
+            _ => dispatch_focused_zone_key(obs, state, viewport, key),
+        };
+    }
+
     match key.code {
         SeatKeyCode::Char('c') if key.modifiers.ctrl => Some(SeatIntent::quit()),
         SeatKeyCode::Char('q') | SeatKeyCode::Esc => Some(SeatIntent::quit()),
-        SeatKeyCode::Char('l') if key.modifiers.ctrl => Some(SeatIntent::lock_and_hand_off()),
-        SeatKeyCode::Char('L') => Some(SeatIntent::lock_and_hand_off()),
+        SeatKeyCode::Char('l') | SeatKeyCode::Char('L') if key.modifiers.ctrl => {
+            Some(SeatIntent::lock_and_hand_off())
+        }
         SeatKeyCode::Char('r') | SeatKeyCode::F(2) => {
             state.set_chronicle_open(true);
             clamp_chronicle_idx(obs, state);
@@ -90,7 +228,7 @@ pub(crate) fn apply_seat_key(
                 obs, state,
             )))
         }
-        _ => dispatch_focused_zone_key(obs, state, key),
+        _ => dispatch_focused_zone_key(obs, state, viewport, key),
     }
 }
 
@@ -99,9 +237,40 @@ fn handle_chronicle_key(
     state: &mut SeatUiState,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
+    if key.is_repeat {
+        match key.code {
+            SeatKeyCode::Left | SeatKeyCode::Char('[') => {
+                state.chronicle_receipt_idx = state.chronicle_receipt_idx.saturating_sub(1);
+                state.chronicle_scroll = 0;
+            }
+            SeatKeyCode::Right | SeatKeyCode::Char(']') => {
+                let max_idx = obs.public_receipts.len().saturating_sub(1);
+                state.chronicle_receipt_idx = (state.chronicle_receipt_idx + 1).min(max_idx);
+                state.chronicle_scroll = 0;
+            }
+            SeatKeyCode::Up => {
+                state.chronicle_scroll = state.chronicle_scroll.saturating_sub(1);
+            }
+            SeatKeyCode::Down => {
+                state.chronicle_scroll = state.chronicle_scroll.saturating_add(1);
+            }
+            SeatKeyCode::PageUp => {
+                state.chronicle_scroll = state.chronicle_scroll.saturating_sub(6);
+            }
+            SeatKeyCode::PageDown => {
+                state.chronicle_scroll = state.chronicle_scroll.saturating_add(6);
+            }
+            SeatKeyCode::Home => {
+                state.chronicle_scroll = 0;
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     match key.code {
         SeatKeyCode::Char('c') if key.modifiers.ctrl => Some(SeatIntent::quit()),
-        SeatKeyCode::Char('l') if key.modifiers.ctrl => {
+        SeatKeyCode::Char('l') | SeatKeyCode::Char('L') if key.modifiers.ctrl => {
             state.set_chronicle_open(false);
             Some(SeatIntent::lock_and_hand_off())
         }
@@ -148,18 +317,24 @@ fn handle_chronicle_key(
     }
 }
 
+fn push_bounded_char(draft: &mut alloc::string::String, max_len: usize, ch: char) {
+    if !ch.is_control() && draft.chars().count() < max_len {
+        draft.push(ch);
+    }
+}
+
 fn handle_composer_text_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     match key.code {
-        SeatKeyCode::Char('c') if key.modifiers.ctrl => Some(SeatIntent::quit()),
-        SeatKeyCode::Esc => {
+        SeatKeyCode::Char('c') if key.modifiers.ctrl && !key.is_repeat => Some(SeatIntent::quit()),
+        SeatKeyCode::Esc if !key.is_repeat => {
             state.composer_edit_active = false;
             None
         }
-        SeatKeyCode::Enter => {
+        SeatKeyCode::Enter if !key.is_repeat => {
             apply_composer_draft_overrides(obs, state);
             state.composer_edit_active = false;
             None
@@ -169,9 +344,7 @@ fn handle_composer_text_key(
             None
         }
         SeatKeyCode::Char(ch) if !key.modifiers.ctrl => {
-            if !ch.is_control() && state.composer_draft.chars().count() < 120 {
-                state.composer_draft.push(ch);
-            }
+            push_bounded_char(&mut state.composer_draft, 120, ch);
             None
         }
         _ => None,
@@ -180,8 +353,8 @@ fn handle_composer_text_key(
 
 fn handle_notes_text_key(state: &mut SeatUiState, key: SeatKeyEvent) -> Option<SeatIntent> {
     match key.code {
-        SeatKeyCode::Char('c') if key.modifiers.ctrl => Some(SeatIntent::quit()),
-        SeatKeyCode::Esc | SeatKeyCode::Enter => {
+        SeatKeyCode::Char('c') if key.modifiers.ctrl && !key.is_repeat => Some(SeatIntent::quit()),
+        SeatKeyCode::Esc | SeatKeyCode::Enter if !key.is_repeat => {
             state.notes_edit_active = false;
             None
         }
@@ -190,9 +363,7 @@ fn handle_notes_text_key(state: &mut SeatUiState, key: SeatKeyEvent) -> Option<S
             None
         }
         SeatKeyCode::Char(ch) if !key.modifiers.ctrl => {
-            if !ch.is_control() && state.notes_draft.chars().count() < 240 {
-                state.notes_draft.push(ch);
-            }
+            push_bounded_char(&mut state.notes_draft, 240, ch);
             None
         }
         _ => None,
@@ -202,26 +373,65 @@ fn handle_notes_text_key(state: &mut SeatUiState, key: SeatKeyEvent) -> Option<S
 fn dispatch_focused_zone_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
+    viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     match state.selection.focus_zone {
         FocusZone::PublicLedger => {
+            let total = public_ledger_total_rows(obs);
+            let t_len = obs.seats.len();
+            let ih = ledger_inner_height(viewport);
+            let max_idx = total.saturating_sub(1);
             match key.code {
                 SeatKeyCode::Up => {
-                    state.public_scroll = state.public_scroll.saturating_sub(1);
                     state.selection.ledger_row_idx =
                         state.selection.ledger_row_idx.saturating_sub(1);
+                    sync_public_scroll(
+                        state.selection.ledger_row_idx,
+                        &mut state.public_scroll,
+                        t_len,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::Down => {
-                    state.public_scroll = state.public_scroll.saturating_add(1);
-                    state.selection.ledger_row_idx =
-                        state.selection.ledger_row_idx.saturating_add(1);
+                    state.selection.ledger_row_idx = state
+                        .selection
+                        .ledger_row_idx
+                        .saturating_add(1)
+                        .min(max_idx);
+                    sync_public_scroll(
+                        state.selection.ledger_row_idx,
+                        &mut state.public_scroll,
+                        t_len,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::PageUp => {
-                    state.public_scroll = state.public_scroll.saturating_sub(6);
+                    state.selection.ledger_row_idx =
+                        state.selection.ledger_row_idx.saturating_sub(ih.max(1));
+                    sync_public_scroll(
+                        state.selection.ledger_row_idx,
+                        &mut state.public_scroll,
+                        t_len,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::PageDown => {
-                    state.public_scroll = state.public_scroll.saturating_add(6);
+                    state.selection.ledger_row_idx = state
+                        .selection
+                        .ledger_row_idx
+                        .saturating_add(ih.max(1))
+                        .min(max_idx);
+                    sync_public_scroll(
+                        state.selection.ledger_row_idx,
+                        &mut state.public_scroll,
+                        t_len,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::Home => {
                     state.public_scroll = 0;
@@ -232,22 +442,55 @@ fn dispatch_focused_zone_key(
             None
         }
         FocusZone::PrivateDrawer => {
+            let total = private_drawer_total_rows(obs, state);
+            let ih = drawer_inner_height(viewport);
+            let max_idx = total.saturating_sub(1);
             match key.code {
                 SeatKeyCode::Up => {
-                    state.drawer_scroll = state.drawer_scroll.saturating_sub(1);
                     state.selection.drawer_row_idx =
                         state.selection.drawer_row_idx.saturating_sub(1);
+                    ensure_row_visible(
+                        state.selection.drawer_row_idx,
+                        &mut state.drawer_scroll,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::Down => {
-                    state.drawer_scroll = state.drawer_scroll.saturating_add(1);
-                    state.selection.drawer_row_idx =
-                        state.selection.drawer_row_idx.saturating_add(1);
+                    state.selection.drawer_row_idx = state
+                        .selection
+                        .drawer_row_idx
+                        .saturating_add(1)
+                        .min(max_idx);
+                    ensure_row_visible(
+                        state.selection.drawer_row_idx,
+                        &mut state.drawer_scroll,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::PageUp => {
-                    state.drawer_scroll = state.drawer_scroll.saturating_sub(6);
+                    state.selection.drawer_row_idx =
+                        state.selection.drawer_row_idx.saturating_sub(ih.max(1));
+                    ensure_row_visible(
+                        state.selection.drawer_row_idx,
+                        &mut state.drawer_scroll,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::PageDown => {
-                    state.drawer_scroll = state.drawer_scroll.saturating_add(6);
+                    state.selection.drawer_row_idx = state
+                        .selection
+                        .drawer_row_idx
+                        .saturating_add(ih.max(1))
+                        .min(max_idx);
+                    ensure_row_visible(
+                        state.selection.drawer_row_idx,
+                        &mut state.drawer_scroll,
+                        ih,
+                        total,
+                    );
                 }
                 SeatKeyCode::Home => {
                     state.drawer_scroll = 0;
@@ -258,9 +501,9 @@ fn dispatch_focused_zone_key(
             None
         }
         FocusZone::CenterTabs => match state.active_tab {
-            CenterTab::MarketAndContracts => handle_market_tab_key(obs, state, key),
-            CenterTab::WorkshopDealsPolitics => handle_bundle_tab_key(obs, state, key),
-            CenterTab::WhatIfSandbox => handle_what_if_tab_key(obs, state, key),
+            CenterTab::MarketAndContracts => handle_market_tab_key(obs, state, viewport, key),
+            CenterTab::WorkshopDealsPolitics => handle_bundle_tab_key(obs, state, viewport, key),
+            CenterTab::WhatIfSandbox => handle_what_if_tab_key(obs, state, viewport, key),
         },
     }
 }
@@ -268,12 +511,16 @@ fn dispatch_focused_zone_key(
 fn handle_market_tab_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
+    viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     let kind_len = ALL_MARKET_KINDS.len();
     let kind = ALL_MARKET_KINDS[state.selection.market_kind_idx % kind_len];
     let field_count = market_field_count(kind);
     let n = obs.spec.seat_count.max(1);
+    let header_rows = 1 + usize::from(obs.cancel_locked && kind == MarketActionKind::CancelOffer);
+    let total = center_tab_total_rows(obs, state);
+    let bh = center_body_height(viewport);
 
     match key.code {
         SeatKeyCode::Char('[') => {
@@ -294,23 +541,41 @@ fn handle_market_tab_key(
                 state.center_scroll = state.center_scroll.saturating_sub(1);
             } else {
                 state.selection.market_field_idx -= 1;
+                ensure_row_visible(
+                    header_rows + state.selection.market_field_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             }
             None
         }
         SeatKeyCode::Down => {
             if state.selection.market_field_idx + 1 < field_count {
                 state.selection.market_field_idx += 1;
+                ensure_row_visible(
+                    header_rows + state.selection.market_field_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             } else {
-                state.center_scroll = state.center_scroll.saturating_add(1);
+                state.center_scroll = state
+                    .center_scroll
+                    .saturating_add(1)
+                    .min(total.saturating_sub(1));
             }
             None
         }
         SeatKeyCode::PageUp => {
-            state.center_scroll = state.center_scroll.saturating_sub(6);
+            state.center_scroll = state.center_scroll.saturating_sub(bh.max(1));
             None
         }
         SeatKeyCode::PageDown => {
-            state.center_scroll = state.center_scroll.saturating_add(6);
+            state.center_scroll = state
+                .center_scroll
+                .saturating_add(bh.max(1))
+                .min(total.saturating_sub(1));
             None
         }
         SeatKeyCode::Home => {
@@ -341,7 +606,7 @@ fn handle_market_tab_key(
             );
             None
         }
-        SeatKeyCode::Enter => {
+        SeatKeyCode::Enter if !key.is_repeat => {
             if obs.cancel_locked && kind == MarketActionKind::CancelOffer {
                 return None;
             }
@@ -356,6 +621,7 @@ fn handle_market_tab_key(
 fn handle_bundle_tab_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
+    viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     let sections = visible_bundle_sections(obs.turn);
@@ -365,6 +631,8 @@ fn handle_bundle_tab_key(
     let section = sections[sec_idx];
     let field_count = bundle_field_count(section);
     let n = obs.spec.seat_count.max(1);
+    let total = center_tab_total_rows(obs, state);
+    let bh = center_body_height(viewport);
 
     match key.code {
         SeatKeyCode::Char('[') => {
@@ -384,23 +652,41 @@ fn handle_bundle_tab_key(
                 state.center_scroll = state.center_scroll.saturating_sub(1);
             } else {
                 state.selection.bundle_field_idx -= 1;
+                ensure_row_visible(
+                    1 + state.selection.bundle_field_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             }
             None
         }
         SeatKeyCode::Down => {
             if state.selection.bundle_field_idx + 1 < field_count {
                 state.selection.bundle_field_idx += 1;
+                ensure_row_visible(
+                    1 + state.selection.bundle_field_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             } else {
-                state.center_scroll = state.center_scroll.saturating_add(1);
+                state.center_scroll = state
+                    .center_scroll
+                    .saturating_add(1)
+                    .min(total.saturating_sub(1));
             }
             None
         }
         SeatKeyCode::PageUp => {
-            state.center_scroll = state.center_scroll.saturating_sub(6);
+            state.center_scroll = state.center_scroll.saturating_sub(bh.max(1));
             None
         }
         SeatKeyCode::PageDown => {
-            state.center_scroll = state.center_scroll.saturating_add(6);
+            state.center_scroll = state
+                .center_scroll
+                .saturating_add(bh.max(1))
+                .min(total.saturating_sub(1));
             None
         }
         SeatKeyCode::Home => {
@@ -441,13 +727,15 @@ fn handle_bundle_tab_key(
             );
             None
         }
-        SeatKeyCode::Enter => Some(SeatIntent::update_bundle(
+        SeatKeyCode::Enter if !key.is_repeat => Some(SeatIntent::update_bundle(
             state.bundle_fields.build_stage_op(obs, section),
         )),
-        SeatKeyCode::Delete | SeatKeyCode::Backspace => Some(SeatIntent::update_bundle(
-            state.bundle_fields.build_clear_op(section),
-        )),
-        SeatKeyCode::Char('X') => Some(SeatIntent::update_bundle(BundleDraftAction::ClearAll)),
+        SeatKeyCode::Delete | SeatKeyCode::Backspace if !key.is_repeat => Some(
+            SeatIntent::update_bundle(state.bundle_fields.build_clear_op(section)),
+        ),
+        SeatKeyCode::Char('X') if !key.is_repeat => {
+            Some(SeatIntent::update_bundle(BundleDraftAction::ClearAll))
+        }
         _ => None,
     }
 }
@@ -455,6 +743,7 @@ fn handle_bundle_tab_key(
 fn handle_what_if_tab_key(
     obs: &SeatObservation,
     state: &mut SeatUiState,
+    viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> Option<SeatIntent> {
     let offer_ids: Vec<u64> = obs
@@ -465,29 +754,50 @@ fn handle_what_if_tab_key(
         .collect();
     let check_ids: Vec<u64> = obs.checks.keys().copied().collect();
     let row_total = 5 + offer_ids.len() + check_ids.len();
+    let total = center_tab_total_rows(obs, state);
+    let bh = center_body_height(viewport);
 
     match key.code {
         SeatKeyCode::Up => {
-            state.selection.what_if_row_idx = state.selection.what_if_row_idx.saturating_sub(1);
             if state.selection.what_if_row_idx == 0 {
                 state.center_scroll = state.center_scroll.saturating_sub(1);
+            } else {
+                state.selection.what_if_row_idx -= 1;
+                ensure_row_visible(
+                    state.selection.what_if_row_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             }
             None
         }
         SeatKeyCode::Down => {
             if state.selection.what_if_row_idx + 1 < row_total {
                 state.selection.what_if_row_idx += 1;
+                ensure_row_visible(
+                    state.selection.what_if_row_idx,
+                    &mut state.center_scroll,
+                    bh,
+                    total,
+                );
             } else {
-                state.center_scroll = state.center_scroll.saturating_add(1);
+                state.center_scroll = state
+                    .center_scroll
+                    .saturating_add(1)
+                    .min(total.saturating_sub(1));
             }
             None
         }
         SeatKeyCode::PageUp => {
-            state.center_scroll = state.center_scroll.saturating_sub(6);
+            state.center_scroll = state.center_scroll.saturating_sub(bh.max(1));
             None
         }
         SeatKeyCode::PageDown => {
-            state.center_scroll = state.center_scroll.saturating_add(6);
+            state.center_scroll = state
+                .center_scroll
+                .saturating_add(bh.max(1))
+                .min(total.saturating_sub(1));
             None
         }
         SeatKeyCode::Home => {
@@ -504,9 +814,9 @@ fn handle_what_if_tab_key(
             toggle_what_if_row(obs, state, &offer_ids, &check_ids);
             None
         }
-        SeatKeyCode::Enter => Some(SeatIntent::request_what_if(build_what_if_request(
-            obs, state,
-        ))),
+        SeatKeyCode::Enter if !key.is_repeat => Some(SeatIntent::request_what_if(
+            build_what_if_request(obs, state),
+        )),
         _ => None,
     }
 }

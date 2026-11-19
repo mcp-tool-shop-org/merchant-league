@@ -13,8 +13,8 @@ Preview — not released. This page documents the Club Mode (`v0.1.0`) turn-scre
 
 Each human turn renders inside a responsive four-zone layout built strictly from that seat's `SeatObservation`:
 
-- At **`100×30` or larger**, the screen shows the Header Bar on top, three side-by-side panels in the middle (`Public Table & Ledger Mirror`, `Action & Order Composer`, and `Private Vault & Diagnostics`), and the Status Line along the bottom.
-- At **`80×24`**, the four zones stack vertically without clipping panels mid-row.
+- At **`100×30` or larger**, the screen shows the Header Bar on top, three side-by-side panels in the middle (`Public Table & Ledger Mirror`, `Action & Order Composer`, and `Private Vault & Diagnostics`), and a two-row Status Line (alert row plus shortcuts) along the bottom.
+- At **`80×24`**, the four zones stack vertically so every row of each zone is either shown at full height or reachable via that zone's scroll (`Up`/`Down`/`PageUp`/`PageDown`); lines wider than a zone's inner width are cut at that zone's width.
 - Below **`80×24`**, the terminal renders a single `"Terminal too small"` message until resized.
 
 Goods appear with both their role-qualified guild name and 3-letter ledger code (for example `Seasoned Timber [TMB]` and `Clearinghouse Marks [CRED]`). Press `c` at any time to switch between guild names and plain codes.
@@ -50,7 +50,7 @@ Press `r` (or `F2`) to inspect completed turns inside the **Sweep Chronicle** mo
 | `p` | Run What-If Sandbox (`preview_what_if`) immediately |
 | `c` | Toggle in-world commodity names + `[CODE]` vs plain `[CODE]` |
 | `r` / `F2` | Open or close the Sweep Chronicle modal |
-| `Ctrl+l` / `L` | Lock active pass, clear free text, and open Privacy Curtain |
+| `Ctrl+l` / `Ctrl+L` | Lock active pass, clear free text, and open Privacy Curtain |
 | `Space` then `Enter` | Confirm Privacy Curtain hand-off to the next human seat |
 | `q` / `Esc` / `Ctrl+c` | Quit the terminal session cleanly |
 
@@ -63,4 +63,4 @@ Each turn steps cleanly through:
 3. **Sub-Pass B (Post-Lock & Sealed Commit)** lets every seat post final non-cancel Phase-1 actions and finalize its `SealedOrderBundle`.
 4. **Local seal-and-sweep** runs `commit_and_reveal_all` followed by `sweep_turn`.
 
-Whenever a human seat triggers **Lock & Hand Off (`Ctrl+l` / `L`)**, the host drops the outgoing `SeatObservation`, clears all free-text buffers (`composer_draft`, `whisper_draft`, and `notes_draft`) while preserving only tab and selection indices, clears the terminal buffer, and displays the untimed **Privacy Curtain** showing only the table ID, turn number, pass label, and next seat's guild name until `[Space]` followed by `[Enter]` confirms.
+Whenever a human seat triggers **Lock & Hand Off (`Ctrl+l` / `Ctrl+L`)**, the host drops the outgoing `SeatObservation`, clears all free-text buffers (`composer_draft`, `whisper_draft`, and `notes_draft`) while preserving only tab and selection indices, clears the terminal buffer, and displays the untimed **Privacy Curtain** showing only the table ID, turn number, pass label, and next seat's guild name until `[Space]` followed by `[Enter]` confirms. When no human seat controls the keyboard (after `q`, at season close, or on a pass-advance error), only the public **Session Standby** screen renders — never any seat's Private Vault.

@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "2ad7155e485544f756c5ef50e59078f740373df96b4373b1fc93020e64502c33",
+          "hash": "97a80995f4f2181845a62ebebb1ca6fb53ee3cd83f446949dbcab0de712f3440",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -6739,7 +6739,7 @@
           "path": "crates/league-seat-types/src/intent.rs"
         },
         {
-          "hash": "1682d5cfa5797850e3db9fc9ebab876d3d5193aa4849f45907849e99266542c4",
+          "hash": "f914a64bb3ec1da051faf54a953f63a91ca46f0a88a9381d5a4f4bd6ecd5c8fb",
           "importOrder": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6840,7 +6840,7 @@
           "path": "crates/league-seat-types/src/types.rs"
         },
         {
-          "hash": "fba0d43e0c9fe650f3fb24927d289a1b69810b36ab983b5cf15c17480c5d14a9",
+          "hash": "b41a742150fb5578e5cdb188af98b4bcbc59ebf592121f9ddfaa025ee59e9835",
           "path": "crates/league-seat-types/src/view.rs"
         }
       ],
@@ -6883,9 +6883,10 @@
             "market_field_count",
             "preview_selected_asset"
           ],
-          "hash": "62e319e9eb50f93b42d673e09b4b5d97c1d41b6a8c62a1539e0160733d59c081",
+          "hash": "c67af76a539d22887d139f17d7b5a3427d4945269d95b912c15ed5d37e0f63ec",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs",
+            "crates/league-seat-ui/src/render.rs",
             "crates/league-seat-ui/src/state.rs"
           ],
           "path": "crates/league-seat-ui/src/composer.rs"
@@ -6897,12 +6898,13 @@
             "action_for",
             "curtain_view",
             "handle_seat_key",
+            "neutral_session_view",
             "render_seat",
             "render_seat_with_commodities",
             "render_turn_screen",
             "title_view"
           ],
-          "hash": "02d5f00ad3baa94683166206b650fd037eb5790ef8b769fa6a1735ce9147ed48",
+          "hash": "57ff1d05b0a668ee4a7a319a9eaf049812b49817bcd4649ebb52f08a8dbe029e",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-seat-ui/src/composer.rs",
@@ -6914,7 +6916,7 @@
             {
               "calls": [
                 {
-                  "line": 69,
+                  "line": 72,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -6922,7 +6924,7 @@
                   }
                 },
                 {
-                  "line": 71,
+                  "line": 74,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -6938,7 +6940,7 @@
             {
               "calls": [
                 {
-                  "line": 93,
+                  "line": 96,
                   "name": "build_turn_screen",
                   "target": {
                     "file": "crates/league-seat-ui/src/render.rs"
@@ -6953,14 +6955,14 @@
             {
               "calls": [
                 {
-                  "line": 107,
+                  "line": 110,
                   "name": "apply_seat_key",
                   "target": {
                     "file": "crates/league-seat-ui/src/composer.rs"
                   }
                 },
                 {
-                  "line": 108,
+                  "line": 111,
                   "name": "build_turn_screen",
                   "target": {
                     "file": "crates/league-seat-ui/src/render.rs"
@@ -6975,7 +6977,7 @@
             {
               "calls": [
                 {
-                  "line": 127,
+                  "line": 130,
                   "name": "build_curtain_view",
                   "target": {
                     "file": "crates/league-seat-ui/src/render.rs"
@@ -6990,7 +6992,22 @@
             {
               "calls": [
                 {
-                  "line": 176,
+                  "line": 144,
+                  "name": "build_neutral_session_view",
+                  "target": {
+                    "file": "crates/league-seat-ui/src/render.rs"
+                  }
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "neutral_session_view"
+            },
+            {
+              "calls": [
+                {
+                  "line": 193,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -6999,7 +7016,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 184,
+                  "line": 201,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -7008,7 +7025,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 201,
+                  "line": 218,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -7017,7 +7034,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 200,
+                  "line": 217,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -7034,7 +7051,7 @@
             {
               "calls": [
                 {
-                  "line": 176,
+                  "line": 193,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -7043,7 +7060,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 184,
+                  "line": 201,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -7052,7 +7069,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 201,
+                  "line": 218,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -7061,7 +7078,7 @@
                   "via": "render_seat_view"
                 },
                 {
-                  "line": 200,
+                  "line": 217,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -7078,7 +7095,7 @@
             {
               "calls": [
                 {
-                  "line": 176,
+                  "line": 193,
                   "name": "Refined",
                   "receiver": "AssetId",
                   "target": {
@@ -7086,7 +7103,7 @@
                   }
                 },
                 {
-                  "line": 184,
+                  "line": 201,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -7094,7 +7111,7 @@
                   }
                 },
                 {
-                  "line": 201,
+                  "line": 218,
                   "name": "plain",
                   "receiver": "ViewLabel",
                   "target": {
@@ -7102,7 +7119,7 @@
                   }
                 },
                 {
-                  "line": 200,
+                  "line": 217,
                   "name": "single_panel",
                   "receiver": "SeatScreenView",
                   "target": {
@@ -7121,11 +7138,18 @@
         {
           "exports": [
             "build_curtain_view",
+            "build_neutral_session_view",
             "build_turn_screen",
+            "center_tab_rows",
+            "center_tab_total_rows",
             "format_asset_label",
-            "guild_name_for_seat"
+            "guild_name_for_seat",
+            "private_drawer_rows",
+            "private_drawer_total_rows",
+            "public_ledger_body_rows",
+            "public_ledger_total_rows"
           ],
-          "hash": "77151e4240ad1140edf7d2f038f36ea9c151ef8ed4090eaf9d08665f0cebf16f",
+          "hash": "cd7b7bedafcc04e315efb2d8229fd66673219637ba1ad04c2efac1d43879751e",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-seat-ui/src/composer.rs",
@@ -7620,50 +7644,65 @@
             {
               "in": "handle_key_event",
               "kind": "match-err",
-              "line": 770
+              "line": 871
             },
             {
               "in": "handle_key_event",
               "kind": "err",
-              "line": 773
+              "line": 874
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 789
+              "line": 902
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 799
+              "line": 912
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 820
+              "line": 942
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 831
+              "line": 963
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 854
+              "line": 974
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 863
+              "line": 997
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 897
+              "line": 1006
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "err",
+              "line": 1040
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "match-err",
+              "line": 1076
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "err",
+              "line": 1078
             }
           ],
-          "hash": "01d978f4ee08fdbdfe451812c5104cbe1e589677e25f07d8ae7146a34f7354ad",
+          "hash": "4306c9772e68de5954455e1f434c7de5421102a7de5c41f2f64c76059deec0a7",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-gen/src/lib.rs",
@@ -7675,7 +7714,7 @@
             {
               "calls": [
                 {
-                  "line": 40,
+                  "line": 42,
                   "name": "Char",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -7683,7 +7722,7 @@
                   }
                 },
                 {
-                  "line": 55,
+                  "line": 57,
                   "name": "F",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -7691,8 +7730,24 @@
                   }
                 },
                 {
-                  "line": 58,
+                  "line": 66,
                   "name": "new",
+                  "receiver": "SeatKeyEvent",
+                  "target": {
+                    "file": "crates/league-seat-types/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 69,
+                  "name": "Char",
+                  "receiver": "SeatKeyCode",
+                  "target": {
+                    "file": "crates/league-seat-types/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 73,
+                  "name": "repeated",
                   "receiver": "SeatKeyEvent",
                   "target": {
                     "file": "crates/league-seat-types/src/lib.rs"
@@ -7707,14 +7762,14 @@
             {
               "calls": [
                 {
-                  "line": 425,
+                  "line": 486,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 423,
+                  "line": 484,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -7730,7 +7785,7 @@
             {
               "calls": [
                 {
-                  "line": 433,
+                  "line": 494,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -7745,7 +7800,7 @@
             {
               "calls": [
                 {
-                  "line": 445,
+                  "line": 506,
                   "name": "RevealSalt",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -7767,25 +7822,25 @@
             {
               "in": "run_session_loop",
               "kind": "match-err",
-              "line": 93
+              "line": 102
             },
             {
               "in": "run_session_loop",
               "kind": "err",
-              "line": 99
+              "line": 108
             },
             {
               "in": "default_dev_ring_table",
               "kind": "err",
-              "line": 134
+              "line": 145
             },
             {
               "in": "dispatch_cli",
               "kind": "match-err",
-              "line": 177
+              "line": 188
             }
           ],
-          "hash": "8efd57870ed9f10fbb4449de05d2c5b3cfc8ca3f8ef7d0a8293de83f7760f721",
+          "hash": "543c808ae127412292afd78c2d03fab0cee98494cf2f72bc8f0fd32b6e7c8594",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-gen/src/lib.rs",
@@ -7812,14 +7867,14 @@
                   }
                 },
                 {
-                  "line": 74,
+                  "line": 76,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 74,
+                  "line": 77,
                   "name": "action_for",
                   "target": {
                     "file": "crates/league-seat-ui/src/lib.rs"
@@ -7834,21 +7889,6 @@
             {
               "calls": [
                 {
-                  "line": 97,
-                  "name": "scrub_secret_text",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  }
-                },
-                {
-                  "branch": "let Some(err) = render_err",
-                  "line": 99,
-                  "name": "scrub_secret_text",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  }
-                },
-                {
                   "line": 106,
                   "name": "scrub_secret_text",
                   "target": {
@@ -7856,7 +7896,22 @@
                   }
                 },
                 {
-                  "line": 107,
+                  "branch": "let Some(err) = render_err",
+                  "line": 108,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 112,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 113,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -7864,7 +7919,7 @@
                   }
                 },
                 {
-                  "line": 109,
+                  "line": 117,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -7879,7 +7934,7 @@
             {
               "calls": [
                 {
-                  "line": 118,
+                  "line": 129,
                   "name": "default",
                   "receiver": "GeneratorConfig",
                   "target": {
@@ -7887,21 +7942,21 @@
                   }
                 },
                 {
-                  "line": 125,
+                  "line": 136,
                   "name": "is_reserved_test_seed",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
                   }
                 },
                 {
-                  "line": 125,
+                  "line": 136,
                   "name": "seed_pool",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
                   }
                 },
                 {
-                  "line": 128,
+                  "line": 139,
                   "name": "generate_ring_table_for_setup",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
@@ -7916,7 +7971,7 @@
             {
               "calls": [
                 {
-                  "line": 118,
+                  "line": 129,
                   "name": "default",
                   "receiver": "GeneratorConfig",
                   "target": {
@@ -7925,7 +7980,7 @@
                   "via": "default_dev_ring_table"
                 },
                 {
-                  "line": 125,
+                  "line": 136,
                   "name": "is_reserved_test_seed",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
@@ -7933,7 +7988,7 @@
                   "via": "default_dev_ring_table"
                 },
                 {
-                  "line": 125,
+                  "line": 136,
                   "name": "seed_pool",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
@@ -7941,7 +7996,7 @@
                   "via": "default_dev_ring_table"
                 },
                 {
-                  "line": 128,
+                  "line": 139,
                   "name": "generate_ring_table_for_setup",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
@@ -7949,21 +8004,21 @@
                   "via": "default_dev_ring_table"
                 },
                 {
-                  "line": 139,
+                  "line": 150,
                   "name": "TableId",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 139,
+                  "line": 150,
                   "name": "from_ring_table",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 140,
+                  "line": 151,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -7971,7 +8026,7 @@
                 },
                 {
                   "branch": "let Some(err) = render_err",
-                  "line": 99,
+                  "line": 108,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -7979,7 +8034,7 @@
                   "via": "run_session_loop"
                 },
                 {
-                  "line": 106,
+                  "line": 112,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -7987,7 +8042,7 @@
                   "via": "run_session_loop"
                 },
                 {
-                  "line": 107,
+                  "line": 113,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -7996,7 +8051,7 @@
                   "via": "run_session_loop"
                 },
                 {
-                  "line": 109,
+                  "line": 117,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8012,7 +8067,7 @@
             {
               "calls": [
                 {
-                  "line": 178,
+                  "line": 189,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8027,7 +8082,7 @@
             {
               "calls": [
                 {
-                  "line": 178,
+                  "line": 189,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8079,7 +8134,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "1bea647d07205d07d6b876b5ff722961eabad1716cc938da16dbcbda29dc3a4c",
+          "hash": "494d44ec5c5508b0ef997e212c1699ae6ca62bdc29afafde4feebdfa2c0f32ce",
           "path": "CHANGELOG.md"
         },
         {
@@ -9498,7 +9553,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "3be43b904a587c7cdd1857e95f911238f5fef1c9",
+    "commit": "01df1621705d40f9638de23ea3f68504cf248898",
     "tracked": 576
   },
   "landings": [
@@ -10581,7 +10636,7 @@
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
-      "hash": "e5cc6997fcae50f6e069b882a783fe38255c87e554143e764958957c96fd7bc0",
+      "hash": "e150867ce8f1b55d2cf677223940b7ceeedec0d3bb3b359e12adb9f95151eb06",
       "path": "site/src/content/docs/handbook/playing-a-turn.md"
     },
     {

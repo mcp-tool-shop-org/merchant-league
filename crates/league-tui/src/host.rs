@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use league_core::{
     AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal,
     PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, SealedOrderBundle, Seat,
@@ -17,8 +17,9 @@ use league_core::{
 use league_gen::{GenError, RingTable, ring_table_to_table_spec};
 use league_seat_types::{
     CommodityDisplayMap, SeatIntent, SeatIntentKind, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
-    SeatScreenView, ViewAlign, ViewAxis, ViewColor, ViewLayoutMode, ViewPanel, ViewSizeHint,
-    ViewStyle, ViewTabBar, ViewTable, ViewZoneId, ViewportSize,
+    SeatScreenView, ViewAlign, ViewAxis, ViewColor, ViewLayoutMode, ViewPanel, ViewRow,
+    ViewSizeHint, ViewSpan, ViewStyle, ViewTabBar, ViewTable, ViewZoneId, ViewportSize,
+    WhatIfPreview,
 };
 use league_seat_ui::{PassKind, SeatUiState};
 use ratatui::Frame;
@@ -33,9 +34,10 @@ struct CurtainState {
     space_armed: bool,
 }
 
-/// Converts a host `crossterm` [`KeyEvent`] into a pure seat key event value.
+/// Converts a host `crossterm` [`KeyEvent`] into a pure seat key event value, dropping
+/// `KeyEventKind::Release` and blocking `KeyEventKind::Repeat` on commit/lock/quit keys.
 #[must_use]
-pub(crate) fn map_crossterm_key(key: KeyEvent) -> SeatKeyEvent {
+pub(crate) fn map_crossterm_key(key: KeyEvent) -> Option<SeatKeyEvent> {
     let code = match key.code {
         KeyCode::Char(ch) => SeatKeyCode::Char(ch),
         KeyCode::Enter => SeatKeyCode::Enter,
@@ -55,14 +57,24 @@ pub(crate) fn map_crossterm_key(key: KeyEvent) -> SeatKeyEvent {
         KeyCode::F(n) => SeatKeyCode::F(n),
         _ => SeatKeyCode::Unmapped,
     };
-    SeatKeyEvent::new(
-        code,
-        SeatKeyModifiers {
-            ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
-            alt: key.modifiers.contains(KeyModifiers::ALT),
-            shift: key.modifiers.contains(KeyModifiers::SHIFT),
-        },
-    )
+    let mods = SeatKeyModifiers {
+        ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
+        alt: key.modifiers.contains(KeyModifiers::ALT),
+        shift: key.modifiers.contains(KeyModifiers::SHIFT),
+    };
+    match key.kind {
+        KeyEventKind::Press => Some(SeatKeyEvent::new(code, mods)),
+        KeyEventKind::Repeat => {
+            if matches!(code, SeatKeyCode::Enter | SeatKeyCode::Esc)
+                || (mods.ctrl && matches!(code, SeatKeyCode::Char('l' | 'L' | 'c' | 'C')))
+            {
+                None
+            } else {
+                Some(SeatKeyEvent::repeated(code, mods))
+            }
+        }
+        KeyEventKind::Release => None,
+    }
 }
 
 const fn map_color(color: ViewColor) -> Color {
@@ -190,11 +202,21 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u1
     used_rows
 }
 
-fn render_view_table(frame: &mut Frame<'_>, area: Rect, table: &ViewTable) -> u16 {
-    if area.width == 0 || area.height < 2 || table.columns.is_empty() {
+fn render_view_table(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    table: &ViewTable,
+    skip_rows: usize,
+) -> u16 {
+    if area.width == 0
+        || area.height < 2
+        || table.columns.is_empty()
+        || skip_rows >= table.rows.len()
+    {
         return 0;
     }
-    let desired_rows = 1_usize.saturating_add(table.rows.len());
+    let visible_rows = &table.rows[skip_rows..];
+    let desired_rows = 1_usize.saturating_add(visible_rows.len());
     let allocated = u16::try_from(desired_rows)
         .unwrap_or(u16::MAX)
         .min(area.height);
@@ -218,13 +240,12 @@ fn render_view_table(frame: &mut Frame<'_>, area: Rect, table: &ViewTable) -> u1
         .collect();
     let header = Row::new(header_cells);
     let data_limit = usize::from(allocated.saturating_sub(1));
-    let data_rows: Vec<Row<'_>> = table
-        .rows
+    let data_rows: Vec<Row<'_>> = visible_rows
         .iter()
         .enumerate()
         .take(data_limit)
-        .map(|(idx, row)| {
-            let selected = table.selected_row == Some(idx);
+        .map(|(rel_idx, row)| {
+            let selected = table.selected_row == Some(skip_rows + rel_idx);
             let cells: Vec<Cell<'_>> = row
                 .cells
                 .iter()
@@ -293,21 +314,29 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
         return;
     }
 
-    if let Some(table) = &panel.table {
-        let used = render_view_table(frame, inner, table);
-        inner.y = inner.y.saturating_add(used);
-        inner.height = inner.height.saturating_sub(used);
-    }
+    let offset = panel.scroll.map_or(0, |s| s.offset);
+    let row_offset = if let Some(table) = &panel.table {
+        let t_len = table.rows.len();
+        if offset < t_len {
+            let used = render_view_table(frame, inner, table, offset);
+            inner.y = inner.y.saturating_add(used);
+            inner.height = inner.height.saturating_sub(used);
+            0
+        } else {
+            offset - t_len
+        }
+    } else {
+        offset
+    };
     if inner.height == 0 || panel.rows.is_empty() {
         return;
     }
 
-    let offset = panel.scroll.map_or(0, |s| s.offset);
     let lines: Vec<Line<'_>> = panel
         .rows
         .iter()
         .enumerate()
-        .skip(offset)
+        .skip(row_offset)
         .take(usize::from(inner.height))
         .map(|(idx, row)| {
             let is_selected = panel.selected_row == Some(idx);
@@ -336,21 +365,53 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) 
     let Some(status) = &view.status_line else {
         return;
     };
-    let mut spans: Vec<Span<'_>> = status
+    let alert_spans: Option<Vec<Span<'_>>> = status.alert.as_ref().map(|alert| {
+        alert
+            .spans
+            .iter()
+            .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
+            .collect()
+    });
+    let left_spans: Vec<Span<'_>> = status
         .left
         .iter()
         .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
         .collect();
-    if !status.right.is_empty() {
-        if !spans.is_empty() {
-            spans.push(Span::styled(" | ", map_style(status.style)));
+    let right_spans: Vec<Span<'_>> = status
+        .right
+        .iter()
+        .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
+        .collect();
+
+    let lines = if area.height >= 2 {
+        let top = if let Some(alert) = alert_spans {
+            Line::from(alert)
+        } else {
+            Line::from(right_spans)
+        };
+        vec![top, Line::from(left_spans)]
+    } else {
+        let mut combined = Vec::new();
+        if let Some(alert) = alert_spans {
+            combined.extend(alert);
+            if !left_spans.is_empty() {
+                combined.push(Span::styled(" | ", map_style(status.style)));
+                combined.extend(left_spans);
+            }
+        } else {
+            combined.extend(left_spans);
+            if !right_spans.is_empty() {
+                if !combined.is_empty() {
+                    combined.push(Span::styled(" | ", map_style(status.style)));
+                }
+                combined.extend(right_spans);
+            }
         }
-        for sp in &status.right {
-            spans.push(Span::styled(sp.text.as_str(), map_style(sp.style)));
-        }
-    }
+        vec![Line::from(combined)]
+    };
+
     frame.render_widget(
-        Paragraph::new(Text::from(vec![Line::from(spans)])).style(map_style(status.style)),
+        Paragraph::new(Text::from(lines)).style(map_style(status.style)),
         area,
     );
 }
@@ -460,6 +521,9 @@ pub struct TuiHostSession {
     pass_offset: usize,
     curtain: Option<CurtainState>,
     quit_requested: bool,
+    advance_halted_error: Option<StructuredError>,
+    #[cfg(test)]
+    injected_raw_what_if: Option<WhatIfPreview>,
 }
 
 #[allow(dead_code)]
@@ -483,6 +547,9 @@ impl TuiHostSession {
             pass_offset: 0,
             curtain: None,
             quit_requested: false,
+            advance_halted_error: None,
+            #[cfg(test)]
+            injected_raw_what_if: None,
         };
         if session.host.phase() == TurnPhase::TalkAndMarket
             && session.human_seats.iter().any(|&h| h)
@@ -586,11 +653,12 @@ impl TuiHostSession {
     }
 
     /// Returns the seat currently controlling the keyboard (`None` when Curtain is up, season is
-    /// closed, or quit was requested).
+    /// closed, a pass advance failed, or quit was requested).
     #[must_use]
     pub fn active_human_seat(&self) -> Option<Seat> {
         if self.curtain.is_some()
             || self.quit_requested
+            || self.advance_halted_error.is_some()
             || self.host.phase() != TurnPhase::TalkAndMarket
         {
             return None;
@@ -660,25 +728,52 @@ impl TuiHostSession {
         }
     }
 
-    /// Builds the plain owned [`SeatScreenView`] for either the Curtain hand-off or the active
-    /// seat's [`SeatObservation`].
+    /// Builds the plain owned [`SeatScreenView`] for either the Curtain hand-off, the active
+    /// seat's [`SeatObservation`], or a strictly public standby view when no human seat is active.
     pub fn build_current_view(
         &self,
         viewport: ViewportSize,
     ) -> Result<SeatScreenView, EngineError> {
         if let Some(curtain) = &self.curtain {
-            return Ok(league_seat_ui::curtain_view(
+            let mut view = league_seat_ui::curtain_view(
                 self.host.table_id(),
                 Turn(self.host.turn()),
                 self.pass,
                 curtain.next_seat,
                 viewport,
                 curtain.space_armed,
-            ));
+            );
+            if let Some(err) = &self.advance_halted_error
+                && let Some(status) = &mut view.status_line
+            {
+                let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
+                    banner,
+                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                )]));
+            }
+            return Ok(view);
         }
-        let target_seat = self
-            .active_human_seat()
-            .unwrap_or_else(|| self.seat_at_offset(0).unwrap_or(Seat(0)));
+        let Some(target_seat) = self.active_human_seat() else {
+            let mut view = league_seat_ui::neutral_session_view(
+                self.host.table_id(),
+                Turn(self.host.turn()),
+                self.host.phase(),
+                self.pass,
+                self.quit_requested,
+                viewport,
+            );
+            if let Some(err) = &self.advance_halted_error
+                && let Some(status) = &mut view.status_line
+            {
+                let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
+                status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
+                    banner,
+                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
+                )]));
+            }
+            return Ok(view);
+        };
         let obs = self.host.observe_seat(target_seat)?;
         let idx = usize::from(target_seat.0);
         let mut view = league_seat_ui::render_turn_screen(
@@ -692,15 +787,15 @@ impl TuiHostSession {
             && let Some(status) = &mut view.status_line
         {
             let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
-            status.right.push(league_seat_types::ViewSpan::styled(
-                format!(" | {banner}"),
+            status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
+                banner,
                 ViewStyle::plain().with_fg(ViewColor::Red).bold(),
-            ));
+            )]));
         }
         Ok(view)
     }
 
-    /// Renders the active view (Curtain or active seat's turn screen) onto `frame`.
+    /// Renders the active view (Curtain, neutral standby, or active seat's turn screen) onto `frame`.
     pub fn render_current_frame(&self, frame: &mut Frame<'_>) -> Result<(), EngineError> {
         let viewport = ViewportSize::new(frame.area().width, frame.area().height);
         let view = self.build_current_view(viewport)?;
@@ -716,6 +811,9 @@ impl TuiHostSession {
         viewport: ViewportSize,
     ) -> Result<(), StructuredError> {
         if let Some(curtain) = &mut self.curtain {
+            if key.is_repeat {
+                return Ok(());
+            }
             match key.code {
                 SeatKeyCode::Char('c') if key.modifiers.ctrl => {
                     self.quit_requested = true;
@@ -741,6 +839,9 @@ impl TuiHostSession {
         }
 
         let Some(active) = self.active_human_seat() else {
+            if key.is_repeat {
+                return Ok(());
+            }
             if matches!(key.code, SeatKeyCode::Char('q') | SeatKeyCode::Esc)
                 || (key.code == SeatKeyCode::Char('c') && key.modifiers.ctrl)
             {
@@ -775,6 +876,18 @@ impl TuiHostSession {
         Ok(())
     }
 
+    fn compute_raw_what_if(
+        &mut self,
+        obs: &SeatObservation,
+        req: &league_core::HumanWhatIfRequest,
+    ) -> Result<WhatIfPreview, StructuredError> {
+        #[cfg(test)]
+        if let Some(injected) = self.injected_raw_what_if.take() {
+            return Ok(injected);
+        }
+        preview_what_if(&obs.to_public_preview_state(), req).map_err(|err| scrub_engine_error(&err))
+    }
+
     /// Validates and applies a plain owned [`SeatIntent`] strictly if `submitting_seat` is the
     /// active keyboard seat and all payload seat indices and engine checks succeed.
     ///
@@ -803,6 +916,36 @@ impl TuiHostSession {
                     intent.kind, submitting_seat.0, active.0
                 ),
                 Some("Submit actions only for the currently active seat."),
+            ));
+        }
+
+        let unexpected_payload = match intent.kind {
+            SeatIntentKind::SubmitMarketAction => {
+                intent.bundle_action.is_some() || intent.what_if.is_some()
+            }
+            SeatIntentKind::UpdateBundle => {
+                intent.market_action.is_some() || intent.what_if.is_some()
+            }
+            SeatIntentKind::RequestWhatIf => {
+                intent.market_action.is_some() || intent.bundle_action.is_some()
+            }
+            SeatIntentKind::LockAndHandOff
+            | SeatIntentKind::OpenChronicleModal
+            | SeatIntentKind::CloseChronicleModal
+            | SeatIntentKind::Quit => {
+                intent.market_action.is_some()
+                    || intent.bundle_action.is_some()
+                    || intent.what_if.is_some()
+            }
+        };
+        if unexpected_payload {
+            return Err(host_error(
+                "UNEXPECTED_INTENT_PAYLOAD",
+                &format!(
+                    "refused {:?}: extra payload fields not matching intent kind",
+                    intent.kind
+                ),
+                Some("Populate only the payload field named by SeatIntentKind."),
             ));
         }
 
@@ -907,8 +1050,7 @@ impl TuiHostSession {
                     .host
                     .observe_seat(submitting_seat)
                     .map_err(|err| scrub_engine_error(&err))?;
-                let mut preview = preview_what_if(&obs.to_public_preview_state(), &req)
-                    .map_err(|err| scrub_engine_error(&err))?;
+                let mut preview = self.compute_raw_what_if(&obs, &req)?;
                 for refused in &mut preview.refused_market_actions {
                     refused.message = scrub_secret_text(&refused.message);
                 }
@@ -931,7 +1073,11 @@ impl TuiHostSession {
                 self.seat_states[idx].clear_for_hand_off();
                 self.last_errors[idx] = None;
                 self.pass_offset += 1;
-                self.advance_after_human_lock()
+                if let Err(err) = self.advance_after_human_lock() {
+                    self.advance_halted_error = Some(err.clone());
+                    return Err(err);
+                }
+                Ok(())
             }
         }
     }
@@ -1103,9 +1249,9 @@ mod tests {
     use ratatui::backend::TestBackend;
     use std::collections::BTreeSet;
 
-    fn dev_ring_table(start_seed: u64) -> RingTable {
+    fn dev_ring_table_for_seats(start_seed: u64, seat_count: SeatCount) -> RingTable {
         let cfg = GeneratorConfig {
-            seat_count: Some(SeatCount::Four),
+            seat_count: Some(seat_count),
             ..GeneratorConfig::default()
         };
         let opts = TableSetupOptions {
@@ -1123,6 +1269,10 @@ mod tests {
             }
         }
         panic!("no feasible dev table found from seed {start_seed}");
+    }
+
+    fn dev_ring_table(start_seed: u64) -> RingTable {
+        dev_ring_table_for_seats(start_seed, SeatCount::Four)
     }
 
     fn distinct_mandate_deal_seed(ring: &RingTable, human_seats: &[u8]) -> [u8; 32] {
@@ -1143,11 +1293,15 @@ mod tests {
                 ),
                 "bridge",
             );
-            let mut tags = BTreeSet::new();
+            let mut fulls = BTreeSet::new();
+            let mut clips = BTreeSet::new();
             for rev in &deal.seat_reveals {
-                tags.insert(format!("{:?}", rev.mandate.kind));
+                let s = mandate_short_marker(rev.mandate.kind);
+                clips.insert(s.chars().take(22).collect::<String>());
+                fulls.insert(s);
             }
-            if tags.len() == usize::from(spec.seat_count) {
+            let n = usize::from(spec.seat_count);
+            if fulls.len() == n && clips.len() == n {
                 return deal_seed;
             }
         }
@@ -1251,26 +1405,88 @@ mod tests {
         );
     }
 
+    #[derive(Debug, Clone)]
+    struct CapturedSeasonDraw {
+        turn: u8,
+        active_seat: Option<u8>,
+        view_text: String,
+        buffer_text: String,
+    }
+
+    #[derive(Debug, Clone)]
+    struct MandateLeakSpec {
+        short_full: String,
+        clipped_drawer: String,
+        debug_kind: String,
+        bonus_line: String,
+        target_tokens: Vec<String>,
+    }
+
+    fn build_mandate_leak_spec(mandate: &league_core::PrivateMandate) -> MandateLeakSpec {
+        let short_full = mandate_short_marker(mandate.kind);
+        let clipped_drawer: String = short_full.chars().take(22).collect();
+        let debug_kind = format!("{:?}", mandate.kind);
+        let bonus_line = format!("Bonus: +{} eq", mandate.bonus_equity);
+        let target_tokens = match mandate.kind {
+            MandateKind::MinProjectEquity { target } => {
+                let full_t = format!(">={target}");
+                let clipped_t: String = full_t.chars().take(5).collect();
+                vec![full_t, clipped_t]
+            }
+            MandateKind::MinRefinedVariety {
+                distinct_goods,
+                min_each,
+            } => vec![format!("{distinct_goods}x{min_each}")],
+            MandateKind::MaintainCleanCredit { min_tier } => {
+                vec![format!("CleanCredit >= {min_tier:?}")]
+            }
+            MandateKind::MinActivePartners { min_partners } => {
+                vec![format!("ActivePartners >={min_partners}")]
+            }
+        };
+        MandateLeakSpec {
+            short_full,
+            clipped_drawer,
+            debug_kind,
+            bonus_line,
+            target_tokens,
+        }
+    }
+
+    fn draw_and_capture(
+        session: &TuiHostSession,
+        terminal: &mut Terminal<TestBackend>,
+        vp: ViewportSize,
+        turn: u8,
+        active_seat: Option<u8>,
+        frames: &mut Vec<CapturedSeasonDraw>,
+    ) {
+        let view = must_ok(session.build_current_view(vp), "build current view");
+        let view_text = view.plain_text();
+        must_ok(
+            terminal.draw(|f| draw_screen_view(f, &view)),
+            "draw captured view",
+        );
+        frames.push(CapturedSeasonDraw {
+            turn,
+            active_seat,
+            view_text,
+            buffer_text: screen_text(terminal),
+        });
+    }
+
     fn unlock_curtain_and_capture(
         session: &mut TuiHostSession,
         terminal: &mut Terminal<TestBackend>,
         vp: ViewportSize,
-        frames: &mut Vec<(u8, Option<u8>, String)>,
+        frames: &mut Vec<CapturedSeasonDraw>,
     ) {
         if !session.is_curtain_open() {
             return;
         }
-        must_ok(
-            terminal.draw(|f| must_ok(session.render_current_frame(f), "curtain draw 1")),
-            "draw curtain 1",
-        );
-        frames.push((session.turn(), None, screen_text(terminal)));
+        draw_and_capture(session, terminal, vp, session.turn(), None, frames);
         must_ok(session.handle_key_event(key(' '), vp), "curtain space");
-        must_ok(
-            terminal.draw(|f| must_ok(session.render_current_frame(f), "curtain draw 2")),
-            "draw curtain armed",
-        );
-        frames.push((session.turn(), None, screen_text(terminal)));
+        draw_and_capture(session, terminal, vp, session.turn(), None, frames);
         must_ok(
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter",
@@ -1293,50 +1509,164 @@ mod tests {
         }
     }
 
+    fn check_season_leaks(
+        frames: &[CapturedSeasonDraw],
+        mandates: &[MandateLeakSpec],
+        salt_hexes: &[String],
+        digests: &[[u8; 32]],
+        drawn_shock_bps_by_turn: &[(u8, u8, league_core::Bps)],
+    ) -> Result<(), String> {
+        if frames.is_empty() {
+            return Err("expected at least one captured frame".to_owned());
+        }
+        let digest_hexes: Vec<(String, String)> = digests
+            .iter()
+            .map(|d| {
+                let full: String = d.iter().map(|b| format!("{b:02x}")).collect();
+                let short = full.chars().take(16).collect();
+                (full, short)
+            })
+            .collect();
+        let salt_prefixes: Vec<(String, String)> = salt_hexes
+            .iter()
+            .map(|s| {
+                let low = s.to_ascii_lowercase();
+                let short = low.chars().take(16).collect();
+                (low, short)
+            })
+            .collect();
+
+        for frame in frames {
+            let v_low = frame.view_text.to_ascii_lowercase();
+            let b_low = frame.buffer_text.to_ascii_lowercase();
+            if frame.active_seat.is_none()
+                && (frame.view_text.contains("Private Vault")
+                    || frame.view_text.contains("Private Mandate")
+                    || frame.buffer_text.contains("Private Vault")
+                    || frame.buffer_text.contains("Private Mandate"))
+            {
+                return Err(format!(
+                    "Turn {} non-active frame exposed Private Vault/Mandate",
+                    frame.turn
+                ));
+            }
+            let own = frame.active_seat.and_then(|s| mandates.get(usize::from(s)));
+            for (seat_idx, spec) in mandates.iter().enumerate() {
+                if frame
+                    .active_seat
+                    .is_some_and(|s| usize::from(s) == seat_idx)
+                {
+                    continue;
+                }
+                if own.is_none_or(|o| o.short_full != spec.short_full) {
+                    if frame.view_text.contains(&spec.short_full) {
+                        return Err(format!(
+                            "Turn {} seat {:?} pre-draw view leaked seat {seat_idx}'s mandate `{}`",
+                            frame.turn, frame.active_seat, spec.short_full
+                        ));
+                    }
+                    if frame.buffer_text.contains(&spec.short_full) {
+                        return Err(format!(
+                            "Turn {} seat {:?} buffer leaked seat {seat_idx}'s mandate `{}`",
+                            frame.turn, frame.active_seat, spec.short_full
+                        ));
+                    }
+                }
+                if own.is_none_or(|o| o.clipped_drawer != spec.clipped_drawer)
+                    && frame.buffer_text.contains(&spec.clipped_drawer)
+                {
+                    return Err(format!(
+                        "Turn {} seat {:?} buffer leaked seat {seat_idx}'s clipped mandate `{}`",
+                        frame.turn, frame.active_seat, spec.clipped_drawer
+                    ));
+                }
+                if own.is_none_or(|o| o.debug_kind != spec.debug_kind)
+                    && (frame.view_text.contains(&spec.debug_kind)
+                        || frame.buffer_text.contains(&spec.debug_kind))
+                {
+                    return Err(format!(
+                        "Turn {} seat {:?} leaked seat {seat_idx}'s Debug mandate `{}`",
+                        frame.turn, frame.active_seat, spec.debug_kind
+                    ));
+                }
+                if own.is_none_or(|o| o.bonus_line != spec.bonus_line)
+                    && (frame.view_text.contains(&spec.bonus_line)
+                        || frame.buffer_text.contains(&spec.bonus_line))
+                {
+                    return Err(format!(
+                        "Turn {} seat {:?} leaked seat {seat_idx}'s mandate bonus `{}`",
+                        frame.turn, frame.active_seat, spec.bonus_line
+                    ));
+                }
+                for tok in &spec.target_tokens {
+                    if own.is_none_or(|o| !o.target_tokens.contains(tok))
+                        && (frame.view_text.contains(tok) || frame.buffer_text.contains(tok))
+                    {
+                        return Err(format!(
+                            "Turn {} seat {:?} leaked seat {seat_idx}'s mandate target `{tok}`",
+                            frame.turn, frame.active_seat,
+                        ));
+                    }
+                }
+            }
+            for (salt_full, salt_short) in &salt_prefixes {
+                if v_low.contains(salt_full)
+                    || b_low.contains(salt_full)
+                    || (!salt_short.is_empty()
+                        && (v_low.contains(salt_short) || b_low.contains(salt_short)))
+                {
+                    return Err(format!(
+                        "Turn {} seat {:?} leaked mandate salt hex",
+                        frame.turn, frame.active_seat
+                    ));
+                }
+            }
+            for (d_full, d_short) in &digest_hexes {
+                if v_low.contains(d_full)
+                    || b_low.contains(d_full)
+                    || (!d_short.is_empty() && (v_low.contains(d_short) || b_low.contains(d_short)))
+                {
+                    return Err(format!(
+                        "Turn {} seat {:?} leaked post_state_digest `{d_full}`",
+                        frame.turn, frame.active_seat
+                    ));
+                }
+            }
+            for &(realize_turn, _forecast_turn, mag_bps) in drawn_shock_bps_by_turn {
+                if frame.turn < realize_turn {
+                    let tight = format!("{mag_bps}bps");
+                    let spaced = format!("{mag_bps} bps");
+                    if frame.view_text.contains(&tight)
+                        || frame.buffer_text.contains(&tight)
+                        || frame.view_text.contains(&spaced)
+                        || frame.buffer_text.contains(&spaced)
+                    {
+                        return Err(format!(
+                            "Turn {} seat {:?} leaked unrealized shock magnitude `{tight}` (realizes T{realize_turn})",
+                            frame.turn, frame.active_seat
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn assert_no_season_leaks(
-        frames: &[(u8, Option<u8>, String)],
-        mandate_markers: &[String],
+        frames: &[CapturedSeasonDraw],
+        mandates: &[MandateLeakSpec],
         salt_hexes: &[String],
         digests: &[[u8; 32]],
         drawn_shock_bps_by_turn: &[(u8, u8, league_core::Bps)],
     ) {
-        assert!(!frames.is_empty(), "expected at least one captured frame");
-        let digest_hexes: Vec<String> = digests
-            .iter()
-            .map(|d| d.iter().map(|b| format!("{b:02x}")).collect::<String>())
-            .collect();
-
-        for (frame_turn, active_seat, txt) in frames {
-            for (seat_idx, marker) in mandate_markers.iter().enumerate() {
-                let allowed = active_seat.is_some_and(|s| usize::from(s) == seat_idx);
-                if !allowed {
-                    assert!(
-                        !txt.contains(marker),
-                        "Turn {frame_turn} seat {active_seat:?} leaked seat {seat_idx}'s mandate `{marker}`"
-                    );
-                }
-            }
-            for salt_hex in salt_hexes {
-                assert!(
-                    !txt.contains(salt_hex),
-                    "Turn {frame_turn} seat {active_seat:?} leaked mandate salt hex"
-                );
-            }
-            for dhex in &digest_hexes {
-                assert!(
-                    !txt.contains(dhex),
-                    "Turn {frame_turn} seat {active_seat:?} leaked post_state_digest `{dhex}`"
-                );
-            }
-            for &(realize_turn, _forecast_turn, mag_bps) in drawn_shock_bps_by_turn {
-                if *frame_turn < realize_turn {
-                    let needle = format!("{mag_bps}bps");
-                    assert!(
-                        !txt.contains(&needle),
-                        "Turn {frame_turn} seat {active_seat:?} leaked unrealized shock magnitude `{needle}` (realizes T{realize_turn})"
-                    );
-                }
-            }
+        if let Err(err) = check_season_leaks(
+            frames,
+            mandates,
+            salt_hexes,
+            digests,
+            drawn_shock_bps_by_turn,
+        ) {
+            panic!("{err}");
         }
     }
 
@@ -1494,12 +1824,16 @@ mod tests {
             (KeyCode::F(12), SeatKeyCode::F(12)),
             (KeyCode::Insert, SeatKeyCode::Unmapped),
         ] {
-            let ev = map_crossterm_key(KeyEvent::new(
-                raw_code,
-                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
-            ));
+            let ev = must_some(
+                map_crossterm_key(KeyEvent::new(
+                    raw_code,
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+                )),
+                "KeyEventKind::Press must map",
+            );
             assert_eq!(ev.code, expected);
             assert!(ev.modifiers.ctrl && ev.modifiers.alt && ev.modifiers.shift);
+            assert!(!ev.is_repeat);
         }
 
         let all_colors = [
@@ -1631,6 +1965,7 @@ mod tests {
                 },
             ],
             status_line: Some(ViewStatusLine {
+                alert: None,
                 left: vec![ViewSpan::plain("STATUS-L".to_owned())],
                 right: vec![ViewSpan::plain("STATUS-R".to_owned())],
                 style: ViewStyle::plain(),
@@ -1845,7 +2180,7 @@ mod tests {
         assert!(header_xy.1 < ledger_xy.1);
         assert!(ledger_xy.0 < center_xy.0 && center_xy.0 < drawer_xy.0);
         let wide_txt = screen_text(&term_wide);
-        assert!(wide_txt.contains("1-3 Tabs"));
+        assert!(wide_txt.contains("1-3:Tabs"));
 
         let mut term_stacked = must_ok(Terminal::new(TestBackend::new(80, 24)), "80x24");
         must_ok(
@@ -2139,7 +2474,8 @@ mod tests {
             build_explicit_sessions(&ring, TableId(81_008), &[0], deal_seed, [0x77; 32], 41);
         let vp = ViewportSize::new(100, 30);
         let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
-        let mut frames: Vec<(u8, Option<u8>, String)> = Vec::new();
+        let mut frames: Vec<CapturedSeasonDraw> = Vec::new();
+        let mut opened_chronicle = false;
 
         while session.phase() == TurnPhase::TalkAndMarket {
             unlock_curtain_and_capture(&mut session, &mut terminal, vp, &mut frames);
@@ -2155,6 +2491,23 @@ mod tests {
                     );
                 }
                 must_ok(session.handle_key_event(key('p'), vp), "what-if preview");
+                if !opened_chronicle && !session.public_receipts().is_empty() {
+                    opened_chronicle = true;
+                    must_ok(
+                        session.handle_key_event(key('r'), vp),
+                        "open chronicle modal",
+                    );
+                    draw_and_capture(&session, &mut terminal, vp, t, Some(0), &mut frames);
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::PageDown), vp),
+                        "scroll chronicle modal",
+                    );
+                    draw_and_capture(&session, &mut terminal, vp, t, Some(0), &mut frames);
+                    must_ok(
+                        session.handle_key_event(key('r'), vp),
+                        "close chronicle modal",
+                    );
+                }
             } else {
                 if t <= 20 {
                     must_ok(session.handle_key_event(key('2'), vp), "tab 2");
@@ -2192,27 +2545,38 @@ mod tests {
                     );
                 }
             }
-            must_ok(
-                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw active")),
-                "draw active",
-            );
-            frames.push((session.turn(), Some(0), screen_text(&terminal)));
+            draw_and_capture(&session, &mut terminal, vp, t, Some(0), &mut frames);
             must_ok(
                 session.handle_key_event(ctrl_key('l'), vp),
                 "lock and handoff",
             );
         }
 
+        assert!(
+            opened_chronicle,
+            "Chronicle modal must be opened during season"
+        );
         assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
         assert!(session.public_receipts().len() >= 24);
+        draw_and_capture(
+            &session,
+            &mut terminal,
+            vp,
+            session.turn(),
+            None,
+            &mut frames,
+        );
+        let post_txt = screen_text(&terminal);
+        assert!(post_txt.contains("Session Standby"));
+        assert!(!post_txt.contains("Private Vault"));
 
         let (_sb, log, _sec, _met) =
             must_ok(session.host.finalize_club_season(), "finalize club season");
         let (replay_out, _) = must_ok(replay_season_with_state_predicates(&log), "replay log");
-        let mandate_markers: Vec<String> = log
+        let mandates: Vec<MandateLeakSpec> = log
             .mandate_reveals
             .iter()
-            .map(|r| mandate_short_marker(must_some(r.as_ref(), "revealed mandate").mandate.kind))
+            .map(|r| build_mandate_leak_spec(&must_some(r.as_ref(), "revealed mandate").mandate))
             .collect();
         let salt_hexes: Vec<String> = log
             .mandate_reveals
@@ -2234,7 +2598,7 @@ mod tests {
         }
         assert_no_season_leaks(
             &frames,
-            &mandate_markers,
+            &mandates,
             &salt_hexes,
             &replay_out.state_digests,
             &drawn_shocks,
@@ -2249,8 +2613,9 @@ mod tests {
             build_explicit_sessions(&ring, TableId(81_009), &[0, 1], deal_seed, [0x77; 32], 43);
         let vp = ViewportSize::new(100, 30);
         let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
-        let mut frames: Vec<(u8, Option<u8>, String)> = Vec::new();
+        let mut frames: Vec<CapturedSeasonDraw> = Vec::new();
         let n = usize::from(headless.seat_count());
+        let mut opened_chronicle = false;
 
         while session.phase() == TurnPhase::TalkAndMarket {
             let turn = headless.turn();
@@ -2262,7 +2627,61 @@ mod tests {
                 if s < 2 {
                     unlock_curtain_and_capture(&mut session, &mut terminal, vp, &mut frames);
                     assert_eq!(session.active_human_seat(), Some(Seat(s)));
-                    if turn == 1 {
+                    if s == 0 {
+                        // Drive Seat 0 via keyboard events on Tab 1 and Sweep Chronicle modal.
+                        if turn == 1 {
+                            must_ok(
+                                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                                "tui key submit PostOffer",
+                            );
+                            let default_action = MarketAction::PostOffer {
+                                seat: 0,
+                                order: OfferProposal {
+                                    side: OfferSide::Buy,
+                                    good: AssetId::Raw(1),
+                                    amount: 1_000,
+                                    price_per_unit_cred: 1_200,
+                                    domain_id: None,
+                                    is_hybrid: false,
+                                },
+                            };
+                            must_ok(
+                                headless.apply_market_action(default_action),
+                                "headless PostOffer matching Seat 0 key submit",
+                            );
+                        }
+                        if !opened_chronicle && !session.public_receipts().is_empty() {
+                            opened_chronicle = true;
+                            must_ok(
+                                session.handle_key_event(key('r'), vp),
+                                "open chronicle modal",
+                            );
+                            draw_and_capture(
+                                &session,
+                                &mut terminal,
+                                vp,
+                                turn,
+                                Some(s),
+                                &mut frames,
+                            );
+                            must_ok(
+                                session.handle_key_event(key_code(SeatKeyCode::PageDown), vp),
+                                "scroll chronicle modal",
+                            );
+                            draw_and_capture(
+                                &session,
+                                &mut terminal,
+                                vp,
+                                turn,
+                                Some(s),
+                                &mut frames,
+                            );
+                            must_ok(
+                                session.handle_key_event(key_code(SeatKeyCode::Esc), vp),
+                                "close chronicle modal",
+                            );
+                        }
+                    } else if turn == 1 {
                         let action = MarketAction::PostOffer {
                             seat: s,
                             order: OfferProposal {
@@ -2286,11 +2705,7 @@ mod tests {
                             "headless pass a action",
                         );
                     }
-                    must_ok(
-                        terminal.draw(|f| must_ok(session.render_current_frame(f), "draw human A")),
-                        "draw human A",
-                    );
-                    frames.push((turn, Some(s), screen_text(&terminal)));
+                    draw_and_capture(&session, &mut terminal, vp, turn, Some(s), &mut frames);
                     must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock human A");
                 } else {
                     let obs = must_ok(headless.observe_seat(Seat(s)), "bot obs A");
@@ -2315,10 +2730,18 @@ mod tests {
                             runs: 1,
                         });
                         op.apply_to(&mut headless_bundles[usize::from(s)]);
-                        must_ok(
-                            session.apply_seat_intent(Seat(s), SeatIntent::update_bundle(op)),
-                            "tui stage converter",
-                        );
+                        if s == 0 {
+                            must_ok(session.handle_key_event(key('2'), vp), "seat 0 tab 2 key");
+                            must_ok(
+                                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                                "seat 0 key stage converter",
+                            );
+                        } else {
+                            must_ok(
+                                session.apply_seat_intent(Seat(s), SeatIntent::update_bundle(op)),
+                                "tui stage converter",
+                            );
+                        }
                     }
                     if turn.is_multiple_of(4) {
                         let op = BundleDraftAction::SetCouncilVote(Some(CouncilVoteBallot {
@@ -2342,11 +2765,7 @@ mod tests {
                             "tui stage charter bid",
                         );
                     }
-                    must_ok(
-                        terminal.draw(|f| must_ok(session.render_current_frame(f), "draw human B")),
-                        "draw human B",
-                    );
-                    frames.push((turn, Some(s), screen_text(&terminal)));
+                    draw_and_capture(&session, &mut terminal, vp, turn, Some(s), &mut frames);
                     must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock human B");
                 } else {
                     let obs = must_ok(headless.observe_seat(Seat(s)), "bot obs B");
@@ -2374,8 +2793,21 @@ mod tests {
             must_ok(headless.sweep_turn(), "headless sweep");
         }
 
+        assert!(opened_chronicle, "2-human season must open Chronicle modal");
         assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
         assert_eq!(headless.phase(), TurnPhase::AwaitingMandateReveal);
+        draw_and_capture(
+            &session,
+            &mut terminal,
+            vp,
+            headless.turn(),
+            None,
+            &mut frames,
+        );
+        let post_txt = screen_text(&terminal);
+        assert!(post_txt.contains("Session Standby"));
+        assert!(!post_txt.contains("Private Vault"));
+
         let tui_receipts = session.public_receipts();
         let headless_receipts = headless.public_receipts();
         assert_eq!(tui_receipts.len(), headless_receipts.len());
@@ -2400,10 +2832,10 @@ mod tests {
             "finalize 2-human season",
         );
         let (replay_out, _) = must_ok(replay_season_with_state_predicates(&log), "replay 2-human");
-        let mandate_markers: Vec<String> = log
+        let mandates: Vec<MandateLeakSpec> = log
             .mandate_reveals
             .iter()
-            .map(|r| mandate_short_marker(must_some(r.as_ref(), "rev").mandate.kind))
+            .map(|r| build_mandate_leak_spec(&must_some(r.as_ref(), "rev").mandate))
             .collect();
         let salt_hexes: Vec<String> = log
             .mandate_reveals
@@ -2425,7 +2857,7 @@ mod tests {
         }
         assert_no_season_leaks(
             &frames,
-            &mandate_markers,
+            &mandates,
             &salt_hexes,
             &replay_out.state_digests,
             &drawn_shocks,
@@ -2439,32 +2871,45 @@ mod tests {
             TuiHostSession::from_ring_table(&ring, TableId(81_010), &[0], 47),
             "session",
         );
-        let vp = ViewportSize::new(220, 36);
-        let mut terminal = must_ok(Terminal::new(TestBackend::new(220, 36)), "220x36");
+        let vp_small = ViewportSize::new(80, 24);
+        let vp_wide = ViewportSize::new(100, 30);
+        let mut term_80 = must_ok(Terminal::new(TestBackend::new(80, 24)), "80x24");
+        let mut term_100 = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
 
-        // 1. Secret-bearing host error banner reaches buffer strictly scrubbed.
+        // 1. Secret-bearing host error banner reaches buffer strictly scrubbed at 80x24 and 100x30.
         session.record_scrubbed_host_error(
             "HOST_ERR",
             "leaked sEd7N5k8mQp2rT9vW3xY6zA4bC1d OPENROUTER_API_KEY=sk-secret-value Bearer tok_live_999 sk-proj-secret123",
         );
-        must_ok(
-            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw error banner")),
-            "draw error banner",
-        );
-        let err_buf = screen_text(&terminal);
-        assert!(err_buf.contains("REFUSED [HOST_ERR]:"));
-        assert!(err_buf.contains("[REDACTED]"));
-        for secret in [
-            "sEd7N5k8mQp2rT9vW3xY6zA4bC1d",
-            "sk-secret-value",
-            "tok_live_999",
-            "sk-proj-secret123",
-        ] {
-            assert!(!err_buf.contains(secret), "TUI leaked `{secret}`");
+        for (term, label) in [(&mut term_80, "80x24"), (&mut term_100, "100x30")] {
+            must_ok(
+                term.draw(|f| must_ok(session.render_current_frame(f), label)),
+                label,
+            );
+            let err_buf = screen_text(term);
+            assert!(
+                err_buf.contains("REFUSED [HOST_ERR]:"),
+                "missing banner at {label}"
+            );
+            assert!(
+                err_buf.contains("[REDACTED]"),
+                "missing [REDACTED] at {label}"
+            );
+            for secret in [
+                "sEd7N5k8mQp2rT9vW3xY6zA4bC1d",
+                "sk-secret-value",
+                "tok_live_999",
+                "sk-proj-secret123",
+            ] {
+                assert!(
+                    !err_buf.contains(secret),
+                    "TUI leaked `{secret}` at {label}"
+                );
+            }
         }
 
         // 2. Display-text paths + Part A over-redaction phrases render verbatim on TestBackend
-        // without triggering false-positive `[REDACTED]` scrubbing.
+        // at 80x24 (full 78-col stacked drawer) and 100x30 without triggering false-positive `[REDACTED]`.
         let obs = must_ok(session.build_seat_observation(Seat(0)), "obs");
         let over_redaction_phrases = [
             "risk-or-reward",
@@ -2474,42 +2919,81 @@ mod tests {
             "class=\"btn-bearer active\"",
             "the standard bearer of",
         ];
-        let mut ui = SeatUiState::new();
         for phrase in over_redaction_phrases {
-            let mut s = ui.clone();
-            let step_n =
-                league_seat_ui::handle_seat_key(&obs, s, PassKind::SubPassA, None, vp, key('n'));
-            s = step_n.state;
+            let mut s = SeatUiState::new();
+            s = league_seat_ui::handle_seat_key(
+                &obs,
+                s,
+                PassKind::SubPassA,
+                None,
+                vp_small,
+                key('n'),
+            )
+            .state;
             for ch in phrase.chars() {
-                s = league_seat_ui::handle_seat_key(&obs, s, PassKind::SubPassA, None, vp, key(ch))
-                    .state;
+                s = league_seat_ui::handle_seat_key(
+                    &obs,
+                    s,
+                    PassKind::SubPassA,
+                    None,
+                    vp_small,
+                    key(ch),
+                )
+                .state;
             }
             s = league_seat_ui::handle_seat_key(
                 &obs,
                 s,
                 PassKind::SubPassA,
                 None,
-                vp,
+                vp_small,
                 key_code(SeatKeyCode::Enter),
             )
             .state;
-            let view = league_seat_ui::render_turn_screen(&obs, &s, PassKind::SubPassA, None, vp);
+            for _ in 0..20 {
+                s = league_seat_ui::handle_seat_key(
+                    &obs,
+                    s,
+                    PassKind::SubPassA,
+                    None,
+                    vp_small,
+                    key_code(SeatKeyCode::Down),
+                )
+                .state;
+            }
+            let view_80 =
+                league_seat_ui::render_turn_screen(&obs, &s, PassKind::SubPassA, None, vp_small);
             must_ok(
-                terminal.draw(|f| draw_screen_view(f, &view)),
-                "draw over-redaction phrase",
+                term_80.draw(|f| draw_screen_view(f, &view_80)),
+                "draw over-redaction phrase 80x24",
             );
-            let txt = screen_text(&terminal);
+            let txt_80 = screen_text(&term_80);
             assert!(
-                txt.contains(phrase),
-                "TUI buffer altered over-redaction phrase `{phrase}`"
+                txt_80.contains(phrase),
+                "80x24 TUI buffer altered over-redaction phrase `{phrase}`:\n{txt_80}"
             );
-            assert!(!txt.contains("[REDACTED]"));
-            ui = SeatUiState::new();
+            assert!(!txt_80.contains("[REDACTED]"));
+
+            let view_100 =
+                league_seat_ui::render_turn_screen(&obs, &s, PassKind::SubPassA, None, vp_wide);
+            must_ok(
+                term_100.draw(|f| draw_screen_view(f, &view_100)),
+                "draw over-redaction phrase 100x30",
+            );
+            let txt_100 = screen_text(&term_100);
+            let clip_24: String = phrase.chars().take(24).collect();
+            assert!(
+                txt_100.contains(&clip_24),
+                "100x30 TUI buffer altered clipped over-redaction phrase `{clip_24}`:\n{txt_100}"
+            );
+            assert!(!txt_100.contains("[REDACTED]"));
         }
 
-        // All 61 commodity display catalog pairs + numeraire render verbatim without redaction.
+        // 3. Raw secret injected into What-If result is scrubbed inside `apply_seat_intent(RequestWhatIf)`
+        // and reaches TestBackend at supported sizes (80x24 and 100x30) strictly scrubbed.
         let dummy_state = obs.seats[0].clone();
-        ui.set_what_if_preview(Some(WhatIfPreview {
+        session.last_errors[0] = None;
+        session.injected_raw_what_if = Some(WhatIfPreview {
             seat: 0,
             turn: 1,
             baseline_predicates: obs.baseline_predicates.clone(),
@@ -2521,7 +3005,7 @@ mod tests {
             refused_market_actions: vec![RefusedActionPreview {
                 action_index: 0,
                 error_code: "CANCEL_LOCKED".to_owned(),
-                message: scrub_secret_text("bad key sk-ant-secret_999"),
+                message: "bad key sk-ant-secret_999 leaked sEd7N5k8mQp2rT9vW3xY6zA4bC1d".to_owned(),
             }],
             converter_orders: Vec::new(),
             project_orders: Vec::new(),
@@ -2568,19 +3052,93 @@ mod tests {
                 fills: Vec::new(),
                 wash_freeze_settlements: Vec::new(),
             },
-        }));
-        let ui =
-            league_seat_ui::handle_seat_key(&obs, ui, PassKind::SubPassA, None, vp, key('3')).state;
-        let view_refusal =
-            league_seat_ui::render_turn_screen(&obs, &ui, PassKind::SubPassA, None, vp);
+        });
         must_ok(
-            terminal.draw(|f| draw_screen_view(f, &view_refusal)),
-            "draw refusal preview",
+            session.apply_seat_intent(
+                Seat(0),
+                SeatIntent::request_what_if(HumanWhatIfRequest {
+                    seat: 0,
+                    market_actions: Vec::new(),
+                    cancel_lock_at: None,
+                    bundle: SealedOrderBundle::default(),
+                    tie_mode: PreviewTieMode::NeutralSeed,
+                    assumptions: league_core::CounterpartyAssumptions::default(),
+                }),
+            ),
+            "apply RequestWhatIf through host scrub path",
         );
-        let r_txt = screen_text(&terminal);
-        assert!(r_txt.contains("[REDACTED]"));
-        assert!(!r_txt.contains("sk-ant-secret_999"));
+        let stored_wi = must_some(
+            must_some(session.seat_ui_state(Seat(0)), "ui0").what_if_preview(),
+            "stored what-if preview",
+        );
+        assert!(
+            stored_wi.refused_market_actions[0]
+                .message
+                .contains("[REDACTED]")
+        );
+        assert!(
+            !stored_wi.refused_market_actions[0]
+                .message
+                .contains("sk-ant-secret_999")
+        );
+        assert!(
+            !stored_wi.refused_market_actions[0]
+                .message
+                .contains("sEd7N5k8mQp2rT9vW3xY6zA4bC1d")
+        );
 
+        must_ok(session.handle_key_event(key('3'), vp_wide), "tab 3");
+        let mut r_txt_80 = String::new();
+        for _ in 0..4 {
+            must_ok(
+                term_80.draw(|f| must_ok(session.render_current_frame(f), "draw refusal 80x24")),
+                "draw refusal 80x24",
+            );
+            r_txt_80.push_str(&screen_text(&term_80));
+            r_txt_80.push('\n');
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::PageDown), vp_small),
+                "scroll down to preview refusal",
+            );
+        }
+        assert!(r_txt_80.contains("Refused Action #0: [CANCEL_LOCKED]"));
+        assert!(r_txt_80.contains("[REDACTED]"));
+        assert!(!r_txt_80.contains("sk-ant-secret_999"));
+        assert!(!r_txt_80.contains("sEd7N5k8mQp2rT9vW3xY6zA4bC1d"));
+
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Home), vp_wide),
+            "reset scroll",
+        );
+        must_ok(
+            term_100.draw(|f| must_ok(session.render_current_frame(f), "draw refusal 100x30")),
+            "draw refusal 100x30",
+        );
+        let r_txt_100 = screen_text(&term_100);
+        assert!(r_txt_100.contains("Refused Action #0: [CANCEL_LOCKED]"));
+        assert!(r_txt_100.contains("[REDACTED]"));
+        assert!(!r_txt_100.contains("sk-ant-secret_999"));
+
+        // 4. All 61 commodity display catalog pairs + numeraire render verbatim without redaction at 80x24 & 100x30.
+        let ui_raw = SeatUiState::new();
+        let ui_refined = league_seat_ui::handle_seat_key(
+            &obs,
+            ui_raw.clone(),
+            PassKind::SubPassA,
+            None,
+            vp_wide,
+            key_code(SeatKeyCode::Down),
+        )
+        .state;
+        let ui_refined = league_seat_ui::handle_seat_key(
+            &obs,
+            ui_refined,
+            PassKind::SubPassA,
+            None,
+            vp_wide,
+            key_code(SeatKeyCode::Right),
+        )
+        .state;
         for entry in COMMODITY_DISPLAY_CATALOG {
             let cmap = CommodityDisplayMap {
                 numeraire_code: "CRED".to_owned(),
@@ -2595,21 +3153,37 @@ mod tests {
                     })
                     .collect(),
             };
-            let v = league_seat_ui::render_turn_screen(
+            let v_raw = league_seat_ui::render_turn_screen(
                 &obs,
-                &SeatUiState::new(),
+                &ui_raw,
                 PassKind::SubPassA,
                 Some(&cmap),
-                vp,
+                vp_wide,
             );
-            must_ok(terminal.draw(|f| draw_screen_view(f, &v)), "draw commodity");
-            let buf = screen_text(&terminal);
+            must_ok(term_100.draw(|f| draw_screen_view(f, &v_raw)), "draw raw");
+            let buf_raw = screen_text(&term_100);
             assert!(
-                buf.contains(&entry.refined_display(false)),
-                "commodity `{}` missing from TUI buffer",
+                buf_raw.contains(&entry.raw_display(false)),
+                "raw commodity `{}` missing from 100x30 TUI buffer",
+                entry.raw_display(false)
+            );
+            assert!(!buf_raw.contains("[REDACTED]"));
+
+            let v_ref = league_seat_ui::render_turn_screen(
+                &obs,
+                &ui_refined,
+                PassKind::SubPassA,
+                Some(&cmap),
+                vp_wide,
+            );
+            must_ok(term_100.draw(|f| draw_screen_view(f, &v_ref)), "draw ref");
+            let buf_ref = screen_text(&term_100);
+            assert!(
+                buf_ref.contains(&entry.refined_display(false)),
+                "refined commodity `{}` missing from 100x30 TUI buffer",
                 entry.refined_display(false)
             );
-            assert!(!buf.contains("[REDACTED]"));
+            assert!(!buf_ref.contains("[REDACTED]"));
         }
 
         // Verify unused imports aren't flagged by referencing TableMode / SeatConfig / deal_graded_mandates_with_entropy.
@@ -2631,5 +3205,676 @@ mod tests {
             },
             deal_graded_mandates_with_entropy,
         );
+    }
+
+    #[test]
+    fn no_active_human_seat_draws_public_only_standby_across_quit_season_end_and_error() {
+        let mut failures = Vec::new();
+        let vp = ViewportSize::new(100, 30);
+
+        // (a) Non-first human seat (Seat 1) presses q on Turn 1.
+        {
+            let ring = dev_ring_table(1);
+            let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1]);
+            let (mut session, _, _) =
+                build_explicit_sessions(&ring, TableId(81_101), &[0, 1], deal_seed, [0x77; 32], 51);
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+            must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock seat 0");
+            must_ok(session.handle_key_event(key(' '), vp), "curtain space");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "curtain enter",
+            );
+            assert_eq!(session.active_human_seat(), Some(Seat(1)));
+            must_ok(session.handle_key_event(key('q'), vp), "seat 1 quit");
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw post-q a")),
+                "draw post-q a",
+            );
+            let txt = screen_text(&terminal);
+            if txt.contains("Private Vault") || txt.contains("Private Mandate") {
+                failures.push(format!("(a) post-quit leaked Private Vault:\n{txt}"));
+            }
+            if !txt.contains("Session Standby") {
+                failures.push("(a) post-quit missing neutral Session Standby view".to_owned());
+            }
+        }
+
+        // (b) Single human Seat 0 quits on Turn 2 (where offset 0 is Seat 1 ClubBot).
+        {
+            let ring = dev_ring_table(1);
+            let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
+            let (mut session, _, _) =
+                build_explicit_sessions(&ring, TableId(81_102), &[0], deal_seed, [0x77; 32], 53);
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+            must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock T1 A");
+            must_ok(session.handle_key_event(key(' '), vp), "space T1 B");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "enter T1 B",
+            );
+            must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock T1 B");
+            must_ok(session.handle_key_event(key(' '), vp), "space T2 A");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "enter T2 A",
+            );
+            assert_eq!(session.turn(), 2);
+            must_ok(session.handle_key_event(key('q'), vp), "seat 0 quit T2");
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw post-q b")),
+                "draw post-q b",
+            );
+            let txt = screen_text(&terminal);
+            if txt.contains("Private Vault") || txt.contains("Private Mandate") {
+                failures.push(format!("(b) T2 post-quit leaked Private Vault:\n{txt}"));
+            }
+            if !txt.contains("Session Standby") {
+                failures.push("(b) T2 post-quit missing neutral Session Standby view".to_owned());
+            }
+        }
+
+        // (c) Season end (`TurnPhase::AwaitingMandateReveal`) after final lock.
+        {
+            let ring = dev_ring_table(1);
+            let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
+            let (mut session, _, _) =
+                build_explicit_sessions(&ring, TableId(81_103), &[0], deal_seed, [0x77; 32], 55);
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+            while session.phase() == TurnPhase::TalkAndMarket {
+                unlock_curtain_and_capture(&mut session, &mut terminal, vp, &mut Vec::new());
+                must_ok(session.handle_key_event(ctrl_key('l'), vp), "advance turn");
+            }
+            assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw season end")),
+                "draw season end",
+            );
+            let txt = screen_text(&terminal);
+            if txt.contains("Private Vault") || txt.contains("Private Mandate") {
+                failures.push(format!("(c) season-end leaked Private Vault:\n{txt}"));
+            }
+            if !txt.contains("AwaitingMandateReveal") {
+                failures
+                    .push("(c) season-end missing AwaitingMandateReveal standby status".to_owned());
+            }
+        }
+
+        // (d) Forced error inside `advance_after_human_lock` (invalid counterparty bundle in SubPassB).
+        {
+            let ring = dev_ring_table(1);
+            let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
+            let (mut session, _, _) =
+                build_explicit_sessions(&ring, TableId(81_104), &[0], deal_seed, [0x77; 32], 57);
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+            must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock T1 A");
+            must_ok(session.handle_key_event(key(' '), vp), "space T1 B");
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "enter T1 B",
+            );
+            assert_eq!(session.pass(), PassKind::SubPassB);
+            session.pending_bundles[0].contract_deliveries.push(
+                league_seat_types::ContractDeliveryOrder {
+                    counterparty: 99,
+                    good: AssetId::Raw(0),
+                    gross_amount: 100,
+                    domain_id: None,
+                    dual_escrow_id: None,
+                },
+            );
+            let err = session.handle_key_event(ctrl_key('l'), vp);
+            assert!(
+                err.is_err(),
+                "forced advance_after_human_lock error must return Err"
+            );
+            assert!(session.active_human_seat().is_none());
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw after error")),
+                "draw after error",
+            );
+            let txt = screen_text(&terminal);
+            if txt.contains("Private Vault") || txt.contains("Private Mandate") {
+                failures.push(format!("(d) forced error leaked Private Vault:\n{txt}"));
+            }
+            if !txt.contains("Session Standby") || !txt.contains("REFUSED [") {
+                failures.push("(d) forced error missing standby or REFUSED banner".to_owned());
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "active-seat-less draws leaked private data:\n{}",
+            failures.join("\n---\n")
+        );
+    }
+
+    #[test]
+    fn season_leak_assertion_catches_clipped_mandate_unrealized_shock_and_state_digest_plants() {
+        let vp = ViewportSize::new(100, 30);
+        let ring = dev_ring_table(1);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1]);
+        let (session, _, _) =
+            build_explicit_sessions(&ring, TableId(81_109), &[0, 1], deal_seed, [0x77; 32], 59);
+        let mandates = vec![
+            build_mandate_leak_spec(&league_core::PrivateMandate {
+                kind: MandateKind::MinProjectEquity { target: 24_225 },
+                bonus_equity: 7_250,
+            }),
+            build_mandate_leak_spec(&league_core::PrivateMandate {
+                kind: MandateKind::MinRefinedVariety {
+                    distinct_goods: 2,
+                    min_each: 1_500,
+                },
+                bonus_equity: 4_500,
+            }),
+        ];
+        let _ = session.turn();
+
+        // 1. Clipped mandate plant in 24-col drawer at 100x30 (`>=24225` clips to `>=242`).
+        let clipped_view = SeatScreenView {
+            layout: league_seat_types::ScreenLayout::layout_for_viewport(vp),
+            zones: vec![
+                ViewZonePanel {
+                    zone: ViewZoneId::HeaderBar,
+                    panel: ViewPanel {
+                        title: Some(ViewLabel::plain("Header".to_owned())),
+                        bordered: true,
+                        ..ViewPanel::default()
+                    },
+                },
+                ViewZonePanel {
+                    zone: ViewZoneId::PublicLedger,
+                    panel: ViewPanel {
+                        title: Some(ViewLabel::plain("Ledger".to_owned())),
+                        bordered: true,
+                        ..ViewPanel::default()
+                    },
+                },
+                ViewZonePanel {
+                    zone: ViewZoneId::CenterTabs,
+                    panel: ViewPanel {
+                        title: Some(ViewLabel::plain("Center".to_owned())),
+                        bordered: true,
+                        ..ViewPanel::default()
+                    },
+                },
+                ViewZonePanel {
+                    zone: ViewZoneId::PrivateDrawer,
+                    panel: ViewPanel {
+                        title: Some(ViewLabel::plain(
+                            "Seat 0 Private Vault & Diagnostics".to_owned(),
+                        )),
+                        bordered: true,
+                        alignment: ViewAlign::Left,
+                        rows: vec![
+                            ViewRow::from_plain("Private Mandate:".to_owned()),
+                            ViewRow::from_plain("  MinProjectEquity >=24225".to_owned()),
+                        ],
+                        ..ViewPanel::default()
+                    },
+                },
+            ],
+            status_line: Some(ViewStatusLine::default()),
+            modal: None,
+        };
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+        must_ok(
+            terminal.draw(|f| draw_screen_view(f, &clipped_view)),
+            "draw clipped mandate",
+        );
+        let clipped_buf = screen_text(&terminal);
+        assert!(clipped_buf.contains("MinProjectEquity >=242"));
+        assert!(!clipped_buf.contains("MinProjectEquity >=24225"));
+
+        // Verify buffer-only check catches the clipped prefix even with view_text empty.
+        let err_mandate = must_err(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 1,
+                    active_seat: Some(1),
+                    view_text: String::new(),
+                    buffer_text: clipped_buf,
+                }],
+                &mandates,
+                &[],
+                &[],
+                &[],
+            ),
+            "clipped mandate plant must fail",
+        );
+        assert_eq!(
+            err_mandate,
+            "Turn 1 seat Some(1) buffer leaked seat 0's clipped mandate `MinProjectEquity >=242`"
+        );
+
+        // 2. Unrealized shock magnitude plant (`6002bps` before realize_turn = 5).
+        let err_shock = must_err(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 1,
+                    active_seat: Some(0),
+                    view_text: "Shock 6002bps".to_owned(),
+                    buffer_text: "Shock 6002bps".to_owned(),
+                }],
+                &mandates,
+                &[],
+                &[],
+                &[(5, 3, 6_002)],
+            ),
+            "unrealized shock plant must fail",
+        );
+        assert_eq!(
+            err_shock,
+            "Turn 1 seat Some(0) leaked unrealized shock magnitude `6002bps` (realizes T5)"
+        );
+
+        // 3. State digest plant (`[0xAB; 32]`).
+        let planted_digest = [0xAB_u8; 32];
+        let digest_prefix: String = planted_digest
+            .iter()
+            .take(8)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let err_digest = must_err(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 1,
+                    active_seat: Some(0),
+                    view_text: format!("digest {digest_prefix}"),
+                    buffer_text: format!("digest {digest_prefix}"),
+                }],
+                &mandates,
+                &[],
+                &[planted_digest],
+                &[],
+            ),
+            "state digest plant must fail",
+        );
+        assert_eq!(
+            err_digest,
+            "Turn 1 seat Some(0) leaked post_state_digest `abababababababababababababababababababababababababababababababab`"
+        );
+    }
+
+    #[test]
+    fn every_zone_row_is_drawn_or_scrollable_across_supported_viewports_and_seat_counts() {
+        fn trimmed_prefix(s: &str, max_chars: usize) -> String {
+            s.chars().take(max_chars).collect::<String>()
+        }
+
+        for seat_count in [SeatCount::Four, SeatCount::Six] {
+            let ring = dev_ring_table_for_seats(1, seat_count);
+            for (w, h) in [(80_u16, 24_u16), (99, 30), (100, 29), (100, 30)] {
+                let mut session = must_ok(
+                    TuiHostSession::from_ring_table(&ring, TableId(81_110), &[0], 61),
+                    "session",
+                );
+                let vp = ViewportSize::new(w, h);
+                let mut terminal = must_ok(Terminal::new(TestBackend::new(w, h)), "tb");
+                // Run a What-If first so Tab 3 includes caveat + preview rows too.
+                must_ok(session.handle_key_event(key('p'), vp), "seed what-if");
+                must_ok(session.handle_key_event(key('1'), vp), "back to tab 1");
+
+                let wide = w >= 100 && h >= 30;
+                let inner_w_ledger = if wide {
+                    ((usize::from(w) * 30) / 100).saturating_sub(3)
+                } else {
+                    usize::from(w).saturating_sub(2)
+                };
+                let inner_w_center = if wide {
+                    ((usize::from(w) * 44) / 100).saturating_sub(3)
+                } else {
+                    usize::from(w).saturating_sub(2)
+                };
+                let inner_w_drawer = if wide {
+                    ((usize::from(w) * 26) / 100).saturating_sub(3)
+                } else {
+                    usize::from(w).saturating_sub(2)
+                };
+
+                // HeaderBar and StatusLine must appear in full without scrolling.
+                let view0 = must_ok(session.build_current_view(vp), "view0");
+                must_ok(terminal.draw(|f| draw_screen_view(f, &view0)), "draw view0");
+                let buf0 = screen_text(&terminal);
+                let hdr = must_some(view0.zone(ViewZoneId::HeaderBar), "HeaderBar");
+                for row in &hdr.rows {
+                    let prefix =
+                        trimmed_prefix(&row.plain_text(), usize::from(w).saturating_sub(2));
+                    assert!(
+                        buf0.contains(&prefix),
+                        "{w}x{h} ({seat_count:?}) missing HeaderBar row `{prefix}`:\n{buf0}"
+                    );
+                }
+                let st = must_some(view0.status_line.as_ref(), "StatusLine");
+                for span in &st.left {
+                    let prefix = trimmed_prefix(&span.text, usize::from(w));
+                    assert!(
+                        buf0.contains(&prefix),
+                        "{w}x{h} missing StatusLine left `{prefix}`"
+                    );
+                }
+                for span in &st.right {
+                    let prefix = trimmed_prefix(&span.text, usize::from(w));
+                    assert!(
+                        buf0.contains(&prefix),
+                        "{w}x{h} missing StatusLine right `{prefix}`"
+                    );
+                }
+
+                // Focus PublicLedger (1 F6 press from CenterTabs -> PrivateDrawer, 2 -> PublicLedger).
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                    "f6->drawer",
+                );
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                    "f6->ledger",
+                );
+                let ledger_panel =
+                    must_some(view0.zone(ViewZoneId::PublicLedger), "PublicLedger").clone();
+                let ledger_total = ledger_panel
+                    .scroll
+                    .map_or(ledger_panel.rows.len(), |s| s.total);
+                let mut ledger_combined = String::new();
+                for _ in 0..=ledger_total {
+                    must_ok(
+                        terminal.draw(|f| must_ok(session.render_current_frame(f), "draw ledger")),
+                        "draw ledger",
+                    );
+                    ledger_combined.push_str(&screen_text(&terminal));
+                    ledger_combined.push('\n');
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                        "scroll ledger down",
+                    );
+                }
+                for s_idx in 0..usize::from(session.seat_count()) {
+                    assert!(
+                        ledger_combined.contains(&format!("S{s_idx}")),
+                        "{w}x{h} ({seat_count:?}) PublicLedger unreachable seat row S{s_idx}"
+                    );
+                }
+                for row in &ledger_panel.rows {
+                    let prefix = trimmed_prefix(&row.plain_text(), inner_w_ledger.min(24));
+                    if !prefix.trim().is_empty() {
+                        assert!(
+                            ledger_combined.contains(&prefix),
+                            "{w}x{h} ({seat_count:?}) PublicLedger unreachable row `{prefix}`"
+                        );
+                    }
+                }
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Home), vp),
+                    "ledger home",
+                );
+
+                // Focus PrivateDrawer (2 F6 presses from PublicLedger -> CenterTabs -> PrivateDrawer).
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                    "f6->center",
+                );
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                    "f6->drawer",
+                );
+                let drawer_panel =
+                    must_some(view0.zone(ViewZoneId::PrivateDrawer), "PrivateDrawer").clone();
+                let drawer_total = drawer_panel
+                    .scroll
+                    .map_or(drawer_panel.rows.len(), |s| s.total);
+                let mut drawer_combined = String::new();
+                for _ in 0..=drawer_total {
+                    must_ok(
+                        terminal.draw(|f| must_ok(session.render_current_frame(f), "draw drawer")),
+                        "draw drawer",
+                    );
+                    drawer_combined.push_str(&screen_text(&terminal));
+                    drawer_combined.push('\n');
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                        "scroll drawer down",
+                    );
+                }
+                for row in &drawer_panel.rows {
+                    let prefix = trimmed_prefix(&row.plain_text(), inner_w_drawer.min(20));
+                    if !prefix.trim().is_empty() {
+                        assert!(
+                            drawer_combined.contains(&prefix),
+                            "{w}x{h} ({seat_count:?}) PrivateDrawer unreachable row `{prefix}`"
+                        );
+                    }
+                }
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Home), vp),
+                    "drawer home",
+                );
+
+                // Focus CenterTabs and verify Tabs 1, 2, 3 rows are all reachable by scroll.
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                    "f6->center",
+                );
+                for tab_char in ['1', '2', '3'] {
+                    must_ok(session.handle_key_event(key(tab_char), vp), "switch tab");
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Home), vp),
+                        "tab home",
+                    );
+                    let tab_view = must_ok(session.build_current_view(vp), "tab view");
+                    let tab_panel =
+                        must_some(tab_view.zone(ViewZoneId::CenterTabs), "CenterTabs").clone();
+                    let tab_total = tab_panel.scroll.map_or(tab_panel.rows.len(), |s| s.total);
+                    let mut tab_combined = String::new();
+                    for _ in 0..=(tab_total + 4) {
+                        must_ok(
+                            terminal.draw(|f| must_ok(session.render_current_frame(f), "draw tab")),
+                            "draw tab",
+                        );
+                        tab_combined.push_str(&screen_text(&terminal));
+                        tab_combined.push('\n');
+                        must_ok(
+                            session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                            "scroll tab down",
+                        );
+                    }
+                    for row in &tab_panel.rows {
+                        let raw = row.plain_text();
+                        let trimmed = raw
+                            .strip_prefix("> ")
+                            .or_else(|| raw.strip_prefix("  "))
+                            .unwrap_or(&raw);
+                        let prefix =
+                            trimmed_prefix(trimmed, inner_w_center.saturating_sub(2).min(26));
+                        if !prefix.trim().is_empty() {
+                            assert!(
+                                tab_combined.contains(&prefix),
+                                "{w}x{h} ({seat_count:?}) CenterTab {tab_char} unreachable row `{prefix}`"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shift_l_does_not_lock_and_handoff_while_ctrl_l_does() {
+        let ring = dev_ring_table(1);
+        let mut session = must_ok(
+            TuiHostSession::from_ring_table(&ring, TableId(81_106), &[0, 1], 63),
+            "2-human",
+        );
+        let vp = ViewportSize::new(100, 30);
+        must_ok(
+            session.handle_key_event(
+                SeatKeyEvent::new(
+                    SeatKeyCode::Char('L'),
+                    SeatKeyModifiers {
+                        ctrl: false,
+                        alt: false,
+                        shift: true,
+                    },
+                ),
+                vp,
+            ),
+            "Shift-L",
+        );
+        assert!(
+            !session.is_curtain_open(),
+            "Shift-L alone must not lock and open the Curtain"
+        );
+        must_ok(session.handle_key_event(ctrl_key('l'), vp), "Ctrl-L");
+        assert!(
+            session.is_curtain_open(),
+            "Ctrl-L must lock and open the Curtain"
+        );
+    }
+
+    #[test]
+    fn intents_with_mismatched_extra_payloads_are_refused_with_zero_state_change() {
+        let ring = dev_ring_table(1);
+        let mut session = must_ok(
+            TuiHostSession::from_ring_table(&ring, TableId(81_107), &[0, 1], 65),
+            "2-human",
+        );
+        let obs_before = must_ok(session.build_all_seat_observations(), "obs before");
+        let ui0_before = must_some(session.seat_ui_state(Seat(0)), "ui0 before").clone();
+        let ui1_before = must_some(session.seat_ui_state(Seat(1)), "ui1 before").clone();
+        let b0_before = must_some(session.pending_bundle(Seat(0)), "b0 before").clone();
+        let b1_before = must_some(session.pending_bundle(Seat(1)), "b1 before").clone();
+        let errs_before = session.last_errors.clone();
+
+        let dummy_action = MarketAction::PostOffer {
+            seat: 0,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: 100,
+                price_per_unit_cred: 1_000,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        };
+        let dummy_bundle = BundleDraftAction::SetDebtRepaymentCred(100);
+        let dummy_what_if = HumanWhatIfRequest {
+            seat: 0,
+            market_actions: Vec::new(),
+            cancel_lock_at: None,
+            bundle: SealedOrderBundle::default(),
+            tie_mode: PreviewTieMode::NeutralSeed,
+            assumptions: league_core::CounterpartyAssumptions::default(),
+        };
+
+        let bad_intents = vec![
+            SeatIntent {
+                kind: SeatIntentKind::SubmitMarketAction,
+                market_action: Some(dummy_action.clone()),
+                bundle_action: Some(dummy_bundle.clone()),
+                what_if: None,
+            },
+            SeatIntent {
+                kind: SeatIntentKind::SubmitMarketAction,
+                market_action: Some(dummy_action.clone()),
+                bundle_action: None,
+                what_if: Some(dummy_what_if.clone()),
+            },
+            SeatIntent {
+                kind: SeatIntentKind::UpdateBundle,
+                market_action: Some(dummy_action.clone()),
+                bundle_action: Some(dummy_bundle.clone()),
+                what_if: None,
+            },
+            SeatIntent {
+                kind: SeatIntentKind::RequestWhatIf,
+                market_action: None,
+                bundle_action: Some(dummy_bundle.clone()),
+                what_if: Some(dummy_what_if.clone()),
+            },
+            SeatIntent {
+                kind: SeatIntentKind::LockAndHandOff,
+                market_action: Some(dummy_action.clone()),
+                bundle_action: None,
+                what_if: None,
+            },
+            SeatIntent {
+                kind: SeatIntentKind::OpenChronicleModal,
+                market_action: None,
+                bundle_action: Some(dummy_bundle),
+                what_if: None,
+            },
+            SeatIntent {
+                kind: SeatIntentKind::CloseChronicleModal,
+                market_action: None,
+                bundle_action: None,
+                what_if: Some(dummy_what_if),
+            },
+            SeatIntent {
+                kind: SeatIntentKind::Quit,
+                market_action: Some(dummy_action),
+                bundle_action: None,
+                what_if: None,
+            },
+        ];
+
+        for intent in bad_intents {
+            let err = must_err(
+                session.apply_seat_intent(Seat(0), intent),
+                "intent with extra payload must fail",
+            );
+            assert_eq!(err.code, "UNEXPECTED_INTENT_PAYLOAD");
+        }
+
+        assert_eq!(
+            must_ok(session.build_all_seat_observations(), "obs after"),
+            obs_before
+        );
+        assert_eq!(
+            must_some(session.seat_ui_state(Seat(0)), "ui0 after"),
+            &ui0_before
+        );
+        assert_eq!(
+            must_some(session.seat_ui_state(Seat(1)), "ui1 after"),
+            &ui1_before
+        );
+        assert_eq!(
+            must_some(session.pending_bundle(Seat(0)), "b0 after"),
+            &b0_before
+        );
+        assert_eq!(
+            must_some(session.pending_bundle(Seat(1)), "b1 after"),
+            &b1_before
+        );
+        assert_eq!(session.last_errors, errs_before);
+        assert!(!session.is_curtain_open());
+        assert!(!session.quit_requested());
+    }
+
+    #[test]
+    fn refusal_banner_is_visible_and_scrubbed_at_80x24_100x30_and_120x40() {
+        let ring = dev_ring_table(1);
+        let mut session = must_ok(
+            TuiHostSession::from_ring_table(&ring, TableId(81_108), &[0], 67),
+            "1-human",
+        );
+        session.record_scrubbed_host_error(
+            "HOST_ERR",
+            "leaked sEd7N5k8mQp2rT9vW3xY6zA4bC1d sk-proj-secret123",
+        );
+        for (w, h) in [(80_u16, 24_u16), (100, 30), (120, 40)] {
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(w, h)), "tb");
+            must_ok(
+                terminal.draw(|f| must_ok(session.render_current_frame(f), "draw banner")),
+                "draw banner",
+            );
+            let txt = screen_text(&terminal);
+            assert!(
+                txt.contains("REFUSED [HOST_ERR]:"),
+                "refusal banner missing at {w}x{h}:\n{txt}"
+            );
+            assert!(txt.contains("[REDACTED]"), "missing scrub at {w}x{h}");
+            assert!(!txt.contains("sEd7N5k8mQp2rT9vW3xY6zA4bC1d"));
+            assert!(!txt.contains("sk-proj-secret123"));
+        }
     }
 }

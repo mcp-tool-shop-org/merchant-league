@@ -758,6 +758,9 @@ mod tests {
                 },
             ],
             status_line: Some(ViewStatusLine {
+                alert: Some(ViewRow::from_plain(
+                    "REFUSED [SAMPLE]: check alert".to_owned(),
+                )),
                 left: vec![ViewSpan::plain("Keys".to_owned())],
                 right: vec![ViewSpan::plain("Ready".to_owned())],
                 style: ViewStyle::plain(),
@@ -778,8 +781,17 @@ mod tests {
         assert!(flat.contains("Top"));
         assert!(flat.contains("Header"));
         assert!(flat.contains("Row 1\nCRED: 15000"));
+        assert!(flat.contains("REFUSED [SAMPLE]: check alert"));
         assert!(flat.contains("Keys | Ready"));
         assert!(flat.contains("Chronicle\nBody"));
+
+        let single_status = ScreenLayout::single_panel_with_status(ViewportSize::new(90, 25));
+        assert_eq!(single_status.mode, ViewLayoutMode::SinglePanel);
+        assert_eq!(single_status.bands.len(), 2);
+
+        let rep = SeatKeyEvent::repeated(SeatKeyCode::Down, SeatKeyModifiers::NONE);
+        assert!(rep.is_repeat);
+        assert!(!SeatKeyEvent::new(SeatKeyCode::Down, SeatKeyModifiers::NONE).is_repeat);
 
         let single = SeatScreenView::single_panel(panel);
         assert_eq!(single.layout.mode, ViewLayoutMode::SinglePanel);

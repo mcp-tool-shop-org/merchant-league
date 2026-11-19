@@ -70,10 +70,16 @@ where
                 host::draw_screen_view(frame, &view);
             })
             .map_err(|err| io::Error::other(err.to_string()))?;
-        if let Some(Event::Key(key)) = events()?
-            && action_for(host::map_crossterm_key(key)) == Action::Quit
-        {
-            return Ok(());
+        match events()? {
+            None => return Ok(()),
+            Some(Event::Key(key)) => {
+                if let Some(mapped) = host::map_crossterm_key(key)
+                    && action_for(mapped) == Action::Quit
+                {
+                    return Ok(());
+                }
+            }
+            Some(_) => {}
         }
     }
 }
@@ -87,6 +93,9 @@ where
     B::Error: std::fmt::Display,
 {
     loop {
+        if session.quit_requested() || session.phase() != TurnPhase::TalkAndMarket {
+            return Ok(());
+        }
         let mut render_err = None;
         terminal
             .draw(|frame| {
@@ -98,16 +107,18 @@ where
         if let Some(err) = render_err {
             return Err(io::Error::other(scrub_secret_text(&err.to_string())));
         }
-        if session.quit_requested() || session.phase() != TurnPhase::TalkAndMarket {
-            return Ok(());
-        }
         let area = terminal
             .size()
             .map_err(|err| io::Error::other(scrub_secret_text(&err.to_string())))?;
         let vp = ViewportSize::new(area.width, area.height);
-        if let Some(Event::Key(key)) = events()? {
-            let mapped = host::map_crossterm_key(key);
-            let _ = session.handle_key_event(mapped, vp);
+        match events()? {
+            None => return Ok(()),
+            Some(Event::Key(key)) => {
+                if let Some(mapped) = host::map_crossterm_key(key) {
+                    let _ = session.handle_key_event(mapped, vp);
+                }
+            }
+            Some(_) => {}
         }
     }
 }
@@ -287,6 +298,132 @@ mod tests {
         .into_iter();
         run_session_loop(&mut terminal, &mut session, &mut || Ok(seq.next()))?;
         assert!(session.quit_requested());
+        Ok(())
+    }
+
+    #[test]
+    fn key_releases_and_action_repeats_are_ignored_on_notes_and_curtain()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        let ring = default_dev_ring_table()?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        let key_with = |code: KeyCode, modifiers: KeyModifiers, kind: KeyEventKind| {
+            let mut ev = KeyEvent::new(code, modifiers);
+            ev.kind = kind;
+            Event::Key(ev)
+        };
+
+        // 1. Press + Release stream (`n`, `n`, `z`, `Esc`) + Repeat on text/nav vs ignored Repeat on Esc/q/Enter/Ctrl+L.
+        let mut session_notes = host::TuiHostSession::from_ring_table(&ring, TableId(78), &[0], 1)?;
+        let mut notes_events = vec![
+            key_with(KeyCode::Char('n'), KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(
+                KeyCode::Char('n'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            key_with(KeyCode::Char('n'), KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(
+                KeyCode::Char('n'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            key_with(KeyCode::Char('z'), KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(
+                KeyCode::Char('z'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            key_with(KeyCode::Char('!'), KeyModifiers::NONE, KeyEventKind::Repeat),
+            key_with(KeyCode::Backspace, KeyModifiers::NONE, KeyEventKind::Repeat),
+            key_with(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Repeat),
+            key_with(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release),
+            key_with(KeyCode::Char('q'), KeyModifiers::NONE, KeyEventKind::Repeat),
+            key_with(
+                KeyCode::Char('l'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Repeat,
+            ),
+        ]
+        .into_iter();
+        run_session_loop(&mut terminal, &mut session_notes, &mut || {
+            Ok(notes_events.next())
+        })?;
+        assert!(
+            !session_notes.quit_requested(),
+            "Esc/q repeat/release must not quit"
+        );
+        assert!(
+            !session_notes.is_curtain_open(),
+            "Ctrl+L repeat must not lock"
+        );
+        assert_eq!(
+            session_notes
+                .seat_ui_state(league_core::Seat(0))
+                .ok_or("missing s0")?
+                .notes_draft(),
+            "nz"
+        );
+
+        // 2. Curtain handoff (`Ctrl+L`, `Space`, `Enter`) with Press + Release must post zero offers.
+        let mut session_curtain =
+            host::TuiHostSession::from_ring_table(&ring, TableId(79), &[0], 1)?;
+        let mut curtain_events = vec![
+            key_with(
+                KeyCode::Char('l'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Press,
+            ),
+            key_with(
+                KeyCode::Char('l'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Release,
+            ),
+            key_with(KeyCode::Char(' '), KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(
+                KeyCode::Char(' '),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release),
+            key_with(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat),
+        ]
+        .into_iter();
+        run_session_loop(&mut terminal, &mut session_curtain, &mut || {
+            Ok(curtain_events.next())
+        })?;
+        assert!(!session_curtain.is_curtain_open());
+        let obs_curtain = session_curtain.build_seat_observation(league_core::Seat(0))?;
+        assert!(
+            !obs_curtain.offers.values().any(|o| o.maker == 0),
+            "Enter release/repeat after Curtain must not post an offer for seat 0"
+        );
+
+        // 3. Pressing `q` inside `run_session_loop` exits before drawing any post-quit standby frame.
+        let mut session_quit = host::TuiHostSession::from_ring_table(&ring, TableId(80), &[0], 1)?;
+        let mut draw_count = 0_usize;
+        let mut q_iter = vec![
+            key_with(KeyCode::Char('q'), KeyModifiers::NONE, KeyEventKind::Press),
+            key_with(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+        ]
+        .into_iter();
+        let mut term_counted = Terminal::new(TestBackend::new(100, 30))?;
+        run_session_loop(&mut term_counted, &mut session_quit, &mut || {
+            draw_count += 1;
+            Ok(q_iter.next())
+        })?;
+        assert!(session_quit.quit_requested());
+        assert_eq!(
+            draw_count, 1,
+            "run_session_loop must check quit_requested before drawing a second frame"
+        );
         Ok(())
     }
 }

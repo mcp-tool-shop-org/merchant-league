@@ -26,8 +26,8 @@ use alloc::vec;
 
 use league_seat_types::{
     AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, Seat, SeatKeyCode, SeatKeyEvent,
-    SeatObservation, SeatScreenView, SeatState, TableId, Turn, ViewAlign, ViewLabel, ViewPanel,
-    ViewRow, ViewportSize,
+    SeatObservation, SeatScreenView, SeatState, TableId, Turn, TurnPhase, ViewAlign, ViewLabel,
+    ViewPanel, ViewRow, ViewportSize,
 };
 
 pub use state::{
@@ -51,9 +51,12 @@ pub enum Action {
     Ignore,
 }
 
-/// Map a plain seat key press to an [`Action`]. `q`, `Esc` and Ctrl-C quit.
+/// Map a plain seat key press to an [`Action`]. `q`, `Esc` and Ctrl-C quit (never auto-repeats).
 #[must_use]
 pub const fn action_for(key: SeatKeyEvent) -> Action {
+    if key.is_repeat {
+        return Action::Ignore;
+    }
     match key.code {
         SeatKeyCode::Char('q') | SeatKeyCode::Esc => Action::Quit,
         SeatKeyCode::Char('c') if key.modifiers.ctrl => Action::Quit,
@@ -104,7 +107,7 @@ pub fn handle_seat_key(
     viewport: ViewportSize,
     key: SeatKeyEvent,
 ) -> SeatUiStep {
-    let intent = composer::apply_seat_key(obs, &mut state, key);
+    let intent = composer::apply_seat_key(obs, &mut state, viewport, key);
     let view = render::build_turn_screen(obs, &state, pass, commodities, viewport);
     SeatUiStep {
         view,
@@ -125,6 +128,20 @@ pub fn curtain_view(
     space_armed: bool,
 ) -> SeatScreenView {
     render::build_curtain_view(table_id, turn, pass, next_seat, viewport, space_armed)
+}
+
+/// Renders a strictly public session-standby view when no human seat controls the keyboard
+/// (after quit, at season close, or on a pass-advance error), containing zero seat private state.
+#[must_use]
+pub fn neutral_session_view(
+    table_id: TableId,
+    turn: Turn,
+    phase: TurnPhase,
+    pass: PassKind,
+    quit_requested: bool,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    render::build_neutral_session_view(table_id, turn, phase, pass, quit_requested, viewport)
 }
 
 /// Build one seat's minimal observation view model from [`SeatObservation`] alone.
@@ -236,8 +253,8 @@ mod tests {
 
     use crate::{
         Action, CenterTab, PassKind, SeatUiState, TITLE_LINES, action_for, curtain_view,
-        format_own_mandate_line, handle_seat_key, render_seat, render_seat_with_commodities,
-        render_turn_screen, title_view,
+        format_own_mandate_line, handle_seat_key, neutral_session_view, render_seat,
+        render_seat_with_commodities, render_turn_screen, title_view,
     };
 
     fn key(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> SeatKeyEvent {
@@ -1361,13 +1378,23 @@ mod tests {
             ),
             (
                 SeatKeyCode::Char('L'),
-                SeatKeyModifiers::NONE,
+                SeatKeyModifiers::CTRL,
                 SeatIntentKind::LockAndHandOff,
             ),
         ] {
             let step = press(&obs, s.clone(), c, mods);
             assert_eq!(step.intent.map(|i| i.kind), Some(expected_kind));
         }
+        assert!(
+            press(
+                &obs,
+                s.clone(),
+                SeatKeyCode::Char('L'),
+                SeatKeyModifiers::NONE
+            )
+            .intent
+            .is_none()
+        );
 
         for zone_steps in 0..2 {
             s = press(&obs, s, SeatKeyCode::F(6), SeatKeyModifiers::NONE).state;
@@ -1589,5 +1616,91 @@ mod tests {
             Some(SeatIntentKind::CloseChronicleModal)
         );
         assert!(!closed.state.chronicle_open());
+    }
+
+    #[test]
+    fn neutral_standby_shift_l_and_repeat_key_filters_hold() {
+        let obs = sample_seat_observation();
+        let vp = ViewportSize::new(80, 24);
+        let neutral = neutral_session_view(
+            TableId(202_611),
+            Turn(4),
+            TurnPhase::AwaitingMandateReveal,
+            PassKind::SubPassB,
+            false,
+            vp,
+        );
+        let n_txt = neutral.plain_text();
+        assert!(n_txt.contains("Session Standby"));
+        assert!(n_txt.contains("Table #202611 | Turn 4 | Phase: AwaitingMandateReveal"));
+        assert!(!n_txt.contains("Private Vault"));
+        assert!(!n_txt.contains("Private Mandate"));
+
+        let small_neutral = neutral_session_view(
+            TableId(202_611),
+            Turn(4),
+            TurnPhase::TalkAndMarket,
+            PassKind::SubPassA,
+            true,
+            ViewportSize::new(79, 23),
+        );
+        assert_eq!(small_neutral.layout.mode, ViewLayoutMode::TooSmall);
+
+        // Shift-L alone does not emit LockAndHandOff; Ctrl+L does; repeated Ctrl+L does not.
+        let shift_l = handle_seat_key(
+            &obs,
+            SeatUiState::new(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(
+                SeatKeyCode::Char('L'),
+                SeatKeyModifiers {
+                    ctrl: false,
+                    alt: false,
+                    shift: true,
+                },
+            ),
+        );
+        assert!(shift_l.intent.is_none());
+
+        let rep_enter = handle_seat_key(
+            &obs,
+            SeatUiState::new(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            SeatKeyEvent::repeated(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+        );
+        assert!(rep_enter.intent.is_none());
+
+        let rep_ctrl_l = handle_seat_key(
+            &obs,
+            SeatUiState::new(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            SeatKeyEvent::repeated(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+        );
+        assert!(rep_ctrl_l.intent.is_none());
+
+        let rep_quit = action_for(SeatKeyEvent::repeated(
+            SeatKeyCode::Char('q'),
+            SeatKeyModifiers::NONE,
+        ));
+        assert_eq!(rep_quit, Action::Ignore);
+
+        let press_ctrl_l = handle_seat_key(
+            &obs,
+            SeatUiState::new(),
+            PassKind::SubPassA,
+            None,
+            vp,
+            key(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+        );
+        assert_eq!(
+            press_ctrl_l.intent.map(|i| i.kind),
+            Some(SeatIntentKind::LockAndHandOff)
+        );
     }
 }

@@ -348,9 +348,37 @@ impl ScreenLayout {
         }
     }
 
+    /// Builds a single full-viewport layout with a two-row bottom [`ViewZoneId::StatusLine`]
+    /// for screens such as the Privacy Curtain and neutral standby view.
+    #[must_use]
+    pub fn single_panel_with_status(viewport: ViewportSize) -> Self {
+        Self {
+            viewport,
+            mode: ViewLayoutMode::SinglePanel,
+            bands: vec![
+                ViewZoneGroup {
+                    axis: ViewAxis::Vertical,
+                    hint: ViewSizeHint::Min(1),
+                    zones: vec![ViewZoneSpec {
+                        zone: ViewZoneId::SingleFull,
+                        hint: ViewSizeHint::Min(1),
+                    }],
+                },
+                ViewZoneGroup {
+                    axis: ViewAxis::Vertical,
+                    hint: ViewSizeHint::Fixed(2),
+                    zones: vec![ViewZoneSpec {
+                        zone: ViewZoneId::StatusLine,
+                        hint: ViewSizeHint::Fixed(2),
+                    }],
+                },
+            ],
+        }
+    }
+
     /// Computes the responsive Club Mode turn-screen layout from `viewport`:
     /// - `>= 100x30`: four-zone desktop layout (`HeaderBar`, `PublicLedger` / `CenterTabs` / `PrivateDrawer`, `StatusLine`);
-    /// - `>= 80x24`: stacked four-zone fallback without mid-row cuts;
+    /// - `>= 80x24`: stacked four-zone layout where every zone row is drawn in full height or reachable via that zone's scroll (lines wider than the zone cut at the zone's width);
     /// - `< 80x24`: single `TooSmall` warning layout.
     #[must_use]
     pub fn layout_for_viewport(viewport: ViewportSize) -> Self {
@@ -387,10 +415,10 @@ impl ScreenLayout {
                     },
                     ViewZoneGroup {
                         axis: ViewAxis::Vertical,
-                        hint: ViewSizeHint::Fixed(1),
+                        hint: ViewSizeHint::Fixed(2),
                         zones: vec![ViewZoneSpec {
                             zone: ViewZoneId::StatusLine,
-                            hint: ViewSizeHint::Fixed(1),
+                            hint: ViewSizeHint::Fixed(2),
                         }],
                     },
                 ],
@@ -402,26 +430,26 @@ impl ScreenLayout {
                 bands: vec![
                     ViewZoneGroup {
                         axis: ViewAxis::Vertical,
-                        hint: ViewSizeHint::Fixed(4),
+                        hint: ViewSizeHint::Fixed(5),
                         zones: vec![ViewZoneSpec {
                             zone: ViewZoneId::HeaderBar,
-                            hint: ViewSizeHint::Fixed(4),
+                            hint: ViewSizeHint::Fixed(5),
                         }],
                     },
                     ViewZoneGroup {
                         axis: ViewAxis::Vertical,
-                        hint: ViewSizeHint::Fixed(6),
+                        hint: ViewSizeHint::Fixed(5),
                         zones: vec![ViewZoneSpec {
                             zone: ViewZoneId::PublicLedger,
-                            hint: ViewSizeHint::Fixed(6),
+                            hint: ViewSizeHint::Fixed(5),
                         }],
                     },
                     ViewZoneGroup {
                         axis: ViewAxis::Vertical,
-                        hint: ViewSizeHint::Min(8),
+                        hint: ViewSizeHint::Min(7),
                         zones: vec![ViewZoneSpec {
                             zone: ViewZoneId::CenterTabs,
-                            hint: ViewSizeHint::Min(8),
+                            hint: ViewSizeHint::Min(7),
                         }],
                     },
                     ViewZoneGroup {
@@ -434,10 +462,10 @@ impl ScreenLayout {
                     },
                     ViewZoneGroup {
                         axis: ViewAxis::Vertical,
-                        hint: ViewSizeHint::Fixed(1),
+                        hint: ViewSizeHint::Fixed(2),
                         zones: vec![ViewZoneSpec {
                             zone: ViewZoneId::StatusLine,
-                            hint: ViewSizeHint::Fixed(1),
+                            hint: ViewSizeHint::Fixed(2),
                         }],
                     },
                 ],
@@ -628,9 +656,11 @@ pub struct ViewModal {
     pub panel: ViewPanel,
 }
 
-/// Bottom status line with left key-hint spans and right context/refusal spans.
+/// Bottom status line with optional prominent refusal/alert row plus key-hint and mode spans.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewStatusLine {
+    /// Prominent top-row refusal/error banner rendered ahead of shortcuts so it stays visible at 80x24+.
+    pub alert: Option<ViewRow>,
     /// Left-aligned spans.
     pub left: Vec<ViewSpan>,
     /// Right-aligned spans.
@@ -640,20 +670,30 @@ pub struct ViewStatusLine {
 }
 
 impl ViewStatusLine {
-    /// Joins left and right spans as plain text.
+    /// Joins alert, left, and right spans as plain text.
     #[must_use]
     pub fn plain_text(&self) -> String {
         let mut out = String::new();
+        if let Some(alert) = &self.alert {
+            out.push_str(&alert.plain_text());
+        }
+        let mut bar = String::new();
         for span in &self.left {
-            out.push_str(&span.text);
+            bar.push_str(&span.text);
         }
         if !self.right.is_empty() {
-            if !out.is_empty() {
-                out.push_str(" | ");
+            if !bar.is_empty() {
+                bar.push_str(" | ");
             }
             for span in &self.right {
-                out.push_str(&span.text);
+                bar.push_str(&span.text);
             }
+        }
+        if !bar.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&bar);
         }
         out
     }
@@ -900,21 +940,37 @@ impl SeatKeyModifiers {
     };
 }
 
-/// Single key press passed by value from the trusted host into `league-seat-ui`.
+/// Single key press or key auto-repeat passed by value from the trusted host into `league-seat-ui`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
 )]
 pub struct SeatKeyEvent {
-    /// Pressed key code.
+    /// Pressed or repeated key code.
     pub code: SeatKeyCode,
     /// Active key modifier flags.
     pub modifiers: SeatKeyModifiers,
+    /// `true` when emitted from terminal key auto-repeat rather than an initial key press.
+    pub is_repeat: bool,
 }
 
 impl SeatKeyEvent {
-    /// Constructs a [`SeatKeyEvent`] from its key code and modifiers.
+    /// Constructs an initial key-press [`SeatKeyEvent`] (`is_repeat = false`).
     #[must_use]
     pub const fn new(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> Self {
-        Self { code, modifiers }
+        Self {
+            code,
+            modifiers,
+            is_repeat: false,
+        }
+    }
+
+    /// Constructs a repeated [`SeatKeyEvent`] (`is_repeat = true`).
+    #[must_use]
+    pub const fn repeated(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> Self {
+        Self {
+            code,
+            modifiers,
+            is_repeat: true,
+        }
     }
 }

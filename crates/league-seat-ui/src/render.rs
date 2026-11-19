@@ -9,9 +9,9 @@ use league_seat_types::{
     CommodityDisplayMap, CredOffer, CreditCheck, DualEscrowVault, FillRecord,
     HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge, IntentTarget, MandateKind, MarketAction,
     PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity, SeatObservation, SeatScreenView,
-    SeatState, TokenEscrowVault, Turn, ViewAlign, ViewColor, ViewLabel, ViewLayoutMode, ViewModal,
-    ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar,
-    ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId,
+    SeatState, TokenEscrowVault, Turn, TurnPhase, ViewAlign, ViewColor, ViewLabel, ViewLayoutMode,
+    ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle,
+    ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId,
     ViewZonePanel, ViewportSize, format_numeraire_display, scrub_secret_text,
 };
 
@@ -112,10 +112,23 @@ pub(crate) fn build_curtain_view(
         selected_row: None,
         scroll: None,
     };
-    let mut view = SeatScreenView::single_panel_at(panel, viewport);
+    let mut view = SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel,
+        }],
+        status_line: None,
+        modal: None,
+    };
     view.status_line = Some(ViewStatusLine {
+        alert: None,
         left: vec![ViewSpan::plain(
-            "Space Arm Hand-Off | Enter Confirm | q Quit".to_owned(),
+            "Space:Arm Hand-Off | Enter:Confirm Reveal | q:Quit".to_owned(),
         )],
         right: vec![ViewSpan::plain(if space_armed {
             "Armed".to_owned()
@@ -125,6 +138,73 @@ pub(crate) fn build_curtain_view(
         style: ViewStyle::plain(),
     });
     view
+}
+
+pub(crate) fn build_neutral_session_view(
+    table_id: league_seat_types::TableId,
+    turn: Turn,
+    phase: TurnPhase,
+    pass: PassKind,
+    quit_requested: bool,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    let layout = ScreenLayout::layout_for_viewport(viewport);
+    if layout.mode == ViewLayoutMode::TooSmall {
+        return build_too_small_view(viewport, layout);
+    }
+
+    let state_note = if quit_requested {
+        "Session quit requested — returning to terminal."
+    } else if phase != TurnPhase::TalkAndMarket {
+        "Turn closed — waiting for host post-season step."
+    } else {
+        "No human seat active — session standby."
+    };
+    let panel = ViewPanel {
+        title: Some(ViewLabel::styled(
+            "Merchant League — Session Standby".to_owned(),
+            ViewStyle {
+                fg: ViewColor::Cyan,
+                bg: ViewColor::Reset,
+                bold: true,
+                ..ViewStyle::plain()
+            },
+        )),
+        alignment: ViewAlign::Center,
+        bordered: true,
+        tabs: None,
+        table: None,
+        rows: vec![
+            ViewRow::from_plain(format!(
+                "Table #{} | Turn {} | Phase: {:?} | Pass: {}",
+                table_id.0,
+                turn.0,
+                phase,
+                pass.label()
+            )),
+            ViewRow::from_plain(state_note.to_owned()),
+        ],
+        selected_row: None,
+        scroll: None,
+    };
+    SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel,
+        }],
+        status_line: Some(ViewStatusLine {
+            alert: None,
+            left: vec![ViewSpan::plain("q / Esc / Ctrl-C: Quit".to_owned())],
+            right: vec![ViewSpan::plain("Standby".to_owned())],
+            style: ViewStyle::plain(),
+        }),
+        modal: None,
+    }
 }
 
 pub(crate) fn build_turn_screen(
@@ -180,11 +260,13 @@ pub(crate) fn build_turn_screen(
         layout,
         zones,
         status_line: Some(ViewStatusLine {
+            alert: None,
             left: vec![ViewSpan::plain(
-                "1-3 Tabs | F6 Zone | [/] Item | +/- Adj | Enter Submit | p What-If | r Chronicle | c Codes | Ctrl-L HandOff | q Quit"
-                    .to_owned(),
+                "1-3:Tabs F6:Zone [/]:Item Arrows/+/-:Adj e:Draft n:Notes Enter:Apply".to_owned(),
             )],
-            right: vec![ViewSpan::plain(mode_tag.to_owned())],
+            right: vec![ViewSpan::plain(format!(
+                "[{mode_tag}] c:Codes r:Chron p:WhatIf Ctrl+L:Lock q:Quit"
+            ))],
             style: ViewStyle::plain(),
         }),
         modal,
@@ -367,19 +449,17 @@ fn build_public_ledger_panel(
             alignment: ViewAlign::Right,
         },
     ];
-    let table_rows = obs.seats.iter().map(build_seat_table_row).collect();
+    let table_rows: Vec<ViewTableRow> = obs.seats.iter().map(build_seat_table_row).collect();
+    let table_len = table_rows.len();
+    let rows = public_ledger_body_rows(obs, state.plain_codes, commodities);
+    let total = table_len + rows.len();
+    let offset = state.public_scroll.min(total.saturating_sub(1));
+    let ledger_sel = state.selection.ledger_row_idx.min(total.saturating_sub(1));
     let table = ViewTable {
         columns,
         rows: table_rows,
-        selected_row: Some(usize::from(obs.seat)),
+        selected_row: (ledger_sel < table_len).then_some(ledger_sel),
     };
-
-    let mut rows = Vec::new();
-    append_ledger_inventory_rows(obs, state.plain_codes, commodities, &mut rows);
-    append_ledger_book_rows(obs, state.plain_codes, commodities, &mut rows);
-
-    let total = rows.len();
-    let offset = state.public_scroll.min(total.saturating_sub(1));
 
     ViewPanel {
         title: Some(ViewLabel::styled(
@@ -396,9 +476,24 @@ fn build_public_ledger_panel(
         tabs: None,
         table: Some(table),
         rows,
-        selected_row: Some(state.selection.ledger_row_idx.min(total.saturating_sub(1))),
+        selected_row: ledger_sel.checked_sub(table_len),
         scroll: Some(ViewScroll { offset, total }),
     }
+}
+
+pub(crate) fn public_ledger_body_rows(
+    obs: &SeatObservation,
+    plain_codes: bool,
+    commodities: Option<&CommodityDisplayMap>,
+) -> Vec<ViewRow> {
+    let mut rows = Vec::new();
+    append_ledger_inventory_rows(obs, plain_codes, commodities, &mut rows);
+    append_ledger_book_rows(obs, plain_codes, commodities, &mut rows);
+    rows
+}
+
+pub(crate) fn public_ledger_total_rows(obs: &SeatObservation) -> usize {
+    obs.seats.len() + public_ledger_body_rows(obs, false, None).len()
 }
 
 fn build_seat_table_row(s: &SeatState) -> ViewTableRow {
@@ -732,12 +827,7 @@ fn build_center_tabs_panel(
         active_index: state.active_tab.index(),
     };
 
-    let rows = match state.active_tab {
-        CenterTab::MarketAndContracts => build_market_tab_rows(obs, state, commodities),
-        CenterTab::WorkshopDealsPolitics => build_bundle_tab_rows(obs, state, commodities),
-        CenterTab::WhatIfSandbox => build_what_if_tab_rows(obs, state, commodities),
-    };
-
+    let rows = center_tab_rows(obs, state, commodities);
     let total = rows.len();
     let offset = state.center_scroll.min(total.saturating_sub(1));
 
@@ -759,6 +849,22 @@ fn build_center_tabs_panel(
         selected_row: None,
         scroll: Some(ViewScroll { offset, total }),
     }
+}
+
+pub(crate) fn center_tab_rows(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    commodities: Option<&CommodityDisplayMap>,
+) -> Vec<ViewRow> {
+    match state.active_tab {
+        CenterTab::MarketAndContracts => build_market_tab_rows(obs, state, commodities),
+        CenterTab::WorkshopDealsPolitics => build_bundle_tab_rows(obs, state, commodities),
+        CenterTab::WhatIfSandbox => build_what_if_tab_rows(obs, state, commodities),
+    }
+}
+
+pub(crate) fn center_tab_total_rows(obs: &SeatObservation, state: &SeatUiState) -> usize {
+    center_tab_rows(obs, state, None).len()
 }
 
 fn build_market_tab_rows(
@@ -1227,9 +1333,10 @@ fn append_what_if_preview_result(
         for r in &preview.refused_market_actions {
             let safe_msg = scrub_secret_text(&r.message);
             rows.push(ViewRow::from_plain(format!(
-                "  Refused Action #{}: [{}] {}",
-                r.action_index, r.error_code, safe_msg
+                "  Refused Action #{}: [{}]",
+                r.action_index, r.error_code
             )));
+            rows.push(ViewRow::from_plain(format!("    {safe_msg}")));
         }
     }
     rows.push(ViewRow::from_plain(format!(
@@ -1261,6 +1368,35 @@ fn build_private_drawer_panel(
     state: &SeatUiState,
     commodities: Option<&CommodityDisplayMap>,
 ) -> ViewPanel {
+    let rows = private_drawer_rows(obs, state, commodities);
+    let total = rows.len();
+    let offset = state.drawer_scroll.min(total.saturating_sub(1));
+
+    ViewPanel {
+        title: Some(ViewLabel::styled(
+            format!("Seat {} Private Vault & Diagnostics", obs.seat),
+            ViewStyle {
+                fg: ViewColor::Yellow,
+                bg: ViewColor::Reset,
+                bold: state.selection.focus_zone == FocusZone::PrivateDrawer,
+                ..ViewStyle::plain()
+            },
+        )),
+        alignment: ViewAlign::Left,
+        bordered: true,
+        tabs: None,
+        table: None,
+        rows,
+        selected_row: Some(state.selection.drawer_row_idx.min(total.saturating_sub(1))),
+        scroll: Some(ViewScroll { offset, total }),
+    }
+}
+
+pub(crate) fn private_drawer_rows(
+    obs: &SeatObservation,
+    state: &SeatUiState,
+    commodities: Option<&CommodityDisplayMap>,
+) -> Vec<ViewRow> {
     let mut rows = Vec::new();
     match obs.own_mandate() {
         Some(m) => {
@@ -1303,28 +1439,11 @@ fn build_private_drawer_panel(
         },
         if state.notes_edit_active { "_" } else { "" }
     )));
+    rows
+}
 
-    let total = rows.len();
-    let offset = state.drawer_scroll.min(total.saturating_sub(1));
-
-    ViewPanel {
-        title: Some(ViewLabel::styled(
-            format!("Seat {} Private Vault & Diagnostics", obs.seat),
-            ViewStyle {
-                fg: ViewColor::Yellow,
-                bg: ViewColor::Reset,
-                bold: state.selection.focus_zone == FocusZone::PrivateDrawer,
-                ..ViewStyle::plain()
-            },
-        )),
-        alignment: ViewAlign::Left,
-        bordered: true,
-        tabs: None,
-        table: None,
-        rows,
-        selected_row: Some(state.selection.drawer_row_idx.min(total.saturating_sub(1))),
-        scroll: Some(ViewScroll { offset, total }),
-    }
+pub(crate) fn private_drawer_total_rows(obs: &SeatObservation, state: &SeatUiState) -> usize {
+    private_drawer_rows(obs, state, None).len()
 }
 
 fn format_mandate_kind(kind: MandateKind) -> String {
