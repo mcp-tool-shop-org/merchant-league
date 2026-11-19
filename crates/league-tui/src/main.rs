@@ -535,6 +535,81 @@ mod tests {
         }
     }
 
+    struct FixedSizeCrosstermBackend<W: io::Write> {
+        inner: CrosstermBackend<W>,
+        width: u16,
+        height: u16,
+    }
+
+    impl<W: io::Write> FixedSizeCrosstermBackend<W> {
+        fn new(writer: W, width: u16, height: u16) -> Self {
+            Self {
+                inner: CrosstermBackend::new(writer),
+                width,
+                height,
+            }
+        }
+    }
+
+    impl<W: io::Write> Backend for FixedSizeCrosstermBackend<W> {
+        type Error = io::Error;
+
+        fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+        {
+            self.inner.draw(content)
+        }
+
+        fn hide_cursor(&mut self) -> io::Result<()> {
+            self.inner.hide_cursor()
+        }
+
+        fn show_cursor(&mut self) -> io::Result<()> {
+            self.inner.show_cursor()
+        }
+
+        fn get_cursor_position(&mut self) -> io::Result<ratatui::layout::Position> {
+            Ok(ratatui::layout::Position::new(0, 0))
+        }
+
+        fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+            &mut self,
+            position: P,
+        ) -> io::Result<()> {
+            self.inner.set_cursor_position(position)
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            self.inner.clear()
+        }
+
+        fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> io::Result<()> {
+            self.inner.clear_region(clear_type)
+        }
+
+        fn size(&self) -> io::Result<ratatui::layout::Size> {
+            Ok(ratatui::layout::Size::new(self.width, self.height))
+        }
+
+        fn window_size(&mut self) -> io::Result<ratatui::backend::WindowSize> {
+            Ok(ratatui::backend::WindowSize {
+                columns_rows: ratatui::layout::Size::new(self.width, self.height),
+                pixels: ratatui::layout::Size::new(0, 0),
+            })
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl<W: io::Write> ScrollbackClear for FixedSizeCrosstermBackend<W> {
+        fn clear_scrollback(&mut self) -> io::Result<()> {
+            self.inner.clear_scrollback()
+        }
+    }
+
     #[test]
     fn cli_args_parse_and_dispatch_all_paths() {
         assert_eq!(parse_args(["league-tui", "--help"]), CliAction::Help);
@@ -807,7 +882,11 @@ mod tests {
         let mut session =
             host::TuiHostSession::from_ring_table(&ring, TableId(81_301), &[0, 1], 5)?;
         let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
-        let mut terminal = Terminal::new(CrosstermBackend::new(SharedVecWriter(written.clone())))?;
+        let mut terminal = Terminal::new(FixedSizeCrosstermBackend::new(
+            SharedVecWriter(written.clone()),
+            100,
+            30,
+        ))?;
         let key_ev = |code: KeyCode, mods: KeyModifiers| {
             let mut k = KeyEvent::new(code, mods);
             k.kind = KeyEventKind::Press;
