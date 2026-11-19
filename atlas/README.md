@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-19 from commit 7b871d9 by Atlas 1.23.0.
+Mapped at 2026-11-19 from commit 2aefc72 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,13 +8,13 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-19 (09ec4f9)
+## What changed since 2026-11-19 (ad88f57)
 
-Nothing structural changed since 2026-11-19; 1 file changed content.
+Nothing structural changed since 2026-11-19; 2 files changed content.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 54 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
+1. **CI.** On a pull request; on a push to main touching 13 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 53 more; checks crates/league-gen/src/lib.rs, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
 4. **league-relay** (a command people run). Runs crates/league-relay/src/main.rs.
@@ -25,7 +25,7 @@ Nothing structural changed since 2026-11-19; 1 file changed content.
 
 ## What happens through CI
 
-1. The workflow runs 5 files in scripts, 15 files in league-core, crates/league-error/ in league-error, 10 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 18 files in 8 more places; it checks crates/league-gen/src/lib.rs in league-gen and crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay.
+1. The workflow runs 5 files in scripts, 15 files in league-core, crates/league-error/ in league-error, 10 files in league-gen, crates/league-ledger/examples/, crates/league-ledger/src/ and crates/league-ledger/tests/vectors.rs in league-ledger, and 17 files in 8 more places; it checks crates/league-gen/src/lib.rs in league-gen and crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results
@@ -108,7 +108,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
 - 23 writes and 13 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
-- 13 writes and 18 reads go to a path their caller passes, not to this repository.
+- 13 writes and 17 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.
 - 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.
