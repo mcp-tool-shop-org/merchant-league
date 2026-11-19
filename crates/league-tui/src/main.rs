@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event};
 use crossterm::terminal::{
-    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use league_core::{TableId, TurnPhase, scrub_secret_text};
 use league_gen::{
@@ -26,23 +26,6 @@ use ratatui::Terminal;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 use ratatui::backend::{Backend, CrosstermBackend};
-
-trait ScrollbackClear {
-    fn clear_scrollback(&mut self) -> io::Result<()>;
-}
-
-impl<W: io::Write> ScrollbackClear for CrosstermBackend<W> {
-    fn clear_scrollback(&mut self) -> io::Result<()> {
-        crossterm::execute!(self, Clear(ClearType::Purge))
-    }
-}
-
-#[cfg(test)]
-impl ScrollbackClear for TestBackend {
-    fn clear_scrollback(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 
 enum PollEvent {
     Input(Event),
@@ -184,13 +167,26 @@ where
     CliAction::RunClub(opts)
 }
 
+fn enter_alternate_screen<W: io::Write>(out: &mut W) -> io::Result<()> {
+    crossterm::execute!(out, EnterAlternateScreen)
+}
+
+fn leave_alternate_screen<W: io::Write>(out: &mut W) -> io::Result<()> {
+    crossterm::execute!(out, LeaveAlternateScreen)
+}
+
+fn finish_terminal_session<B: Backend>(terminal: &mut Terminal<B>) {
+    let _ = terminal.clear();
+    let _ = terminal.show_cursor();
+}
+
 struct TerminalCleanup;
 
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = crossterm::execute!(stdout, LeaveAlternateScreen);
+        let _ = leave_alternate_screen(&mut stdout);
     }
 }
 
@@ -229,7 +225,7 @@ fn run_session_loop<B, E>(
     events: &mut E,
 ) -> io::Result<()>
 where
-    B: Backend + ScrollbackClear,
+    B: Backend,
     B::Error: std::fmt::Display,
     E: SessionEventSource,
 {
@@ -238,11 +234,7 @@ where
         if session.quit_requested() || session.phase() != TurnPhase::TalkAndMarket {
             return Ok(());
         }
-        if session.take_scrollback_purge() {
-            terminal
-                .backend_mut()
-                .clear_scrollback()
-                .map_err(|err| io::Error::other(scrub_secret_text(&err.to_string())))?;
+        if session.take_screen_clear() {
             terminal
                 .clear()
                 .map_err(|err| io::Error::other(scrub_secret_text(&err.to_string())))?;
@@ -389,12 +381,12 @@ fn run_interactive(opts: &CliOptions) -> io::Result<()> {
     enable_raw_mode()?;
     let _cleanup = TerminalCleanup;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    enter_alternate_screen(&mut stdout)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut live_events = LiveTerminalEvents::new();
     let res = run_session_loop(&mut terminal, &mut session, &mut live_events);
-    let _ = terminal.show_cursor();
+    finish_terminal_session(&mut terminal);
     res
 }
 
@@ -601,12 +593,6 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             self.inner.flush()
-        }
-    }
-
-    impl<W: io::Write> ScrollbackClear for FixedSizeCrosstermBackend<W> {
-        fn clear_scrollback(&mut self) -> io::Result<()> {
-            self.inner.clear_scrollback()
         }
     }
 
@@ -875,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn curtain_handoff_discards_queued_input_enforces_dead_time_and_purges_scrollback()
+    fn curtain_handoff_discards_queued_input_enforces_dead_time_and_clears_alternate_screen()
     -> Result<(), Box<dyn std::error::Error>> {
         use crossterm::event::KeyEventKind;
         let ring = default_dev_ring_table()?;
@@ -962,8 +948,12 @@ mod tests {
         let bytes = written.borrow();
         let raw_ansi = String::from_utf8_lossy(&bytes);
         assert!(
-            raw_ansi.contains("\x1b[3J"),
-            "Curtain hand-off must emit ESC[3J scrollback purge on CrosstermBackend"
+            raw_ansi.contains("\x1b[2J"),
+            "Curtain hand-off must clear alternate screen cells in place with CSI 2 J"
+        );
+        assert!(
+            !bytes.windows(4).any(|w| w == b"\x1b[3J") && !raw_ansi.contains("\x1b[3J"),
+            "must never emit CSI 3 J scrollback purge"
         );
         assert!(
             !bytes.contains(&0x07),
@@ -971,6 +961,91 @@ mod tests {
         );
         assert!(!raw_ansi.contains("\x1b]0;") && !raw_ansi.contains("\x1b]2;"));
         assert!(!raw_ansi.contains("\x1b]52;"));
+        Ok(())
+    }
+
+    #[test]
+    fn handoff_and_exit_bytes_never_contain_csi_3j_scrollback_purge()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        let ring = default_dev_ring_table()?;
+        let mut session =
+            host::TuiHostSession::from_ring_table(&ring, TableId(81_302), &[0, 1], 7)?;
+        let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
+        let mut screen_writer = SharedVecWriter(written.clone());
+        enter_alternate_screen(&mut screen_writer)?;
+        let mut terminal = Terminal::new(FixedSizeCrosstermBackend::new(
+            SharedVecWriter(written.clone()),
+            100,
+            30,
+        ))?;
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+
+        let mut events = ScriptedSessionEvents::from_timed_with_queued([
+            (
+                Duration::from_millis(10),
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(10),
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                Duration::from_millis(10),
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+            (
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('q'), KeyModifiers::NONE)),
+                Vec::new(),
+            ),
+        ]);
+
+        run_session_loop(&mut terminal, &mut session, &mut events)?;
+        let handoff_len = written.borrow().len();
+        {
+            let bytes = written.borrow();
+            let handoff_ansi = String::from_utf8_lossy(&bytes);
+            assert!(
+                handoff_ansi.contains("\x1b[?1049h"),
+                "session startup must enter the alternate screen"
+            );
+            assert!(
+                handoff_ansi.contains("\x1b[2J"),
+                "Curtain hand-off must clear only the alternate screen (CSI 2 J)"
+            );
+            assert!(
+                !bytes.windows(4).any(|w| w == b"\x1b[3J") && !handoff_ansi.contains("\x1b[3J"),
+                "bytes written at Curtain hand-off must contain no CSI 3 J sequence"
+            );
+        }
+
+        finish_terminal_session(&mut terminal);
+        leave_alternate_screen(&mut screen_writer)?;
+        let all_bytes = written.borrow();
+        let exit_ansi = String::from_utf8_lossy(&all_bytes[handoff_len..]);
+        let full_ansi = String::from_utf8_lossy(&all_bytes);
+        assert!(
+            exit_ansi.contains("\x1b[?1049l"),
+            "session exit must leave the alternate screen"
+        );
+        assert!(
+            !all_bytes.windows(4).any(|w| w == b"\x1b[3J") && !full_ansi.contains("\x1b[3J"),
+            "bytes written at hand-off and at exit must never contain CSI 3 J"
+        );
+        assert!(
+            !all_bytes.contains(&0x07),
+            "must never emit terminal bell (BEL)"
+        );
+        assert!(!full_ansi.contains("\x1b]0;") && !full_ansi.contains("\x1b]2;"));
+        assert!(!full_ansi.contains("\x1b]52;"));
         Ok(())
     }
 

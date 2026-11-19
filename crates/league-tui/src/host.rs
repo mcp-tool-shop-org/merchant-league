@@ -607,7 +607,7 @@ pub struct TuiHostSession {
     active_pass_started_at: Option<Duration>,
     now: Duration,
     curtain_dead_until: Option<Duration>,
-    pending_scrollback_purge: bool,
+    pending_screen_clear: bool,
     pending_input_drain: bool,
     #[cfg(test)]
     injected_raw_what_if: Option<WhatIfPreview>,
@@ -686,7 +686,7 @@ impl TuiHostSession {
             active_pass_started_at: None,
             now: Duration::ZERO,
             curtain_dead_until: None,
-            pending_scrollback_purge: false,
+            pending_screen_clear: false,
             pending_input_drain: false,
             #[cfg(test)]
             injected_raw_what_if: None,
@@ -705,7 +705,7 @@ impl TuiHostSession {
             session.curtain = cursor
                 .curtain_next_seat
                 .map(|s| CurtainState::fresh(Seat(s)));
-            session.pending_scrollback_purge = session.curtain.is_some();
+            session.pending_screen_clear = session.curtain.is_some();
             if let Some(active) = session.active_human_seat() {
                 session.active_pass_started_at = Some(session.now);
                 session.restore_seat_ui_from_host(active);
@@ -793,7 +793,7 @@ impl TuiHostSession {
             self.curtain = Some(CurtainState::fresh(active));
             self.active_pass_started_at = None;
             self.curtain_dead_until = None;
-            self.pending_scrollback_purge = true;
+            self.pending_screen_clear = true;
         }
     }
 
@@ -807,7 +807,7 @@ impl TuiHostSession {
         self.seat_states[idx].clear_for_hand_off();
         self.last_errors[idx] = None;
         self.active_pass_started_at = None;
-        self.pending_scrollback_purge = true;
+        self.pending_screen_clear = true;
         self.pass_offset += 1;
         if let Err(err) = self.advance_after_human_lock() {
             self.advance_halted_error = Some(err);
@@ -956,9 +956,9 @@ impl TuiHostSession {
         self.sync_clock(self.now.saturating_add(delta));
     }
 
-    /// Consumes a pending terminal scrollback purge request emitted on Curtain open or lift.
-    pub(crate) fn take_scrollback_purge(&mut self) -> bool {
-        std::mem::take(&mut self.pending_scrollback_purge)
+    /// Consumes a pending alternate-screen clear request emitted on Curtain open or lift.
+    pub(crate) fn take_screen_clear(&mut self) -> bool {
+        std::mem::take(&mut self.pending_screen_clear)
     }
 
     /// Consumes a pending input-queue drain request emitted right as the Curtain lifts.
@@ -1275,7 +1275,7 @@ impl TuiHostSession {
                             self.curtain_dead_until =
                                 Some(self.now.saturating_add(CURTAIN_LIFT_DEAD_TIME));
                             self.pending_input_drain = true;
-                            self.pending_scrollback_purge = true;
+                            self.pending_screen_clear = true;
                             self.restore_seat_ui_from_host(next);
                             if need_autosave {
                                 self.maybe_autosave()?;
@@ -1325,7 +1325,7 @@ impl TuiHostSession {
                         self.curtain_dead_until =
                             Some(self.now.saturating_add(CURTAIN_LIFT_DEAD_TIME));
                         self.pending_input_drain = true;
-                        self.pending_scrollback_purge = true;
+                        self.pending_screen_clear = true;
                         self.restore_seat_ui_from_host(next);
                     }
                 }
@@ -1580,7 +1580,7 @@ impl TuiHostSession {
                 self.seat_states[idx].clear_for_hand_off();
                 self.last_errors[idx] = None;
                 self.active_pass_started_at = None;
-                self.pending_scrollback_purge = true;
+                self.pending_screen_clear = true;
                 self.pass_offset += 1;
                 if let Err(err) = self.advance_after_human_lock() {
                     self.advance_halted_error = Some(err.clone());
@@ -1691,7 +1691,7 @@ impl TuiHostSession {
                     self.curtain = Some(CurtainState::fresh(seat));
                     self.active_pass_started_at = None;
                     self.curtain_dead_until = None;
-                    self.pending_scrollback_purge = true;
+                    self.pending_screen_clear = true;
                     self.maybe_autosave()?;
                     return Ok(());
                 }
