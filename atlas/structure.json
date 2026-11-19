@@ -8134,7 +8134,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "494d44ec5c5508b0ef997e212c1699ae6ca62bdc29afafde4feebdfa2c0f32ce",
+          "hash": "4c83640448b8ae15142cd0bb73c9411f8d91704741ed765dd990e3a8a7db2642",
           "path": "CHANGELOG.md"
         },
         {
@@ -8142,7 +8142,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "8f6ce9499567879f9c0bb782dce8dafad3ea374c4fcd305606a358e8547d247b",
+          "hash": "9207ba26927b08f4e948b54e5d6916d8b8f6f53d3adb6dea3e588115a88253af",
           "path": "Cargo.lock"
         },
         {
@@ -9553,7 +9553,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "01df1621705d40f9638de23ea3f68504cf248898",
+    "commit": "ad88f572b8cd5419729dd30d65e653d7ef2b06fe",
     "tracked": 576
   },
   "landings": [
@@ -10681,11 +10681,11 @@
       "path": "site/tsconfig.json"
     },
     {
-      "hash": "9a3759b99e6cbd302511f162463c71aa7e64170fd86b1cebfb3957a14de80bce",
+      "hash": "ce94f5c1916dd6ae9b668416d45d269961bedd6a7bc59bc4243d35baf7427095",
       "path": "vendor/xrpl-rust/Cargo.toml"
     },
     {
-      "hash": "d94e8adda0909b21c7cc27df9c8ad7c593fd6891f6817adad2d8a490b584898f",
+      "hash": "deb3670943c83535e7fffee1dbc9b38ceb854aed23e5d0ef680cb11c96ec56dc",
       "path": "vendor/xrpl-rust/Cargo.toml.orig"
     },
     {
@@ -10701,7 +10701,7 @@
       "path": "vendor/xrpl-rust/README.md"
     },
     {
-      "hash": "9dbd3d0fefbb7e435aa42265a65737f6a83fdebfed5955c52190611b47382b4e",
+      "hash": "d580acf22011c627d8a5906d2b583eb56bc5b2fb901251e108c4a62b3899e424",
       "path": "vendor/xrpl-rust/VENDORED.md"
     },
     {
