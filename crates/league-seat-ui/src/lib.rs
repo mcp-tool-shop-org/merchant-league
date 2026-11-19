@@ -25,9 +25,9 @@ use alloc::string::String;
 use alloc::vec;
 
 use league_seat_types::{
-    AssetId, CommodityDisplayMap, NUMERAIRE_DISPLAY_LABEL, Seat, SeatKeyCode, SeatKeyEvent,
-    SeatObservation, SeatScreenView, SeatState, TableId, Turn, TurnPhase, ViewAlign, ViewLabel,
-    ViewPanel, ViewRow, ViewportSize,
+    AssetId, CommodityDisplayMap, CurtainPinPrompt, NUMERAIRE_DISPLAY_LABEL, Seat, SeatKeyCode,
+    SeatKeyEvent, SeatObservation, SeatScreenView, SeatState, TableId, Turn, TurnPhase, ViewAlign,
+    ViewLabel, ViewPanel, ViewRow, ViewportSize,
 };
 
 pub use state::{
@@ -116,8 +116,8 @@ pub fn handle_seat_key(
     }
 }
 
-/// Renders the untimed hot-seat Privacy Curtain holding strictly `table_id`, `turn`, `pass`,
-/// and `next_seat`'s guild name until `[Space]` then `[Enter]` confirms.
+/// Renders the hot-seat Privacy Curtain holding strictly `table_id`, `turn`, `pass`,
+/// `next_seat`'s guild name, and any masked PIN prompt until confirmation completes.
 #[must_use]
 pub fn curtain_view(
     table_id: TableId,
@@ -126,8 +126,17 @@ pub fn curtain_view(
     next_seat: Seat,
     viewport: ViewportSize,
     space_armed: bool,
+    pin_prompt: CurtainPinPrompt,
 ) -> SeatScreenView {
-    render::build_curtain_view(table_id, turn, pass, next_seat, viewport, space_armed)
+    render::build_curtain_view(
+        table_id,
+        turn,
+        pass,
+        next_seat,
+        viewport,
+        space_armed,
+        pin_prompt,
+    )
 }
 
 /// Renders a strictly public session-standby view when no human seat controls the keyboard
@@ -139,9 +148,18 @@ pub fn neutral_session_view(
     phase: TurnPhase,
     pass: PassKind,
     quit_requested: bool,
+    halted_on_error: bool,
     viewport: ViewportSize,
 ) -> SeatScreenView {
-    render::build_neutral_session_view(table_id, turn, phase, pass, quit_requested, viewport)
+    render::build_neutral_session_view(
+        table_id,
+        turn,
+        phase,
+        pass,
+        quit_requested,
+        halted_on_error,
+        viewport,
+    )
 }
 
 /// Build one seat's minimal observation view model from [`SeatObservation`] alone.
@@ -237,11 +255,11 @@ mod tests {
         ActiveCharter, ActiveShock, AssetId, AtomicSwapProposal, AuditorShockHint,
         BondSettlementMode, BondSpec, BundleDraftAction, COMMODITY_DISPLAY_CATALOG, CartelDomain,
         CharterRole, CheckStatus, CoalitionReach, CommitmentHash, CommodityDisplayMap,
-        CouncilPlatform, CredOffer, CreditCheck, CreditTier, DualEscrowProposal, DualEscrowVault,
-        EscrowStatus, FillKind, FillRecord, FundamentalParities, GoodScarcity, GradedMandateCard,
-        HoldingMark, IntentPledge, IntentTarget, MandateKind, MarketAction, NUMERAIRE_CODE,
-        NUMERAIRE_DISPLAY_LABEL, OfferSide, PreviewTieMode, PrivateMandate, PublicSweepReceipt,
-        PublicTableSpec, RecipeCover, RefusedActionPreview, RegentDoctrine,
+        CouncilPlatform, CredOffer, CreditCheck, CreditTier, CurtainPinPrompt, DualEscrowProposal,
+        DualEscrowVault, EscrowStatus, FillKind, FillRecord, FundamentalParities, GoodScarcity,
+        GradedMandateCard, HoldingMark, IntentPledge, IntentTarget, MandateKind, MarketAction,
+        NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, OfferSide, PreviewTieMode, PrivateMandate,
+        PublicSweepReceipt, PublicTableSpec, RecipeCover, RefusedActionPreview, RegentDoctrine,
         STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, Seat, SeatCommodityDisplay,
         SeatConfig, SeatIdentity, SeatIntentKind, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
         SeatObservation, SeatObservationPublicParts, SeatSpoilagePreview, SeatState,
@@ -253,7 +271,7 @@ mod tests {
 
     use crate::{
         Action, CenterTab, PassKind, SeatUiState, TITLE_LINES, action_for, curtain_view,
-        format_own_mandate_line, handle_seat_key, neutral_session_view, render_seat,
+        format_own_mandate_line, handle_seat_key, neutral_session_view, render, render_seat,
         render_seat_with_commodities, render_turn_screen, title_view,
     };
 
@@ -597,6 +615,7 @@ mod tests {
             Seat(1),
             ViewportSize::new(100, 30),
             false,
+            CurtainPinPrompt::default(),
         );
         let c_txt = curtain_unarmed.plain_text();
         assert!(c_txt.contains("Table #202611 | Turn 3"));
@@ -610,6 +629,7 @@ mod tests {
             Seat(1),
             ViewportSize::new(100, 30),
             true,
+            CurtainPinPrompt::default(),
         );
         assert!(curtain_armed.plain_text().contains("HAND-OFF ARMED"));
     }
@@ -1353,6 +1373,7 @@ mod tests {
             Seat(1),
             ViewportSize::new(60, 15),
             false,
+            CurtainPinPrompt::default(),
         );
         assert_eq!(small_curtain.layout.mode, ViewLayoutMode::TooSmall);
         for (c, mods, expected_kind) in [
@@ -1628,13 +1649,30 @@ mod tests {
             TurnPhase::AwaitingMandateReveal,
             PassKind::SubPassB,
             false,
+            false,
             vp,
         );
         let n_txt = neutral.plain_text();
         assert!(n_txt.contains("Session Standby"));
         assert!(n_txt.contains("Table #202611 | Turn 4 | Phase: AwaitingMandateReveal"));
+        assert!(n_txt.contains("Season closed — waiting for host post-season step."));
         assert!(!n_txt.contains("Private Vault"));
         assert!(!n_txt.contains("Private Mandate"));
+
+        let halted_neutral = neutral_session_view(
+            TableId(202_611),
+            Turn(4),
+            TurnPhase::Reveal,
+            PassKind::SubPassB,
+            false,
+            true,
+            vp,
+        );
+        assert!(
+            halted_neutral
+                .plain_text()
+                .contains("Pass advance failed — session halted")
+        );
 
         let small_neutral = neutral_session_view(
             TableId(202_611),
@@ -1642,6 +1680,7 @@ mod tests {
             TurnPhase::TalkAndMarket,
             PassKind::SubPassA,
             true,
+            false,
             ViewportSize::new(79, 23),
         );
         assert_eq!(small_neutral.layout.mode, ViewLayoutMode::TooSmall);
@@ -1702,5 +1741,90 @@ mod tests {
             press_ctrl_l.intent.map(|i| i.kind),
             Some(SeatIntentKind::LockAndHandOff)
         );
+    }
+
+    #[test]
+    fn ledger_abbreviations_clock_badge_pin_prompts_and_note_replay_work() {
+        use league_seat_types::{CurtainPinMode, TurnClockDisplay};
+
+        assert_eq!(render::format_ledger_units(15_000, 6), "15000");
+        assert_eq!(render::format_ledger_units(15_000, 4), "15k");
+        assert_eq!(render::format_ledger_units(15_500, 5), "15500");
+        assert_eq!(render::format_ledger_units(15_500_000, 5), "15.5M");
+        assert_eq!(render::format_ledger_units(15_500, 4), "15k+");
+        assert_eq!(render::format_ledger_units(1_234_567, 6), "1.2M+");
+        assert_eq!(render::format_ledger_units(-15_000, 4), "-15k");
+        assert_eq!(render::format_tariff_pair(1_245, 708, 9), "1245/708");
+        assert_eq!(render::format_tariff_pair(1_245, 708, 7), "1k+/708");
+
+        let obs = sample_seat_observation();
+        let mut st = SeatUiState::new();
+        st.set_clock_display(TurnClockDisplay::timed(95, 157));
+        assert_eq!(st.clock_display().remaining_secs, 95);
+        st.apply_note_key(key(SeatKeyCode::Char('A'), SeatKeyModifiers::NONE));
+        st.apply_note_key(key(SeatKeyCode::Char('B'), SeatKeyModifiers::NONE));
+        st.apply_note_key(key(SeatKeyCode::Backspace, SeatKeyModifiers::NONE));
+        assert_eq!(st.notes_draft(), "A");
+
+        let timed_txt = render_turn_screen(
+            &obs,
+            &st,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+        )
+        .plain_text();
+        assert!(timed_txt.contains("Clock: 01:35"));
+
+        let pin_set = curtain_view(
+            TableId(202_611),
+            Turn(1),
+            PassKind::SubPassA,
+            Seat(0),
+            ViewportSize::new(100, 30),
+            true,
+            CurtainPinPrompt {
+                mode: CurtainPinMode::SetInitialPin,
+                entered_count: 2,
+                failed_attempts: 0,
+                locked_out_reset: false,
+            },
+        )
+        .plain_text();
+        assert!(pin_set.contains("SET 4-DIGIT SEAT PIN: [**__]"));
+
+        let pin_verify = curtain_view(
+            TableId(202_611),
+            Turn(2),
+            PassKind::SubPassB,
+            Seat(0),
+            ViewportSize::new(100, 30),
+            true,
+            CurtainPinPrompt {
+                mode: CurtainPinMode::VerifyPin,
+                entered_count: 1,
+                failed_attempts: 1,
+                locked_out_reset: false,
+            },
+        )
+        .plain_text();
+        assert!(pin_verify.contains("ENTER 4-DIGIT SEAT PIN: [*___] (wrong PIN; attempt 2/3)"));
+
+        let pin_locked_out = curtain_view(
+            TableId(202_611),
+            Turn(2),
+            PassKind::SubPassB,
+            Seat(0),
+            ViewportSize::new(100, 30),
+            false,
+            CurtainPinPrompt {
+                mode: CurtainPinMode::Inactive,
+                entered_count: 0,
+                failed_attempts: 0,
+                locked_out_reset: true,
+            },
+        )
+        .plain_text();
+        assert!(pin_locked_out.contains("PIN entry failed 3 times — Curtain re-locked."));
     }
 }

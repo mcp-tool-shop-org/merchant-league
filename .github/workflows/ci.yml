@@ -114,13 +114,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      # Coverage floor 90, the org bar: the scaffold measured 100% (173 of
-      # 173 lines) on 2026-11-14, so the bar is adopted from the start.
-      # Never lowered to make a build green.
+      # Coverage floor 91, raised for Card 5 Part B2a. Never lowered to
+      # make a build green.
       - name: Coverage
         run: |
           command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked --version "0.9.1"
-          cargo llvm-cov --workspace --locked --fail-under-lines 90
+          cargo llvm-cov --workspace --locked --fail-under-lines 91
 
       - name: Testnet only
         run: bash scripts/check-testnet-only.sh

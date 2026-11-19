@@ -5,21 +5,25 @@
 //! seat view-model logic or forbidden engine symbols into `league-tui`.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
 use league_core::{
     AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal,
-    PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, SealedOrderBundle, Seat,
-    SeatIdentity, SeatObservation, StructuredError, TableId, TableSpec, ToStructuredError, Turn,
+    SealedOrderBundle, Seat, SeatObservation, StructuredError, TableId, ToStructuredError, Turn,
     TurnPhase, preview_seat_bundle, preview_what_if, scrub_secret_text,
 };
+#[cfg(test)]
+use league_core::{PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
+use league_core::SeatIdentity;
 use league_gen::{GenError, RingTable, ring_table_to_table_spec};
 use league_seat_types::{
-    CommodityDisplayMap, SeatIntent, SeatIntentKind, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
-    SeatScreenView, ViewAlign, ViewAxis, ViewColor, ViewLayoutMode, ViewPanel, ViewRow,
-    ViewSizeHint, ViewSpan, ViewStyle, ViewTabBar, ViewTable, ViewZoneId, ViewportSize,
-    WhatIfPreview,
+    CommodityDisplayMap, CurtainPinMode, CurtainPinPrompt, SeatIntent, SeatIntentKind, SeatKeyCode,
+    SeatKeyEvent, SeatKeyModifiers, SeatScreenView, TurnClockDisplay, ViewAlign, ViewAxis,
+    ViewColor, ViewLayoutMode, ViewPanel, ViewRow, ViewSizeHint, ViewSpan, ViewStyle, ViewTabBar,
+    ViewTable, ViewZoneId, ViewportSize, WhatIfPreview,
 };
 use league_seat_ui::{PassKind, SeatUiState};
 use ratatui::Frame;
@@ -28,10 +32,55 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table};
 
+/// Post-lift input dead time enforced after any Privacy Curtain unlocks so buffered or
+/// held keystrokes immediately following `[Enter]` do not leak into the arriving seat.
+pub(crate) const CURTAIN_LIFT_DEAD_TIME: Duration = Duration::from_millis(400);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CurtainPinEntry {
+    mode: CurtainPinMode,
+    digits: String,
+    wrong_tries: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CurtainState {
     next_seat: Seat,
     space_armed: bool,
+    pin_entry: Option<CurtainPinEntry>,
+    locked_out_reset: bool,
+}
+
+impl CurtainState {
+    const fn fresh(next_seat: Seat) -> Self {
+        Self {
+            next_seat,
+            space_armed: false,
+            pin_entry: None,
+            locked_out_reset: false,
+        }
+    }
+}
+
+fn strip_terminal_controls(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_control()).collect()
+}
+
+fn clip_text_right(text: &str, max_width: usize) -> String {
+    let sanitized = strip_terminal_controls(text);
+    if max_width == 0 {
+        return String::new();
+    }
+    let count = sanitized.chars().count();
+    if count <= max_width {
+        return sanitized;
+    }
+    if max_width == 1 {
+        return sanitized.chars().take(1).collect();
+    }
+    let mut out: String = sanitized.chars().take(max_width - 1).collect();
+    out.push('~');
+    out
 }
 
 /// Converts a host `crossterm` [`KeyEvent`] into a pure seat key event value, dropping
@@ -181,8 +230,9 @@ fn render_tab_bar(frame: &mut Frame<'_>, area: Rect, tab_bar: &ViewTabBar) -> u1
             } else if !item.enabled {
                 st = st.fg(Color::DarkGray).add_modifier(Modifier::DIM);
             }
-            line_width += chip.chars().count();
-            current.push(Span::styled(chip, st));
+            let safe_chip = strip_terminal_controls(&chip);
+            line_width += safe_chip.chars().count();
+            current.push(Span::styled(safe_chip, st));
         }
     }
 
@@ -225,13 +275,32 @@ fn render_view_table(
         .iter()
         .map(|c| map_constraint(c.width))
         .collect();
+    let table_rect = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: allocated,
+    };
+    let col_rects = Layout::default()
+        .direction(Direction::Horizontal)
+        .spacing(1)
+        .constraints(widths.clone())
+        .split(table_rect);
+    let col_widths: Vec<usize> = col_rects.iter().map(|r| usize::from(r.width)).collect();
+
     let header_cells: Vec<Cell<'_>> = table
         .columns
         .iter()
-        .map(|col| {
+        .enumerate()
+        .map(|(col_idx, col)| {
+            let max_w = col_widths
+                .get(col_idx)
+                .copied()
+                .unwrap_or_else(|| usize::from(area.width));
+            let text = clip_text_right(&col.header.text, max_w);
             Cell::from(
                 Line::from(Span::styled(
-                    col.header.text.as_str(),
+                    text,
                     map_style(col.header.style).add_modifier(Modifier::BOLD),
                 ))
                 .alignment(map_align(col.alignment)),
@@ -249,18 +318,40 @@ fn render_view_table(
             let cells: Vec<Cell<'_>> = row
                 .cells
                 .iter()
-                .map(|cell| {
-                    let spans: Vec<Span<'_>> = cell
+                .enumerate()
+                .map(|(col_idx, cell)| {
+                    let max_w = col_widths
+                        .get(col_idx)
+                        .copied()
+                        .unwrap_or_else(|| usize::from(area.width));
+                    let total_chars: usize = cell
                         .spans
                         .iter()
-                        .map(|sp| {
-                            let mut st = map_style(sp.style);
-                            if selected {
-                                st = st.add_modifier(Modifier::REVERSED);
-                            }
-                            Span::styled(sp.text.as_str(), st)
-                        })
-                        .collect();
+                        .map(|sp| strip_terminal_controls(&sp.text).chars().count())
+                        .sum();
+                    let spans: Vec<Span<'_>> = if total_chars <= max_w {
+                        cell.spans
+                            .iter()
+                            .map(|sp| {
+                                let mut st = map_style(sp.style);
+                                if selected {
+                                    st = st.add_modifier(Modifier::REVERSED);
+                                }
+                                Span::styled(strip_terminal_controls(&sp.text), st)
+                            })
+                            .collect()
+                    } else {
+                        let combined: String =
+                            cell.spans.iter().map(|sp| sp.text.as_str()).collect();
+                        let mut st = cell
+                            .spans
+                            .first()
+                            .map_or_else(Style::default, |sp| map_style(sp.style));
+                        if selected {
+                            st = st.add_modifier(Modifier::REVERSED);
+                        }
+                        vec![Span::styled(clip_text_right(&combined, max_w), st)]
+                    };
                     Cell::from(Line::from(spans).alignment(map_align(cell.alignment)))
                 })
                 .collect();
@@ -272,12 +363,6 @@ fn render_view_table(
         })
         .collect();
     let widget = Table::new(data_rows, widths).header(header);
-    let table_rect = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: allocated,
-    };
     frame.render_widget(widget, table_rect);
     allocated
 }
@@ -292,7 +377,10 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
         }
         let mut block = Block::default().borders(Borders::ALL);
         if let Some(title) = &panel.title {
-            block = block.title(Span::styled(title.text.as_str(), map_style(title.style)));
+            block = block.title(Span::styled(
+                strip_terminal_controls(&title.text),
+                map_style(title.style),
+            ));
         }
         let inner_rect = block.inner(area);
         frame.render_widget(block, area);
@@ -348,7 +436,7 @@ fn render_view_panel(frame: &mut Frame<'_>, area: Rect, panel: &ViewPanel) {
                     if is_selected {
                         st = st.add_modifier(Modifier::REVERSED);
                     }
-                    Span::styled(span.text.as_str(), st)
+                    Span::styled(strip_terminal_controls(&span.text), st)
                 })
                 .collect();
             Line::from(spans)
@@ -369,18 +457,18 @@ fn render_status_line(frame: &mut Frame<'_>, area: Rect, view: &SeatScreenView) 
         alert
             .spans
             .iter()
-            .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
+            .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
             .collect()
     });
     let left_spans: Vec<Span<'_>> = status
         .left
         .iter()
-        .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
+        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
         .collect();
     let right_spans: Vec<Span<'_>> = status
         .right
         .iter()
-        .map(|sp| Span::styled(sp.text.as_str(), map_style(sp.style)))
+        .map(|sp| Span::styled(strip_terminal_controls(&sp.text), map_style(sp.style)))
         .collect();
 
     let lines = if area.height >= 2 {
@@ -495,79 +583,315 @@ fn scrub_engine_error(err: &EngineError) -> StructuredError {
     s
 }
 
-fn deterministic_reveal_salt(table_id: TableId, turn: u8, seat: u8) -> RevealSalt {
-    let mut bytes = [0x5Au8; 32];
-    let tid = table_id.0.to_le_bytes();
-    bytes[0] = turn.max(1);
-    bytes[1] = seat.saturating_add(1);
-    bytes[2] = tid[0] ^ turn ^ 0xA5;
-    bytes[3] = tid[1] ^ seat ^ 0x3C;
-    bytes[31] = (turn.wrapping_add(seat)).max(1);
-    RevealSalt(bytes)
-}
-
 /// Host session bridging a [`ClubHost`] table to seat-isolated `league-seat-ui` views and
 /// executing sequential hot-seat passes (`SubPassA -> begin_cancel_lock -> SubPassB -> Sweep`).
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct TuiHostSession {
     host: ClubHost,
     commodities: Option<CommodityDisplayMap>,
     human_seats: Vec<bool>,
     seat_states: Vec<SeatUiState>,
     pending_bundles: Vec<SealedOrderBundle>,
+    sub_pass_b_committed: Vec<bool>,
+    seat_notes: Vec<String>,
+    seat_pins: Vec<Option<String>>,
+    pins_enabled: bool,
     last_errors: Vec<Option<StructuredError>>,
     pass: PassKind,
     pass_offset: usize,
     curtain: Option<CurtainState>,
     quit_requested: bool,
     advance_halted_error: Option<StructuredError>,
+    autosave_paths: Option<(PathBuf, PathBuf)>,
+    turn_clock_budget_secs: Option<u16>,
+    active_pass_started_at: Option<Duration>,
+    now: Duration,
+    curtain_dead_until: Option<Duration>,
+    pending_scrollback_purge: bool,
+    pending_input_drain: bool,
     #[cfg(test)]
     injected_raw_what_if: Option<WhatIfPreview>,
+    #[cfg(test)]
+    injected_bot_action: Option<MarketAction>,
+    #[cfg(test)]
+    observe_seat_calls: std::cell::Cell<usize>,
 }
 
-#[allow(dead_code)]
 impl TuiHostSession {
-    fn from_host(host: ClubHost, commodities: Option<CommodityDisplayMap>) -> Self {
-        let spec = host.public_spec();
+    fn from_host(
+        host: ClubHost,
+        commodities: Option<CommodityDisplayMap>,
+    ) -> Result<Self, StructuredError> {
+        Self::from_host_with_extra_bot_action(
+            host,
+            commodities,
+            #[cfg(test)]
+            None,
+        )
+    }
+
+    fn from_host_with_extra_bot_action(
+        host: ClubHost,
+        commodities: Option<CommodityDisplayMap>,
+        #[cfg(test)] extra_bot_action: Option<MarketAction>,
+    ) -> Result<Self, StructuredError> {
+        #[cfg(not(test))]
+        let _ = ();
         let n = usize::from(host.seat_count());
+        let spec = host.public_spec();
         let human_seats: Vec<bool> = spec
             .seats
             .iter()
             .map(|cfg| cfg.identity == SeatIdentity::Human)
             .collect();
+        let ckpt = ClubSessionCheckpoint::load_from_host(&host);
+        let pending_bundles = if ckpt.pending_bundles.len() == n {
+            ckpt.pending_bundles
+        } else {
+            vec![SealedOrderBundle::default(); n]
+        };
+        let sub_pass_b_committed = if ckpt.sub_pass_b_committed.len() == n {
+            ckpt.sub_pass_b_committed
+        } else {
+            vec![false; n]
+        };
+        let seat_notes = if ckpt.seat_notes.len() == n {
+            ckpt.seat_notes
+        } else {
+            vec![String::new(); n]
+        };
+        let seat_pins = if ckpt.seat_pins.len() == n {
+            ckpt.seat_pins
+        } else {
+            vec![None; n]
+        };
         let mut session = Self {
             host,
             commodities,
             human_seats,
             seat_states: vec![SeatUiState::new(); n],
-            pending_bundles: vec![SealedOrderBundle::default(); n],
+            pending_bundles,
+            sub_pass_b_committed,
+            seat_notes,
+            seat_pins,
+            pins_enabled: ckpt.pins_enabled,
             last_errors: vec![None; n],
             pass: PassKind::SubPassA,
             pass_offset: 0,
             curtain: None,
             quit_requested: false,
             advance_halted_error: None,
+            autosave_paths: None,
+            turn_clock_budget_secs: None,
+            active_pass_started_at: None,
+            now: Duration::ZERO,
+            curtain_dead_until: None,
+            pending_scrollback_purge: false,
+            pending_input_drain: false,
             #[cfg(test)]
             injected_raw_what_if: None,
+            #[cfg(test)]
+            injected_bot_action: extra_bot_action,
+            #[cfg(test)]
+            observe_seat_calls: std::cell::Cell::new(0),
         };
-        if session.host.phase() == TurnPhase::TalkAndMarket
+        if let Some(cursor) = ckpt.pause_cursor {
+            session.pass = if cursor.sub_pass_b {
+                PassKind::SubPassB
+            } else {
+                PassKind::SubPassA
+            };
+            session.pass_offset = cursor.pass_offset;
+            session.curtain = cursor
+                .curtain_next_seat
+                .map(|s| CurtainState::fresh(Seat(s)));
+            session.pending_scrollback_purge = session.curtain.is_some();
+            if let Some(active) = session.active_human_seat() {
+                session.active_pass_started_at = Some(session.now);
+                session.restore_seat_ui_from_host(active);
+            }
+        } else if session.host.phase() == TurnPhase::TalkAndMarket
             && session.human_seats.iter().any(|&h| h)
         {
-            let _ = session.advance_bots_without_curtain();
+            session.advance_bots_without_curtain()?;
+            if session.active_human_seat().is_some() {
+                session.active_pass_started_at = Some(session.now);
+            }
         }
-        session
+        Ok(session)
+    }
+
+    fn observe_seat_checked(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
+        #[cfg(test)]
+        self.observe_seat_calls
+            .set(self.observe_seat_calls.get().saturating_add(1));
+        self.host.observe_seat(seat)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_observe_seat_calls(&self) {
+        self.observe_seat_calls.set(0);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_seat_call_count(&self) -> usize {
+        self.observe_seat_calls.get()
+    }
+
+    fn pass_budget_secs(&self) -> Option<u16> {
+        let budget_secs = self.turn_clock_budget_secs?;
+        let human_count = u64::try_from(self.human_seats.iter().filter(|&&h| h).count().max(1))
+            .unwrap_or(1);
+        let pct = match self.pass {
+            PassKind::SubPassA => 75_u64,
+            PassKind::SubPassB => 25_u64,
+        };
+        let raw = (u64::from(budget_secs) * pct) / (100 * human_count);
+        Some(u16::try_from(raw.max(1)).unwrap_or(u16::MAX))
+    }
+
+    fn refresh_active_clock_display(&mut self) {
+        let Some(active) = self.active_human_seat() else {
+            return;
+        };
+        let idx = usize::from(active.0);
+        let display = if let Some(budget_secs) = self.pass_budget_secs() {
+            let elapsed_secs = self
+                .active_pass_started_at
+                .map_or(0_u64, |start| self.now.saturating_sub(start).as_secs());
+            let rem = u16::try_from(u64::from(budget_secs).saturating_sub(elapsed_secs))
+                .unwrap_or(0);
+            TurnClockDisplay::timed(rem, budget_secs)
+        } else {
+            TurnClockDisplay::untimed()
+        };
+        self.seat_states[idx].set_clock_display(display);
+    }
+
+    /// Enables timed per-turn budgeting (`Some(180..=300)` seconds split 75%/25% across human
+    /// seats) or disables the countdown clock (`None` for Untimed Hot-Seat).
+    pub(crate) fn configure_turn_clock(&mut self, budget_secs: Option<u16>) {
+        self.turn_clock_budget_secs = budget_secs;
+        if budget_secs.is_some()
+            && self.active_human_seat().is_some()
+            && self.active_pass_started_at.is_none()
+        {
+            self.active_pass_started_at = Some(self.now);
+        }
+        self.refresh_active_clock_display();
+    }
+
+    /// Enables optional 4-digit table-local seat PINs at every Curtain; if the table is on its
+    /// initial Turn-1 human seat with no Curtain yet, opens the Curtain so that seat sets its PIN
+    /// before any seat observation is built.
+    pub(crate) fn enable_seat_pins(&mut self) {
+        self.pins_enabled = true;
+        if self.curtain.is_none()
+            && let Some(active) = self.active_human_seat()
+            && self.seat_pins[usize::from(active.0)].is_none()
+        {
+            self.curtain = Some(CurtainState::fresh(active));
+            self.active_pass_started_at = None;
+            self.curtain_dead_until = None;
+            self.pending_scrollback_purge = true;
+        }
+    }
+
+    fn expire_active_seat_pass(&mut self, seat: Seat) {
+        let idx = usize::from(seat.0);
+        self.seat_notes[idx] = self.seat_states[idx].notes_draft().to_owned();
+        if self.pass == PassKind::SubPassB {
+            let staged_non_empty = self.pending_bundles[idx] != SealedOrderBundle::default();
+            self.sub_pass_b_committed[idx] = staged_non_empty;
+        }
+        self.seat_states[idx].clear_for_hand_off();
+        self.last_errors[idx] = None;
+        self.active_pass_started_at = None;
+        self.pending_scrollback_purge = true;
+        self.pass_offset += 1;
+        if let Err(err) = self.advance_after_human_lock() {
+            self.advance_halted_error = Some(err);
+        }
+    }
+
+    fn curtain_pin_prompt(curtain: &CurtainState) -> CurtainPinPrompt {
+        match &curtain.pin_entry {
+            Some(entry) => CurtainPinPrompt {
+                mode: entry.mode,
+                entered_count: u8::try_from(entry.digits.len()).unwrap_or(4),
+                failed_attempts: entry.wrong_tries,
+                locked_out_reset: curtain.locked_out_reset,
+            },
+            None => CurtainPinPrompt {
+                mode: CurtainPinMode::Inactive,
+                entered_count: 0,
+                failed_attempts: 0,
+                locked_out_reset: curtain.locked_out_reset,
+            },
+        }
+    }
+
+    fn restore_seat_ui_from_host(&mut self, seat: Seat) {
+        let idx = usize::from(seat.0);
+        self.seat_states[idx].clear_for_hand_off();
+        let synced = self.pending_bundles[idx].clone();
+        self.seat_states[idx].set_staged_bundle(synced);
+        let note = self.seat_notes[idx].clone();
+        for ch in note.chars() {
+            self.seat_states[idx].apply_note_key(SeatKeyEvent::new(
+                SeatKeyCode::Char(ch),
+                SeatKeyModifiers::NONE,
+            ));
+        }
+        self.refresh_active_clock_display();
+    }
+
+    fn sync_checkpoint_to_host(&mut self) -> Result<(), StructuredError> {
+        let pause_cursor = (self.host.phase() == TurnPhase::TalkAndMarket).then(|| ClubPauseCursor {
+            sub_pass_b: self.pass == PassKind::SubPassB,
+            pass_offset: self.pass_offset,
+            curtain_next_seat: self.curtain.as_ref().map(|c| c.next_seat.0),
+        });
+        ClubSessionCheckpoint::store_on_host(
+            &mut self.host,
+            ClubSessionCheckpoint {
+                pause_cursor,
+                pending_bundles: self.pending_bundles.clone(),
+                sub_pass_b_committed: self.sub_pass_b_committed.clone(),
+                seat_notes: self.seat_notes.clone(),
+                seat_pins: self.seat_pins.clone(),
+                pins_enabled: self.pins_enabled,
+            },
+        )
+        .map_err(|err| scrub_engine_error(&err))
+    }
+
+    fn maybe_autosave(&mut self) -> Result<(), StructuredError> {
+        if self.is_wedged() {
+            return Ok(());
+        }
+        if let Some((save_path, seal_path)) = self.autosave_paths.clone() {
+            self.write_save_and_seal(&save_path, &seal_path)?;
+        }
+        Ok(())
+    }
+
+    /// Configures automatic `.save.json` / `.seal` checkpointing at every Curtain and Sweep.
+    pub(crate) fn enable_autosave(&mut self, save_path: PathBuf, seal_path: PathBuf) {
+        self.autosave_paths = Some((save_path, seal_path));
     }
 
     /// Bootstraps a Club Mode session on the canonical `TableSpec::standard_club_chiral_ring_with_setup`.
+    #[cfg(test)]
     pub fn from_standard_setup(
         table_id: TableId,
         seat_count: u8,
         layout_seed: u64,
         bot_tie_seed: u64,
-    ) -> Result<Self, EngineError> {
-        let host = ClubHost::from_standard_setup(table_id, seat_count, layout_seed, bot_tie_seed)?;
-        Ok(Self::from_host(host, None))
+    ) -> Result<Self, StructuredError> {
+        let host = ClubHost::from_standard_setup(table_id, seat_count, layout_seed, bot_tie_seed)
+            .map_err(|err| scrub_engine_error(&err))?;
+        Self::from_host(host, None)
     }
 
     /// Promotes a feasibility-checked `SeedPool::Dev` [`RingTable`] into a live Club Mode session
@@ -580,12 +904,14 @@ impl TuiHostSession {
     ) -> Result<Self, GenError> {
         let (spec, cmap, deal, eval_seed) = ring_table_to_table_spec(table, table_id, human_seats)?;
         let host = ClubHost::new(spec, table.seed, deal, eval_seed, bot_tie_seed)
-            .map_err(|err| GenError::InvalidConfig(err.to_string()))?;
-        Ok(Self::from_host(host, Some(cmap.to_display_map())))
+            .map_err(|err| GenError::InvalidConfig(scrub_secret_text(&err.to_string())))?;
+        Self::from_host(host, Some(cmap.to_display_map()))
+            .map_err(|err| GenError::InvalidConfig(scrub_secret_text(&err.to_string())))
     }
 
     /// Creates a Club Mode session from explicit [`TableSpec`], [`SealedMandateDeal`], and
     /// [`SealedEvalSeed`] values for deterministic tests.
+    #[cfg(test)]
     pub fn from_explicit_setup(
         spec: TableSpec,
         layout_seed: u64,
@@ -593,18 +919,63 @@ impl TuiHostSession {
         mandate_deal: SealedMandateDeal,
         eval_seed: SealedEvalSeed,
         bot_tie_seed: u64,
-    ) -> Result<Self, EngineError> {
-        let host = ClubHost::new(spec, layout_seed, mandate_deal, eval_seed, bot_tie_seed)?;
-        Ok(Self::from_host(host, commodities))
+    ) -> Result<Self, StructuredError> {
+        let host = ClubHost::new(spec, layout_seed, mandate_deal, eval_seed, bot_tie_seed)
+            .map_err(|err| scrub_engine_error(&err))?;
+        Self::from_host(host, commodities)
+    }
+
+    /// Advances the monotonic session clock (`elapsed` since session loop start), retires expired
+    /// post-Curtain dead time, updates the active seat's header countdown, and locks timed-out
+    /// human passes through the Privacy Curtain.
+    pub(crate) fn sync_clock(&mut self, elapsed: Duration) {
+        self.now = self.now.max(elapsed);
+        if self.curtain_dead_until.is_some_and(|until| self.now >= until) {
+            self.curtain_dead_until = None;
+        }
+        let Some(active) = self.active_human_seat() else {
+            return;
+        };
+        if let (Some(budget_secs), Some(started_at)) =
+            (self.pass_budget_secs(), self.active_pass_started_at)
+            && self.now.saturating_sub(started_at) >= Duration::from_secs(u64::from(budget_secs))
+        {
+            self.expire_active_seat_pass(active);
+            return;
+        }
+        self.refresh_active_clock_display();
+    }
+
+    /// Advances the session clock by `delta` for deterministic tests.
+    #[cfg(test)]
+    pub fn advance_clock(&mut self, delta: Duration) {
+        self.sync_clock(self.now.saturating_add(delta));
+    }
+
+    /// Consumes a pending terminal scrollback purge request emitted on Curtain open or lift.
+    pub(crate) fn take_scrollback_purge(&mut self) -> bool {
+        std::mem::take(&mut self.pending_scrollback_purge)
+    }
+
+    /// Consumes a pending input-queue drain request emitted right as the Curtain lifts.
+    pub(crate) fn take_input_drain(&mut self) -> bool {
+        std::mem::take(&mut self.pending_input_drain)
+    }
+
+    /// Returns whether the session halted on a pass-advance error.
+    pub(crate) const fn is_wedged(&self) -> bool {
+        self.advance_halted_error.is_some()
     }
 
     /// Returns the number of seats at the table (`4..=6`).
+    #[cfg(test)]
     #[must_use]
     pub const fn seat_count(&self) -> u8 {
         self.host.seat_count()
     }
 
     /// Returns the active turn number (`1..=32`).
+    #[cfg(test)]
     #[must_use]
     pub const fn turn(&self) -> u8 {
         self.host.turn()
@@ -617,12 +988,14 @@ impl TuiHostSession {
     }
 
     /// Returns the active sub-pass (`SubPassA` or `SubPassB`).
+    #[cfg(test)]
     #[must_use]
     pub const fn pass(&self) -> PassKind {
         self.pass
     }
 
     /// Returns whether the Privacy Curtain is currently displayed between seat hand-offs.
+    #[cfg(test)]
     #[must_use]
     pub const fn is_curtain_open(&self) -> bool {
         self.curtain.is_some()
@@ -635,18 +1008,21 @@ impl TuiHostSession {
     }
 
     /// Returns the seat-safe 30-field live [`PublicSweepReceipt`] history.
+    #[cfg(test)]
     #[must_use]
     pub fn public_receipts(&self) -> &[PublicSweepReceipt] {
         self.host.public_receipts()
     }
 
     /// Returns an immutable reference to `seat`'s host-owned [`SeatUiState`].
+    #[cfg(test)]
     #[must_use]
     pub fn seat_ui_state(&self, seat: Seat) -> Option<&SeatUiState> {
         self.seat_states.get(usize::from(seat.0))
     }
 
     /// Returns the pending [`SealedOrderBundle`] staged for `seat`.
+    #[cfg(test)]
     #[must_use]
     pub fn pending_bundle(&self, seat: Seat) -> Option<&SealedOrderBundle> {
         self.pending_bundles.get(usize::from(seat.0))
@@ -658,7 +1034,7 @@ impl TuiHostSession {
     pub fn active_human_seat(&self) -> Option<Seat> {
         if self.curtain.is_some()
             || self.quit_requested
-            || self.advance_halted_error.is_some()
+            || self.is_wedged()
             || self.host.phase() != TurnPhase::TalkAndMarket
         {
             return None;
@@ -673,12 +1049,14 @@ impl TuiHostSession {
 
     /// Builds a single [`SeatObservation`] **by value** for `seat`, carrying strictly `seat`'s
     /// own dealt `PrivateMandate` and never rival seats' mandates or hidden engine state.
+    #[cfg(test)]
     pub fn build_seat_observation(&self, seat: Seat) -> Result<SeatObservation, EngineError> {
         self.host.observe_seat(seat)
     }
 
     /// Builds one [`SeatObservation`] **by value** per seat `0..seat_count` in ascending order,
     /// each carrying strictly that seat's own `PrivateMandate`.
+    #[cfg(test)]
     pub fn build_all_seat_observations(&self) -> Result<Vec<SeatObservation>, EngineError> {
         let count = self.seat_count();
         let mut out = Vec::with_capacity(usize::from(count));
@@ -689,6 +1067,7 @@ impl TuiHostSession {
     }
 
     /// Runs `TalkAndMarket -> Commit -> Reveal -> sweep_turn` atomically on the host.
+    #[cfg(test)]
     pub fn commit_reveal_and_sweep(
         &mut self,
         reveals: &BTreeMap<u8, OrderReveal>,
@@ -697,31 +1076,76 @@ impl TuiHostSession {
         self.host.sweep_turn()
     }
 
-    /// Atomically persists `.save.json` and `.seal` sidecar files on the host.
+    /// Atomically persists `.save.json` and `.seal` sidecar files on the host, refusing wedged
+    /// sessions (`SESSION_WEDGED`).
     pub fn write_save_and_seal(
-        &self,
+        &mut self,
         save_path: &Path,
         seal_path: &Path,
-    ) -> Result<(), EngineError> {
-        self.host.write_save_and_seal(save_path, seal_path)
+    ) -> Result<(), StructuredError> {
+        if self.is_wedged() {
+            return Err(host_error(
+                "SESSION_WEDGED",
+                "refused saving a wedged Club session after a pass advance error",
+                Some("Resume from the last clean Curtain or Sweep autosave."),
+            ));
+        }
+        self.sync_checkpoint_to_host()?;
+        self.host
+            .write_save_and_seal(save_path, seal_path)
+            .map_err(|err| scrub_engine_error(&err))
     }
 
-    /// Reloads a persisted Club Mode host session from `.save.json` and `.seal`.
+    /// Reloads a persisted Club Mode host session from `.save.json` and `.seal`, restoring any
+    /// paused pass/Curtain cursor, uncommitted bundles, private notes, and PIN state.
     pub fn read_save_and_seal(
         save_path: &Path,
         seal_path: &Path,
         commodities: Option<CommodityDisplayMap>,
-    ) -> Result<Self, EngineError> {
-        let host = ClubHost::read_save_and_seal(save_path, seal_path)?;
-        Ok(Self::from_host(host, commodities))
+    ) -> Result<Self, StructuredError> {
+        let host = ClubHost::read_save_and_seal(save_path, seal_path)
+            .map_err(|err| scrub_engine_error(&err))?;
+        Self::from_host(host, commodities)
+    }
+
+    /// Wipes the private `.seal` sidecar cleanly once the season finishes and replay log is
+    /// exported, refusing wedged or in-progress sessions.
+    #[cfg(test)]
+    pub(crate) fn wipe_seal_after_season_export(
+        &self,
+        seal_path: &Path,
+    ) -> Result<(), StructuredError> {
+        if self.is_wedged() {
+            return Err(host_error(
+                "SESSION_WEDGED",
+                "refused wiping .seal for a wedged Club session",
+                Some("Resolve or resume from a clean autosave before wiping .seal."),
+            ));
+        }
+        if self.host.phase() == TurnPhase::TalkAndMarket {
+            return Err(host_error(
+                "SEASON_NOT_FINISHED",
+                "refused wiping .seal while season is still open",
+                None,
+            ));
+        }
+        ClubHost::wipe_seal_file(seal_path).map_err(|err| scrub_engine_error(&err))
     }
 
     /// Wipes a finished `.seal` sidecar cleanly.
+    #[cfg(test)]
     pub fn wipe_seal_file(seal_path: &Path) -> Result<(), EngineError> {
         ClubHost::wipe_seal_file(seal_path)
     }
 
+    /// Returns this table's [`TableId`].
+    #[must_use]
+    pub const fn table_id(&self) -> TableId {
+        self.host.table_id()
+    }
+
     /// Records a scrubbed host-level error banner for the currently active seat.
+    #[cfg(test)]
     pub fn record_scrubbed_host_error(&mut self, code: &'static str, raw_msg: &str) {
         if let Some(active) = self.active_human_seat() {
             self.last_errors[usize::from(active.0)] = Some(host_error(code, raw_msg, None));
@@ -735,24 +1159,15 @@ impl TuiHostSession {
         viewport: ViewportSize,
     ) -> Result<SeatScreenView, EngineError> {
         if let Some(curtain) = &self.curtain {
-            let mut view = league_seat_ui::curtain_view(
+            return Ok(league_seat_ui::curtain_view(
                 self.host.table_id(),
                 Turn(self.host.turn()),
                 self.pass,
                 curtain.next_seat,
                 viewport,
                 curtain.space_armed,
-            );
-            if let Some(err) = &self.advance_halted_error
-                && let Some(status) = &mut view.status_line
-            {
-                let banner = scrub_secret_text(&format!("REFUSED [{}]: {}", err.code, err.message));
-                status.alert = Some(ViewRow::from_spans(vec![ViewSpan::styled(
-                    banner,
-                    ViewStyle::plain().with_fg(ViewColor::Red).bold(),
-                )]));
-            }
-            return Ok(view);
+                Self::curtain_pin_prompt(curtain),
+            ));
         }
         let Some(target_seat) = self.active_human_seat() else {
             let mut view = league_seat_ui::neutral_session_view(
@@ -761,6 +1176,7 @@ impl TuiHostSession {
                 self.host.phase(),
                 self.pass,
                 self.quit_requested,
+                self.is_wedged(),
                 viewport,
             );
             if let Some(err) = &self.advance_halted_error
@@ -774,7 +1190,7 @@ impl TuiHostSession {
             }
             return Ok(view);
         };
-        let obs = self.host.observe_seat(target_seat)?;
+        let obs = self.observe_seat_checked(target_seat)?;
         let idx = usize::from(target_seat.0);
         let mut view = league_seat_ui::render_turn_screen(
             &obs,
@@ -814,6 +1230,67 @@ impl TuiHostSession {
             if key.is_repeat {
                 return Ok(());
             }
+            let next = curtain.next_seat;
+            let next_idx = usize::from(next.0);
+            if let Some(entry) = &mut curtain.pin_entry {
+                match key.code {
+                    SeatKeyCode::Char('c') if key.modifiers.ctrl => {
+                        self.quit_requested = true;
+                    }
+                    SeatKeyCode::Esc => {
+                        curtain.pin_entry = None;
+                        curtain.space_armed = false;
+                        curtain.locked_out_reset = false;
+                    }
+                    SeatKeyCode::Backspace => {
+                        entry.digits.pop();
+                    }
+                    SeatKeyCode::Char(ch)
+                        if ch.is_ascii_digit()
+                            && !key.modifiers.ctrl
+                            && !key.modifiers.alt
+                            && entry.digits.len() < 4 =>
+                    {
+                        entry.digits.push(ch);
+                    }
+                    SeatKeyCode::Enter if entry.digits.len() == 4 => {
+                        let pin_matches_or_set = match entry.mode {
+                            CurtainPinMode::SetInitialPin => {
+                                self.seat_pins[next_idx] = Some(entry.digits.clone());
+                                true
+                            }
+                            CurtainPinMode::VerifyPin => {
+                                self.seat_pins[next_idx].as_deref() == Some(entry.digits.as_str())
+                            }
+                            CurtainPinMode::Inactive => true,
+                        };
+                        if pin_matches_or_set {
+                            let need_autosave = entry.mode == CurtainPinMode::SetInitialPin;
+                            self.curtain = None;
+                            self.active_pass_started_at = Some(self.now);
+                            self.curtain_dead_until =
+                                Some(self.now.saturating_add(CURTAIN_LIFT_DEAD_TIME));
+                            self.pending_input_drain = true;
+                            self.pending_scrollback_purge = true;
+                            self.restore_seat_ui_from_host(next);
+                            if need_autosave {
+                                self.maybe_autosave()?;
+                            }
+                        } else {
+                            entry.digits.clear();
+                            entry.wrong_tries = entry.wrong_tries.saturating_add(1);
+                            if entry.wrong_tries >= 3 {
+                                curtain.pin_entry = None;
+                                curtain.space_armed = false;
+                                curtain.locked_out_reset = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+
             match key.code {
                 SeatKeyCode::Char('c') if key.modifiers.ctrl => {
                     self.quit_requested = true;
@@ -823,19 +1300,43 @@ impl TuiHostSession {
                 }
                 SeatKeyCode::Char(' ') => {
                     curtain.space_armed = true;
+                    curtain.locked_out_reset = false;
                 }
                 SeatKeyCode::Enter if curtain.space_armed => {
-                    let next = curtain.next_seat;
-                    self.curtain = None;
-                    let idx = usize::from(next.0);
-                    let synced = self.pending_bundles[idx].clone();
-                    self.seat_states[idx].set_staged_bundle(synced);
+                    if self.pins_enabled {
+                        let mode = if self.seat_pins[next_idx].is_some() {
+                            CurtainPinMode::VerifyPin
+                        } else {
+                            CurtainPinMode::SetInitialPin
+                        };
+                        curtain.locked_out_reset = false;
+                        curtain.pin_entry = Some(CurtainPinEntry {
+                            mode,
+                            digits: String::new(),
+                            wrong_tries: 0,
+                        });
+                    } else {
+                        self.curtain = None;
+                        self.active_pass_started_at = Some(self.now);
+                        self.curtain_dead_until =
+                            Some(self.now.saturating_add(CURTAIN_LIFT_DEAD_TIME));
+                        self.pending_input_drain = true;
+                        self.pending_scrollback_purge = true;
+                        self.restore_seat_ui_from_host(next);
+                    }
                 }
                 _ => {
                     curtain.space_armed = false;
                 }
             }
             return Ok(());
+        }
+
+        if let Some(until) = self.curtain_dead_until {
+            if self.now < until {
+                return Ok(());
+            }
+            self.curtain_dead_until = None;
         }
 
         let Some(active) = self.active_human_seat() else {
@@ -853,8 +1354,7 @@ impl TuiHostSession {
         let idx = usize::from(active.0);
         self.last_errors[idx] = None;
         let obs = self
-            .host
-            .observe_seat(active)
+            .observe_seat_checked(active)
             .map_err(|err| scrub_engine_error(&err))?;
         let state = self.seat_states[idx].clone();
         let step = league_seat_ui::handle_seat_key(
@@ -867,6 +1367,7 @@ impl TuiHostSession {
         );
         drop(obs);
         self.seat_states[idx] = step.state;
+        self.seat_notes[idx] = self.seat_states[idx].notes_draft().to_owned();
         if let Some(intent) = step.intent
             && let Err(err) = self.apply_seat_intent(active, intent)
         {
@@ -1012,8 +1513,7 @@ impl TuiHostSession {
                     ));
                 }
                 let obs = self
-                    .host
-                    .observe_seat(submitting_seat)
+                    .observe_seat_checked(submitting_seat)
                     .map_err(|err| scrub_engine_error(&err))?;
                 let _preview = preview_seat_bundle(
                     &obs.to_public_preview_state(),
@@ -1047,8 +1547,7 @@ impl TuiHostSession {
                     ));
                 }
                 let obs = self
-                    .host
-                    .observe_seat(submitting_seat)
+                    .observe_seat_checked(submitting_seat)
                     .map_err(|err| scrub_engine_error(&err))?;
                 let mut preview = self.compute_raw_what_if(&obs, &req)?;
                 for refused in &mut preview.refused_market_actions {
@@ -1070,8 +1569,14 @@ impl TuiHostSession {
                 Ok(())
             }
             SeatIntentKind::LockAndHandOff => {
+                self.seat_notes[idx] = self.seat_states[idx].notes_draft().to_owned();
+                if self.pass == PassKind::SubPassB {
+                    self.sub_pass_b_committed[idx] = true;
+                }
                 self.seat_states[idx].clear_for_hand_off();
                 self.last_errors[idx] = None;
+                self.active_pass_started_at = None;
+                self.pending_scrollback_purge = true;
                 self.pass_offset += 1;
                 if let Err(err) = self.advance_after_human_lock() {
                     self.advance_halted_error = Some(err.clone());
@@ -1084,6 +1589,7 @@ impl TuiHostSession {
 
     /// Builds one [`SeatObservation`] **by value** for `seat`, requests the Part A view model, and
     /// draws it onto `frame` via `ratatui`.
+    #[cfg(test)]
     pub fn render_seat_frame(
         &self,
         frame: &mut Frame<'_>,
@@ -1110,6 +1616,12 @@ impl TuiHostSession {
     }
 
     fn run_bot_for_current_pass(&mut self, seat: Seat) -> Result<(), StructuredError> {
+        #[cfg(test)]
+        if let Some(action) = self.injected_bot_action.take() {
+            self.host
+                .apply_market_action(action)
+                .map_err(|err| scrub_engine_error(&err))?;
+        }
         let obs = self
             .host
             .observe_seat(seat)
@@ -1136,7 +1648,9 @@ impl TuiHostSession {
                         .apply_market_action(action)
                         .map_err(|err| scrub_engine_error(&err))?;
                 }
-                self.pending_bundles[usize::from(seat.0)] = bundle;
+                let idx = usize::from(seat.0);
+                self.pending_bundles[idx] = bundle;
+                self.sub_pass_b_committed[idx] = true;
             }
         }
         Ok(())
@@ -1170,10 +1684,11 @@ impl TuiHostSession {
                     host_error("INVALID_OFFSET", "seat offset out of range", None)
                 })?;
                 if self.human_seats[usize::from(seat.0)] {
-                    self.curtain = Some(CurtainState {
-                        next_seat: seat,
-                        space_armed: false,
-                    });
+                    self.curtain = Some(CurtainState::fresh(seat));
+                    self.active_pass_started_at = None;
+                    self.curtain_dead_until = None;
+                    self.pending_scrollback_purge = true;
+                    self.maybe_autosave()?;
                     return Ok(());
                 }
                 self.run_bot_for_current_pass(seat)?;
@@ -1189,18 +1704,16 @@ impl TuiHostSession {
                     self.pass_offset = 0;
                 }
                 PassKind::SubPassB => {
-                    let table_id = self.host.table_id();
-                    let turn = self.host.turn();
                     let mut reveals = BTreeMap::new();
                     for s in 0..self.host.seat_count() {
-                        let bundle = std::mem::take(&mut self.pending_bundles[usize::from(s)]);
-                        reveals.insert(
-                            s,
-                            OrderReveal {
-                                bundle,
-                                salt: deterministic_reveal_salt(table_id, turn, s),
-                            },
-                        );
+                        let idx = usize::from(s);
+                        let committed = std::mem::take(&mut self.sub_pass_b_committed[idx]);
+                        let bundle = std::mem::take(&mut self.pending_bundles[idx]);
+                        if committed {
+                            let salt = ClubSessionCheckpoint::turn_reveal_salt(&self.host, Seat(s))
+                                .map_err(|err| scrub_engine_error(&err))?;
+                            reveals.insert(s, OrderReveal { bundle, salt });
+                        }
                     }
                     self.host
                         .commit_and_reveal_all(&reveals)
@@ -1211,12 +1724,14 @@ impl TuiHostSession {
                     for state in &mut self.seat_states {
                         state.set_staged_bundle(SealedOrderBundle::default());
                     }
-                    if self.host.phase() != TurnPhase::TalkAndMarket {
-                        self.curtain = None;
-                        return Ok(());
-                    }
                     self.pass = PassKind::SubPassA;
                     self.pass_offset = 0;
+                    if self.host.phase() != TurnPhase::TalkAndMarket {
+                        self.curtain = None;
+                        self.maybe_autosave()?;
+                        return Ok(());
+                    }
+                    self.maybe_autosave()?;
                 }
             }
         }
@@ -1441,7 +1956,7 @@ mod tests {
                 vec![format!("CleanCredit >= {min_tier:?}")]
             }
             MandateKind::MinActivePartners { min_partners } => {
-                vec![format!("ActivePartners >={min_partners}")]
+                vec![format!("ActivePartners >= {min_partners}")]
             }
         };
         MandateLeakSpec {
@@ -1491,6 +2006,7 @@ mod tests {
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter",
         );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
     }
 
     fn mandate_short_marker(kind: MandateKind) -> String {
@@ -1523,7 +2039,7 @@ mod tests {
             .iter()
             .map(|d| {
                 let full: String = d.iter().map(|b| format!("{b:02x}")).collect();
-                let short = full.chars().take(16).collect();
+                let short = full.chars().take(8).collect();
                 (full, short)
             })
             .collect();
@@ -1636,6 +2152,13 @@ mod tests {
                 if frame.turn < realize_turn {
                     let tight = format!("{mag_bps}bps");
                     let spaced = format!("{mag_bps} bps");
+                    let pct = format!("{:.2}%", f64::from(mag_bps) / 100.0);
+                    let view_no_closing = frame
+                        .view_text
+                        .replace("35.00% roll each Sweep", "<closing_roll>");
+                    let buf_no_closing = frame
+                        .buffer_text
+                        .replace("35.00% roll each Sweep", "<closing_roll>");
                     if frame.view_text.contains(&tight)
                         || frame.buffer_text.contains(&tight)
                         || frame.view_text.contains(&spaced)
@@ -1643,6 +2166,12 @@ mod tests {
                     {
                         return Err(format!(
                             "Turn {} seat {:?} leaked unrealized shock magnitude `{tight}` (realizes T{realize_turn})",
+                            frame.turn, frame.active_seat
+                        ));
+                    }
+                    if view_no_closing.contains(&pct) || buf_no_closing.contains(&pct) {
+                        return Err(format!(
+                            "Turn {} seat {:?} leaked unrealized shock percentage `{pct}` (realizes T{realize_turn})",
                             frame.turn, frame.active_seat
                         ));
                     }
@@ -2134,6 +2663,7 @@ mod tests {
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter",
         );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
         assert_eq!(session.active_human_seat(), Some(Seat(1)));
 
         for tab_key in ['1', '2', '3'] {
@@ -2258,6 +2788,7 @@ mod tests {
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter",
         );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
         assert_eq!(session.pass(), PassKind::SubPassB);
         must_ok(session.handle_key_event(key('1'), vp), "tab 1");
         must_ok(session.handle_key_event(key(']'), vp), "select CancelOffer");
@@ -2287,6 +2818,7 @@ mod tests {
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter t2",
         );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
         assert_eq!(session.turn(), 2);
         assert_eq!(session.public_receipts().len(), 1);
 
@@ -2451,6 +2983,7 @@ mod tests {
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "curtain enter",
         );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
         assert_eq!(session.active_human_seat(), Some(Seat(1)));
         for tab in ['1', '2', '3'] {
             must_ok(session.handle_key_event(key(tab), vp), "seat 1 tab");
@@ -2785,7 +3318,10 @@ mod tests {
                     s,
                     OrderReveal {
                         bundle: std::mem::take(&mut headless_bundles[usize::from(s)]),
-                        salt: deterministic_reveal_salt(headless.table_id(), turn, s),
+                        salt: must_ok(
+                            ClubSessionCheckpoint::turn_reveal_salt(&headless, Seat(s)),
+                            "headless salt",
+                        ),
                     },
                 );
             }
@@ -3225,6 +3761,7 @@ mod tests {
                 session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
                 "curtain enter",
             );
+            session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
             assert_eq!(session.active_human_seat(), Some(Seat(1)));
             must_ok(session.handle_key_event(key('q'), vp), "seat 1 quit");
             must_ok(
@@ -3253,12 +3790,14 @@ mod tests {
                 session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
                 "enter T1 B",
             );
+            session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
             must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock T1 B");
             must_ok(session.handle_key_event(key(' '), vp), "space T2 A");
             must_ok(
                 session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
                 "enter T2 A",
             );
+            session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
             assert_eq!(session.turn(), 2);
             must_ok(session.handle_key_event(key('q'), vp), "seat 0 quit T2");
             must_ok(
@@ -3313,6 +3852,7 @@ mod tests {
                 session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
                 "enter T1 B",
             );
+            session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
             assert_eq!(session.pass(), PassKind::SubPassB);
             session.pending_bundles[0].contract_deliveries.push(
                 league_seat_types::ContractDeliveryOrder {
@@ -3448,7 +3988,7 @@ mod tests {
             "Turn 1 seat Some(1) buffer leaked seat 0's clipped mandate `MinProjectEquity >=242`"
         );
 
-        // 2. Unrealized shock magnitude plant (`6002bps` before realize_turn = 5).
+        // 2. Unrealized shock magnitude plant (`6002bps` and `60.02%` before realize_turn = 5).
         let err_shock = must_err(
             check_season_leaks(
                 &[CapturedSeasonDraw {
@@ -3469,13 +4009,73 @@ mod tests {
             "Turn 1 seat Some(0) leaked unrealized shock magnitude `6002bps` (realizes T5)"
         );
 
-        // 3. State digest plant (`[0xAB; 32]`).
+        let err_shock_pct = must_err(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 1,
+                    active_seat: Some(0),
+                    view_text: "Shock 60.02%".to_owned(),
+                    buffer_text: "Shock 60.02%".to_owned(),
+                }],
+                &mandates,
+                &[],
+                &[],
+                &[(5, 3, 6_002)],
+            ),
+            "unrealized shock percentage plant must fail",
+        );
+        assert_eq!(
+            err_shock_pct,
+            "Turn 1 seat Some(0) leaked unrealized shock percentage `60.02%` (realizes T5)"
+        );
+
+        // Static Closing Window 35.00% caption is NOT flagged as an unrealized 3500 bps shock.
+        must_ok(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 24,
+                    active_seat: Some(0),
+                    view_text: "Closing Window Active: 35.00% roll each Sweep".to_owned(),
+                    buffer_text: "Closing Window Active: 35.00% roll each Sweep".to_owned(),
+                }],
+                &mandates,
+                &[],
+                &[],
+                &[(26, 25, 3_500)],
+            ),
+            "closing window 35.00% caption must not false-positive",
+        );
+
+        // MinActivePartners rendered token (`ActivePartners >= N`) is caught when leaked to rival seat.
+        let partner_mandate = vec![build_mandate_leak_spec(&league_core::PrivateMandate {
+            kind: MandateKind::MinActivePartners { min_partners: 3 },
+            bonus_equity: 3_000,
+        })];
+        let err_partner = must_err(
+            check_season_leaks(
+                &[CapturedSeasonDraw {
+                    turn: 1,
+                    active_seat: Some(1),
+                    view_text: "ActivePartners >= 3".to_owned(),
+                    buffer_text: "ActivePartners >= 3".to_owned(),
+                }],
+                &partner_mandate,
+                &[],
+                &[],
+                &[],
+            ),
+            "MinActivePartners rendered token must fail",
+        );
+        assert!(err_partner.contains("ActivePartners >= 3"));
+
+        // 3. State digest plant (`[0xAB; 32]`) using an 8-hex-character prefix (`abababab`).
         let planted_digest = [0xAB_u8; 32];
         let digest_prefix: String = planted_digest
             .iter()
-            .take(8)
+            .take(4)
             .map(|b| format!("{b:02x}"))
             .collect();
+        assert_eq!(digest_prefix.len(), 8);
         let err_digest = must_err(
             check_season_leaks(
                 &[CapturedSeasonDraw {
@@ -3489,7 +4089,7 @@ mod tests {
                 &[planted_digest],
                 &[],
             ),
-            "state digest plant must fail",
+            "8-hex state digest prefix plant must fail",
         );
         assert_eq!(
             err_digest,
@@ -3876,5 +4476,821 @@ mod tests {
             assert!(!txt.contains("sEd7N5k8mQp2rT9vW3xY6zA4bC1d"));
             assert!(!txt.contains("sk-proj-secret123"));
         }
+    }
+
+    fn format_expected_ledger_cells(
+        st: &league_seat_types::SeatState,
+        w: u16,
+        h: u16,
+    ) -> (String, String, &'static str, String) {
+        let tier = match st.credit_tier {
+            league_seat_types::CreditTier::Aaa => "Aaa",
+            league_seat_types::CreditTier::Bbb => "Bbb",
+            league_seat_types::CreditTier::B => "B",
+            league_seat_types::CreditTier::D => "D",
+        };
+        let format_units = |v: i64, max_chars: usize| -> String {
+            let exact = v.to_string();
+            if exact.chars().count() <= max_chars {
+                return exact;
+            }
+            let neg = v < 0;
+            let abs = v.unsigned_abs();
+            let sign = if neg { "-" } else { "" };
+            for (div, suffix) in [
+                (1_000_000_000_u64, 'B'),
+                (1_000_000_u64, 'M'),
+                (1_000_u64, 'k'),
+            ] {
+                if abs < div {
+                    continue;
+                }
+                let whole = abs / div;
+                let rem = abs % div;
+                let tenths = (rem * 10) / div;
+                let mut cands = Vec::new();
+                if rem == 0 {
+                    cands.push(format!("{sign}{whole}{suffix}"));
+                } else {
+                    if rem * 10 == tenths * div {
+                        cands.push(format!("{sign}{whole}.{tenths}{suffix}"));
+                    } else {
+                        cands.push(format!("{sign}{whole}.{tenths}{suffix}+"));
+                    }
+                    cands.push(format!("{sign}{whole}{suffix}+"));
+                    cands.push(format!("{sign}{whole}{suffix}"));
+                }
+                for cand in cands {
+                    if cand.chars().count() <= max_chars {
+                        return cand;
+                    }
+                }
+            }
+            exact
+        };
+        let (cw, dw, tw) = if w >= 100 && h >= 30 {
+            if ((usize::from(w) * 30) / 100).saturating_sub(2) >= 34 {
+                (7, 6, 9)
+            } else {
+                (6, 4, 9)
+            }
+        } else {
+            (8, 7, 9)
+        };
+        let cred = format_units(st.cred, cw);
+        let debt = format_units(st.cred_debt, dw);
+        let raw_tar = format!("{}/{}", st.raw_tariff_bps, st.refined_tariff_bps);
+        let tar = if raw_tar.chars().count() <= tw {
+            raw_tar
+        } else {
+            let side = (tw - 1) / 2;
+            format!(
+                "{}/{}",
+                format_units(i64::from(st.raw_tariff_bps), side),
+                format_units(i64::from(st.refined_tariff_bps), side)
+            )
+        };
+        (cred, debt, tier, tar)
+    }
+
+    #[test]
+    fn public_ledger_cells_show_whole_or_abbreviated_values_at_80x24_100x30_and_120x40() {
+        for seat_count in [SeatCount::Four, SeatCount::Six] {
+            let ring = dev_ring_table_for_seats(1, seat_count);
+            let mut session = must_ok(
+                TuiHostSession::from_ring_table(&ring, TableId(81_201), &[0], 71),
+                "session",
+            );
+            // Drive one market trade + Turn 1 sweep so credits, tariffs, and potentially debt
+            // reflect realistic non-zero figures across all seats.
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), ViewportSize::new(100, 30)),
+                "submit default offer",
+            );
+            must_ok(
+                session.handle_key_event(ctrl_key('l'), ViewportSize::new(100, 30)),
+                "lock T1 pass A",
+            );
+            unlock_curtain_and_capture(
+                &mut session,
+                &mut must_ok(Terminal::new(TestBackend::new(100, 30)), "tb"),
+                ViewportSize::new(100, 30),
+                &mut Vec::new(),
+            );
+            must_ok(
+                session.handle_key_event(ctrl_key('l'), ViewportSize::new(100, 30)),
+                "lock T1 pass B",
+            );
+            unlock_curtain_and_capture(
+                &mut session,
+                &mut must_ok(Terminal::new(TestBackend::new(100, 30)), "tb"),
+                ViewportSize::new(100, 30),
+                &mut Vec::new(),
+            );
+
+            let obs = must_ok(session.build_seat_observation(Seat(0)), "seat 0 obs");
+            let mut seat0_100x30_row = None;
+            for (w, h) in [(80_u16, 24_u16), (100, 30), (120, 40)] {
+                let vp = ViewportSize::new(w, h);
+                let mut terminal = must_ok(Terminal::new(TestBackend::new(w, h)), "tb");
+                let mut combined_buf = String::new();
+                if w >= 100 && h >= 30 {
+                    must_ok(
+                        terminal.draw(|f| must_ok(session.render_current_frame(f), "draw wide")),
+                        "draw wide",
+                    );
+                    combined_buf = screen_text(&terminal);
+                    if (w, h) == (100, 30) && seat_count == SeatCount::Four {
+                        seat0_100x30_row = combined_buf
+                            .lines()
+                            .find(|l| l.contains("S0 ") && (l.contains("Aaa") || l.contains("Bbb")))
+                            .map(|l| l.trim().to_owned());
+                    }
+                } else {
+                    // At 80x24 StackedFallback the PublicLedger pane shows 2 table rows per scroll
+                    // step; focus PublicLedger (F6 x 2) and scroll through every seat row.
+                    must_ok(session.handle_key_event(key_code(SeatKeyCode::F(6)), vp), "f6 1");
+                    must_ok(session.handle_key_event(key_code(SeatKeyCode::F(6)), vp), "f6 2");
+                    for _ in 0..obs.seats.len() {
+                        must_ok(
+                            terminal
+                                .draw(|f| must_ok(session.render_current_frame(f), "draw 80x24")),
+                            "draw 80x24",
+                        );
+                        combined_buf.push_str(&screen_text(&terminal));
+                        combined_buf.push('\n');
+                        must_ok(
+                            session.handle_key_event(key_code(SeatKeyCode::Down), vp),
+                            "scroll ledger down",
+                        );
+                    }
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::Home), vp),
+                        "home",
+                    );
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                        "f6 back",
+                    );
+                }
+                assert!(
+                    combined_buf.lines().any(|l| l.contains("S0")),
+                    "{w}x{h} ({seat_count:?}) missing S0 ledger row:\n{combined_buf}"
+                );
+
+                for st in &obs.seats {
+                    let (cred, debt, tier, tar) = format_expected_ledger_cells(st, w, h);
+                    let row_line = combined_buf
+                        .lines()
+                        .find(|l| {
+                            l.contains(&format!("S{} ", st.seat))
+                                && l.contains(tier)
+                                && l.contains(&tar)
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{w}x{h} ({seat_count:?}) missing complete S{} row (expected cred=`{cred}`, debt=`{debt}`, tier=`{tier}`, tar=`{tar}`):\n{combined_buf}",
+                                st.seat
+                            )
+                        });
+                    assert!(
+                        row_line.contains(&cred),
+                        "{w}x{h} ({seat_count:?}) S{} expected cred `{cred}` in row `{row_line}`",
+                        st.seat
+                    );
+                    assert!(
+                        row_line.contains(&debt),
+                        "{w}x{h} ({seat_count:?}) S{} expected debt `{debt}` in row `{row_line}`",
+                        st.seat
+                    );
+                    assert!(
+                        row_line.contains(&tar),
+                        "{w}x{h} ({seat_count:?}) S{} expected tariff `{tar}` in row `{row_line}`",
+                        st.seat
+                    );
+                    // Ensure no truncation drops leading digits on large credit balances.
+                    let full_cred = st.cred.to_string();
+                    if cred == full_cred {
+                        assert!(
+                            row_line.contains(&full_cred),
+                            "{w}x{h} ({seat_count:?}) S{} lost digits from `{full_cred}` in `{row_line}`",
+                            st.seat
+                        );
+                    }
+                }
+            }
+            if seat_count == SeatCount::Four {
+                let captured_row = must_some(seat0_100x30_row, "seat 0 100x30 row");
+                eprintln!("VERIFIED_100X30_SEAT0_ROW={captured_row}");
+            }
+        }
+
+        // Explicitly verify exact 15000 credits and 1245/708 tariff cells from the card brief at
+        // 80x24, 100x30, and 120x40 (even when tariffs/balances sit right on column limits).
+        let ring = dev_ring_table(1);
+        let session = must_ok(
+            TuiHostSession::from_ring_table(&ring, TableId(81_202), &[0], 73),
+            "ring session",
+        );
+        let mut obs = must_ok(session.build_seat_observation(Seat(0)), "obs");
+        obs.seats[0].cred = 15_000;
+        obs.seats[0].cred_debt = 2_450;
+        obs.seats[0].raw_tariff_bps = 1_245;
+        obs.seats[0].refined_tariff_bps = 708;
+        obs.seats[1].cred = 1_500_000;
+        obs.seats[1].cred_debt = 15_000;
+        obs.seats[1].raw_tariff_bps = 500;
+        obs.seats[1].refined_tariff_bps = 250;
+        let state = SeatUiState::new();
+        for (w, h) in [(80_u16, 24_u16), (100, 30), (120, 40)] {
+            let vp = ViewportSize::new(w, h);
+            let view = league_seat_ui::render_turn_screen(
+                &obs,
+                &state,
+                PassKind::SubPassA,
+                None,
+                vp,
+            );
+            let mut terminal = must_ok(Terminal::new(TestBackend::new(w, h)), "tb");
+            must_ok(terminal.draw(|f| draw_screen_view(f, &view)), "draw synthetic");
+            let buf = screen_text(&terminal);
+            assert!(
+                buf.contains("15000"),
+                "{w}x{h} must display whole `15000`:\n{buf}"
+            );
+            assert!(
+                buf.contains("1245/708"),
+                "{w}x{h} must display whole `1245/708`:\n{buf}"
+            );
+            assert!(
+                buf.contains("15k") || buf.contains("15000"),
+                "{w}x{h} must show debt 15000 whole or as unambiguous `15k`:\n{buf}"
+            );
+            assert!(
+                buf.contains("1500k") || buf.contains("1.5M") || buf.contains("1500000"),
+                "{w}x{h} must show 1.5M whole or unambiguous abbreviation:\n{buf}"
+            );
+            assert!(
+                !buf.contains("│ S0   00 ") && !buf.contains("│S0   00 "),
+                "{w}x{h} cut leading digits to `00`:\n{buf}"
+            );
+        }
+    }
+
+    #[test]
+    fn halted_session_shows_accurate_standby_notes_refuses_wedged_save_and_from_host_surfaces_bot_errors()
+    {
+        let vp = ViewportSize::new(100, 30);
+        let ring = dev_ring_table(1);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
+        let (mut session, _, _) =
+            build_explicit_sessions(&ring, TableId(81_203), &[0], deal_seed, [0x77; 32], 75);
+        must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock A");
+        unlock_curtain_and_capture(
+            &mut session,
+            &mut must_ok(Terminal::new(TestBackend::new(100, 30)), "tb"),
+            vp,
+            &mut Vec::new(),
+        );
+        session.pending_bundles[0].contract_deliveries.push(
+            league_seat_types::ContractDeliveryOrder {
+                counterparty: 99,
+                good: AssetId::Raw(0),
+                gross_amount: 100,
+                domain_id: None,
+                dual_escrow_id: None,
+            },
+        );
+        let lock_err = must_err(
+            session.handle_key_event(ctrl_key('l'), vp),
+            "wedging session via invalid delivery counterparty",
+        );
+        assert!(!lock_err.code.is_empty());
+        assert!(session.is_wedged());
+
+        let standby = must_ok(session.build_current_view(vp), "wedged standby");
+        let txt = standby.plain_text();
+        assert!(
+            !txt.contains("bots or sweep idle"),
+            "halted session must not show misleading idle standby note:\n{txt}"
+        );
+        assert!(
+            txt.contains("Pass advance failed") && txt.contains("REFUSED ["),
+            "halted session must describe error standby truthfully:\n{txt}"
+        );
+
+        let dir = std::env::temp_dir().join(format!("ml_wedged_save_{}", std::process::id()));
+        let save_path = dir.join("wedged.save.json");
+        let seal_path = dir.join("wedged.seal");
+        let save_err = must_err(
+            session.write_save_and_seal(&save_path, &seal_path),
+            "wedged session must refuse save",
+        );
+        assert_eq!(save_err.code, "SESSION_WEDGED");
+        assert!(!save_path.exists());
+        assert!(!seal_path.exists());
+
+        // `TuiHostSession::from_host` propagates bot-advance / host startup errors scrubbed instead
+        // of silently discarding with `let _ =`.
+        let ring2 = dev_ring_table(1);
+        let (spec, _, deal, eval_seed) =
+            league_gen::ring_table_to_table_spec(&ring2, TableId(81_204), &[1])
+                .unwrap_or_else(|e| panic!("ring spec: {e}"));
+        let bad_host = ClubHost::new(spec, ring2.seed, deal, eval_seed, 77)
+            .unwrap_or_else(|e| panic!("bad_host: {e}"));
+        let err_from_host = must_err(
+            TuiHostSession::from_host_with_extra_bot_action(
+                bad_host,
+                None,
+                Some(MarketAction::CancelOffer {
+                    seat: 0,
+                    offer_id: 999_999,
+                }),
+            ),
+            "from_host must preserve bot/host advance error",
+        );
+        assert_eq!(err_from_host.code, "UNKNOWN_OBJECT");
+    }
+
+    #[test]
+    fn mid_turn_save_and_resume_at_curtains_matches_uninterrupted_receipts_keeps_secrets_in_seal_and_wipes_seal()
+    {
+        let vp = ViewportSize::new(100, 30);
+        let ring = dev_ring_table(1);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1, 2]);
+        let salts: Vec<RevealSalt> = (0..ring.seat_count.as_u8())
+            .map(|i| RevealSalt([0x31_u8.wrapping_add(i); 32]))
+            .collect();
+        let seed_eval = must_ok(SealedEvalSeed::try_from_bytes([0x61; 32]), "eval seed");
+        let (spec, cmap, deal, eval_seed) = ring_table_to_table_spec_with_explicit_entropy(
+            &ring,
+            TableId(81_401),
+            &[0, 1, 2],
+            deal_seed,
+            &salts,
+            seed_eval,
+        )
+        .unwrap_or_else(|e| panic!("ring spec: {e}"));
+
+        // 1. Baseline uninterrupted run across 3 human seats + 1 bot (`Seat(3)`).
+        let mut baseline = must_ok(
+            TuiHostSession::from_explicit_setup(
+                spec.clone(),
+                ring.seed,
+                Some(cmap.to_display_map()),
+                deal.clone(),
+                eval_seed.clone(),
+                83,
+            ),
+            "baseline",
+        );
+        let mut term = must_ok(Terminal::new(TestBackend::new(100, 30)), "tb");
+
+        // Sub-Pass A Seat 0 -> post default offer + private note -> Lock -> Seat 1 -> Lock -> Seat 2 Curtain.
+        type_text_in_mode(&mut baseline, 'n', "NOTE_S0_SECRET_771", vp);
+        must_ok(
+            baseline.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "baseline s0 offer",
+        );
+        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s0 lock");
+        unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
+        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s1 lock");
+        unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
+        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s2 lock");
+        // Now at Turn 1 Sub-Pass B Seat 0 Curtain.
+        unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
+        assert_eq!(baseline.pass(), PassKind::SubPassB);
+        assert_eq!(baseline.active_human_seat(), Some(Seat(0)));
+        must_ok(
+            baseline.apply_seat_intent(
+                Seat(0),
+                SeatIntent::update_bundle(BundleDraftAction::SetDebtRepaymentCred(731)),
+            ),
+            "baseline s0 debt bundle",
+        );
+        must_ok(
+            baseline.handle_key_event(ctrl_key('l'), vp),
+            "baseline s0 lock B",
+        );
+        // Now at Turn 1 Sub-Pass B Seat 1 Curtain -> unlock & finish rest of season cleanly.
+        while baseline.phase() == TurnPhase::TalkAndMarket {
+            unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
+            if baseline.active_human_seat().is_some() {
+                must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline lock");
+            }
+        }
+        assert_eq!(baseline.phase(), TurnPhase::AwaitingMandateReveal);
+
+        // 2. Paused run: enable autosave, pause at Sub-Pass A Seat 2 Curtain, resume, then pause at
+        // Sub-Pass B Seat 1 Curtain, resume, and drive to season close.
+        let dir = std::env::temp_dir().join(format!("ml_partB2a_resume_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let save_path = dir.join("club-81401.save.json");
+        let seal_path = dir.join("club-81401.seal");
+
+        let mut run1 = must_ok(
+            TuiHostSession::from_explicit_setup(
+                spec,
+                ring.seed,
+                Some(cmap.to_display_map()),
+                deal,
+                eval_seed,
+                83,
+            ),
+            "run1",
+        );
+        run1.enable_autosave(save_path.clone(), seal_path.clone());
+        type_text_in_mode(&mut run1, 'n', "NOTE_S0_SECRET_771", vp);
+        must_ok(
+            run1.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "run1 s0 offer",
+        );
+        must_ok(run1.handle_key_event(ctrl_key('l'), vp), "run1 s0 lock A");
+        unlock_curtain_and_capture(&mut run1, &mut term, vp, &mut Vec::new());
+        must_ok(run1.handle_key_event(ctrl_key('l'), vp), "run1 s1 lock A");
+        // Paused right at Sub-Pass A Seat 2 Curtain (`pass_offset == 2`).
+        assert!(run1.is_curtain_open());
+        assert_eq!(run1.pass(), PassKind::SubPassA);
+        assert!(save_path.exists() && seal_path.exists());
+
+        let save1_txt = std::fs::read_to_string(&save_path)
+            .unwrap_or_else(|e| panic!("read save1: {e}"));
+        let seal1_txt = std::fs::read_to_string(&seal_path)
+            .unwrap_or_else(|e| panic!("read seal1: {e}"));
+        assert!(!save1_txt.contains("NOTE_S0_SECRET_771"));
+        assert!(seal1_txt.contains("NOTE_S0_SECRET_771"));
+
+        let mut run2 = must_ok(
+            TuiHostSession::read_save_and_seal(&save_path, &seal_path, Some(cmap.to_display_map())),
+            "resume at Pass A Seat 2 Curtain",
+        );
+        run2.enable_autosave(save_path.clone(), seal_path.clone());
+        assert_eq!(run2.turn(), 1);
+        assert_eq!(run2.pass(), PassKind::SubPassA);
+        assert!(run2.is_curtain_open());
+        unlock_curtain_and_capture(&mut run2, &mut term, vp, &mut Vec::new());
+        assert_eq!(run2.active_human_seat(), Some(Seat(2)));
+        must_ok(run2.handle_key_event(ctrl_key('l'), vp), "run2 s2 lock A");
+
+        // Now in Sub-Pass B Seat 0 Curtain -> unlock Seat 0 -> verify note replayed + stage 731.
+        unlock_curtain_and_capture(&mut run2, &mut term, vp, &mut Vec::new());
+        assert_eq!(run2.pass(), PassKind::SubPassB);
+        assert_eq!(run2.active_human_seat(), Some(Seat(0)));
+        assert_eq!(
+            must_some(run2.seat_ui_state(Seat(0)), "s0 ui").notes_draft(),
+            "NOTE_S0_SECRET_771",
+            "Seat 0 private note must survive hand-offs and save/resume via .seal"
+        );
+        must_ok(
+            run2.apply_seat_intent(
+                Seat(0),
+                SeatIntent::update_bundle(BundleDraftAction::SetDebtRepaymentCred(731)),
+            ),
+            "run2 s0 debt bundle",
+        );
+        must_ok(run2.handle_key_event(ctrl_key('l'), vp), "run2 s0 lock B");
+        // Now paused at Sub-Pass B Seat 1 Curtain! Autosave ran when Curtain opened.
+        assert_eq!(run2.pass(), PassKind::SubPassB);
+        assert!(run2.is_curtain_open());
+
+        let save2_txt = std::fs::read_to_string(&save_path)
+            .unwrap_or_else(|e| panic!("read save2: {e}"));
+        let seal2_txt = std::fs::read_to_string(&seal_path)
+            .unwrap_or_else(|e| panic!("read seal2: {e}"));
+        let s0_mandate_dbg = format!(
+            "{:?}",
+            must_some(run2.build_seat_observation(Seat(0)).ok().and_then(|o| o.own_mandate().copied()), "s0 m")
+        );
+        let _ = &s0_mandate_dbg;
+        assert!(!save2_txt.contains("NOTE_S0_SECRET_771"));
+        assert!(!save2_txt.contains("731"));
+        assert!(!save2_txt.contains("debt_repayment_cred"));
+        assert!(!save2_txt.contains("sealed_mandate_deal"));
+        assert!(!save2_txt.contains("seat_reveals"));
+        assert!(!save2_txt.contains("mandate_commits"));
+        assert!(!save2_txt.contains("mandate_reveals"));
+        assert!(!save2_txt.contains("vrf_proofs"));
+        assert!(!save2_txt.contains("current_turn_salts"));
+        assert!(seal2_txt.contains("NOTE_S0_SECRET_771"));
+        assert!(seal2_txt.contains("731"));
+        assert!(seal2_txt.contains("sealed_mandate_deal"));
+
+        let mut run3 = must_ok(
+            TuiHostSession::read_save_and_seal(&save_path, &seal_path, Some(cmap.to_display_map())),
+            "resume at Pass B Seat 1 Curtain",
+        );
+        run3.enable_autosave(save_path.clone(), seal_path.clone());
+        assert_eq!(run3.turn(), 1);
+        assert_eq!(run3.pass(), PassKind::SubPassB);
+        assert!(run3.is_curtain_open());
+        assert_eq!(
+            must_some(run3.pending_bundle(Seat(0)), "s0 staged bundle").debt_repayment_cred,
+            731
+        );
+        // Active season cannot wipe `.seal`.
+        let active_wipe_err = must_err(
+            run3.wipe_seal_after_season_export(&seal_path),
+            "cannot wipe .seal mid-season",
+        );
+        assert_eq!(active_wipe_err.code, "SEASON_NOT_FINISHED");
+
+        while run3.phase() == TurnPhase::TalkAndMarket {
+            unlock_curtain_and_capture(&mut run3, &mut term, vp, &mut Vec::new());
+            if run3.active_human_seat().is_some() {
+                must_ok(run3.handle_key_event(ctrl_key('l'), vp), "run3 lock");
+            }
+        }
+        assert_eq!(run3.phase(), TurnPhase::AwaitingMandateReveal);
+        assert_eq!(
+            run3.public_receipts(),
+            baseline.public_receipts(),
+            "mid-turn paused/resumed season must produce byte-identical PublicSweepReceipts"
+        );
+
+        must_ok(
+            run3.wipe_seal_after_season_export(&seal_path),
+            "wipe .seal after season close/export",
+        );
+        assert!(!seal_path.exists(), ".seal must be deleted after season export");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commit_salts_draw_from_sealed_entropy_differ_across_identical_public_tables_stay_out_of_save_json_and_replay_verifies()
+    {
+        let ring = dev_ring_table(1);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
+        let salts: Vec<RevealSalt> = (0..ring.seat_count.as_u8())
+            .map(|i| RevealSalt([0x21_u8.wrapping_add(i); 32]))
+            .collect();
+        let seed_eval = must_ok(SealedEvalSeed::try_from_bytes([0x55; 32]), "eval seed");
+        let (spec, _, deal, eval_seed) = ring_table_to_table_spec_with_explicit_entropy(
+            &ring,
+            TableId(81_402),
+            &[0],
+            deal_seed,
+            &salts,
+            seed_eval,
+        )
+        .unwrap_or_else(|e| panic!("ring spec: {e}"));
+
+        let mut session_a = must_ok(
+            TuiHostSession::from_explicit_setup(
+                spec.clone(),
+                ring.seed,
+                None,
+                deal.clone(),
+                eval_seed.clone(),
+                91,
+            ),
+            "session A",
+        );
+        let session_b = must_ok(
+            TuiHostSession::from_explicit_setup(spec, ring.seed, None, deal, eval_seed, 91),
+            "session B",
+        );
+
+        let salt_a = must_ok(
+            ClubSessionCheckpoint::turn_reveal_salt(&session_a.host, Seat(0)),
+            "salt A",
+        );
+        let salt_b = must_ok(
+            ClubSessionCheckpoint::turn_reveal_salt(&session_b.host, Seat(0)),
+            "salt B",
+        );
+        assert_ne!(salt_a, RevealSalt([0u8; 32]));
+        assert_ne!(salt_b, RevealSalt([0u8; 32]));
+        assert_ne!(
+            salt_a, salt_b,
+            "identical public tables must draw independent commit salts from .seal entropy"
+        );
+
+        let salt_a_hex: String = salt_a.0.iter().map(|b| format!("{b:02x}")).collect();
+        let dir = std::env::temp_dir().join(format!("ml_salt_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let save_path = dir.join("salt.save.json");
+        let seal_path = dir.join("salt.seal");
+        must_ok(
+            session_a.write_save_and_seal(&save_path, &seal_path),
+            "save salt table",
+        );
+        let save_txt = std::fs::read_to_string(&save_path)
+            .unwrap_or_else(|e| panic!("read salt save: {e}"));
+        let seal_txt = std::fs::read_to_string(&seal_path)
+            .unwrap_or_else(|e| panic!("read salt seal: {e}"));
+        assert!(
+            seal_txt.contains(&salt_a_hex),
+            "sealed turn reveal salt hex must be persisted in .seal"
+        );
+        assert!(
+            !save_txt.contains(&salt_a_hex),
+            "commit salt hex must never appear in .save.json"
+        );
+
+        // Drive session A to season close and verify replay log verifies cleanly.
+        let vp = ViewportSize::new(100, 30);
+        let mut term = must_ok(Terminal::new(TestBackend::new(100, 30)), "tb");
+        while session_a.phase() == TurnPhase::TalkAndMarket {
+            unlock_curtain_and_capture(&mut session_a, &mut term, vp, &mut Vec::new());
+            if session_a.active_human_seat().is_some() {
+                must_ok(session_a.handle_key_event(ctrl_key('l'), vp), "lock");
+            }
+        }
+        let (board, log, _, _) =
+            must_ok(session_a.host.finalize_club_season(), "finalize club season");
+        let replayed = must_ok(league_core::replay_season(&log), "replay_season");
+        assert_eq!(replayed.scoreboard, board);
+        assert!(!log.turns.is_empty());
+        assert_eq!(
+            log.turns[0].reveals.get(&0).map(|r| r.salt.clone()),
+            Some(salt_a),
+            "Turn 1 reveal salt must match .seal-derived salt"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn optional_seat_pins_never_echo_build_zero_observations_on_wrong_tries_return_to_curtain_on_third_miss_and_stay_in_seal_only()
+    {
+        let vp = ViewportSize::new(100, 30);
+        let ring = dev_ring_table(1);
+        let dir = std::env::temp_dir().join(format!("ml_pins_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let save_path = dir.join("club-81501.save.json");
+        let seal_path = dir.join("club-81501.seal");
+
+        let mut session = must_ok(
+            TuiHostSession::from_ring_table(&ring, TableId(81_501), &[0, 1], 97),
+            "pins session",
+        );
+        session.enable_autosave(save_path.clone(), seal_path.clone());
+        session.enable_seat_pins();
+
+        let mut term = must_ok(Terminal::new(TestBackend::new(100, 30)), "tb");
+        assert!(
+            session.is_curtain_open(),
+            "first seat must open at Curtain to set its PIN before any observation is built"
+        );
+        session.reset_observe_seat_calls();
+
+        // Arm Seat 0's Curtain and set PIN `"4829"`. Verify digits never echo in the buffer.
+        must_ok(session.handle_key_event(key(' '), vp), "arm s0 curtain");
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "open s0 pin prompt",
+        );
+        for d in ['4', '8', '2', '9'] {
+            must_ok(session.handle_key_event(key(d), vp), "type s0 pin digit");
+            must_ok(
+                term.draw(|f| must_ok(session.render_current_frame(f), "draw pin entry")),
+                "draw pin entry",
+            );
+            let buf = screen_text(&term);
+            assert!(
+                !buf.contains("4829"),
+                "PIN digits must never echo in Curtain buffer:\n{buf}"
+            );
+        }
+        assert!(
+            screen_text(&term).contains("[****]"),
+            "Curtain must show 4 masked stars while digits stay hidden"
+        );
+        assert_eq!(
+            session.observe_seat_call_count(),
+            0,
+            "setting Curtain PIN must build zero SeatObservations before Enter completes"
+        );
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "confirm s0 pin",
+        );
+        assert!(!session.is_curtain_open());
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        let obs0 = must_ok(session.build_seat_observation(Seat(0)), "s0 obs");
+        let s0_mandate = mandate_short_marker(must_some(obs0.own_mandate(), "s0 mandate").kind);
+        let s0_mandate_clip: String = s0_mandate.chars().take(20).collect();
+
+        // Lock Seat 0 -> Seat 1 sets its PIN `"7135"`.
+        must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock s0 pass A");
+        must_ok(session.handle_key_event(key(' '), vp), "arm s1 curtain");
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "open s1 pin",
+        );
+        for d in ['7', '1', '3', '5'] {
+            must_ok(session.handle_key_event(key(d), vp), "type s1 pin");
+        }
+        must_ok(
+            term.draw(|f| must_ok(session.render_current_frame(f), "draw s1 pin")),
+            "draw s1 pin",
+        );
+        assert!(!screen_text(&term).contains("7135"));
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "confirm s1 pin",
+        );
+        session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+
+        // Verify `.save.json` contains neither PIN while `.seal` holds both PINs.
+        let save_txt = std::fs::read_to_string(&save_path)
+            .unwrap_or_else(|e| panic!("read pin save: {e}"));
+        let seal_txt = std::fs::read_to_string(&seal_path)
+            .unwrap_or_else(|e| panic!("read pin seal: {e}"));
+        assert!(!save_txt.contains("4829") && !save_txt.contains("7135"));
+        assert!(!save_txt.contains("session_seat_pins"));
+        assert!(seal_txt.contains("4829") && seal_txt.contains("7135"));
+
+        // Seat 1 locks Pass A -> Pass B opens Curtain for Seat 0 (`VerifyPin`).
+        must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock s1 pass A");
+        assert!(session.is_curtain_open());
+        assert_eq!(session.pass(), PassKind::SubPassB);
+
+        // Reset observation counter: 3 wrong PIN attempts must build ZERO observations and return
+        // to the unarmed Curtain after the 3rd miss.
+        session.reset_observe_seat_calls();
+        must_ok(session.handle_key_event(key(' '), vp), "arm s0 pass B");
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "enter verify pin",
+        );
+        for bad_pin in ["0001", "0002", "0003"] {
+            for ch in bad_pin.chars() {
+                must_ok(session.handle_key_event(key(ch), vp), "type wrong pin");
+            }
+            must_ok(
+                session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                "submit wrong pin",
+            );
+            must_ok(
+                term.draw(|f| must_ok(session.render_current_frame(f), "draw after wrong pin")),
+                "draw after wrong pin",
+            );
+            let buf = screen_text(&term);
+            assert!(
+                !buf.contains(bad_pin),
+                "wrong PIN digits must never appear in buffer:\n{buf}"
+            );
+            assert!(
+                !buf.contains(&s0_mandate_clip) && !buf.contains("Private Mandate"),
+                "wrong PIN try must leak zero seat private data:\n{buf}"
+            );
+            assert_eq!(
+                session.observe_seat_call_count(),
+                0,
+                "wrong PIN `{bad_pin}` must build zero SeatObservations"
+            );
+            assert!(session.is_curtain_open());
+        }
+        let reset_buf = screen_text(&term);
+        assert!(
+            reset_buf.contains("PIN entry failed 3 times"),
+            "3rd wrong PIN must reset back to unarmed Curtain notice:\n{reset_buf}"
+        );
+        // After 3rd miss, Curtain is unarmed (typing `Enter` or digits directly does not unlock).
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "unarmed enter stays on Curtain",
+        );
+        assert!(session.is_curtain_open());
+        assert_eq!(session.observe_seat_call_count(), 0);
+
+        // Saving/resuming at this Curtain retains `.seal` PINs and enforces `VerifyPin` on resume.
+        must_ok(session.write_save_and_seal(&save_path, &seal_path), "save with pin");
+        let mut resumed_pin_session = must_ok(
+            TuiHostSession::read_save_and_seal(&save_path, &seal_path, None),
+            "resume pin session",
+        );
+        resumed_pin_session.reset_observe_seat_calls();
+        must_ok(resumed_pin_session.handle_key_event(key(' '), vp), "re-arm resumed after 3-miss");
+        must_ok(
+            resumed_pin_session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "re-open verify pin",
+        );
+        for ch in "4829".chars() {
+            must_ok(resumed_pin_session.handle_key_event(key(ch), vp), "type correct pin");
+        }
+        must_ok(
+            resumed_pin_session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "submit correct pin",
+        );
+        assert!(!resumed_pin_session.is_curtain_open());
+        resumed_pin_session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
+        must_ok(
+            term.draw(|f| must_ok(resumed_pin_session.render_current_frame(f), "draw unlocked s0")),
+            "draw unlocked s0",
+        );
+        assert!(
+            resumed_pin_session.observe_seat_call_count() >= 1,
+            "correct PIN unlock must build active SeatObservation"
+        );
+        let unlocked_buf = screen_text(&term);
+        assert!(
+            unlocked_buf.contains("Seat 0 Private Vault") && unlocked_buf.contains(&s0_mandate_clip),
+            "unlocked Seat 0 must display own private vault:\n{unlocked_buf}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

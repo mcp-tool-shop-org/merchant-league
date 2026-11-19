@@ -14,12 +14,13 @@ use std::io::{ErrorKind, Write as _};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::commit::{
     CommitmentHash, CouncilPlatform, EVAL_VRF_PROOF_BYTES, IntentPledge, MandateReveal,
     OrderReveal, PrivateMandate, RevealSalt, SealedEvalSeed, SealedMandateDeal, SealedOrderBundle,
-    compute_mandate_commitment, compute_order_commitment, verify_and_extract_eval_vrf_beacon,
-    verify_sealed_mandate_deal,
+    compute_mandate_commitment, compute_order_commitment, draw_nonzero_256_bits,
+    verify_and_extract_eval_vrf_beacon, verify_sealed_mandate_deal,
 };
 use crate::contracts::{
     ActiveCharter, CartelDomain, CredOffer, CreditCheck, DualEscrowVault, FillRecord, MarketAction,
@@ -129,6 +130,145 @@ pub struct ClubSaveSnapshot {
     pub public_receipts: Vec<PublicSweepReceipt>,
 }
 
+/// Sub-pass and Privacy Curtain resume cursor persisted solely inside `.seal`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClubPauseCursor {
+    /// `true` when paused inside `SubPassB`; `false` when paused inside `SubPassA`.
+    pub sub_pass_b: bool,
+    /// Active seat offset (`0..seat_count`) inside the rotating pass order.
+    pub pass_offset: usize,
+    /// Next human seat behind the Privacy Curtain if a Curtain hand-off screen is open.
+    pub curtain_next_seat: Option<u8>,
+}
+
+/// Private hot-seat session checkpoint stored exclusively inside the `.seal` sidecar.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClubSessionCheckpoint {
+    /// Saved mid-turn pause cursor (`None` when outside an interactive TUI pause).
+    pub pause_cursor: Option<ClubPauseCursor>,
+    /// Per-seat uncommitted Phase-2 bundles queued prior to commit/reveal.
+    pub pending_bundles: Vec<SealedOrderBundle>,
+    /// Per-seat `SubPassB` explicit commit flags (distinguishes locked vs timed-out idle seats).
+    pub sub_pass_b_committed: Vec<bool>,
+    /// Per-seat private scratch notes, held strictly out of `.save.json`.
+    pub seat_notes: Vec<String>,
+    /// Optional per-seat 4-digit table-local Curtain PINs, held strictly out of `.save.json`.
+    pub seat_pins: Vec<Option<String>>,
+    /// Whether optional table-local 4-digit Curtain PINs are enabled for this table.
+    pub pins_enabled: bool,
+}
+
+impl ClubSessionCheckpoint {
+    /// Returns the `.seal`-derived Phase-2 commit salt for `seat` on the host's active turn.
+    pub fn turn_reveal_salt(host: &ClubHost, seat: Seat) -> Result<RevealSalt, EngineError> {
+        host.current_turn_salts
+            .get(usize::from(seat.0))
+            .cloned()
+            .ok_or(EngineError::InvalidSeat(seat.0))
+    }
+
+    /// Validates and stages `checkpoint` on `host` so subsequent `write_save_and_seal` writes it
+    /// into `.seal` (and never `.save.json`).
+    pub fn store_on_host(host: &mut ClubHost, checkpoint: Self) -> Result<(), EngineError> {
+        let n = usize::from(host.seat_count());
+        validate_checkpoint_shapes(n, &checkpoint)?;
+        host.session_pause_cursor = checkpoint.pause_cursor;
+        host.session_pending_bundles = normalize_vec_len(checkpoint.pending_bundles, n);
+        host.session_sub_pass_b_committed = normalize_vec_len(checkpoint.sub_pass_b_committed, n);
+        host.session_seat_notes = normalize_vec_len(checkpoint.seat_notes, n);
+        host.session_seat_pins = normalize_vec_len(checkpoint.seat_pins, n);
+        host.session_pins_enabled = checkpoint.pins_enabled;
+        Ok(())
+    }
+
+    /// Reads the persisted checkpoint state from a freshly loaded [`ClubHost`].
+    #[must_use]
+    pub fn load_from_host(host: &ClubHost) -> Self {
+        Self {
+            pause_cursor: host.session_pause_cursor.clone(),
+            pending_bundles: host.session_pending_bundles.clone(),
+            sub_pass_b_committed: host.session_sub_pass_b_committed.clone(),
+            seat_notes: host.session_seat_notes.clone(),
+            seat_pins: host.session_seat_pins.clone(),
+            pins_enabled: host.session_pins_enabled,
+        }
+    }
+}
+
+fn validate_pin_format(pin: &str) -> bool {
+    pin.len() == 4 && pin.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn normalize_vec_len<T: Default>(mut v: Vec<T>, n: usize) -> Vec<T> {
+    if v.is_empty() {
+        v.resize_with(n, T::default);
+    }
+    v
+}
+
+fn validate_checkpoint_shapes(
+    seat_count: usize,
+    checkpoint: &ClubSessionCheckpoint,
+) -> Result<(), EngineError> {
+    if let Some(cursor) = &checkpoint.pause_cursor {
+        if cursor.pass_offset > seat_count {
+            return Err(EngineError::InvalidConfig(format!(
+                "Club checkpoint pass_offset {} exceeds seat_count {seat_count}",
+                cursor.pass_offset
+            )));
+        }
+        if let Some(next_seat) = cursor.curtain_next_seat
+            && usize::from(next_seat) >= seat_count
+        {
+            return Err(EngineError::InvalidSeat(next_seat));
+        }
+    }
+    for (name, len) in [
+        ("pending_bundles", checkpoint.pending_bundles.len()),
+        ("sub_pass_b_committed", checkpoint.sub_pass_b_committed.len()),
+        ("seat_notes", checkpoint.seat_notes.len()),
+        ("seat_pins", checkpoint.seat_pins.len()),
+    ] {
+        if len != 0 && len != seat_count {
+            return Err(EngineError::InvalidConfig(format!(
+                "Club checkpoint {name} length {len} does not match seat_count {seat_count}"
+            )));
+        }
+    }
+    for pin_opt in &checkpoint.seat_pins {
+        if let Some(pin) = pin_opt
+            && !validate_pin_format(pin)
+        {
+            return Err(EngineError::InvalidConfig(
+                "Club checkpoint PIN must be exactly 4 ASCII digits".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn derive_turn_commit_salts(
+    entropy: &RevealSalt,
+    table_id: TableId,
+    turn: u8,
+    seat_count: u8,
+) -> Vec<RevealSalt> {
+    let mut salts = Vec::with_capacity(usize::from(seat_count));
+    for s in 0..seat_count {
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-club-order-salt-v1");
+        hasher.update(entropy.0);
+        hasher.update(table_id.0.to_le_bytes());
+        hasher.update([turn, s]);
+        let mut bytes: [u8; 32] = hasher.finalize().into();
+        if bytes == [0u8; 32] {
+            bytes[0] = 1;
+        }
+        salts.push(RevealSalt(bytes));
+    }
+    salts
+}
+
 #[derive(Serialize, Deserialize)]
 struct ClubSealPayload {
     format_version: u32,
@@ -145,6 +285,22 @@ struct ClubSealPayload {
     current_reveals: BTreeMap<u8, OrderReveal>,
     bot_tie_seed: u64,
     live_state_digests: Vec<[u8; 32]>,
+    #[serde(default)]
+    commit_salt_entropy: Option<RevealSalt>,
+    #[serde(default)]
+    current_turn_salts: Vec<RevealSalt>,
+    #[serde(default)]
+    session_pause_cursor: Option<ClubPauseCursor>,
+    #[serde(default)]
+    session_pending_bundles: Vec<SealedOrderBundle>,
+    #[serde(default)]
+    session_sub_pass_b_committed: Vec<bool>,
+    #[serde(default)]
+    session_seat_notes: Vec<String>,
+    #[serde(default)]
+    session_seat_pins: Vec<Option<String>>,
+    #[serde(default)]
+    session_pins_enabled: bool,
 }
 
 /// Exclusive Club Mode host wrapper owning [`TurnEngine`], pre-derived VRF proofs, sealed Turn-1
@@ -167,6 +323,14 @@ pub struct ClubHost {
     current_cancel_lock_at: Option<u32>,
     current_commitments: BTreeMap<u8, CommitmentHash>,
     current_reveals: BTreeMap<u8, OrderReveal>,
+    commit_salt_entropy: RevealSalt,
+    current_turn_salts: Vec<RevealSalt>,
+    session_pause_cursor: Option<ClubPauseCursor>,
+    session_pending_bundles: Vec<SealedOrderBundle>,
+    session_sub_pass_b_committed: Vec<bool>,
+    session_seat_notes: Vec<String>,
+    session_seat_pins: Vec<Option<String>>,
+    session_pins_enabled: bool,
 }
 
 impl fmt::Debug for ClubHost {
@@ -234,8 +398,13 @@ impl ClubHost {
         let vrf_proofs = derive_all_vrf_proofs(eval_seed, spec.table_id)?;
 
         let n = usize::from(spec.seat_count);
+        let seat_count = spec.seat_count;
         let mut engine = TurnEngine::new(spec)?;
         let table_id = engine.state().table_id;
+        let initial_turn = engine.state().turn;
+        let commit_salt_entropy = RevealSalt(draw_nonzero_256_bits()?);
+        let current_turn_salts =
+            derive_turn_commit_salts(&commit_salt_entropy, table_id, initial_turn, seat_count);
         let mut mandate_commits = Vec::with_capacity(n);
         for s in 0..n as u8 {
             let rev = &sealed_mandate_deal.seat_reveals[usize::from(s)];
@@ -258,6 +427,14 @@ impl ClubHost {
             current_cancel_lock_at: None,
             current_commitments: BTreeMap::new(),
             current_reveals: BTreeMap::new(),
+            commit_salt_entropy,
+            current_turn_salts,
+            session_pause_cursor: None,
+            session_pending_bundles: vec![SealedOrderBundle::default(); n],
+            session_sub_pass_b_committed: vec![false; n],
+            session_seat_notes: vec![String::new(); n],
+            session_seat_pins: vec![None; n],
+            session_pins_enabled: false,
         })
     }
 
@@ -547,6 +724,14 @@ impl ClubHost {
             eval_vrf_proof: Some(proof),
             drawn_shocks: raw_receipt.newly_drawn_shocks,
         });
+        if self.phase() == TurnPhase::TalkAndMarket {
+            self.current_turn_salts = derive_turn_commit_salts(
+                &self.commit_salt_entropy,
+                self.table_id(),
+                self.turn(),
+                self.seat_count(),
+            );
+        }
         Ok(public_receipt)
     }
 
@@ -697,6 +882,14 @@ impl ClubHost {
             current_reveals: self.current_reveals.clone(),
             bot_tie_seed: self.bot_tie_seed,
             live_state_digests: self.live_state_digests.clone(),
+            commit_salt_entropy: Some(self.commit_salt_entropy.clone()),
+            current_turn_salts: self.current_turn_salts.clone(),
+            session_pause_cursor: self.session_pause_cursor.clone(),
+            session_pending_bundles: self.session_pending_bundles.clone(),
+            session_sub_pass_b_committed: self.session_sub_pass_b_committed.clone(),
+            session_seat_notes: self.session_seat_notes.clone(),
+            session_seat_pins: self.session_seat_pins.clone(),
+            session_pins_enabled: self.session_pins_enabled,
         };
         let seal_bytes = serde_json::to_vec(&seal).map_err(|err| {
             EngineError::InvalidConfig(format!("failed to serialize Club seal sidecar: {err}"))
@@ -814,6 +1007,44 @@ impl ClubHost {
             )));
         }
 
+        let commit_salt_entropy = match seal.commit_salt_entropy {
+            Some(entropy) => {
+                if entropy.0 == [0u8; 32] {
+                    return Err(EngineError::InvalidConfig(
+                        "ClubHost seal commit_salt_entropy must be non-zero".to_owned(),
+                    ));
+                }
+                entropy
+            }
+            None => RevealSalt(draw_nonzero_256_bits()?),
+        };
+        let current_turn_salts = if seal.current_turn_salts.is_empty() {
+            derive_turn_commit_salts(
+                &commit_salt_entropy,
+                table_id,
+                seal.engine.state().turn,
+                spec.seat_count,
+            )
+        } else {
+            if seal.current_turn_salts.len() != n
+                || seal.current_turn_salts.iter().any(|salt| salt.0 == [0u8; 32])
+            {
+                return Err(EngineError::InvalidConfig(
+                    "ClubHost seal current_turn_salts invalid or wrong length".to_owned(),
+                ));
+            }
+            seal.current_turn_salts
+        };
+        let ckpt = ClubSessionCheckpoint {
+            pause_cursor: seal.session_pause_cursor,
+            pending_bundles: seal.session_pending_bundles,
+            sub_pass_b_committed: seal.session_sub_pass_b_committed,
+            seat_notes: seal.session_seat_notes,
+            seat_pins: seal.session_seat_pins,
+            pins_enabled: seal.session_pins_enabled,
+        };
+        validate_checkpoint_shapes(n, &ckpt)?;
+
         let host = Self {
             layout_seed: seal.layout_seed,
             bot_tie_seed: seal.bot_tie_seed,
@@ -828,6 +1059,14 @@ impl ClubHost {
             current_cancel_lock_at: seal.current_cancel_lock_at,
             current_commitments: seal.current_commitments,
             current_reveals: seal.current_reveals,
+            commit_salt_entropy,
+            current_turn_salts,
+            session_pause_cursor: ckpt.pause_cursor,
+            session_pending_bundles: normalize_vec_len(ckpt.pending_bundles, n),
+            session_sub_pass_b_committed: normalize_vec_len(ckpt.sub_pass_b_committed, n),
+            session_seat_notes: normalize_vec_len(ckpt.seat_notes, n),
+            session_seat_pins: normalize_vec_len(ckpt.seat_pins, n),
+            session_pins_enabled: ckpt.pins_enabled,
         };
         if host.public_save_snapshot()? != save {
             return Err(EngineError::InvalidConfig(

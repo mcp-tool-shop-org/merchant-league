@@ -974,3 +974,91 @@ impl SeatKeyEvent {
         }
     }
 }
+
+/// Plain turn-clock state rendered in the turn header bar without holding wall-clock handles.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct TurnClockDisplay {
+    /// `true` when the table runs under a timed turn budget; `false` when untimed.
+    pub timed: bool,
+    /// Whole seconds remaining for the active human seat's current sub-pass.
+    pub remaining_secs: u16,
+    /// Total whole-second budget allocated to this sub-pass for one human seat.
+    pub pass_budget_secs: u16,
+}
+
+impl TurnClockDisplay {
+    /// Creates an untimed [`TurnClockDisplay`].
+    #[must_use]
+    pub const fn untimed() -> Self {
+        Self {
+            timed: false,
+            remaining_secs: 0,
+            pass_budget_secs: 0,
+        }
+    }
+
+    /// Creates a timed [`TurnClockDisplay`] with remaining and budget seconds.
+    #[must_use]
+    pub const fn timed(remaining_secs: u16, pass_budget_secs: u16) -> Self {
+        Self {
+            timed: true,
+            remaining_secs,
+            pass_budget_secs,
+        }
+    }
+}
+
+/// Stage of optional 4-digit table-local PIN gating on the Privacy Curtain.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum CurtainPinMode {
+    /// No PIN prompt active (either PINs disabled or Curtain is waiting for `[Space]` + `[Enter]`).
+    #[default]
+    Inactive,
+    /// Seat has not yet set its 4-digit PIN and is entering one for the first time.
+    SetInitialPin,
+    /// Seat already has a PIN and must enter the matching 4 digits before observation builds.
+    VerifyPin,
+}
+
+/// Masked PIN prompt status passed to `curtain_view` without carrying PIN digits.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct CurtainPinPrompt {
+    /// Current Curtain PIN stage (`Inactive`, `SetInitialPin`, or `VerifyPin`).
+    pub mode: CurtainPinMode,
+    /// Number of digits currently typed (`0..=4`); the digits themselves stay host-private.
+    pub entered_count: u8,
+    /// Number of failed verification attempts in this Curtain visit (`0..=2`).
+    pub failed_attempts: u8,
+    /// `true` after three wrong PIN tries reset the prompt back to the unarmed Curtain.
+    pub locked_out_reset: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clock_and_curtain_pin_dtos_preserve_defaults_and_constructors() {
+        let untimed = TurnClockDisplay::untimed();
+        assert!(!untimed.timed);
+        assert_eq!(untimed.remaining_secs, 0);
+        assert_eq!(untimed.pass_budget_secs, 0);
+
+        let timed = TurnClockDisplay::timed(39, 39);
+        assert!(timed.timed);
+        assert_eq!(timed.remaining_secs, 39);
+        assert_eq!(timed.pass_budget_secs, 39);
+
+        let prompt = CurtainPinPrompt::default();
+        assert_eq!(prompt.mode, CurtainPinMode::Inactive);
+        assert_eq!(prompt.entered_count, 0);
+        assert_eq!(prompt.failed_attempts, 0);
+        assert!(!prompt.locked_out_reset);
+    }
+}

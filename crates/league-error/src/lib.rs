@@ -250,7 +250,7 @@ pub fn scrub_secret_text(input: &str) -> String {
 
 /// Canonical machine- and human-readable error shape required across workspace crates
 /// (`SHIP_GATE.md` `:26`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StructuredError {
     /// Stable `SCREAMING_SNAKE_CASE` error identifier.
     pub code: &'static str,
@@ -262,6 +262,20 @@ pub struct StructuredError {
     pub cause: Option<String>,
     /// Whether retrying the identical operation without changing configuration might succeed.
     pub retryable: bool,
+}
+
+impl fmt::Debug for StructuredError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let scrubbed_message = scrub_secret_text(&self.message);
+        let scrubbed_cause = self.cause.as_deref().map(scrub_secret_text);
+        f.debug_struct("StructuredError")
+            .field("code", &self.code)
+            .field("message", &scrubbed_message)
+            .field("hint", &self.hint)
+            .field("cause", &scrubbed_cause)
+            .field("retryable", &self.retryable)
+            .finish()
+    }
 }
 
 impl Serialize for StructuredError {
@@ -600,5 +614,36 @@ mod tests {
         let relay_scrubbed = scrub_secret_text_with_marker(&raw, RELAY_REDACTED_MARKER);
         assert!(relay_scrubbed.contains("Bearer\t<REDACTED_API_KEY>"));
         assert_eq!(scrub_secret_text(&relay_scrubbed), relay_scrubbed);
+    }
+
+    #[test]
+    fn structured_error_debug_scrubs_raw_message_and_cause_like_display() {
+        let raw_literal = StructuredError {
+            code: "RAW_DEBUG",
+            message: "seed sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r key sk-proj-secretDebug123".to_owned(),
+            hint: "check inputs",
+            cause: Some("Bearer tok_debug_secret OPENROUTER_API_KEY=or_debug_val".to_owned()),
+            retryable: false,
+        };
+        let dbg = format!("{raw_literal:?}");
+        let disp = format!("{raw_literal}");
+        for secret in [
+            "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
+            "sk-proj-secretDebug123",
+            "tok_debug_secret",
+            "or_debug_val",
+        ] {
+            assert!(!dbg.contains(secret), "Debug leaked `{secret}`: {dbg}");
+            assert!(!disp.contains(secret), "Display leaked `{secret}`: {disp}");
+        }
+        assert!(dbg.contains("[REDACTED]"));
+        assert!(dbg.contains("RAW_DEBUG"));
+
+        let clean = StructuredError::new("CLEAN_CODE", "normal text", "normal hint", true)
+            .with_cause("plain cause");
+        assert_eq!(
+            format!("{clean:?}"),
+            "StructuredError { code: \"CLEAN_CODE\", message: \"normal text\", hint: \"normal hint\", cause: Some(\"plain cause\"), retryable: true }"
+        );
     }
 }
