@@ -13,7 +13,7 @@
           "path": ".github/audit-allowlist.json"
         },
         {
-          "hash": "f8cf29efbfbb583d8be82b02be63164338058ec9c7eb836f1f938f18093a00e3",
+          "hash": "1489b81dbf24bc20195c6212779d8a9065e4507510120d3173736ce4d5a8c53a",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "6ca7aeef1a64f0feb0d9d0ea7b4cc6af76d384ef9bfdcee267b4424bbf58e359",
+          "hash": "ea9291f54964bf57ac1e7d52b1a5869da008784b93f1885a5cd409ca3893afde",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -1947,7 +1947,7 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "3e162ceced5ab981cb276d8ae028f1649e172c534bfb143bae7c0d47c76dc1b2",
+          "hash": "bf74902ebacc522f5ae1287bfdc9adabe778bca789f5179628d2050b31309ad6",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-core/src/types.rs",
@@ -9889,7 +9889,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "a4225ea0af0daa1339e2aed2c60e42c78d20beb236c0d94dd6279b8a3e340540",
+          "hash": "9e136071bd53883e3a6fe27e6549225af30d52ee43475ea27397facc5fb8474d",
           "path": "CHANGELOG.md"
         },
         {
@@ -11315,7 +11315,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "2b6dd8cb8a30cf0a5303c1d78ca6621fcfae64b6",
+    "commit": "d5564a379f17a3e3349ab60d4bb948511ab66b89",
     "tracked": 576
   },
   "landings": [
