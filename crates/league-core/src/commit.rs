@@ -241,7 +241,7 @@ pub fn width_independent_index(digest: [u8; 32], upper_exclusive: usize) -> usiz
     usize::try_from(idx_u64).unwrap_or(0)
 }
 
-fn draw_nonzero_256_bits() -> Result<[u8; 32], EngineError> {
+pub(crate) fn draw_nonzero_256_bits() -> Result<[u8; 32], EngineError> {
     for _ in 0..8 {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).map_err(|err| {

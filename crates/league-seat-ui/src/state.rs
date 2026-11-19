@@ -6,8 +6,8 @@ use league_seat_types::{
     CheckProposal, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform,
     CouncilVoteBallot, DualEscrowProposal, EscrowFinishUnlock, EscrowProposal, IntentPledge,
     IntentTarget, MarketAction, OfferProposal, OfferSide, PreimageSecret, PreviewTieMode,
-    ProjectDeliveryOrder, SealedOrderBundle, SeatIntent, SeatObservation, SeatScreenView, Units,
-    WhatIfPreview,
+    ProjectDeliveryOrder, SealedOrderBundle, SeatIntent, SeatKeyCode, SeatKeyEvent,
+    SeatObservation, SeatScreenView, TurnClockDisplay, Units, WhatIfPreview,
 };
 
 /// Pass label rendered inside the Curtain hand-off screen and header banner.
@@ -740,6 +740,7 @@ pub struct SeatUiState {
     pub(crate) include_draft_market_action: bool,
     pub(crate) staged_bundle: SealedOrderBundle,
     pub(crate) last_what_if: Option<WhatIfPreview>,
+    pub(crate) clock_display: TurnClockDisplay,
 }
 
 impl SeatUiState {
@@ -758,6 +759,35 @@ impl SeatUiState {
         *self = Self::new();
         self.active_tab = active_tab;
         self.selection = selection;
+    }
+
+    /// Updates the host-supplied turn clock countdown display.
+    pub fn set_clock_display(&mut self, clock: TurnClockDisplay) {
+        self.clock_display = clock;
+    }
+
+    /// Returns the host-supplied turn clock countdown display.
+    #[must_use]
+    pub const fn clock_display(&self) -> TurnClockDisplay {
+        self.clock_display
+    }
+
+    /// Applies one single character or Backspace key to this seat's private `notes_draft`
+    /// (used by the host when restoring persisted private notes on Curtain unlock).
+    pub fn apply_note_key(&mut self, key: SeatKeyEvent) {
+        match key.code {
+            SeatKeyCode::Backspace => {
+                self.notes_draft.pop();
+            }
+            SeatKeyCode::Char(ch)
+                if !key.modifiers.ctrl
+                    && !ch.is_control()
+                    && self.notes_draft.chars().count() < 240 =>
+            {
+                self.notes_draft.push(ch);
+            }
+            _ => {}
+        }
     }
 
     /// Updates the host-validated staged [`SealedOrderBundle`] mirrored in Tab 2 and Tab 3.

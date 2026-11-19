@@ -269,6 +269,9 @@ const ALLOWED_SEAT_TYPES: &[&str] = &[
     "SeatKeyCode",
     "SeatKeyModifiers",
     "SeatKeyEvent",
+    "TurnClockDisplay",
+    "CurtainPinMode",
+    "CurtainPinPrompt",
     // TUI (`ratatui` / `crossterm`) UI value types
     "Action",
     "Frame",
@@ -549,6 +552,9 @@ const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
     "SeatKeyCode",
     "SeatKeyModifiers",
     "SeatKeyEvent",
+    "TurnClockDisplay",
+    "CurtainPinMode",
+    "CurtainPinPrompt",
     // Concrete `no_std` + `alloc` core value & collection types
     "bool",
     "char",
@@ -696,6 +702,9 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "SeatKeyCode",
     "SeatKeyModifiers",
     "SeatKeyEvent",
+    "TurnClockDisplay",
+    "CurtainPinMode",
+    "CurtainPinPrompt",
     "Action",
     "bool",
     "Option",
@@ -830,6 +839,9 @@ const ALLOWED_SEAT_UI_PUB_FIELD_TYPES: &[&str] = &[
     "SeatKeyCode",
     "SeatKeyModifiers",
     "SeatKeyEvent",
+    "TurnClockDisplay",
+    "CurtainPinMode",
+    "CurtainPinPrompt",
     "Action",
     "bool",
     "u8",
@@ -8448,7 +8460,17 @@ fn check_workspace_manifests_and_crate_sources(
     }
 
     let mut checked_crates = Vec::with_capacity(member_manifests.len());
+    let mut seat_clippy_tomls: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for (crate_name, crate_dir, manifest) in member_manifests {
+        if matches!(
+            crate_name.as_str(),
+            "league-error" | "league-seat-types" | "league-seat-ui"
+        ) {
+            let clippy_bytes = fs::read(crate_dir.join("clippy.toml")).map_err(|err| {
+                format!("{crate_name}: missing or unreadable clippy.toml ({err})")
+            })?;
+            seat_clippy_tomls.insert(crate_name.clone(), clippy_bytes);
+        }
         if crate_name == "league-core" {
             check_league_core_manifest(&manifest)?;
         } else if crate_name == "league-standalone" {
@@ -8739,6 +8761,19 @@ fn check_workspace_manifests_and_crate_sources(
         if !seen.contains(expected) {
             return Err(format!(
                 "expected workspace crate `{expected}` was not scanned"
+            ));
+        }
+    }
+    let ref_clippy = seat_clippy_tomls
+        .get("league-error")
+        .ok_or_else(|| "missing league-error/clippy.toml bytes".to_owned())?;
+    for other in ["league-seat-types", "league-seat-ui"] {
+        let other_bytes = seat_clippy_tomls
+            .get(other)
+            .ok_or_else(|| format!("missing {other}/clippy.toml bytes"))?;
+        if other_bytes != ref_clippy {
+            return Err(format!(
+                "seat-closure `clippy.toml` divergence: `{other}/clippy.toml` is not byte-identical to `league-error/clippy.toml`"
             ));
         }
     }
@@ -11570,5 +11605,28 @@ fn planted_fix5_league_error_seat_rules_forbid_unsafe_code_unsafe_attrs_and_asm_
             assert!(err.contains(expected_substr), "{err}");
             let _ = fs::remove_dir_all(&root);
         }
+    }
+}
+
+#[test]
+fn seat_closure_clippy_toml_divergence_is_rejected_by_guard() {
+    for target in ["league-error", "league-seat-types", "league-seat-ui"] {
+        let root = unique_tmp_dir(&format!("clippy_div_{target}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let path = root.join("crates").join(target).join("clippy.toml");
+        let mut bytes = fs::read(&path).unwrap_or_else(|e| panic!("read clippy.toml: {e}"));
+        bytes.extend_from_slice(b"\n# divergence check\n");
+        if let Err(err) = fs::write(&path, &bytes) {
+            panic!("write clippy.toml: {err}");
+        }
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("diverged {target}/clippy.toml must fail guard"));
+        println!("PLANTED_CLIPPY_DIVERGE {target} => {err}");
+        assert!(err.contains("clippy.toml"), "{err}");
+        assert!(err.contains("byte-identical"), "{err}");
+        let _ = fs::remove_dir_all(&root);
     }
 }

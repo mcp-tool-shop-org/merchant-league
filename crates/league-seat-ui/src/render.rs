@@ -6,13 +6,14 @@ use alloc::vec::Vec;
 
 use league_seat_types::{
     ActiveCharter, AssetId, CLOSING_ROLL_START_TURN, COMMODITY_DISPLAY_CATALOG,
-    CommodityDisplayMap, CredOffer, CreditCheck, DualEscrowVault, FillRecord,
-    HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge, IntentTarget, MandateKind, MarketAction,
-    PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity, SeatObservation, SeatScreenView,
-    SeatState, TokenEscrowVault, Turn, TurnPhase, ViewAlign, ViewColor, ViewLabel, ViewLayoutMode,
-    ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle,
-    ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId,
-    ViewZonePanel, ViewportSize, format_numeraire_display, scrub_secret_text,
+    CommodityDisplayMap, CredOffer, CreditCheck, CurtainPinMode, CurtainPinPrompt, DualEscrowVault,
+    FillRecord, HYPOTHETICAL_CLOSE_MARK_CAVEAT, IntentPledge, IntentTarget, MandateKind,
+    MarketAction, PublicSweepReceipt, ScreenLayout, Seat, SeatIdentity, SeatObservation,
+    SeatScreenView, SeatState, TokenEscrowVault, Turn, TurnClockDisplay, TurnPhase, ViewAlign,
+    ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
+    ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
+    ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize,
+    format_numeraire_display, scrub_secret_text,
 };
 
 use crate::composer::{
@@ -72,18 +73,14 @@ pub(crate) fn build_curtain_view(
     next_seat: Seat,
     viewport: ViewportSize,
     space_armed: bool,
+    pin_prompt: CurtainPinPrompt,
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
     if layout.mode == ViewLayoutMode::TooSmall {
         return build_too_small_view(viewport, layout);
     }
 
-    let prompt = if space_armed {
-        "HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen"
-    } else {
-        "PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen"
-    };
-    let rows = vec![
+    let mut rows = vec![
         ViewRow::from_plain(format!("Table #{} | Turn {}", table_id.0, turn.0)),
         ViewRow::from_plain(format!("Pass: {}", pass.label())),
         ViewRow::from_plain(format!(
@@ -92,8 +89,59 @@ pub(crate) fn build_curtain_view(
             guild_name_for_seat(next_seat.0)
         )),
         ViewRow::from_plain(String::new()),
-        ViewRow::from_plain(prompt.to_owned()),
     ];
+
+    let (prompt, footer_left, footer_right) = match pin_prompt.mode {
+        CurtainPinMode::Inactive => {
+            if pin_prompt.locked_out_reset {
+                rows.push(ViewRow::from_plain(
+                    "PIN entry failed 3 times — Curtain re-locked.".to_owned(),
+                ));
+            }
+            let msg = if space_armed {
+                "HAND-OFF ARMED ([Space] received) — press [Enter] to reveal seat screen"
+            } else {
+                "PRIVACY CURTAIN — press [Space] then [Enter] when ready to reveal seat screen"
+            };
+            (
+                msg.to_owned(),
+                "Space:Arm Hand-Off | Enter:Confirm Reveal | q:Quit".to_owned(),
+                if space_armed {
+                    "Armed".to_owned()
+                } else {
+                    "Locked Curtain".to_owned()
+                },
+            )
+        }
+        CurtainPinMode::SetInitialPin | CurtainPinMode::VerifyPin => {
+            let filled = usize::from(pin_prompt.entered_count.min(4));
+            let masked: String = (0..4)
+                .map(|idx| if idx < filled { '*' } else { '_' })
+                .collect();
+            let heading = match pin_prompt.mode {
+                CurtainPinMode::SetInitialPin => {
+                    format!("SET 4-DIGIT SEAT PIN: [{masked}] (digits never echoed)")
+                }
+                CurtainPinMode::VerifyPin => {
+                    if pin_prompt.failed_attempts > 0 {
+                        format!(
+                            "ENTER 4-DIGIT SEAT PIN: [{masked}] (wrong PIN; attempt {}/3)",
+                            pin_prompt.failed_attempts + 1
+                        )
+                    } else {
+                        format!("ENTER 4-DIGIT SEAT PIN: [{masked}]")
+                    }
+                }
+                CurtainPinMode::Inactive => String::new(),
+            };
+            (
+                heading,
+                "0-9:PIN Digit | Backspace:Erase | Enter:Submit PIN | Esc:Cancel".to_owned(),
+                "PIN Gate".to_owned(),
+            )
+        }
+    };
+    rows.push(ViewRow::from_plain(prompt));
     let panel = ViewPanel {
         title: Some(ViewLabel::styled(
             "Hot-Seat Privacy Curtain".to_owned(),
@@ -127,14 +175,8 @@ pub(crate) fn build_curtain_view(
     };
     view.status_line = Some(ViewStatusLine {
         alert: None,
-        left: vec![ViewSpan::plain(
-            "Space:Arm Hand-Off | Enter:Confirm Reveal | q:Quit".to_owned(),
-        )],
-        right: vec![ViewSpan::plain(if space_armed {
-            "Armed".to_owned()
-        } else {
-            "Locked Curtain".to_owned()
-        })],
+        left: vec![ViewSpan::plain(footer_left)],
+        right: vec![ViewSpan::plain(footer_right)],
         style: ViewStyle::plain(),
     });
     view
@@ -146,6 +188,7 @@ pub(crate) fn build_neutral_session_view(
     phase: TurnPhase,
     pass: PassKind,
     quit_requested: bool,
+    halted_on_error: bool,
     viewport: ViewportSize,
 ) -> SeatScreenView {
     let layout = ScreenLayout::layout_for_viewport(viewport);
@@ -155,8 +198,12 @@ pub(crate) fn build_neutral_session_view(
 
     let state_note = if quit_requested {
         "Session quit requested — returning to terminal."
+    } else if halted_on_error {
+        "Pass advance failed — session halted; press q to quit."
+    } else if matches!(phase, TurnPhase::Commit | TurnPhase::Reveal) {
+        "Mid-turn commit/reveal in progress — session standby."
     } else if phase != TurnPhase::TalkAndMarket {
-        "Turn closed — waiting for host post-season step."
+        "Season closed — waiting for host post-season step."
     } else {
         "No human seat active — session standby."
     };
@@ -222,11 +269,17 @@ pub(crate) fn build_turn_screen(
     let zones = vec![
         ViewZonePanel {
             zone: ViewZoneId::HeaderBar,
-            panel: build_header_panel(obs, pass, commodities, state.plain_codes),
+            panel: build_header_panel(
+                obs,
+                pass,
+                commodities,
+                state.plain_codes,
+                state.clock_display,
+            ),
         },
         ViewZonePanel {
             zone: ViewZoneId::PublicLedger,
-            panel: build_public_ledger_panel(obs, state, commodities),
+            panel: build_public_ledger_panel(obs, state, commodities, viewport),
         },
         ViewZonePanel {
             zone: ViewZoneId::CenterTabs,
@@ -310,11 +363,21 @@ fn build_too_small_view(viewport: ViewportSize, layout: ScreenLayout) -> SeatScr
     }
 }
 
+fn format_clock_badge(clock: TurnClockDisplay) -> String {
+    if !clock.timed {
+        return "Clock: Untimed".to_owned();
+    }
+    let mins = clock.remaining_secs / 60;
+    let secs = clock.remaining_secs % 60;
+    format!("Clock: {mins:02}:{secs:02}")
+}
+
 fn build_header_panel(
     obs: &SeatObservation,
     pass: PassKind,
     commodities: Option<&CommodityDisplayMap>,
     plain_codes: bool,
+    clock: TurnClockDisplay,
 ) -> ViewPanel {
     let active_role = obs
         .seats
@@ -388,8 +451,9 @@ fn build_header_panel(
         table: None,
         rows: vec![
             ViewRow::from_plain(format!(
-                "{} | {} | TM: S{} | Chair: {}",
+                "{} | {} | {} | TM: S{} | Chair: {}",
                 pass.label(),
+                format_clock_badge(clock),
                 lock_badge,
                 obs.trade_minister,
                 chair_label,
@@ -402,56 +466,217 @@ fn build_header_panel(
     }
 }
 
+fn ledger_zone_inner_width(viewport: ViewportSize) -> usize {
+    if viewport.width >= 100 && viewport.height >= 30 {
+        ((usize::from(viewport.width) * 30) / 100).saturating_sub(2)
+    } else {
+        usize::from(viewport.width).saturating_sub(2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LedgerTableLayout {
+    Compact28,
+    Compact34,
+    FullStacked,
+}
+
+impl LedgerTableLayout {
+    pub(crate) fn for_viewport(viewport: ViewportSize) -> Self {
+        let inner_w = ledger_zone_inner_width(viewport);
+        if inner_w >= 61 {
+            Self::FullStacked
+        } else if inner_w >= 34 {
+            Self::Compact34
+        } else {
+            Self::Compact28
+        }
+    }
+}
+
+/// Formats an integer ledger value without ever dropping leading digits.
+///
+/// Values that fit in `max_chars` are returned in full; wider values abbreviate toward zero with
+/// SI suffixes (`k`, `M`, `B`, `T`, `E`) and `+` whenever truncated non-zero lower digits remain.
+pub(crate) fn format_ledger_units(value: i64, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let exact = format!("{value}");
+    if exact.chars().count() <= max_chars {
+        return exact;
+    }
+
+    let neg = value < 0;
+    let abs_val = value.unsigned_abs();
+    let sign = if neg { "-" } else { "" };
+    for (div, suffix) in [
+        (1_000_000_000_000_000_000_u64, 'E'),
+        (1_000_000_000_000_000_u64, 'P'),
+        (1_000_000_000_000_u64, 'T'),
+        (1_000_000_000_u64, 'B'),
+        (1_000_000_u64, 'M'),
+        (1_000_u64, 'k'),
+    ] {
+        if abs_val < div {
+            continue;
+        }
+        let whole = abs_val / div;
+        let rem = abs_val % div;
+        let tenths = (rem.saturating_mul(10)) / div;
+        let mut candidates = Vec::new();
+        if rem == 0 {
+            candidates.push(format!("{sign}{whole}{suffix}"));
+        } else {
+            let exact_tenth = rem.saturating_mul(10) == tenths.saturating_mul(div);
+            if exact_tenth {
+                candidates.push(format!("{sign}{whole}.{tenths}{suffix}"));
+            } else {
+                candidates.push(format!("{sign}{whole}.{tenths}{suffix}+"));
+            }
+            candidates.push(format!("{sign}{whole}{suffix}+"));
+            candidates.push(format!("{sign}{whole}{suffix}"));
+        }
+        for cand in candidates {
+            if cand.chars().count() <= max_chars {
+                return cand;
+            }
+        }
+    }
+
+    if max_chars == 1 {
+        return "…".to_owned();
+    }
+    let mut clipped: String = exact.chars().take(max_chars - 1).collect();
+    clipped.push('…');
+    clipped
+}
+
+pub(crate) fn format_tariff_pair(raw_bps: u16, refined_bps: u16, max_chars: usize) -> String {
+    let full = format!("{raw_bps}/{refined_bps}");
+    if full.chars().count() <= max_chars {
+        return full;
+    }
+    let side_w = (max_chars.saturating_sub(1)) / 2;
+    format!(
+        "{}/{}",
+        format_ledger_units(i64::from(raw_bps), side_w),
+        format_ledger_units(i64::from(refined_bps), side_w)
+    )
+}
+
 fn build_public_ledger_panel(
     obs: &SeatObservation,
     state: &SeatUiState,
     commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
 ) -> ViewPanel {
-    let columns = vec![
-        ViewTableColumn {
-            header: ViewLabel::plain("Seat".to_owned()),
-            width: ViewSizeHint::Fixed(5),
-            alignment: ViewAlign::Left,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Role".to_owned()),
-            width: ViewSizeHint::Fixed(4),
-            alignment: ViewAlign::Left,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("CRED".to_owned()),
-            width: ViewSizeHint::Fixed(7),
-            alignment: ViewAlign::Right,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Debt".to_owned()),
-            width: ViewSizeHint::Fixed(6),
-            alignment: ViewAlign::Right,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Tier".to_owned()),
-            width: ViewSizeHint::Fixed(4),
-            alignment: ViewAlign::Left,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Eq".to_owned()),
-            width: ViewSizeHint::Fixed(6),
-            alignment: ViewAlign::Right,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Tar(R/M)".to_owned()),
-            width: ViewSizeHint::Fixed(9),
-            alignment: ViewAlign::Right,
-        },
-        ViewTableColumn {
-            header: ViewLabel::plain("Def/Br/Frz".to_owned()),
-            width: ViewSizeHint::Min(8),
-            alignment: ViewAlign::Right,
-        },
-    ];
-    let table_rows: Vec<ViewTableRow> = obs.seats.iter().map(build_seat_table_row).collect();
+    let table_layout = LedgerTableLayout::for_viewport(viewport);
+    let columns = match table_layout {
+        LedgerTableLayout::Compact28 => vec![
+            ViewTableColumn {
+                header: ViewLabel::plain("St".to_owned()),
+                width: ViewSizeHint::Fixed(2),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("CRED".to_owned()),
+                width: ViewSizeHint::Fixed(6),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Debt".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Tr".to_owned()),
+                width: ViewSizeHint::Fixed(3),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("TarR/M".to_owned()),
+                width: ViewSizeHint::Fixed(9),
+                alignment: ViewAlign::Right,
+            },
+        ],
+        LedgerTableLayout::Compact34 => vec![
+            ViewTableColumn {
+                header: ViewLabel::plain("Seat".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("CRED".to_owned()),
+                width: ViewSizeHint::Fixed(7),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Debt".to_owned()),
+                width: ViewSizeHint::Fixed(6),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Tier".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Tar(R/M)".to_owned()),
+                width: ViewSizeHint::Fixed(9),
+                alignment: ViewAlign::Right,
+            },
+        ],
+        LedgerTableLayout::FullStacked => vec![
+            ViewTableColumn {
+                header: ViewLabel::plain("Seat".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Role".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("CRED".to_owned()),
+                width: ViewSizeHint::Fixed(8),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Debt".to_owned()),
+                width: ViewSizeHint::Fixed(7),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Tier".to_owned()),
+                width: ViewSizeHint::Fixed(4),
+                alignment: ViewAlign::Left,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Eq".to_owned()),
+                width: ViewSizeHint::Fixed(7),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Tar(R/M)".to_owned()),
+                width: ViewSizeHint::Fixed(9),
+                alignment: ViewAlign::Right,
+            },
+            ViewTableColumn {
+                header: ViewLabel::plain("Def/Br/Frz".to_owned()),
+                width: ViewSizeHint::Min(10),
+                alignment: ViewAlign::Right,
+            },
+        ],
+    };
+    let table_rows: Vec<ViewTableRow> = obs
+        .seats
+        .iter()
+        .map(|s| build_seat_table_row(s, table_layout))
+        .collect();
     let table_len = table_rows.len();
-    let rows = public_ledger_body_rows(obs, state.plain_codes, commodities);
+    let rows = public_ledger_body_rows(obs, state.plain_codes, commodities, table_layout);
     let total = table_len + rows.len();
     let offset = state.public_scroll.min(total.saturating_sub(1));
     let ledger_sel = state.selection.ledger_row_idx.min(total.saturating_sub(1));
@@ -485,18 +710,47 @@ pub(crate) fn public_ledger_body_rows(
     obs: &SeatObservation,
     plain_codes: bool,
     commodities: Option<&CommodityDisplayMap>,
+    table_layout: LedgerTableLayout,
 ) -> Vec<ViewRow> {
     let mut rows = Vec::new();
+    if table_layout != LedgerTableLayout::FullStacked {
+        append_compact_standing_rows(obs, &mut rows);
+    }
     append_ledger_inventory_rows(obs, plain_codes, commodities, &mut rows);
     append_ledger_book_rows(obs, plain_codes, commodities, &mut rows);
     rows
 }
 
-pub(crate) fn public_ledger_total_rows(obs: &SeatObservation) -> usize {
-    obs.seats.len() + public_ledger_body_rows(obs, false, None).len()
+pub(crate) fn public_ledger_total_rows(obs: &SeatObservation, viewport: ViewportSize) -> usize {
+    obs.seats.len()
+        + public_ledger_body_rows(obs, false, None, LedgerTableLayout::for_viewport(viewport)).len()
 }
 
-fn build_seat_table_row(s: &SeatState) -> ViewTableRow {
+fn append_compact_standing_rows(obs: &SeatObservation, rows: &mut Vec<ViewRow>) {
+    rows.push(ViewRow::from_plain("--- Standing & Legend ---".to_owned()));
+    rows.push(ViewRow::from_plain("Legend: k=1e3 M=1e6 +=rem".to_owned()));
+    for s in &obs.seats {
+        let role = match s.identity {
+            SeatIdentity::Human => "HUM",
+            SeatIdentity::AiSyndicate => "BOT",
+        };
+        let frz = if s.wash_frozen_until_turn > 0 {
+            format!("T{}", s.wash_frozen_until_turn)
+        } else {
+            "-".to_owned()
+        };
+        rows.push(ViewRow::from_plain(format!(
+            "S{} {} Eq:{} D/B/F:{}/{}/{}",
+            s.seat, role, s.project_equity, s.hard_credit_defaults, s.broken_promises, frz
+        )));
+        rows.push(ViewRow::from_plain(format!(
+            "  C:{} D:{} T:{}/{}",
+            s.cred, s.cred_debt, s.raw_tariff_bps, s.refined_tariff_bps
+        )));
+    }
+}
+
+fn build_seat_table_row(s: &SeatState, table_layout: LedgerTableLayout) -> ViewTableRow {
     let role = match s.identity {
         SeatIdentity::Human => "HUM",
         SeatIdentity::AiSyndicate => "BOT",
@@ -512,24 +766,66 @@ fn build_seat_table_row(s: &SeatState) -> ViewTableRow {
     } else {
         "-".to_owned()
     };
-    ViewTableRow {
-        cells: vec![
+    let cells = match table_layout {
+        LedgerTableLayout::Compact28 => vec![
             ViewTableCell::plain(format!("S{}", s.seat)),
-            ViewTableCell::plain(role.to_owned()),
-            ViewTableCell::aligned(format!("{}", s.cred), ViewAlign::Right, ViewStyle::plain()),
             ViewTableCell::aligned(
-                format!("{}", s.cred_debt),
+                format_ledger_units(s.cred, 6),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+            ViewTableCell::aligned(
+                format_ledger_units(s.cred_debt, 4),
                 ViewAlign::Right,
                 ViewStyle::plain(),
             ),
             ViewTableCell::plain(tier.to_owned()),
             ViewTableCell::aligned(
-                format!("{}", s.project_equity),
+                format_tariff_pair(s.raw_tariff_bps, s.refined_tariff_bps, 9),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+        ],
+        LedgerTableLayout::Compact34 => vec![
+            ViewTableCell::plain(format!("S{}", s.seat)),
+            ViewTableCell::aligned(
+                format_ledger_units(s.cred, 7),
                 ViewAlign::Right,
                 ViewStyle::plain(),
             ),
             ViewTableCell::aligned(
-                format!("{}/{}", s.raw_tariff_bps, s.refined_tariff_bps),
+                format_ledger_units(s.cred_debt, 6),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+            ViewTableCell::plain(tier.to_owned()),
+            ViewTableCell::aligned(
+                format_tariff_pair(s.raw_tariff_bps, s.refined_tariff_bps, 9),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+        ],
+        LedgerTableLayout::FullStacked => vec![
+            ViewTableCell::plain(format!("S{}", s.seat)),
+            ViewTableCell::plain(role.to_owned()),
+            ViewTableCell::aligned(
+                format_ledger_units(s.cred, 8),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+            ViewTableCell::aligned(
+                format_ledger_units(s.cred_debt, 7),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+            ViewTableCell::plain(tier.to_owned()),
+            ViewTableCell::aligned(
+                format_ledger_units(s.project_equity, 7),
+                ViewAlign::Right,
+                ViewStyle::plain(),
+            ),
+            ViewTableCell::aligned(
+                format_tariff_pair(s.raw_tariff_bps, s.refined_tariff_bps, 9),
                 ViewAlign::Right,
                 ViewStyle::plain(),
             ),
@@ -539,6 +835,9 @@ fn build_seat_table_row(s: &SeatState) -> ViewTableRow {
                 ViewStyle::plain(),
             ),
         ],
+    };
+    ViewTableRow {
+        cells,
         style: ViewStyle::plain(),
     }
 }

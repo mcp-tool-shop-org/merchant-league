@@ -75,11 +75,11 @@ pub use types::{
     TableMode, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
 };
 pub use view::{
-    ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView, ViewAlign, ViewAxis,
-    ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
-    ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
-    ViewTableColumn, ViewTableRow, ViewZoneGroup, ViewZoneId, ViewZonePanel, ViewZoneSpec,
-    ViewportSize,
+    CurtainPinMode, CurtainPinPrompt, ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
+    SeatScreenView, TurnClockDisplay, ViewAlign, ViewAxis, ViewColor, ViewLabel, ViewLayoutMode,
+    ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle,
+    ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow,
+    ViewZoneGroup, ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
 };
 
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical

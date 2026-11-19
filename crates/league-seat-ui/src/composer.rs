@@ -378,7 +378,7 @@ fn dispatch_focused_zone_key(
 ) -> Option<SeatIntent> {
     match state.selection.focus_zone {
         FocusZone::PublicLedger => {
-            let total = public_ledger_total_rows(obs);
+            let total = public_ledger_total_rows(obs, viewport);
             let t_len = obs.seats.len();
             let ih = ledger_inner_height(viewport);
             let max_idx = total.saturating_sub(1);
