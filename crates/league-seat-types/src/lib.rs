@@ -128,15 +128,22 @@ pub mod wire_serde {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde::{Deserialize, Serialize};
+    use std::collections::{BTreeMap, BTreeSet};
 
-    fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
-        match res {
-            Ok(v) => v,
-            Err(err) => panic!("{ctx}: {err}"),
-        }
-    }
+    use crate::{
+        AssetId, AuditorShockHint, Bps, COMMODITY_DISPLAY_CATALOG, CoalitionReach, CommitmentHash,
+        CommodityDisplayMap, ConverterRecipe, CounterpartyAssumptions, CreditTier,
+        DRAND_QUICKNET_GENESIS_UNIX, DrandSchedule, EngineError, FundamentalParities, GoodScarcity,
+        GradedMandateCard, MandateKind, MarketAction, MarketDay, NUMERAIRE_CODE,
+        NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, ParitySpecSource, PreimageSecret,
+        PreviewTieMode, PrivateMandate, PublicSweepReceipt, PublicTableSpec, RegentDoctrine,
+        STATE_PREDICATES_VERSION, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat,
+        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservation,
+        SeatObservationPublicParts, SeatState, SeatStatePredicates, ShockKind,
+        SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode, ToStructuredError, Turn,
+        TurnPhase, UpkeepAndDebt, drand_quicknet_round_for_close, format_numeraire_display,
+        lookup_commodity_display, lookup_commodity_display_bytes,
+    };
 
     #[test]
     fn ids_assets_credit_and_commit_value_methods_work() {
@@ -180,67 +187,6 @@ mod tests {
             format!("{hash:?}"),
             format!("CommitmentHash({})", "ab".repeat(32))
         );
-    }
-
-    #[test]
-    fn wire_serde_round_trips_and_rejects_invalid_inputs() {
-        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-        struct Holder {
-            #[serde(
-                serialize_with = "wire_serde::serialize_hex32",
-                deserialize_with = "wire_serde::deserialize_hex32"
-            )]
-            fixed: [u8; 32],
-        }
-        let h_val = Holder { fixed: [0x11; 32] };
-        let h_json = must_ok(serde_json::to_string(&h_val), "holder json");
-        assert_eq!(
-            must_ok(serde_json::from_str::<Holder>(&h_json), "holder back"),
-            h_val
-        );
-        // Exercise direct deserialize_hex32 / opt_hex32 / delivery_ledger errors too.
-        let p = PreimageSecret([0x1F; 32]);
-        let j = must_ok(serde_json::to_string(&p), "preimage json");
-        let parsed: PreimageSecret = must_ok(serde_json::from_str(&j), "preimage parse");
-        assert_eq!(parsed, p);
-        assert!(serde_json::from_str::<PreimageSecret>("\"abc\"").is_err());
-        assert!(
-            serde_json::from_str::<PreimageSecret>(&format!("\"{}\"", "00".repeat(31))).is_err()
-        );
-        assert!(
-            serde_json::from_str::<PreimageSecret>(&format!("\"{}\"", "zz".repeat(32))).is_err()
-        );
-
-        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-        struct OptHolder {
-            #[serde(
-                serialize_with = "wire_serde::serialize_opt_hex32",
-                deserialize_with = "wire_serde::deserialize_opt_hex32"
-            )]
-            key: Option<[u8; 32]>,
-            #[serde(
-                serialize_with = "wire_serde::serialize_delivery_ledger",
-                deserialize_with = "wire_serde::deserialize_delivery_ledger"
-            )]
-            ledger: std::collections::BTreeMap<(u8, u8, AssetId), Units>,
-        }
-        let mut ledger = std::collections::BTreeMap::new();
-        ledger.insert((0, 1, AssetId::Raw(0)), 500);
-        let oh = OptHolder {
-            key: Some([0xAB; 32]),
-            ledger,
-        };
-        let oh_json = must_ok(serde_json::to_string(&oh), "oh json");
-        assert_eq!(
-            must_ok(serde_json::from_str::<OptHolder>(&oh_json), "oh back"),
-            oh
-        );
-        let none_json = "{\"key\":null,\"ledger\":[]}";
-        let none_parsed: OptHolder = must_ok(serde_json::from_str(none_json), "none json");
-        assert!(none_parsed.key.is_none());
-        let dup_json = "{\"key\":null,\"ledger\":[[[0,1,\"Cred\"],10],[[0,1,\"Cred\"],20]]}";
-        assert!(serde_json::from_str::<OptHolder>(dup_json).is_err());
-        let _ = core::mem::size_of::<Holder>();
     }
 
     #[test]
@@ -296,8 +242,34 @@ mod tests {
         };
         assert!(ds.validate().is_ok());
         assert!(ds.close_unix_for_turn(Turn(0)).is_err());
+        assert!(ds.close_unix_for_turn(Turn(1)).is_ok());
         assert!(ds.expected_round_for_turn(Turn(1)).is_ok());
         assert!(drand_quicknet_round_for_close(0).is_err());
+        assert!(drand_quicknet_round_for_close(DRAND_QUICKNET_GENESIS_UNIX + 6).is_ok());
+        assert!(
+            DrandSchedule {
+                turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX - 1,
+                turn_period_secs: 60,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            DrandSchedule {
+                turn_1_close_unix: DRAND_QUICKNET_GENESIS_UNIX + 60,
+                turn_period_secs: u64::MAX,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            DrandSchedule {
+                turn_1_close_unix: u64::MAX,
+                turn_period_secs: 3,
+            }
+            .validate()
+            .is_err()
+        );
 
         let bad_ds = DrandSchedule {
             turn_1_close_unix: 10,
@@ -349,14 +321,16 @@ mod tests {
         assert_eq!(COMMODITY_DISPLAY_CATALOG.len(), 61);
         assert_eq!(format_numeraire_display(false), NUMERAIRE_DISPLAY_LABEL);
         assert_eq!(format_numeraire_display(true), NUMERAIRE_PLAIN_LABEL);
-        let tmb = match lookup_commodity_display("TMB") {
-            Some(entry) => entry,
-            None => panic!("TMB missing from COMMODITY_DISPLAY_CATALOG"),
-        };
-        assert_eq!(tmb.raw_display(false), "Rough Timber [TMB]");
-        assert_eq!(tmb.raw_display(true), "TMB");
-        assert_eq!(tmb.refined_display(false), "Seasoned Timber [TMB]");
-        assert_eq!(tmb.refined_display(true), "TMB");
+        assert!(lookup_commodity_display_bytes(*b"TMB").is_some());
+        assert!(lookup_commodity_display_bytes(*b"ZZZ").is_none());
+        let tmb_opt = lookup_commodity_display("TMB");
+        assert!(tmb_opt.is_some());
+        if let Some(tmb) = tmb_opt {
+            assert_eq!(tmb.raw_display(false), "Rough Timber [TMB]");
+            assert_eq!(tmb.raw_display(true), "TMB");
+            assert_eq!(tmb.refined_display(false), "Seasoned Timber [TMB]");
+            assert_eq!(tmb.refined_display(true), "TMB");
+        }
         assert!(lookup_commodity_display("CRED").is_none());
         assert!(lookup_commodity_display("ZWZ").is_none());
         assert!(lookup_commodity_display("AB").is_none());
@@ -397,5 +371,251 @@ mod tests {
             Some("SLT")
         );
         assert!(map.format_asset(AssetId::Raw(9), false).is_none());
+        assert!(map.format_asset(AssetId::Refined(9), false).is_none());
+    }
+
+    #[test]
+    fn observation_preview_summary_and_parities_cover_helpers_cleanly() {
+        struct EmptySpec;
+        impl ParitySpecSource for EmptySpec {
+            fn spec_seat_count(&self) -> u8 {
+                0
+            }
+
+            fn spec_seats(&self) -> &[SeatConfig] {
+                &[]
+            }
+        }
+        let empty_p = FundamentalParities::from_spec(&EmptySpec);
+        assert_eq!(empty_p.cred_per_unit, 1_000);
+        assert!(empty_p.raw_per_unit.is_empty());
+        assert!(empty_p.refined_per_unit.is_empty());
+        assert_eq!(empty_p.asset_parity(AssetId::Cred), 1_000);
+        assert_eq!(empty_p.asset_parity(AssetId::Raw(5)), 0);
+        assert_eq!(empty_p.asset_parity(AssetId::Refined(5)), 0);
+
+        let seat_cfg = SeatConfig {
+            seat: 0,
+            identity: SeatIdentity::Human,
+            initial_cred: 15_000,
+            raw_yield_per_turn: 10_000,
+            refined_project_value: 2_400,
+            upkeep_good: 1,
+            upkeep_amount: 1_800,
+            initial_raw_tariff_bps: 800,
+            initial_refined_tariff_bps: 600,
+            perishable_decay_bps: 2_000,
+            regent: Some(RegentDoctrine {
+                risk_tolerance_bps: 5_000,
+                min_raw_reserve: 1_000,
+                auto_cash_due_claims: true,
+            }),
+            converters: vec![
+                ConverterRecipe {
+                    owner: 0,
+                    inputs: vec![(0, 1_000)],
+                    output_good: 0,
+                    output_amount: 2_000,
+                    max_runs_per_turn: 2,
+                    is_secondary: true,
+                },
+                ConverterRecipe {
+                    owner: 0,
+                    inputs: vec![],
+                    output_good: 0,
+                    output_amount: 1_000,
+                    max_runs_per_turn: 1,
+                    is_secondary: false,
+                },
+            ],
+        };
+        let pub_spec = PublicTableSpec {
+            table_id: TableId(55),
+            mode: TableMode::Club,
+            seat_count: 1,
+            seats: vec![seat_cfg],
+            projects: Vec::new(),
+            closing_hazard_bps: [3_500; 8],
+            mandate_deck: Vec::new(),
+            drand_schedule: None,
+            eval_vrf_pubkey: None,
+            town_import_premium_bps: 22_500,
+            works_stipend_per_unit_cred: 350,
+            mandate_alpha_bps: 250,
+            cancel_lock_bps: 2_500,
+            wash_round_trip_min_units: 1_000,
+            wash_freeze_bond_cred: 500,
+            wash_freeze_bounty_cred: 500,
+        };
+        assert_eq!(pub_spec.spec_seat_count(), 1);
+        assert_eq!(pub_spec.spec_seats().len(), 1);
+        let parities = FundamentalParities::from_spec(&pub_spec);
+        assert_eq!(parities.raw_per_unit, vec![2_400]);
+        assert_eq!(parities.refined_per_unit, vec![2_400]);
+
+        let predicates = SeatStatePredicates {
+            version: STATE_PREDICATES_VERSION,
+            table_id: TableId(55),
+            turn: 2,
+            phase: TurnPhase::TalkAndMarket,
+            seat: 0,
+            upkeep: UpkeepAndDebt {
+                upkeep_good: 1,
+                owed_units: 1_800,
+                held_units: 0,
+                held_on_own_resting_sells: 0,
+                shortfall_units: 1_800,
+                debt_added_at_sweep: 3_600,
+                interest_bps: 400,
+            },
+            spoilage: SpoilageAndConversion {
+                own_raw_good: 0,
+                own_raw_yield_at_sweep: 10_000,
+                spoilage_bps_by_good: vec![2_000],
+                spoil_units_held_by_good: vec![0],
+                spoil_units_on_resting_offers: 0,
+                spoil_units_total: 0,
+                workshop_capacity_runs_left: 2,
+                recipes: Vec::new(),
+            },
+            scarcity: vec![GoodScarcity {
+                good: AssetId::Raw(0),
+                producer_seat: 0,
+                own_units: 0,
+                table_units_held: 0,
+                open_book_units_offered: 0,
+                open_book_units_bid: 0,
+                domain_book_units_offered: 0,
+                domain_book_units_bid: 0,
+                seats_needing: 1,
+                open_book_tariff_bps: 800,
+            }],
+            coalitions: vec![CoalitionReach {
+                members: vec![0],
+                upkeep_goods_makeable: Vec::new(),
+                upkeep_goods_not_makeable: vec![1],
+            }],
+            season_end: SeasonEndAndMarks {
+                season_closed: false,
+                turns_until_earliest_close: 22,
+                turns_until_latest_close: 30,
+                holdings: Vec::new(),
+                projects: Vec::new(),
+            },
+            cancel_locked: false,
+        };
+        let receipt = PublicSweepReceipt {
+            turn: 1,
+            non_reveal_seats: vec![],
+            regent_acted_seats: vec![],
+            converted_to_ai: vec![],
+            escrows_finished: vec![],
+            escrows_cancelled_or_forfeited: vec![],
+            atomic_swaps_settled: 0,
+            converter_batches_run: 1,
+            converter_orders_clamped: 0,
+            checks_cashed: vec![],
+            checks_bounced: vec![],
+            cartel_evictions: vec![],
+            projects_completed: 0,
+            project_orders_clamped: 0,
+            total_upkeep_shortfall_debt: 0,
+            total_spoilage_clawed_back: 0,
+            broken_promises: vec![],
+            elected_officers: None,
+            charters_awarded: vec![],
+            public_forecasts: vec![],
+            newly_activated_shocks: vec![],
+            cred_debt_repaid: 0,
+            charter_cred_burned: 0,
+            town_import_cred_spent: 0,
+            works_stipend_cred_minted: 0,
+            batch_trades_cleared: 0,
+            fills: vec![],
+            wash_freeze_settlements: vec![],
+            season_closed: false,
+            pbrs_deltas: vec![10],
+        };
+        let summary = Step0To7SweepSummary::from_public_sweep_receipt(&receipt);
+        assert_eq!(summary.turn, 1);
+        assert_eq!(summary.converter_batches_run, 1);
+
+        let hint = AuditorShockHint {
+            hint_turn: 2,
+            forecast_turn: 3,
+            realize_turn: 4,
+            target_seat: 0,
+            kind: ShockKind::DemandSurge,
+        };
+        let obs = SeatObservation::unmandated(SeatObservationPublicParts {
+            seat: 0,
+            table_id: TableId(55),
+            turn: 2,
+            phase: TurnPhase::TalkAndMarket,
+            cancel_locked: false,
+            trade_minister: 0,
+            cartel_chair: None,
+            spec: pub_spec,
+            parities,
+            seats: vec![SeatState {
+                seat: 0,
+                identity: SeatIdentity::Human,
+                cred: 15_000,
+                cred_debt: 0,
+                raw: vec![0],
+                refined: vec![0],
+                project_equity: 0,
+                raw_tariff_bps: 800,
+                refined_tariff_bps: 600,
+                credit_tier: CreditTier::Aaa,
+                hard_credit_defaults: 0,
+                bond_breaches: 0,
+                broken_promises: 0,
+                honor_penalties: 0,
+                consecutive_misses: 0,
+                consecutive_zero_production_turns: 0,
+                wash_frozen_until_turn: 0,
+            }],
+            offers: BTreeMap::new(),
+            checks: BTreeMap::new(),
+            escrows: BTreeMap::new(),
+            dual_escrows: BTreeMap::new(),
+            pledges: BTreeMap::new(),
+            audited_pledges: BTreeSet::new(),
+            domains: Vec::new(),
+            council_platforms: BTreeMap::new(),
+            charters: Vec::new(),
+            active_shocks: Vec::new(),
+            public_forecasts: Vec::new(),
+            auditor_hints: vec![hint],
+            next_offer_id: 1,
+            next_check_id: 1,
+            next_escrow_id: 1,
+            delivery_ledger: BTreeMap::new(),
+            last_potentials: vec![15_000],
+            pending_town_import_cred_spent: 0,
+            fill_log: Vec::new(),
+            pending_wash_freezes: Vec::new(),
+            eval_vrf_pubkey: None,
+            baseline_predicates: predicates,
+            public_receipts: vec![receipt],
+        });
+        assert!(obs.own_mandate().is_none());
+        assert_eq!(obs.auditor_hints(), &[hint]);
+        let preview_state = obs.to_public_preview_state();
+        assert_eq!(preview_state.table_id, TableId(55));
+        assert_eq!(preview_state.turn, 2);
+        let default_bundle = SealedOrderBundle::default();
+        assert!(default_bundle.converter_runs.is_empty());
+        let default_assumptions = CounterpartyAssumptions::default();
+        assert!(default_assumptions.assumed_peer_bundles.is_empty());
+        assert_eq!(PreviewTieMode::default(), PreviewTieMode::NeutralSeed);
+        let _ = (
+            None::<Bps>,
+            PrivateMandate {
+                kind: MandateKind::MinProjectEquity { target: 1_000 },
+                bonus_equity: 3_000,
+            },
+        );
     }
 }

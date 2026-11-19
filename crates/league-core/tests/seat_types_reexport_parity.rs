@@ -201,6 +201,23 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
             checked_types += 1;
         }};
     }
+    macro_rules! check_ser_blob_hash {
+        ($ty:ty, $val:expr, $expected_len:expr, $expected_sha:expr) => {{
+            let val = &$val;
+            let json = must_ok(serde_json::to_string(val), stringify!($ty));
+            assert_eq!(
+                json.len(),
+                $expected_len,
+                concat!("JSON byte length mismatch for ", stringify!($ty))
+            );
+            assert_eq!(
+                sha256_hex(json.as_bytes()),
+                $expected_sha,
+                concat!("JSON SHA-256 mismatch for ", stringify!($ty))
+            );
+            checked_types += 1;
+        }};
+    }
 
     // 1. Scalar / ID / Enum value types (lines 1..22 of captured_8abc9abc.txt)
     let tid = TableId(202_611);
@@ -1012,7 +1029,7 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
     obs_none
         .delivery_ledger
         .insert((0, 1, AssetId::Raw(0)), 500);
-    check_blob_hash!(
+    check_ser_blob_hash!(
         SeatObservation,
         obs_none,
         10_345,
@@ -1307,4 +1324,102 @@ fn moved_types_and_full_season_match_captured_8abc9abc_literals_byte_for_byte() 
         "SEASON_PARITY_8ABC9ABC: checked_shapes={checked_types} turns={turn_count} close_obs0_len={} stream_sha256={actual_stream_sha256}",
         close_obs0_json.len()
     );
+}
+
+#[test]
+fn wire_serde_round_trips_and_rejects_invalid_inputs() {
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct Holder {
+        #[serde(
+            serialize_with = "league_seat_types::wire_serde::serialize_hex32",
+            deserialize_with = "league_seat_types::wire_serde::deserialize_hex32"
+        )]
+        fixed: [u8; 32],
+    }
+
+    let h_val = Holder { fixed: [0x11; 32] };
+    let h_json = must_ok(serde_json::to_string(&h_val), "serialize Holder");
+    assert_eq!(
+        must_ok(
+            serde_json::from_str::<Holder>(&h_json),
+            "deserialize Holder"
+        ),
+        h_val
+    );
+    let p = PreimageSecret([0x1F; 32]);
+    let j = must_ok(serde_json::to_string(&p), "serialize PreimageSecret");
+    assert_eq!(
+        must_ok(
+            serde_json::from_str::<PreimageSecret>(&j),
+            "deserialize PreimageSecret"
+        ),
+        p
+    );
+    assert!(serde_json::from_str::<PreimageSecret>("\"abc\"").is_err());
+    assert!(serde_json::from_str::<PreimageSecret>(&format!("\"{}\"", "00".repeat(31))).is_err());
+    assert!(serde_json::from_str::<PreimageSecret>(&format!("\"{}\"", "zz".repeat(32))).is_err());
+
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct OptHolder {
+        #[serde(
+            serialize_with = "league_seat_types::wire_serde::serialize_opt_hex32",
+            deserialize_with = "league_seat_types::wire_serde::deserialize_opt_hex32"
+        )]
+        key: Option<[u8; 32]>,
+        #[serde(
+            serialize_with = "league_seat_types::wire_serde::serialize_delivery_ledger",
+            deserialize_with = "league_seat_types::wire_serde::deserialize_delivery_ledger"
+        )]
+        ledger: BTreeMap<(u8, u8, AssetId), Units>,
+    }
+
+    let mut ledger = BTreeMap::new();
+    ledger.insert((0, 1, AssetId::Raw(0)), 500);
+    let oh = OptHolder {
+        key: Some([0xAB; 32]),
+        ledger,
+    };
+    let oh_json = must_ok(serde_json::to_string(&oh), "serialize OptHolder");
+    assert_eq!(
+        must_ok(
+            serde_json::from_str::<OptHolder>(&oh_json),
+            "deserialize OptHolder"
+        ),
+        oh
+    );
+    let none_json = "{\"key\":null,\"ledger\":[]}";
+    let none_parsed: OptHolder = must_ok(
+        serde_json::from_str(none_json),
+        "deserialize OptHolder with null key",
+    );
+    assert_eq!(none_parsed.key, None);
+    let dup_json = "{\"key\":null,\"ledger\":[[[0,1,\"Cred\"],10],[[0,1,\"Cred\"],20]]}";
+    assert!(serde_json::from_str::<OptHolder>(dup_json).is_err());
+
+    // Exercise PublicPreviewState round-trips with `eval_vrf_pubkey: Some(...)` and `None`.
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x66; 32]), "SealedEvalSeed");
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(202_699), 4, 1, [0x55; 32], &salts, eval_seed, 42),
+        "ClubHost::from_explicit_setup",
+    );
+    let obs = must_ok(host.observe_seat(Seat(0)), "observe_seat(0)");
+    let mut prev = obs.to_public_preview_state();
+    let prev_json = must_ok(serde_json::to_string(&prev), "serialize PublicPreviewState");
+    let prev_rt: PublicPreviewState = must_ok(
+        serde_json::from_str(&prev_json),
+        "deserialize PublicPreviewState",
+    );
+    assert_eq!(prev_rt.spec.eval_vrf_pubkey, prev.spec.eval_vrf_pubkey);
+
+    prev.spec.eval_vrf_pubkey = None;
+    let prev_none_json = must_ok(
+        serde_json::to_string(&prev),
+        "serialize PublicPreviewState None",
+    );
+    let prev_none_rt: PublicPreviewState = must_ok(
+        serde_json::from_str(&prev_none_json),
+        "deserialize PublicPreviewState None",
+    );
+    assert_eq!(prev_none_rt.spec.eval_vrf_pubkey, None);
 }

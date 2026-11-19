@@ -1018,4 +1018,221 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn club_host_new_validation_accessors_debug_and_premature_phase_errors() {
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x61 + i; 32])).collect();
+        let tid = TableId(905_101);
+        let host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                tid,
+                4,
+                7,
+                [0x4D; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7C; 32]), "eval"),
+                88,
+            ),
+            "host setup",
+        );
+
+        assert_eq!(host.layout_seed(), 7);
+        assert_eq!(host.bot_tie_seed(), 88);
+        assert_eq!(host.table_id(), tid);
+        assert!(!host.cancel_locked());
+        assert_eq!(host.public_spec().table_id, tid);
+        assert!(host.public_receipts().is_empty());
+        assert!(format!("{host:?}").contains("<hidden>"));
+        assert!(host.mandate_for_seat(Seat(99)).is_err());
+        assert!(host.observe_seat(Seat(99)).is_err());
+        assert!(host.preview_regent_bundle_for_seat(Seat(0)).is_ok());
+
+        let mut host_mut = host;
+        assert!(matches!(
+            host_mut.finalize_club_season(),
+            Err(EngineError::InvalidPhase(_))
+        ));
+        assert!(matches!(
+            host_mut.export_replay_log(),
+            Err(EngineError::InvalidPhase(_))
+        ));
+
+        let (base_spec, base_deal, base_eval) = must_ok_host(
+            TableSpec::standard_club_chiral_ring_with_explicit_setup(
+                TableId(905_102),
+                4,
+                7,
+                [0x4E; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval2"),
+            ),
+            "base spec",
+        );
+
+        let mut wrong_mode = base_spec.clone();
+        wrong_mode.mode = TableMode::Eval;
+        assert!(
+            ClubHost::new(
+                wrong_mode,
+                7,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        assert!(
+            ClubHost::new(
+                base_spec.clone(),
+                1_u64 << 63,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        let mut no_pk = base_spec.clone();
+        no_pk.eval_vrf_pubkey = None;
+        assert!(
+            ClubHost::new(
+                no_pk,
+                7,
+                base_deal.clone(),
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7D; 32]), "eval"),
+                1,
+            )
+            .is_err()
+        );
+
+        let mismatched_eval = must_ok_host(SealedEvalSeed::try_from_bytes([0x7E; 32]), "eval3");
+        assert!(
+            ClubHost::new(base_spec.clone(), 7, base_deal.clone(), mismatched_eval, 1).is_err()
+        );
+
+        let mut bad_commits = base_spec;
+        bad_commits.dealt_mandate_commits[0].0[0] ^= 0x01;
+        assert!(ClubHost::new(bad_commits, 7, base_deal, base_eval, 1).is_err());
+    }
+
+    #[test]
+    fn from_save_and_seal_bytes_rejects_corrupted_headers_versions_proofs_and_mismatches() {
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x71 + i; 32])).collect();
+        let mut host = must_ok_host(
+            ClubHost::from_explicit_setup(
+                TableId(905_103),
+                4,
+                7,
+                [0x5E; 32],
+                &salts,
+                must_ok_host(SealedEvalSeed::try_from_bytes([0x7F; 32]), "eval"),
+                99,
+            ),
+            "host setup",
+        );
+        must_ok_host(
+            host.commit_and_reveal_all(&BTreeMap::new()),
+            "commit_and_reveal_all",
+        );
+        let _ = must_ok_host(host.sweep_turn(), "sweep_turn");
+        let (save_bytes, seal_bytes) = must_ok_host(host.to_save_and_seal_bytes(), "save_seal");
+
+        let save_val: serde_json::Value =
+            must_ok_host(serde_json::from_slice(&save_bytes), "parse save");
+        let seal_val: serde_json::Value =
+            must_ok_host(serde_json::from_slice(&seal_bytes), "parse seal");
+
+        let mut bad_save_ver = save_val.clone();
+        bad_save_ver["format_version"] = serde_json::json!(99);
+        assert!(matches!(
+            ClubHost::from_save_and_seal_bytes(
+                &must_ok_host(serde_json::to_vec(&bad_save_ver), "s"),
+                &seal_bytes,
+            ),
+            Err(EngineError::UnsupportedReplayVersion { found: 99, .. })
+        ));
+        assert!(ClubHost::from_save_and_seal_bytes(b"{not-json", &seal_bytes).is_err());
+
+        let mut bad_seal_ver = seal_val.clone();
+        bad_seal_ver["format_version"] = serde_json::json!(99);
+        assert!(matches!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_seal_ver), "s"),
+            ),
+            Err(EngineError::UnsupportedReplayVersion { found: 99, .. })
+        ));
+        assert!(ClubHost::from_save_and_seal_bytes(&save_bytes, b"{not-json").is_err());
+
+        let mut mismatch_seed = seal_val.clone();
+        mismatch_seed["layout_seed"] = serde_json::json!(9);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&mismatch_seed), "s"),
+            )
+            .is_err()
+        );
+
+        let mut short_proofs = seal_val.clone();
+        if let Some(arr) = short_proofs["vrf_proofs"].as_array_mut() {
+            arr.pop();
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&short_proofs), "s"),
+            )
+            .is_err()
+        );
+
+        let mut wrong_len_proof = seal_val.clone();
+        wrong_len_proof["vrf_proofs"][0] = serde_json::json!(vec![0_u8; 4]);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&wrong_len_proof), "s"),
+            )
+            .is_err()
+        );
+
+        let mut bad_proof_byte = seal_val.clone();
+        if let Some(first) = bad_proof_byte["vrf_proofs"][0]
+            .as_array_mut()
+            .and_then(|a| a.first_mut())
+            && let Some(b) = first.as_u64()
+        {
+            *first = serde_json::json!(b ^ 1);
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_proof_byte), "s"),
+            )
+            .is_err()
+        );
+
+        let mut bad_commits_len = seal_val;
+        if let Some(arr) = bad_commits_len["mandate_commits"].as_array_mut() {
+            arr.pop();
+        }
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &save_bytes,
+                &must_ok_host(serde_json::to_vec(&bad_commits_len), "s"),
+            )
+            .is_err()
+        );
+
+        let mut mismatched_turn_save = save_val;
+        mismatched_turn_save["turn"] = serde_json::json!(99);
+        assert!(
+            ClubHost::from_save_and_seal_bytes(
+                &must_ok_host(serde_json::to_vec(&mismatched_turn_save), "s"),
+                &seal_bytes,
+            )
+            .is_err()
+        );
+    }
 }

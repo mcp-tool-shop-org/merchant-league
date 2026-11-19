@@ -69,6 +69,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
+      - name: Seat crates clippy (all targets)
+        run: cargo clippy -p league-seat-types -p league-seat-ui --all-targets --locked -- -D warnings
+
       # B4 note: league-tui is now the binary host crate depending on league-core (owning ClubHost
       # and building per-seat SeatObservation values passed to league-seat-ui), and league-gen
       # also carries a league-core dependency. This standalone check ensures neither crate enables

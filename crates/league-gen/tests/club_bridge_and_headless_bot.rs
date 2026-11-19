@@ -744,3 +744,130 @@ fn refused_action_preview_message_documents_error_string_scrubber_exemption() {
     assert!(!refused_ai.message.is_empty());
     assert_eq!(scrub_secret_text(&refused_ai.message), refused_ai.message);
 }
+
+#[test]
+fn club_bridge_validation_errors_and_display_map_conversions() {
+    use sha2::{Digest, Sha256};
+
+    let (_seed, valid_table) = dev_table_for_seat_count(SeatCount::Four, 1);
+
+    let mut reserved_probe_tbl = valid_table.clone();
+    reserved_probe_tbl.seed = RESERVED_TEST_LAYOUT_SEEDS[0];
+    let err_reserved_probe = must_err(
+        ring_table_to_table_spec(&reserved_probe_tbl, TableId(81_700), &[0]),
+        "non-dev reserved seed must be rejected",
+    );
+    assert!(
+        err_reserved_probe
+            .to_string()
+            .contains("SEED_POOL_MISMATCH"),
+        "unexpected non-dev reserved err: {err_reserved_probe}"
+    );
+
+    if let Some(dev_reserved) = RESERVED_TEST_LAYOUT_SEEDS
+        .iter()
+        .copied()
+        .find(|&s| seed_pool(s) == SeedPool::Dev)
+    {
+        let mut reserved_tbl = valid_table.clone();
+        reserved_tbl.seed = dev_reserved;
+        let err_reserved = must_err(
+            ring_table_to_table_spec(&reserved_tbl, TableId(81_701), &[0]),
+            "dev reserved seed must be rejected",
+        );
+        assert!(
+            err_reserved.to_string().contains("RESERVED_SEED_FORBIDDEN"),
+            "unexpected reserved err: {err_reserved}"
+        );
+    }
+
+    let mut sealed_tbl = valid_table.clone();
+    sealed_tbl.seed = 1_u64 << 63;
+    let _ = must_err(
+        ring_table_to_table_spec(&sealed_tbl, TableId(81_702), &[0]),
+        "sealed seed must be rejected",
+    );
+
+    let mut ver_tbl = valid_table.clone();
+    ver_tbl.generator_version = "wrong-gen-v0".to_owned();
+    let err_ver = must_err(
+        ring_table_to_table_spec(&ver_tbl, TableId(81_703), &[0]),
+        "wrong generator_version must be rejected",
+    );
+    assert!(err_ver.to_string().contains("generator_version"));
+
+    let mut num_tbl = valid_table.clone();
+    num_tbl.numeraire_code = "USD".to_owned();
+    let err_num = must_err(
+        ring_table_to_table_spec(&num_tbl, TableId(81_704), &[0]),
+        "wrong numeraire_code must be rejected",
+    );
+    assert!(err_num.to_string().contains("numeraire_code"));
+
+    let err_oob_seat = must_err(
+        ring_table_to_table_spec(&valid_table, TableId(81_705), &[99]),
+        "out-of-range human seat must be rejected",
+    );
+    assert!(err_oob_seat.to_string().contains("out of range"));
+
+    let err_dup_seat = must_err(
+        ring_table_to_table_spec(&valid_table, TableId(81_706), &[0, 0]),
+        "duplicate human seat must be rejected",
+    );
+    assert!(err_dup_seat.to_string().contains("duplicate"));
+
+    // Explicit entropy bridge rejects padded and hashed deal_seed/eval_seed couplings.
+    let mut padded = [0u8; 32];
+    padded[..8].copy_from_slice(&valid_table.seed.to_le_bytes());
+    let hashed: [u8; 32] = Sha256::digest(valid_table.seed.to_le_bytes()).into();
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x21 + i; 32])).collect();
+    let eval_good = must_ok(SealedEvalSeed::try_from_bytes([0x7A; 32]), "eval_good");
+    let err_deal = must_err(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &valid_table,
+            TableId(81_707),
+            &[0],
+            padded,
+            &salts,
+            eval_good,
+        ),
+        "coupled deal_seed must fail",
+    );
+    assert!(err_deal.to_string().contains("deal_seed"));
+
+    let eval_coupled = must_ok(SealedEvalSeed::try_from_bytes(hashed), "eval_coupled");
+    let err_eval = must_err(
+        ring_table_to_table_spec_with_explicit_entropy(
+            &valid_table,
+            TableId(81_708),
+            &[0],
+            [0x3B; 32],
+            &salts,
+            eval_coupled,
+        ),
+        "coupled eval_seed must fail",
+    );
+    assert!(err_eval.to_string().contains("eval_seed"));
+
+    // Exercise TableCommodityMap::format_asset and CommodityDisplayMap::from conversion.
+    let cmap = league_gen::TableCommodityMap::from_ring_table(&valid_table);
+    assert_eq!(
+        cmap.format_asset(AssetId::Cred, false).as_deref(),
+        Some(NUMERAIRE_DISPLAY_LABEL)
+    );
+    assert_eq!(
+        cmap.format_asset(AssetId::Cred, true).as_deref(),
+        Some(NUMERAIRE_PLAIN_LABEL)
+    );
+    let raw0 = cmap.format_asset(AssetId::Raw(0), false);
+    let raw0_plain = cmap.format_asset(AssetId::Raw(0), true);
+    let ref0 = cmap.format_asset(AssetId::Refined(0), false);
+    let ref0_plain = cmap.format_asset(AssetId::Refined(0), true);
+    assert!(raw0.is_some() && raw0_plain.is_some());
+    assert!(ref0.is_some() && ref0_plain.is_some());
+    assert_eq!(cmap.format_asset(AssetId::Raw(99), false), None);
+    assert_eq!(cmap.format_asset(AssetId::Refined(99), true), None);
+
+    let dmap_from = league_seat_types::CommodityDisplayMap::from(&cmap);
+    assert_eq!(dmap_from, cmap.to_display_map());
+}

@@ -326,3 +326,56 @@ impl CommodityCatalog {
         Self::lookup(code).refined_display(plain_codes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commodity_catalog_covers_all_61_entries_lookups_and_displays() {
+        assert!(catalog_aligned_with_glossary());
+        assert!(str_eq("ALM", "ALM"));
+        assert!(!str_eq("ALM", "ANV"));
+        assert!(!str_eq("AL", "ALM"));
+
+        let entries = CommodityCatalog::entries();
+        assert_eq!(entries.len(), 61);
+        for e in entries {
+            assert_eq!(CommodityCatalog::lookup(e.code), e);
+            assert_eq!(CommodityCatalog::lookup_bytes(e.code.as_bytes()), Some(e));
+            assert_eq!(CommodityCatalog::lookup_str(e.code.as_str()), Some(e));
+
+            let raw_full = CommodityCatalog::format_raw(e.code, false);
+            let raw_plain = CommodityCatalog::format_raw(e.code, true);
+            assert_eq!(raw_full, e.raw_display(false));
+            assert_eq!(raw_plain, e.raw_display(true));
+            assert!(raw_full.contains(e.code.as_str()));
+            assert_eq!(raw_plain, e.code.as_str());
+
+            let ref_full = CommodityCatalog::format_refined(e.code, false);
+            let ref_plain = CommodityCatalog::format_refined(e.code, true);
+            assert_eq!(ref_full, e.refined_display(false));
+            assert_eq!(ref_plain, e.refined_display(true));
+            assert!(ref_full.contains(e.code.as_str()));
+            assert_eq!(ref_plain, e.code.as_str());
+        }
+
+        assert!(CommodityCatalog::lookup_bytes(*b"ALM").is_some());
+        assert!(CommodityCatalog::lookup_bytes(*b"ZNC").is_some());
+        assert!(CommodityCatalog::lookup_bytes(*b"ZZZ").is_none());
+        assert!(CommodityCatalog::lookup_str("ALM").is_some());
+        assert!(CommodityCatalog::lookup_str("CRED").is_none());
+        assert!(CommodityCatalog::lookup_str("AB").is_none());
+        assert!(CommodityCatalog::lookup_str("ABCD").is_none());
+        assert!(CommodityCatalog::lookup_str("ZZZ").is_none());
+
+        assert_eq!(
+            CommodityCatalog::format_numeraire(false),
+            NUMERAIRE_DISPLAY_LABEL
+        );
+        assert_eq!(
+            CommodityCatalog::format_numeraire(true),
+            NUMERAIRE_PLAIN_LABEL
+        );
+    }
+}

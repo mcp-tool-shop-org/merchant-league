@@ -417,3 +417,227 @@ fn seat_observation_carries_only_own_mandate_and_never_rival_mandates() {
         assert!(!pub_preview_json.contains("own_mandate"));
     }
 }
+
+#[test]
+fn club_bot_exercises_stale_cancels_debt_repay_checks_close_variety_council_charter_and_import() {
+    use league_core::{
+        CheckStatus, CredOffer, CreditCheck, CreditTier, MandateKind, MarketAction, OfferSide,
+    };
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x81 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x8F; 32]), "eval_seed");
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(81_801), 4, 7, [0x71; 32], &salts, eval_seed, 5),
+        "host setup",
+    );
+
+    let bot = ClubBot::new(11);
+    let base_obs = must_ok(host.observe_seat(Seat(0)), "observe(0)");
+    let mandate = base_obs
+        .own_mandate()
+        .copied()
+        .unwrap_or_else(|| panic!("Seat(0) missing own_mandate"));
+
+    // Case A: wash-frozen seat cancels stale Buy/Raw Sell and own upkeep Sell, then returns early.
+    let mut frozen_obs = base_obs.clone();
+    let upkeep_g = frozen_obs.spec.seats[0].upkeep_good;
+    frozen_obs.turn = 3;
+    frozen_obs.seats[0].wash_frozen_until_turn = 3;
+    frozen_obs.offers.insert(
+        101,
+        CredOffer {
+            offer_id: 101,
+            maker: 0,
+            side: OfferSide::Buy,
+            good: AssetId::Raw(1),
+            remaining_units: 500,
+            price_per_unit_cred: 1_000,
+            locked_cred: 500,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 1,
+        },
+    );
+    frozen_obs.offers.insert(
+        102,
+        CredOffer {
+            offer_id: 102,
+            maker: 0,
+            side: OfferSide::Sell,
+            good: AssetId::Raw(0),
+            remaining_units: 500,
+            price_per_unit_cred: 1_000,
+            locked_cred: 0,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 1,
+        },
+    );
+    frozen_obs.offers.insert(
+        103,
+        CredOffer {
+            offer_id: 103,
+            maker: 0,
+            side: OfferSide::Sell,
+            good: AssetId::Refined(upkeep_g),
+            remaining_units: 400,
+            price_per_unit_cred: 1_000,
+            locked_cred: 0,
+            domain_id: None,
+            is_hybrid: false,
+            created_turn: 3,
+        },
+    );
+    let pass_a_frozen = bot.plan_pass_a(&frozen_obs, &mandate);
+    assert_eq!(pass_a_frozen.len(), 3);
+    assert!(
+        pass_a_frozen
+            .iter()
+            .all(|a| matches!(a, MarketAction::CancelOffer { seat: 0, .. }))
+    );
+
+    // Case B: near close, due check, CRED debt, turn-12 council vote + charter bid, variety buffer.
+    let mut rich_obs = base_obs.clone();
+    rich_obs.turn = 12;
+    rich_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 2;
+    rich_obs.seats[0].cred = 50_000;
+    rich_obs.seats[0].cred_debt = 3_000;
+    rich_obs.seats[0].raw[0] = 20_000;
+    rich_obs.seats[0].refined[0] = 20_000;
+    rich_obs.seats[0].refined[1] = 20_000;
+    rich_obs.checks.insert(
+        77,
+        CreditCheck {
+            check_id: 77,
+            drawer: 1,
+            payee: 0,
+            asset: AssetId::Cred,
+            send_max: 500,
+            deliver_min: 100,
+            due_turn: 10,
+            expiration_turn: 15,
+            status: CheckStatus::Open,
+        },
+    );
+    let variety_mandate = league_core::PrivateMandate {
+        kind: MandateKind::MinRefinedVariety {
+            distinct_goods: 2,
+            min_each: 1_500,
+        },
+        bonus_equity: 4_500,
+    };
+    let decision = bot.decide_full_turn(&rich_obs, &variety_mandate);
+    assert!(!decision.pass_a_actions.is_empty());
+    assert!(decision.bundle.check_cashes.contains(&77));
+    assert_eq!(decision.bundle.debt_repayment_cred, 3_000);
+    assert!(decision.bundle.council_vote.is_some());
+    assert_eq!(decision.bundle.charter_bids.len(), 1);
+
+    // Case C: Pass B TownImport triggers under long horizon + CreditTier::D, skipped at horizon 1.
+    let mut import_obs = base_obs;
+    import_obs.seats[0].cred = 50_000;
+    import_obs.seats[0].credit_tier = CreditTier::D;
+    import_obs.seats[0].refined[usize::from(upkeep_g)] = 0;
+    import_obs.baseline_predicates.upkeep.shortfall_units = 1_000;
+    import_obs.baseline_predicates.upkeep.owed_units = 1_000;
+    import_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 10;
+    let (pass_b_import, _) = bot.plan_pass_b_and_bundle(&import_obs, &mandate);
+    assert!(
+        pass_b_import
+            .iter()
+            .any(|a| matches!(a, MarketAction::TownImport { seat: 0, .. }))
+    );
+
+    import_obs
+        .baseline_predicates
+        .season_end
+        .turns_until_latest_close = 1;
+    let (pass_b_skip, _) = bot.plan_pass_b_and_bundle(&import_obs, &mandate);
+    assert!(pass_b_skip.is_empty());
+}
+
+#[test]
+fn replay_layout_seed_errors_and_sealed_accessors_round_trip() {
+    use league_core::{
+        ReplayLayoutSeed, ReplayLayoutSeedError, SEALED_LAYOUT_SEED_MIN, SealedReplaySeed,
+        SeasonReplayLog, TableSpec, layout_seed_digest,
+    };
+
+    let sealed_digest = layout_seed_digest(SEALED_LAYOUT_SEED_MIN);
+    let variants = [
+        (
+            ReplayLayoutSeedError::SealedSeedInClear {
+                seed_digest: sealed_digest.clone(),
+            },
+            "SEALED_SEED_IN_CLEAR",
+        ),
+        (
+            ReplayLayoutSeedError::InvalidSealedPool {
+                pool: "dev".to_owned(),
+            },
+            "INVALID_SEALED_SEED_POOL",
+        ),
+        (
+            ReplayLayoutSeedError::InvalidSealedDigest,
+            "INVALID_SEALED_SEED_DIGEST",
+        ),
+        (
+            ReplayLayoutSeedError::NonSealedSeedInSealed { seed: 42 },
+            "NON_SEALED_SEED_IN_SEALED",
+        ),
+    ];
+    for (err, expected_code) in variants {
+        assert_eq!(err.code(), expected_code);
+        assert!(err.to_string().contains(expected_code));
+    }
+
+    let valid_json = format!(
+        r#"{{"pool":"sealed","digest":"{sealed_digest}","independence_checked_at_write_unverified":true}}"#
+    );
+    let seed: ReplayLayoutSeed = must_ok(serde_json::from_str(&valid_json), "valid sealed json");
+    assert!(seed.is_sealed());
+    assert_eq!(seed.clear_seed(), None);
+    assert_eq!(seed.pool(), Some("sealed"));
+    assert_eq!(seed.sealed_digest(), Some(sealed_digest.as_str()));
+    assert_eq!(seed.independence_checked_at_write_unverified(), Some(true));
+    let inner: &SealedReplaySeed = seed
+        .sealed()
+        .unwrap_or_else(|| panic!("sealed() should be Some"));
+    assert_eq!(inner.pool(), "sealed");
+    assert_eq!(inner.digest(), sealed_digest);
+    assert!(inner.independence_checked_at_write_unverified());
+
+    let bad_pool = format!(r#"{{"pool":"dev","digest":"{sealed_digest}"}}"#);
+    assert!(serde_json::from_str::<ReplayLayoutSeed>(&bad_pool).is_err());
+    let bad_digest = r#"{"pool":"sealed","digest":"not-hex"}"#;
+    assert!(serde_json::from_str::<ReplayLayoutSeed>(bad_digest).is_err());
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x91 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x9A; 32]), "eval_seed");
+    let (spec, deal, _) = must_ok(
+        TableSpec::standard_club_chiral_ring_with_explicit_setup(
+            TableId(81_802),
+            4,
+            1,
+            [0x61; 32],
+            &salts,
+            eval_seed,
+        ),
+        "spec setup",
+    );
+    let err_new_sealed = must_err(
+        SeasonReplayLog::new_sealed(spec, 1, deal, vec![], vec![], vec![]),
+        "clear seed < 2^63 must fail new_sealed",
+    );
+    assert!(
+        err_new_sealed
+            .to_string()
+            .contains("NON_SEALED_SEED_IN_SEALED")
+    );
+}

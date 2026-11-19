@@ -140,19 +140,25 @@ fn render_seat_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use league_seat_types::{
-        ActiveShock, AuditorShockHint, COMMODITY_DISPLAY_CATALOG, CharterRole, CoalitionReach,
-        CommitmentHash, CommodityDisplayMap, CreditTier, FundamentalParities, GoodScarcity,
-        GradedMandateCard, MandateKind, NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, PrivateMandate,
-        PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION, SeasonEndAndMarks,
-        SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservationPublicParts, SeatState,
-        SeatStatePredicates, ShockKind, SpoilageAndConversion, TableId, TableMode, TurnPhase,
-        UpkeepAndDebt,
+        ActiveShock, AssetId, AuditorShockHint, COMMODITY_DISPLAY_CATALOG, CharterRole,
+        CoalitionReach, CommitmentHash, CommodityDisplayMap, CreditTier, FundamentalParities,
+        GoodScarcity, GradedMandateCard, MandateKind, NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL,
+        PrivateMandate, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
+        SeasonEndAndMarks, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatObservation,
+        SeatObservationPublicParts, SeatState, SeatStatePredicates, ShockKind,
+        SpoilageAndConversion, TableId, TableMode, TurnPhase, UpkeepAndDebt,
     };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::{
+        Action, TITLE_LINES, action_for, draw_title, format_own_mandate_line, render_seat,
+        render_seat_with_commodities,
+    };
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
@@ -374,9 +380,9 @@ mod tests {
             match never {}
         }
         let screen = buffer_text(&terminal);
-        assert!(screen.contains("Merchant League"));
-        assert!(screen.contains("XRPL Testnet. No real money."));
-        assert!(screen.contains("Not playable yet"));
+        assert!(screen.contains(TITLE_LINES[0]));
+        assert!(screen.contains(TITLE_LINES[1]));
+        assert!(screen.contains(TITLE_LINES[2]));
     }
 
     #[test]
@@ -453,5 +459,15 @@ mod tests {
         let plain = buffer_text(&terminal);
         assert!(plain.contains("CRED: 15000"));
         assert!(plain.contains("Upkeep Good: IRN"));
+
+        let mut obs_empty = sample_seat_observation();
+        obs_empty.seats.clear();
+        obs_empty.spec.seats.clear();
+        if let Err(never) = terminal.draw(|f| render_seat(f, &obs_empty)) {
+            match never {}
+        }
+        let empty_screen = buffer_text(&terminal);
+        assert!(empty_screen.contains("Tier: Unknown"));
+        assert!(empty_screen.contains("Upkeep Good: None"));
     }
 }

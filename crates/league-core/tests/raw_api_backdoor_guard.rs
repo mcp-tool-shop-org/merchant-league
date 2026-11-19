@@ -554,8 +554,10 @@ const ALLOWED_SEAT_UI_PUBLIC_TYPES: &[&str] = &[
 ];
 
 /// Strict entry-point parameter allow-list for `league-seat-ui` `pub fn` functions (`Part B` rule):
-/// accepts `league-seat-types` values, seat-ui-local UI state (`local_types`), and concrete UI
-/// frame/key/event/state handles — never free `&str`/`String`/`Cow` or arbitrary host maps/buffers.
+/// accepts `league-seat-types` values, seat-ui-local UI state (`local_types`), and single scalar
+/// frame/key/mouse/state handles — never `Vec<KeyCode>`, slices, tuples, `Event` (carries
+/// `Event::Paste(String)`), `StructuredError`, `EngineError`, `RefusedActionPreview`, `char`,
+/// or free `&str`/`String`/`Cow`/`OsStr`/`CStr`.
 const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "SeatObservation",
     "PublicSweepReceipt",
@@ -571,7 +573,6 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "PublicSwapOrderPreview",
     "PublicSwapOutcome",
     "AuditorShockHint",
-    "RefusedActionPreview",
     "Step0To7SweepSummary",
     "SeatSpoilagePreview",
     "SeatUpkeepPreview",
@@ -595,7 +596,6 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "FinalScoreboard",
     "SeatScoreEntry",
     "FundamentalParities",
-    "ParitySpecSource",
     "SeatState",
     "SeatConfig",
     "SeatIdentity",
@@ -616,8 +616,6 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "AtomicSwapProposal",
     "DualEscrowProposal",
     "EscrowFinishUnlock",
-    "PreimageSecret",
-    "CommitmentHash",
     "IntentPledge",
     "IntentTarget",
     "MarketAction",
@@ -653,13 +651,7 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "SeasonId",
     "TableId",
     "TableMode",
-    "Units",
-    "Bps",
-    "EngineError",
-    "StructuredError",
-    "CommodityDisplayEntry",
     "CommodityDisplayMap",
-    "SeatCommodityDisplay",
     "Action",
     "Frame",
     "Rect",
@@ -667,13 +659,124 @@ const ALLOWED_SEAT_UI_ENTRY_PARAM_TYPES: &[&str] = &[
     "KeyCode",
     "KeyModifiers",
     "KeyEventKind",
-    "Event",
     "MouseEvent",
     "ListState",
     "TableState",
     "bool",
     "Option",
-    "Vec",
+];
+
+/// Additional scalar UI index fields permitted on `pub` fields of seat-ui-local state structs
+/// (`UiState::selected: usize`, `AppState::seat_idx: u8`) — never admitted on `pub fn` params
+/// or text carriers.
+const ALLOWED_SEAT_UI_PUB_FIELD_TYPES: &[&str] = &[
+    "SeatObservation",
+    "PublicSweepReceipt",
+    "PublicPreviewState",
+    "WhatIfPreview",
+    "HumanWhatIfRequest",
+    "AiPreviewRequest",
+    "CounterpartyAssumptions",
+    "PreviewTieMode",
+    "PublicTableSpec",
+    "PublicCheckOrderPreview",
+    "PublicCheckOutcome",
+    "PublicSwapOrderPreview",
+    "PublicSwapOutcome",
+    "AuditorShockHint",
+    "Step0To7SweepSummary",
+    "SeatSpoilagePreview",
+    "SeatUpkeepPreview",
+    "ConverterOrderPreview",
+    "ProjectOrderPreview",
+    "EscrowOrderPreview",
+    "SeatStatePredicates",
+    "UpkeepAndDebt",
+    "SpoilageAndConversion",
+    "RecipeCover",
+    "GoodScarcity",
+    "HoldingMark",
+    "ProjectCover",
+    "ProjectInputCover",
+    "CoalitionReach",
+    "SeasonEndAndMarks",
+    "SeatSeasonMetrics",
+    "StatePredicateSection",
+    "TurnPredicateRecord",
+    "SeatSweepOutcome",
+    "FinalScoreboard",
+    "SeatScoreEntry",
+    "FundamentalParities",
+    "SeatState",
+    "SeatConfig",
+    "SeatIdentity",
+    "RegentDoctrine",
+    "ConverterRecipe",
+    "ProjectRecipe",
+    "GradedMandateCard",
+    "PrivateMandate",
+    "MandateKind",
+    "CreditTier",
+    "SealedOrderBundle",
+    "ConverterRunOrder",
+    "ProjectDeliveryOrder",
+    "CharterBidOrder",
+    "CouncilVoteBallot",
+    "CouncilPlatform",
+    "ContractDeliveryOrder",
+    "AtomicSwapProposal",
+    "DualEscrowProposal",
+    "EscrowFinishUnlock",
+    "IntentPledge",
+    "IntentTarget",
+    "MarketAction",
+    "OfferProposal",
+    "OfferSide",
+    "CredOffer",
+    "CreditCheck",
+    "CheckProposal",
+    "CheckStatus",
+    "TokenEscrowVault",
+    "DualEscrowVault",
+    "EscrowProposal",
+    "EscrowStatus",
+    "BondProposal",
+    "BondSpec",
+    "BondSettlementMode",
+    "CartelDomain",
+    "ActiveCharter",
+    "CharterRole",
+    "ActiveShock",
+    "ShockKind",
+    "ShockForecastEvent",
+    "FillRecord",
+    "FillKind",
+    "BrokenPromiseRecord",
+    "PendingWashFreeze",
+    "WashFreezeSettlement",
+    "TurnPhase",
+    "AssetId",
+    "Seat",
+    "Turn",
+    "MarketDay",
+    "SeasonId",
+    "TableId",
+    "TableMode",
+    "CommodityDisplayMap",
+    "Action",
+    "Frame",
+    "Rect",
+    "KeyEvent",
+    "KeyCode",
+    "KeyModifiers",
+    "KeyEventKind",
+    "MouseEvent",
+    "ListState",
+    "TableState",
+    "bool",
+    "u8",
+    "usize",
+    "Option",
 ];
 
 /// Concrete allow-listed std/serde/error types permitted in `crates/league-seat-types` fields,
@@ -1371,12 +1474,15 @@ fn parse_tok_attr(tokens: &[Tok], mut idx: usize, flags: &mut AttrFlags) -> usiz
     }
     let inner = &tokens[start..end];
     if let Some(Tok::Ident(head)) = inner.first() {
-        if head == "test" {
+        if head == "test" && inner.len() == 1 {
             flags.cfg_test = true;
         } else if head == "cfg" {
-            if inner
-                .iter()
-                .any(|t| matches!(t, Tok::Ident(s) if s == "test"))
+            // A1 fix: ONLY exact `#[cfg(test)]` counts as test-only — never `#[cfg(not(test))]`,
+            // `#[cfg(any(test, ...))]`, `#[cfg(all(not(test)))]`, or any other predicate naming `test`.
+            if inner.len() == 4
+                && matches!(&inner[1], Tok::LParen)
+                && matches!(&inner[2], Tok::Ident(s) if s == "test")
+                && matches!(&inner[3], Tok::RParen)
             {
                 flags.cfg_test = true;
             }
@@ -4693,10 +4799,28 @@ fn check_seat_surface_type_tokens(
     while idx < ty_tokens.len() {
         match &ty_tokens[idx] {
             Tok::LBracket => {
+                if matches!(
+                    mode,
+                    SurfaceCheckMode::UiEntryParam | SurfaceCheckMode::UiPubField
+                ) {
+                    return Err(format!(
+                        "{rel_path}: {ctx} must not accept slice or array buffer type in `league-seat-ui` (`Part B` rule)"
+                    ));
+                }
                 bracket_stack.push(false);
                 prev_was_quote = false;
                 idx += 1;
                 continue;
+            }
+            Tok::LParen => {
+                if matches!(
+                    mode,
+                    SurfaceCheckMode::UiEntryParam | SurfaceCheckMode::UiPubField
+                ) {
+                    return Err(format!(
+                        "{rel_path}: {ctx} must not accept tuple type in `league-seat-ui` (`Part B` rule)"
+                    ));
+                }
             }
             Tok::RBracket => {
                 bracket_stack.pop();
@@ -4774,7 +4898,7 @@ fn check_seat_surface_type_tokens(
                 SurfaceCheckMode::UiEntryParam | SurfaceCheckMode::UiPubField
             ) && matches!(
                 ident.as_str(),
-                "str" | "String" | "Cow" | "OsStr" | "OsString" | "CStr" | "CString"
+                "str" | "String" | "char" | "Cow" | "OsStr" | "OsString" | "CStr" | "CString"
             ) {
                 return Err(format!(
                     "{rel_path}: {ctx} must not accept free `{ident}` from host in `league-seat-ui` (`Part B` rule: entry points take `league-seat-types` values and seat-ui-local UI state only)"
@@ -4908,6 +5032,24 @@ fn collect_seat_local_types(files: &[(String, String)], include_traits: bool) ->
         }
     }
     local_types
+}
+
+fn find_item_body_or_semi(tokens: &[Tok], start: usize) -> usize {
+    let mut paren = 0_usize;
+    let mut bracket = 0_usize;
+    let mut j = start;
+    while j < tokens.len() {
+        match tokens[j] {
+            Tok::LParen => paren += 1,
+            Tok::RParen => paren = paren.saturating_sub(1),
+            Tok::LBracket => bracket += 1,
+            Tok::RBracket => bracket = bracket.saturating_sub(1),
+            Tok::LBrace | Tok::Semi if paren == 0 && bracket == 0 => break,
+            _ => {}
+        }
+        j += 1;
+    }
+    j
 }
 
 fn find_stmt_semi(tokens: &[Tok], start: usize) -> usize {
@@ -5243,16 +5385,41 @@ fn check_seat_ui_public_surface(
                 allowed_types: ALLOWED_SEAT_UI_PUBLIC_TYPES,
                 allowed_fn_generics: &empty_generics,
             };
+            let mut key_input_param_count = 0_usize;
             for seg in split_top_level_comma(params) {
                 let clean = strip_leading_attrs_and_vis(seg);
                 if let Some(colon_pos) = clean.iter().position(|t| matches!(t, Tok::Other(':'))) {
+                    let param_ty = &clean[colon_pos + 1..];
                     check_seat_surface_type_tokens(
                         rel_path,
                         &format!("`{vis_label} {fn_name}` parameter"),
-                        &clean[colon_pos + 1..],
+                        param_ty,
                         &ui_env,
                         param_mode,
                     )?;
+                    if param_mode == SurfaceCheckMode::UiEntryParam
+                        && param_ty.iter().any(|t| {
+                            matches!(
+                                t,
+                                Tok::Ident(s)
+                                    if matches!(
+                                        s.as_str(),
+                                        "KeyEvent"
+                                            | "KeyCode"
+                                            | "KeyModifiers"
+                                            | "KeyEventKind"
+                                            | "MouseEvent"
+                                    )
+                            )
+                        })
+                    {
+                        key_input_param_count += 1;
+                        if key_input_param_count > 1 {
+                            return Err(format!(
+                                "{rel_path}: `{vis_label} {fn_name}` must accept at most one single key/mouse event parameter (`Part B` rule)"
+                            ));
+                        }
+                    }
                 }
             }
             if !ret_slice.is_empty() {
@@ -5277,9 +5444,8 @@ fn check_seat_ui_public_surface(
             continue;
         }
 
-        if matches!(vis, Visibility::Public)
-            && matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "const" || s == "static")
-        {
+        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "const" || s == "static") {
+            let is_static = matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "static");
             let mut k = after_vis + 1;
             if matches!(tokens.get(k), Some(Tok::Ident(s)) if s == "mut") {
                 k += 1;
@@ -5296,6 +5462,11 @@ fn check_seat_ui_public_surface(
                     .position(|t| matches!(t, Tok::Other('=')))
                     .map(|p| colon_pos + 1 + p)
                     .unwrap_or(stmt.len());
+                let vis_prefix = if matches!(vis, Visibility::Public) {
+                    "pub "
+                } else {
+                    ""
+                };
                 let ui_env = SurfaceCheckEnv {
                     crate_name: "league-seat-ui",
                     local_types,
@@ -5305,12 +5476,8 @@ fn check_seat_ui_public_surface(
                 check_seat_surface_type_tokens(
                     rel_path,
                     &format!(
-                        "`pub {} {item_name}`",
-                        if matches!(tokens.get(after_vis), Some(Tok::Ident(s)) if s == "static") {
-                            "static"
-                        } else {
-                            "const"
-                        }
+                        "`{vis_prefix}{} {item_name}`",
+                        if is_static { "static" } else { "const" }
                     ),
                     &stmt[colon_pos + 1..end_ty],
                     &ui_env,
@@ -5356,6 +5523,12 @@ fn check_seat_ui_public_surface(
                 allowed_types: ALLOWED_SEAT_UI_PUBLIC_TYPES,
                 allowed_fn_generics: &empty_generics,
             };
+            let ui_pub_field_env = SurfaceCheckEnv {
+                crate_name: "league-seat-ui",
+                local_types,
+                allowed_types: ALLOWED_SEAT_UI_PUB_FIELD_TYPES,
+                allowed_fn_generics: &empty_generics,
+            };
             if item_kw == "struct" && body_pos < tokens.len() {
                 if matches!(tokens[body_pos], Tok::LBrace) {
                     let close = find_matching_brace(&tokens, body_pos);
@@ -5366,6 +5539,11 @@ fn check_seat_ui_public_surface(
                             } else {
                                 SurfaceCheckMode::UiGeneral
                             };
+                        let field_env = if fmode == SurfaceCheckMode::UiPubField {
+                            &ui_pub_field_env
+                        } else {
+                            &ui_env
+                        };
                         let clean = strip_leading_attrs_and_vis(seg);
                         if let Some(cpos) = clean.iter().position(|t| matches!(t, Tok::Other(':')))
                         {
@@ -5373,7 +5551,7 @@ fn check_seat_ui_public_surface(
                                 rel_path,
                                 &format!("struct `{item_name}` field"),
                                 &clean[cpos + 1..],
-                                &ui_env,
+                                field_env,
                                 fmode,
                             )?;
                         }
@@ -5390,12 +5568,17 @@ fn check_seat_ui_public_surface(
                             } else {
                                 SurfaceCheckMode::UiGeneral
                             };
+                        let field_env = if fmode == SurfaceCheckMode::UiPubField {
+                            &ui_pub_field_env
+                        } else {
+                            &ui_env
+                        };
                         let clean = strip_leading_attrs_and_vis(seg);
                         check_seat_surface_type_tokens(
                             rel_path,
                             &format!("struct `{item_name}` tuple field"),
                             clean,
-                            &ui_env,
+                            field_env,
                             fmode,
                         )?;
                     }
@@ -5415,6 +5598,11 @@ fn check_seat_ui_public_surface(
                 } else {
                     SurfaceCheckMode::UiGeneral
                 };
+                let variant_env = if vmode == SurfaceCheckMode::UiPubField {
+                    &ui_pub_field_env
+                } else {
+                    &ui_env
+                };
                 let close = find_matching_brace(&tokens, body_pos);
                 for seg in split_top_level_comma(&tokens[body_pos + 1..close]) {
                     let clean = strip_leading_attrs_and_vis(seg);
@@ -5429,7 +5617,7 @@ fn check_seat_ui_public_surface(
                                     rel_path,
                                     &format!("enum `{item_name}` variant field"),
                                     &fclean[cpos + 1..],
-                                    &ui_env,
+                                    variant_env,
                                     vmode,
                                 )?;
                             }
@@ -5444,7 +5632,7 @@ fn check_seat_ui_public_surface(
                                 rel_path,
                                 &format!("enum `{item_name}` tuple variant field"),
                                 fclean,
-                                &ui_env,
+                                variant_env,
                                 vmode,
                             )?;
                         }
@@ -6069,6 +6257,1074 @@ fn check_seat_types_surface(files: &[(String, String)]) -> Result<(), String> {
                 attrs = AttrFlags::default();
             }
             i += 1;
+        }
+    }
+
+    Ok(())
+}
+
+const ALLOWED_SEAT_TYPES_DERIVES: &[&str] = &[
+    "Clone",
+    "Copy",
+    "Debug",
+    "Default",
+    "Deserialize",
+    "Eq",
+    "Hash",
+    "Ord",
+    "PartialEq",
+    "PartialOrd",
+    "Serialize",
+];
+
+const ALLOWED_SEAT_UI_DERIVES: &[&str] = &[
+    "Clone",
+    "Copy",
+    "Debug",
+    "Default",
+    "Eq",
+    "Hash",
+    "Ord",
+    "PartialEq",
+    "PartialOrd",
+];
+
+const ALLOWED_SEAT_TYPES_SERDE_ATTR_KEYS: &[&str] = &[
+    "default",
+    "skip_serializing_if",
+    "with",
+    "serialize_with",
+    "deserialize_with",
+    "rename_all",
+];
+
+const ALLOWED_SEAT_PROD_MACROS: &[&str] = &[
+    "vec",
+    "format",
+    "write",
+    "writeln",
+    "matches",
+    "debug_assert",
+];
+
+const ALLOWED_SEAT_TEST_MACROS: &[&str] = &["assert", "assert_eq", "assert_ne"];
+
+const ALLOWED_SEAT_CONST_TYPE_IDENTS: &[&str] = &[
+    "bool",
+    "char",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "str",
+    "Units",
+    "Bps",
+    "CommitmentHash",
+    "CommodityDisplayEntry",
+    "CLOSING_ROLL_WINDOW_LEN",
+];
+
+const ALLOWED_SEAT_TYPES_SUBMODS: &[&str] = &[
+    "commit",
+    "contracts",
+    "display",
+    "engine_types",
+    "observation",
+    "predicates_types",
+    "scoring_types",
+    "serde_helpers",
+    "types",
+    "wire_serde",
+    "hex32",
+    "opt_hex32",
+    "delivery_ledger_serde",
+    "tests",
+];
+
+fn parse_attr_bracket_end(tokens: &[Tok], lbracket_idx: usize) -> usize {
+    let mut depth = 1_usize;
+    let mut j = lbracket_idx + 1;
+    while j < tokens.len() && depth > 0 {
+        match tokens[j] {
+            Tok::LBracket => depth += 1,
+            Tok::RBracket => depth -= 1,
+            _ => {}
+        }
+        j += 1;
+    }
+    j
+}
+
+fn is_exact_seat_forbid_inner_attr(inner: &[Tok]) -> bool {
+    let body = if inner.last() == Some(&Tok::Other(',')) {
+        &inner[..inner.len() - 1]
+    } else {
+        inner
+    };
+    if body.len() < 4
+        || !matches!(&body[0], Tok::Ident(s) if s == "forbid")
+        || !matches!(&body[1], Tok::LParen)
+        || !matches!(body.last(), Some(Tok::RParen))
+    {
+        return false;
+    }
+    let lint_toks = &body[2..body.len() - 1];
+    let mut lints = Vec::new();
+    for seg in split_top_level_comma(lint_toks) {
+        if seg.is_empty() {
+            continue;
+        }
+        if seg.len() == 4
+            && matches!(&seg[0], Tok::Ident(c) if c == "clippy")
+            && matches!(seg[1], Tok::Other(':'))
+            && matches!(seg[2], Tok::Other(':'))
+            && let Tok::Ident(name) = &seg[3]
+        {
+            lints.push(name.as_str());
+        } else {
+            return false;
+        }
+    }
+    lints.contains(&"disallowed_methods")
+        && lints.contains(&"disallowed_types")
+        && lints.contains(&"disallowed_macros")
+        && lints.len() == 3
+}
+
+fn validate_seat_derive_attr(
+    crate_name: &str,
+    rel_path: &str,
+    inner: &[Tok],
+) -> Result<(), String> {
+    if inner.len() < 4
+        || !matches!(inner.get(1), Some(Tok::LParen))
+        || !matches!(inner.last(), Some(Tok::RParen))
+    {
+        return Err(format!(
+            "{crate_name}/{rel_path}: malformed `#[derive(...)]` attribute in seat crate"
+        ));
+    }
+    let allowed = if crate_name == "league-seat-types" {
+        ALLOWED_SEAT_TYPES_DERIVES
+    } else {
+        ALLOWED_SEAT_UI_DERIVES
+    };
+    let list = &inner[2..inner.len() - 1];
+    let mut saw_any = false;
+    for seg in split_top_level_comma(list) {
+        if seg.is_empty() {
+            continue;
+        }
+        if seg.len() != 1 {
+            return Err(format!(
+                "{crate_name}/{rel_path}: `#[derive(...)]` only permits bare allow-listed derive identifiers"
+            ));
+        }
+        let Tok::Ident(d) = &seg[0] else {
+            return Err(format!(
+                "{crate_name}/{rel_path}: `#[derive(...)]` contains non-identifier entry"
+            ));
+        };
+        if !allowed.contains(&d.as_str()) {
+            return Err(format!(
+                "{crate_name}/{rel_path}: derive `{d}` is not on the `{crate_name}` allow-list (`{allowed:?}`)"
+            ));
+        }
+        saw_any = true;
+    }
+    if !saw_any {
+        return Err(format!(
+            "{crate_name}/{rel_path}: empty `#[derive()]` is forbidden in seat crates"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_seat_serde_attr(crate_name: &str, rel_path: &str, inner: &[Tok]) -> Result<(), String> {
+    if inner.len() < 4
+        || !matches!(inner.get(1), Some(Tok::LParen))
+        || !matches!(inner.last(), Some(Tok::RParen))
+    {
+        return Err(format!(
+            "{crate_name}/{rel_path}: malformed `#[serde(...)]` attribute"
+        ));
+    }
+    for seg in split_top_level_comma(&inner[2..inner.len() - 1]) {
+        if seg.is_empty() {
+            continue;
+        }
+        let Some(Tok::Ident(key)) = seg.first() else {
+            return Err(format!(
+                "{crate_name}/{rel_path}: `#[serde(...)]` key must be an allow-listed identifier"
+            ));
+        };
+        if !ALLOWED_SEAT_TYPES_SERDE_ATTR_KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "{crate_name}/{rel_path}: serde attribute `{key}` is not on the `league-seat-types` allow-list"
+            ));
+        }
+        if seg.len() > 1 && !matches!(seg.get(1), Some(Tok::Other('='))) {
+            return Err(format!(
+                "{crate_name}/{rel_path}: `#[serde({key}...)]` form is not on the seat-crate allow-list"
+            ));
+        }
+    }
+    Ok(())
+}
+
+struct SeatAttrScan {
+    is_attr_tok: Vec<bool>,
+    test_mod_span: Option<(usize, usize)>,
+}
+
+fn find_seat_test_mod_span_and_check_attrs(
+    crate_name: &str,
+    rel_path: &str,
+    tokens: &[Tok],
+) -> Result<SeatAttrScan, String> {
+    let mut is_attr_tok = vec![false; tokens.len()];
+    let mut test_mod_span: Option<(usize, usize)> = None;
+    let mut cfg_test_seen = false;
+    let mut seen_non_attr = false;
+    let mut i = 0_usize;
+
+    while i < tokens.len() {
+        if matches!(tokens[i], Tok::Pound) {
+            let is_inner = matches!(tokens.get(i + 1), Some(Tok::Bang));
+            let b_idx = if is_inner { i + 2 } else { i + 1 };
+            if !matches!(tokens.get(b_idx), Some(Tok::LBracket)) {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: unexpected `#` token outside attribute"
+                ));
+            }
+            let end_excl = parse_attr_bracket_end(tokens, b_idx);
+            if end_excl <= b_idx + 1 {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: unclosed attribute bracket"
+                ));
+            }
+            for flag in &mut is_attr_tok[i..end_excl] {
+                *flag = true;
+            }
+            let inner = &tokens[b_idx + 1..end_excl - 1];
+            if is_inner {
+                if rel_path != "src/lib.rs" || seen_non_attr {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: inner attribute `#![...]` is only allowed at the top of `src/lib.rs`"
+                    ));
+                }
+                if !is_exact_seat_forbid_inner_attr(inner) {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: inner attribute is not on the seat-crate allow-list (only `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` is allowed)"
+                    ));
+                }
+                i = end_excl;
+                continue;
+            }
+            seen_non_attr = true;
+            let in_test_mod = test_mod_span.is_some_and(|(s, e)| i > s && i < e);
+            let head = inner.first().and_then(|t| match t {
+                Tok::Ident(s) => Some(s.as_str()),
+                _ => None,
+            });
+            match head {
+                Some("cfg") => {
+                    let is_exact_cfg_test = inner.len() == 4
+                        && matches!(&inner[1], Tok::LParen)
+                        && matches!(&inner[2], Tok::Ident(s) if s == "test")
+                        && matches!(&inner[3], Tok::RParen);
+                    if !is_exact_cfg_test {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `#[cfg(...)]` is forbidden by seat-crate allow-list (only exact `#[cfg(test)]` on one `mod tests` block is allowed)"
+                        ));
+                    }
+                    if cfg_test_seen {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: at most one `#[cfg(test)] mod tests` block per file is allowed"
+                        ));
+                    }
+                    let is_mod_tests = matches!(tokens.get(end_excl), Some(Tok::Ident(s)) if s == "mod")
+                        && matches!(tokens.get(end_excl + 1), Some(Tok::Ident(s)) if s == "tests")
+                        && matches!(tokens.get(end_excl + 2), Some(Tok::LBrace));
+                    if !is_mod_tests {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `#[cfg(test)]` is allowed only directly on `mod tests {{ ... }}`"
+                        ));
+                    }
+                    let lbrace = end_excl + 2;
+                    let rbrace = find_matching_brace(tokens, lbrace);
+                    cfg_test_seen = true;
+                    test_mod_span = Some((lbrace, rbrace));
+                }
+                Some("cfg_attr") => {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: `#[cfg_attr(...)]` is forbidden by seat-crate allow-list"
+                    ));
+                }
+                Some("test") if inner.len() == 1 => {
+                    if !in_test_mod {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `#[test]` is only allowed inside `#[cfg(test)] mod tests`"
+                        ));
+                    }
+                }
+                Some("must_use") if inner.len() == 1 => {}
+                Some("derive") => validate_seat_derive_attr(crate_name, rel_path, inner)?,
+                Some("default") if crate_name == "league-seat-types" && inner.len() == 1 => {}
+                Some("doc")
+                    if crate_name == "league-seat-types"
+                        && inner.len() == 4
+                        && matches!(&inner[1], Tok::LParen)
+                        && matches!(&inner[2], Tok::Ident(s) if s == "hidden")
+                        && matches!(&inner[3], Tok::RParen) => {}
+                Some("serde") if crate_name == "league-seat-types" => {
+                    validate_seat_serde_attr(crate_name, rel_path, inner)?;
+                }
+                _ => {
+                    let attr_name = head.unwrap_or("<unknown>");
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: attribute `#[{attr_name}...]` is not on the `{crate_name}` allow-list"
+                    ));
+                }
+            }
+            i = end_excl;
+            continue;
+        }
+        seen_non_attr = true;
+        i += 1;
+    }
+
+    Ok(SeatAttrScan {
+        is_attr_tok,
+        test_mod_span,
+    })
+}
+
+fn is_allowed_seat_std_core_chain(chain: &[&str]) -> bool {
+    let Some((&root, rest)) = chain.split_first() else {
+        return false;
+    };
+    match (root, rest.first().copied()) {
+        ("std" | "core", Some("fmt")) => match rest.get(1).copied() {
+            None => true,
+            Some(item) => {
+                matches!(item, "Debug" | "Display" | "Formatter" | "Result" | "Write")
+                    && rest.len() == 2
+            }
+        },
+        ("std", Some("collections")) => match rest.get(1).copied() {
+            Some("BTreeMap" | "BTreeSet" | "VecDeque") => rest.len() <= 3,
+            _ => false,
+        },
+        ("std" | "core", Some("cmp")) => match rest.get(1).copied() {
+            Some("Ordering" | "max" | "min") => rest.len() == 2,
+            _ => false,
+        },
+        ("std" | "core", Some("error")) => rest.get(1).copied() == Some("Error") && rest.len() == 2,
+        _ => false,
+    }
+}
+
+fn is_allowed_seat_use_path(
+    crate_name: &str,
+    local_mods: &BTreeSet<String>,
+    canonical_path: &str,
+) -> bool {
+    let segs: Vec<&str> = canonical_path.split("::").collect();
+    if segs.is_empty() || segs.contains(&"") {
+        return false;
+    }
+    if matches!(segs[0], "crate" | "super" | "self") || local_mods.contains(segs[0]) {
+        return segs[0] != "self" || segs.len() > 1;
+    }
+    if is_allowed_seat_std_core_chain(&segs) {
+        return true;
+    }
+    if crate_name == "league-seat-types" {
+        match segs[0] {
+            "league_error" => {
+                matches!(
+                    segs.get(1).copied(),
+                    Some("StructuredError" | "ToStructuredError" | "scrub_secret_text")
+                ) && segs.len() == 2
+            }
+            "serde" => match segs.get(1).copied() {
+                Some("Deserialize" | "Deserializer" | "Serialize" | "Serializer") => {
+                    segs.len() == 2
+                }
+                Some("de") => {
+                    segs.len() <= 3 && matches!(segs.get(2).copied(), None | Some("Error"))
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    } else {
+        matches!(segs[0], "league_seat_types" | "ratatui" | "crossterm") && segs.len() >= 2
+    }
+}
+
+fn is_rust_primitive_or_self_kw(ident: &str) -> bool {
+    matches!(
+        ident,
+        "bool"
+            | "char"
+            | "str"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "self"
+            | "super"
+            | "crate"
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SeatContainerKind {
+    Module,
+    Impl,
+    StructOrEnum,
+    FnOrBlock,
+}
+
+fn validate_seat_const_item(
+    crate_name: &str,
+    rel_path: &str,
+    stmt: &[Tok],
+    local_types: &BTreeSet<String>,
+) -> Result<(), String> {
+    let Some(Tok::Ident(const_name)) = stmt.first() else {
+        return Err(format!(
+            "{crate_name}/{rel_path}: `const` item must have a named identifier in seat crates"
+        ));
+    };
+    if const_name == "_" {
+        return Err(format!(
+            "{crate_name}/{rel_path}: anonymous `const _:` item is forbidden by seat-crate allow-list"
+        ));
+    }
+    let Some(colon_pos) = stmt.iter().position(|t| matches!(t, Tok::Other(':'))) else {
+        return Err(format!(
+            "{crate_name}/{rel_path}: `const {const_name}` missing explicit type annotation"
+        ));
+    };
+    let Some(eq_rel) = stmt[colon_pos + 1..]
+        .iter()
+        .position(|t| matches!(t, Tok::Other('=')))
+    else {
+        return Err(format!(
+            "{crate_name}/{rel_path}: `const {const_name}` missing `=` initializer"
+        ));
+    };
+    let eq_pos = colon_pos + 1 + eq_rel;
+    let ty_slice = &stmt[colon_pos + 1..eq_pos];
+    let expr_slice = &stmt[eq_pos + 1..];
+    if matches!(expr_slice.first(), Some(Tok::LBrace)) {
+        return Err(format!(
+            "{crate_name}/{rel_path}: `const {const_name}` block initializer `{{ ... }}` is forbidden by seat-crate allow-list"
+        ));
+    }
+    let empty_generics = BTreeSet::new();
+    let const_env = SurfaceCheckEnv {
+        crate_name,
+        local_types,
+        allowed_types: if crate_name == "league-seat-types" {
+            ALLOWED_SEAT_TYPES_SURFACE_TYPES
+        } else {
+            ALLOWED_SEAT_UI_PUBLIC_TYPES
+        },
+        allowed_fn_generics: &empty_generics,
+    };
+    let mode = if crate_name == "league-seat-types" {
+        SurfaceCheckMode::SeatTypes
+    } else {
+        SurfaceCheckMode::UiGeneral
+    };
+    check_seat_surface_type_tokens(
+        rel_path,
+        &format!("`const {const_name}`"),
+        ty_slice,
+        &const_env,
+        mode,
+    )?;
+
+    // Ensure const type uses strictly compile-time scalar/slice/catalog value types (no heap
+    // collections like `Vec`/`String`/`BTreeMap` or ratatui widget/frame handles).
+    let mut in_array_len = 0_usize;
+    let mut prev_quote = false;
+    for tok in ty_slice {
+        match tok {
+            Tok::Semi => in_array_len += 1,
+            Tok::RBracket => in_array_len = in_array_len.saturating_sub(1),
+            Tok::Ident(id)
+                if !prev_quote
+                    && in_array_len == 0
+                    && !TYPE_KEYWORDS_SKIP.contains(&id.as_str())
+                    && !ALLOWED_SEAT_CONST_TYPE_IDENTS.contains(&id.as_str()) =>
+            {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: `const {const_name}` uses type `{id}` outside constant allow-list"
+                ));
+            }
+            _ => {}
+        }
+        prev_quote = matches!(tok, Tok::Other('\''));
+    }
+    Ok(())
+}
+
+fn collect_crate_local_mods(crate_name: &str, files: &[(String, String)]) -> BTreeSet<String> {
+    let mut mods = BTreeSet::new();
+    if crate_name == "league-seat-types" {
+        for &m in ALLOWED_SEAT_TYPES_SUBMODS {
+            mods.insert(m.to_owned());
+        }
+    } else {
+        mods.insert("tests".to_owned());
+    }
+    for (rel_path, source) in files {
+        let tokens = tokenize_rust(source);
+        for w in tokens.windows(2) {
+            if matches!(&w[0], Tok::Ident(k) if k == "mod")
+                && let Tok::Ident(m_name) = &w[1]
+            {
+                mods.insert(m_name.clone());
+            }
+        }
+        if let Some(stem) = rel_path
+            .strip_prefix("src/")
+            .and_then(|s| s.strip_suffix(".rs"))
+            && stem != "lib"
+        {
+            mods.insert(stem.to_owned());
+        }
+    }
+    mods
+}
+
+fn check_seat_crate_allowlist(crate_name: &str, files: &[(String, String)]) -> Result<(), String> {
+    let local_mods = collect_crate_local_mods(crate_name, files);
+    let mut local_types = collect_seat_local_types(files, crate_name == "league-seat-types");
+    if crate_name == "league-seat-types" {
+        for (_, source) in files {
+            let toks = tokenize_rust(source);
+            for w in toks.windows(2) {
+                if matches!(&w[0], Tok::Ident(kw) if kw == "type")
+                    && let Tok::Ident(alias_name) = &w[1]
+                {
+                    local_types.insert(alias_name.clone());
+                }
+            }
+        }
+    }
+
+    for (rel_path, source) in files {
+        let tokens = tokenize_rust(source);
+        let SeatAttrScan {
+            is_attr_tok,
+            test_mod_span,
+        } = find_seat_test_mod_span_and_check_attrs(crate_name, rel_path, &tokens)?;
+
+        // Check Observation derive in `crates/league-seat-types/src/observation.rs`:
+        // `SeatObservation` must NEVER derive `Deserialize` (`B1`).
+        if crate_name == "league-seat-types" {
+            for k in 0..tokens.len() {
+                if !is_attr_tok[k]
+                    && matches!(&tokens[k], Tok::Ident(kw) if kw == "struct")
+                    && matches!(tokens.get(k + 1), Some(Tok::Ident(nm)) if nm == "SeatObservation")
+                {
+                    let mut decl_start = k;
+                    if decl_start > 0
+                        && matches!(&tokens[decl_start - 1], Tok::Ident(p) if p == "pub")
+                    {
+                        decl_start -= 1;
+                    } else if decl_start >= 3 && matches!(&tokens[decl_start - 1], Tok::RParen) {
+                        let mut paren_depth = 1_usize;
+                        let mut p = decl_start - 1;
+                        while p > 0 && paren_depth > 0 {
+                            p -= 1;
+                            match tokens[p] {
+                                Tok::RParen => paren_depth += 1,
+                                Tok::LParen => paren_depth -= 1,
+                                _ => {}
+                            }
+                        }
+                        if p > 0 && matches!(&tokens[p - 1], Tok::Ident(kw) if kw == "pub") {
+                            decl_start = p - 1;
+                        }
+                    }
+                    let mut back = decl_start;
+                    while back > 0 && is_attr_tok[back - 1] {
+                        back -= 1;
+                    }
+                    if tokens[back..decl_start]
+                        .iter()
+                        .any(|t| matches!(t, Tok::Ident(a) if a == "Deserialize"))
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `SeatObservation` must not derive `Deserialize` (`B1` host-only mandate isolation)"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Whole-file macro/keyword/token allow-list.
+        for (k, tok) in tokens.iter().enumerate() {
+            if is_attr_tok[k] {
+                continue;
+            }
+            let in_test_mod = test_mod_span.is_some_and(|(s, e)| k > s && k < e);
+            if matches!(tok, Tok::Other('$')) {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: macro metavariable `$` is forbidden by seat-crate allow-list"
+                ));
+            }
+            if let Tok::Ident(id) = tok {
+                if id == "static"
+                    && !matches!(
+                        k.checked_sub(1).and_then(|p| tokens.get(p)),
+                        Some(Tok::Other('\''))
+                    )
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: `static` item is forbidden by seat-crate allow-list"
+                    ));
+                }
+                if matches!(
+                    id.as_str(),
+                    "macro_rules"
+                        | "proc_macro"
+                        | "unsafe"
+                        | "async"
+                        | "extern"
+                        | "union"
+                        | "asm"
+                        | "global_asm"
+                ) {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: `{id}` is forbidden by seat-crate allow-list"
+                    ));
+                }
+                if id == "macro"
+                    && matches!(tokens.get(k + 1), Some(Tok::Ident(_)))
+                    && (k == 0 || !matches!(tokens[k - 1], Tok::Other(':')))
+                {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: `macro` definition is forbidden by seat-crate allow-list"
+                    ));
+                }
+            }
+            if matches!(tok, Tok::Bang) {
+                let prev_is_pound = k > 0 && matches!(tokens[k - 1], Tok::Pound);
+                let next_is_eq = matches!(tokens.get(k + 1), Some(Tok::Other('=')));
+                if prev_is_pound || next_is_eq {
+                    continue;
+                }
+                if let Some(Tok::Ident(macro_name)) = k.checked_sub(1).and_then(|p| tokens.get(p))
+                    && matches!(
+                        tokens.get(k + 1),
+                        Some(Tok::LParen | Tok::LBracket | Tok::LBrace)
+                    )
+                    && !matches!(
+                        macro_name.as_str(),
+                        "if" | "while" | "return" | "break" | "in" | "match" | "else" | "yield"
+                    )
+                {
+                    if k >= 3
+                        && matches!(tokens[k - 2], Tok::Other(':'))
+                        && matches!(tokens[k - 3], Tok::Other(':'))
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: path-qualified macro `{macro_name}!` is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let allowed_prod = ALLOWED_SEAT_PROD_MACROS.contains(&macro_name.as_str());
+                    let allowed_test =
+                        in_test_mod && ALLOWED_SEAT_TEST_MACROS.contains(&macro_name.as_str());
+                    if !allowed_prod && !allowed_test {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: macro `{macro_name}!` is not on the seat-crate allow-list"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Inline `::` path chain allow-list (excluding attribute tokens and `use ...;` statements).
+        let mut idx = 0_usize;
+        while idx < tokens.len() {
+            if is_attr_tok[idx] {
+                idx += 1;
+                continue;
+            }
+            if matches!(&tokens[idx], Tok::Ident(u) if u == "use") {
+                idx = find_stmt_semi(&tokens, idx + 1) + 1;
+                continue;
+            }
+            let prev_is_double_colon = idx >= 2
+                && matches!(tokens[idx - 1], Tok::Other(':'))
+                && matches!(tokens[idx - 2], Tok::Other(':'));
+            if matches!(&tokens[idx], Tok::Ident(_))
+                && !prev_is_double_colon
+                && matches!(
+                    (tokens.get(idx + 1), tokens.get(idx + 2)),
+                    (Some(Tok::Other(':')), Some(Tok::Other(':')))
+                )
+            {
+                let mut chain: Vec<&str> = Vec::new();
+                let mut pos = idx;
+                while let Some(Tok::Ident(seg)) = tokens.get(pos) {
+                    chain.push(seg.as_str());
+                    if matches!(
+                        (tokens.get(pos + 1), tokens.get(pos + 2)),
+                        (Some(Tok::Other(':')), Some(Tok::Other(':')))
+                    ) {
+                        pos += 3;
+                    } else {
+                        pos += 1;
+                        break;
+                    }
+                }
+                if chain.len() >= 2 {
+                    let seg0 = chain[0];
+                    if matches!(seg0, "std" | "core" | "alloc") {
+                        if !is_allowed_seat_std_core_chain(&chain) {
+                            return Err(format!(
+                                "{crate_name}/{rel_path}: inline std/core path `{}` is not on the seat-crate allow-list",
+                                chain.join("::")
+                            ));
+                        }
+                    } else if seg0 == "fmt" {
+                        if !matches!(
+                            chain.get(1).copied(),
+                            Some("Debug" | "Display" | "Formatter" | "Result" | "Write")
+                        ) || chain.len() > 2
+                        {
+                            return Err(format!(
+                                "{crate_name}/{rel_path}: path `{}` is not on the seat-crate allow-list",
+                                chain.join("::")
+                            ));
+                        }
+                    } else if seg0.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                        && !is_rust_primitive_or_self_kw(seg0)
+                        && !local_mods.contains(seg0)
+                    {
+                        let allowed_external = if crate_name == "league-seat-types" {
+                            seg0 == "league_error" || seg0 == "serde"
+                        } else {
+                            matches!(seg0, "league_seat_types" | "ratatui" | "crossterm")
+                        };
+                        if !allowed_external {
+                            return Err(format!(
+                                "{crate_name}/{rel_path}: path `{}` is not on the `{crate_name}` allow-list",
+                                chain.join("::")
+                            ));
+                        }
+                    }
+                }
+                idx = pos;
+                continue;
+            }
+            if matches!(tokens[idx], Tok::Other(':'))
+                && matches!(tokens.get(idx + 1), Some(Tok::Other(':')))
+                && matches!(tokens.get(idx + 2), Some(Tok::Ident(_)))
+                && (idx == 0
+                    || !matches!(
+                        tokens[idx - 1],
+                        Tok::Ident(_) | Tok::Other('>') | Tok::RParen | Tok::RBracket
+                    ))
+            {
+                return Err(format!(
+                    "{crate_name}/{rel_path}: global-root `::` path is forbidden by seat-crate allow-list"
+                ));
+            }
+            idx += 1;
+        }
+
+        // Scope, item-kind, `const`, `type`, `trait`, `mod`, and `use` statement walk.
+        let mut scopes = vec![SeatContainerKind::Module];
+        let mut at_stmt_start = true;
+        let mut k = 0_usize;
+
+        while k < tokens.len() {
+            if is_attr_tok[k] {
+                k += 1;
+                continue;
+            }
+            let in_test_mod = test_mod_span.is_some_and(|(s, e)| k > s && k < e);
+            let cur_scope = scopes.last().copied().unwrap_or(SeatContainerKind::Module);
+
+            match &tokens[k] {
+                Tok::RBrace => {
+                    if scopes.len() > 1 {
+                        scopes.pop();
+                    }
+                    at_stmt_start = true;
+                    k += 1;
+                    continue;
+                }
+                Tok::LBrace => {
+                    if cur_scope == SeatContainerKind::StructOrEnum {
+                        scopes.push(SeatContainerKind::StructOrEnum);
+                    } else {
+                        scopes.push(SeatContainerKind::FnOrBlock);
+                    }
+                    at_stmt_start = true;
+                    k += 1;
+                    continue;
+                }
+                Tok::Semi => {
+                    at_stmt_start = true;
+                    k += 1;
+                    continue;
+                }
+                _ => {}
+            }
+
+            if matches!(cur_scope, SeatContainerKind::StructOrEnum) || !at_stmt_start {
+                k += 1;
+                continue;
+            }
+
+            // Skip visibility qualifier (`pub` or `pub(...)`) at statement/item start.
+            let mut item_pos = k;
+            if matches!(&tokens[item_pos], Tok::Ident(p) if p == "pub") {
+                if matches!(tokens.get(item_pos + 1), Some(Tok::LParen)) {
+                    item_pos = find_matching_paren(&tokens, item_pos + 1) + 1;
+                } else {
+                    item_pos += 1;
+                }
+            }
+            while item_pos < tokens.len() && is_attr_tok[item_pos] {
+                item_pos += 1;
+            }
+            let Some(Tok::Ident(kw)) = tokens.get(item_pos) else {
+                if matches!(
+                    cur_scope,
+                    SeatContainerKind::Module | SeatContainerKind::Impl
+                ) {
+                    return Err(format!(
+                        "{crate_name}/{rel_path}: unexpected non-identifier token at item start"
+                    ));
+                }
+                at_stmt_start = false;
+                k = item_pos + 1;
+                continue;
+            };
+
+            match kw.as_str() {
+                "use" => {
+                    let semi = find_stmt_semi(&tokens, item_pos + 1);
+                    let use_toks = &tokens[item_pos + 1..semi];
+                    if matches!(use_toks.first(), Some(Tok::Other(':'))) {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: global-root `use ::...` is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    if use_toks
+                        .iter()
+                        .any(|t| matches!(t, Tok::Ident(s) if s == "as"))
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `use ... as` rename is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let mut expanded = Vec::new();
+                    expand_use_tree_inner(rel_path, use_toks, "", false, &mut expanded)?;
+                    for item in &expanded {
+                        if !is_allowed_seat_use_path(crate_name, &local_mods, &item.canonical_path)
+                        {
+                            return Err(format!(
+                                "{crate_name}/{rel_path}: `use {}` is not on the `{crate_name}` allow-list",
+                                item.canonical_path
+                            ));
+                        }
+                    }
+                    at_stmt_start = true;
+                    k = (semi + 1).min(tokens.len());
+                }
+                "type" => {
+                    if crate_name == "league-seat-ui"
+                        || cur_scope != SeatContainerKind::Module
+                        || in_test_mod
+                    {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `type` item is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let semi = find_stmt_semi(&tokens, item_pos + 1);
+                    at_stmt_start = true;
+                    k = (semi + 1).min(tokens.len());
+                }
+                "trait" => {
+                    let is_allowed_parity_trait = crate_name == "league-seat-types"
+                        && rel_path == "src/scoring_types.rs"
+                        && cur_scope == SeatContainerKind::Module
+                        && !in_test_mod
+                        && matches!(
+                            tokens.get(item_pos + 1),
+                            Some(Tok::Ident(n)) if n == "ParitySpecSource"
+                        );
+                    if !is_allowed_parity_trait {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `trait` definition is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let j = find_item_body_or_semi(&tokens, item_pos + 2);
+                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
+                        scopes.push(SeatContainerKind::Impl);
+                        at_stmt_start = true;
+                        k = j + 1;
+                    } else {
+                        at_stmt_start = true;
+                        k = (j + 1).min(tokens.len());
+                    }
+                }
+                "const" if matches!(tokens.get(item_pos + 1), Some(Tok::Ident(s)) if s == "fn") => {
+                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: nested `const fn` declaration inside production function body is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let j = find_item_body_or_semi(&tokens, item_pos + 2);
+                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
+                        scopes.push(SeatContainerKind::FnOrBlock);
+                        at_stmt_start = true;
+                        k = j + 1;
+                    } else {
+                        at_stmt_start = true;
+                        k = (j + 1).min(tokens.len());
+                    }
+                }
+                "const" => {
+                    if !matches!(
+                        cur_scope,
+                        SeatContainerKind::Module | SeatContainerKind::Impl
+                    ) {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `const` item outside module/`impl` scope is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let semi = find_stmt_semi(&tokens, item_pos + 1);
+                    validate_seat_const_item(
+                        crate_name,
+                        rel_path,
+                        &tokens[item_pos + 1..semi],
+                        &local_types,
+                    )?;
+                    at_stmt_start = true;
+                    k = (semi + 1).min(tokens.len());
+                }
+                "fn" => {
+                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: nested `fn` declaration inside production function body is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
+                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
+                        scopes.push(SeatContainerKind::FnOrBlock);
+                        at_stmt_start = true;
+                        k = j + 1;
+                    } else {
+                        at_stmt_start = true;
+                        k = (j + 1).min(tokens.len());
+                    }
+                }
+                "impl" => {
+                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: nested `impl` block inside production function body is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
+                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
+                        scopes.push(SeatContainerKind::Impl);
+                        at_stmt_start = true;
+                        k = j + 1;
+                    } else {
+                        at_stmt_start = true;
+                        k = (j + 1).min(tokens.len());
+                    }
+                }
+                "mod" => {
+                    if cur_scope != SeatContainerKind::Module {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: `mod` inside function/impl body is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let j = find_item_body_or_semi(&tokens, item_pos + 1);
+                    if matches!(tokens.get(j), Some(Tok::LBrace)) {
+                        scopes.push(SeatContainerKind::Module);
+                        at_stmt_start = true;
+                        k = j + 1;
+                    } else {
+                        at_stmt_start = true;
+                        k = (j + 1).min(tokens.len());
+                    }
+                }
+                "struct" | "enum" => {
+                    if cur_scope == SeatContainerKind::FnOrBlock && !in_test_mod {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: nested `{kw}` declaration inside production function body is forbidden by seat-crate allow-list"
+                        ));
+                    }
+                    let mut j = item_pos + 1;
+                    while j < tokens.len()
+                        && !matches!(tokens[j], Tok::LBrace | Tok::LParen | Tok::Semi)
+                    {
+                        j += 1;
+                    }
+                    match tokens.get(j) {
+                        Some(Tok::LBrace) => {
+                            scopes.push(SeatContainerKind::StructOrEnum);
+                            at_stmt_start = true;
+                            k = j + 1;
+                        }
+                        Some(Tok::LParen) => {
+                            let semi = find_stmt_semi(&tokens, j + 1);
+                            at_stmt_start = true;
+                            k = (semi + 1).min(tokens.len());
+                        }
+                        _ => {
+                            at_stmt_start = true;
+                            k = (j + 1).min(tokens.len());
+                        }
+                    }
+                }
+                other => {
+                    if matches!(
+                        cur_scope,
+                        SeatContainerKind::Module | SeatContainerKind::Impl
+                    ) {
+                        return Err(format!(
+                            "{crate_name}/{rel_path}: item kind `{other}` is not on the seat-crate allow-list"
+                        ));
+                    }
+                    at_stmt_start = false;
+                    k = item_pos + 1;
+                }
+            }
         }
     }
 
@@ -7916,18 +9172,11 @@ fn check_workspace_manifests_and_crate_sources(
             }
             check_seat_crate_no_io_or_includes(&crate_name, &crate_dir)?;
             let loaded = load_crate_rs_files(&crate_dir)?;
-            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
-            check_seat_types_surface(&loaded)?;
             for (rel_in_crate, src) in &loaded {
-                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
-                    rel_in_crate,
-                    rel_in_crate == "src/lib.rs",
-                    src,
-                    true,
-                    &crate_aliases,
-                )?;
+                let toks = tokenize_rust(src);
+                let _ = find_seat_test_mod_span_and_check_attrs(&crate_name, rel_in_crate, &toks)?;
                 let mut from_host_parts_count = 0_usize;
-                for tok in tokenize_rust(src) {
+                for tok in toks {
                     if let Tok::Ident(ident) = tok {
                         if ident == "from_host_parts" && rel_in_crate == "src/observation.rs" {
                             from_host_parts_count += 1;
@@ -7946,6 +9195,18 @@ fn check_workspace_manifests_and_crate_sources(
                     }
                 }
             }
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
+            check_seat_types_surface(&loaded)?;
+            for (rel_in_crate, src) in &loaded {
+                scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
+                    rel_in_crate,
+                    rel_in_crate == "src/lib.rs",
+                    src,
+                    true,
+                    &crate_aliases,
+                )?;
+            }
+            check_seat_crate_allowlist(&crate_name, &loaded)?;
         } else if crate_name == "league-seat-ui" {
             check_seat_crate_manifest(
                 "league-seat-ui",
@@ -7976,7 +9237,8 @@ fn check_workspace_manifests_and_crate_sources(
             let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
             let local_types = collect_seat_local_types(&loaded, false);
             for (rel_in_crate, src) in &loaded {
-                for tok in tokenize_rust(src) {
+                let toks = tokenize_rust(src);
+                for tok in &toks {
                     if let Tok::Ident(ident) = tok
                         && FORBIDDEN_SEAT_IDENTIFIERS.contains(&ident.as_str())
                     {
@@ -7985,6 +9247,7 @@ fn check_workspace_manifests_and_crate_sources(
                         ));
                     }
                 }
+                let _ = find_seat_test_mod_span_and_check_attrs(&crate_name, rel_in_crate, &toks)?;
                 scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
                     rel_in_crate,
                     rel_in_crate == "src/lib.rs",
@@ -7994,6 +9257,7 @@ fn check_workspace_manifests_and_crate_sources(
                 )?;
                 check_seat_ui_public_surface(rel_in_crate, src, &local_types)?;
             }
+            check_seat_crate_allowlist(&crate_name, &loaded)?;
         } else {
             if crate_name == "league-error" {
                 check_league_error_leaf_manifest(&manifest)?;
@@ -8094,10 +9358,18 @@ fn check_workspace_manifests_and_crate_sources(
                                 "from_host_parts"
                                     | "with_own_mandate"
                                     | "observe_seat_with_mandate"
+                                    | "unmandated"
+                                    | "SeatObservationPublicParts"
+                                    | "serde"
+                                    | "serde_json"
+                                    | "Deserialize"
+                                    | "from_str"
+                                    | "from_slice"
+                                    | "from_value"
                             )
                         {
                             return Err(format!(
-                                "league-tui/{rel_in_crate}: references forbidden mandate constructor `{ident}` (use `ClubHost::observe_seat`)"
+                                "league-tui/{rel_in_crate}: references forbidden SeatObservation forgery/deserialization symbol `{ident}` (must construct SeatObservation solely via `ClubHost::observe_seat`)"
                             ));
                         }
                     }
@@ -8356,6 +9628,16 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     assert!(checked_crates.contains(&"league-seat-ui".to_owned()));
     assert!(checked_crates.contains(&"league-tui".to_owned()));
     assert!(checked_crates.contains(&"league-relay".to_owned()));
+
+    let ci_yml_path = workspace_root.join(".github/workflows/ci.yml");
+    let ci_yml = fs::read_to_string(&ci_yml_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", ci_yml_path.display()));
+    assert!(
+        ci_yml.contains(
+            "cargo clippy -p league-seat-types -p league-seat-ui --all-targets --locked -- -D warnings"
+        ),
+        ".github/workflows/ci.yml must run `--all-targets` clippy over both seat crates"
+    );
 
     assert_eq!(SweepMode::default(), SweepMode::PreviewSteps0To7);
 
@@ -10306,4 +11588,507 @@ fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
     println!("PLANTED_FIX2_ITEM5_C2 league-core/bot.rs => {core_err}");
     assert!(core_err.contains("observe_seat_with_mandate"), "{core_err}");
     let _ = fs::remove_dir_all(&core_dir);
+}
+
+#[test]
+fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
+    let hdr = concat!(
+        "#![forbid(\n",
+        "    clippy::disallowed_methods,\n",
+        "    clippy::disallowed_types,\n",
+        "    clippy::disallowed_macros\n",
+        ")]\n",
+    );
+
+    // Seat-crate `#[cfg(...)]` and `#[cfg_attr(...)]` controls (every variant fails allow-list).
+    let seat_cfg_cases: [(&str, &str, &str, &str); 13] = [
+        (
+            "cfg_not_test_on_seat_ui_pub_fn",
+            "league-seat-ui",
+            "#[cfg(not(test))]\npub fn zz_not_test_ok() {}\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N1_cfg_not_test_type_and_ptr_fn",
+            "league-seat-ui",
+            "#[cfg(not(test))]\ntype PeekPtr = fn(u8) -> String;\n#[cfg(not(test))]\npub fn zz_render_ptr(_f: PeekPtr, _r: u8) -> String { String::new() }\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N1b_cfg_not_test_zz_render_peek",
+            "league-seat-ui",
+            "#[cfg(not(test))]\npub fn zz_render_peek(_f: Box<dyn Fn(u8) -> String>, _r: u8) -> String { String::new() }\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N1c_cfg_not_test_partb_str",
+            "league-seat-ui",
+            "#[cfg(not(test))]\npub fn zz_render_text(_s: &str) -> usize { 0 }\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N1d_cfg_any_test_unix",
+            "league-seat-ui",
+            "#[cfg(any(test, unix))]\npub fn zz_any_test() {}\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "cfg_all_not_test",
+            "league-seat-ui",
+            "#[cfg(all(not(test)))]\npub fn zz_all_not_test() {}\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N1e_cfg_not_test_pub_mod",
+            "league-seat-ui",
+            "#[cfg(not(test))]\npub mod zz { pub fn p() {} }\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "N2b_seat_types_cfg_not_test_ZzRaw",
+            "league-seat-types",
+            "#[cfg(not(test))]\npub type ZzRaw = Box<dyn Fn(u8) -> String>;\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "cfg_test_stray_on_fn_not_mod_tests",
+            "league-seat-ui",
+            "#[cfg(test)]\npub fn stray_cfg_test() {}\n",
+            "allowed only directly on",
+        ),
+        (
+            "cfg_test_second_mod_tests_in_file",
+            "league-seat-ui",
+            "#[cfg(test)]\nmod tests {}\n#[cfg(test)]\nmod tests {}\n",
+            "at most one `#[cfg(test)] mod tests`",
+        ),
+        (
+            "N5b_cfg_not_clippy_std_fs_read",
+            "league-seat-ui",
+            "#[cfg(not(clippy))]\npub fn zz_read() -> Vec<u8> { std::fs::read(\"zz.seal\").unwrap_or_default() }\n",
+            "fs::",
+        ),
+        (
+            "cfg_not_clippy_on_harmless_fn",
+            "league-seat-ui",
+            "#[cfg(not(clippy))]\npub fn zz_unlinted() {}\n",
+            "#[cfg(...)]",
+        ),
+        (
+            "cfg_attr_all_must_use",
+            "league-seat-ui",
+            "#[cfg_attr(all(), must_use)]\npub fn zz_cfg_attr() {}\n",
+            "#[cfg_attr(...)]",
+        ),
+    ];
+
+    for (label, crate_name, body, expected_substr) in seat_cfg_cases {
+        let root = unique_tmp_dir(&format!("fix3_cfg_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates").join(crate_name).join("src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("fix3 `{label}` must fail guard"));
+        println!("PLANTED_FIX3_CFG {crate_name}:{label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Also test non-`#[cfg(...)]` `parse_tok_attr` `V-new` bypass in `league-core`:
+    // `#[cfg(not(test))] use ... as Es8; pub type SeatView8 = Es8;` and
+    // `#[cfg(not(test))] pub struct Wrap9(pub crate::engine::TurnEngine);` MUST now fail.
+    let vnew_cases: [(&str, &str, &str); 2] = [
+        (
+            "V_new_core_cfg_not_test_SeatView8",
+            "#[cfg(not(test))]\nuse crate::engine::EngineState as Es8;\n#[cfg(not(test))]\npub type SeatView8 = Es8;\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "EngineState",
+        ),
+        (
+            "V_new_core_cfg_not_test_Wrap9",
+            "#[cfg(not(test))]\npub struct Wrap9(pub crate::engine::TurnEngine);\npub fn preview_what_if() {}\npub fn preview_seat_bundle() {}\n",
+            "TurnEngine",
+        ),
+    ];
+    let strict_surface = ExpectedCoreSurface {
+        enforce_exact_surface: true,
+        required_pub_mods: &["engine", "observation"],
+        allowed_pub_mods: &["engine", "observation"],
+        allowed_reexports: &[],
+        allowed_turn_engine_pub_fns: &["observe_seat"],
+        allowed_club_host_pub_fns: None,
+        allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
+    };
+    for (label, content, expected_substr) in vnew_cases {
+        let core_dir = unique_tmp_dir(&format!("fix3_{label}"));
+        if let Err(err) = write_minimal_clean_core_tree(&core_dir) {
+            panic!("setup core tree: {err}");
+        }
+        let _ = fs::write(core_dir.join("observation.rs"), content);
+        let err = scan_league_core_src_tree_with_surface(&core_dir, &strict_surface)
+            .err()
+            .unwrap_or_else(|| panic!("fix3 core `{label}` must fail guard"));
+        println!("PLANTED_FIX3_V_NEW league-core:{label} => {err}");
+        assert!(err.contains(expected_substr), "{err}");
+        let _ = fs::remove_dir_all(&core_dir);
+    }
+}
+
+#[test]
+fn planted_fix3_item1_macros_derives_glob_use_items_consts_and_e2e_leaks_all_fail() {
+    let hdr = concat!(
+        "#![forbid(\n",
+        "    clippy::disallowed_methods,\n",
+        "    clippy::disallowed_types,\n",
+        "    clippy::disallowed_macros\n",
+        ")]\n",
+    );
+
+    let cases: [(&str, &str, &str, &str); 25] = [
+        (
+            "M1_macro_rules_pub_fn_ptr",
+            "league-seat-ui",
+            "macro_rules! zz_mk { ($n:ident, $($t:tt)*) => { pub fn $n(_f: $($t)*, _rival: u8) -> String { String::new() } } }\nzz_mk!(zz_render_ptr, fn(u8) -> String);\n",
+            "`macro_rules` is forbidden",
+        ),
+        (
+            "M4_macro_rules_pub_fn_str",
+            "league-seat-ui",
+            "macro_rules! zz_mk { ($n:ident) => { pub fn $n(_s: &str) {} } }\nzz_mk!(zz_render_text);\n",
+            "`macro_rules` is forbidden",
+        ),
+        (
+            "macros_2_0_item_decl",
+            "league-seat-ui",
+            "pub macro zz_m2() {}\n",
+            "macro` definition",
+        ),
+        (
+            "offlist_macro_concat",
+            "league-seat-ui",
+            "pub fn m() { let _ = concat!(\"a\", \"b\"); }\n",
+            "macro `concat!` is not on the seat-crate allow-list",
+        ),
+        (
+            "offlist_macro_stringify",
+            "league-seat-ui",
+            "pub fn m() { let _ = stringify!(x); }\n",
+            "macro `stringify!` is not on the seat-crate allow-list",
+        ),
+        (
+            "offlist_macro_println",
+            "league-seat-ui",
+            "pub fn m() { println!(\"peek\"); }\n",
+            "macro `println!` is not on the seat-crate allow-list",
+        ),
+        (
+            "offlist_macro_env",
+            "league-seat-types",
+            "pub fn m() { let _ = env!(\"PATH\"); }\n",
+            "macro `env!` is forbidden",
+        ),
+        (
+            "offlist_macro_assert_eq_outside_mod_tests",
+            "league-seat-ui",
+            "pub fn m() { assert_eq!(1, 1); }\n",
+            "macro `assert_eq!` is not on the seat-crate allow-list",
+        ),
+        (
+            "offlist_macro_panic_inside_mod_tests",
+            "league-seat-types",
+            "#[cfg(test)]\nmod tests { #[test] fn t() { panic!(\"nope\"); } }\n",
+            "macro `panic!` is not on the seat-crate allow-list",
+        ),
+        (
+            "offlist_macro_path_qualified_std_vec",
+            "league-seat-ui",
+            "pub fn m() { let _ = std::vec![1_u8]; }\n",
+            "path-qualified macro `vec!`",
+        ),
+        (
+            "offlist_derive_arbitrary",
+            "league-seat-ui",
+            "#[derive(Debug, Arbitrary)]\npub struct S { pub ok: bool }\n",
+            "derive `Arbitrary` is not on the `league-seat-ui` allow-list",
+        ),
+        (
+            "offlist_derive_serialize_in_seat_ui",
+            "league-seat-ui",
+            "#[derive(Debug, Serialize)]\npub struct S { pub ok: bool }\n",
+            "derive `Serialize` is not on the `league-seat-ui` allow-list",
+        ),
+        (
+            "offlist_attribute_inline",
+            "league-seat-ui",
+            "#[inline]\npub fn f() {}\n",
+            "attribute `#[inline...]` is not on the `league-seat-ui` allow-list",
+        ),
+        (
+            "offlist_inner_attribute_allow",
+            "league-seat-ui",
+            "#![allow(dead_code)]\npub fn f() {}\n",
+            "inner attribute is not on the seat-crate allow-list",
+        ),
+        (
+            "glob_use_in_prod",
+            "league-seat-ui",
+            "use league_seat_types::*;\npub fn f() {}\n",
+            "glob `use *` is forbidden",
+        ),
+        (
+            "glob_use_super_in_mod_tests",
+            "league-seat-ui",
+            "#[cfg(test)]\nmod tests { use super::*; #[test] fn t() {} }\n",
+            "glob `use *` is forbidden",
+        ),
+        (
+            "offlist_use_std_time_instant",
+            "league-seat-ui",
+            "use std::time::Instant;\npub fn f() {}\n",
+            "use std::time::Instant` is not on the `league-seat-ui` allow-list",
+        ),
+        (
+            "offlist_inline_std_time_instant",
+            "league-seat-ui",
+            "pub fn f() { let _ = std::time::Instant::now(); }\n",
+            "inline std/core path `std::time::Instant::now` is not on the seat-crate allow-list",
+        ),
+        (
+            "const_anonymous_underscore",
+            "league-seat-ui",
+            "const _: () = ();\npub fn f() {}\n",
+            "anonymous `const _:`",
+        ),
+        (
+            "const_block_initializer",
+            "league-seat-ui",
+            "pub const C: u8 = { 1 };\n",
+            "block initializer",
+        ),
+        (
+            "const_disallowed_heap_vec_type",
+            "league-seat-types",
+            "pub const V: Vec<u8> = Vec::new();\n",
+            "outside constant allow-list",
+        ),
+        (
+            "disallowed_item_union",
+            "league-seat-ui",
+            "pub union U { a: u8, b: i8 }\n",
+            "`union` is forbidden by seat-crate allow-list",
+        ),
+        (
+            "disallowed_item_private_trait_in_seat_ui",
+            "league-seat-ui",
+            "trait Peek { fn peek(&self); }\n",
+            "`trait` definition is forbidden by seat-crate allow-list",
+        ),
+        (
+            "disallowed_second_trait_in_seat_types",
+            "league-seat-types",
+            "pub trait ExtraTrait { fn x(&self) -> u8; }\n",
+            "`trait` definition is forbidden by seat-crate allow-list",
+        ),
+        (
+            "N5_e2e_cfg_not_clippy_macro_spliced_seal_read",
+            "league-seat-ui",
+            "#[cfg(not(clippy))]\nmacro_rules! zz_io { ($m:ident, $f:ident) => { std::$m::$f } }\n#[cfg(not(clippy))]\npub fn zread() -> Vec<u8> { zz_io!(fs, read)(\"zz.seal\").unwrap_or_default() }\n",
+            "#[cfg(...)]",
+        ),
+    ];
+
+    for (label, crate_name, body, expected_substr) in cases {
+        let root = unique_tmp_dir(&format!("fix3_allow_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates").join(crate_name).join("src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("fix3 allow-list `{label}` must fail guard"));
+        println!("PLANTED_FIX3_ALLOWLIST {crate_name}:{label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn planted_fix3_items4_5_b1_host_only_seat_observation_and_b2_entry_text_carriers_fail() {
+    let hdr = concat!(
+        "#![forbid(\n",
+        "    clippy::disallowed_methods,\n",
+        "    clippy::disallowed_types,\n",
+        "    clippy::disallowed_macros\n",
+        ")]\n",
+    );
+
+    // Item 4 (`B1`): restoring `Deserialize` on `SeatObservation` or calling
+    // `unmandated`/`serde_json`/`from_str` in `league-tui` fails the guard.
+    let de_root = unique_tmp_dir("fix3_b1_obs_deserialize");
+    if let Err(err) = write_minimal_workspace_tree(&de_root) {
+        panic!("setup workspace: {err}");
+    }
+    let _ = fs::write(
+        de_root.join("crates/league-seat-types/src/lib.rs"),
+        format!(
+            "{hdr}use serde::Serialize;\n#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct SeatObservation {{ pub seat: u8 }}\n"
+        ),
+    );
+    let de_err = check_workspace_manifests_and_crate_sources(&de_root)
+        .err()
+        .unwrap_or_else(|| panic!("SeatObservation with Deserialize must fail guard"));
+    println!("PLANTED_FIX3_B1 seat-types:SeatObservation_Deserialize => {de_err}");
+    assert!(de_err.contains("Deserialize"), "{de_err}");
+    let _ = fs::remove_dir_all(&de_root);
+
+    for (label, code, expected_substr) in [
+        (
+            "tui_calls_unmandated",
+            "pub fn stamp() { let _ = league_seat_types::SeatObservation::unmandated; }\n",
+            "unmandated",
+        ),
+        (
+            "tui_names_public_parts",
+            "pub fn stamp(_p: league_seat_types::SeatObservationPublicParts) {}\n",
+            "SeatObservationPublicParts",
+        ),
+        (
+            "tui_uses_serde_json_from_str",
+            "pub fn stamp(s: &str) { let _ = serde_json::from_str::<u8>(s); }\n",
+            "serde_json",
+        ),
+    ] {
+        let tui_root = unique_tmp_dir(&format!("fix3_b1_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&tui_root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(tui_root.join("crates/league-tui/src/host.rs"), code);
+        let err = check_workspace_manifests_and_crate_sources(&tui_root)
+            .err()
+            .unwrap_or_else(|| panic!("B1 `{label}` in league-tui must fail guard"));
+        println!("PLANTED_FIX3_B1 league-tui:{label} => {err}");
+        assert!(err.contains(expected_substr), "{err}");
+        let _ = fs::remove_dir_all(&tui_root);
+    }
+
+    // Item 5 (`B2`): closed host text carriers in Part B entry allow-list.
+    let b2_cases: [(&str, &str, &str); 9] = [
+        (
+            "B_a_zz_render_keys_Vec_KeyCode",
+            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: Vec<KeyCode>) {}\n",
+            "non-allow-listed type `Vec`",
+        ),
+        (
+            "B_a_zz_render_key_slice",
+            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: &[KeyCode]) {}\n",
+            "slice or array buffer",
+        ),
+        (
+            "B_a_zz_render_key_tuple",
+            "use crossterm::event::KeyCode;\npub fn zz_render_keys(_k: (KeyCode, KeyCode)) {}\n",
+            "tuple type",
+        ),
+        (
+            "B_b_zz_render_err_StructuredError",
+            "use league_seat_types::StructuredError;\npub fn zz_render_err(_e: &StructuredError) {}\n",
+            "non-allow-listed type `StructuredError`",
+        ),
+        (
+            "zz_render_eng_err_EngineError",
+            "use league_seat_types::EngineError;\npub fn zz_render_eng_err(_e: &EngineError) {}\n",
+            "non-allow-listed type `EngineError`",
+        ),
+        (
+            "zz_render_crossterm_Event_Paste",
+            "use crossterm::event::Event;\npub fn zz_render_event(_e: Event) {}\n",
+            "non-allow-listed type `Event`",
+        ),
+        (
+            "zz_render_char",
+            "pub fn zz_render_char(_c: char) {}\n",
+            "must not accept free `char`",
+        ),
+        (
+            "zz_two_key_params",
+            "use crossterm::event::KeyCode;\npub fn zz_two_keys(_a: KeyCode, _b: KeyCode) {}\n",
+            "at most one single key/mouse event parameter",
+        ),
+        (
+            "BadUi_pub_Vec_KeyCode_field",
+            "use crossterm::event::KeyCode;\npub struct BadUi { pub keys: Vec<KeyCode> }\n",
+            "non-allow-listed type `Vec`",
+        ),
+    ];
+
+    for (label, body, expected_substr) in b2_cases {
+        let root = unique_tmp_dir(&format!("fix3_b2_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-seat-ui/src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("fix3 B2 `{label}` must fail guard"));
+        println!("PLANTED_FIX3_B2 {label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Disallow `serde_json` paths even inside `#[cfg(test)] mod tests` of `league-seat-types`,
+    // and disallow nested item declarations inside production function bodies.
+    let extra_cases: [(&str, &str, &str); 3] = [
+        (
+            "seat_types_serde_json_in_cfg_test",
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { let _ = serde_json::from_str::<u8>(\"1\"); }\n}\n",
+            "is not on the `league-seat-types` allow-list",
+        ),
+        (
+            "seat_types_nested_struct_in_prod_fn",
+            "pub fn f() { struct Zz(u8); }\n",
+            "nested `struct` declaration inside production function body is forbidden",
+        ),
+        (
+            "seat_types_nested_fn_in_prod_fn",
+            "pub fn f() { fn z() {} }\n",
+            "nested `fn` declaration inside production function body is forbidden",
+        ),
+    ];
+    for (label, body, expected_substr) in extra_cases {
+        let root = unique_tmp_dir(&format!("fix3_extra_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-seat-types/src/lib.rs"),
+            format!("{hdr}{body}"),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("fix3 extra `{label}` must fail guard"));
+        println!("PLANTED_FIX3_EXTRA {label} => {err}");
+        assert!(
+            err.contains(expected_substr),
+            "expected `{expected_substr}` in `{err}` for {label}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 }

@@ -13,7 +13,7 @@
           "path": ".github/audit-allowlist.json"
         },
         {
-          "hash": "00fa5f2eb048b2b4b4c01998f10caee18cb435a35afa966dad290a1a0bb402a8",
+          "hash": "f434291b203a772b23f86f9d624198107a1e2abe4ad445b07543f98b9570438b",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "18d961eeed4914e166b3e5cddba797ce1f5d8f06edaa8b1d759d7424ed6fc329",
+          "hash": "89db79b5960d771221f03975d15e285098e562a113f33a99c7572426f140f788",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -522,7 +522,7 @@
               "line": 907
             }
           ],
-          "hash": "7b30dd7a006f32903d528940ec8490abe590e3c32238b33ae0609c65f3c612b6",
+          "hash": "8e8afde15096a1c54952c87d35b4f95ea52e2a04e51222a8a23553e64320fb14",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1879,7 +1879,7 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "ab9fa856f2f9bda158d453cee48c28f9b4885901ef6f498a29dd77076e2aad65",
+          "hash": "4d5ee0bde870a0b27bd0eb5992c1473a96aa226188f0b6e139c7d917fdcb7e5a",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1923,7 +1923,7 @@
           "testsInside": true
         },
         {
-          "hash": "03b304698333d3fdaef034b04d5d03e1db2f3411a68152d59c66c5c7ef48aa57",
+          "hash": "9ce801db07fd932d84e25191e1362e33f7e9b2735c572d19708063df9c2606c1",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -1941,7 +1941,7 @@
           "testsInside": true
         },
         {
-          "hash": "05b690879a17a9a2b0242de5712f699574729644f3b7520199f6649fd7c1a97c",
+          "hash": "ec73a1e892d3c6a8df9ed1c097aedb56e0830c503aa226e44ec684c953a9a16b",
           "importOrder": [
             "crates/league-core/src/observation.rs",
             "crates/league-core/src/lib.rs"
@@ -2048,7 +2048,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 5,
+      "testedBy": 6,
       "unresolvedSites": 0
     },
     {
@@ -2555,12 +2555,13 @@
           "testsInside": true
         },
         {
-          "hash": "1d3f9b00fd2aae4a77dc2330e4e3606c449a0f93e905e5732da1c874a26bdc03",
+          "hash": "1a5c26e4d962361cdbaff00f85084fead9b4ffe1a1786a637a95432daabdbfb9",
           "importsFiles": [
             "crates/league-gen/src/schema.rs",
             "crates/league-seat-types/src/lib.rs"
           ],
-          "path": "crates/league-gen/src/glossary.rs"
+          "path": "crates/league-gen/src/glossary.rs",
+          "testsInside": true
         },
         {
           "hash": "8b38fb214841bdb9745f1b9a01ccb97fe44cff5952ce7c754a92600c119dca0f",
@@ -2766,10 +2767,11 @@
           "testsInside": true
         },
         {
-          "hash": "a80c3306bc9c1148ddc6e46176516558ee750551816f7ae636f96d6abd279192",
+          "hash": "84816ce8d6df0de768364fca963c31bf63dcd505d36e0cbbb6441cfe2b213925",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
-            "crates/league-gen/src/lib.rs"
+            "crates/league-gen/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
           ],
           "library": "crates/league-gen/src/lib.rs",
           "path": "crates/league-gen/tests/club_bridge_and_headless_bot.rs",
@@ -2795,7 +2797,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 9,
+      "testedBy": 10,
       "unresolvedSites": 0
     },
     {
@@ -6720,7 +6722,7 @@
           "path": "crates/league-seat-types/src/engine_types.rs"
         },
         {
-          "hash": "50f28934bd52d98beb3018f5e9597e8cfd788f3da8ae9be0befc11e8b0c36cf1",
+          "hash": "f9df36c2c6766a5924d7fe95c7e50a94ca6f785bc3040984dbf3c98f48c09679",
           "importOrder": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6749,7 +6751,7 @@
           "testsInside": true
         },
         {
-          "hash": "ba9708db317ad84f1938e937860e51ef6420eac821bd3f5a0fd6ef17a88b739c",
+          "hash": "1b92755c3776bde914667abadb35a26511fdf4da0a06649cd415f6ca00fea17c",
           "importsFiles": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6785,25 +6787,25 @@
             {
               "in": "hex_decode_32",
               "kind": "err",
-              "line": 22
+              "line": 16
             },
             {
               "in": "hex_decode_32",
               "kind": "err",
-              "line": 25
+              "line": 19
             },
             {
               "in": "decode_nibble",
               "kind": "err",
-              "line": 41
+              "line": 35
             },
             {
               "in": "deserialize",
               "kind": "err",
-              "line": 113
+              "line": 115
             }
           ],
-          "hash": "5b9b441137e38041cdbf7e935ea7cd49883703f7b83c5e319030ea7efa4f7abb",
+          "hash": "6d9b481c5b457eca20f5d9da2addc7568c3c48fbdc99e1b964bfbbd180b85099",
           "importsFiles": [
             "crates/league-seat-types/src/types.rs"
           ],
@@ -6827,7 +6829,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 2,
+      "testedBy": 3,
       "unresolvedSites": 0
     },
     {
@@ -6857,7 +6859,7 @@
             "render_seat",
             "render_seat_with_commodities"
           ],
-          "hash": "7d9b9690f623ee419a0bea1c1f3586cb5a10ba8dfd3fccaa1c5b3ff58a463900",
+          "hash": "59ffbcad155c8519028b539f401da87d97581e9b84372ad15725e66116eb5859",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs"
           ],
@@ -7383,7 +7385,7 @@
           "path": "crates/league-tui/Cargo.toml"
         },
         {
-          "hash": "af737e2bd2efabd57d5065dedf1b05906b6884624939b1085f7317b1cb572365",
+          "hash": "d390d20d4c7072e1bafb36c5dce68cfcbdb1677a5b681f60d7e3697988cbd8f3",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-gen/src/lib.rs",
@@ -7484,7 +7486,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "5fec8a0f7bd8d9305019bf6f297d7c167ff970404aa2f099d7d55062427d96ea",
+          "hash": "fdffdd49127cc297c7ab924b4114ccab5d157a1126c623d6128a6fa93f42f2c9",
           "path": "CHANGELOG.md"
         },
         {
@@ -7668,6 +7670,14 @@
             "cargo"
           ],
           "step": "Clippy"
+        },
+        {
+          "dir": "",
+          "job": "check",
+          "programs": [
+            "cargo"
+          ],
+          "step": "Seat crates clippy (all targets)"
         },
         {
           "dir": "",
@@ -8000,6 +8010,13 @@
           "via": "cargo test"
         },
         {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-gen/src/glossary.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
           "job": "audit",
           "matched": true,
           "path": "crates/league-gen/src/lib.rs",
@@ -8244,7 +8261,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 43,
+      "runsCount": 44,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -8259,14 +8276,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 47,
+          "files": 48,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 47,
+          "files": 48,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -8888,7 +8905,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "f08874354a1922e1b4b8289fb31741bcba494699",
+    "commit": "40c793332ba78998865a377fd5c6957cc836cec3",
     "tracked": 569
   },
   "landings": [
@@ -9927,7 +9944,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 60,
+  "testFiles": 61,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",

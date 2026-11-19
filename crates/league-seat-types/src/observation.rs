@@ -178,7 +178,16 @@ impl ParitySpecSource for PublicTableSpec {
 /// (populating solely `seat`'s own mandate when emitted by a host). Never carries raw
 /// `SweepReceipt`s, unforecast `newly_drawn_shocks`, shock magnitudes before realize,
 /// `dealt_mandate_commits`, peer commits/reveals, or `post_state_digest`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Intentionally omits `serde::Deserialize` (`B1`): neither save files nor replay logs deserialize
+/// `SeatObservation`, so neither seat code nor host code can forge `own_mandate` via a serde
+/// round-trip:
+///
+/// ```compile_fail,E0277
+/// use league_seat_types::SeatObservation;
+/// let _: Result<SeatObservation, _> = serde_json::from_str("{}");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SeatObservation {
     /// Observing seat index (`0..seat_count`).
     pub seat: u8,
@@ -231,7 +240,7 @@ pub struct SeatObservation {
     /// Monotonic next escrow ID.
     pub next_escrow_id: u64,
     /// Cumulative delivered volume `(sender, receiver, asset)`.
-    #[serde(with = "delivery_ledger_serde")]
+    #[serde(serialize_with = "delivery_ledger_serde::serialize")]
     pub delivery_ledger: BTreeMap<(u8, u8, AssetId), Units>,
     /// Previous step PBRS potentials `Psi_i(s_t)`.
     pub last_potentials: Vec<Units>,
@@ -242,7 +251,7 @@ pub struct SeatObservation {
     /// Unsettled bonded `FlagWashFreeze` challenges for the current turn.
     pub pending_wash_freezes: Vec<PendingWashFreeze>,
     /// Optional `ristretto255` VRF public key (`PK_eval`) committed on the table.
-    #[serde(default, with = "opt_hex32")]
+    #[serde(serialize_with = "opt_hex32::serialize")]
     pub eval_vrf_pubkey: Option<[u8; 32]>,
     /// Static start-of-observation diagnostics for `seat`.
     pub baseline_predicates: SeatStatePredicates,
@@ -250,7 +259,7 @@ pub struct SeatObservation {
     pub public_receipts: Vec<PublicSweepReceipt>,
     /// Dealt Turn-1 [`PrivateMandate`] belonging solely to `seat`, populated exclusively by
     /// `ClubHost::observe_seat` (never carries reveal salts or rival seats' mandates).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     own_mandate: Option<PrivateMandate>,
 }
 

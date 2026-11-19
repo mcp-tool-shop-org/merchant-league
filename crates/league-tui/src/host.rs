@@ -318,4 +318,39 @@ mod tests {
         assert!(plain.contains("CRED:"));
         assert!(!plain.contains("Clearinghouse Marks [CRED]"));
     }
+
+    #[test]
+    fn host_builds_every_seat_observation_exclusively_via_club_host_observe_seat() {
+        let ring = dev_ring_table(1);
+        let tid = TableId(81_003);
+        let session = must_ok(
+            TuiHostSession::from_ring_table(&ring, tid, &[0], 17),
+            "tui session",
+        );
+
+        let all = must_ok(
+            session.build_all_seat_observations(),
+            "build_all_seat_observations",
+        );
+        assert_eq!(all.len(), usize::from(session.seat_count()));
+        for s in 0..session.seat_count() {
+            let via_single = must_ok(
+                session.build_seat_observation(Seat(s)),
+                "build_seat_observation",
+            );
+            let expected_own = must_some(
+                all[usize::from(s)].own_mandate(),
+                "own_mandate attached via host",
+            );
+            assert_eq!(via_single, all[usize::from(s)]);
+            assert_eq!(via_single.seat, s);
+            assert_eq!(via_single.own_mandate(), Some(expected_own));
+            // Verify direct host observation matches bit-for-bit.
+            let direct_obs = must_ok(
+                session.host.observe_seat(Seat(s)),
+                "direct host.observe_seat",
+            );
+            assert_eq!(via_single, direct_obs);
+        }
+    }
 }
