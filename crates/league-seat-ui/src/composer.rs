@@ -1331,3 +1331,186 @@ fn clamp_chronicle_idx(obs: &SeatObservation, state: &mut SeatUiState) {
 pub(crate) fn preview_selected_asset(fields: &MarketComposerFields, seat_count: u8) -> AssetId {
     fields.selected_good(seat_count)
 }
+
+pub(crate) fn apply_lobby_key(
+    state: &mut crate::state::LobbyState,
+    overrides: league_seat_types::LobbyCliOverrides,
+    key: SeatKeyEvent,
+) -> crate::state::LobbyAction {
+    use crate::state::LobbyAction;
+
+    if !key.is_repeat {
+        if matches!(key.code, SeatKeyCode::Char('q') | SeatKeyCode::Esc)
+            || (key.code == SeatKeyCode::Char('c') && key.modifiers.ctrl)
+        {
+            return LobbyAction::Quit;
+        }
+        if key.code == SeatKeyCode::Enter {
+            return LobbyAction::StartSeason;
+        }
+    }
+
+    let total_rows = state.total_rows();
+    let seed_row = state.seed_row_idx();
+    let clock_row = state.clock_row_idx();
+    let pins_row = state.pins_row_idx();
+
+    match key.code {
+        SeatKeyCode::Up | SeatKeyCode::BackTab => {
+            if state.focus_row == 0 {
+                state.focus_row = total_rows.saturating_sub(1);
+            } else {
+                state.focus_row -= 1;
+            }
+        }
+        SeatKeyCode::Down | SeatKeyCode::Tab => {
+            state.focus_row = (state.focus_row + 1) % total_rows.max(1);
+        }
+        SeatKeyCode::Char(ch) if state.focus_row == seed_row && ch.is_ascii_digit() => {
+            if !key.modifiers.ctrl && state.seed_text.len() < 20 {
+                if state.seed_text == "0" {
+                    state.seed_text.clear();
+                }
+                state.seed_text.push(ch);
+            }
+        }
+        SeatKeyCode::Backspace if state.focus_row == seed_row => {
+            state.seed_text.pop();
+        }
+        SeatKeyCode::Left | SeatKeyCode::Char('-') => {
+            if state.focus_row == 0 {
+                state.set_seat_count_step(false);
+            } else if (1..=usize::from(state.seat_count)).contains(&state.focus_row) {
+                state.toggle_seat_role(league_seat_types::Seat((state.focus_row - 1) as u8));
+            } else if state.focus_row == seed_row {
+                if let Ok(cur) = state.seed_text.parse::<u64>() {
+                    state.seed_text = alloc::format!("{}", cur.saturating_sub(1));
+                }
+            } else if state.focus_row == clock_row {
+                if !overrides.untimed && overrides.turn_clock_secs.is_none() {
+                    if state.untimed {
+                        state.untimed = false;
+                        state.turn_clock_secs = 210;
+                    } else {
+                        state.turn_clock_secs = state.turn_clock_secs.saturating_sub(15).max(180);
+                    }
+                }
+            } else if state.focus_row == pins_row && !overrides.pins_enabled {
+                state.pins_enabled = !state.pins_enabled;
+            }
+        }
+        SeatKeyCode::Right | SeatKeyCode::Char('+') | SeatKeyCode::Char(' ') => {
+            if state.focus_row == 0 {
+                state.set_seat_count_step(true);
+            } else if (1..=usize::from(state.seat_count)).contains(&state.focus_row) {
+                state.toggle_seat_role(league_seat_types::Seat((state.focus_row - 1) as u8));
+            } else if state.focus_row == seed_row {
+                if let Ok(cur) = state.seed_text.parse::<u64>() {
+                    let next = cur.saturating_add(1);
+                    state.seed_text = alloc::format!("{next}");
+                } else {
+                    state.seed_text = alloc::borrow::ToOwned::to_owned("1");
+                }
+            } else if state.focus_row == clock_row {
+                if !overrides.untimed && overrides.turn_clock_secs.is_none() {
+                    if key.code == SeatKeyCode::Char(' ') {
+                        state.untimed = !state.untimed;
+                    } else if state.untimed {
+                        state.untimed = false;
+                        state.turn_clock_secs = 180;
+                    } else {
+                        state.turn_clock_secs = (state.turn_clock_secs + 15).min(300);
+                    }
+                }
+            } else if state.focus_row == pins_row && !overrides.pins_enabled {
+                state.pins_enabled = !state.pins_enabled;
+            }
+        }
+        _ => {}
+    }
+
+    LobbyAction::None
+}
+
+pub(crate) fn apply_awaiting_reveal_key(key: SeatKeyEvent) -> Option<SeatIntent> {
+    if key.is_repeat {
+        return None;
+    }
+    if matches!(key.code, SeatKeyCode::Char('q') | SeatKeyCode::Esc)
+        || (key.code == SeatKeyCode::Char('c') && key.modifiers.ctrl)
+    {
+        return Some(SeatIntent::quit());
+    }
+    if matches!(key.code, SeatKeyCode::Enter | SeatKeyCode::Char(' ')) {
+        return Some(SeatIntent::submit_mandate_reveal());
+    }
+    None
+}
+
+pub(crate) fn apply_end_of_season_key(
+    state: &mut crate::state::EndOfSeasonUiState,
+    key: SeatKeyEvent,
+) -> Option<SeatIntent> {
+    use crate::state::EndOfSeasonTab;
+
+    if !key.is_repeat {
+        if matches!(key.code, SeatKeyCode::Char('q') | SeatKeyCode::Esc)
+            || (key.code == SeatKeyCode::Char('c') && key.modifiers.ctrl)
+        {
+            return Some(SeatIntent::quit());
+        }
+        if key.code == SeatKeyCode::Char('e')
+            || (key.code == SeatKeyCode::Enter && state.active_tab == EndOfSeasonTab::ReplayExport)
+        {
+            return Some(SeatIntent::export_replay());
+        }
+        if key.code == SeatKeyCode::Char('c') {
+            state.plain_codes = !state.plain_codes;
+            return None;
+        }
+    }
+
+    match key.code {
+        SeatKeyCode::Char('1') => {
+            state.active_tab = EndOfSeasonTab::Scoreboard;
+            state.scroll = 0;
+        }
+        SeatKeyCode::Char('2') => {
+            state.active_tab = EndOfSeasonTab::Mandates;
+            state.scroll = 0;
+        }
+        SeatKeyCode::Char('3') => {
+            state.active_tab = EndOfSeasonTab::SeasonMetrics;
+            state.scroll = 0;
+        }
+        SeatKeyCode::Char('4') => {
+            state.active_tab = EndOfSeasonTab::ReplayExport;
+            state.scroll = 0;
+        }
+        SeatKeyCode::Tab | SeatKeyCode::Right => {
+            state.active_tab = state.active_tab.next();
+            state.scroll = 0;
+        }
+        SeatKeyCode::BackTab | SeatKeyCode::Left => {
+            state.active_tab = state.active_tab.prev();
+            state.scroll = 0;
+        }
+        SeatKeyCode::Up => {
+            state.scroll = state.scroll.saturating_sub(1);
+        }
+        SeatKeyCode::Down => {
+            state.scroll = state.scroll.saturating_add(1);
+        }
+        SeatKeyCode::PageUp => {
+            state.scroll = state.scroll.saturating_sub(8);
+        }
+        SeatKeyCode::PageDown => {
+            state.scroll = state.scroll.saturating_add(8);
+        }
+        SeatKeyCode::Home => {
+            state.scroll = 0;
+        }
+        _ => {}
+    }
+    None
+}

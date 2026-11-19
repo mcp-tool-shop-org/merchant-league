@@ -142,7 +142,7 @@ pub struct ClubPauseCursor {
 }
 
 /// Private hot-seat session checkpoint stored exclusively inside the `.seal` sidecar.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct ClubSessionCheckpoint {
     /// Saved mid-turn pause cursor (`None` when outside an interactive TUI pause).
     pub pause_cursor: Option<ClubPauseCursor>,
@@ -201,6 +201,91 @@ impl ClubSessionCheckpoint {
             untimed: host.session_untimed,
         }
     }
+
+    /// Returns how many seats (`0..=seat_count`) have already submitted their Turn-1 mandate
+    /// reveal in [`TurnPhase::AwaitingMandateReveal`] or [`TurnPhase::Completed`].
+    #[must_use]
+    pub fn revealed_mandate_count(host: &ClubHost) -> u8 {
+        host.engine
+            .state()
+            .mandate_reveals
+            .iter()
+            .filter(|entry| entry.is_some())
+            .count() as u8
+    }
+
+    /// Submits the next unsubmitted seat's dealt Turn-1 mandate reveal during
+    /// [`TurnPhase::AwaitingMandateReveal`], returning the updated revealed count (`1..=seat_count`).
+    ///
+    /// Keeps the host in `TurnPhase::AwaitingMandateReveal` until the caller invokes
+    /// [`ClubHost::finalize_club_season`] once all `seat_count` reveals are present.
+    pub fn submit_next_mandate_reveal(host: &mut ClubHost) -> Result<u8, EngineError> {
+        if host.phase() != TurnPhase::AwaitingMandateReveal {
+            return Err(EngineError::InvalidPhase(
+                "submit_next_mandate_reveal requires AwaitingMandateReveal".to_owned(),
+            ));
+        }
+        let n = usize::from(host.seat_count());
+        let next_idx = host
+            .engine
+            .state()
+            .mandate_reveals
+            .iter()
+            .position(Option::is_none)
+            .ok_or_else(|| {
+                EngineError::InvalidPhase(
+                    "all seat mandate reveals are already submitted".to_owned(),
+                )
+            })?;
+        let rev = host.sealed_mandate_deal.seat_reveals[next_idx].clone();
+        host.engine
+            .submit_mandate_reveal(Seat(next_idx as u8), rev.clone())?;
+        if host.mandate_reveals.len() != n {
+            host.mandate_reveals = vec![None; n];
+        }
+        host.mandate_reveals[next_idx] = Some(rev);
+        Ok(Self::revealed_mandate_count(host))
+    }
+
+    /// Reconstructs `(FinalScoreboard, SeasonReplayLog, StatePredicateSection, Vec<SeatSeasonMetrics>)`
+    /// only after [`ClubHost::finalize_club_season`] has transitioned the table to
+    /// [`TurnPhase::Completed`].
+    pub fn load_completed_season_artifacts(
+        host: &ClubHost,
+    ) -> Result<
+        (
+            crate::FinalScoreboard,
+            crate::SeasonReplayLog,
+            crate::StatePredicateSection,
+            Vec<crate::SeatSeasonMetrics>,
+        ),
+        EngineError,
+    > {
+        if host.phase() != TurnPhase::Completed {
+            return Err(EngineError::InvalidPhase(
+                "load_completed_season_artifacts requires Completed phase".to_owned(),
+            ));
+        }
+        let log = host.export_replay_log()?;
+        let (replay_out, section) = crate::replay_season_with_state_predicates(&log)?;
+        let metrics = crate::compute_season_metrics(&section);
+        Ok((replay_out.scoreboard, log, section, metrics))
+    }
+}
+
+impl fmt::Debug for ClubSessionCheckpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClubSessionCheckpoint")
+            .field("pause_cursor", &self.pause_cursor)
+            .field("sub_pass_b_committed", &self.sub_pass_b_committed)
+            .field("pins_enabled", &self.pins_enabled)
+            .field("turn_clock_secs", &self.turn_clock_secs)
+            .field("untimed", &self.untimed)
+            .field("pending_bundles", &"<redacted>")
+            .field("seat_notes", &"<redacted>")
+            .field("seat_pins", &"<redacted>")
+            .finish()
+    }
 }
 
 fn validate_pin_format(pin: &str) -> bool {
@@ -221,7 +306,7 @@ fn validate_checkpoint_shapes(
     if let Some(cursor) = &checkpoint.pause_cursor {
         if cursor.pass_offset > seat_count {
             return Err(EngineError::InvalidConfig(format!(
-                "Club checkpoint pass_offset {} exceeds seat_count {seat_count}",
+                "INVALID_CHECKPOINT_PASS_OFFSET: Club checkpoint pass_offset {} exceeds seat_count {seat_count}",
                 cursor.pass_offset
             )));
         }
@@ -231,40 +316,61 @@ fn validate_checkpoint_shapes(
             return Err(EngineError::InvalidSeat(next_seat));
         }
     }
-    for (name, len) in [
-        ("pending_bundles", checkpoint.pending_bundles.len()),
+    for (code, name, len) in [
         (
+            "INVALID_CHECKPOINT_BUNDLES_LEN",
+            "pending_bundles",
+            checkpoint.pending_bundles.len(),
+        ),
+        (
+            "INVALID_CHECKPOINT_COMMITTED_LEN",
             "sub_pass_b_committed",
             checkpoint.sub_pass_b_committed.len(),
         ),
-        ("seat_notes", checkpoint.seat_notes.len()),
-        ("seat_pins", checkpoint.seat_pins.len()),
+        (
+            "INVALID_CHECKPOINT_NOTES_LEN",
+            "seat_notes",
+            checkpoint.seat_notes.len(),
+        ),
+        (
+            "INVALID_CHECKPOINT_PINS_LEN",
+            "seat_pins",
+            checkpoint.seat_pins.len(),
+        ),
     ] {
         if len != 0 && len != seat_count {
             return Err(EngineError::InvalidConfig(format!(
-                "Club checkpoint {name} length {len} does not match seat_count {seat_count}"
+                "{code}: Club checkpoint {name} length {len} does not match seat_count {seat_count}"
             )));
         }
+    }
+    if checkpoint.pins_enabled && checkpoint.seat_pins.len() != seat_count {
+        return Err(EngineError::InvalidConfig(format!(
+            "INVALID_CHECKPOINT_PINS_LEN: Club checkpoint pins_enabled requires {seat_count} seat_pins entries, got {}",
+            checkpoint.seat_pins.len()
+        )));
     }
     for pin_opt in &checkpoint.seat_pins {
         if let Some(pin) = pin_opt
             && !validate_pin_format(pin)
         {
             return Err(EngineError::InvalidConfig(
-                "Club checkpoint PIN must be exactly 4 ASCII digits".to_owned(),
+                "INVALID_CHECKPOINT_PIN_FORMAT: Club checkpoint PIN must be exactly 4 ASCII digits"
+                    .to_owned(),
             ));
         }
     }
     if checkpoint.untimed && checkpoint.turn_clock_secs.is_some() {
         return Err(EngineError::InvalidConfig(
-            "Club checkpoint cannot set both untimed and turn_clock_secs".to_owned(),
+            "CONFLICTING_CHECKPOINT_CLOCK: Club checkpoint cannot set both untimed and turn_clock_secs"
+                .to_owned(),
         ));
     }
     if let Some(secs) = checkpoint.turn_clock_secs
         && !(180..=300).contains(&secs)
     {
         return Err(EngineError::InvalidConfig(format!(
-            "Club checkpoint turn_clock_secs {secs} out of range (180..=300)"
+            "INVALID_CHECKPOINT_TURN_CLOCK: Club checkpoint turn_clock_secs {secs} out of range (180..=300)"
         )));
     }
     Ok(())
@@ -949,7 +1055,9 @@ impl ClubHost {
             });
         }
         let save: ClubSaveSnapshot = serde_json::from_slice(save_bytes).map_err(|err| {
-            EngineError::InvalidConfig(format!("Club save JSON does not parse: {err}"))
+            EngineError::InvalidConfig(format!(
+                "MALFORMED_SAVE_JSON: Club save JSON does not parse: {err}"
+            ))
         })?;
         if save.format_version != CLUB_SAVE_FORMAT_VERSION {
             return Err(EngineError::UnsupportedReplayVersion {
@@ -966,7 +1074,9 @@ impl ClubHost {
             });
         }
         let seal: ClubSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {
-            EngineError::InvalidConfig(format!("Club seal JSON does not parse: {err}"))
+            EngineError::InvalidConfig(format!(
+                "MALFORMED_SEAL_JSON: Club seal JSON does not parse: {err}"
+            ))
         })?;
         if seal.format_version != CLUB_SEAL_FORMAT_VERSION {
             return Err(EngineError::UnsupportedReplayVersion {
@@ -977,26 +1087,28 @@ impl ClubHost {
         validate_club_dev_seed(seal.layout_seed)?;
         if seal.layout_seed != save.layout_seed {
             return Err(EngineError::InvalidConfig(
-                "Club save layout_seed does not match seal layout_seed".to_owned(),
+                "SEAL_LAYOUT_SEED_MISMATCH: Club save layout_seed does not match seal layout_seed"
+                    .to_owned(),
             ));
         }
 
         let spec = &seal.engine.state().spec;
         if spec.mode != TableMode::Club {
             return Err(EngineError::InvalidConfig(format!(
-                "ClubHost seal requires TableMode::Club, got {:?}",
+                "INVALID_SEAL_TABLE_MODE: ClubHost seal requires TableMode::Club, got {:?}",
                 spec.mode
             )));
         }
-        spec.validate()?;
         let eval_pk = spec.eval_vrf_pubkey.ok_or_else(|| {
             EngineError::InvalidConfig(
-                "ClubHost seal requires TableSpec::eval_vrf_pubkey".to_owned(),
+                "MISSING_SEAL_EVAL_VRF_PUBKEY: ClubHost seal requires TableSpec::eval_vrf_pubkey"
+                    .to_owned(),
             )
         })?;
+        spec.validate()?;
         if seal.vrf_proofs.len() != usize::from(HARD_TURN_CAP) {
             return Err(EngineError::InvalidConfig(format!(
-                "ClubHost seal expected {HARD_TURN_CAP} VRF proofs, got {}",
+                "INVALID_SEAL_VRF_PROOF_COUNT: ClubHost seal expected {HARD_TURN_CAP} VRF proofs, got {}",
                 seal.vrf_proofs.len()
             )));
         }
@@ -1004,7 +1116,7 @@ impl ClubHost {
         for (idx, proof) in seal.vrf_proofs.iter().enumerate() {
             if proof.len() != EVAL_VRF_PROOF_BYTES {
                 return Err(EngineError::InvalidConfig(format!(
-                    "ClubHost seal proof {} has length {} (expected {EVAL_VRF_PROOF_BYTES})",
+                    "INVALID_SEAL_VRF_PROOF_LEN: ClubHost seal proof {} has length {} (expected {EVAL_VRF_PROOF_BYTES})",
                     idx + 1,
                     proof.len()
                 )));
@@ -1023,18 +1135,20 @@ impl ClubHost {
             &seal.sealed_mandate_deal,
         )? {
             return Err(EngineError::InvalidConfig(
-                "ClubHost seal sealed_mandate_deal failed verification".to_owned(),
+                "INVALID_SEALED_MANDATE_DEAL: ClubHost seal sealed_mandate_deal failed verification"
+                    .to_owned(),
             ));
         }
         let n = usize::from(spec.seat_count);
         if seal.mandate_commits.len() != n || seal.mandate_reveals.len() != n {
             return Err(EngineError::InvalidConfig(
-                "ClubHost seal mandate commit/reveal lengths do not match seat_count".to_owned(),
+                "INVALID_SEAL_MANDATE_LEN: ClubHost seal mandate commit/reveal lengths do not match seat_count"
+                    .to_owned(),
             ));
         }
         if seal.live_state_digests.len() != seal.logged_turns.len() {
             return Err(EngineError::InvalidConfig(format!(
-                "ClubHost seal live_state_digests len {} does not match logged_turns len {}",
+                "INVALID_SEAL_DIGEST_LEN: ClubHost seal live_state_digests len {} does not match logged_turns len {}",
                 seal.live_state_digests.len(),
                 seal.logged_turns.len()
             )));
@@ -1044,7 +1158,8 @@ impl ClubHost {
             Some(entropy) => {
                 if entropy.0 == [0u8; 32] {
                     return Err(EngineError::InvalidConfig(
-                        "ClubHost seal commit_salt_entropy must be non-zero".to_owned(),
+                        "DEGENERATE_COMMIT_SALT_ENTROPY: ClubHost seal commit_salt_entropy must be non-zero"
+                            .to_owned(),
                     ));
                 }
                 entropy
@@ -1066,7 +1181,8 @@ impl ClubHost {
                     .any(|salt| salt.0 == [0u8; 32])
             {
                 return Err(EngineError::InvalidConfig(
-                    "ClubHost seal current_turn_salts invalid or wrong length".to_owned(),
+                    "INVALID_CURRENT_TURN_SALTS: ClubHost seal current_turn_salts invalid or wrong length"
+                        .to_owned(),
                 ));
             }
             seal.current_turn_salts
@@ -1110,7 +1226,8 @@ impl ClubHost {
         };
         if host.public_save_snapshot()? != save {
             return Err(EngineError::InvalidConfig(
-                "Club save snapshot does not match verified seal state".to_owned(),
+                "SAVE_SEAL_SNAPSHOT_MISMATCH: Club save snapshot does not match verified seal state"
+                    .to_owned(),
             ));
         }
         Ok(host)

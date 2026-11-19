@@ -10,6 +10,7 @@ sidebar:
 | Document | What it holds |
 | --- | --- |
 | [`docs/design-v2.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/design-v2.md) | The current design: the economy, the turn engine, contracts and reputation, scoring, politics, shocks and the season, the two modes, and the seed pools |
+| [`docs/club-mode-design.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/club-mode-design.md) | Offline Club Mode (`v0.1.0`) specification: host/seat `no_std` boundary, hot-seat Privacy Curtain, timed passes, What-If Sandbox, save/resume security, and `SHIP_GATE` closure |
 | [`docs/design.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/design.md) | The first design, kept for its history. `design-v2.md` supersedes it |
 | [`docs/standalone-xrpld.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/standalone-xrpld.md) | The stand-alone `xrpld` harness: the pinned image, its limits and its isolation checks |
 | [`docs/paper-test.md`](https://github.com/mcp-tool-shop-org/merchant-league/blob/main/docs/paper-test.md) | How the paper playtests were run |
@@ -17,6 +18,47 @@ sidebar:
 | [`docs/receipts/`](https://github.com/mcp-tool-shop-org/merchant-league/tree/main/docs/receipts) | Live checks taken on the Testnet |
 
 The Testnet is wiped from time to time (next on 2026-11-25), which deletes every account and transaction on it. After a wipe, the receipts' transaction hashes stop resolving. What they recorded, and the test vectors in `crates/league-ledger/tests/vectors/`, stay the evidence.
+
+## `league-tui`
+
+The offline hot-seat host binary runs full Club Mode seasons in a terminal without network calls or Testnet credentials (prototype — not released yet).
+
+```text
+league-tui [options]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--save-dir <DIR>` | Directory for atomic `club-<id>.save.json`, private `club-<id>.seal`, and exported `club-<id>.replay.json` |
+| `--resume <PATH>` | Resume from a `club-<id>.save.json` file or directory containing one (always opens behind a Curtain) |
+| `--turn-clock <180..=300>` | Override whole-turn clock budget in seconds (`75%` Sub-Pass A / `25%` Sub-Pass B across `H` humans; `210` default) |
+| `--untimed` | Disable timed turn auto-locks (overrides Lobby and `.seal` clock settings; conflicts with `--turn-clock`) |
+| `--pins` | Enable 4-digit table-local Curtain PINs entered interactively behind the Curtain (passing `--pin` on CLI fails with `PIN_CLI_FORBIDDEN`) |
+| `--error-format <text\|json>` | Error output encoding on `stderr`: `text` (default `error: [CODE] ...; hint: ...`) or compact `StructuredError` JSON |
+| `--log-level <level>` | Diagnostic verbosity: `silent`, `normal` (default), `verbose`, or `debug` (or `LEAGUE_LOG_LEVEL` env var) |
+| `-q`, `--silent` | Shorthand for `--log-level silent` |
+| `-v`, `--verbose` | Shorthand for `--log-level verbose` (turn/pass state transitions and resumed metadata after terminal restore) |
+| `--debug` | Shorthand for `--log-level debug` (Curtain/drain events and scrubbed panic backtraces after terminal restore) |
+| `--log-file <PATH>` | Append scrubbed diagnostic lines directly to `<PATH>` |
+| `-h`, `--help` | Print usage, CLI override precedence, and exit codes (succeeds without a TTY) |
+| `-V`, `--version` | Print `league-tui` version (succeeds without a TTY) |
+
+**CLI precedence:** `--turn-clock`, `--untimed`, and `--pins` override conflicting Lobby UI choices and resumed `.seal` settings; `--log-level`, `-q`, `-v`, and `--debug` override `LEAGUE_LOG_LEVEL`.
+
+### `league-tui` logging and panic safety
+
+While the alternate screen is active, zero diagnostic lines are written to the terminal screen stream; buffered diagnostics flush to `stderr` only after cooked terminal mode is restored (`disable_raw_mode()` + `LeaveAlternateScreen`). Credentials, sealed keys, PINs, private Vault notes, dealt mandates, staged orders, and commit salts are redacted across all four log levels. An uncaught panic restores cooked terminal mode before writing one redacted line to `stderr` (`stack backtrace:` appears solely under `--debug`).
+
+### `league-tui` exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Clean completion (`--help`, `--version`, quit from Lobby or active/completed session cleanly) |
+| 1 | User or configuration error (bad or conflicting flags, invalid `LEAGUE_LOG_LEVEL`, `--pin` on CLI [`PIN_CLI_FORBIDDEN`], missing `--resume` target [`INVALID_RESUME_TARGET`], or non-TTY launch [`TTY_REQUIRED`], checked before raw mode is entered) |
+| 2 | Runtime error (corrupt `.save.json` / `.seal` checkpoint refusal, autosave failure [`TUI_AUTOSAVE_FAILED`], wedged pass error, or terminal I/O failure) |
+| 3 | Partial success (season finalized cleanly through `TurnPhase::Completed`, but `club-<id>.replay.json` write or `.seal` wipe failed [`TUI_REPLAY_EXPORT_FAILED`]; `.seal` stays intact for retry) |
+
+An uncaught main-thread panic exits with Rust's standard code `101` after restoring cooked terminal mode.
 
 ## `league-relay`
 

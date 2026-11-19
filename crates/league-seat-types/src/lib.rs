@@ -75,11 +75,12 @@ pub use types::{
     TableMode, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
 };
 pub use view::{
-    CurtainPinMode, CurtainPinPrompt, ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
-    SeatScreenView, TurnClockDisplay, ViewAlign, ViewAxis, ViewColor, ViewLabel, ViewLayoutMode,
-    ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle,
-    ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow,
-    ViewZoneGroup, ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
+    AwaitingRevealProgress, CurtainPinMode, CurtainPinPrompt, EndOfSeasonData, LobbyCliOverrides,
+    ReplayExportState, ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView,
+    TurnClockDisplay, ViewAlign, ViewAxis, ViewColor, ViewLabel, ViewLayoutMode, ViewModal,
+    ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar,
+    ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneGroup,
+    ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
 };
 
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical
@@ -1033,5 +1034,228 @@ mod tests {
         };
         let json_res = receipt.to_json_string();
         assert!(json_res.is_ok());
+    }
+
+    #[test]
+    fn debug_and_pretty_debug_redact_all_private_seat_types() {
+        let pm = PrivateMandate {
+            kind: MandateKind::MinProjectEquity { target: 987_654 },
+            bonus_equity: 7_777,
+        };
+        let bundle = SealedOrderBundle {
+            converter_runs: vec![ConverterRunOrder {
+                recipe_idx: 2,
+                runs: 9,
+            }],
+            project_deliveries: vec![ProjectDeliveryOrder {
+                project_id: 42,
+                batches: 3,
+            }],
+            atomic_swaps: vec![],
+            contract_deliveries: vec![],
+            dual_escrows: vec![],
+            debt_repayment_cred: 654_321,
+            escrow_finishes: vec![EscrowFinishUnlock {
+                escrow_id: 88,
+                preimage: Some(PreimageSecret([0x5A; 32])),
+            }],
+            check_cashes: vec![55],
+            council_vote: None,
+            charter_bids: vec![],
+        };
+        let draft_act = BundleDraftAction::SetDebtRepaymentCred(765_432);
+        let intent_bundle = SeatIntent::update_bundle(draft_act.clone());
+        let what_if_req = HumanWhatIfRequest {
+            seat: 0,
+            market_actions: vec![MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Raw(0),
+                amount: 876_543,
+            }],
+            cancel_lock_at: None,
+            bundle: bundle.clone(),
+            tie_mode: PreviewTieMode::NeutralSeed,
+            assumptions: CounterpartyAssumptions {
+                assumed_cancelled_offer_ids: vec![432_109],
+                assumed_peer_market_actions: vec![],
+                assumed_peer_bundles: BTreeMap::new(),
+                assumed_cosigned_swaps: vec![],
+                assumed_cosigned_dual_escrows: vec![],
+                assumed_peer_deliveries: vec![],
+                assumed_peer_escrow_finishes: vec![],
+                assumed_bounced_check_ids: vec![321_987],
+            },
+        };
+        let intent_whatif = SeatIntent::request_what_if(what_if_req.clone());
+        let ai_req = crate::AiPreviewRequest {
+            seat: 1,
+            market_actions: vec![],
+            bundle: bundle.clone(),
+        };
+
+        let seat_cfg = SeatConfig {
+            seat: 0,
+            identity: SeatIdentity::Human,
+            initial_cred: 15_000,
+            raw_yield_per_turn: 10_000,
+            refined_project_value: 2_000,
+            upkeep_good: 0,
+            upkeep_amount: 1_800,
+            initial_raw_tariff_bps: 800,
+            initial_refined_tariff_bps: 600,
+            perishable_decay_bps: 2_000,
+            regent: None,
+            converters: Vec::new(),
+        };
+        let spec = PublicTableSpec {
+            table_id: TableId(55),
+            mode: TableMode::Club,
+            seat_count: 1,
+            seats: vec![seat_cfg],
+            projects: Vec::new(),
+            closing_hazard_bps: [3_500; 8],
+            mandate_deck: Vec::new(),
+            drand_schedule: None,
+            eval_vrf_pubkey: None,
+            town_import_premium_bps: 22_500,
+            works_stipend_per_unit_cred: 350,
+            mandate_alpha_bps: 250,
+            cancel_lock_bps: 2_500,
+            wash_round_trip_min_units: 1_000,
+            wash_freeze_bond_cred: 500,
+            wash_freeze_bounty_cred: 500,
+        };
+        let preds = SeatStatePredicates {
+            version: STATE_PREDICATES_VERSION,
+            table_id: TableId(55),
+            turn: 2,
+            phase: TurnPhase::TalkAndMarket,
+            seat: 0,
+            upkeep: UpkeepAndDebt {
+                upkeep_good: 0,
+                owed_units: 1_800,
+                held_units: 0,
+                held_on_own_resting_sells: 0,
+                shortfall_units: 1_800,
+                debt_added_at_sweep: 3_600,
+                interest_bps: 400,
+            },
+            spoilage: SpoilageAndConversion {
+                own_raw_good: 0,
+                own_raw_yield_at_sweep: 10_000,
+                spoilage_bps_by_good: vec![2_000],
+                spoil_units_held_by_good: vec![0],
+                spoil_units_on_resting_offers: 0,
+                spoil_units_total: 0,
+                workshop_capacity_runs_left: 0,
+                recipes: Vec::new(),
+            },
+            scarcity: Vec::new(),
+            coalitions: Vec::new(),
+            season_end: SeasonEndAndMarks {
+                season_closed: false,
+                turns_until_earliest_close: 23,
+                turns_until_latest_close: 31,
+                holdings: Vec::new(),
+                projects: Vec::new(),
+            },
+            cancel_locked: false,
+        };
+        let obs = SeatObservation::unmandated(SeatObservationPublicParts {
+            seat: 0,
+            table_id: TableId(55),
+            turn: 1,
+            phase: TurnPhase::TalkAndMarket,
+            cancel_locked: false,
+            trade_minister: 0,
+            cartel_chair: None,
+            spec: spec.clone(),
+            parities: FundamentalParities::from_spec(&spec),
+            seats: vec![SeatState {
+                seat: 0,
+                identity: SeatIdentity::Human,
+                cred: 15_000,
+                cred_debt: 0,
+                raw: vec![0],
+                refined: vec![0],
+                project_equity: 0,
+                raw_tariff_bps: 800,
+                refined_tariff_bps: 600,
+                credit_tier: CreditTier::Aaa,
+                hard_credit_defaults: 0,
+                bond_breaches: 0,
+                broken_promises: 0,
+                honor_penalties: 0,
+                consecutive_misses: 0,
+                consecutive_zero_production_turns: 0,
+                wash_frozen_until_turn: 0,
+            }],
+            offers: BTreeMap::new(),
+            checks: BTreeMap::new(),
+            escrows: BTreeMap::new(),
+            dual_escrows: BTreeMap::new(),
+            pledges: BTreeMap::new(),
+            audited_pledges: BTreeSet::new(),
+            domains: Vec::new(),
+            council_platforms: BTreeMap::new(),
+            charters: Vec::new(),
+            active_shocks: Vec::new(),
+            public_forecasts: Vec::new(),
+            auditor_hints: Vec::new(),
+            next_offer_id: 1,
+            next_check_id: 1,
+            next_escrow_id: 1,
+            delivery_ledger: BTreeMap::new(),
+            last_potentials: vec![15_000],
+            pending_town_import_cred_spent: 0,
+            fill_log: Vec::new(),
+            pending_wash_freezes: Vec::new(),
+            eval_vrf_pubkey: None,
+            baseline_predicates: preds,
+            public_receipts: Vec::new(),
+        });
+
+        let markers = [
+            "987654",
+            "7777",
+            "654321",
+            "765432",
+            "876543",
+            "432109",
+            "321987",
+            "5a5a5a",
+            "5A5A5A",
+            "90, 90, 90",
+        ];
+        let debug_strings = [
+            alloc::format!("{pm:?}"),
+            alloc::format!("{pm:#?}"),
+            alloc::format!("{bundle:?}"),
+            alloc::format!("{bundle:#?}"),
+            alloc::format!("{draft_act:?}"),
+            alloc::format!("{draft_act:#?}"),
+            alloc::format!("{intent_bundle:?}"),
+            alloc::format!("{intent_bundle:#?}"),
+            alloc::format!("{what_if_req:?}"),
+            alloc::format!("{what_if_req:#?}"),
+            alloc::format!("{intent_whatif:?}"),
+            alloc::format!("{intent_whatif:#?}"),
+            alloc::format!("{ai_req:?}"),
+            alloc::format!("{ai_req:#?}"),
+            alloc::format!("{obs:?}"),
+            alloc::format!("{obs:#?}"),
+        ];
+        for text in &debug_strings {
+            assert!(
+                text.contains("<redacted>") || text.contains("own_mandate: None"),
+                "expected <redacted> or own_mandate: None marker in Debug:\n{text}"
+            );
+            for m in &markers {
+                assert!(
+                    !text.contains(m),
+                    "planted secret marker `{m}` leaked into Debug:\n{text}"
+                );
+            }
+        }
     }
 }

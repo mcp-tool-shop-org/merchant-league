@@ -1,3 +1,5 @@
+use core::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::commit::{
@@ -11,7 +13,7 @@ use crate::types::Units;
 
 /// Staging or clearing operation applied by the trusted host to a seat's pending
 /// [`SealedOrderBundle`] draft.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BundleDraftAction {
     /// Sets or updates a converter batch run (`runs == 0` removes any entry for `recipe_idx`).
     SetConverterRun(ConverterRunOrder),
@@ -173,6 +175,12 @@ impl BundleDraftAction {
     }
 }
 
+impl fmt::Debug for BundleDraftAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("BundleDraftAction(<redacted>)")
+    }
+}
+
 /// Discriminant for [`SeatIntent`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SeatIntentKind {
@@ -188,6 +196,10 @@ pub enum SeatIntentKind {
     OpenChronicleModal,
     /// Closes the Sweep Chronicle modal.
     CloseChronicleModal,
+    /// Submits Turn-1 Private Charter Mandate reveals once the season enters `AwaitingMandateReveal`.
+    SubmitMandateReveal,
+    /// Exports the verified [`crate::SeasonReplayLog`] (or replay file) at `Completed` season close.
+    ExportReplay,
     /// Exits the interactive terminal session cleanly.
     Quit,
 }
@@ -196,7 +208,7 @@ pub enum SeatIntentKind {
 ///
 /// The trusted host (`league-tui`) validates every intent through `ClubHost` and `league-core`
 /// previews/checks before applying any change.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatIntent {
     /// Which host action the seat is requesting.
     pub kind: SeatIntentKind,
@@ -275,6 +287,28 @@ impl SeatIntent {
         }
     }
 
+    /// Constructs an intent to submit the next Turn-1 Private Mandate reveal at season close.
+    #[must_use]
+    pub const fn submit_mandate_reveal() -> Self {
+        Self {
+            kind: SeatIntentKind::SubmitMandateReveal,
+            market_action: None,
+            bundle_action: None,
+            what_if: None,
+        }
+    }
+
+    /// Constructs an intent to export the verified `SeasonReplayLog` at `Completed` season close.
+    #[must_use]
+    pub const fn export_replay() -> Self {
+        Self {
+            kind: SeatIntentKind::ExportReplay,
+            market_action: None,
+            bundle_action: None,
+            what_if: None,
+        }
+    }
+
     /// Constructs an intent to exit the interactive terminal session cleanly.
     #[must_use]
     pub const fn quit() -> Self {
@@ -284,5 +318,22 @@ impl SeatIntent {
             bundle_action: None,
             what_if: None,
         }
+    }
+}
+
+impl fmt::Debug for SeatIntent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeatIntent")
+            .field("kind", &self.kind)
+            .field(
+                "market_action",
+                &self.market_action.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "bundle_action",
+                &self.bundle_action.as_ref().map(|_| "<redacted>"),
+            )
+            .field("what_if", &self.what_if.as_ref().map(|_| "<redacted>"))
+            .finish()
     }
 }

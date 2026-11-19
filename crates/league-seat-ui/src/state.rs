@@ -1,12 +1,14 @@
+use alloc::borrow::ToOwned;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
 
 use league_seat_types::{
     AssetId, AtomicSwapProposal, BondProposal, BondSettlementMode, CharterBidOrder, CharterRole,
     CheckProposal, CommitmentHash, ContractDeliveryOrder, ConverterRunOrder, CouncilPlatform,
     CouncilVoteBallot, DualEscrowProposal, EscrowFinishUnlock, EscrowProposal, IntentPledge,
     IntentTarget, MarketAction, OfferProposal, OfferSide, PreimageSecret, PreviewTieMode,
-    ProjectDeliveryOrder, SealedOrderBundle, SeatIntent, SeatKeyCode, SeatKeyEvent,
+    ProjectDeliveryOrder, SealedOrderBundle, Seat, SeatIntent, SeatKeyCode, SeatKeyEvent,
     SeatObservation, SeatScreenView, TurnClockDisplay, Units, WhatIfPreview,
 };
 
@@ -236,7 +238,7 @@ pub struct SeatUiSelection {
     pub drawer_row_idx: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct MarketComposerFields {
     pub(crate) side_buy: bool,
     pub(crate) good_kind_raw: bool,
@@ -493,7 +495,13 @@ impl MarketComposerFields {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl fmt::Debug for MarketComposerFields {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MarketComposerFields(<redacted>)")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BundleComposerFields {
     pub(crate) recipe_idx: usize,
     pub(crate) runs: u32,
@@ -708,12 +716,18 @@ impl BundleComposerFields {
     }
 }
 
+impl fmt::Debug for BundleComposerFields {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("BundleComposerFields(<redacted>)")
+    }
+}
+
 /// Host-owned per-seat UI state passed into `league-seat-ui` strictly for one seat at a time.
 ///
 /// Every non-scalar / text-bearing field stays `pub(crate)` behind typed accessors, and
 /// [`Self::clear_for_hand_off`] drops all free text, drafts, notes, scrolls, and previews while
 /// keeping only [`Self::active_tab`] and [`Self::selection`] (`docs/club-mode-design.md` §1.4).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct SeatUiState {
     pub(crate) active_tab: CenterTab,
     pub(crate) selection: SeatUiSelection,
@@ -868,13 +882,312 @@ impl SeatUiState {
     }
 }
 
+impl fmt::Debug for SeatUiState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeatUiState")
+            .field("active_tab", &self.active_tab)
+            .field("selection", &self.selection)
+            .field("chronicle_open", &self.chronicle_open)
+            .field("plain_codes", &self.plain_codes)
+            .field("clock_display", &self.clock_display)
+            .field("composer_draft", &"<redacted>")
+            .field("whisper_draft", &"<redacted>")
+            .field("notes_draft", &"<redacted>")
+            .field("market_fields", &self.market_fields)
+            .field("bundle_fields", &self.bundle_fields)
+            .field("staged_bundle", &self.staged_bundle)
+            .field(
+                "last_what_if",
+                &self.last_what_if.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
 /// Complete step result emitted by `handle_seat_key` without mutating host or engine state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SeatUiStep {
     /// Updated screen view model for the host to draw.
     pub view: SeatScreenView,
     /// Updated per-seat UI state owned by the host.
     pub state: SeatUiState,
     /// Optional seat-to-host intent for validation and application.
+    pub intent: Option<SeatIntent>,
+}
+
+impl fmt::Debug for SeatUiStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeatUiStep")
+            .field("view", &"<redacted>")
+            .field("state", &self.state)
+            .field("intent", &self.intent)
+            .finish()
+    }
+}
+
+/// Interactive Lobby outcome returned alongside the rendered view by `handle_lobby_key`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LobbyAction {
+    /// Stay in the Lobby and keep editing options.
+    #[default]
+    None,
+    /// Player confirmed starting the Club Mode table with the configured options.
+    StartSeason,
+    /// Player requested quitting the Lobby before starting a table.
+    Quit,
+}
+
+/// Pure UI configuration state for the Club Mode pre-game Lobby (`docs/club-mode-design.md` §1.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LobbyState {
+    pub(crate) seat_count: u8,
+    pub(crate) human_seats: [bool; 6],
+    pub(crate) seed_text: String,
+    pub(crate) untimed: bool,
+    pub(crate) turn_clock_secs: u16,
+    pub(crate) pins_enabled: bool,
+    pub(crate) focus_row: usize,
+}
+
+impl Default for LobbyState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LobbyState {
+    /// Creates a default 4-seat Club Mode Lobby (`Seat 0` Human, `Seats 1..=3` ClubBot, `seed = 1`,
+    /// `210 s` whole-turn clock, PINs off).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            seat_count: 4,
+            human_seats: [true, false, false, false, false, false],
+            seed_text: "1".to_owned(),
+            untimed: false,
+            turn_clock_secs: 210,
+            pins_enabled: false,
+            focus_row: 0,
+        }
+    }
+
+    pub(crate) const fn seed_row_idx(&self) -> usize {
+        1 + (self.seat_count as usize)
+    }
+
+    pub(crate) const fn clock_row_idx(&self) -> usize {
+        self.seed_row_idx() + 1
+    }
+
+    pub(crate) const fn pins_row_idx(&self) -> usize {
+        self.clock_row_idx() + 1
+    }
+
+    pub(crate) const fn start_row_idx(&self) -> usize {
+        self.pins_row_idx() + 1
+    }
+
+    pub(crate) const fn total_rows(&self) -> usize {
+        self.start_row_idx() + 1
+    }
+
+    /// Configured table seat count (`4..=6`).
+    #[must_use]
+    pub const fn seat_count(&self) -> u8 {
+        self.seat_count
+    }
+
+    /// Returns `true` when `seat` is configured as `Human`, `false` for `ClubBot`.
+    #[must_use]
+    pub fn seat_is_human(&self, seat: Seat) -> bool {
+        let idx = usize::from(seat.0);
+        idx < usize::from(self.seat_count) && self.human_seats[idx]
+    }
+
+    /// Returns ordered `Human` seat indices (`0..seat_count`).
+    #[must_use]
+    pub fn human_seat_indices(&self) -> Vec<u8> {
+        (0..self.seat_count)
+            .filter(|&s| self.human_seats[usize::from(s)])
+            .collect()
+    }
+
+    /// Current raw digits entered for the table layout seed (`"1"` by default).
+    #[must_use]
+    pub fn seed_text(&self) -> &str {
+        &self.seed_text
+    }
+
+    /// Returns `true` if Lobby configured untimed hot-seat turns.
+    #[must_use]
+    pub const fn untimed(&self) -> bool {
+        self.untimed
+    }
+
+    /// Configured timed turn budget in seconds (`180..=300`, `210` default).
+    #[must_use]
+    pub const fn turn_clock_secs(&self) -> u16 {
+        self.turn_clock_secs
+    }
+
+    /// Returns `true` if Lobby enabled 4-digit table-local Curtain PINs.
+    #[must_use]
+    pub const fn pins_enabled(&self) -> bool {
+        self.pins_enabled
+    }
+
+    /// Returns the currently highlighted Lobby row index.
+    #[must_use]
+    pub const fn focus_row(&self) -> usize {
+        self.focus_row
+    }
+
+    /// Steps seat count (`4..=6`) up or down, clamping `focus_row` cleanly.
+    pub fn set_seat_count_step(&mut self, increase: bool) {
+        if increase {
+            self.seat_count = if self.seat_count >= 6 {
+                4
+            } else {
+                self.seat_count + 1
+            };
+        } else if self.seat_count <= 4 {
+            self.seat_count = 6;
+        } else {
+            self.seat_count -= 1;
+        }
+        let max_row = self.total_rows().saturating_sub(1);
+        if self.focus_row > max_row {
+            self.focus_row = max_row;
+        }
+    }
+
+    /// Toggles `seat` between `Human` and `ClubBot`.
+    pub fn toggle_seat_role(&mut self, seat: Seat) {
+        let idx = usize::from(seat.0);
+        if idx < 6 {
+            self.human_seats[idx] = !self.human_seats[idx];
+        }
+    }
+
+    /// Explicitly sets untimed (`true`) or timed (`false`) mode in the Lobby.
+    pub fn set_untimed(&mut self, untimed: bool) {
+        self.untimed = untimed;
+    }
+
+    /// Explicitly toggles 4-digit Curtain PINs in the Lobby.
+    pub fn set_pins_enabled(&mut self, enabled: bool) {
+        self.pins_enabled = enabled;
+    }
+}
+
+/// Result returned by `handle_lobby_key`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LobbyStep {
+    /// Updated Lobby screen view model.
+    pub view: SeatScreenView,
+    /// Updated Lobby configuration state.
+    pub state: LobbyState,
+    /// Resulting action (`None`, `StartSeason`, or `Quit`).
+    pub action: LobbyAction,
+}
+
+/// Active tab inside the 4-tab End-of-Season summary screen (`TurnPhase::Completed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EndOfSeasonTab {
+    /// Tab 1: Ranked `FinalScoreboard`.
+    #[default]
+    Scoreboard,
+    /// Tab 2: All seats' unsealed Turn-1 `PrivateMandate` cards and `MandateBonus`.
+    Mandates,
+    /// Tab 3: `2026-11-16` `HoldingMark` close-marking splits & `SeatSeasonMetrics`.
+    SeasonMetrics,
+    /// Tab 4: Interactive `SeasonReplayLog` export and `.seal` wipe trigger.
+    ReplayExport,
+}
+
+pub(crate) const ALL_END_OF_SEASON_TABS: [EndOfSeasonTab; 4] = [
+    EndOfSeasonTab::Scoreboard,
+    EndOfSeasonTab::Mandates,
+    EndOfSeasonTab::SeasonMetrics,
+    EndOfSeasonTab::ReplayExport,
+];
+
+impl EndOfSeasonTab {
+    /// Human-readable label for this End-of-Season tab.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Scoreboard => "1: Scoreboard",
+            Self::Mandates => "2: Mandates",
+            Self::SeasonMetrics => "3: Metrics & Marks",
+            Self::ReplayExport => "4: Replay Export",
+        }
+    }
+
+    pub(crate) const fn next(self) -> Self {
+        match self {
+            Self::Scoreboard => Self::Mandates,
+            Self::Mandates => Self::SeasonMetrics,
+            Self::SeasonMetrics => Self::ReplayExport,
+            Self::ReplayExport => Self::Scoreboard,
+        }
+    }
+
+    pub(crate) const fn prev(self) -> Self {
+        match self {
+            Self::Scoreboard => Self::ReplayExport,
+            Self::Mandates => Self::Scoreboard,
+            Self::SeasonMetrics => Self::Mandates,
+            Self::ReplayExport => Self::SeasonMetrics,
+        }
+    }
+}
+
+/// UI navigation state for the 4-tab End-of-Season screen (`TurnPhase::Completed`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EndOfSeasonUiState {
+    pub(crate) active_tab: EndOfSeasonTab,
+    pub(crate) scroll: usize,
+    pub(crate) plain_codes: bool,
+}
+
+impl EndOfSeasonUiState {
+    /// Creates initial End-of-Season UI state focused on Tab 1 (`Scoreboard`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            active_tab: EndOfSeasonTab::Scoreboard,
+            scroll: 0,
+            plain_codes: false,
+        }
+    }
+
+    /// Returns the currently active End-of-Season tab.
+    #[must_use]
+    pub const fn active_tab(&self) -> EndOfSeasonTab {
+        self.active_tab
+    }
+
+    /// Returns the vertical scroll offset inside the End-of-Season panel.
+    #[must_use]
+    pub const fn scroll(&self) -> usize {
+        self.scroll
+    }
+
+    /// Returns whether plain 3-letter tickers are shown on close marks.
+    #[must_use]
+    pub const fn plain_codes(&self) -> bool {
+        self.plain_codes
+    }
+}
+
+/// Step result emitted by `handle_end_of_season_key`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndOfSeasonStep {
+    /// Updated End-of-Season screen view model.
+    pub view: SeatScreenView,
+    /// Updated navigation state.
+    pub state: EndOfSeasonUiState,
+    /// Optional host intent (`ExportReplay` or `Quit`).
     pub intent: Option<SeatIntent>,
 }

@@ -4,6 +4,11 @@ use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
+use crate::commit::PrivateMandate;
+use crate::predicates_types::{SeatSeasonMetrics, SeatStatePredicates};
+use crate::scoring_types::FinalScoreboard;
+use crate::types::{TableId, Turn};
+
 /// Plain terminal palette color carried in a seat UI view model without depending on `ratatui`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
@@ -1039,6 +1044,64 @@ pub struct CurtainPinPrompt {
     pub locked_out_reset: bool,
 }
 
+/// Command-line override flags displayed cleanly in the Club Mode Lobby (`CLI > Lobby`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct LobbyCliOverrides {
+    /// Whole-turn timed budget forced by `--turn-clock <180..=300>`, if passed on CLI.
+    pub turn_clock_secs: Option<u16>,
+    /// `true` when `--untimed` was passed on CLI.
+    pub untimed: bool,
+    /// `true` when `--pins` was passed on CLI.
+    pub pins_enabled: bool,
+}
+
+/// Public progress counter rendered during `TurnPhase::AwaitingMandateReveal` before finalization.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct AwaitingRevealProgress {
+    /// Number of seats whose Turn-1 mandate reveal has been submitted (`0..=seat_count`).
+    pub revealed_count: u8,
+    /// Total seats at the table (`4..=6`).
+    pub seat_count: u8,
+}
+
+/// Public status of interactive `SeasonReplayLog` export on End-of-Season Tab 4.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum ReplayExportState {
+    /// Replay file has not been exported from End-of-Season Tab 4 yet.
+    #[default]
+    Ready,
+    /// Replay log was verified, written to disk, and `.seal` was wiped.
+    Exported,
+    /// Replay write or verification failed; `.seal` was preserved on disk.
+    Failed,
+}
+
+/// Plain post-finalize season summary rendered by `league-seat-ui` only in `TurnPhase::Completed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndOfSeasonData {
+    /// Closed table identifier.
+    pub table_id: TableId,
+    /// Terminal turn number (`24..=32`).
+    pub closed_turn: Turn,
+    /// Final ranked scoreboard across all seats.
+    pub scoreboard: FinalScoreboard,
+    /// All seats' unsealed Turn-1 Private Charter Mandates (`0..seat_count`), populated strictly
+    /// after `finalize_season()`.
+    pub revealed_mandates: Vec<PrivateMandate>,
+    /// Closing `SeatStatePredicates` (`at_close`) holding terminal `HoldingMark` splits.
+    pub close_predicates: Vec<SeatStatePredicates>,
+    /// Per-seat paper-test solvency and holding metrics (`SeatSeasonMetrics`).
+    pub season_metrics: Vec<SeatSeasonMetrics>,
+    /// Replay export status for Tab 4 (`Ready`, `Exported`, `Failed`).
+    pub export_state: ReplayExportState,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,5 +1123,17 @@ mod tests {
         assert_eq!(prompt.entered_count, 0);
         assert_eq!(prompt.failed_attempts, 0);
         assert!(!prompt.locked_out_reset);
+
+        let ov = LobbyCliOverrides::default();
+        assert_eq!(ov.turn_clock_secs, None);
+        assert!(!ov.untimed);
+        assert!(!ov.pins_enabled);
+
+        let prog = AwaitingRevealProgress {
+            revealed_count: 1,
+            seat_count: 4,
+        };
+        assert_eq!(prog.revealed_count, 1);
+        assert_eq!(ReplayExportState::default(), ReplayExportState::Ready);
     }
 }

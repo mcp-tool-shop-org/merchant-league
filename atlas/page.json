@@ -94,23 +94,49 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 5,
+      "changed": 22,
       "moved": 0,
-      "parts": 4,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
+        "kind": "sequence",
+        "sentence": "In crates/league-tui/src/main.rs, `main` gained a step, `parse`, before `set_panic_hook_log_level`.",
+        "subjects": [
+          "crates/league-tui/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-tui/src/main.rs, `main` gained a step, `set_panic_hook_log_level`, before `panic_hook_log_level`.",
+        "subjects": [
+          "crates/league-tui/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "In crates/league-tui/src/main.rs, `main` gained a step, `panic_hook_log_level`, before `scrub_tui_diagnostic_text`.",
+        "subjects": [
+          "crates/league-tui/src/main.rs"
+        ]
+      },
+      {
+        "kind": "sequence",
+        "sentence": "And 20 more changes to the order of work.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-19; 5 files changed content.",
+        "sentence": "22 files changed content, across 6 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "8602c90399bd23654481301a40275e482fef80c9",
-      "generatedAt": "2026-11-19T19:51:14.613Z"
+      "commit": "2b680d88fd23bd4180763504fcc8c3944ce7db91",
+      "generatedAt": "2026-11-19T21:02:26.744Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -144,21 +170,6 @@
       "shared": 5
     },
     {
-      "a": "crates/league-tui/src/host.rs",
-      "b": "crates/league-tui/src/main.rs",
-      "either": 6,
-      "partLabels": [
-        "league-tui",
-        "league-tui"
-      ],
-      "parts": [
-        "league-tui",
-        "league-tui"
-      ],
-      "relation": "inside",
-      "shared": 5
-    },
-    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
       "either": 22,
@@ -187,6 +198,21 @@
       ],
       "relation": "inside",
       "shared": 9
+    },
+    {
+      "a": "crates/league-core/src/replay.rs",
+      "b": "crates/league-core/tests/replay_invariants.rs",
+      "either": 11,
+      "partLabels": [
+        "league-core",
+        "league-core"
+      ],
+      "parts": [
+        "league-core",
+        "league-core"
+      ],
+      "relation": "inside",
+      "shared": 9
     }
   ],
   "changesTogetherNote": [
@@ -194,7 +220,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "2b680d88fd23bd4180763504fcc8c3944ce7db91",
+  "commit": "2b6dd8cb8a30cf0a5303c1d78ca6621fcfae64b6",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -611,14 +637,14 @@
       "to": "league-seat-ui"
     }
   ],
-  "engine": "1.23.0",
+  "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-19T21:02:26.744Z",
+  "generatedAt": "2026-11-19T23:16:19.267Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "23 writes and 13 reads use paths built at run time and are not named here.",
+    "26 writes and 13 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "13 writes and 18 reads go to a path their caller passes, not to this repository.",
+    "14 writes and 18 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
@@ -670,12 +696,13 @@
     "league-tui": 2,
     "scripts": 1
   },
+  "testedCodeParts": 11,
   "testedInside": [
     "league-season",
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 23,
+  "unnamedWrites": 26,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

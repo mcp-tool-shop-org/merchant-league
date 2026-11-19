@@ -1975,3 +1975,494 @@ fn format_fill_line(
         f.turn, f.kind, good, f.from, f.to, f.units, f.net_units, f.cred_amount
     )
 }
+
+pub(crate) fn build_lobby_screen(
+    state: &crate::state::LobbyState,
+    overrides: league_seat_types::LobbyCliOverrides,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    let layout = ScreenLayout::layout_for_viewport(viewport);
+    if layout.mode == ViewLayoutMode::TooSmall {
+        return build_too_small_view(viewport, layout);
+    }
+
+    let sel = |row: usize, text: String| {
+        if state.focus_row == row {
+            ViewRow::from_spans(vec![ViewSpan::styled(
+                format!("> {text}"),
+                ViewStyle::plain().with_fg(ViewColor::Cyan).bold(),
+            )])
+        } else {
+            ViewRow::from_plain(format!("  {text}"))
+        }
+    };
+
+    let mut rows = vec![
+        ViewRow::from_plain(
+            "Configure offline Club Mode table (`dev` seed pool 0..=9999; CLI flags override Lobby):"
+                .to_owned(),
+        ),
+        sel(0, format!("Seat Count: {} (allowed 4..=6)", state.seat_count)),
+    ];
+
+    for (s, is_human) in state
+        .human_seats
+        .iter()
+        .copied()
+        .enumerate()
+        .take(usize::from(state.seat_count))
+    {
+        let role = if is_human {
+            "Human (Regent fallback: Auto; editable pre-start in design, default Auto here)"
+        } else {
+            "ClubBot (AiSyndicate)"
+        };
+        rows.push(sel(
+            1 + s,
+            format!("Seat {s} ({}): {role}", guild_name_for_seat(s as u8)),
+        ));
+    }
+
+    let seed_row = state.seed_row_idx();
+    rows.push(sel(
+        seed_row,
+        format!("Layout Seed (dev 0..=9999): {}", state.seed_text),
+    ));
+
+    let effective_untimed =
+        overrides.untimed || (overrides.turn_clock_secs.is_none() && state.untimed);
+    let effective_secs = overrides.turn_clock_secs.unwrap_or(state.turn_clock_secs);
+    let clock_note = if overrides.untimed {
+        "Untimed (CLI override --untimed)"
+    } else if overrides.turn_clock_secs.is_some() {
+        "(CLI override --turn-clock)"
+    } else if effective_untimed {
+        "Untimed (no pass timeout)"
+    } else {
+        "75% Pass A / 25% Pass B across humans"
+    };
+    let clock_val = if effective_untimed {
+        "Untimed".to_owned()
+    } else {
+        format!("{effective_secs}s")
+    };
+    rows.push(sel(
+        state.clock_row_idx(),
+        format!("Turn Clock: {clock_val} — {clock_note}"),
+    ));
+
+    let effective_pins = overrides.pins_enabled || state.pins_enabled;
+    let pin_note = if overrides.pins_enabled {
+        "On (CLI override --pins; set 4 digits at first Curtain)"
+    } else if effective_pins {
+        "On (enter 4-digit table PIN at first Curtain)"
+    } else {
+        "Off"
+    };
+    rows.push(sel(
+        state.pins_row_idx(),
+        format!("Curtain PINs: {pin_note}"),
+    ));
+    rows.push(sel(
+        state.start_row_idx(),
+        "[ Start Club Season ] (press Enter)".to_owned(),
+    ));
+
+    let total_rows = rows.len();
+    let max_vis = usize::from(viewport.height.saturating_sub(6)).max(1);
+    let scroll_off = state
+        .focus_row
+        .saturating_add(2)
+        .saturating_sub(max_vis)
+        .min(total_rows.saturating_sub(1));
+
+    let panel = ViewPanel {
+        title: Some(ViewLabel::styled(
+            "Merchant League — Club Mode Lobby".to_owned(),
+            ViewStyle {
+                fg: ViewColor::Cyan,
+                bg: ViewColor::Reset,
+                bold: true,
+                ..ViewStyle::plain()
+            },
+        )),
+        alignment: ViewAlign::Left,
+        bordered: true,
+        tabs: None,
+        table: None,
+        rows,
+        selected_row: None,
+        scroll: Some(ViewScroll {
+            offset: scroll_off,
+            total: total_rows,
+        }),
+    };
+
+    SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel,
+        }],
+        status_line: Some(ViewStatusLine {
+            alert: None,
+            left: vec![ViewSpan::plain(
+                "Up/Down: Row | Left/Right/Space: Toggle | Digits: Seed | Enter: Start | q/Esc: Quit"
+                    .to_owned(),
+            )],
+            right: vec![ViewSpan::plain("Lobby".to_owned())],
+            style: ViewStyle::plain(),
+        }),
+        modal: None,
+    }
+}
+
+pub(crate) fn build_awaiting_reveal_screen(
+    table_id: league_seat_types::TableId,
+    turn: Turn,
+    progress: league_seat_types::AwaitingRevealProgress,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    let layout = ScreenLayout::layout_for_viewport(viewport);
+    if layout.mode == ViewLayoutMode::TooSmall {
+        return build_too_small_view(viewport, layout);
+    }
+
+    let panel = ViewPanel {
+        title: Some(ViewLabel::styled(
+            "Merchant League — Session Standby".to_owned(),
+            ViewStyle {
+                fg: ViewColor::Cyan,
+                bg: ViewColor::Reset,
+                bold: true,
+                ..ViewStyle::plain()
+            },
+        )),
+        alignment: ViewAlign::Center,
+        bordered: true,
+        tabs: None,
+        table: None,
+        rows: vec![
+            ViewRow::from_plain(format!(
+                "Table #{} | Turn {} | Phase: {:?}",
+                table_id.0,
+                turn.0,
+                TurnPhase::AwaitingMandateReveal
+            )),
+            ViewRow::from_plain(
+                "Season closed — Turn-1 mandates stay sealed until all seats submit reveals."
+                    .to_owned(),
+            ),
+            ViewRow::from_plain(format!(
+                "Mandate reveals submitted: {}/{} — press Enter to submit next reveal.",
+                progress.revealed_count, progress.seat_count
+            )),
+        ],
+        selected_row: None,
+        scroll: None,
+    };
+
+    SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel,
+        }],
+        status_line: Some(ViewStatusLine {
+            alert: None,
+            left: vec![ViewSpan::plain(
+                "Enter/Space: Submit Mandate Reveal | q / Esc / Ctrl-C: Quit".to_owned(),
+            )],
+            right: vec![ViewSpan::plain("Awaiting Reveal".to_owned())],
+            style: ViewStyle::plain(),
+        }),
+        modal: None,
+    }
+}
+
+pub(crate) fn build_end_of_season_screen(
+    data: &league_seat_types::EndOfSeasonData,
+    state: &crate::state::EndOfSeasonUiState,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    use crate::state::{ALL_END_OF_SEASON_TABS, EndOfSeasonTab};
+    use league_seat_types::ReplayExportState;
+
+    let layout = ScreenLayout::layout_for_viewport(viewport);
+    if layout.mode == ViewLayoutMode::TooSmall {
+        return build_too_small_view(viewport, layout);
+    }
+
+    let tabs = ViewTabBar {
+        tabs: ALL_END_OF_SEASON_TABS
+            .iter()
+            .map(|tab| ViewTabItem {
+                label: ViewLabel::plain(tab.label().to_owned()),
+                enabled: true,
+            })
+            .collect(),
+        active_index: match state.active_tab {
+            EndOfSeasonTab::Scoreboard => 0,
+            EndOfSeasonTab::Mandates => 1,
+            EndOfSeasonTab::SeasonMetrics => 2,
+            EndOfSeasonTab::ReplayExport => 3,
+        },
+    };
+
+    let mut rows = vec![ViewRow::from_plain(format!(
+        "Table #{} | Closed Turn {} | {} seats",
+        data.table_id.0,
+        data.closed_turn.0,
+        data.scoreboard.standings.len()
+    ))];
+    let mut table = None;
+
+    match state.active_tab {
+        EndOfSeasonTab::Scoreboard => {
+            rows.push(ViewRow::from_plain(
+                "Final Standings (sorted by Total Equity, tie-broken cleanly via standings order):"
+                    .to_owned(),
+            ));
+            let columns = vec![
+                ViewTableColumn {
+                    header: ViewLabel::plain("Rank".to_owned()),
+                    width: ViewSizeHint::Fixed(4),
+                    alignment: ViewAlign::Right,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("Seat".to_owned()),
+                    width: ViewSizeHint::Fixed(4),
+                    alignment: ViewAlign::Left,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("TotalEq".to_owned()),
+                    width: ViewSizeHint::Min(8),
+                    alignment: ViewAlign::Right,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("ProjEq".to_owned()),
+                    width: ViewSizeHint::Min(7),
+                    alignment: ViewAlign::Right,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("NetEq".to_owned()),
+                    width: ViewSizeHint::Min(7),
+                    alignment: ViewAlign::Right,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("MandEq".to_owned()),
+                    width: ViewSizeHint::Min(6),
+                    alignment: ViewAlign::Right,
+                },
+                ViewTableColumn {
+                    header: ViewLabel::plain("Tier".to_owned()),
+                    width: ViewSizeHint::Fixed(4),
+                    alignment: ViewAlign::Left,
+                },
+            ];
+            let mut trows = Vec::new();
+            for (idx, entry) in data.scoreboard.standings.iter().enumerate() {
+                let rank = idx + 1;
+                trows.push(ViewTableRow {
+                    cells: vec![
+                        ViewTableCell::aligned(
+                            format!("#{rank}"),
+                            ViewAlign::Right,
+                            ViewStyle::plain(),
+                        ),
+                        ViewTableCell::plain(format!("S{}", entry.seat)),
+                        ViewTableCell::aligned(
+                            format!("{}", entry.total_equity),
+                            ViewAlign::Right,
+                            ViewStyle::plain().bold(),
+                        ),
+                        ViewTableCell::aligned(
+                            format!("{}", entry.project_equity),
+                            ViewAlign::Right,
+                            ViewStyle::plain(),
+                        ),
+                        ViewTableCell::aligned(
+                            format!("{}", entry.net_asset_equity),
+                            ViewAlign::Right,
+                            ViewStyle::plain(),
+                        ),
+                        ViewTableCell::aligned(
+                            format!("{}", entry.mandate_bonus),
+                            ViewAlign::Right,
+                            ViewStyle::plain(),
+                        ),
+                        ViewTableCell::plain(format!("{:?}", entry.credit_tier)),
+                    ],
+                    style: ViewStyle::plain(),
+                });
+            }
+            table = Some(ViewTable {
+                columns,
+                rows: trows,
+                selected_row: None,
+            });
+            for (idx, entry) in data.scoreboard.standings.iter().enumerate() {
+                rows.push(ViewRow::from_plain(format!(
+                    "  Rank #{} — S{} ({}) | TotalEq={} ProjEq={} NetEq={} MandEq={} HonorPen={}",
+                    idx + 1,
+                    entry.seat,
+                    guild_name_for_seat(entry.seat),
+                    entry.total_equity,
+                    entry.project_equity,
+                    entry.net_asset_equity,
+                    entry.mandate_bonus,
+                    entry.honor_penalties
+                )));
+            }
+        }
+        EndOfSeasonTab::Mandates => {
+            rows.push(ViewRow::from_plain(
+                "Unsealed Turn-1 Private Charter Mandates (revealed post-close):".to_owned(),
+            ));
+            for (idx, mandate) in data.revealed_mandates.iter().enumerate() {
+                let seat_u8 = idx as u8;
+                let bonus_awarded = data
+                    .scoreboard
+                    .standings
+                    .iter()
+                    .find(|e| e.seat == seat_u8)
+                    .map_or(0, |e| e.mandate_bonus);
+                let status = if bonus_awarded > 0 {
+                    format!("AWARDED +{bonus_awarded}")
+                } else {
+                    "Unmet (+0)".to_owned()
+                };
+                rows.push(ViewRow::from_plain(format!(
+                    "S{} ({}): {} | BaseBonus: {} | {}",
+                    seat_u8,
+                    guild_name_for_seat(seat_u8),
+                    format_mandate_kind(mandate.kind),
+                    mandate.bonus_equity,
+                    status
+                )));
+            }
+        }
+        EndOfSeasonTab::SeasonMetrics => {
+            rows.push(ViewRow::from_plain(
+                "2026-11-16 Close-Marking Splits (HoldingMark) & Solvency / Honor Metrics:"
+                    .to_owned(),
+            ));
+            for (idx, metric) in data.season_metrics.iter().enumerate() {
+                let entry = data
+                    .scoreboard
+                    .standings
+                    .iter()
+                    .find(|e| e.seat == metric.seat);
+                let (defaults, breaches, broken, honor_pen, tier) =
+                    entry.map_or((0, 0, 0, 0, "Aaa".to_owned()), |e| {
+                        (
+                            e.hard_credit_defaults,
+                            e.bond_breaches,
+                            e.broken_promises,
+                            e.honor_penalties,
+                            format!("{:?}", e.credit_tier),
+                        )
+                    });
+                rows.push(ViewRow::from_plain(format!(
+                    "S{} ({}) | Tier {tier} | Defaults:{defaults} Breaches:{breaches} Broken:{broken} HonorPen:{honor_pen}",
+                    metric.seat,
+                    guild_name_for_seat(metric.seat),
+                )));
+                rows.push(ViewRow::from_plain(format!(
+                    "  Metrics: held_short={:?} covered_short={:?} spoiled={} stranded_u={} floor_val={}",
+                    metric.held_enough_but_short_turns,
+                    metric.covered_with_own_offers_but_short_turns,
+                    metric.spoiled_units,
+                    metric.stranded_units_at_close,
+                    metric.stranded_value_at_close
+                )));
+                if let Some(pred) = data.close_predicates.get(idx) {
+                    for h in &pred.season_end.holdings {
+                        if h.units > 0 {
+                            rows.push(ViewRow::from_plain(format!(
+                                "  Mark {}: units={} marked={} (bid_u={} floor_u={} floor_val={})",
+                                format_asset_label(h.good, commodities, state.plain_codes),
+                                h.units,
+                                h.marked_value,
+                                h.units_marked_by_bids,
+                                h.units_at_floor,
+                                h.value_at_floor
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        EndOfSeasonTab::ReplayExport => {
+            rows.push(ViewRow::from_plain(
+                "SeasonReplayLog Export & Private .seal Cleanup:".to_owned(),
+            ));
+            let msg = match data.export_state {
+                ReplayExportState::Ready => {
+                    "Status: Ready — press `e` or `Enter` to verify & export SeasonReplayLog JSON and wipe `.seal`."
+                }
+                ReplayExportState::Exported => {
+                    "Status: Exported & Verified — SeasonReplayLog written cleanly and private `.seal` wiped."
+                }
+                ReplayExportState::Failed => {
+                    "Status: Export Failed — private `.seal` was preserved on disk; see details below."
+                }
+            };
+            rows.push(ViewRow::from_plain(msg.to_owned()));
+        }
+    }
+
+    let total_rows = rows.len() + table.as_ref().map_or(0, |t| t.rows.len() + 1);
+    let panel = ViewPanel {
+        title: Some(ViewLabel::styled(
+            "Merchant League — End of Season".to_owned(),
+            ViewStyle {
+                fg: ViewColor::Cyan,
+                bg: ViewColor::Reset,
+                bold: true,
+                ..ViewStyle::plain()
+            },
+        )),
+        alignment: ViewAlign::Left,
+        bordered: true,
+        tabs: Some(tabs),
+        table,
+        rows,
+        selected_row: None,
+        scroll: Some(ViewScroll {
+            offset: state.scroll.min(total_rows.saturating_sub(1)),
+            total: total_rows,
+        }),
+    };
+
+    SeatScreenView {
+        layout: if viewport.height >= 8 {
+            ScreenLayout::single_panel_with_status(viewport)
+        } else {
+            ScreenLayout::single_panel(viewport)
+        },
+        zones: vec![ViewZonePanel {
+            zone: ViewZoneId::SingleFull,
+            panel,
+        }],
+        status_line: Some(ViewStatusLine {
+            alert: None,
+            left: vec![ViewSpan::plain(
+                "1-4/Tab: Tab | Up/Down/PgDn: Scroll | c: Codes | e/Enter(Tab 4): Export Replay | q/Esc: Quit"
+                    .to_owned(),
+            )],
+            right: vec![ViewSpan::plain(state.active_tab.label().to_owned())],
+            style: ViewStyle::plain(),
+        }),
+        modal: None,
+    }
+}

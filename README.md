@@ -16,7 +16,7 @@
 
 A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.
 
-**Status: prototype, design stage.** The rules engine, the table generator and the replay are built and tested. The game itself is **not playable yet**: there is no game client and no release. Testnet only: no real money, and no path to Mainnet.
+**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`). Public-Testnet Game mode and the container image are not built yet, and there is **no release yet**. Testnet only: no real money, and no path to Mainnet.
 
 ## The game
 
@@ -48,7 +48,22 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | `league-standalone` | The stand-alone `xrpld` harness for training mode, in a pinned, resource-capped container |
 | `league-season` | The Testnet's announced reset dates, and a check that spots an unannounced reset |
 | `league-relay` | The tool that ran the paper playtests with AI seats |
-| `league-tui` | The terminal client. A title screen only, for now |
+| `league-tui` | The offline Club Mode terminal host: Lobby setup, four-zone hot-seat turns, Privacy Curtain with optional PINs, timed passes, mid-turn save/resume, end-of-season scoreboard, and replay export |
+
+## Play a season
+
+Offline **Club Mode** runs a full `24..=32`-turn hot-seat season in your terminal (`4–6` human or `ClubBot` seats on one machine):
+
+```bash
+cargo run -p league-tui --locked -- --save-dir ./saves
+```
+
+- **Lobby setup:** Choose seat count (`4–6`, `Left`/`Right`), toggle each seat between `Human` and `ClubBot` (`Space`), enter a clear `SeedPool::Dev` seed in `0..=9999` (reserved test seeds and other pools are refused by name), choose a turn budget (`180–300 s`, `210 s` default, or `Untimed` with `Space`), and toggle 4-digit table-local Curtain PINs. Press `Enter` on **Start Club Mode Table**. Command-line flags (`--turn-clock`, `--untimed`, `--pins`) override conflicting Lobby and saved `.seal` choices (`league-tui --help` documents precedence; passing PIN digits via `--pin` on the CLI is refused).
+- **Turn keys:** `1`/`2`/`3`/`Tab`/`BackTab` switch enabled composer tabs (`4: Diplomatic Desk (Disabled)` stays disabled); `F6` cycles focus across the Public Ledger, Composer Tabs, and Private Vault; `[`/`]` cycles action kinds or bundle sections; `Up`/`Down`/`PageUp`/`PageDown`/`Home` selects or scrolls; `Left`/`Right`/`+`/`-`/`Space` adjusts fields; `e` edits free-text overrides; `n` edits personal Private Vault notes; `Enter` submits an action, stages a bundle section, or runs the `p` What-If Sandbox; `Del`/`Backspace`/`X` clears staged orders; `c` toggles guild good names vs 3-letter codes (`[CRED]`, `[TMB]`); `r`/`F2` opens the Sweep Chronicle modal; `Ctrl+l`/`Ctrl+L` locks your pass and opens the Privacy Curtain; `q`/`Esc`/`Ctrl+c` quits cleanly.
+- **Privacy Curtain, dead time & PINs:** Every hand-off, timeout, and resume opens a public Privacy Curtain (clearing the alternate screen in place with `CSI 2 J` and never `CSI 3 J` scrollback purge), drains queued input, and enforces a `400 ms` input dead time both when opening and when lifting (lift dead time does not count against the arriving seat's clock). Press `Space` then `Enter` to lift; if PINs are enabled, type your masked 4-digit PIN (entered only behind the Curtain — the 1st turn sets it, later hand-offs verify it, wrong tries build zero seat observations, and 3 misses reset back to the unarmed Curtain).
+- **Clock:** Timed turns split each budget `75%` Sub-Pass A / `25%` Sub-Pass B across all `H` human seats (`floor(0.75 * B / H)` s and `floor(0.25 * B / H)` s). Locking early advances immediately; idle Sub-Pass B timeouts resolve via the Standing Regent fallback doctrine.
+- **Save & resume:** With `--save-dir <DIR>`, the host autosaves atomically at every Curtain, initial PIN commit, and Sweep leaving `TalkAndMarket`. Public state saves to `club-<id>.save.json`; hidden mandates, salts, pre-derived VRF proofs, notes, uncommitted bundles, and PINs stay solely in `club-<id>.seal`. Resume any time with `cargo run -p league-tui --locked -- --resume ./saves/club-1.save.json` (or `--resume ./saves`), always landing behind the active human seat's Curtain with a fresh pass clock.
+- **End of season & replay export:** After the Closing Bell closes `TalkAndMarket`, step through the public standby mandate-reveal stage (`Enter`/`Space` per seat, showing zero mandates beforehand) to finalize into the four-tab End-of-Season screen (`1: Scoreboard`, `2: Mandates`, `3: Metrics & Marks`, `4: Replay Export`). On Tab 4, press `e` or `Enter` to write and verify `club-<id>.replay.json` and wipe the private `.seal` file (if export fails, `.seal` stays on disk so you can retry).
 
 ## Build from source
 
@@ -72,7 +87,7 @@ LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live -
 
 ## Security and data
 
-- **What it touches.** In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.
+- **What it touches.** In offline Club Mode (`league-tui`), `--save-dir` writes public `club-<id>.save.json`, private hot-seat `club-<id>.seal` (deleted upon successful replay export), verified `club-<id>.replay.json`, and optional `--log-file` diagnostics (redacted across all four log levels) on your own machine with zero network calls. In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.
 - **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).
 - **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.
 - **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.
