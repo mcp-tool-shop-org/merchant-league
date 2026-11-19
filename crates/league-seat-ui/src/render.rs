@@ -728,9 +728,7 @@ pub(crate) fn public_ledger_total_rows(obs: &SeatObservation, viewport: Viewport
 
 fn append_compact_standing_rows(obs: &SeatObservation, rows: &mut Vec<ViewRow>) {
     rows.push(ViewRow::from_plain("--- Standing & Legend ---".to_owned()));
-    rows.push(ViewRow::from_plain(
-        "Legend: k=1e3 M=1e6 +=rem".to_owned(),
-    ));
+    rows.push(ViewRow::from_plain("Legend: k=1e3 M=1e6 +=rem".to_owned()));
     for s in &obs.seats {
         let role = match s.identity {
             SeatIdentity::Human => "HUM",

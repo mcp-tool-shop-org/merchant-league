@@ -23,9 +23,9 @@ use league_seat_types::ViewportSize;
 #[cfg(test)]
 use league_seat_ui::{Action, action_for};
 use ratatui::Terminal;
-use ratatui::backend::{Backend, CrosstermBackend};
 #[cfg(test)]
 use ratatui::backend::TestBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 
 trait ScrollbackClear {
     fn clear_scrollback(&mut self) -> io::Result<()>;
@@ -351,7 +351,9 @@ fn apply_cli_session_options(session: &mut host::TuiHostSession, opts: &CliOptio
     if opts.untimed {
         session.configure_turn_clock(None);
     } else {
-        session.configure_turn_clock(Some(opts.turn_clock_secs.unwrap_or(DEFAULT_TURN_CLOCK_SECS)));
+        session.configure_turn_clock(Some(
+            opts.turn_clock_secs.unwrap_or(DEFAULT_TURN_CLOCK_SECS),
+        ));
     }
     if opts.pins_enabled {
         session.enable_seat_pins();
@@ -805,8 +807,7 @@ mod tests {
         let mut session =
             host::TuiHostSession::from_ring_table(&ring, TableId(81_301), &[0, 1], 5)?;
         let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
-        let mut terminal =
-            Terminal::new(CrosstermBackend::new(SharedVecWriter(written.clone())))?;
+        let mut terminal = Terminal::new(CrosstermBackend::new(SharedVecWriter(written.clone())))?;
         let key_ev = |code: KeyCode, mods: KeyModifiers| {
             let mut k = KeyEvent::new(code, mods);
             k.kind = KeyEventKind::Press;
@@ -885,7 +886,10 @@ mod tests {
             raw_ansi.contains("\x1b[3J"),
             "Curtain hand-off must emit ESC[3J scrollback purge on CrosstermBackend"
         );
-        assert!(!bytes.contains(&0x07), "must never emit terminal bell (BEL)");
+        assert!(
+            !bytes.contains(&0x07),
+            "must never emit terminal bell (BEL)"
+        );
         assert!(!raw_ansi.contains("\x1b]0;") && !raw_ansi.contains("\x1b]2;"));
         assert!(!raw_ansi.contains("\x1b]52;"));
         Ok(())
@@ -909,13 +913,11 @@ mod tests {
 
         // Drive Seat 0 note `"PRIVATE_BEFORE_TIMEOUT_919"`, What-If preview (`p`), then let
         // non-blocking `Tick` events advance past `67s` WITHOUT pressing Ctrl+L.
-        let mut steps: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
-            (
-                Duration::ZERO,
-                Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
-                Vec::new(),
-            ),
-        ];
+        let mut steps: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![(
+            Duration::ZERO,
+            Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+            Vec::new(),
+        )];
         for ch in "PRIVATE_BEFORE_TIMEOUT_919".chars() {
             steps.push((
                 Duration::ZERO,
@@ -1023,7 +1025,11 @@ mod tests {
         }
         let mut regent_events = ScriptedSessionEvents::from_timed_with_queued(regent_steps);
         run_session_loop(&mut terminal, &mut regent_session, &mut regent_events)?;
-        assert_eq!(regent_session.turn(), 2, "Turn 1 must sweep after Pass B timeout");
+        assert_eq!(
+            regent_session.turn(),
+            2,
+            "Turn 1 must sweep after Pass B timeout"
+        );
         let r1 = &regent_session.public_receipts()[0];
         assert!(
             r1.regent_acted_seats.contains(&0),

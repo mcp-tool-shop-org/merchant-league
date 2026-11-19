@@ -9,15 +9,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use league_core::SeatIdentity;
 use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
 use league_core::{
-    AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal,
-    SealedOrderBundle, Seat, SeatObservation, StructuredError, TableId, ToStructuredError, Turn,
-    TurnPhase, preview_seat_bundle, preview_what_if, scrub_secret_text,
+    AiPreviewRequest, ClubBot, ClubHost, EngineError, MarketAction, OrderReveal, SealedOrderBundle,
+    Seat, SeatObservation, StructuredError, TableId, ToStructuredError, Turn, TurnPhase,
+    preview_seat_bundle, preview_what_if, scrub_secret_text,
 };
 #[cfg(test)]
 use league_core::{PublicSweepReceipt, RevealSalt, SealedEvalSeed, SealedMandateDeal, TableSpec};
-use league_core::SeatIdentity;
 use league_gen::{GenError, RingTable, ring_table_to_table_spec};
 use league_seat_types::{
     CommodityDisplayMap, CurtainPinMode, CurtainPinPrompt, SeatIntent, SeatIntentKind, SeatKeyCode,
@@ -740,8 +740,8 @@ impl TuiHostSession {
 
     fn pass_budget_secs(&self) -> Option<u16> {
         let budget_secs = self.turn_clock_budget_secs?;
-        let human_count = u64::try_from(self.human_seats.iter().filter(|&&h| h).count().max(1))
-            .unwrap_or(1);
+        let human_count =
+            u64::try_from(self.human_seats.iter().filter(|&&h| h).count().max(1)).unwrap_or(1);
         let pct = match self.pass {
             PassKind::SubPassA => 75_u64,
             PassKind::SubPassB => 25_u64,
@@ -759,8 +759,8 @@ impl TuiHostSession {
             let elapsed_secs = self
                 .active_pass_started_at
                 .map_or(0_u64, |start| self.now.saturating_sub(start).as_secs());
-            let rem = u16::try_from(u64::from(budget_secs).saturating_sub(elapsed_secs))
-                .unwrap_or(0);
+            let rem =
+                u16::try_from(u64::from(budget_secs).saturating_sub(elapsed_secs)).unwrap_or(0);
             TurnClockDisplay::timed(rem, budget_secs)
         } else {
             TurnClockDisplay::untimed()
@@ -847,11 +847,12 @@ impl TuiHostSession {
     }
 
     fn sync_checkpoint_to_host(&mut self) -> Result<(), StructuredError> {
-        let pause_cursor = (self.host.phase() == TurnPhase::TalkAndMarket).then(|| ClubPauseCursor {
-            sub_pass_b: self.pass == PassKind::SubPassB,
-            pass_offset: self.pass_offset,
-            curtain_next_seat: self.curtain.as_ref().map(|c| c.next_seat.0),
-        });
+        let pause_cursor =
+            (self.host.phase() == TurnPhase::TalkAndMarket).then(|| ClubPauseCursor {
+                sub_pass_b: self.pass == PassKind::SubPassB,
+                pass_offset: self.pass_offset,
+                curtain_next_seat: self.curtain.as_ref().map(|c| c.next_seat.0),
+            });
         ClubSessionCheckpoint::store_on_host(
             &mut self.host,
             ClubSessionCheckpoint {
@@ -930,7 +931,10 @@ impl TuiHostSession {
     /// human passes through the Privacy Curtain.
     pub(crate) fn sync_clock(&mut self, elapsed: Duration) {
         self.now = self.now.max(elapsed);
-        if self.curtain_dead_until.is_some_and(|until| self.now >= until) {
+        if self
+            .curtain_dead_until
+            .is_some_and(|until| self.now >= until)
+        {
             self.curtain_dead_until = None;
         }
         let Some(active) = self.active_human_seat() else {
@@ -4609,8 +4613,14 @@ mod tests {
                 } else {
                     // At 80x24 StackedFallback the PublicLedger pane shows 2 table rows per scroll
                     // step; focus PublicLedger (F6 x 2) and scroll through every seat row.
-                    must_ok(session.handle_key_event(key_code(SeatKeyCode::F(6)), vp), "f6 1");
-                    must_ok(session.handle_key_event(key_code(SeatKeyCode::F(6)), vp), "f6 2");
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                        "f6 1",
+                    );
+                    must_ok(
+                        session.handle_key_event(key_code(SeatKeyCode::F(6)), vp),
+                        "f6 2",
+                    );
                     for _ in 0..obs.seats.len() {
                         must_ok(
                             terminal
@@ -4704,15 +4714,13 @@ mod tests {
         let state = SeatUiState::new();
         for (w, h) in [(80_u16, 24_u16), (100, 30), (120, 40)] {
             let vp = ViewportSize::new(w, h);
-            let view = league_seat_ui::render_turn_screen(
-                &obs,
-                &state,
-                PassKind::SubPassA,
-                None,
-                vp,
-            );
+            let view =
+                league_seat_ui::render_turn_screen(&obs, &state, PassKind::SubPassA, None, vp);
             let mut terminal = must_ok(Terminal::new(TestBackend::new(w, h)), "tb");
-            must_ok(terminal.draw(|f| draw_screen_view(f, &view)), "draw synthetic");
+            must_ok(
+                terminal.draw(|f| draw_screen_view(f, &view)),
+                "draw synthetic",
+            );
             let buf = screen_text(&terminal);
             assert!(
                 buf.contains("15000"),
@@ -4739,7 +4747,7 @@ mod tests {
 
     #[test]
     fn halted_session_shows_accurate_standby_notes_refuses_wedged_save_and_from_host_surfaces_bot_errors()
-    {
+     {
         let vp = ViewportSize::new(100, 30);
         let ring = dev_ring_table(1);
         let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
@@ -4814,7 +4822,7 @@ mod tests {
 
     #[test]
     fn mid_turn_save_and_resume_at_curtains_matches_uninterrupted_receipts_keeps_secrets_in_seal_and_wipes_seal()
-    {
+     {
         let vp = ViewportSize::new(100, 30);
         let ring = dev_ring_table(1);
         let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 1, 2]);
@@ -4852,11 +4860,20 @@ mod tests {
             baseline.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "baseline s0 offer",
         );
-        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s0 lock");
+        must_ok(
+            baseline.handle_key_event(ctrl_key('l'), vp),
+            "baseline s0 lock",
+        );
         unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
-        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s1 lock");
+        must_ok(
+            baseline.handle_key_event(ctrl_key('l'), vp),
+            "baseline s1 lock",
+        );
         unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
-        must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline s2 lock");
+        must_ok(
+            baseline.handle_key_event(ctrl_key('l'), vp),
+            "baseline s2 lock",
+        );
         // Now at Turn 1 Sub-Pass B Seat 0 Curtain.
         unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
         assert_eq!(baseline.pass(), PassKind::SubPassB);
@@ -4876,7 +4893,10 @@ mod tests {
         while baseline.phase() == TurnPhase::TalkAndMarket {
             unlock_curtain_and_capture(&mut baseline, &mut term, vp, &mut Vec::new());
             if baseline.active_human_seat().is_some() {
-                must_ok(baseline.handle_key_event(ctrl_key('l'), vp), "baseline lock");
+                must_ok(
+                    baseline.handle_key_event(ctrl_key('l'), vp),
+                    "baseline lock",
+                );
             }
         }
         assert_eq!(baseline.phase(), TurnPhase::AwaitingMandateReveal);
@@ -4913,10 +4933,10 @@ mod tests {
         assert_eq!(run1.pass(), PassKind::SubPassA);
         assert!(save_path.exists() && seal_path.exists());
 
-        let save1_txt = std::fs::read_to_string(&save_path)
-            .unwrap_or_else(|e| panic!("read save1: {e}"));
-        let seal1_txt = std::fs::read_to_string(&seal_path)
-            .unwrap_or_else(|e| panic!("read seal1: {e}"));
+        let save1_txt =
+            std::fs::read_to_string(&save_path).unwrap_or_else(|e| panic!("read save1: {e}"));
+        let seal1_txt =
+            std::fs::read_to_string(&seal_path).unwrap_or_else(|e| panic!("read seal1: {e}"));
         assert!(!save1_txt.contains("NOTE_S0_SECRET_771"));
         assert!(seal1_txt.contains("NOTE_S0_SECRET_771"));
 
@@ -4953,13 +4973,18 @@ mod tests {
         assert_eq!(run2.pass(), PassKind::SubPassB);
         assert!(run2.is_curtain_open());
 
-        let save2_txt = std::fs::read_to_string(&save_path)
-            .unwrap_or_else(|e| panic!("read save2: {e}"));
-        let seal2_txt = std::fs::read_to_string(&seal_path)
-            .unwrap_or_else(|e| panic!("read seal2: {e}"));
+        let save2_txt =
+            std::fs::read_to_string(&save_path).unwrap_or_else(|e| panic!("read save2: {e}"));
+        let seal2_txt =
+            std::fs::read_to_string(&seal_path).unwrap_or_else(|e| panic!("read seal2: {e}"));
         let s0_mandate_dbg = format!(
             "{:?}",
-            must_some(run2.build_seat_observation(Seat(0)).ok().and_then(|o| o.own_mandate().copied()), "s0 m")
+            must_some(
+                run2.build_seat_observation(Seat(0))
+                    .ok()
+                    .and_then(|o| o.own_mandate().copied()),
+                "s0 m"
+            )
         );
         let _ = &s0_mandate_dbg;
         assert!(!save2_txt.contains("NOTE_S0_SECRET_771"));
@@ -5011,14 +5036,17 @@ mod tests {
             run3.wipe_seal_after_season_export(&seal_path),
             "wipe .seal after season close/export",
         );
-        assert!(!seal_path.exists(), ".seal must be deleted after season export");
+        assert!(
+            !seal_path.exists(),
+            ".seal must be deleted after season export"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn commit_salts_draw_from_sealed_entropy_differ_across_identical_public_tables_stay_out_of_save_json_and_replay_verifies()
-    {
+     {
         let ring = dev_ring_table(1);
         let deal_seed = distinct_mandate_deal_seed(&ring, &[0]);
         let salts: Vec<RevealSalt> = (0..ring.seat_count.as_u8())
@@ -5075,10 +5103,10 @@ mod tests {
             session_a.write_save_and_seal(&save_path, &seal_path),
             "save salt table",
         );
-        let save_txt = std::fs::read_to_string(&save_path)
-            .unwrap_or_else(|e| panic!("read salt save: {e}"));
-        let seal_txt = std::fs::read_to_string(&seal_path)
-            .unwrap_or_else(|e| panic!("read salt seal: {e}"));
+        let save_txt =
+            std::fs::read_to_string(&save_path).unwrap_or_else(|e| panic!("read salt save: {e}"));
+        let seal_txt =
+            std::fs::read_to_string(&seal_path).unwrap_or_else(|e| panic!("read salt seal: {e}"));
         assert!(
             seal_txt.contains(&salt_a_hex),
             "sealed turn reveal salt hex must be persisted in .seal"
@@ -5097,8 +5125,10 @@ mod tests {
                 must_ok(session_a.handle_key_event(ctrl_key('l'), vp), "lock");
             }
         }
-        let (board, log, _, _) =
-            must_ok(session_a.host.finalize_club_season(), "finalize club season");
+        let (board, log, _, _) = must_ok(
+            session_a.host.finalize_club_season(),
+            "finalize club season",
+        );
         let replayed = must_ok(league_core::replay_season(&log), "replay_season");
         assert_eq!(replayed.scoreboard, board);
         assert!(!log.turns.is_empty());
@@ -5113,7 +5143,7 @@ mod tests {
 
     #[test]
     fn optional_seat_pins_never_echo_build_zero_observations_on_wrong_tries_return_to_curtain_on_third_miss_and_stay_in_seal_only()
-    {
+     {
         let vp = ViewportSize::new(100, 30);
         let ring = dev_ring_table(1);
         let dir = std::env::temp_dir().join(format!("ml_pins_test_{}", std::process::id()));
@@ -5173,7 +5203,10 @@ mod tests {
         let s0_mandate_clip: String = s0_mandate.chars().take(20).collect();
 
         // Lock Seat 0 -> Seat 1 sets its PIN `"7135"`.
-        must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock s0 pass A");
+        must_ok(
+            session.handle_key_event(ctrl_key('l'), vp),
+            "lock s0 pass A",
+        );
         must_ok(session.handle_key_event(key(' '), vp), "arm s1 curtain");
         must_ok(
             session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
@@ -5194,16 +5227,19 @@ mod tests {
         session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
 
         // Verify `.save.json` contains neither PIN while `.seal` holds both PINs.
-        let save_txt = std::fs::read_to_string(&save_path)
-            .unwrap_or_else(|e| panic!("read pin save: {e}"));
-        let seal_txt = std::fs::read_to_string(&seal_path)
-            .unwrap_or_else(|e| panic!("read pin seal: {e}"));
+        let save_txt =
+            std::fs::read_to_string(&save_path).unwrap_or_else(|e| panic!("read pin save: {e}"));
+        let seal_txt =
+            std::fs::read_to_string(&seal_path).unwrap_or_else(|e| panic!("read pin seal: {e}"));
         assert!(!save_txt.contains("4829") && !save_txt.contains("7135"));
         assert!(!save_txt.contains("session_seat_pins"));
         assert!(seal_txt.contains("4829") && seal_txt.contains("7135"));
 
         // Seat 1 locks Pass A -> Pass B opens Curtain for Seat 0 (`VerifyPin`).
-        must_ok(session.handle_key_event(ctrl_key('l'), vp), "lock s1 pass A");
+        must_ok(
+            session.handle_key_event(ctrl_key('l'), vp),
+            "lock s1 pass A",
+        );
         assert!(session.is_curtain_open());
         assert_eq!(session.pass(), PassKind::SubPassB);
 
@@ -5257,19 +5293,28 @@ mod tests {
         assert_eq!(session.observe_seat_call_count(), 0);
 
         // Saving/resuming at this Curtain retains `.seal` PINs and enforces `VerifyPin` on resume.
-        must_ok(session.write_save_and_seal(&save_path, &seal_path), "save with pin");
+        must_ok(
+            session.write_save_and_seal(&save_path, &seal_path),
+            "save with pin",
+        );
         let mut resumed_pin_session = must_ok(
             TuiHostSession::read_save_and_seal(&save_path, &seal_path, None),
             "resume pin session",
         );
         resumed_pin_session.reset_observe_seat_calls();
-        must_ok(resumed_pin_session.handle_key_event(key(' '), vp), "re-arm resumed after 3-miss");
+        must_ok(
+            resumed_pin_session.handle_key_event(key(' '), vp),
+            "re-arm resumed after 3-miss",
+        );
         must_ok(
             resumed_pin_session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
             "re-open verify pin",
         );
         for ch in "4829".chars() {
-            must_ok(resumed_pin_session.handle_key_event(key(ch), vp), "type correct pin");
+            must_ok(
+                resumed_pin_session.handle_key_event(key(ch), vp),
+                "type correct pin",
+            );
         }
         must_ok(
             resumed_pin_session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
@@ -5278,7 +5323,12 @@ mod tests {
         assert!(!resumed_pin_session.is_curtain_open());
         resumed_pin_session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
         must_ok(
-            term.draw(|f| must_ok(resumed_pin_session.render_current_frame(f), "draw unlocked s0")),
+            term.draw(|f| {
+                must_ok(
+                    resumed_pin_session.render_current_frame(f),
+                    "draw unlocked s0",
+                )
+            }),
             "draw unlocked s0",
         );
         assert!(
@@ -5287,7 +5337,8 @@ mod tests {
         );
         let unlocked_buf = screen_text(&term);
         assert!(
-            unlocked_buf.contains("Seat 0 Private Vault") && unlocked_buf.contains(&s0_mandate_clip),
+            unlocked_buf.contains("Seat 0 Private Vault")
+                && unlocked_buf.contains(&s0_mandate_clip),
             "unlocked Seat 0 must display own private vault:\n{unlocked_buf}"
         );
 

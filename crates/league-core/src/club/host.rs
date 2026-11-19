@@ -225,7 +225,10 @@ fn validate_checkpoint_shapes(
     }
     for (name, len) in [
         ("pending_bundles", checkpoint.pending_bundles.len()),
-        ("sub_pass_b_committed", checkpoint.sub_pass_b_committed.len()),
+        (
+            "sub_pass_b_committed",
+            checkpoint.sub_pass_b_committed.len(),
+        ),
         ("seat_notes", checkpoint.seat_notes.len()),
         ("seat_pins", checkpoint.seat_pins.len()),
     ] {
@@ -1027,7 +1030,10 @@ impl ClubHost {
             )
         } else {
             if seal.current_turn_salts.len() != n
-                || seal.current_turn_salts.iter().any(|salt| salt.0 == [0u8; 32])
+                || seal
+                    .current_turn_salts
+                    .iter()
+                    .any(|salt| salt.0 == [0u8; 32])
             {
                 return Err(EngineError::InvalidConfig(
                     "ClubHost seal current_turn_salts invalid or wrong length".to_owned(),
