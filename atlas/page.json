@@ -94,23 +94,31 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 2,
+      "changed": 15,
       "moved": 0,
-      "parts": 1,
+      "parts": 8,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-seat-types/src/view.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-seat-types/src/view.rs"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-19; 2 files changed content.",
+        "sentence": "15 files changed content, across 8 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "ad88f572b8cd5419729dd30d65e653d7ef2b06fe",
-      "generatedAt": "2026-11-19T19:03:37.460Z"
+      "commit": "2aefc72678d8f2307c0b52b211155244c82f420f",
+      "generatedAt": "2026-11-19T19:14:43.842Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -194,7 +202,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "2aefc72678d8f2307c0b52b211155244c82f420f",
+  "commit": "8602c90399bd23654481301a40275e482fef80c9",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -299,14 +307,15 @@
         "crates/league-relay/tests/",
         "crates/league-season/",
         "crates/league-seat-types/src/lib.rs",
+        "crates/league-seat-types/src/view.rs",
         "crates/league-seat-ui/src/lib.rs",
         "crates/league-standalone/",
         "crates/league-tui/",
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 35,
-      "runsMore": 53,
+      "runsCount": 36,
+      "runsMore": 54,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -610,14 +619,14 @@
       "to": "league-seat-ui"
     }
   ],
-  "engine": "1.26.0",
+  "engine": "1.23.0",
   "generated": [],
-  "generatedAt": "2026-11-19T19:14:43.842Z",
+  "generatedAt": "2026-11-19T19:51:14.613Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "23 writes and 13 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "13 writes and 17 reads go to a path their caller passes, not to this repository.",
+    "13 writes and 18 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
@@ -655,7 +664,7 @@
   "startReason": "This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 61,
+  "testFiles": 62,
   "testedBy": {
     "league-core": 18,
     "league-error": 7,
@@ -663,13 +672,12 @@
     "league-ledger": 8,
     "league-relay": 4,
     "league-season": 1,
-    "league-seat-types": 4,
+    "league-seat-types": 5,
     "league-seat-ui": 1,
     "league-standalone": 5,
     "league-tui": 2,
     "scripts": 1
   },
-  "testedCodeParts": 11,
   "testedInside": [
     "league-season",
     "league-seat-ui",
