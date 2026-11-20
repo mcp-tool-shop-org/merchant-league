@@ -306,6 +306,22 @@ fn relay_and_transport_errors_project_onto_shared_structured_error() -> TestResu
         RelayError::Io(format!("io failed {secret_blob}")),
         RelayError::CorruptLog(format!("corrupt {secret_blob}")),
         RelayError::IncompatibleSetup(format!("incompatible {secret_blob}")),
+        RelayError::PreviewState {
+            kind: league_relay::PreviewStateErrorKind::Missing,
+            detail: format!("missing preview {secret_blob}"),
+        },
+        RelayError::PreviewState {
+            kind: league_relay::PreviewStateErrorKind::Malformed,
+            detail: format!("bad preview {secret_blob}"),
+        },
+        RelayError::PreviewState {
+            kind: league_relay::PreviewStateErrorKind::DayMismatch,
+            detail: format!("wrong day {secret_blob}"),
+        },
+        RelayError::PreviewState {
+            kind: league_relay::PreviewStateErrorKind::SeatMismatch,
+            detail: format!("wrong seat {secret_blob}"),
+        },
         RelayError::TurnLocked {
             lock_path: format!("game/{secret_blob}/relay/turn.lock"),
             holder: Some(format!("pid=42 {secret_blob}")),
@@ -1103,6 +1119,10 @@ fn exit_code_4_is_never_returned_across_all_outcomes_and_errors() -> TestResult 
         RelayError::Io("io".to_owned()),
         RelayError::CorruptLog("corrupt".to_owned()),
         RelayError::IncompatibleSetup("old".to_owned()),
+        RelayError::PreviewState {
+            kind: league_relay::PreviewStateErrorKind::Missing,
+            detail: "missing preview state".to_owned(),
+        },
         RelayError::TurnLocked {
             lock_path: "lock".to_owned(),
             holder: Some("pid=1".to_owned()),

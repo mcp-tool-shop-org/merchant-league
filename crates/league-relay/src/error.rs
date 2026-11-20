@@ -30,6 +30,51 @@ pub fn scrub_structured_error_with_keys(
     scrubbed
 }
 
+/// Specific validation failure class for `--preview-tool on` preview-state inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewStateErrorKind {
+    /// Expected `<game-dir>/to-seat/day-<DD>-act-<Guild>.preview-state.json` is absent.
+    Missing,
+    /// Preview state file is unreadable, invalid JSON, or fails strict round-trip validation.
+    Malformed,
+    /// Preview state turn/day does not match `--day`.
+    DayMismatch,
+    /// Preview state seat or seat count does not match the asking seat or `seats.json`.
+    SeatMismatch,
+}
+
+impl PreviewStateErrorKind {
+    /// Stable uppercase error code for JSON/stderr reporting.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Missing => "PREVIEW_STATE_MISSING",
+            Self::Malformed => "PREVIEW_STATE_MALFORMED",
+            Self::DayMismatch => "PREVIEW_STATE_DAY_MISMATCH",
+            Self::SeatMismatch => "PREVIEW_STATE_SEAT_MISMATCH",
+        }
+    }
+
+    /// Operator remediation hint matching [`RelayError::remediation`].
+    #[must_use]
+    pub const fn remediation(self) -> &'static str {
+        match self {
+            Self::Missing => {
+                "write the seat's per-turn `day-<DD>-act-<Guild>.preview-state.json` under `to-seat/` before running with `--preview-tool on`"
+            }
+            Self::Malformed => {
+                "ensure the `.preview-state.json` file is exact JSON of `PublicPreviewState` from `SeatObservation::to_public_preview_state()`"
+            }
+            Self::DayMismatch => {
+                "ensure the `.preview-state.json` file's `turn` and `baseline_predicates.turn` match `--day`"
+            }
+            Self::SeatMismatch => {
+                "ensure the `.preview-state.json` file's `seat`, `baseline_predicates.seat`, and `spec.seat_count` match the target guild seat"
+            }
+        }
+    }
+}
+
 /// Errors returned when validating configuration or executing a relay turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelayError {
@@ -56,6 +101,13 @@ pub enum RelayError {
     CorruptLog(String),
     /// `<game-dir>/relay/setup.json` was written under an earlier relay schema or wording arm (`C-17`).
     IncompatibleSetup(String),
+    /// Per-turn `.preview-state.json` input required by `--preview-tool on` on `act` failed validation.
+    PreviewState {
+        /// Specific failure class (missing, malformed, day mismatch, or seat mismatch).
+        kind: PreviewStateErrorKind,
+        /// Redacted diagnostic detail safe to print to stderr.
+        detail: String,
+    },
     /// Another `league-relay turn` already holds `<game-dir>/relay/turn.lock`, or `turn.lock` was deleted/replaced mid-turn.
     TurnLocked {
         /// Redacted path to `<game-dir>/relay/turn.lock`.
@@ -90,6 +142,7 @@ impl RelayError {
             Self::Io(_) => "RELAY_IO",
             Self::CorruptLog(_) => "CORRUPT_LOG",
             Self::IncompatibleSetup(_) => "INCOMPATIBLE_SETUP",
+            Self::PreviewState { kind, .. } => kind.code(),
             Self::TurnLocked { .. } => "TURN_LOCKED",
             Self::UnrecordedCharge { .. } => "UNRECORDED_CHARGE",
         }
@@ -127,6 +180,7 @@ impl RelayError {
             Self::IncompatibleSetup(_) => {
                 "start a fresh --game-dir matching the active relay setup schema and wording arm"
             }
+            Self::PreviewState { kind, .. } => kind.remediation(),
             Self::TurnLocked { .. } => {
                 "wait for the active league-relay turn on this --game-dir to finish without deleting relay/turn.lock, then retry"
             }
@@ -153,7 +207,8 @@ impl RelayError {
             | Self::InvalidCap(_)
             | Self::MissingWrapper { .. }
             | Self::SeatConfig(_)
-            | Self::IncompatibleSetup(_) => 1,
+            | Self::IncompatibleSetup(_)
+            | Self::PreviewState { .. } => 1,
             Self::Io(_)
             | Self::CorruptLog(_)
             | Self::TurnLocked { .. }
@@ -209,6 +264,9 @@ impl fmt::Display for RelayError {
             RelayError::Io(msg) => write!(f, "file error: {msg}"),
             RelayError::CorruptLog(msg) => write!(f, "corrupt relay log: {msg}"),
             RelayError::IncompatibleSetup(msg) => write!(f, "incompatible game setup: {msg}"),
+            RelayError::PreviewState { kind, detail } => {
+                write!(f, "preview state error ({}): {detail}", kind.code())
+            }
             RelayError::TurnLocked { lock_path, holder } => match holder {
                 Some(h) if h.starts_with("compromised:") => {
                     let detail = h.trim_start_matches("compromised:").trim();

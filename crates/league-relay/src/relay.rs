@@ -5,7 +5,7 @@
 //! reasoning pinning, untrusted whisper isolation + BATNA framing, and shared
 //! reservation-backed cap gating in credits or GPU-seconds.
 
-use crate::error::RelayError;
+use crate::error::{PreviewStateErrorKind, RelayError};
 use crate::seats::{
     BackendKind, CostUnit, LocalSeat, OpenRouterSeat, ReasoningEffort, SeatBackend, SeatFile,
     SeatReasoningConfig, validate_local_base_url,
@@ -18,11 +18,16 @@ use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
 };
 use crate::wording::{
-    ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_SCRATCHPAD_TOKENS, escape_default_ignorable_code_points, extract_scratchpad_update,
+    EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
+    MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_preview_turn_orders_tool_definition,
+    escape_default_ignorable_code_points, execute_preview_tool_call, extract_scratchpad_update,
     format_sanitized_scratchpad_section, json_escape_untrusted_str,
-    load_negotiation_inputs_if_present, sanitize_scratchpad_for_prompt, split_negotiation_sections,
-    strip_thinking_tags, wording_slot,
+    load_negotiation_inputs_if_present, preview_wording_slot, preview_wording_template,
+    render_call_limit_reached_wire_json, render_malformed_tool_call_wire_json,
+    sanitize_scratchpad_for_prompt, split_negotiation_sections, strip_thinking_tags, wording_slot,
+};
+use league_core::{
+    AiPreviewRequest, PublicPreviewState, SealedOrderBundle, TurnPhase, preview_seat_bundle,
 };
 use same_file::Handle as SameFileHandle;
 use serde::{Deserialize, Serialize};
@@ -2173,8 +2178,11 @@ pub struct GameSetupRecord {
     /// Ledger cost unit (`"gpu_seconds"` or `"credits"`, or `None` when manual-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_unit: Option<CostUnit>,
-    /// Active model-facing wording arm (`ACTIVE_WORDING_ARM`).
+    /// Active model-facing wording arm (`ACTIVE_WORDING_ARM` when `off`, `PREVIEW_WORDING_ARM` when `on`).
     pub wording_arm: String,
+    /// Card 7 what-if preview tool toggle (`off` by default, including pre-Card-7 setups).
+    #[serde(default)]
+    pub preview_tool: PreviewToolMode,
     /// Optional structured output schema name if `--response-schema` was configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_name: Option<String>,
@@ -2233,6 +2241,8 @@ pub struct TurnConfig {
     pub endpoint_url: String,
     /// Diagnostic verbosity level (`LogLevel::Normal` by default).
     pub log_level: LogLevel,
+    /// Card 7 AI what-if preview tool toggle (`PreviewToolMode::Off` by default).
+    pub preview_tool: PreviewToolMode,
     /// Additional environment keys supplied by the CLI for defense-in-depth scrubbing.
     pub(crate) extra_redaction_keys: Vec<ApiKey>,
 }
@@ -2264,6 +2274,7 @@ impl TurnConfig {
             allowed_vm_hosts: Vec::new(),
             endpoint_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
             log_level: LogLevel::default(),
+            preview_tool: PreviewToolMode::default(),
             extra_redaction_keys: Vec::new(),
         }
     }
@@ -2307,6 +2318,12 @@ impl TurnConfig {
     /// Configure the diagnostic [`LogLevel`] (`silent`, `normal`, `verbose`, or `debug`).
     pub fn with_log_level(mut self, level: LogLevel) -> Self {
         self.log_level = level;
+        self
+    }
+
+    /// Configure the Card 7 what-if preview tool toggle (`off` default, `on` enables `preview_turn_orders` on `act`).
+    pub fn with_preview_tool(mut self, preview_tool: PreviewToolMode) -> Self {
+        self.preview_tool = preview_tool;
         self
     }
 
@@ -2563,10 +2580,29 @@ impl TurnSummary {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ChatToolCallFunctionWire {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ChatToolCallWire {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    function: ChatToolCallFunctionWire,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
 struct ChatMessageWire<'a> {
     role: &'a str,
-    content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<&'a [ChatToolCallWire]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2584,7 +2620,7 @@ struct ResponseFormatWire<'a> {
     json_schema: JsonSchemaInnerWire<'a>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct OpenRouterReasoningWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     effort: Option<&'a str>,
@@ -2611,6 +2647,8 @@ struct ChatCompletionRequestWire<'a> {
     chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a [serde_json::Value]>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2639,6 +2677,8 @@ struct ChatChoiceMessageWire {
     reasoning: Option<String>,
     #[serde(default)]
     reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ChatToolCallWire>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -3288,7 +3328,8 @@ fn build_setup_record(
         scratchpad: plan.table_status.clone(),
         mixed_scratchpad_arm: plan.mixed_scratchpad_arm,
         cost_unit: config.seats.cost_unit(),
-        wording_arm: ACTIVE_WORDING_ARM.to_owned(),
+        wording_arm: config.preview_tool.wording_arm().to_owned(),
+        preview_tool: config.preview_tool,
         response_schema_name: config.response_format.as_ref().map(|r| r.name.clone()),
         response_schema_sha256: config
             .response_format
@@ -3302,6 +3343,7 @@ fn build_setup_record(
 fn load_compatible_setup_if_exists(
     turn_lock: &TurnLock,
     game_dir: &Path,
+    expected_preview_tool: PreviewToolMode,
     redaction_key: Option<&ApiKey>,
 ) -> Result<Option<GameSetupRecord>, RelayError> {
     turn_lock.verify_identity(redaction_key)?;
@@ -3325,11 +3367,12 @@ fn load_compatible_setup_if_exists(
             redaction_key,
         ))
     })?;
+    let expected_arm = expected_preview_tool.wording_arm();
     if !has_non_pinned_field {
-        let arm_detail = if existing.wording_arm != ACTIVE_WORDING_ARM {
+        let arm_detail = if existing.wording_arm != expected_arm {
             format!(
                 " and recorded earlier wording_arm '{}' (active arm is '{}')",
-                existing.wording_arm, ACTIVE_WORDING_ARM
+                existing.wording_arm, expected_arm
             )
         } else {
             String::new()
@@ -3342,13 +3385,26 @@ fn load_compatible_setup_if_exists(
             redaction_key,
         )));
     }
-    if existing.wording_arm != ACTIVE_WORDING_ARM {
+    if existing.wording_arm != existing.preview_tool.wording_arm() {
         return Err(RelayError::IncompatibleSetup(redact_secrets(
             &format!(
-                "{} recorded earlier wording_arm '{}', which is incompatible with active wording_arm '{}'; start a new --game-dir",
+                "{} recorded wording_arm '{}' inconsistent with preview_tool '{}'; start a new --game-dir",
                 setup_path.display(),
                 existing.wording_arm,
-                ACTIVE_WORDING_ARM
+                existing.preview_tool.as_str()
+            ),
+            redaction_key,
+        )));
+    }
+    if existing.preview_tool != expected_preview_tool || existing.wording_arm != expected_arm {
+        return Err(RelayError::IncompatibleSetup(redact_secrets(
+            &format!(
+                "{} recorded preview_tool '{}' (wording_arm '{}'), which is incompatible with --preview-tool '{}' (wording_arm '{}'); start a new --game-dir",
+                setup_path.display(),
+                existing.preview_tool.as_str(),
+                existing.wording_arm,
+                expected_preview_tool.as_str(),
+                expected_arm
             ),
             redaction_key,
         )));
@@ -3359,9 +3415,11 @@ fn load_compatible_setup_if_exists(
 fn check_existing_setup_compatibility(
     turn_lock: &TurnLock,
     game_dir: &Path,
+    expected_preview_tool: PreviewToolMode,
     redaction_key: Option<&ApiKey>,
 ) -> Result<(), RelayError> {
-    load_compatible_setup_if_exists(turn_lock, game_dir, redaction_key).map(|_| ())
+    load_compatible_setup_if_exists(turn_lock, game_dir, expected_preview_tool, redaction_key)
+        .map(|_| ())
 }
 
 fn ensure_game_setup(
@@ -3376,9 +3434,12 @@ fn ensure_game_setup(
     let setup_path = relay_dir.join(SETUP_FILENAME);
     let desired = build_setup_record(config, plan, seat_wrappers, fallback_wrapper);
 
-    if let Some(existing) =
-        load_compatible_setup_if_exists(turn_lock, &config.game_dir, redaction_key)?
-    {
+    if let Some(existing) = load_compatible_setup_if_exists(
+        turn_lock,
+        &config.game_dir,
+        config.preview_tool,
+        redaction_key,
+    )? {
         if existing.memory_mode != desired.memory_mode {
             return Err(RelayError::Usage(format!(
                 "game setup recorded memory_mode '{}' in {}, refusing turn with '{}'",
@@ -3475,7 +3536,10 @@ fn ensure_game_setup(
             )));
         }
         // Skip rewriting when invariants already match so read-only `relay/` re-runs succeed.
-        if existing.cost_unit.is_some() || desired.cost_unit.is_none() {
+        if (existing.cost_unit.is_some() || desired.cost_unit.is_none())
+            && existing.preview_tool == desired.preview_tool
+            && existing.wording_arm == desired.wording_arm
+        {
             return Ok(());
         }
     }
@@ -4450,7 +4514,7 @@ fn entry_marks_cost_unknown(entry: &CallLogEntry) -> bool {
     if entry.cost.is_some() {
         return false;
     }
-    if entry.outcome == "OK" {
+    if entry.outcome == "OK" || entry.outcome == "TOOL_CALL" {
         return true;
     }
     if entry.cost_unit == CostUnit::GpuSeconds {
@@ -4597,6 +4661,185 @@ pub fn run_turn(
     run_turn_with_diag(config, transport, redaction_key, sink.as_ref())
 }
 
+fn preview_state_error(
+    kind: PreviewStateErrorKind,
+    detail: String,
+    redaction_key: Option<&ApiKey>,
+) -> RelayError {
+    RelayError::PreviewState {
+        kind,
+        detail: redact_secrets(&detail, redaction_key),
+    }
+}
+
+fn load_preview_states_for_act_turn(
+    config: &TurnConfig,
+    redaction_key: Option<&ApiKey>,
+) -> Result<Vec<Option<PublicPreviewState>>, RelayError> {
+    validate_day(&config.day)?;
+    let day_u8 = config.day.parse::<u8>().map_err(|_| {
+        RelayError::Usage(
+            "--day must be two digits between 01 and 99 (for example --day 01)".to_owned(),
+        )
+    })?;
+    let expected_seat_count = config.seats.seats.len();
+    let mut states = Vec::with_capacity(expected_seat_count);
+
+    for (seat_idx, seat) in config.seats.seats.iter().enumerate() {
+        if matches!(seat.backend, SeatBackend::File { .. }) {
+            states.push(None);
+            continue;
+        }
+        let path = config.game_dir.join("to-seat").join(format!(
+            "day-{}-act-{}.preview-state.json",
+            config.day, seat.guild
+        ));
+        let raw = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(preview_state_error(
+                    PreviewStateErrorKind::Missing,
+                    format!(
+                        "missing preview state file {} for seat '{}'",
+                        path.display(),
+                        seat.guild
+                    ),
+                    redaction_key,
+                ));
+            }
+            Err(err) => {
+                return Err(preview_state_error(
+                    PreviewStateErrorKind::Malformed,
+                    format!(
+                        "could not read preview state file {}: {err}",
+                        path.display()
+                    ),
+                    redaction_key,
+                ));
+            }
+        };
+
+        let raw_val: serde_json::Value = serde_json::from_str(&raw).map_err(|err| {
+            preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!("invalid JSON in {}: {err}", path.display()),
+                redaction_key,
+            )
+        })?;
+        let parsed: PublicPreviewState =
+            serde_json::from_value(raw_val.clone()).map_err(|err| {
+                preview_state_error(
+                    PreviewStateErrorKind::Malformed,
+                    format!("invalid PublicPreviewState in {}: {err}", path.display()),
+                    redaction_key,
+                )
+            })?;
+        let roundtrip_val = serde_json::to_value(&parsed).map_err(|err| {
+            preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!(
+                    "could not re-serialize PublicPreviewState in {}: {err}",
+                    path.display()
+                ),
+                redaction_key,
+            )
+        })?;
+        if raw_val != roundtrip_val {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!(
+                    "preview state {} failed exact PublicPreviewState JSON round-trip (extra, missing, or non-canonical fields)",
+                    path.display()
+                ),
+                redaction_key,
+            ));
+        }
+
+        if parsed.turn != day_u8 || parsed.baseline_predicates.turn != day_u8 {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::DayMismatch,
+                format!(
+                    "preview state {} has turn {} (baseline {}) but --day is {}",
+                    path.display(),
+                    parsed.turn,
+                    parsed.baseline_predicates.turn,
+                    day_u8
+                ),
+                redaction_key,
+            ));
+        }
+
+        if usize::from(parsed.seat) != seat_idx
+            || parsed.baseline_predicates.seat != parsed.seat
+            || usize::from(parsed.spec.seat_count) != expected_seat_count
+            || parsed.seats.len() != expected_seat_count
+        {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::SeatMismatch,
+                format!(
+                    "preview state {} has seat {} (baseline {}, seat_count {}, seats len {}) but expected seat {} ('{}') of {}",
+                    path.display(),
+                    parsed.seat,
+                    parsed.baseline_predicates.seat,
+                    parsed.spec.seat_count,
+                    parsed.seats.len(),
+                    seat_idx,
+                    seat.guild,
+                    expected_seat_count
+                ),
+                redaction_key,
+            ));
+        }
+
+        if !matches!(
+            parsed.phase,
+            TurnPhase::TalkAndMarket | TurnPhase::Commit | TurnPhase::Reveal
+        ) {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!(
+                    "preview state {} is not in an active pre-sweep turn phase",
+                    path.display()
+                ),
+                redaction_key,
+            ));
+        }
+
+        if parsed.table_id != parsed.baseline_predicates.table_id {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!(
+                    "preview state {} has table_id {} inconsistent with baseline_predicates",
+                    path.display(),
+                    parsed.table_id.0
+                ),
+                redaction_key,
+            ));
+        }
+
+        let probe_req = AiPreviewRequest {
+            seat: parsed.seat,
+            market_actions: Vec::new(),
+            bundle: SealedOrderBundle::default(),
+        };
+        if let Err(err) = preview_seat_bundle(&parsed, &probe_req) {
+            return Err(preview_state_error(
+                PreviewStateErrorKind::Malformed,
+                format!(
+                    "preview state {} failed preview validation ({})",
+                    path.display(),
+                    err.code()
+                ),
+                redaction_key,
+            ));
+        }
+
+        states.push(Some(parsed));
+    }
+
+    Ok(states)
+}
+
 pub(crate) fn run_turn_with_diag(
     config: &TurnConfig,
     transport: &dyn Transport,
@@ -4700,7 +4943,18 @@ pub(crate) fn run_turn_with_diag(
             return Err(err);
         }
     };
-    check_existing_setup_compatibility(&turn_lock, &config.game_dir, redaction_key)?;
+    check_existing_setup_compatibility(
+        &turn_lock,
+        &config.game_dir,
+        config.preview_tool,
+        redaction_key,
+    )?;
+    let preview_states = if config.preview_tool == PreviewToolMode::On && config.round == Round::Act
+    {
+        Some(load_preview_states_for_act_turn(config, redaction_key)?)
+    } else {
+        None
+    };
 
     let wrapper_text = match &config.wrapper_path {
         Some(path) => Some(fs::read_to_string(path).map_err(|e| io_err(path, e, redaction_key))?),
@@ -4774,8 +5028,9 @@ pub(crate) fn run_turn_with_diag(
             || "from_transcript".to_owned(),
             |w| sha256_hex(w.as_bytes()),
         );
+        let active_arm = config.preview_tool.wording_arm();
         format!(
-            "setup=verified wording_arm={ACTIVE_WORDING_ARM} response_schema_sha256={schema_sha} wrapper_sha256={wrapper_sha}"
+            "setup=verified wording_arm={active_arm} response_schema_sha256={schema_sha} wrapper_sha256={wrapper_sha}"
         )
     });
 
@@ -4845,6 +5100,10 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
+                    let preview_state_ref = preview_states
+                        .as_deref()
+                        .and_then(|v| v.get(idx))
+                        .and_then(Option::as_ref);
                     handles.push(scope.spawn(move || {
                         let view =
                             view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
@@ -4853,6 +5112,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
+                            preview_state_ref,
                             transport,
                             ledger_ref,
                             calls_ref,
@@ -4867,6 +5127,10 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
+                    let preview_state_ref = preview_states
+                        .as_deref()
+                        .and_then(|v| v.get(idx))
+                        .and_then(Option::as_ref);
                     handles.push(scope.spawn(move || {
                         let view = view_local_seat(local_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
@@ -4874,6 +5138,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
+                            preview_state_ref,
                             transport,
                             ledger_ref,
                             calls_ref,
@@ -4999,12 +5264,20 @@ fn format_emc_compacted_older_turns(
     format!("{}\n{body}", wording_slot("emc_older_replies_header"))
 }
 
+struct OwnedToolHistoryMessage {
+    role: String,
+    content: Option<String>,
+    tool_calls: Option<Vec<ChatToolCallWire>>,
+    tool_call_id: Option<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_single_automated_seat(
     config: &TurnConfig,
     guild: &str,
     seat: &AutomatedSeatView<'_>,
     wrapper_text: Option<&str>,
+    preview_state_opt: Option<&PublicPreviewState>,
     transport: &dyn Transport,
     ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
@@ -5071,7 +5344,18 @@ fn run_single_automated_seat(
         };
     };
 
-    let system_wire = build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
+    let base_system_wire =
+        build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
+    let system_wire = if preview_state_opt.is_some() {
+        let budget_sentence = preview_wording_slot("preview_call_budget_sentence");
+        if base_system_wire.is_empty() {
+            budget_sentence
+        } else {
+            format!("{base_system_wire}\n\n{budget_sentence}")
+        }
+    } else {
+        base_system_wire
+    };
 
     let older_replies_sec =
         if config.memory_mode == MemoryMode::Emc && loaded.turns.len() > EMC_VERBATIM_TURN_WINDOW {
@@ -5206,10 +5490,12 @@ fn run_single_automated_seat(
 
     let user_content = composed_sections.join("\n\n");
 
-    let mut messages: Vec<ChatMessageWire<'_>> = Vec::new();
-    messages.push(ChatMessageWire {
+    let mut base_messages: Vec<ChatMessageWire<'_>> = Vec::new();
+    base_messages.push(ChatMessageWire {
         role: "system",
-        content: &system_wire,
+        content: Some(&system_wire),
+        tool_calls: None,
+        tool_call_id: None,
     });
 
     match config.memory_mode {
@@ -5217,33 +5503,43 @@ fn run_single_automated_seat(
         MemoryMode::Emc => {
             let start_idx = loaded.turns.len().saturating_sub(EMC_VERBATIM_TURN_WINDOW);
             for (u, a) in &loaded.turns[start_idx..] {
-                messages.push(ChatMessageWire {
+                base_messages.push(ChatMessageWire {
                     role: &u.role,
-                    content: &u.content,
+                    content: Some(&u.content),
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
-                messages.push(ChatMessageWire {
+                base_messages.push(ChatMessageWire {
                     role: &a.role,
-                    content: &a.content,
+                    content: Some(&a.content),
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
             }
         }
         MemoryMode::Full => {
             for (u, a) in &loaded.turns {
-                messages.push(ChatMessageWire {
+                base_messages.push(ChatMessageWire {
                     role: &u.role,
-                    content: &u.content,
+                    content: Some(&u.content),
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
-                messages.push(ChatMessageWire {
+                base_messages.push(ChatMessageWire {
                     role: &a.role,
-                    content: &a.content,
+                    content: Some(&a.content),
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
             }
         }
     }
 
-    messages.push(ChatMessageWire {
+    base_messages.push(ChatMessageWire {
         role: "user",
-        content: &user_content,
+        content: Some(&user_content),
+        tool_calls: None,
+        tool_call_id: None,
     });
 
     let effective_response_format = match (&config.response_format, seat.keeps_scratchpad) {
@@ -5251,17 +5547,6 @@ fn run_single_automated_seat(
         (Some(rf), false) => Some(rf.without_scratchpad_property()),
         (None, _) => None,
     };
-
-    let response_format_wire = effective_response_format
-        .as_ref()
-        .map(|rf| ResponseFormatWire {
-            kind: "json_schema",
-            json_schema: JsonSchemaInnerWire {
-                name: &rf.name,
-                strict: rf.strict,
-                schema: &rf.schema,
-            },
-        });
 
     let (or_reasoning, local_effort, local_budget, local_kwargs, local_include_reasoning) =
         match (seat.backend_kind, seat.reasoning) {
@@ -5286,539 +5571,715 @@ fn run_single_automated_seat(
             _ => (None, None, None, None, None),
         };
 
-    let request_wire = ChatCompletionRequestWire {
-        model: seat.model,
-        messages,
-        temperature: seat.temperature,
-        max_tokens: seat.max_output_tokens,
-        response_format: response_format_wire,
-        reasoning: or_reasoning,
-        reasoning_effort: local_effort,
-        thinking_token_budget: local_budget,
-        chat_template_kwargs: local_kwargs,
-        include_reasoning: local_include_reasoning,
-    };
-    let Ok(request_body) = serde_json::to_string(&request_wire) else {
-        return SeatOutcome::SeatError {
-            detail: "failed to encode chat-completion request".to_owned(),
-        };
-    };
-    let request_body_sha256 = sha256_hex(request_body.as_bytes());
     let wrapper_sha256 = sha256_hex(base_wrapper.as_bytes());
     let estimate_label = match seat.cost_unit {
         CostUnit::Credits => "max_cost_per_call",
         CostUnit::GpuSeconds => "max_gpu_secs_per_call",
     };
-    diag_log(diag_sink, LogLevel::Debug, || {
-        format!(
-            "seat_hashes seat={guild} backend={} wrapper_sha256={wrapper_sha256} request_body_sha256={request_body_sha256}",
-            seat.backend_kind.as_str()
-        )
-    });
 
-    for attempt in [1_u8, 2_u8] {
-        let trigger = if attempt == 1 { "turn" } else { "harness" };
-        let reservation_template = reserved_call_entry(
-            config,
-            guild,
-            attempt,
-            trigger,
-            seat.model,
-            &request_body_sha256,
-            seat.cost_unit,
-            seat.max_per_call_spend,
-        );
+    let tools_storage =
+        preview_state_opt.map(|_| vec![build_preview_turn_orders_tool_definition()]);
+    let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
+    let mut preview_calls_used = 0usize;
+    let mut limit_refusal_sent = false;
 
-        let reservation_id = {
-            let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-            match guard.try_reserve(
-                seat.max_per_call_spend,
-                &reservation_template,
-                redaction_key,
-            ) {
-                Ok(PreCallDecision::Reserved(resv_id)) => resv_id,
-                Ok(PreCallDecision::LockCompromised(lock_err)) => {
-                    return SeatOutcome::SeatError {
-                        detail: lock_err.to_string(),
-                    };
-                }
-                Ok(PreCallDecision::CapReached {
-                    charged_sum,
-                    reserved_in_flight,
-                    requested,
-                    cap,
-                }) => {
-                    diag_log(diag_sink, LogLevel::Verbose, || {
-                        format!(
-                            "seat_cap_refusal seat={guild} attempt={attempt} trigger={trigger} charged={charged_sum:.6} reserved={reserved_in_flight:.6} requested={requested:.6} cap={cap:.6} cost_unit={}",
-                            seat.cost_unit
-                        )
-                    });
-                    let entry = refused_call_entry(
-                        config,
-                        guild,
-                        attempt,
-                        trigger,
-                        seat.model,
-                        &request_body_sha256,
-                        seat.cost_unit,
-                        "CAP_REACHED",
-                        format!(
-                            "charged {charged_sum:.6} + reserved {reserved_in_flight:.6} + {estimate_label} {requested:.6} exceeds cap {cap:.6}"
-                        ),
-                    );
-                    if let Err(e) = guard.record_refusal(&entry, redaction_key) {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
-                        };
-                    }
-                    return SeatOutcome::CapReached {
-                        calls_path: calls_path.to_path_buf(),
-                        request_body_sha256,
-                    };
-                }
-                Ok(PreCallDecision::LedgerWriteFailed) => {
-                    let detail =
-                        "prior call ledger write failed in turn; failing closed".to_owned();
-                    let entry = refused_call_entry(
-                        config,
-                        guild,
-                        attempt,
-                        trigger,
-                        seat.model,
-                        &request_body_sha256,
-                        seat.cost_unit,
-                        "LEDGER_ERROR",
-                        detail.clone(),
-                    );
-                    let _ = guard.record_refusal(&entry, redaction_key);
-                    return SeatOutcome::SeatError { detail };
-                }
-                Ok(PreCallDecision::CostUnknown) => {
-                    let entry = refused_call_entry(
-                        config,
-                        guild,
-                        attempt,
-                        trigger,
-                        seat.model,
-                        &request_body_sha256,
-                        seat.cost_unit,
-                        "COST_UNKNOWN",
-                        "prior call in turn carried no cost; failing closed".to_owned(),
-                    );
-                    if let Err(e) = guard.record_refusal(&entry, redaction_key) {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
-                        };
-                    }
-                    return SeatOutcome::CostUnknownRefused {
-                        calls_path: calls_path.to_path_buf(),
-                        request_body_sha256,
-                    };
-                }
-                Ok(PreCallDecision::CostOverEstimate) => {
-                    let entry = refused_call_entry(
-                        config,
-                        guild,
-                        attempt,
-                        trigger,
-                        seat.model,
-                        &request_body_sha256,
-                        seat.cost_unit,
-                        "COST_OVER_ESTIMATE",
-                        format!("prior call in turn exceeded {estimate_label}; failing closed"),
-                    );
-                    if let Err(e) = guard.record_refusal(&entry, redaction_key) {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
-                        };
-                    }
-                    return SeatOutcome::CostOverEstimateRefused {
-                        calls_path: calls_path.to_path_buf(),
-                        request_body_sha256,
-                    };
-                }
-                Err(e) => {
-                    return SeatOutcome::SeatError {
-                        detail: e.to_string(),
-                    };
-                }
-            }
-        };
-
-        let all_keys = merged_redaction_keys(redaction_key, &config.extra_redaction_keys);
-
-        diag_log(diag_sink, LogLevel::Debug, || {
-            format!(
-                "transport=dispatch seat={guild} backend={} endpoint={} attempt={attempt} trigger={trigger} timeout_ms={} reservation_id={reservation_id}",
-                seat.backend_kind.as_str(),
-                redact_secrets_multi_with_limit(
-                    seat.endpoint_url,
-                    &all_keys,
-                    MAX_REDACTION_SCAN_BYTES
-                ),
-                seat.timeout.as_millis()
-            )
-        });
-
-        let (call_result, elapsed) = call_with_wall_timeout(
-            transport,
-            seat.endpoint_url,
-            &request_body,
-            seat.timeout,
-            &all_keys,
-        );
-        let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-        let wall_secs = elapsed.as_secs_f64();
-        let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
-
-        diag_log(diag_sink, LogLevel::Debug, || {
-            let status_desc = match &call_result {
-                CallTransportResult::OnTime(Ok(resp)) => format!("http_{}", resp.status),
-                CallTransportResult::OnTime(Err(TransportError::Timeout))
-                | CallTransportResult::TimedOut => "timeout".to_owned(),
-                CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
-                    format!(
-                        "transport_err({})",
-                        redact_secrets_multi_with_limit(msg, &all_keys, MAX_REDACTION_SCAN_BYTES)
-                    )
-                }
-                CallTransportResult::Late(resp) => format!("late_http_{}", resp.status),
-            };
-            format!(
-                "transport=response seat={guild} attempt={attempt} status={status_desc} latency_ms={latency_ms}"
-            )
-        });
-
-        let raw_evaluated = evaluate_call_result(
-            call_result,
-            exclude_thinking,
-            effective_response_format.as_ref(),
-            &all_keys,
-        );
-
-        let mut validated_scratchpad_update: Option<String> = None;
-        let evaluated = match raw_evaluated {
-            EvaluatedCall::Success {
-                reply_content,
-                persisted_reasoning,
-                model_returned,
-                usage,
-            } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
-                match extract_scratchpad_update(&reply_content) {
-                    None => EvaluatedCall::DeliveryFailure {
-                        reason: format!(
-                            "structured output missing required '{}' string property",
-                            wording_slot("scratchpad_schema_key")
-                        ),
-                        model_returned,
-                        usage,
-                        is_late_reply: false,
+    'http_rounds: loop {
+        let mut messages = base_messages.clone();
+        for tm in &tool_history {
+            messages.push(ChatMessageWire {
+                role: &tm.role,
+                content: tm.content.as_deref(),
+                tool_calls: tm.tool_calls.as_deref(),
+                tool_call_id: tm.tool_call_id.as_deref(),
+            });
+        }
+        let response_format_wire =
+            effective_response_format
+                .as_ref()
+                .map(|rf| ResponseFormatWire {
+                    kind: "json_schema",
+                    json_schema: JsonSchemaInnerWire {
+                        name: &rf.name,
+                        strict: rf.strict,
+                        schema: &rf.schema,
                     },
-                    Some(candidate_pad) if candidate_pad.is_empty() => {
-                        validated_scratchpad_update = Some(String::new());
-                        EvaluatedCall::Success {
-                            reply_content,
-                            persisted_reasoning,
+                });
+        let request_wire = ChatCompletionRequestWire {
+            model: seat.model,
+            messages,
+            temperature: seat.temperature,
+            max_tokens: seat.max_output_tokens,
+            response_format: response_format_wire,
+            reasoning: or_reasoning,
+            reasoning_effort: local_effort,
+            thinking_token_budget: local_budget,
+            chat_template_kwargs: local_kwargs,
+            include_reasoning: local_include_reasoning,
+            tools: tools_storage.as_deref(),
+        };
+        let Ok(request_body) = serde_json::to_string(&request_wire) else {
+            return SeatOutcome::SeatError {
+                detail: "failed to encode chat-completion request".to_owned(),
+            };
+        };
+        let request_body_sha256 = sha256_hex(request_body.as_bytes());
+        if tool_history.is_empty() {
+            diag_log(diag_sink, LogLevel::Debug, || {
+                format!(
+                    "seat_hashes seat={guild} backend={} wrapper_sha256={wrapper_sha256} request_body_sha256={request_body_sha256}",
+                    seat.backend_kind.as_str()
+                )
+            });
+        }
+
+        for attempt in [1_u8, 2_u8] {
+            let trigger = if attempt == 1 {
+                if tool_history.is_empty() {
+                    "turn"
+                } else {
+                    "tool_followup"
+                }
+            } else {
+                "harness"
+            };
+            let reservation_template = reserved_call_entry(
+                config,
+                guild,
+                attempt,
+                trigger,
+                seat.model,
+                &request_body_sha256,
+                seat.cost_unit,
+                seat.max_per_call_spend,
+            );
+
+            let reservation_id = {
+                let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                match guard.try_reserve(
+                    seat.max_per_call_spend,
+                    &reservation_template,
+                    redaction_key,
+                ) {
+                    Ok(PreCallDecision::Reserved(resv_id)) => resv_id,
+                    Ok(PreCallDecision::LockCompromised(lock_err)) => {
+                        return SeatOutcome::SeatError {
+                            detail: lock_err.to_string(),
+                        };
+                    }
+                    Ok(PreCallDecision::CapReached {
+                        charged_sum,
+                        reserved_in_flight,
+                        requested,
+                        cap,
+                    }) => {
+                        diag_log(diag_sink, LogLevel::Verbose, || {
+                            format!(
+                                "seat_cap_refusal seat={guild} attempt={attempt} trigger={trigger} charged={charged_sum:.6} reserved={reserved_in_flight:.6} requested={requested:.6} cap={cap:.6} cost_unit={}",
+                                seat.cost_unit
+                            )
+                        });
+                        let entry = refused_call_entry(
+                            config,
+                            guild,
+                            attempt,
+                            trigger,
+                            seat.model,
+                            &request_body_sha256,
+                            seat.cost_unit,
+                            "CAP_REACHED",
+                            format!(
+                                "charged {charged_sum:.6} + reserved {reserved_in_flight:.6} + {estimate_label} {requested:.6} exceeds cap {cap:.6}"
+                            ),
+                        );
+                        if let Err(e) = guard.record_refusal(&entry, redaction_key) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        return SeatOutcome::CapReached {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
+                        };
+                    }
+                    Ok(PreCallDecision::LedgerWriteFailed) => {
+                        let detail =
+                            "prior call ledger write failed in turn; failing closed".to_owned();
+                        let entry = refused_call_entry(
+                            config,
+                            guild,
+                            attempt,
+                            trigger,
+                            seat.model,
+                            &request_body_sha256,
+                            seat.cost_unit,
+                            "LEDGER_ERROR",
+                            detail.clone(),
+                        );
+                        let _ = guard.record_refusal(&entry, redaction_key);
+                        return SeatOutcome::SeatError { detail };
+                    }
+                    Ok(PreCallDecision::CostUnknown) => {
+                        let entry = refused_call_entry(
+                            config,
+                            guild,
+                            attempt,
+                            trigger,
+                            seat.model,
+                            &request_body_sha256,
+                            seat.cost_unit,
+                            "COST_UNKNOWN",
+                            "prior call in turn carried no cost; failing closed".to_owned(),
+                        );
+                        if let Err(e) = guard.record_refusal(&entry, redaction_key) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        return SeatOutcome::CostUnknownRefused {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
+                        };
+                    }
+                    Ok(PreCallDecision::CostOverEstimate) => {
+                        let entry = refused_call_entry(
+                            config,
+                            guild,
+                            attempt,
+                            trigger,
+                            seat.model,
+                            &request_body_sha256,
+                            seat.cost_unit,
+                            "COST_OVER_ESTIMATE",
+                            format!("prior call in turn exceeded {estimate_label}; failing closed"),
+                        );
+                        if let Err(e) = guard.record_refusal(&entry, redaction_key) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        return SeatOutcome::CostOverEstimateRefused {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
+                        };
+                    }
+                    Err(e) => {
+                        return SeatOutcome::SeatError {
+                            detail: e.to_string(),
+                        };
+                    }
+                }
+            };
+
+            let all_keys = merged_redaction_keys(redaction_key, &config.extra_redaction_keys);
+
+            diag_log(diag_sink, LogLevel::Debug, || {
+                format!(
+                    "transport=dispatch seat={guild} backend={} endpoint={} attempt={attempt} trigger={trigger} timeout_ms={} reservation_id={reservation_id}",
+                    seat.backend_kind.as_str(),
+                    redact_secrets_multi_with_limit(
+                        seat.endpoint_url,
+                        &all_keys,
+                        MAX_REDACTION_SCAN_BYTES
+                    ),
+                    seat.timeout.as_millis()
+                )
+            });
+
+            let (call_result, elapsed) = call_with_wall_timeout(
+                transport,
+                seat.endpoint_url,
+                &request_body,
+                seat.timeout,
+                &all_keys,
+            );
+            let latency_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            let wall_secs = elapsed.as_secs_f64();
+            let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
+
+            diag_log(diag_sink, LogLevel::Debug, || {
+                let status_desc = match &call_result {
+                    CallTransportResult::OnTime(Ok(resp)) => format!("http_{}", resp.status),
+                    CallTransportResult::OnTime(Err(TransportError::Timeout))
+                    | CallTransportResult::TimedOut => "timeout".to_owned(),
+                    CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
+                        format!(
+                            "transport_err({})",
+                            redact_secrets_multi_with_limit(
+                                msg,
+                                &all_keys,
+                                MAX_REDACTION_SCAN_BYTES
+                            )
+                        )
+                    }
+                    CallTransportResult::Late(resp) => format!("late_http_{}", resp.status),
+                };
+                format!(
+                    "transport=response seat={guild} attempt={attempt} status={status_desc} latency_ms={latency_ms}"
+                )
+            });
+
+            let raw_evaluated = evaluate_call_result(
+                call_result,
+                exclude_thinking,
+                effective_response_format.as_ref(),
+                preview_state_opt.is_some(),
+                &all_keys,
+            );
+
+            let mut validated_scratchpad_update: Option<String> = None;
+            let evaluated = match raw_evaluated {
+                EvaluatedCall::Success {
+                    reply_content,
+                    persisted_reasoning,
+                    model_returned,
+                    usage,
+                } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
+                    match extract_scratchpad_update(&reply_content) {
+                        None => EvaluatedCall::DeliveryFailure {
+                            reason: format!(
+                                "structured output missing required '{}' string property",
+                                wording_slot("scratchpad_schema_key")
+                            ),
                             model_returned,
                             usage,
-                        }
-                    }
-                    Some(candidate_pad) => {
-                        let shown_candidate = sanitize_scratchpad_for_prompt(&candidate_pad);
-                        let tokenize_res = match seat.tokenize_url {
-                            Some(tok_url) => transport.count_tokens(
-                                tok_url,
-                                seat.model,
-                                &shown_candidate,
-                                seat.timeout,
-                            ),
-                            None => Err(TransportError::Network(
-                                "backend has no /tokenize endpoint".to_owned(),
-                            )),
-                        };
-                        match tokenize_res {
-                            Ok(pad_tokens) if pad_tokens <= MAX_SCRATCHPAD_TOKENS => {
-                                validated_scratchpad_update = Some(candidate_pad);
-                                EvaluatedCall::Success {
-                                    reply_content,
-                                    persisted_reasoning,
-                                    model_returned,
-                                    usage,
-                                }
-                            }
-                            Ok(pad_tokens) => EvaluatedCall::DeliveryFailure {
-                                reason: format!(
-                                    "scratchpad has {pad_tokens} tokens, exceeding {MAX_SCRATCHPAD_TOKENS}-token cap"
-                                ),
+                            is_late_reply: false,
+                        },
+                        Some(candidate_pad) if candidate_pad.is_empty() => {
+                            validated_scratchpad_update = Some(String::new());
+                            EvaluatedCall::Success {
+                                reply_content,
+                                persisted_reasoning,
                                 model_returned,
                                 usage,
-                                is_late_reply: false,
-                            },
-                            Err(tok_err) => {
-                                let detail = redact_secrets(
-                                    &format!(
-                                        "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
-                                    ),
-                                    redaction_key,
-                                );
-                                let (valid_cost, charged_credits, over_estimate, _) =
-                                    compute_call_accounting(
-                                        seat.cost_unit,
-                                        usage.cost,
-                                        wall_secs,
-                                        seat.max_per_call_spend,
-                                    );
-                                let entry = CallLogEntry {
-                                    time_utc: now_utc_rfc3339(),
-                                    day: config.day.clone(),
-                                    round: config.round,
-                                    guild: guild.to_owned(),
-                                    attempt,
-                                    trigger: trigger.to_owned(),
-                                    model_requested: seat.model.to_owned(),
-                                    model_returned,
-                                    request_body_sha256: request_body_sha256.clone(),
-                                    reply_sha256: None,
-                                    prompt_tokens: usage.prompt_tokens,
-                                    completion_tokens: usage.completion_tokens,
-                                    total_tokens: usage.total_tokens,
-                                    reasoning_tokens: usage.effective_reasoning_tokens(),
-                                    cost_unit: seat.cost_unit,
-                                    wall_secs: Some(wall_secs),
-                                    cost: valid_cost,
-                                    charged_credits,
-                                    latency_ms,
-                                    outcome: if over_estimate {
-                                        "COST_OVER_ESTIMATE".to_owned()
-                                    } else {
-                                        "TOKENIZE_UNAVAILABLE".to_owned()
-                                    },
-                                    error: Some(detail.clone()),
-                                    reservation_id: Some(reservation_id.clone()),
-                                };
-                                let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                                if let Err(e) = guard.finish_call_and_record(
-                                    &reservation_id,
-                                    seat.max_per_call_spend,
-                                    &entry,
-                                    over_estimate,
-                                    redaction_key,
-                                ) {
-                                    return SeatOutcome::SeatError {
-                                        detail: e.to_string(),
-                                    };
+                            }
+                        }
+                        Some(candidate_pad) => {
+                            let shown_candidate = sanitize_scratchpad_for_prompt(&candidate_pad);
+                            let tokenize_res = match seat.tokenize_url {
+                                Some(tok_url) => transport.count_tokens(
+                                    tok_url,
+                                    seat.model,
+                                    &shown_candidate,
+                                    seat.timeout,
+                                ),
+                                None => Err(TransportError::Network(
+                                    "backend has no /tokenize endpoint".to_owned(),
+                                )),
+                            };
+                            match tokenize_res {
+                                Ok(pad_tokens) if pad_tokens <= MAX_SCRATCHPAD_TOKENS => {
+                                    validated_scratchpad_update = Some(candidate_pad);
+                                    EvaluatedCall::Success {
+                                        reply_content,
+                                        persisted_reasoning,
+                                        model_returned,
+                                        usage,
+                                    }
                                 }
-                                return SeatOutcome::SeatError { detail };
+                                Ok(pad_tokens) => EvaluatedCall::DeliveryFailure {
+                                    reason: format!(
+                                        "scratchpad has {pad_tokens} tokens, exceeding {MAX_SCRATCHPAD_TOKENS}-token cap"
+                                    ),
+                                    model_returned,
+                                    usage,
+                                    is_late_reply: false,
+                                },
+                                Err(tok_err) => {
+                                    let detail = redact_secrets(
+                                        &format!(
+                                            "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
+                                        ),
+                                        redaction_key,
+                                    );
+                                    let (valid_cost, charged_credits, over_estimate, _) =
+                                        compute_call_accounting(
+                                            seat.cost_unit,
+                                            usage.cost,
+                                            wall_secs,
+                                            seat.max_per_call_spend,
+                                        );
+                                    let entry = CallLogEntry {
+                                        time_utc: now_utc_rfc3339(),
+                                        day: config.day.clone(),
+                                        round: config.round,
+                                        guild: guild.to_owned(),
+                                        attempt,
+                                        trigger: trigger.to_owned(),
+                                        model_requested: seat.model.to_owned(),
+                                        model_returned,
+                                        request_body_sha256: request_body_sha256.clone(),
+                                        reply_sha256: None,
+                                        prompt_tokens: usage.prompt_tokens,
+                                        completion_tokens: usage.completion_tokens,
+                                        total_tokens: usage.total_tokens,
+                                        reasoning_tokens: usage.effective_reasoning_tokens(),
+                                        cost_unit: seat.cost_unit,
+                                        wall_secs: Some(wall_secs),
+                                        cost: valid_cost,
+                                        charged_credits,
+                                        latency_ms,
+                                        outcome: if over_estimate {
+                                            "COST_OVER_ESTIMATE".to_owned()
+                                        } else {
+                                            "TOKENIZE_UNAVAILABLE".to_owned()
+                                        },
+                                        error: Some(detail.clone()),
+                                        reservation_id: Some(reservation_id.clone()),
+                                    };
+                                    let mut guard =
+                                        ledger.lock().unwrap_or_else(|p| p.into_inner());
+                                    if let Err(e) = guard.finish_call_and_record(
+                                        &reservation_id,
+                                        seat.max_per_call_spend,
+                                        &entry,
+                                        over_estimate,
+                                        redaction_key,
+                                    ) {
+                                        return SeatOutcome::SeatError {
+                                            detail: e.to_string(),
+                                        };
+                                    }
+                                    return SeatOutcome::SeatError { detail };
+                                }
                             }
                         }
                     }
                 }
-            }
-            other => other,
-        };
+                other => other,
+            };
 
-        match evaluated {
-            EvaluatedCall::Success {
-                reply_content,
-                persisted_reasoning,
-                model_returned,
-                usage,
-            } => {
-                let (valid_cost, charged_credits, over_estimate, observed_cost) =
-                    compute_call_accounting(
+            match evaluated {
+                EvaluatedCall::Success {
+                    reply_content,
+                    persisted_reasoning,
+                    model_returned,
+                    usage,
+                } => {
+                    let (valid_cost, charged_credits, over_estimate, observed_cost) =
+                        compute_call_accounting(
+                            seat.cost_unit,
+                            usage.cost,
+                            wall_secs,
+                            seat.max_per_call_spend,
+                        );
+                    let reply_sha256 = sha256_hex(reply_content.as_bytes());
+                    let (outcome_str, err_opt) = match (over_estimate, observed_cost) {
+                        (true, Some(c)) => (
+                            "COST_OVER_ESTIMATE".to_owned(),
+                            Some(format!(
+                                "returned cost {c:.6} exceeded {estimate_label} {:.6}",
+                                seat.max_per_call_spend
+                            )),
+                        ),
+                        _ => ("OK".to_owned(), None),
+                    };
+                    let outcome_for_diag = outcome_str.clone();
+                    let entry = CallLogEntry {
+                        time_utc: now_utc_rfc3339(),
+                        day: config.day.clone(),
+                        round: config.round,
+                        guild: guild.to_owned(),
+                        attempt,
+                        trigger: trigger.to_owned(),
+                        model_requested: seat.model.to_owned(),
+                        model_returned,
+                        request_body_sha256: request_body_sha256.clone(),
+                        reply_sha256: Some(reply_sha256.clone()),
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        total_tokens: usage.total_tokens,
+                        reasoning_tokens: usage.effective_reasoning_tokens(),
+                        cost_unit: seat.cost_unit,
+                        wall_secs: Some(wall_secs),
+                        cost: valid_cost,
+                        charged_credits,
+                        latency_ms,
+                        outcome: outcome_str,
+                        error: err_opt,
+                        reservation_id: Some(reservation_id.clone()),
+                    };
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_for_diag} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                            seat.max_per_call_spend, seat.cost_unit
+                        )
+                    });
+                    diag_log(diag_sink, LogLevel::Debug, || {
+                        format!(
+                            "seat_reply_hash seat={guild} attempt={attempt} reply_sha256={reply_sha256}"
+                        )
+                    });
+                    {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        if let Some(lock_err) = &guard.lock_compromised {
+                            return SeatOutcome::SeatError {
+                                detail: lock_err.to_string(),
+                            };
+                        }
+                    }
+                    if let Err(e) =
+                        write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
+                    {
+                        return SeatOutcome::SeatError {
+                            detail: e.to_string(),
+                        };
+                    }
+                    if let Some(updated_pad) = validated_scratchpad_update {
+                        if let Some(parent) = scratchpad_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        if let Err(e) = fs::write(&scratchpad_path, updated_pad.as_bytes()) {
+                            return SeatOutcome::SeatError {
+                                detail: io_err(&scratchpad_path, e, redaction_key).to_string(),
+                            };
+                        }
+                    }
+                    let system_to_persist =
+                        if loaded.system_wrapper.is_none() && loaded.turns.is_empty() {
+                            Some(base_wrapper)
+                        } else {
+                            None
+                        };
+                    if let Err(e) = append_transcript_turn(
+                        &transcript_path,
+                        &config.day,
+                        config.round,
+                        system_to_persist,
+                        &user_content,
+                        &reply_content,
+                        persisted_reasoning,
+                        redaction_key,
+                    ) {
+                        return SeatOutcome::SeatError {
+                            detail: e.to_string(),
+                        };
+                    }
+                    return SeatOutcome::Delivered {
+                        attempts: attempt,
+                        from_seat_path,
+                        transcript_path,
+                        calls_path: calls_path.to_path_buf(),
+                        request_body_sha256,
+                        reply_sha256,
+                    };
+                }
+                EvaluatedCall::DeliveryFailure {
+                    reason,
+                    model_returned,
+                    usage,
+                    is_late_reply,
+                } => {
+                    let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
                         seat.cost_unit,
                         usage.cost,
                         wall_secs,
                         seat.max_per_call_spend,
                     );
-                let reply_sha256 = sha256_hex(reply_content.as_bytes());
-                let (outcome_str, err_opt) = match (over_estimate, observed_cost) {
-                    (true, Some(c)) => (
-                        "COST_OVER_ESTIMATE".to_owned(),
-                        Some(format!(
-                            "returned cost {c:.6} exceeded {estimate_label} {:.6}",
-                            seat.max_per_call_spend
-                        )),
-                    ),
-                    _ => ("OK".to_owned(), None),
-                };
-                let outcome_for_diag = outcome_str.clone();
-                let entry = CallLogEntry {
-                    time_utc: now_utc_rfc3339(),
-                    day: config.day.clone(),
-                    round: config.round,
-                    guild: guild.to_owned(),
-                    attempt,
-                    trigger: trigger.to_owned(),
-                    model_requested: seat.model.to_owned(),
-                    model_returned,
-                    request_body_sha256: request_body_sha256.clone(),
-                    reply_sha256: Some(reply_sha256.clone()),
-                    prompt_tokens: usage.prompt_tokens,
-                    completion_tokens: usage.completion_tokens,
-                    total_tokens: usage.total_tokens,
-                    reasoning_tokens: usage.effective_reasoning_tokens(),
-                    cost_unit: seat.cost_unit,
-                    wall_secs: Some(wall_secs),
-                    cost: valid_cost,
-                    charged_credits,
-                    latency_ms,
-                    outcome: outcome_str,
-                    error: err_opt,
-                    reservation_id: Some(reservation_id.clone()),
-                };
-                diag_log(diag_sink, LogLevel::Verbose, || {
-                    format!(
-                        "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_for_diag} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
-                        seat.max_per_call_spend, seat.cost_unit
-                    )
-                });
-                diag_log(diag_sink, LogLevel::Debug, || {
-                    format!(
-                        "seat_reply_hash seat={guild} attempt={attempt} reply_sha256={reply_sha256}"
-                    )
-                });
-                {
-                    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Err(e) = guard.finish_call_and_record(
-                        &reservation_id,
-                        seat.max_per_call_spend,
-                        &entry,
-                        over_estimate,
-                        redaction_key,
-                    ) {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
-                        };
-                    }
-                    if let Some(lock_err) = &guard.lock_compromised {
-                        return SeatOutcome::SeatError {
-                            detail: lock_err.to_string(),
-                        };
-                    }
-                }
-                if let Err(e) = write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
-                {
-                    return SeatOutcome::SeatError {
-                        detail: e.to_string(),
-                    };
-                }
-                if let Some(updated_pad) = validated_scratchpad_update {
-                    if let Some(parent) = scratchpad_path.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    if let Err(e) = fs::write(&scratchpad_path, updated_pad.as_bytes()) {
-                        return SeatOutcome::SeatError {
-                            detail: io_err(&scratchpad_path, e, redaction_key).to_string(),
-                        };
-                    }
-                }
-                let system_to_persist =
-                    if loaded.system_wrapper.is_none() && loaded.turns.is_empty() {
-                        Some(base_wrapper)
+                    let outcome_label = if is_late_reply {
+                        "LATE_DISCARDED"
+                    } else if over_estimate {
+                        "COST_OVER_ESTIMATE"
+                    } else if attempt == 1 {
+                        "harness"
                     } else {
-                        None
+                        "NO_REPLY"
                     };
-                if let Err(e) = append_transcript_turn(
-                    &transcript_path,
-                    &config.day,
-                    config.round,
-                    system_to_persist,
-                    &user_content,
-                    &reply_content,
-                    persisted_reasoning,
-                    redaction_key,
-                ) {
-                    return SeatOutcome::SeatError {
-                        detail: e.to_string(),
+                    let entry = CallLogEntry {
+                        time_utc: now_utc_rfc3339(),
+                        day: config.day.clone(),
+                        round: config.round,
+                        guild: guild.to_owned(),
+                        attempt,
+                        trigger: trigger.to_owned(),
+                        model_requested: seat.model.to_owned(),
+                        model_returned,
+                        request_body_sha256: request_body_sha256.clone(),
+                        reply_sha256: None,
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        total_tokens: usage.total_tokens,
+                        reasoning_tokens: usage.effective_reasoning_tokens(),
+                        cost_unit: seat.cost_unit,
+                        wall_secs: Some(wall_secs),
+                        cost: valid_cost,
+                        charged_credits,
+                        latency_ms,
+                        outcome: outcome_label.to_owned(),
+                        error: Some(reason),
+                        reservation_id: Some(reservation_id.clone()),
                     };
-                }
-                return SeatOutcome::Delivered {
-                    attempts: attempt,
-                    from_seat_path,
-                    transcript_path,
-                    calls_path: calls_path.to_path_buf(),
-                    request_body_sha256,
-                    reply_sha256,
-                };
-            }
-            EvaluatedCall::DeliveryFailure {
-                reason,
-                model_returned,
-                usage,
-                is_late_reply,
-            } => {
-                let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
-                    seat.cost_unit,
-                    usage.cost,
-                    wall_secs,
-                    seat.max_per_call_spend,
-                );
-                let outcome_label = if is_late_reply {
-                    "LATE_DISCARDED"
-                } else if over_estimate {
-                    "COST_OVER_ESTIMATE"
-                } else if attempt == 1 {
-                    "harness"
-                } else {
-                    "NO_REPLY"
-                };
-                let entry = CallLogEntry {
-                    time_utc: now_utc_rfc3339(),
-                    day: config.day.clone(),
-                    round: config.round,
-                    guild: guild.to_owned(),
-                    attempt,
-                    trigger: trigger.to_owned(),
-                    model_requested: seat.model.to_owned(),
-                    model_returned,
-                    request_body_sha256: request_body_sha256.clone(),
-                    reply_sha256: None,
-                    prompt_tokens: usage.prompt_tokens,
-                    completion_tokens: usage.completion_tokens,
-                    total_tokens: usage.total_tokens,
-                    reasoning_tokens: usage.effective_reasoning_tokens(),
-                    cost_unit: seat.cost_unit,
-                    wall_secs: Some(wall_secs),
-                    cost: valid_cost,
-                    charged_credits,
-                    latency_ms,
-                    outcome: outcome_label.to_owned(),
-                    error: Some(reason),
-                    reservation_id: Some(reservation_id.clone()),
-                };
-                diag_log(diag_sink, LogLevel::Verbose, || {
-                    format!(
-                        "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_label} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
-                        seat.max_per_call_spend, seat.cost_unit
-                    )
-                });
-                {
-                    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Err(e) = guard.finish_call_and_record(
-                        &reservation_id,
-                        seat.max_per_call_spend,
-                        &entry,
-                        over_estimate,
-                        redaction_key,
-                    ) {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_label} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                            seat.max_per_call_spend, seat.cost_unit
+                        )
+                    });
+                    {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                    }
+                    if attempt == 2 {
+                        return SeatOutcome::NoReply {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
                         };
                     }
                 }
-                if attempt == 2 {
-                    return SeatOutcome::NoReply {
-                        calls_path: calls_path.to_path_buf(),
-                        request_body_sha256,
+                EvaluatedCall::ToolCalls {
+                    calls,
+                    assistant_content,
+                    model_returned,
+                    usage,
+                } => {
+                    let (valid_cost, charged_credits, over_estimate, observed_cost) =
+                        compute_call_accounting(
+                            seat.cost_unit,
+                            usage.cost,
+                            wall_secs,
+                            seat.max_per_call_spend,
+                        );
+                    let (outcome_str, err_opt, hit_repeat_limit) = if over_estimate {
+                        let msg = observed_cost.map(|c| {
+                            format!(
+                                "returned cost {c:.6} exceeded {estimate_label} {:.6}",
+                                seat.max_per_call_spend
+                            )
+                        });
+                        ("COST_OVER_ESTIMATE".to_owned(), msg, false)
+                    } else if limit_refusal_sent {
+                        (
+                        "NO_REPLY".to_owned(),
+                        Some(
+                            "preview tool call limit reached; model failed to submit final reply"
+                                .to_owned(),
+                        ),
+                        true,
+                    )
+                    } else {
+                        ("TOOL_CALL".to_owned(), None, false)
                     };
+                    let outcome_for_diag = outcome_str.clone();
+                    let entry = CallLogEntry {
+                        time_utc: now_utc_rfc3339(),
+                        day: config.day.clone(),
+                        round: config.round,
+                        guild: guild.to_owned(),
+                        attempt,
+                        trigger: trigger.to_owned(),
+                        model_requested: seat.model.to_owned(),
+                        model_returned,
+                        request_body_sha256: request_body_sha256.clone(),
+                        reply_sha256: None,
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        total_tokens: usage.total_tokens,
+                        reasoning_tokens: usage.effective_reasoning_tokens(),
+                        cost_unit: seat.cost_unit,
+                        wall_secs: Some(wall_secs),
+                        cost: valid_cost,
+                        charged_credits,
+                        latency_ms,
+                        outcome: outcome_str,
+                        error: err_opt,
+                        reservation_id: Some(reservation_id.clone()),
+                    };
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_for_diag} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                            seat.max_per_call_spend, seat.cost_unit
+                        )
+                    });
+                    {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        if let Some(lock_err) = &guard.lock_compromised {
+                            return SeatOutcome::SeatError {
+                                detail: lock_err.to_string(),
+                            };
+                        }
+                    }
+                    if over_estimate {
+                        return SeatOutcome::CostOverEstimateRefused {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
+                        };
+                    }
+                    if hit_repeat_limit {
+                        return SeatOutcome::NoReply {
+                            calls_path: calls_path.to_path_buf(),
+                            request_body_sha256,
+                        };
+                    }
+                    let Some(preview_state) = preview_state_opt else {
+                        return SeatOutcome::SeatError {
+                            detail: "internal error: missing preview state on tool round"
+                                .to_owned(),
+                        };
+                    };
+                    tool_history.push(OwnedToolHistoryMessage {
+                        role: "assistant".to_owned(),
+                        content: assistant_content,
+                        tool_calls: Some(calls.clone()),
+                        tool_call_id: None,
+                    });
+                    let expected_tool_name = preview_wording_template("preview_tool_name");
+                    for call in calls {
+                        let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
+                            limit_refusal_sent = true;
+                            render_call_limit_reached_wire_json()
+                        } else {
+                            preview_calls_used += 1;
+                            if call.kind == "function" && call.function.name == expected_tool_name {
+                                execute_preview_tool_call(preview_state, &call.function.arguments)
+                            } else {
+                                render_malformed_tool_call_wire_json()
+                            }
+                        };
+                        tool_history.push(OwnedToolHistoryMessage {
+                            role: "tool".to_owned(),
+                            content: Some(tool_body),
+                            tool_calls: None,
+                            tool_call_id: Some(call.id),
+                        });
+                    }
+                    continue 'http_rounds;
                 }
             }
         }
-    }
 
-    unreachable!("two-attempt loop always returns on attempt 2")
+        unreachable!("two-attempt loop always returns or advances round")
+    }
 }
 
 fn compute_call_accounting(
@@ -5935,6 +6396,12 @@ enum EvaluatedCall {
         model_returned: Option<String>,
         usage: UsageWire,
     },
+    ToolCalls {
+        calls: Vec<ChatToolCallWire>,
+        assistant_content: Option<String>,
+        model_returned: Option<String>,
+        usage: UsageWire,
+    },
     DeliveryFailure {
         reason: String,
         model_returned: Option<String>,
@@ -6033,6 +6500,7 @@ fn evaluate_call_result(
     call_result: CallTransportResult,
     exclude_thinking: Option<bool>,
     response_format: Option<&ResponseFormatConfig>,
+    allow_tools: bool,
     redaction_keys: &[ApiKey],
 ) -> EvaluatedCall {
     let raw = match call_result {
@@ -6141,10 +6609,22 @@ fn evaluate_call_result(
     }
 
     let msg_opt = parsed.choices.into_iter().next().and_then(|c| c.message);
-    let (raw_content_opt, raw_reasoning_opt) = match msg_opt {
-        Some(m) => (m.content, m.reasoning.or(m.reasoning_content)),
-        None => (None, None),
+    let (raw_content_opt, raw_reasoning_opt, raw_tool_calls_opt) = match msg_opt {
+        Some(m) => (m.content, m.reasoning.or(m.reasoning_content), m.tool_calls),
+        None => (None, None, None),
     };
+
+    if allow_tools
+        && let Some(calls) = raw_tool_calls_opt
+        && !calls.is_empty()
+    {
+        return EvaluatedCall::ToolCalls {
+            calls,
+            assistant_content: raw_content_opt,
+            model_returned,
+            usage,
+        };
+    }
 
     let processed_content = raw_content_opt.map(|c| match exclude_thinking {
         Some(true) => strip_thinking_tags(&c),

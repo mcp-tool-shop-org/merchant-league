@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-20 from commit 8b7ffeb by Atlas 1.26.0.
+Mapped at 2026-11-20 from commit ae01208 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,15 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 14 parts, mostly Rust (373 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-20 (a4ec972)
+## What changed since 2026-11-20 (5f5784e)
 
-- CI's push trigger now also names `.dockerignore` and `Dockerfile`.
-- CI now also runs scripts/smoke-container.sh.
-- .dockerignore is now read by scripts/smoke-container.sh.
-- .gitignore is now read by scripts/smoke-container.sh.
-- CHANGELOG.md is now also read by scripts/smoke-container.sh.
-- And 10 more new writers and readers of places.
-- 3 files added and 9 changed content, across 5 parts.
+Nothing structural changed since 2026-11-20; 5 files changed content.
 
 ## What comes in
 
@@ -44,7 +38,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 **league-tui** (a command people run) runs crates/league-tui/src/main.rs and reaches league-core, league-error, league-gen, league-seat-types and league-seat-ui.
 
-**league-relay** (a command people run) runs crates/league-relay/src/main.rs and reaches league-error.
+**league-relay** (a command people run) runs crates/league-relay/src/main.rs and reaches league-core, league-error and league-seat-types.
 
 **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`) runs crates/league-ledger/examples/testnet_escrow_expiry.rs and reaches league-error.
 
@@ -57,8 +51,8 @@ CI writes only to site/audit-report.json, which is not tracked.
 ## What breaks what
 
 - **league-error** is imported by 5 parts (league-core, league-ledger, league-relay, league-seat-types, league-standalone) and sits on the path of 6 doors.
-- **league-seat-types** is imported by 4 parts (league-core, league-gen, league-seat-ui, league-tui) and sits on the path of 2 doors.
-- **league-core** is imported by 3 parts (league-gen, league-standalone, league-tui) and sits on the path of 2 doors.
+- **league-core** is imported by 4 parts (league-gen, league-relay, league-standalone, league-tui) and sits on the path of 3 doors.
+- **league-seat-types** is imported by 4 parts (league-core, league-gen, league-seat-ui, league-tui) and sits on the path of 3 doors.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 - **league-gen** is imported by 1 part (league-tui) and sits on the path of 2 doors.
 - **league-seat-ui** is imported by 1 part (league-tui) and sits on the path of 2 doors.
@@ -69,13 +63,13 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 - **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 5 commits, inside the league-relay part.
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 18 of 22 commits, inside the league-relay part.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 19 of 23 commits, inside the league-relay part.
 - **crates/league-core/src/engine.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 8 of 10 commits, inside the league-core part.
 - **crates/league-gen/src/generator.rs** and **crates/league-gen/src/lib.rs** changed together in 7 of 9 commits, inside the league-gen part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 7 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
@@ -112,7 +106,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 26 writes and 14 reads use paths built at run time and are not named here.
+- 26 writes and 15 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 14 writes and 21 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.

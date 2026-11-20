@@ -5,26 +5,39 @@
 //! in temporary directories. No outside network socket is opened and no real
 //! API key or GPU is used.
 
+use league_core::club::host::ClubSessionCheckpoint;
+use league_core::{
+    AiPreviewRequest, AssetId, ClubHost, CommitmentHash, ConverterOrderPreview, CreditTier,
+    EngineError, EscrowOrderPreview, FillKind, FillRecord, MarketAction, OfferProposal, OfferSide,
+    OrderReveal, ProjectOrderPreview, PublicCheckOrderPreview, PublicCheckOutcome,
+    PublicPreviewState, PublicSwapOrderPreview, PublicSwapOutcome, RefusedActionPreview,
+    RevealSalt, ScheduledShockSpec, SealedOrderBundle, Seat, SeatIdentity, ShockKind, TableId,
+    TableSpec, Turn, TurnEngine, TurnPhase, WhatIfPreview, compute_order_commitment,
+    preview_seat_bundle,
+};
 use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
-    ACTIVE_WORDING_ARM, ApiKey, BackendKind, CallLogEntry, CostUnit, DurabilityEvent,
-    EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, FORBIDDEN_LOCAL_KEY_ENVS,
-    GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS, LiveGate, LocalGate, LocalOpenAiTransport,
-    MAX_INTENT_HEADER_DEPTH, MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS,
-    MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
-    NonPinnedModelFacingString, REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError,
-    ResponseFormatConfig, Round, SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError,
-    TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry, cap_utf8_bytes, cap_words_and_chars,
-    extract_scratchpad_update, format_negotiation_block, install_redacting_panic_hook,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
-    redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
-    render_json_escaped_whisper_line, render_wording_slot_with, run_turn,
-    sanitize_scratchpad_for_prompt, sanitize_whisper, set_fail_pending_temp_write_for_test,
-    sha256_hex, split_negotiation_sections, strip_thinking_tags, take_durability_events_for_test,
-    truncate_after_redaction, validate_local_base_url, validate_local_endpoints,
-    validate_local_tokenize_url, validate_pinned_local_model, validate_pinned_openrouter_slug,
-    validate_scratchpad_setup, validate_vm_host_allowance, watch_durability_events_for_test,
-    wording_slot, wording_template,
+    ACTIVE_WORDING_ARM, AiPreviewWireOutput, ApiKey, BackendKind, CallLogEntry, CostUnit,
+    DurabilityEvent, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
+    FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS, LiveGate, LocalGate,
+    LocalOpenAiTransport, MAX_INTENT_HEADER_DEPTH, MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS,
+    MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
+    NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode,
+    REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round,
+    SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError, TurnConfig,
+    UntrustedWhisper, UreqTransport, WordingEntry, build_preview_turn_orders_tool_definition,
+    cap_utf8_bytes, cap_words_and_chars, execute_preview_tool_call, extract_scratchpad_update,
+    format_negotiation_block, install_redacting_panic_hook, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, parse_preview_tool_arguments,
+    preview_wording_slot, redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
+    render_call_limit_reached_wire_json, render_engine_refusal_wire_json,
+    render_json_escaped_whisper_line, render_malformed_tool_call_wire_json,
+    render_wording_slot_with, run_turn, sanitize_scratchpad_for_prompt, sanitize_whisper,
+    set_fail_pending_temp_write_for_test, sha256_hex, split_negotiation_sections,
+    strip_thinking_tags, take_durability_events_for_test, truncate_after_redaction,
+    validate_local_base_url, validate_local_endpoints, validate_local_tokenize_url,
+    validate_pinned_local_model, validate_pinned_openrouter_slug, validate_scratchpad_setup,
+    validate_vm_host_allowance, watch_durability_events_for_test, wording_slot, wording_template,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -16502,7 +16515,7 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const MIN_COMMITTED_HISTORY_ROWS: usize = 6;
+const MIN_COMMITTED_HISTORY_ROWS: usize = 7;
 const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
 fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
@@ -16987,6 +17000,120 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    // Row 6 (Card 7 coexisting Eval arm `v2_preview_2026_11_17_r1`): keeps all 24 Row-5 base paths
+    // byte-identical and adds the 5 preview-tool arm render paths sealing every `PREVIEW_ARM_WORDING` entry:
+    ArmRenderHistoryRow {
+        arm: "v2_preview_2026_11_17_r1",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x12f0575c512507b475b9f7a2ef87a090,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+            (
+                "emc_excerpt_160_char_clip",
+                0xe7f8ace5cdc194668aeb07b653ad050f,
+            ),
+            (
+                "whisper_partial_word_truncation",
+                0x93d6b1a5a1fabbb05d2b3da069674a69,
+            ),
+            (
+                "seat_text_default_ignorable_escaped",
+                0x07d0fbd1e379a21ec5d5e547602fa5cd,
+            ),
+            (
+                "whisper_supplementary_di_budget_truncation",
+                0x8e1370adcce3bf0cdf5f7794b636bd9b,
+            ),
+            (
+                "preview_act_initial_request_and_tool_schema",
+                0xc92a91aeb7fb0fef6aab78e548a9dc9b,
+            ),
+            (
+                "preview_talk_round_omits_tool_and_budget",
+                0xb7439d93c89b8f94789bc223dd1949cc,
+            ),
+            (
+                "preview_tool_roundtrip_followup_request",
+                0x64f4294edf6b3aa1b0dfa5eef281006e,
+            ),
+            (
+                "preview_wire_all_outcomes_tiers_identities_and_fills",
+                0x38a86148dead3ae6a50e1dd28748620f,
+            ),
+            (
+                "preview_wire_all_refusal_and_limit_codes",
+                0xe9d7cc834765bcd9177c312baf94a42d,
+            ),
+        ],
+    },
 ];
 
 // `P41-C4` review note: an in-tree test can verify every row against `SEALED_IMMUTABLE_HISTORY_ROWS`
@@ -17017,6 +17144,10 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_neutral_2026_11_15_r6",
         0x41e0641516f522895b4d322557758ae0,
+    ),
+    (
+        "v2_preview_2026_11_17_r1",
+        0x4fd956f044da56e8c99a80bb5e27d10f,
     ),
 ];
 
@@ -17130,15 +17261,23 @@ fn verify_arm_render_path_history(
         }
     }
 
-    let Some(current_row) = history.last() else {
+    let Some(last_row) = history.last() else {
         return Err("ARM_RENDER_PATH_HISTORY cannot be empty".to_owned());
     };
-    if current_row.arm != active_arm {
+    let current_row = if active_arm == ACTIVE_WORDING_ARM
+        && history.len() >= 2
+        && last_row.arm == PREVIEW_WORDING_ARM
+        && history[history.len() - 2].arm == ACTIVE_WORDING_ARM
+    {
+        &history[history.len() - 2]
+    } else if last_row.arm == active_arm {
+        last_row
+    } else {
         return Err(format!(
             "ACTIVE_WORDING_ARM is '{active_arm}', but last row in ARM_RENDER_PATH_HISTORY is '{}' (current arm must be the last row)",
-            current_row.arm
+            last_row.arm
         ));
-    }
+    };
     let mut live_by_name: std::collections::HashMap<&str, &str> =
         std::collections::HashMap::with_capacity(live_wire_bodies.len());
     for (live_name, live_body) in live_wire_bodies {
@@ -19934,7 +20073,8 @@ fn fix7_p39_b2_every_row_sealed_own_path_set_extra_path_and_arm_reuse() -> TestR
             SEALED_IMMUTABLE_HISTORY_ROWS[idx].1
         );
     }
-    let mut extended_live = live_paths.clone();
+    let live_preview_paths = render_all_preview_arm_guard_paths()?;
+    let mut extended_live = live_preview_paths.clone();
     extended_live.push(("synthetic_extra_render_path", extra_body));
     verify_arm_render_path_history(
         &extended_history,
@@ -23381,6 +23521,2278 @@ fn fix11_p44_b1_b2_c2_skip_empty_tokens_mid_flush_pin_and_linebreak_separators()
             String::from_utf8_lossy(&pb_err)
         );
     }
+
+    Ok(())
+}
+
+// ============================================================================
+// Wave 2 Card 7: AI What-If Preview Tool (`v2_preview_2026_11_17_r1`)
+// ============================================================================
+
+fn card7_standard_preview_state(seat: u8) -> Result<PublicPreviewState, Box<dyn Error>> {
+    let spec = TableSpec::standard_chiral_ring(TableId(77), 4, 1)?;
+    let engine = TurnEngine::new(spec)?;
+    let obs = engine.observe_seat(Seat(seat))?;
+    Ok(obs.to_public_preview_state())
+}
+
+fn write_card7_preview_state(
+    game_dir: &Path,
+    day: &str,
+    guild: &str,
+    state: &PublicPreviewState,
+) -> TestResult {
+    let dir = game_dir.join("to-seat");
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("day-{day}-act-{guild}.preview-state.json"));
+    fs::write(path, serde_json::to_string_pretty(state)?)?;
+    Ok(())
+}
+
+fn write_card7_four_seat_local_file(
+    path: &Path,
+    base_url: &str,
+    max_gpu_secs_per_call: f64,
+) -> TestResult {
+    let payload = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": base_url,
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": max_gpu_secs_per_call
+            },
+            { "guild": "Weavers", "backend": "file" },
+            { "guild": "Smiths", "backend": "file" },
+            { "guild": "Dyers", "backend": "file" }
+        ]
+    });
+    fs::write(path, serde_json::to_string_pretty(&payload)?)?;
+    Ok(())
+}
+
+fn card7_tool_call_response_body(
+    call_id: &str,
+    tool_name: &str,
+    arguments_json: &str,
+    cost: Option<f64>,
+) -> String {
+    let mut usage = json!({
+        "prompt_tokens": 20,
+        "completion_tokens": 12,
+        "total_tokens": 32
+    });
+    if let Some(c) = cost {
+        usage["cost"] = json!(c);
+    }
+    json!({
+        "id": format!("mock-tc-{call_id}"),
+        "model": "Qwen/Qwen3-14B",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": arguments_json
+                    }
+                }]
+            }
+        }],
+        "usage": usage
+    })
+    .to_string()
+}
+
+fn card7_all_outcomes_wire_json_array() -> Result<String, Box<dyn Error>> {
+    let base_state = card7_standard_preview_state(0)?;
+    let req = AiPreviewRequest {
+        seat: 0,
+        market_actions: Vec::new(),
+        bundle: SealedOrderBundle::default(),
+    };
+    let mut p_main: WhatIfPreview = preview_seat_bundle(&base_state, &req)?;
+    p_main.pre_seat_state.identity = SeatIdentity::Human;
+    p_main.pre_seat_state.credit_tier = CreditTier::Aaa;
+    p_main.post_market_seat_state.identity = SeatIdentity::AiSyndicate;
+    p_main.post_market_seat_state.credit_tier = CreditTier::Bbb;
+    p_main.post_sweep_seat_state.credit_tier = CreditTier::B;
+    p_main.converter_orders.push(ConverterOrderPreview {
+        recipe_idx: 0,
+        requested_runs: 2,
+        executed_runs: 1,
+        clamped: true,
+    });
+    p_main.project_orders.push(ProjectOrderPreview {
+        project_id: 1,
+        requested_batches: 3,
+        executed_batches: 2,
+        clamped: true,
+    });
+    p_main.escrow_orders.push(EscrowOrderPreview {
+        escrow_id: 9,
+        unlocked: true,
+    });
+    p_main.check_orders = vec![
+        PublicCheckOrderPreview {
+            check_id: 1,
+            outcome: PublicCheckOutcome::Cashed,
+        },
+        PublicCheckOrderPreview {
+            check_id: 2,
+            outcome: PublicCheckOutcome::Bounced,
+        },
+        PublicCheckOrderPreview {
+            check_id: 3,
+            outcome: PublicCheckOutcome::IneligibleOrIgnored,
+        },
+    ];
+    p_main.swap_orders = vec![
+        PublicSwapOrderPreview {
+            swap_id: 10,
+            maker: 0,
+            taker: 1,
+            outcome: PublicSwapOutcome::Settled,
+        },
+        PublicSwapOrderPreview {
+            swap_id: 11,
+            maker: 0,
+            taker: 2,
+            outcome: PublicSwapOutcome::UnmatchedOrInsufficientBalance,
+        },
+    ];
+    p_main.public_fills = vec![
+        FillRecord {
+            turn: 1,
+            kind: FillKind::BatchFill,
+            good: Some(AssetId::Raw(0)),
+            from: Some(0),
+            to: 1,
+            units: 1_000,
+            net_units: 950,
+            cred_amount: 2_000,
+            unit_price_cred: Some(2_000),
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::AtomicSwap,
+            good: Some(AssetId::Refined(0)),
+            from: Some(1),
+            to: 0,
+            units: 500,
+            net_units: 500,
+            cred_amount: 0,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::ContractDelivery,
+            good: Some(AssetId::Cred),
+            from: Some(0),
+            to: 2,
+            units: 100,
+            net_units: 100,
+            cred_amount: 100,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::CheckCashed,
+            good: None,
+            from: Some(1),
+            to: 0,
+            units: 300,
+            net_units: 300,
+            cred_amount: 300,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::EscrowFinished,
+            good: Some(AssetId::Cred),
+            from: Some(0),
+            to: 1,
+            units: 400,
+            net_units: 400,
+            cred_amount: 400,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::EscrowForfeited,
+            good: Some(AssetId::Cred),
+            from: Some(0),
+            to: 2,
+            units: 400,
+            net_units: 400,
+            cred_amount: 400,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::EscrowBreachRefunded,
+            good: Some(AssetId::Cred),
+            from: Some(0),
+            to: 0,
+            units: 400,
+            net_units: 400,
+            cred_amount: 400,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::EscrowRefunded,
+            good: Some(AssetId::Cred),
+            from: Some(0),
+            to: 0,
+            units: 400,
+            net_units: 400,
+            cred_amount: 400,
+            unit_price_cred: None,
+        },
+        FillRecord {
+            turn: 1,
+            kind: FillKind::TownImport,
+            good: Some(AssetId::Raw(1)),
+            from: None,
+            to: 0,
+            units: 1_000,
+            net_units: 1_000,
+            cred_amount: 3_500,
+            unit_price_cred: Some(3_500),
+        },
+    ];
+
+    let mut p_tier_d = p_main.clone();
+    p_tier_d.post_sweep_seat_state.credit_tier = CreditTier::D;
+
+    Ok(serde_json::Value::Array(vec![
+        AiPreviewWireOutput::from_what_if_preview(&p_main)
+            .as_value()
+            .clone(),
+        AiPreviewWireOutput::from_what_if_preview(&p_tier_d)
+            .as_value()
+            .clone(),
+    ])
+    .to_string())
+}
+
+const REACHABLE_PREVIEW_ERROR_CODES: [&str; 10] = [
+    "INVALID_CONFIG",
+    "INVALID_PHASE",
+    "INVALID_SEAT",
+    "INVALID_ORDER",
+    "UNKNOWN_OBJECT",
+    "UNAUTHORIZED",
+    "PERISHABLE_ESCROW_FORBIDDEN",
+    "INSUFFICIENT_BALANCE",
+    "DOMAIN_ACCESS_DENIED",
+    "CANCEL_LOCKED",
+];
+
+fn card7_all_refusals_wire_json_array() -> Result<String, Box<dyn Error>> {
+    let base_state = card7_standard_preview_state(0)?;
+    let req = AiPreviewRequest {
+        seat: 0,
+        market_actions: Vec::new(),
+        bundle: SealedOrderBundle::default(),
+    };
+    let mut p_refused = preview_seat_bundle(&base_state, &req)?;
+    let mut all_codes: Vec<&str> = REACHABLE_PREVIEW_ERROR_CODES.to_vec();
+    all_codes.push("SEASON_ENDED");
+    p_refused.refused_market_actions = all_codes
+        .iter()
+        .enumerate()
+        .map(|(i, code)| RefusedActionPreview {
+            action_index: i,
+            error_code: (*code).to_owned(),
+            message: format!("UNPINNED_ENGINE_DISPLAY_{code}"),
+        })
+        .collect();
+    p_refused.close_mark_caveat = "UNPINNED_CORE_CAVEAT_TEXT".to_owned();
+
+    let mut entries: Vec<serde_json::Value> = vec![
+        AiPreviewWireOutput::from_what_if_preview(&p_refused)
+            .as_value()
+            .clone(),
+        serde_json::from_str(&render_malformed_tool_call_wire_json())?,
+        serde_json::from_str(&render_call_limit_reached_wire_json())?,
+    ];
+    for code in all_codes {
+        entries.push(serde_json::from_str(&render_engine_refusal_wire_json(
+            code,
+        ))?);
+    }
+    Ok(serde_json::Value::Array(entries).to_string())
+}
+
+fn render_all_preview_arm_guard_paths() -> Result<RenderedWordingPaths, Box<dyn Error>> {
+    let (mut paths, _) = render_all_wording_guard_paths()?;
+    let tmp = TempDir::new()?;
+    let preview_state = card7_standard_preview_state(0)?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "FIXED_PREVIEW_WRAPPER")?;
+
+    // 1. Act initial request + tool schema, and roundtrip tool call -> followup request -> final reply.
+    let tool_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 1 },
+            "amount": 1000
+        }],
+        "bundle": {
+            "converter_runs": [{ "recipe_idx": 0, "runs": 1 }],
+            "debt_repayment_cred": 0
+        }
+    })
+    .to_string();
+    let srv_act = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_pinned_1",
+                    "preview_turn_orders",
+                    &tool_args,
+                    Some(0.0),
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    "{\"decision\":\"ok\"}",
+                    "Qwen/Qwen3-14B",
+                    30,
+                    8,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_act = tmp.path().join("seats_act.json");
+    write_card7_four_seat_local_file(&seats_act, &srv_act.base_url, 2.0)?;
+    let g_act = tmp.path().join("g_act");
+    write_to_seat(&g_act, "01", "act", "Saltworks", "ACT BOARD STATE")?;
+    write_card7_preview_state(&g_act, "01", "Saltworks", &preview_state)?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_act.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_act.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0,
+        "preview act turn failed: {}",
+        String::from_utf8_lossy(&err_out)
+    );
+    let act_reqs = srv_act.recorded_requests()?;
+    assert_eq!(act_reqs.len(), 2);
+
+    // 2. Talk round with `--preview-tool on` omits tool and budget sentence.
+    let srv_talk = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body("TALK_OK", "Qwen/Qwen3-14B", 16, 4, None, None),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_talk = tmp.path().join("seats_talk.json");
+    write_card7_four_seat_local_file(&seats_talk, &srv_talk.base_url, 2.0)?;
+    let g_talk = tmp.path().join("g_talk");
+    write_to_seat(&g_talk, "01", "talk", "Saltworks", "TALK BOARD STATE")?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_talk.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_talk.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        ),
+        0,
+        "preview talk turn failed: {}",
+        String::from_utf8_lossy(&err_out)
+    );
+    let talk_reqs = srv_talk.recorded_requests()?;
+    assert_eq!(talk_reqs.len(), 1);
+
+    paths.push((
+        "preview_act_initial_request_and_tool_schema",
+        act_reqs[0].body.clone(),
+    ));
+    paths.push((
+        "preview_talk_round_omits_tool_and_budget",
+        talk_reqs[0].body.clone(),
+    ));
+    paths.push((
+        "preview_tool_roundtrip_followup_request",
+        act_reqs[1].body.clone(),
+    ));
+    paths.push((
+        "preview_wire_all_outcomes_tiers_identities_and_fills",
+        card7_all_outcomes_wire_json_array()?,
+    ));
+    paths.push((
+        "preview_wire_all_refusal_and_limit_codes",
+        card7_all_refusals_wire_json_array()?,
+    ));
+
+    Ok(paths)
+}
+
+#[test]
+fn card7_off_and_omitted_flag_request_bytes_and_24_r6_digests_are_byte_identical() -> TestResult {
+    let (live_r6_paths, _) = render_all_wording_guard_paths()?;
+    assert_eq!(ARM_RENDER_PATH_HISTORY[5].arm, ACTIVE_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[5].path_digests.len(), 24);
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        ACTIVE_WORDING_ARM,
+        &live_r6_paths,
+    )?;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "FIXED_WRAPPER")?;
+    let seats_json = json!({
+        "seats": [{
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "openai/gpt-4o-mini-2024-07-18",
+            "temperature": 0.2,
+            "max_output_tokens": 128,
+            "timeout_secs": 5.0,
+            "max_cost_per_call": 0.05
+        }]
+    });
+    let seats = SeatFile::from_json_str(&seats_json.to_string(), None)?;
+    let ok_resp = || {
+        RawHttpResponse {
+            status: 200,
+            body: json!({
+                "model": "openai/gpt-4o-mini-2024-07-18",
+                "choices": [{"message": {"content": "OFF_OK"}}],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16, "cost": 0.001}
+            })
+            .to_string(),
+        }
+    };
+
+    for round in [Round::Talk, Round::Act] {
+        let round_str = match round {
+            Round::Talk => "talk",
+            Round::Act => "act",
+        };
+        let g_omitted = tmp.path().join(format!("omitted_{round_str}"));
+        let g_off = tmp.path().join(format!("explicit_off_{round_str}"));
+        write_to_seat(&g_omitted, "01", round_str, "Saltworks", "SAME BOARD")?;
+        write_to_seat(&g_off, "01", round_str, "Saltworks", "SAME BOARD")?;
+
+        let tx_omitted = ScriptedTransport::new(vec![ScriptStep::Respond(ok_resp())]);
+        let tx_off = ScriptedTransport::new(vec![ScriptStep::Respond(ok_resp())]);
+
+        let mut cfg_omitted = TurnConfig::new(
+            g_omitted.clone(),
+            "01".to_owned(),
+            round,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            Some(1.0),
+        );
+        assert_eq!(cfg_omitted.preview_tool, PreviewToolMode::Off);
+        cfg_omitted = cfg_omitted.with_preview_tool(PreviewToolMode::Off);
+
+        let parsed_off = parse_args([
+            "turn",
+            "--game-dir",
+            g_off.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            round_str,
+            "--seats",
+            "dummy.json",
+            "--preview-tool",
+            "off",
+        ])?;
+        let CliCommand::Turn(args_off) = parsed_off else {
+            return Err("expected Turn".into());
+        };
+        assert_eq!(args_off.preview_tool, PreviewToolMode::Off);
+
+        let s1 = run_turn(&cfg_omitted, &tx_omitted, None)?;
+        let s2 = run_turn(
+            &TurnConfig::new(
+                g_off.clone(),
+                "01".to_owned(),
+                round,
+                seats.clone(),
+                Some(wrapper.clone()),
+                false,
+                Some(1.0),
+            )
+            .with_preview_tool(PreviewToolMode::Off),
+            &tx_off,
+            None,
+        )?;
+        assert!(s1.all_clean() && s2.all_clean());
+        let b1 = tx_omitted.bodies()?;
+        let b2 = tx_off.bodies()?;
+        assert_eq!(b1, b2);
+        assert!(!b1[0].contains("\"tools\""));
+
+        let setup_raw = fs::read_to_string(g_off.join("relay/setup.json"))?;
+        let setup_val: Json = serde_json::from_str(&setup_raw)?;
+        assert_eq!(setup_val["wording_arm"], json!(ACTIVE_WORDING_ARM));
+        assert_eq!(setup_val["preview_tool"], json!("off"));
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() -> TestResult {
+    let live_paths = render_all_preview_arm_guard_paths()?;
+    assert_eq!(PREVIEW_ARM_WORDING.len(), 250);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[6].arm, PREVIEW_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[6].path_digests.len(), 29);
+
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        PREVIEW_WORDING_ARM,
+        &live_paths,
+    )?;
+
+    // Every entry in `PREVIEW_ARM_WORDING` must be rendered in at least one preview path,
+    // and mutating a single character in that path must break Row 6 verification.
+    for entry in PREVIEW_ARM_WORDING {
+        let needle = preview_wording_slot(entry.slot);
+        let Some((path_idx, (path_name, body))) = live_paths
+            .iter()
+            .enumerate()
+            .skip(24)
+            .find(|(_, (_, b))| b.contains(&needle))
+        else {
+            return Err(format!(
+                "PREVIEW_ARM_WORDING slot '{}' ('{}') was not rendered by any Row 6 preview path",
+                entry.slot, needle
+            )
+            .into());
+        };
+        let mut mutated_char = if needle.ends_with('X') { 'Y' } else { 'X' };
+        let mutated = format!(
+            "{}{mutated_char}",
+            &needle[..needle.len() - needle.chars().last().ok_or("empty")?.len_utf8()]
+        );
+        if mutated == needle {
+            mutated_char = 'Z';
+        }
+        let mutated_str = if mutated != needle {
+            mutated
+        } else {
+            format!("{needle}{mutated_char}")
+        };
+        let mut cloned = live_paths.clone();
+        cloned[path_idx].1 = body.replacen(&needle, &mutated_str, 1);
+        assert_ne!(cloned[path_idx].1, *body);
+        let Err(err) = verify_arm_render_path_history(
+            ARM_RENDER_PATH_HISTORY,
+            SEALED_IMMUTABLE_HISTORY_ROWS,
+            PREVIEW_WORDING_ARM,
+            &cloned,
+        ) else {
+            return Err(format!(
+                "mutating slot '{}' in path '{path_name}' must fail Row 6 seal",
+                entry.slot
+            )
+            .into());
+        };
+        assert!(err.contains(path_name));
+    }
+
+    // Negative check: mutating any character of the live talk path breaks `preview_talk_round_omits_tool_and_budget`.
+    assert!(!live_paths[25].1.contains("\"tools\""));
+    assert!(!live_paths[25].1.contains("preview_turn_orders"));
+
+    Ok(())
+}
+
+fn collect_all_wire_keys_and_strings(v: &Json, out: &mut Vec<String>) {
+    match v {
+        Json::String(s) => out.push(s.clone()),
+        Json::Array(arr) => {
+            for item in arr {
+                collect_all_wire_keys_and_strings(item, out);
+            }
+        }
+        Json::Object(map) => {
+            for (k, val) in map {
+                out.push(k.clone());
+                collect_all_wire_keys_and_strings(val, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn card7_no_unpinned_byte_no_display_debug_or_enum_variant_reaches_wire() -> TestResult {
+    let allowed: std::collections::HashSet<String> = PREVIEW_ARM_WORDING
+        .iter()
+        .map(|e| preview_wording_slot(e.slot))
+        .collect();
+
+    let tool_def = build_preview_turn_orders_tool_definition();
+    let outcomes_val: Json = serde_json::from_str(&card7_all_outcomes_wire_json_array()?)?;
+    let refusals_val: Json = serde_json::from_str(&card7_all_refusals_wire_json_array()?)?;
+
+    let mut observed = Vec::new();
+    collect_all_wire_keys_and_strings(&tool_def, &mut observed);
+    collect_all_wire_keys_and_strings(&outcomes_val, &mut observed);
+    collect_all_wire_keys_and_strings(&refusals_val, &mut observed);
+    assert!(!observed.is_empty());
+
+    let audit_tokens = |tokens: &[String]| -> Result<(), String> {
+        for s in tokens {
+            if !allowed.contains(s) {
+                return Err(format!("unpinned wire string detected: `{s}`"));
+            }
+        }
+        Ok(())
+    };
+    if let Err(e) = audit_tokens(&observed) {
+        return Err(e.into());
+    }
+
+    // Forbidden substrings (Rust Display/Debug, unpinned caveat/message, PascalCase enum variants).
+    let combined_json = format!("{}\n{}\n{}", tool_def, outcomes_val, refusals_val);
+    for forbidden in [
+        "UNPINNED_ENGINE_DISPLAY_",
+        "UNPINNED_CORE_CAVEAT_TEXT",
+        "PostOffer",
+        "NotEligibleOrIgnored",
+        "IneligibleOrIgnored",
+        "UnmatchedOrInsufficientBalance",
+        "SellerPerformanceBond",
+        "BuyerDvpPayment",
+        "ClearinghouseBroker",
+        "CustomsInspector",
+        "OracleAuditor",
+        "InsufficientBalance",
+        "CancelLocked",
+        "WhatIfPreview(",
+        "EngineError",
+        "assumptions",
+        "counterparty",
+    ] {
+        assert!(
+            !combined_json.contains(forbidden),
+            "forbidden unpinned token `{forbidden}` reached the preview wire"
+        );
+    }
+
+    // Confirm `EngineError::InvalidOrder` Display string never reaches `render_engine_refusal_wire_json`.
+    let raw_err = EngineError::InvalidOrder("PLANTED_RAW_DISPLAY_SENTINEL".to_owned());
+    let rendered_refusal = render_engine_refusal_wire_json(raw_err.code());
+    assert!(!rendered_refusal.contains("PLANTED_RAW_DISPLAY_SENTINEL"));
+    assert!(rendered_refusal.contains("INVALID_ORDER"));
+
+    // Negative control proving the walker rejects an unpinned string.
+    let mut planted = observed;
+    planted.push("UnpinnedVariantName".to_owned());
+    assert!(audit_tokens(&planted).is_err());
+
+    Ok(())
+}
+
+#[test]
+fn card7_preview_state_roundtrip_and_named_refusal_codes() -> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let raw_json = serde_json::to_string_pretty(&real_state)?;
+    let parsed: PublicPreviewState = serde_json::from_str(&raw_json)?;
+    assert_eq!(parsed, real_state);
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER")?;
+
+    // Build mock transport that counts calls (must stay 0 across every invalid preview file).
+    let tx = ScriptedTransport::new(vec![]);
+    let seats_path = tmp.path().join("seats.json");
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(vec![], TokenizeBehavior::WordCount)?;
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+    let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
+
+    let run_cli_case = |gdir: &Path| -> Result<(i32, String), Box<dyn Error>> {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "--error-format",
+                "json",
+                "turn",
+                "--game-dir",
+                gdir.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        Ok((code, String::from_utf8_lossy(&err).into_owned()))
+    };
+
+    // 1. Missing file -> PREVIEW_STATE_MISSING (exit 1).
+    let g_missing = tmp.path().join("g_missing");
+    write_to_seat(&g_missing, "01", "act", "Saltworks", "ACT")?;
+    let (code, err_str) = run_cli_case(&g_missing)?;
+    assert_eq!(code, 1);
+    let err_json: Json = serde_json::from_str(err_str.trim())?;
+    assert_eq!(err_json["code"], json!("PREVIEW_STATE_MISSING"));
+    assert!(!g_missing.join("relay/setup.json").exists());
+
+    // 2. Malformed JSON / extra injected field -> PREVIEW_STATE_MALFORMED (exit 1).
+    let g_malformed = tmp.path().join("g_malformed");
+    write_to_seat(&g_malformed, "01", "act", "Saltworks", "ACT")?;
+    fs::write(
+        g_malformed.join("to-seat/day-01-act-Saltworks.preview-state.json"),
+        "{not-json",
+    )?;
+    let (code, err_str) = run_cli_case(&g_malformed)?;
+    assert_eq!(code, 1);
+    let err_json: Json = serde_json::from_str(err_str.trim())?;
+    assert_eq!(err_json["code"], json!("PREVIEW_STATE_MALFORMED"));
+
+    let mut extra_val = serde_json::to_value(&real_state)?;
+    extra_val["injected_field"] = json!(true);
+    fs::write(
+        g_malformed.join("to-seat/day-01-act-Saltworks.preview-state.json"),
+        extra_val.to_string(),
+    )?;
+    let (code, err_str) = run_cli_case(&g_malformed)?;
+    assert_eq!(code, 1);
+    let err_json: Json = serde_json::from_str(err_str.trim())?;
+    assert_eq!(err_json["code"], json!("PREVIEW_STATE_MALFORMED"));
+
+    // 3. Wrong day -> PREVIEW_STATE_DAY_MISMATCH (exit 1).
+    let g_wrong_day = tmp.path().join("g_wrong_day");
+    write_to_seat(&g_wrong_day, "01", "act", "Saltworks", "ACT")?;
+    let mut wrong_day = real_state.clone();
+    wrong_day.turn = 2;
+    write_card7_preview_state(&g_wrong_day, "01", "Saltworks", &wrong_day)?;
+    let (code, err_str) = run_cli_case(&g_wrong_day)?;
+    assert_eq!(code, 1);
+    let err_json: Json = serde_json::from_str(err_str.trim())?;
+    assert_eq!(err_json["code"], json!("PREVIEW_STATE_DAY_MISMATCH"));
+
+    // 4. Wrong seat -> PREVIEW_STATE_SEAT_MISMATCH (exit 1).
+    let wrong_seat = card7_standard_preview_state(1)?;
+    let g_wrong_seat = tmp.path().join("g_wrong_seat");
+    write_to_seat(&g_wrong_seat, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_wrong_seat, "01", "Saltworks", &wrong_seat)?;
+    let (code, err_str) = run_cli_case(&g_wrong_seat)?;
+    assert_eq!(code, 1);
+    let err_json: Json = serde_json::from_str(err_str.trim())?;
+    assert_eq!(err_json["code"], json!("PREVIEW_STATE_SEAT_MISMATCH"));
+
+    // 5. Same named refusal through `run_turn` with 0 transport dispatches.
+    let Err(err_direct) = run_turn(
+        &TurnConfig::new(
+            g_wrong_seat,
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(10.0))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx,
+        None,
+    ) else {
+        return Err("wrong-seat preview state must refuse".into());
+    };
+    assert_eq!(err_direct.code(), "PREVIEW_STATE_SEAT_MISMATCH");
+    assert_eq!(tx.call_count(), 0);
+    assert_eq!(srv.recorded_requests()?.len(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn card7_non_interference_across_hidden_rival_orders_mandates_salts_and_shocks() -> TestResult {
+    // Build twin real TurnEngines whose Seat 0 public state is identical while differing in:
+    // - dealt mandate commitments & reveal salts for rival seats 1..=3
+    // - unforecast scheduled shock (`hint_turn: 2, forecast_turn: 3, realize_turn: 4`, differing target/magnitude)
+    // - in Commit/Reveal phase: rival secret bundle commits and revealed rival orders/salts.
+    let spec1 = TableSpec::standard_chiral_ring(TableId(901), 4, 1)?;
+    let mut spec2 = spec1.clone();
+    spec2.dealt_mandate_commits[1] = CommitmentHash([0x22; 32]);
+    spec2.dealt_mandate_commits[2] = CommitmentHash([0x33; 32]);
+    spec2.shocks.push(ScheduledShockSpec {
+        hint_turn: 2,
+        forecast_turn: 3,
+        realize_turn: 4,
+        target_seat: 2,
+        kind: ShockKind::SupplyFreeze,
+        magnitude_bps: 3_000,
+    });
+
+    let mut eng1 = TurnEngine::new(spec1)?;
+    let mut eng2 = TurnEngine::new(spec2)?;
+
+    // Place one public resting offer by Seat 0 identically on both engines.
+    let pub_action = MarketAction::PostOffer {
+        seat: 0,
+        order: OfferProposal {
+            side: OfferSide::Buy,
+            good: AssetId::Raw(1),
+            amount: 500,
+            price_per_unit_cred: 2_000,
+            domain_id: None,
+            is_hybrid: false,
+        },
+    };
+    eng1.apply_market_action(pub_action.clone())?;
+    eng2.apply_market_action(pub_action)?;
+
+    // Snapshot TalkAndMarket states (before Commit/Reveal) to also verify MarketAction sensitivity.
+    let pub_tm1 = eng1.observe_seat(Seat(0))?.to_public_preview_state();
+    let pub_tm2 = eng2.observe_seat(Seat(0))?.to_public_preview_state();
+
+    // Advance both into Commit and submit different rival secret order commitments + salts,
+    // then advance into Reveal and let rival Seat 1 reveal differing secret bundles.
+    eng1.begin_cancel_lock()?;
+    eng2.begin_cancel_lock()?;
+    eng1.advance_to_commit()?;
+    eng2.advance_to_commit()?;
+
+    let bundle_a = SealedOrderBundle {
+        debt_repayment_cred: 500,
+        ..Default::default()
+    };
+    let mut bundle_b = SealedOrderBundle::default();
+    bundle_b
+        .converter_runs
+        .push(league_core::ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 2,
+        });
+
+    let salt_a = RevealSalt([0x11; 32]);
+    let salt_b = RevealSalt([0x55; 32]);
+    let rev_a = OrderReveal {
+        bundle: bundle_a,
+        salt: salt_a,
+    };
+    let rev_b = OrderReveal {
+        bundle: bundle_b,
+        salt: salt_b,
+    };
+    let commit_a = compute_order_commitment(TableId(901), Turn(1), Seat(1), &rev_a)?;
+    let commit_b = compute_order_commitment(TableId(901), Turn(1), Seat(1), &rev_b)?;
+    assert_ne!(commit_a, commit_b);
+
+    eng1.submit_order_commitment(Seat(1), commit_a)?;
+    eng2.submit_order_commitment(Seat(1), commit_b)?;
+    eng1.advance_to_reveal()?;
+    eng2.advance_to_reveal()?;
+    eng1.submit_order_reveal(Seat(1), rev_a)?;
+    eng2.submit_order_reveal(Seat(1), rev_b)?;
+
+    let pub1 = eng1.observe_seat(Seat(0))?.to_public_preview_state();
+    let pub2 = eng2.observe_seat(Seat(0))?.to_public_preview_state();
+    let j1 = serde_json::to_string(&pub1)?;
+    let j2 = serde_json::to_string(&pub2)?;
+    assert_eq!(
+        j1, j2,
+        "PublicPreviewState must be byte-identical despite hidden rival diffs"
+    );
+
+    // Verify 8 distinct own-order combinations produce byte-identical preview wire outputs.
+    let orders_suite = [
+        json!({"market_actions": [], "bundle": {}}),
+        json!({
+            "market_actions": [{
+                "action_kind": "post_offer",
+                "side": "sell",
+                "good": {"asset_kind": "raw", "good_index": 0},
+                "amount": 500,
+                "price_per_unit_cred": 1500
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "town_import",
+                "good": {"asset_kind": "raw", "good_index": 1},
+                "amount": 1000
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [],
+            "bundle": {"converter_runs": [{"recipe_idx": 0, "runs": 1}]}
+        }),
+        json!({
+            "market_actions": [],
+            "bundle": {"project_deliveries": [{"project_id": 0, "batches": 1}]}
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": {"asset_kind": "cred"},
+                "amount": 1000,
+                "cancel_after_turn": 3
+            }],
+            "bundle": {}
+        }),
+        json!({
+            "market_actions": [{
+                "action_kind": "create_check",
+                "payee": 1,
+                "asset": {"asset_kind": "cred"},
+                "send_max": 1000,
+                "deliver_min": 500,
+                "due_turn": 1,
+                "expiration_turn": 3
+            }],
+            "bundle": {"check_cashes": [1]}
+        }),
+        json!({
+            "market_actions": [{"action_kind": "cancel_offer", "offer_id": 1}],
+            "bundle": {
+                "atomic_swaps": [{
+                    "swap_id": 42,
+                    "maker_seat": 0,
+                    "taker_seat": 1,
+                    "maker_asset": {"asset_kind": "raw", "good_index": 0},
+                    "maker_amount": 500,
+                    "taker_asset": {"asset_kind": "cred"},
+                    "taker_amount": 500
+                }]
+            }
+        }),
+    ];
+
+    for (idx, args) in orders_suite.iter().enumerate() {
+        let s = args.to_string();
+        let w1 = execute_preview_tool_call(&pub1, &s);
+        let w2 = execute_preview_tool_call(&pub2, &s);
+        assert_eq!(
+            w1, w2,
+            "order suite index {idx} diverged on hidden rival state"
+        );
+    }
+
+    // Negative check on TalkAndMarket: modifying a PUBLIC parameter (changing town_import amount)
+    // changes output, and TalkAndMarket states are identical across hidden rival diffs.
+    assert_eq!(
+        serde_json::to_string(&pub_tm1)?,
+        serde_json::to_string(&pub_tm2)?
+    );
+    let tm_baseline = execute_preview_tool_call(&pub_tm1, &orders_suite[2].to_string());
+    let tm_varied = execute_preview_tool_call(
+        &pub_tm1,
+        &json!({
+            "market_actions": [{
+                "action_kind": "town_import",
+                "good": {"asset_kind": "raw", "good_index": 1},
+                "amount": 2000
+            }],
+            "bundle": {}
+        })
+        .to_string(),
+    );
+    assert_ne!(tm_baseline, tm_varied);
+
+    // Also cover ClubHost staged rival orders (`pending_bundles`), private scratch `seat_notes`,
+    // mandate deal seeds/salts, and `bot_tie_seed` via `ClubHost::from_explicit_setup` +
+    // `ClubSessionCheckpoint::store_on_host`.
+    let (_, _, shared_eval_seed) =
+        TableSpec::standard_club_chiral_ring_with_setup(TableId(902), 4, 1)?;
+    let salts_1 = [
+        RevealSalt([0x11; 32]),
+        RevealSalt([0x12; 32]),
+        RevealSalt([0x13; 32]),
+        RevealSalt([0x14; 32]),
+    ];
+    let salts_2 = [
+        RevealSalt([0x21; 32]),
+        RevealSalt([0x22; 32]),
+        RevealSalt([0x23; 32]),
+        RevealSalt([0x24; 32]),
+    ];
+    let mut host1 = ClubHost::from_explicit_setup(
+        TableId(902),
+        4,
+        1,
+        [0x01; 32],
+        &salts_1,
+        shared_eval_seed.clone(),
+        111,
+    )?;
+    let mut host2 = ClubHost::from_explicit_setup(
+        TableId(902),
+        4,
+        1,
+        [0x02; 32],
+        &salts_2,
+        shared_eval_seed,
+        222,
+    )?;
+    let staged_rival_1 = SealedOrderBundle {
+        debt_repayment_cred: 250,
+        ..Default::default()
+    };
+    let mut staged_rival_2 = SealedOrderBundle::default();
+    staged_rival_2
+        .converter_runs
+        .push(league_core::ConverterRunOrder {
+            recipe_idx: 0,
+            runs: 1,
+        });
+    ClubSessionCheckpoint::store_on_host(
+        &mut host1,
+        ClubSessionCheckpoint {
+            pending_bundles: vec![
+                SealedOrderBundle::default(),
+                staged_rival_1,
+                SealedOrderBundle::default(),
+                SealedOrderBundle::default(),
+            ],
+            sub_pass_b_committed: vec![false, true, false, false],
+            seat_notes: vec![
+                String::new(),
+                "rival secret note alpha".to_owned(),
+                "seat2 hidden".to_owned(),
+                "seat3 hidden".to_owned(),
+            ],
+            seat_pins: vec![None; 4],
+            ..ClubSessionCheckpoint::default()
+        },
+    )?;
+    ClubSessionCheckpoint::store_on_host(
+        &mut host2,
+        ClubSessionCheckpoint {
+            pending_bundles: vec![
+                SealedOrderBundle::default(),
+                staged_rival_2,
+                SealedOrderBundle::default(),
+                SealedOrderBundle::default(),
+            ],
+            sub_pass_b_committed: vec![false, false, true, true],
+            seat_notes: vec![
+                "seat0 checkpoint note".to_owned(),
+                "rival secret note beta".to_owned(),
+                "seat2 other".to_owned(),
+                "seat3 other".to_owned(),
+            ],
+            seat_pins: vec![None; 4],
+            ..ClubSessionCheckpoint::default()
+        },
+    )?;
+    let host_pub1 = host1.observe_seat(Seat(0))?.to_public_preview_state();
+    let host_pub2 = host2.observe_seat(Seat(0))?.to_public_preview_state();
+    assert_eq!(
+        serde_json::to_string(&host_pub1)?,
+        serde_json::to_string(&host_pub2)?,
+        "PublicPreviewState must be byte-identical despite staged rival orders, notes, salts, and bot_tie_seed"
+    );
+    for (idx, args) in orders_suite.iter().enumerate() {
+        let s = args.to_string();
+        assert_eq!(
+            execute_preview_tool_call(&host_pub1, &s),
+            execute_preview_tool_call(&host_pub2, &s),
+            "ClubHost order suite index {idx} diverged on hidden staged orders/notes"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card7_own_orders_only_rejects_assumptions_and_counterparty_fields_before_engine() -> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+
+    let bad_inputs = [
+        json!({
+            "market_actions": [],
+            "bundle": {},
+            "assumptions": {}
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": {},
+            "counterparty": 1
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": { "assumed_cosigned_swaps": [] }
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": { "assumed_peer_bundles": {} }
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": {},
+            "tie_mode": "pessimistic_for_seat"
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": {},
+            "seat": 1
+        })
+        .to_string(),
+        json!({
+            "market_actions": [{
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": {"asset_kind": "cred"},
+                "amount": 1000,
+                "cancel_after_turn": 3,
+                "condition_hash": "not-64-hex"
+            }],
+            "bundle": {}
+        })
+        .to_string(),
+        json!({
+            "market_actions": [],
+            "bundle": {
+                "escrow_finishes": [{
+                    "escrow_id": 1,
+                    "preimage": "0000000000000000000000000000000000000000000000000000000000000000"
+                }]
+            }
+        })
+        .to_string(),
+    ];
+
+    for (idx, raw) in bad_inputs.iter().enumerate() {
+        assert!(
+            parse_preview_tool_arguments(raw, 0).is_none(),
+            "bad input #{idx} must be rejected by strict parser before engine"
+        );
+        let wire: Json = serde_json::from_str(&execute_preview_tool_call(&real_state, raw))?;
+        assert_eq!(wire["status"], json!("refused"));
+        assert_eq!(wire["error_code"], json!("MALFORMED_TOOL_CALL"));
+    }
+
+    // Exercise through real HTTP mock relay turn verifying malformed call costs a call against the 3-call limit.
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let seats_path = tmp.path().join("seats.json");
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "bad_1",
+                    "preview_turn_orders",
+                    &bad_inputs[0],
+                    Some(0.0),
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "ok_2",
+                    "preview_turn_orders",
+                    &json!({"market_actions": [], "bundle": {}}).to_string(),
+                    Some(0.0),
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "ok_3",
+                    "preview_turn_orders",
+                    &json!({"market_actions": [], "bundle": {}}).to_string(),
+                    Some(0.0),
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "fourth_refused_by_budget",
+                    "preview_turn_orders",
+                    &json!({"market_actions": [], "bundle": {}}).to_string(),
+                    Some(0.0),
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("FINAL_OK", "Qwen/Qwen3-14B", 20, 4, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+    let g = tmp.path().join("g_malformed_cost");
+    write_to_seat(&g, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g, "01", "Saltworks", &real_state)?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "20.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+    let reqs = srv.recorded_requests()?;
+    assert_eq!(reqs.len(), 5);
+    assert!(reqs[1].body.contains("MALFORMED_TOOL_CALL"));
+    assert!(reqs[4].body.contains("CALL_LIMIT_REACHED"));
+    Ok(())
+}
+
+#[test]
+fn card7_three_call_limit_and_per_round_cap_reservations() -> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let valid_args = json!({"market_actions": [], "bundle": {}}).to_string();
+
+    // Part A: Model requests 4 tool calls -> calls 1..=3 run, 4th gets CALL_LIMIT_REACHED,
+    // 5th round returns final reply -> 5 `calls.jsonl` entries (4 TOOL_CALL + 1 OK).
+    let srv_limit = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c1", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c2", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c3", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c4", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("FINAL_AFTER_4TH", "Qwen/Qwen3-14B", 20, 5, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_limit = tmp.path().join("seats_limit.json");
+    write_card7_four_seat_local_file(&seats_limit, &srv_limit.base_url, 2.0)?;
+    let g_limit = tmp.path().join("g_limit");
+    write_to_seat(&g_limit, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_limit, "01", "Saltworks", &real_state)?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_limit.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_limit.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "30.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+    assert_eq!(srv_limit.recorded_requests()?.len(), 5);
+    assert_eq!(
+        fs::read_to_string(g_limit.join("from-seat/day-01-act-Saltworks.md"))?,
+        "FINAL_AFTER_4TH"
+    );
+    let calls_raw = fs::read_to_string(g_limit.join("relay/calls.jsonl"))?;
+    let call_lines: Vec<CallLogEntry> = calls_raw
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(call_lines.len(), 5);
+    assert_eq!(call_lines[0].outcome, "TOOL_CALL");
+    assert_eq!(call_lines[3].outcome, "TOOL_CALL");
+    assert_eq!(call_lines[4].outcome, "OK");
+
+    // Part B: Model ignores CALL_LIMIT_REACHED and asks for a 5th call -> terminates as NO_REPLY with 0 extra calls.
+    let srv_refuse_repeat = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c1", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c2", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c3", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c4", "preview_turn_orders", &valid_args, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body("c5", "preview_turn_orders", &valid_args, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_repeat = tmp.path().join("seats_repeat.json");
+    write_card7_four_seat_local_file(&seats_repeat, &srv_refuse_repeat.base_url, 2.0)?;
+    let g_repeat = tmp.path().join("g_repeat");
+    write_to_seat(&g_repeat, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_repeat, "01", "Saltworks", &real_state)?;
+    assert_eq!(
+        execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_repeat.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                seats_repeat.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-gpu-secs",
+                "30.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        ),
+        3
+    );
+    assert!(!g_repeat.join("from-seat/day-01-act-Saltworks.md").exists());
+    let repeat_calls: Vec<CallLogEntry> = fs::read_to_string(g_repeat.join("relay/calls.jsonl"))?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(repeat_calls.len(), 5);
+    assert_eq!(repeat_calls[4].outcome, "NO_REPLY");
+
+    // Part C: Tight `--cap-credits` allowing only 2 HTTP rounds -> round 3 hits CAP_REACHED mid-turn via `try_reserve`.
+    let or_seats_json = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "openai/gpt-4o-mini-2024-07-18",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.40
+            },
+            { "guild": "Weavers", "backend": "file" },
+            { "guild": "Smiths", "backend": "file" },
+            { "guild": "Dyers", "backend": "file" }
+        ]
+    });
+    let or_seats = SeatFile::from_json_str(&or_seats_json.to_string(), None)?;
+    let tx_cap = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: card7_tool_call_response_body(
+                "or_1",
+                "preview_turn_orders",
+                &valid_args,
+                Some(0.40),
+            ),
+        }),
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: card7_tool_call_response_body(
+                "or_2",
+                "preview_turn_orders",
+                &valid_args,
+                Some(0.40),
+            ),
+        }),
+    ]);
+    let g_cap = tmp.path().join("g_cap");
+    write_to_seat(&g_cap, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_cap, "01", "Saltworks", &real_state)?;
+    let cap_summary = run_turn(
+        &TurnConfig::new(
+            g_cap.clone(),
+            "01".to_owned(),
+            Round::Act,
+            or_seats,
+            Some(wrapper),
+            false,
+            Some(1.00), // 2 * 0.40 = 0.80 ok; 3rd needs 0.80 + 0.40 = 1.20 > 1.00 -> CAP_REACHED
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_cap,
+        None,
+    )?;
+    assert_eq!(tx_cap.call_count(), 2);
+    assert!(matches!(
+        cap_summary.reports[0].outcome,
+        SeatOutcome::CapReached { .. }
+    ));
+    assert!(!g_cap.join("from-seat/day-01-act-Saltworks.md").exists());
+    let cap_calls: Vec<CallLogEntry> = fs::read_to_string(g_cap.join("relay/calls.jsonl"))?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(cap_calls.len(), 3);
+    assert_eq!(cap_calls[0].outcome, "TOOL_CALL");
+    assert_eq!(cap_calls[1].outcome, "TOOL_CALL");
+    assert_eq!(cap_calls[2].outcome, "CAP_REACHED");
+    assert_eq!(cap_calls[2].charged_credits, 0.0);
+
+    Ok(())
+}
+
+#[test]
+fn card7_token_bans_pass_across_entire_preview_arm() -> TestResult {
+    // Check every entry in PREVIEW_ARM_WORDING + serialized tool schema + serialized wire outputs
+    // using `league-relay`'s real `ResponseFormatConfig::from_json_str` prose/key validator.
+    for entry in PREVIEW_ARM_WORDING {
+        let rendered = preview_wording_slot(entry.slot);
+        let schema_check = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": rendered
+                }
+            }
+        });
+        ResponseFormatConfig::from_json_str(&schema_check.to_string(), None).map_err(|e| {
+            format!(
+                "PREVIEW_ARM_WORDING slot '{}' failed token/DI filter: {e}",
+                entry.slot
+            )
+        })?;
+    }
+
+    // Check every key and string value inside `tools[0]` and wire outputs through the same filter.
+    let mut wire_strings = Vec::new();
+    collect_all_wire_keys_and_strings(
+        &build_preview_turn_orders_tool_definition(),
+        &mut wire_strings,
+    );
+    collect_all_wire_keys_and_strings(
+        &serde_json::from_str::<Json>(&card7_all_outcomes_wire_json_array()?)?,
+        &mut wire_strings,
+    );
+    collect_all_wire_keys_and_strings(
+        &serde_json::from_str::<Json>(&card7_all_refusals_wire_json_array()?)?,
+        &mut wire_strings,
+    );
+    for s in wire_strings {
+        let schema_check = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": s
+                }
+            }
+        });
+        ResponseFormatConfig::from_json_str(&schema_check.to_string(), None)?;
+    }
+
+    // Negative controls: `credit_notes` and `scratch pad` must fail the same filter.
+    for bad in ["credit_notes", "scratch pad"] {
+        let bad_schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": {
+                "orders": {
+                    "type": "string",
+                    "description": bad
+                }
+            }
+        });
+        assert!(
+            ResponseFormatConfig::from_json_str(&bad_schema.to_string(), None).is_err(),
+            "negative token filter control '{bad}' must fail"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card7_setup_json_locks_preview_tool_and_pre_card7_setup_defaults_to_off() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAP")?;
+    let seats_json = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "openai/gpt-4o-mini-2024-07-18",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.05
+            },
+            { "guild": "Weavers", "backend": "file" },
+            { "guild": "Smiths", "backend": "file" },
+            { "guild": "Dyers", "backend": "file" }
+        ]
+    });
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(&seats_path, seats_json.to_string())?;
+    let seats = SeatFile::from_json_str(&seats_json.to_string(), None)?;
+    let ok_resp = || {
+        RawHttpResponse {
+            status: 200,
+            body: json!({
+                "model": "openai/gpt-4o-mini-2024-07-18",
+                "choices": [{"message": {"content": "SETUP_OK"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14, "cost": 0.001}
+            })
+            .to_string(),
+        }
+    };
+
+    // 1. Pre-Card-7 `setup.json` omitting `"preview_tool"` deserializes cleanly as `Off`.
+    let g_legacy = tmp.path().join("g_legacy");
+    fs::create_dir_all(g_legacy.join("relay"))?;
+    let pre_card7_setup = json!({
+        "memory_mode": "snapshot",
+        "scratchpad": "none (no tokenizer)",
+        "cost_unit": "credits",
+        "wording_arm": ACTIVE_WORDING_ARM,
+        "non_pinned_model_facing_strings": [
+            {"source": "system_wrapper", "text": "WRAP"}
+        ],
+        "seats": [
+            {"guild": "Saltworks", "backend": "openrouter", "model": "openai/gpt-4o-mini-2024-07-18", "scratchpad": "none (no tokenizer)"},
+            {"guild": "Weavers", "backend": "file", "scratchpad": "none (manual file seat)"},
+            {"guild": "Smiths", "backend": "file", "scratchpad": "none (manual file seat)"},
+            {"guild": "Dyers", "backend": "file", "scratchpad": "none (manual file seat)"}
+        ]
+    });
+    let parsed_legacy: GameSetupRecord = serde_json::from_value(pre_card7_setup.clone())?;
+    assert_eq!(parsed_legacy.preview_tool, PreviewToolMode::Off);
+    fs::write(
+        g_legacy.join("relay/setup.json"),
+        pre_card7_setup.to_string(),
+    )?;
+
+    // Running omitted/`off` on pre-Card-7 setup succeeds.
+    write_to_seat(&g_legacy, "01", "talk", "Saltworks", "LEGACY TALK")?;
+    let tx_leg = ScriptedTransport::new(vec![ScriptStep::Respond(ok_resp())]);
+    let sum_leg = run_turn(
+        &TurnConfig::new(
+            g_legacy.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            Some(1.0),
+        ),
+        &tx_leg,
+        None,
+    )?;
+    assert!(sum_leg.all_clean());
+
+    // Switching to `--preview-tool on` on that directory refuses with `INCOMPATIBLE_SETUP` (exit 1).
+    let mock_switch = tmp.path().join("mock_switch");
+    fs::create_dir_all(&mock_switch)?;
+    fs::write(
+        mock_switch.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "SALTWORKS",
+                "status": 200,
+                "response": {
+                    "model": "openai/gpt-4o-mini-2024-07-18",
+                    "choices": [{"message": {"content": "MOCK"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": 0.0}
+                }
+            }]
+        }))?,
+    )?;
+    let state = card7_standard_preview_state(0)?;
+    write_to_seat(&g_legacy, "01", "act", "Saltworks", "LEGACY ACT")?;
+    write_card7_preview_state(&g_legacy, "01", "Saltworks", &state)?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let exit_switch = execute_cli(
+        [
+            "--error-format",
+            "json",
+            "turn",
+            "--game-dir",
+            g_legacy.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_switch.to_str().ok_or("utf8")?,
+            "--cap-credits",
+            "1.0",
+            "--preview-tool",
+            "on",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(exit_switch, 1);
+    let err_json: Json = serde_json::from_str(&String::from_utf8_lossy(&err))?;
+    assert_eq!(err_json["code"], json!("INCOMPATIBLE_SETUP"));
+
+    // 2. Game started with `--preview-tool on` locks `preview_tool: "on"` and `wording_arm: PREVIEW_WORDING_ARM`
+    // and refuses a subsequent `--preview-tool off` or omitted run with `INCOMPATIBLE_SETUP`.
+    let g_on = tmp.path().join("g_on");
+    write_to_seat(&g_on, "01", "talk", "Saltworks", "ON TALK")?;
+    let tx_on = ScriptedTransport::new(vec![ScriptStep::Respond(ok_resp())]);
+    let s_on = run_turn(
+        &TurnConfig::new(
+            g_on.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper),
+            false,
+            Some(1.0),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_on,
+        None,
+    )?;
+    assert!(s_on.all_clean());
+    let setup_on: Json = serde_json::from_str(&fs::read_to_string(g_on.join("relay/setup.json"))?)?;
+    assert_eq!(setup_on["preview_tool"], json!("on"));
+    assert_eq!(setup_on["wording_arm"], json!(PREVIEW_WORDING_ARM));
+
+    write_to_seat(&g_on, "01", "act", "Saltworks", "ON ACT")?;
+    let tx_mismatch = ScriptedTransport::new(vec![]);
+    let Err(err_off) = run_turn(
+        &TurnConfig::new(
+            g_on,
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            None,
+            false,
+            Some(1.0),
+        ), // defaults to Off
+        &tx_mismatch,
+        None,
+    ) else {
+        return Err("omitting --preview-tool on an `on` game must fail setup compatibility".into());
+    };
+    assert_eq!(err_off.code(), "INCOMPATIBLE_SETUP");
+    assert_eq!(err_off.exit_code(), 1);
+    assert_eq!(tx_mismatch.call_count(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn card7_parser_variants_prebook_and_state_validation_branches() -> TestResult {
+    // 1. `PreviewToolMode` helper methods (`parse` case-insensitive + invalid, `as_str`, `wording_arm`).
+    assert_eq!(PreviewToolMode::parse("off")?, PreviewToolMode::Off);
+    assert_eq!(PreviewToolMode::parse(" ON ")?, PreviewToolMode::On);
+    assert!(PreviewToolMode::parse("invalid").is_err());
+    assert_eq!(PreviewToolMode::Off.as_str(), "off");
+    assert_eq!(PreviewToolMode::On.as_str(), "on");
+    assert_eq!(PreviewToolMode::Off.wording_arm(), ACTIVE_WORDING_ARM);
+    assert_eq!(PreviewToolMode::On.wording_arm(), PREVIEW_WORDING_ARM);
+
+    // 2. CLI `--preview-tool` on `prebook-check` (`on`, `off`, and invalid value) + `turn` invalid value.
+    let tmp = TempDir::new()?;
+    let seats_p = tmp.path().join("pb_seats.json");
+    let wrap_p = tmp.path().join("pb_wrap.md");
+    fs::write(&wrap_p, "CLEAN WRAPPER")?;
+    fs::write(
+        &seats_p,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:8000",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 64,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5
+            }]
+        })
+        .to_string(),
+    )?;
+    for mode in ["on", "off"] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrap_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                mode,
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            0,
+            "prebook-check --preview-tool {mode} failed: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+    let mut bad_out = Vec::new();
+    let mut bad_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "--error-format",
+                "json",
+                "prebook-check",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrap_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "bogus",
+            ],
+            |_| None,
+            &mut bad_out,
+            &mut bad_err,
+        ),
+        1
+    );
+    let mut turn_bad_out = Vec::new();
+    let mut turn_bad_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "--error-format",
+                "json",
+                "turn",
+                "--game-dir",
+                tmp.path().to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "bogus",
+            ],
+            |_| None,
+            &mut turn_bad_out,
+            &mut turn_bad_err,
+        ),
+        1
+    );
+
+    // 3. Exercise every `MarketAction` variant, `SealedOrderBundle` field, `AssetId` kind, `BondSettlementMode`,
+    // `IntentTarget` variant, `CharterRole`, and mixed-case `hex32` through `parse_preview_tool_arguments` +
+    // `execute_preview_tool_call`.
+    let mixed_hex_a = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789";
+    let valid_all = json!({
+        "market_actions": [
+            {
+                "action_kind": "post_offer",
+                "side": "buy",
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "amount": 100,
+                "price_per_unit_cred": 150,
+                "domain_id": 0,
+                "is_hybrid": true
+            },
+            {
+                "action_kind": "post_offer",
+                "side": "sell",
+                "good": { "asset_kind": "refined", "good_index": 0 },
+                "amount": 50,
+                "price_per_unit_cred": 300,
+                "domain_id": null,
+                "is_hybrid": false
+            },
+            { "action_kind": "cancel_offer", "offer_id": 99 },
+            {
+                "action_kind": "create_check",
+                "payee": 1,
+                "asset": { "asset_kind": "cred", "good_index": null },
+                "send_max": 100,
+                "deliver_min": 50,
+                "due_turn": 2,
+                "expiration_turn": 4
+            },
+            { "action_kind": "cancel_check", "check_id": 88 },
+            {
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": { "asset_kind": "cred" },
+                "amount": 100,
+                "finish_after_turn": null,
+                "cancel_after_turn": 3,
+                "condition_hash": null,
+                "bond": null
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": { "asset_kind": "refined", "good_index": 0 },
+                "amount": 10,
+                "finish_after_turn": 1,
+                "cancel_after_turn": 4,
+                "condition_hash": mixed_hex_a,
+                "bond": {
+                    "good": { "asset_kind": "raw", "good_index": 1 },
+                    "required_units": 20,
+                    "deadline_turn": 3
+                }
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 2,
+                "asset": { "asset_kind": "cred" },
+                "amount": 50,
+                "cancel_after_turn": 3,
+                "bond": {
+                    "good": { "asset_kind": "raw", "good_index": 0 },
+                    "required_units": 5,
+                    "deadline_turn": 2,
+                    "mode": "seller_performance_bond"
+                }
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 2,
+                "asset": { "asset_kind": "cred" },
+                "amount": 50,
+                "cancel_after_turn": 3,
+                "bond": {
+                    "good": { "asset_kind": "cred" },
+                    "required_units": 5,
+                    "deadline_turn": 2,
+                    "mode": "buyer_dvp_payment"
+                }
+            },
+            { "action_kind": "cancel_expired_escrow", "escrow_id": 77 },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 10,
+                "recipient_seat": 1,
+                "target": { "target_kind": "vote_for_seat", "office_turn": 4, "candidate": 0 },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 11,
+                "recipient_seat": 2,
+                "target": { "target_kind": "preserve_cartel_membership", "office_turn": 4, "domain_id": 0, "beneficiary": 2 },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 12,
+                "recipient_seat": 3,
+                "target": { "target_kind": "reveal_preimage", "escrow_id": 5, "condition": mixed_hex_a },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            { "action_kind": "flag_wash_freeze", "target_seat": 1 },
+            {
+                "action_kind": "stand_for_office",
+                "proposed_tariffs_bps": [{ "seat": 0, "raw_bps": 100, "refined_bps": 200 }],
+                "cartel_admissions": [{ "domain_id": 0, "seat": 1 }],
+                "cartel_revocations": [{ "domain_id": 0, "seat": 2 }]
+            },
+            { "action_kind": "town_import", "good": { "asset_kind": "raw", "good_index": 0 }, "amount": 100 }
+        ],
+        "bundle": {
+            "converter_runs": [{ "recipe_idx": 0, "runs": 1 }],
+            "project_deliveries": [{ "project_id": 0, "batches": 1 }],
+            "atomic_swaps": [
+                {
+                    "swap_id": 1,
+                    "maker_seat": 0,
+                    "taker_seat": 1,
+                    "maker_asset": { "asset_kind": "cred" },
+                    "maker_amount": 100,
+                    "taker_asset": { "asset_kind": "raw", "good_index": 0 },
+                    "taker_amount": 50,
+                    "domain_id": 0
+                },
+                {
+                    "swap_id": 2,
+                    "maker_seat": 0,
+                    "taker_seat": 2,
+                    "maker_asset": { "asset_kind": "cred" },
+                    "maker_amount": 100,
+                    "taker_asset": { "asset_kind": "raw", "good_index": 1 },
+                    "taker_amount": 50,
+                    "domain_id": null
+                }
+            ],
+            "contract_deliveries": [
+                { "recipient_seat": 1, "good": { "asset_kind": "raw", "good_index": 0 }, "gross_amount": 10, "domain_id": 0, "dual_escrow_id": 7 },
+                { "recipient_seat": 2, "good": { "asset_kind": "raw", "good_index": 1 }, "gross_amount": 10, "domain_id": null, "dual_escrow_id": null }
+            ],
+            "dual_escrows": [
+                {
+                    "proposal_id": 1,
+                    "buyer_seat": 0,
+                    "seller_seat": 1,
+                    "good": { "asset_kind": "raw", "good_index": 0 },
+                    "required_units": 10,
+                    "payment_cred": 100,
+                    "buyer_bond_cred": 10,
+                    "seller_bond_cred": 10,
+                    "deadline_turn": 3,
+                    "domain_id": 0
+                },
+                {
+                    "proposal_id": 2,
+                    "buyer_seat": 0,
+                    "seller_seat": 2,
+                    "good": { "asset_kind": "raw", "good_index": 1 },
+                    "required_units": 10,
+                    "payment_cred": 100,
+                    "buyer_bond_cred": 10,
+                    "seller_bond_cred": 10,
+                    "deadline_turn": 3,
+                    "domain_id": null
+                }
+            ],
+            "debt_repayment_cred": 25,
+            "escrow_finishes": [
+                { "escrow_id": 1, "preimage": null },
+                { "escrow_id": 2, "preimage": mixed_hex_a }
+            ],
+            "check_cashes": [1, 2],
+            "council_vote": { "trade_minister": 0, "cartel_chair": 1 },
+            "charter_bids": [
+                { "role": "clearinghouse_broker", "bid_cred": 10 },
+                { "role": "customs_inspector", "bid_cred": 15 },
+                { "role": "oracle_auditor", "bid_cred": 20 }
+            ]
+        }
+    });
+    let parsed_all = parse_preview_tool_arguments(&valid_all.to_string(), 0)
+        .ok_or("all-variant preview tool args must parse")?;
+    assert_eq!(parsed_all.market_actions.len(), 16);
+    assert_eq!(parsed_all.bundle.charter_bids.len(), 3);
+    assert_eq!(parsed_all.bundle.debt_repayment_cred, 25);
+
+    let pub_state = card7_standard_preview_state(0)?;
+    let wire_ok = execute_preview_tool_call(&pub_state, &valid_all.to_string());
+    let wire_ok_val: Json = serde_json::from_str(&wire_ok)?;
+    assert_eq!(wire_ok_val["status"], json!("ok"));
+
+    // Also run empty-key omitted optionals in bundle and create_escrow without bond key at all.
+    let minimal = json!({
+        "market_actions": [{
+            "action_kind": "create_escrow",
+            "destination": 1,
+            "asset": { "asset_kind": "cred" },
+            "amount": 10,
+            "cancel_after_turn": 3
+        }],
+        "bundle": { "council_vote": null }
+    });
+    assert!(parse_preview_tool_arguments(&minimal.to_string(), 0).is_some());
+
+    // 4. Exhaust every negative parser branch (`parse_asset_val`, `parse_hex32`, `parse_bond_opt`,
+    // `parse_intent_target`, `parse_market_action`, `parse_bundle_obj`).
+    let malformed_cases = [
+        "123",
+        r#"{"market_actions": "not-array", "bundle": {}}"#,
+        r#"{"market_actions": [], "bundle": "not-obj"}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "hold", "good": {"asset_kind": "cred"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "cred", "good_index": 0}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "raw"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "unknown"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": 7, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "cred"}, "amount": 1, "price_per_unit_cred": 1, "is_hybrid": "yes"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "bond": 123}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "bond": {"good": {"asset_kind": "cred"}, "required_units": 1, "deadline_turn": 2, "mode": "bad"}}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": "short"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": 42}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "record_intent_pledge", "pledge_id": 1, "recipient_seat": 1, "target": {"target_kind": "bad"}, "honor_weight": 1, "memo_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "bogus_kind"}], "bundle": {}}"#,
+        r#"{"market_actions": [], "bundle": {"charter_bids": [{"role": "bad", "bid_cred": 10}]}}"#,
+        r#"{"market_actions": [], "bundle": {"unknown_key": 1}}"#,
+    ];
+    for raw in malformed_cases {
+        assert!(
+            parse_preview_tool_arguments(raw, 0).is_none(),
+            "expected None for {raw}"
+        );
+    }
+
+    // 5. Exercise every remaining `load_preview_states_for_act_turn` refusal branch in `relay.rs`.
+    let relay_seats = tmp.path().join("state_seats.json");
+    let mock_dir = tmp.path().join("state_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "SALTWORKS",
+                "status": 200,
+                "response": {
+                    "model": "Qwen/Qwen3-14B",
+                    "choices": [{"message": {"content": "OK"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                }
+            }]
+        }))?,
+    )?;
+    write_card7_four_seat_local_file(&relay_seats, "http://127.0.0.1:8000", 1.5)?;
+
+    let run_state_err = |case_name: &str,
+                         setup_preview_file: &dyn Fn(&Path) -> TestResult|
+     -> Result<String, Box<dyn Error>> {
+        let gdir = tmp.path().join(case_name);
+        write_to_seat(&gdir, "01", "act", "Saltworks", "ACT PROMPT")?;
+        let ppath = gdir.join("to-seat/day-01-act-Saltworks.preview-state.json");
+        setup_preview_file(&ppath)?;
+        let mut o = Vec::new();
+        let mut e = Vec::new();
+        let code = execute_cli(
+            [
+                "--error-format",
+                "json",
+                "turn",
+                "--game-dir",
+                gdir.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                relay_seats.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "5.0",
+                "--preview-tool",
+                "on",
+            ],
+            |_| None,
+            &mut o,
+            &mut e,
+        );
+        assert_eq!(code, 1, "{case_name} must exit 1");
+        let parsed: Json = serde_json::from_str(&String::from_utf8_lossy(&e))?;
+        Ok(parsed["code"].as_str().ok_or("code")?.to_owned())
+    };
+
+    assert_eq!(
+        run_state_err("ps_isdir", &|p| {
+            fs::create_dir_all(p)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_empty_obj", &|p| {
+            fs::write(p, "{}")?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_baseline_day_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.baseline_predicates.turn = 2;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_DAY_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_baseline_seat_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.baseline_predicates.seat = 1;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_SEAT_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_seats_len_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.seats.pop();
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_SEAT_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_wrong_phase", &|p| {
+            let mut s = pub_state.clone();
+            s.phase = TurnPhase::Completed;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_table_id_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.table_id = TableId(999_999);
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_probe_invalid_config", &|p| {
+            let mut s = pub_state.clone();
+            s.last_potentials.clear();
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
 
     Ok(())
 }

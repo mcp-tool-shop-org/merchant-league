@@ -19,7 +19,7 @@ use crate::transport::{
     LocalOpenAiTransport, MockDirTransport, RawHttpResponse, Transport, TransportError,
     UreqTransport,
 };
-use crate::wording::wording_slot;
+use crate::wording::{PreviewToolMode, wording_slot};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -85,6 +85,7 @@ Options:
   --live                           Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
   --cap-credits <n>                Cumulative credit cap checked against relay/calls.jsonl before each call
   --mock-dir <dir>                 Run against canned offline responses in <dir>/responses.json
+  --preview-tool <off|on>          Enable Card 7 what-if preview tool (off default)
   --error-format <text|json>       Error output encoding on stderr: text (default) or json
   --log-level <level>              Log verbosity: silent, normal (default), verbose, or debug (or LEAGUE_LOG_LEVEL)
   -q, --silent                     Shorthand for --log-level silent
@@ -122,6 +123,8 @@ pub struct PrebookCheckArgs {
     pub mixed_scratchpad_arm: bool,
     /// `--allow-vm-host <host>`
     pub allowed_vm_hosts: Vec<String>,
+    /// `--preview-tool <off|on>`
+    pub preview_tool: PreviewToolMode,
     /// `--error-format <text|json>`
     pub error_format: ErrorFormat,
     /// Explicit CLI `--log-level` / `-q` / `-v` / `--debug` override, if passed.
@@ -159,6 +162,8 @@ pub struct TurnArgs {
     pub allowed_vm_hosts: Vec<String>,
     /// `--mock-dir <dir>`
     pub mock_dir: Option<PathBuf>,
+    /// `--preview-tool <off|on>`
+    pub preview_tool: PreviewToolMode,
     /// `--error-format <text|json>`
     pub error_format: ErrorFormat,
     /// Explicit CLI `--log-level` / `-q` / `-v` / `--debug` override, if passed.
@@ -427,6 +432,7 @@ where
     let mut cap_gpu_secs: Option<f64> = None;
     let mut allowed_vm_hosts: Vec<String> = Vec::new();
     let mut mock_dir: Option<PathBuf> = None;
+    let mut preview_tool = PreviewToolMode::default();
 
     let mut idx = 1;
     while idx < sub_tokens.len() {
@@ -587,6 +593,11 @@ where
                 mock_dir = Some(PathBuf::from(val));
                 idx += step;
             }
+            "--preview-tool" => {
+                let (val, step) = take_flag_value(flag, inline_val, sub_tokens, idx)?;
+                preview_tool = PreviewToolMode::parse(val)?;
+                idx += step;
+            }
             other => {
                 if !other.starts_with('-') {
                     return Err(RelayError::Usage(
@@ -631,6 +642,7 @@ where
         cap_gpu_secs,
         allowed_vm_hosts,
         mock_dir,
+        preview_tool,
         error_format,
         log_level,
     }))
@@ -881,6 +893,7 @@ fn parse_prebook_check_args(
     let mut scratchpad_requested: Option<bool> = None;
     let mut mixed_scratchpad_arm = false;
     let mut allowed_vm_hosts: Vec<String> = Vec::new();
+    let mut preview_tool = PreviewToolMode::default();
 
     let mut idx = 1;
     while idx < tokens.len() {
@@ -980,6 +993,11 @@ fn parse_prebook_check_args(
                 }
                 idx += step;
             }
+            "--preview-tool" => {
+                let (val, step) = take_flag_value(flag, inline_val, tokens, idx)?;
+                preview_tool = PreviewToolMode::parse(val)?;
+                idx += step;
+            }
             "--live" => {
                 return Err(RelayError::Usage(
                     "prebook-check runs offline against mock transport only; omit --live"
@@ -1011,6 +1029,7 @@ fn parse_prebook_check_args(
         scratchpad_requested,
         mixed_scratchpad_arm,
         allowed_vm_hosts,
+        preview_tool,
         error_format,
         log_level,
     }))
@@ -1343,6 +1362,7 @@ fn run_prebook_check(
     .with_mixed_scratchpad_arm(seats.mixed_scratchpad_arm || args.mixed_scratchpad_arm)
     .with_allowed_vm_hosts(effective_vm_hosts)
     .with_log_level(log_level)
+    .with_preview_tool(args.preview_tool)
     .with_extra_redaction_keys(redaction_keys.to_vec());
 
     validate_scratchpad_setup(&cfg)?;
@@ -1501,6 +1521,7 @@ where
     .with_mixed_scratchpad_arm(turn_args.mixed_scratchpad_arm)
     .with_allowed_vm_hosts(turn_args.allowed_vm_hosts.clone())
     .with_log_level(effective_log_level)
+    .with_preview_tool(turn_args.preview_tool)
     .with_extra_redaction_keys(redaction_keys.to_vec());
 
     validate_scratchpad_setup(&base_cfg)?;
