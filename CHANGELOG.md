@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Docs (`README.md`, handbook `playing-a-turn`): say exactly when `--resume` with another `--save-dir` is refused, what an in-season resume into another directory leaves behind, and that save files are not renamed or moved by hand (follow-ups B1, C3 and C5 of the Card 5 Part B2b review).
+
 - Wave 2 Card 5 Part B2b (`league-seat-types`, `league-seat-ui`, `league-tui`, `league-core`, `SHIP_GATE.md`, `README.md`, `site/`, `docs/club-mode-design.md`, `CHANGELOG.md`, `atlas`): B2a review closures, Lobby & End-of-Season interactive screens with `.seal` wipe on replay export, `league-tui` ship gates, and player/handbook docs (`2026-11-19`):
   - **What a player can now do from source:** Launch `league-tui`, set up a `4–6`-seat offline Club Mode table in the interactive Lobby (`Human` or `ClubBot`, clear `SeedPool::Dev` `0..=9999` seed, `180–300 s` or untimed turn clock, optional masked 4-digit table-local Curtain PINs, with CLI flags overriding Lobby and saved `.seal` choices), play a full `24..=32`-turn season behind Privacy Curtains with `400 ms` dead time and mid-turn `.save.json`/`.seal` autosave + `--resume`, inspect the Sweep Chronicle, step through the public `AwaitingMandateReveal` standby phase, view all four End-of-Season tabs (`Scoreboard`, `Mandates`, `Metrics & Marks`, `Replay Export`), and export a verified `club-<id>.replay.json` that wipes the private `.seal` sidecar on success (or keeps `.seal` and reports `TUI_REPLAY_EXPORT_FAILED` with exit `3` on failure).
   - **Part 0 B2a review & FIX 1 / FIX 2 hardening (`B1`–`B4`, `C1`–`C5`):**
