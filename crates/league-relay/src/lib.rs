@@ -16,7 +16,7 @@ pub mod transport;
 pub mod wording;
 
 pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ErrorFormat};
-pub use error::{RelayError, StructuredError, ToStructuredError};
+pub use error::{PreviewStateErrorKind, RelayError, StructuredError, ToStructuredError};
 pub use relay::{
     CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
     Round, SeatOutcome, SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary,
@@ -46,13 +46,17 @@ pub use transport::{
     Transport, TransportError, UreqTransport, map_local_ureq_error, map_ureq_error,
 };
 pub use wording::{
-    ACTIVE_WORDING_ARM, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
-    MAX_INTENT_HEADER_DEPTH, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS,
-    MODEL_FACING_WORDING, NegotiationInputs, SanitizedWhisper, UntrustedWhisper, WordingEntry,
-    cap_words_and_chars, escape_default_ignorable_code_points, extract_scratchpad_update,
+    ACTIVE_WORDING_ARM, AiPreviewWireOutput, EMC_OLDER_REPLY_EXCERPT_CHARS,
+    EMC_VERBATIM_TURN_WINDOW, MAX_INTENT_HEADER_DEPTH, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
+    MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING,
+    NegotiationInputs, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode, SanitizedWhisper,
+    UntrustedWhisper, WordingEntry, build_preview_turn_orders_tool_definition, cap_words_and_chars,
+    escape_default_ignorable_code_points, execute_preview_tool_call, extract_scratchpad_update,
     format_negotiation_block, format_sanitized_scratchpad_section, format_scratchpad_section,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present,
-    render_json_escaped_whisper_line, render_wording_slot_with, render_wording_template_with,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, parse_preview_tool_arguments,
+    preview_wording_slot, preview_wording_template, render_call_limit_reached_wire_json,
+    render_engine_refusal_wire_json, render_json_escaped_whisper_line,
+    render_malformed_tool_call_wire_json, render_wording_slot_with, render_wording_template_with,
     sanitize_scratchpad_for_prompt, sanitize_whisper, split_negotiation_sections,
     strip_thinking_tags, try_render_wording_template_with, wording_slot, wording_template,
 };

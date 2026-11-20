@@ -1453,6 +1453,7 @@ dependencies = [
  "hex",
  "icu_normalizer",
  "icu_properties",
+ "league-core",
  "league-error",
  "league-relay",
  "same-file",

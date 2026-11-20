@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-20 from commit 8b7ffeb by Atlas 1.26.0.
+Mapped at 2026-11-20 from commit 5f5784e by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,15 +8,11 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 14 parts, mostly Rust (373 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-20 (a4ec972)
+## What changed since 2026-11-20 (8b7ffeb)
 
-- CI's push trigger now also names `.dockerignore` and `Dockerfile`.
-- CI now also runs scripts/smoke-container.sh.
-- .dockerignore is now read by scripts/smoke-container.sh.
-- .gitignore is now read by scripts/smoke-container.sh.
-- CHANGELOG.md is now also read by scripts/smoke-container.sh.
-- And 10 more new writers and readers of places.
-- 3 files added and 9 changed content, across 5 parts.
+- league-relay now imports league-core.
+- crates/league-core/ is now also read by crates/league-relay/Cargo.toml.
+- 21 files changed content, across 6 parts.
 
 ## What comes in
 
@@ -44,7 +40,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 **league-tui** (a command people run) runs crates/league-tui/src/main.rs and reaches league-core, league-error, league-gen, league-seat-types and league-seat-ui.
 
-**league-relay** (a command people run) runs crates/league-relay/src/main.rs and reaches league-error.
+**league-relay** (a command people run) runs crates/league-relay/src/main.rs and reaches league-core, league-error and league-seat-types.
 
 **testnet_escrow_expiry** (a command people run with `cargo run --example testnet_escrow_expiry`) runs crates/league-ledger/examples/testnet_escrow_expiry.rs and reaches league-error.
 
@@ -57,8 +53,8 @@ CI writes only to site/audit-report.json, which is not tracked.
 ## What breaks what
 
 - **league-error** is imported by 5 parts (league-core, league-ledger, league-relay, league-seat-types, league-standalone) and sits on the path of 6 doors.
-- **league-seat-types** is imported by 4 parts (league-core, league-gen, league-seat-ui, league-tui) and sits on the path of 2 doors.
-- **league-core** is imported by 3 parts (league-gen, league-standalone, league-tui) and sits on the path of 2 doors.
+- **league-core** is imported by 4 parts (league-gen, league-relay, league-standalone, league-tui) and sits on the path of 3 doors.
+- **league-seat-types** is imported by 4 parts (league-core, league-gen, league-seat-ui, league-tui) and sits on the path of 3 doors.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 - **league-gen** is imported by 1 part (league-tui) and sits on the path of 2 doors.
 - **league-seat-ui** is imported by 1 part (league-tui) and sits on the path of 2 doors.
@@ -112,7 +108,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 26 writes and 14 reads use paths built at run time and are not named here.
+- 26 writes and 15 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 14 writes and 21 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.

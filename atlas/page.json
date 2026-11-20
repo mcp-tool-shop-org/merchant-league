@@ -20,7 +20,20 @@
       "partLabel": "league-error"
     },
     {
-      "doors": 2,
+      "doors": 3,
+      "importedBy": [
+        "league-gen",
+        "league-relay",
+        "league-standalone",
+        "league-tui"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-core",
+      "partLabel": "league-core"
+    },
+    {
+      "doors": 3,
       "importedBy": [
         "league-core",
         "league-gen",
@@ -31,18 +44,6 @@
       "kind": "part",
       "name": "league-seat-types",
       "partLabel": "league-seat-types"
-    },
-    {
-      "doors": 2,
-      "importedBy": [
-        "league-gen",
-        "league-standalone",
-        "league-tui"
-      ],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-core",
-      "partLabel": "league-core"
     },
     {
       "doors": 4,
@@ -93,66 +94,38 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 3,
-      "changed": 9,
+      "added": 0,
+      "changed": 21,
       "moved": 0,
-      "parts": 5,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI's push trigger now also names `.dockerignore` and `Dockerfile`.",
+        "kind": "import-added",
+        "sentence": "league-relay now imports league-core.",
         "subjects": [
-          ".github/workflows/ci.yml"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also runs scripts/smoke-container.sh.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "scripts/smoke-container.sh"
+          "league-relay",
+          "league-core"
         ]
       },
       {
         "kind": "landing",
-        "sentence": ".dockerignore is now read by scripts/smoke-container.sh.",
+        "sentence": "crates/league-core/ is now also read by crates/league-relay/Cargo.toml.",
         "subjects": [
-          ".dockerignore",
-          "scripts/smoke-container.sh"
+          "crates/league-core/",
+          "crates/league-relay/Cargo.toml"
         ]
-      },
-      {
-        "kind": "landing",
-        "sentence": ".gitignore is now read by scripts/smoke-container.sh.",
-        "subjects": [
-          ".gitignore",
-          "scripts/smoke-container.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "CHANGELOG.md is now also read by scripts/smoke-container.sh.",
-        "subjects": [
-          "CHANGELOG.md",
-          "scripts/smoke-container.sh"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 10 more new writers and readers of places.",
-        "subjects": []
       },
       {
         "kind": "counts",
-        "sentence": "3 files added and 9 changed content, across 5 parts.",
+        "sentence": "21 files changed content, across 6 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "a4ec972deed50080e4902dcc2c7fbfb1f3e5b00b",
-      "generatedAt": "2026-11-20T02:55:32.664Z"
+      "commit": "8b7ffeb43a8f94d6e892bf97bada37aa91b33721",
+      "generatedAt": "2026-11-20T04:19:19.440Z"
     },
     "unchanged": false
   },
@@ -238,7 +211,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "8b7ffeb43a8f94d6e892bf97bada37aa91b33721",
+  "commit": "5f5784e7dba67d1c32d27b9db49323fded7cc7d4",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -455,9 +428,19 @@
           "files": 9
         },
         {
+          "boundary": "league-core",
+          "depth": 3,
+          "files": 13
+        },
+        {
           "boundary": "league-error",
           "depth": 3,
           "files": 1
+        },
+        {
+          "boundary": "league-seat-types",
+          "depth": 5,
+          "files": 12
         }
       ],
       "runs": [
@@ -623,6 +606,11 @@
     {
       "from": "league-relay",
       "fromTests": false,
+      "to": "league-core"
+    },
+    {
+      "from": "league-relay",
+      "fromTests": false,
       "to": "league-error"
     },
     {
@@ -658,10 +646,10 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-20T04:19:19.440Z",
+  "generatedAt": "2026-11-20T09:26:55.154Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "26 writes and 14 reads use paths built at run time and are not named here.",
+    "26 writes and 15 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "14 writes and 21 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
@@ -704,7 +692,7 @@
   "summaryFrom": "person",
   "testFiles": 62,
   "testedBy": {
-    "league-core": 18,
+    "league-core": 19,
     "league-error": 7,
     "league-gen": 10,
     "league-ledger": 8,

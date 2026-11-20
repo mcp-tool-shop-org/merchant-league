@@ -123,6 +123,242 @@ const NON_SEAT_WORKSPACE_CRATES: [&str; 7] = [
     "league-tui",
 ];
 
+const ALLOWED_LEAGUE_RELAY_CORE_ITEMS: &[&str] = &[
+    // Card 7 public AI preview API
+    "PublicPreviewState",
+    "AiPreviewRequest",
+    "WhatIfPreview",
+    "preview_seat_bundle",
+    // Minimum plain value types needed by `PublicPreviewState`, `AiPreviewRequest`, and `WhatIfPreview`
+    "AssetId",
+    "MarketAction",
+    "OfferProposal",
+    "OfferSide",
+    "CheckProposal",
+    "EscrowProposal",
+    "BondProposal",
+    "BondSettlementMode",
+    "CommitmentHash",
+    "IntentPledge",
+    "IntentTarget",
+    "CouncilPlatform",
+    "SealedOrderBundle",
+    "ConverterRunOrder",
+    "ProjectDeliveryOrder",
+    "AtomicSwapProposal",
+    "ContractDeliveryOrder",
+    "DualEscrowProposal",
+    "EscrowFinishUnlock",
+    "PreimageSecret",
+    "CouncilVoteBallot",
+    "CharterBidOrder",
+    "CharterRole",
+    "PublicCheckOutcome",
+    "PublicSwapOutcome",
+    "CreditTier",
+    "SeatIdentity",
+    "TurnPhase",
+    "FillKind",
+];
+
+fn skip_balanced_braces(tokens: &[Tok], pos: &mut usize) {
+    if !matches!(tokens.get(*pos), Some(Tok::LBrace)) {
+        return;
+    }
+    let mut depth = 0usize;
+    while *pos < tokens.len() {
+        match tokens[*pos] {
+            Tok::LBrace => depth += 1,
+            Tok::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    *pos += 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+        *pos += 1;
+    }
+}
+
+fn check_league_core_use_suffix(
+    tokens: &[Tok],
+    pos: &mut usize,
+    rel_path: &str,
+) -> Result<(), String> {
+    if matches!(tokens.get(*pos), Some(Tok::LBrace)) {
+        *pos += 1;
+        while *pos < tokens.len() {
+            if matches!(tokens.get(*pos), Some(Tok::RBrace)) {
+                *pos += 1;
+                return Ok(());
+            }
+            check_league_core_use_suffix(tokens, pos, rel_path)?;
+            if matches!(tokens.get(*pos), Some(Tok::Other(','))) {
+                *pos += 1;
+            }
+        }
+        return Err(format!(
+            "league-relay/{rel_path}: unterminated `league_core` use-group"
+        ));
+    }
+
+    if matches!(tokens.get(*pos), Some(Tok::Other('*'))) {
+        return Err(format!(
+            "league-relay/{rel_path}: glob import from `league_core` is forbidden"
+        ));
+    }
+
+    let Some(Tok::Ident(item)) = tokens.get(*pos) else {
+        return Err(format!(
+            "league-relay/{rel_path}: unsupported `league_core::` path syntax"
+        ));
+    };
+    if item == "self" {
+        return Err(format!(
+            "league-relay/{rel_path}: `use league_core::self` module binding is forbidden"
+        ));
+    }
+    if !ALLOWED_LEAGUE_RELAY_CORE_ITEMS.contains(&item.as_str()) {
+        return Err(format!(
+            "league-relay/{rel_path} names non-allowlisted `league_core::{item}`"
+        ));
+    }
+    let is_type_or_enum = item.chars().next().is_some_and(char::is_uppercase);
+    *pos += 1;
+
+    if matches!(tokens.get(*pos), Some(Tok::Other(':')))
+        && matches!(tokens.get(*pos + 1), Some(Tok::Other(':')))
+    {
+        if !is_type_or_enum {
+            return Err(format!(
+                "league-relay/{rel_path}: nested path under `league_core::{item}::` is forbidden"
+            ));
+        }
+        *pos += 2;
+        if matches!(tokens.get(*pos), Some(Tok::LBrace)) {
+            skip_balanced_braces(tokens, pos);
+            return Ok(());
+        }
+        if matches!(tokens.get(*pos), Some(Tok::Other('*'))) {
+            return Err(format!(
+                "league-relay/{rel_path}: glob import under `league_core::{item}::*` is forbidden"
+            ));
+        }
+        if matches!(tokens.get(*pos), Some(Tok::Ident(_))) {
+            *pos += 1;
+        }
+    }
+
+    if matches!(tokens.get(*pos), Some(Tok::Ident(kw)) if kw == "as") {
+        *pos += 1;
+        if matches!(tokens.get(*pos), Some(Tok::Ident(_))) {
+            *pos += 1;
+        }
+    }
+    Ok(())
+}
+
+fn check_league_relay_core_allowlist(files: &[(String, String)]) -> Result<(), String> {
+    for (rel_path, src) in files {
+        let normalized = rel_path.replace('\\', "/");
+        let tokens = tokenize_rust(src);
+
+        if normalized.starts_with("tests/") {
+            for tok in &tokens {
+                if let Tok::Ident(ident) = tok
+                    && (ident == "engine_internals"
+                        || ident == "SweepMode"
+                        || matches!(
+                            ident.as_str(),
+                            "from_host_parts" | "with_own_mandate" | "observe_seat_with_mandate"
+                        )
+                        || FORBIDDEN_RAW_FNS.contains(&ident.as_str()))
+                {
+                    return Err(format!(
+                        "league-relay/{rel_path} test file references forbidden engine-internal symbol `{ident}`"
+                    ));
+                }
+            }
+            continue;
+        }
+
+        let mut i = 0usize;
+        while i < tokens.len() {
+            if matches!(tokens.get(i), Some(Tok::Pound))
+                && matches!(tokens.get(i + 1), Some(Tok::LBracket))
+                && matches!(tokens.get(i + 2), Some(Tok::Ident(kw)) if kw == "path")
+            {
+                return Err(format!(
+                    "league-relay/{rel_path}: `#[path]` attribute is forbidden"
+                ));
+            }
+            if matches!(tokens.get(i), Some(Tok::Ident(kw)) if kw == "extern")
+                && matches!(tokens.get(i + 1), Some(Tok::Ident(kw)) if kw == "crate")
+                && matches!(tokens.get(i + 2), Some(Tok::Ident(krate)) if krate == "league_core")
+            {
+                return Err(format!(
+                    "league-relay/{rel_path}: `extern crate league_core` is forbidden"
+                ));
+            }
+
+            if matches!(tokens.get(i), Some(Tok::Ident(kw)) if kw == "pub") {
+                let mut scan = i + 1;
+                if matches!(tokens.get(scan), Some(Tok::LParen)) {
+                    while scan < tokens.len() && !matches!(tokens.get(scan), Some(Tok::RParen)) {
+                        scan += 1;
+                    }
+                    scan += 1;
+                }
+                if matches!(tokens.get(scan), Some(Tok::Ident(kw)) if kw == "use") {
+                    let mut p = scan + 1;
+                    let mut saw_semi = false;
+                    while p < tokens.len() {
+                        if matches!(tokens.get(p), Some(Tok::Ident(krate)) if krate == "league_core")
+                        {
+                            return Err(format!(
+                                "league-relay/{rel_path}: re-exporting `league_core` items with `pub use` is forbidden"
+                            ));
+                        }
+                        if matches!(tokens.get(p), Some(Tok::Semi)) {
+                            saw_semi = true;
+                            break;
+                        }
+                        p += 1;
+                    }
+                    if !saw_semi {
+                        return Err(format!(
+                            "league-relay/{rel_path}: unterminated `pub use` near `league_core`"
+                        ));
+                    }
+                }
+            }
+
+            if matches!(tokens.get(i), Some(Tok::Ident(krate)) if krate == "league_core") {
+                if matches!(tokens.get(i + 1), Some(Tok::Ident(kw)) if kw == "as")
+                    || matches!(tokens.get(i + 1), Some(Tok::Semi))
+                {
+                    return Err(format!(
+                        "league-relay/{rel_path}: bare or aliased `league_core` crate import is forbidden"
+                    ));
+                }
+                if matches!(tokens.get(i + 1), Some(Tok::Other(':')))
+                    && matches!(tokens.get(i + 2), Some(Tok::Other(':')))
+                {
+                    let mut pos = i + 3;
+                    check_league_core_use_suffix(&tokens, &mut pos, rel_path)?;
+                    i = pos;
+                    continue;
+                }
+            }
+
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
 const ALLOWED_SEAT_TYPES: &[&str] = &[
     // Seat-safe `league-core` observation, preview, predicate, and value types
     "SeatObservation",
@@ -8634,18 +8870,37 @@ fn check_workspace_manifests_and_crate_sources(
                     ));
                 }
                 if (section == "[features]" && code_part.contains("league-core/"))
-                    || (code_part.contains("league-core") && code_part.contains("features"))
+                    || ((code_part.contains("league-core") || section.contains("league-core"))
+                        && code_part.contains("features"))
                 {
                     return Err(format!(
                         "{crate_name}/Cargo.toml must not pass feature flags to `league-core`"
                     ));
                 }
-                if (crate_name == "league-ledger" || crate_name == "league-relay")
+                if crate_name == "league-ledger"
                     && section != "[package]"
                     && code_part.contains("league-core")
                 {
                     return Err(format!(
                         "{crate_name}/Cargo.toml must not depend on or reference `league-core` (in `{section}`)"
+                    ));
+                }
+                if crate_name == "league-relay"
+                    && (section.contains("dev-dependencies")
+                        || section.contains("build-dependencies")
+                        || section.contains("features"))
+                    && code_part.contains("league-core")
+                {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml may depend on `league-core` only in `[dependencies]` without features (found in `{section}`)"
+                    ));
+                }
+                if crate_name == "league-relay"
+                    && (section == "[lib]" || section == "[[bin]]")
+                    && code_part.contains("tests")
+                {
+                    return Err(format!(
+                        "{crate_name}/Cargo.toml [lib]/[[bin]] target must not point into `tests/`"
                     ));
                 }
                 if crate_name == "league-tui" && section == "[lib]" {
@@ -8663,8 +8918,15 @@ fn check_workspace_manifests_and_crate_sources(
 
             let forbidden_for_crate: &[&str] = if crate_name == "league-error" {
                 &["league-core", "league-gen", "league-standalone"]
-            } else if crate_name == "league-ledger" || crate_name == "league-relay" {
+            } else if crate_name == "league-ledger" {
                 &["league-core"]
+            } else if crate_name == "league-relay" {
+                &[
+                    "league-gen",
+                    "league-standalone",
+                    "league-tui",
+                    "league-season",
+                ]
             } else {
                 &[]
             };
@@ -8687,16 +8949,24 @@ fn check_workspace_manifests_and_crate_sources(
             }
 
             let loaded = load_crate_rs_files(&crate_dir)?;
-            let crate_aliases = collect_crate_restricted_aliases_from_files(&loaded);
+            let alias_inputs: Vec<(String, String)> = loaded
+                .iter()
+                .filter(|(rel, _)| crate_name != "league-relay" || !rel.starts_with("tests/"))
+                .cloned()
+                .collect();
+            let crate_aliases = collect_crate_restricted_aliases_from_files(&alias_inputs);
             let is_non_seat_crate = NON_SEAT_WORKSPACE_CRATES.contains(&crate_name.as_str());
             let mut seat_files: Vec<(String, String)> = Vec::new();
 
             for (rel_in_crate, src) in loaded {
+                let is_relay_integration_test =
+                    crate_name == "league-relay" && rel_in_crate.starts_with("tests/");
                 scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
                     &rel_in_crate,
                     rel_in_crate == "src/lib.rs",
                     &src,
-                    !is_non_seat_crate || crate_name == "league-tui",
+                    (!is_non_seat_crate && !is_relay_integration_test)
+                        || crate_name == "league-tui",
                     &crate_aliases,
                 )?;
 
@@ -8730,7 +9000,7 @@ fn check_workspace_manifests_and_crate_sources(
                             ));
                         }
                     }
-                } else if is_non_seat_crate {
+                } else if is_non_seat_crate || is_relay_integration_test {
                     for tok in tokenize_rust(&src) {
                         if let Tok::Ident(ident) = tok
                             && (ident == "engine_internals"
@@ -8756,6 +9026,9 @@ fn check_workspace_manifests_and_crate_sources(
             if !seat_files.is_empty() {
                 let check_all_paths = crate_name != "league-relay";
                 scan_seat_files_two_pass(&seat_files, false, check_all_paths)?;
+                if crate_name == "league-relay" {
+                    check_league_relay_core_allowlist(&seat_files)?;
+                }
             }
         }
         checked_crates.push(crate_name);
@@ -9086,7 +9359,8 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
     }
     assert!(check_workspace_manifests_and_crate_sources(&case_f).is_err());
 
-    // Control G: `league-tui/Cargo.toml` enables `engine-internals` or `league-relay` adds `league-core` -> Err.
+    // Control G: `league-tui/Cargo.toml` enables `engine-internals` -> Err; `league-ledger` adds `league-core` -> Err;
+    // `league-relay` adds `league-core` with `engine-internals` -> Err; `league-relay` adds plain `league-core` -> Ok.
     let case_g1 = tmp_root.join("case_g1");
     if let Err(err) = write_minimal_workspace_tree(&case_g1) {
         panic!("setup case_g1: {err}");
@@ -9104,12 +9378,36 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         panic!("setup case_g2: {err}");
     }
     if let Err(err) = fs::write(
-        case_g2.join("crates/league-relay/Cargo.toml"),
+        case_g2.join("crates/league-ledger/Cargo.toml"),
         "[dependencies]\nleague-core = { path = \"../league-core\" }\n",
     ) {
         panic!("write case_g2: {err}");
     }
     assert!(check_workspace_manifests_and_crate_sources(&case_g2).is_err());
+
+    let case_g3 = tmp_root.join("case_g3");
+    if let Err(err) = write_minimal_workspace_tree(&case_g3) {
+        panic!("setup case_g3: {err}");
+    }
+    if let Err(err) = fs::write(
+        case_g3.join("crates/league-relay/Cargo.toml"),
+        "[dependencies]\nleague-core = { path = \"../league-core\", features = [\"engine-internals\"] }\n",
+    ) {
+        panic!("write case_g3: {err}");
+    }
+    assert!(check_workspace_manifests_and_crate_sources(&case_g3).is_err());
+
+    let case_g4 = tmp_root.join("case_g4");
+    if let Err(err) = write_minimal_workspace_tree(&case_g4) {
+        panic!("setup case_g4: {err}");
+    }
+    if let Err(err) = fs::write(
+        case_g4.join("crates/league-relay/Cargo.toml"),
+        "[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+    ) {
+        panic!("write case_g4: {err}");
+    }
+    assert!(check_workspace_manifests_and_crate_sources(&case_g4).is_ok());
 
     // Control H: `league-seat-ui/src/lib.rs` imports `engine_internals` -> Err; comment near-miss -> Ok.
     let case_h = tmp_root.join("case_h");
@@ -9632,7 +9930,7 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
         ),
     ];
 
-    for target_crate in ["league-relay", "league-ledger"] {
+    for target_crate in ["league-ledger", "league-seat-types", "league-seat-ui"] {
         for (label, template) in routes {
             let root = unique_tmp_dir(&format!("b2_{target_crate}_{label}"));
             if let Err(err) = write_minimal_workspace_tree(&root) {
@@ -9657,7 +9955,7 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
         }
     }
 
-    // Indirect route through a newly added workspace helper crate (`league-relay -> league-helper -> league-core`).
+    // Indirect route through a newly added workspace helper crate (`league-ledger -> league-helper -> league-core`).
     let root = unique_tmp_dir("b2_indirect_new_crate");
     if let Err(err) = write_minimal_workspace_tree(&root) {
         panic!("setup workspace: {err}");
@@ -9676,20 +9974,59 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
         "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
-        root.join("crates/league-relay/Cargo.toml"),
-        "[package]\nname = \"league-relay\"\n[dependencies]\nhelper = { package = \"league-helper\", path = \"../league-helper\" }\n",
+        root.join("crates/league-ledger/Cargo.toml"),
+        "[package]\nname = \"league-ledger\"\n[dependencies]\nhelper = { package = \"league-helper\", path = \"../league-helper\" }\n",
     );
     let err = check_workspace_manifests_and_crate_sources(&root)
         .err()
         .unwrap_or_else(|| panic!("indirect dep via league-helper must fail guard"));
-    println!("PLANTED_DEP_ROUTE league-relay:indirect_league_helper => {err}");
+    println!("PLANTED_DEP_ROUTE league-ledger:indirect_league_helper => {err}");
     assert!(
-        err.contains("league-relay")
+        err.contains("league-ledger")
             && err.contains("league-helper")
             && err.contains("league-core"),
         "unexpected error: {err}"
     );
     let _ = fs::remove_dir_all(&root);
+
+    // Relay host/feature routes must still fail guard.
+    for (label, manifest) in [
+        (
+            "relay_engine_internals_inline",
+            "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\", features = [\"engine-internals\"] }\n",
+        ),
+        (
+            "relay_engine_internals_table",
+            "[package]\nname = \"league-relay\"\n[dependencies.league-core]\npath = \"../league-core\"\nfeatures = [\"engine-internals\"]\n",
+        ),
+        (
+            "relay_features_slash_route",
+            "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n[features]\ndefault = [\"league-core/engine-internals\"]\n",
+        ),
+        (
+            "relay_indirect_via_league_tui",
+            "[package]\nname = \"league-relay\"\n[dependencies]\ntui = { package = \"league-tui\", path = \"../league-tui\" }\n",
+        ),
+        (
+            "relay_indirect_via_league_gen",
+            "[package]\nname = \"league-relay\"\n[dependencies]\ngen = { package = \"league-gen\", path = \"../league-gen\" }\n",
+        ),
+    ] {
+        let root = unique_tmp_dir(&format!("b2_relay_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup workspace: {err}");
+        }
+        let _ = fs::write(root.join("crates/league-relay/Cargo.toml"), manifest);
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("league-relay route `{label}` must fail guard"));
+        println!("PLANTED_RELAY_ROUTE {label} => {err}");
+        assert!(
+            err.contains("league-relay"),
+            "unexpected error for {label}: {err}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     // PR #80 C4 root dotted key in `league-error/Cargo.toml`.
     let root = unique_tmp_dir("c4_league_error_root_key");
@@ -11643,6 +11980,179 @@ fn seat_closure_clippy_toml_divergence_is_rejected_by_guard() {
         println!("PLANTED_CLIPPY_DIVERGE {target} => {err}");
         assert!(err.contains("clippy.toml"), "{err}");
         assert!(err.contains("byte-identical"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn card7_guard_controls_relay_allowlist_engine_internals_and_ledger_seat_bans() {
+    // 1. Positive control: `league-relay` depends on `league-core` (no features) and names only
+    // allowlisted preview API & minimum plain value types.
+    let ok_root = unique_tmp_dir("card7_relay_allowlist_ok");
+    if let Err(err) = write_minimal_workspace_tree(&ok_root) {
+        panic!("setup ok_root: {err}");
+    }
+    let _ = fs::write(
+        ok_root.join("crates/league-relay/Cargo.toml"),
+        "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+    );
+    let _ = fs::write(
+        ok_root.join("crates/league-relay/src/lib.rs"),
+        "use league_core::{\n    AiPreviewRequest, AssetId, MarketAction, OfferSide, PublicCheckOutcome, PublicPreviewState,\n    PublicSwapOutcome, SealedOrderBundle, TurnPhase, WhatIfPreview, preview_seat_bundle,\n};\npub fn ok(_s: &PublicPreviewState, _r: &AiPreviewRequest) -> Option<WhatIfPreview> {\n    let _ = (AssetId::Grain, OfferSide::Buy, PublicCheckOutcome::Cashed, PublicSwapOutcome::Settled, TurnPhase::TalkAndMarket);\n    let _ = (MarketAction::WithdrawAllOffers { actor: 0 }, SealedOrderBundle::default());\n    let _ = preview_seat_bundle;\n    // near-miss comment: league_core::TurnEngine must not trigger guard\n    let _doc = \"league_core::observe_seat\";\n    None\n}\n",
+    );
+    let _ = fs::create_dir_all(ok_root.join("crates/league-relay/tests"));
+    let _ = fs::write(
+        ok_root.join("crates/league-relay/tests/it.rs"),
+        "use league_core::{ClubHost, TableSpec, TurnEngine};\nfn helper() { let _ = std::any::type_name::<(ClubHost, TableSpec, TurnEngine)>(); }\n",
+    );
+    if let Err(err) = check_workspace_manifests_and_crate_sources(&ok_root) {
+        panic!("clean Card 7 league-relay allowlist tree must pass guard: {err}");
+    }
+    println!("CARD7_CTRL allowlisted_relay_clean => Ok");
+    let _ = fs::remove_dir_all(&ok_root);
+
+    // 2. Negative controls: `league-relay/src/` naming non-allowlisted `league_core` items,
+    // module aliases, globs, nested submodules, `pub use`, `#[path]`, or `engine-internals` in manifest.
+    let bad_sources: &[(&str, &str)] = &[
+        ("non_allow_turn_engine", "use league_core::TurnEngine;\n"),
+        ("non_allow_observe_seat", "use league_core::observe_seat;\n"),
+        (
+            "non_allow_human_what_if",
+            "use league_core::HumanWhatIfRequest;\n",
+        ),
+        (
+            "non_allow_counterparty",
+            "use league_core::CounterpartyAssumptions;\n",
+        ),
+        (
+            "non_allow_seat_observation",
+            "use league_core::SeatObservation;\n",
+        ),
+        (
+            "non_allow_engine_internals",
+            "use league_core::engine_internals::SweepMode;\n",
+        ),
+        (
+            "non_allow_submodule_engine",
+            "use league_core::engine::TurnEngine;\n",
+        ),
+        ("non_allow_glob", "use league_core::*;\n"),
+        ("non_allow_alias", "use league_core as lc;\n"),
+        ("non_allow_self_bind", "use league_core::{self};\n"),
+        (
+            "non_allow_inline_fn",
+            "pub fn f() { let _ = league_core::preview_seat_with_counterparty; }\n",
+        ),
+        (
+            "non_allow_pub_use",
+            "pub use league_core::PublicPreviewState;\n",
+        ),
+        (
+            "non_allow_struct_with_seat_obs",
+            "pub struct Leak { pub obs: league_core::SeatObservation }\n",
+        ),
+        (
+            "non_allow_path_attr_to_tests",
+            "#[path = \"../tests/it.rs\"]\nmod sneak;\n",
+        ),
+    ];
+
+    for (label, src) in bad_sources {
+        let root = unique_tmp_dir(&format!("card7_bad_src_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup {label}: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-relay/Cargo.toml"),
+            "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        );
+        let _ = fs::write(root.join("crates/league-relay/src/lib.rs"), src);
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("planted `{label}` in league-relay/src/lib.rs must fail guard")
+            });
+        println!("CARD7_CTRL src:{label} => {err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 3. Negative controls: `league-relay` Cargo.toml dev/build/feature/tests target routes must fail,
+    // and integration tests in `tests/` still cannot reference `engine_internals`.
+    for (label, manifest) in [
+        (
+            "relay_dev_dep",
+            "[package]\nname = \"league-relay\"\n[dev-dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "relay_build_dep",
+            "[package]\nname = \"league-relay\"\n[build-dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+        (
+            "relay_engine_internals_dep",
+            "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\", features = [\"engine-internals\"] }\n",
+        ),
+        (
+            "relay_subtable_features",
+            "[package]\nname = \"league-relay\"\n[dependencies.league-core]\npath = \"../league-core\"\nfeatures = [\"default\"]\n",
+        ),
+        (
+            "relay_bin_points_to_tests",
+            "[package]\nname = \"league-relay\"\n[[bin]]\nname = \"league-relay\"\npath = \"tests/it.rs\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        ),
+    ] {
+        let root = unique_tmp_dir(&format!("card7_bad_toml_{label}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup {label}: {err}");
+        }
+        let _ = fs::write(root.join("crates/league-relay/Cargo.toml"), manifest);
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("planted `{label}` in league-relay/Cargo.toml must fail guard")
+            });
+        println!("CARD7_CTRL toml:{label} => {err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    {
+        let root = unique_tmp_dir("card7_bad_test_engine_internals");
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup test_engine_internals: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates/league-relay/Cargo.toml"),
+            "[package]\nname = \"league-relay\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\n",
+        );
+        let _ = fs::create_dir_all(root.join("crates/league-relay/tests"));
+        let _ = fs::write(
+            root.join("crates/league-relay/tests/it.rs"),
+            "use league_core::engine_internals::SweepMode;\n",
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("planted `engine_internals` in league-relay/tests/it.rs must fail guard")
+            });
+        println!("CARD7_CTRL test:engine_internals => {err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // 4. Negative controls: `league-ledger`, `league-seat-types`, `league-seat-ui` still banned from `league-core`.
+    for banned in ["league-ledger", "league-seat-types", "league-seat-ui"] {
+        let root = unique_tmp_dir(&format!("card7_still_banned_{banned}"));
+        if let Err(err) = write_minimal_workspace_tree(&root) {
+            panic!("setup {banned}: {err}");
+        }
+        let _ = fs::write(
+            root.join("crates").join(banned).join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{banned}\"\n[dependencies]\nleague-core = {{ path = \"../league-core\" }}\n"
+            ),
+        );
+        let err = check_workspace_manifests_and_crate_sources(&root)
+            .err()
+            .unwrap_or_else(|| panic!("{banned} depending on league-core must fail guard"));
+        println!("CARD7_CTRL banned:{banned} => {err}");
         let _ = fs::remove_dir_all(&root);
     }
 }
