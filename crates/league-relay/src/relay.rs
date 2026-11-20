@@ -2631,7 +2631,7 @@ pub struct SavedToolRoundCall {
     pub result_sha256: Option<String>,
 }
 
-/// Complete durable record of one `--preview-tool on` HTTP tool round, written atomically
+/// Complete durable record of one `--preview-tool on` on-time HTTP 200 `act` tool round, written atomically
 /// (`*.tmp` -> `flush` + `sync_all` -> rename) before returning or sending the follow-up HTTP
 /// request (`relay/calls.jsonl` `TOOL_CALL`, terminal repeat-limit `NO_REPLY`, and tool-call
 /// `COST_OVER_ESTIMATE` entries store this file's SHA-256 in `reply_sha256`).
@@ -2669,10 +2669,9 @@ pub struct SavedToolRoundRecord {
     pub calls: Vec<SavedToolRoundCall>,
 }
 
-/// Complete durable record of an HTTP 200 parsed model reply that was discarded rather than
-/// delivered (`LATE_DISCARDED`, `harness`/`NO_REPLY` schema/empty refusal, scratchpad token-cap /
-/// `TOKENIZE_UNAVAILABLE` failure) when `--preview-tool on` is active (`reply_sha256` on the
-/// corresponding `relay/calls.jsonl` row stores this file's SHA-256).
+/// Complete durable record of an HTTP 200 parsed choice discarded rather than delivered
+/// (`LATE_DISCARDED`, `harness`/`NO_REPLY` schema/empty-with-reasoning/`talk`-`tool_calls` refusal,
+/// scratchpad token-cap / `TOKENIZE_UNAVAILABLE` failure) when `--preview-tool on` is active and non-empty (`reply_sha256` on `calls.jsonl` stores this file's SHA-256; raw reply stays in `http-reply-round-*`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedDiscardedReplyRecord {
     /// Two-digit game day (`"01"`..=`"99"`).
