@@ -6983,7 +6983,12 @@ enum CallTransportResult {
 }
 
 mod raw_reply_gate {
-    use super::*;
+    use super::{
+        ApiKey, CallTransportResult, PreviewToolMode, RawHttpResponse, RelayError,
+        SavedHttpReplyRecord, TransportError, TurnConfig, apply_retry_suffix_to_json_path,
+        http_reply_file_path, redact_secrets_multi_with_limit,
+        resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
+    };
 
     pub(super) struct GateVerifiedHttpResponse {
         status: u16,
