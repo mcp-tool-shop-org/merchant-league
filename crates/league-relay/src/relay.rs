@@ -2349,6 +2349,15 @@ pub struct TranscriptEntry {
     pub reasoning: Option<String>,
 }
 
+fn deserialize_double_option_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
 /// One line in `<game-dir>/relay/calls.jsonl`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CallLogEntry {
@@ -2370,6 +2379,15 @@ pub struct CallLogEntry {
     pub model_returned: Option<String>,
     /// Lowercase hex SHA-256 of the serialized UTF-8 request JSON body.
     pub request_body_sha256: String,
+    /// Lowercase hex SHA-256 of the raw HTTP reply sidecar (`<Guild>.day-DD-<round>.http-reply-round-<round_index>-attempt-<attempt>.json`)
+    /// when `--preview-tool on` is active (`Some(Some(sha))` when written, `Some(None)` / JSON `null`
+    /// when no HTTP reply arrived or the raw write failed, and `None` / omitted when `--preview-tool off`).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_double_option_string"
+    )]
+    pub http_reply_sha256: Option<Option<String>>,
     /// Lowercase hex SHA-256 of the verbatim assistant reply text, if delivered.
     pub reply_sha256: Option<String>,
     /// Prompt token count reported by `usage.prompt_tokens`, if any.
@@ -2717,6 +2735,60 @@ pub fn discarded_reply_file_path(
 ) -> PathBuf {
     game_dir.join("relay").join("seats").join(format!(
         "{guild}.day-{day}-{round}.discarded-round-{round_index}-attempt-{attempt}.json"
+    ))
+}
+
+/// Complete durable record of one raw UTF-8 HTTP reply received from a transport when
+/// `--preview-tool on` is active, written atomically (`*.tmp` -> `flush` + `sync_all` -> rename)
+/// at a single boundary before parsing, status inspection, branching, or evaluation
+/// (`<game-dir>/relay/seats/<Guild>.day-<DD>-<round>.http-reply-round-<round_index>-attempt-<attempt>.json`).
+///
+/// The `body` field stores the received HTTP body after full-body secret redaction
+/// (`redact_secrets_multi_with_limit` across `body.len()`) and nothing else: no trimming,
+/// no truncation, no `<think>` stripping, no transcript rule, and no re-serialization of JSON.
+/// Never replayed into any model prompt or shown to any seat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedHttpReplyRecord {
+    /// Two-digit game day (`"01"`..=`"99"`).
+    pub day: String,
+    /// Round (`talk` or `act`).
+    pub round: Round,
+    /// Seated guild name.
+    pub guild: String,
+    /// Ledger run identifier tying all sidecars from the same `run_turn` execution together.
+    pub run_id: String,
+    /// Ledger reservation identifier matching the call row in `relay/calls.jsonl`.
+    pub reservation_id: String,
+    /// Lowercase hex SHA-256 of the HTTP request body that produced this reply.
+    pub request_body_sha256: String,
+    /// Zero-based HTTP round index within the current turn for `guild`.
+    pub round_index: usize,
+    /// HTTP attempt number (`1` or `2`).
+    pub attempt: u8,
+    /// Raw HTTP status code (e.g., `200`, `502`, `503`).
+    pub status: u16,
+    /// Whether this HTTP reply arrived after the seat wall timeout (`CallTransportResult::Late`).
+    pub is_late: bool,
+    /// Whether full-body secret redaction changed any byte of `body`.
+    pub body_redacted: bool,
+    /// Lowercase hex SHA-256 of `body.as_bytes()` as stored in this record.
+    pub body_sha256: String,
+    /// Raw HTTP response body text as received (secret-redacted only, verbatim otherwise).
+    pub body: String,
+}
+
+/// Path to an immutable per-attempt raw HTTP reply sidecar beside `<game-dir>/relay/seats/<Guild>.jsonl`.
+#[must_use]
+pub fn http_reply_file_path(
+    game_dir: &Path,
+    guild: &str,
+    day: &str,
+    round: Round,
+    round_index: usize,
+    attempt: u8,
+) -> PathBuf {
+    game_dir.join("relay").join("seats").join(format!(
+        "{guild}.day-{day}-{round}.http-reply-round-{round_index}-attempt-{attempt}.json"
     ))
 }
 
@@ -5994,12 +6066,102 @@ fn run_single_automated_seat(
             let wall_secs = elapsed.as_secs_f64();
             let exclude_thinking = seat.reasoning.map(|r| r.exclude_from_transcript);
 
+            let recorded_call = match raw_reply_gate::persist_raw_http_reply_at_boundary(
+                call_result,
+                config,
+                guild,
+                run_id,
+                &reservation_id,
+                &request_body_sha256,
+                tool_round_index,
+                attempt,
+                seat_retry_suffix,
+                &all_keys,
+                redaction_key,
+            ) {
+                Ok(recorded) => recorded,
+                Err(store_err) => {
+                    let store_err_msg = store_err.to_string();
+                    diag_log(diag_sink, LogLevel::Debug, || {
+                        format!(
+                            "transport=response seat={guild} attempt={attempt} status=raw_reply_store_write_failed latency_ms={latency_ms}"
+                        )
+                    });
+                    let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
+                        seat.cost_unit,
+                        None,
+                        wall_secs,
+                        seat.max_per_call_spend,
+                    );
+                    let entry = CallLogEntry {
+                        time_utc: now_utc_rfc3339(),
+                        day: config.day.clone(),
+                        round: config.round,
+                        guild: guild.to_owned(),
+                        attempt,
+                        trigger: trigger.to_owned(),
+                        model_requested: seat.model.to_owned(),
+                        model_returned: None,
+                        request_body_sha256: request_body_sha256.clone(),
+                        http_reply_sha256: Some(None),
+                        reply_sha256: None,
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                        total_tokens: None,
+                        reasoning_tokens: None,
+                        cost_unit: seat.cost_unit,
+                        wall_secs: Some(wall_secs),
+                        cost: valid_cost,
+                        charged_credits,
+                        latency_ms,
+                        outcome: "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
+                        error: Some(store_err_msg.clone()),
+                        reservation_id: Some(reservation_id.clone()),
+                    };
+                    diag_log(diag_sink, LogLevel::Verbose, || {
+                        format!(
+                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome=TOOL_ROUND_STORE_WRITE_FAILED latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                            seat.max_per_call_spend, seat.cost_unit
+                        )
+                    });
+                    {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        guard.tool_round_store_failed = Some(store_err.clone());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                    }
+                    return SeatOutcome::SeatError {
+                        detail: store_err_msg,
+                    };
+                }
+            };
+
+            let raw_reply_gate::RecordedTransportCall {
+                outcome: persisted_outcome,
+                http_reply_sha256: recorded_http_reply_sha256,
+            } = recorded_call;
+
             diag_log(diag_sink, LogLevel::Debug, || {
-                let status_desc = match &call_result {
-                    CallTransportResult::OnTime(Ok(resp)) => format!("http_{}", resp.status),
-                    CallTransportResult::OnTime(Err(TransportError::Timeout))
-                    | CallTransportResult::TimedOut => "timeout".to_owned(),
-                    CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
+                let status_desc = match &persisted_outcome {
+                    raw_reply_gate::PersistedTransportOutcome::OnTime(Ok(resp)) => {
+                        format!("http_{}", resp.status())
+                    }
+                    raw_reply_gate::PersistedTransportOutcome::OnTime(Err(
+                        TransportError::Timeout,
+                    ))
+                    | raw_reply_gate::PersistedTransportOutcome::TimedOut => "timeout".to_owned(),
+                    raw_reply_gate::PersistedTransportOutcome::OnTime(Err(
+                        TransportError::Network(msg),
+                    )) => {
                         format!(
                             "transport_err({})",
                             redact_secrets_multi_with_limit(
@@ -6009,7 +6171,9 @@ fn run_single_automated_seat(
                             )
                         )
                     }
-                    CallTransportResult::Late(resp) => format!("late_http_{}", resp.status),
+                    raw_reply_gate::PersistedTransportOutcome::Late(resp) => {
+                        format!("late_http_{}", resp.status())
+                    }
                 };
                 format!(
                     "transport=response seat={guild} attempt={attempt} status={status_desc} latency_ms={latency_ms}"
@@ -6017,7 +6181,7 @@ fn run_single_automated_seat(
             });
 
             let raw_evaluated = evaluate_call_result(
-                call_result,
+                persisted_outcome,
                 exclude_thinking,
                 effective_response_format.as_ref(),
                 preview_state_opt.is_some(),
@@ -6167,6 +6331,7 @@ fn run_single_automated_seat(
                                         model_requested: seat.model.to_owned(),
                                         model_returned,
                                         request_body_sha256: request_body_sha256.clone(),
+                                        http_reply_sha256: recorded_http_reply_sha256.clone(),
                                         reply_sha256: reply_sha256_opt,
                                         prompt_tokens: usage.prompt_tokens,
                                         completion_tokens: usage.completion_tokens,
@@ -6249,6 +6414,7 @@ fn run_single_automated_seat(
                         model_requested: seat.model.to_owned(),
                         model_returned,
                         request_body_sha256: request_body_sha256.clone(),
+                        http_reply_sha256: recorded_http_reply_sha256.clone(),
                         reply_sha256: Some(reply_sha256.clone()),
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
@@ -6407,6 +6573,7 @@ fn run_single_automated_seat(
                         model_requested: seat.model.to_owned(),
                         model_returned,
                         request_body_sha256: request_body_sha256.clone(),
+                        http_reply_sha256: recorded_http_reply_sha256.clone(),
                         reply_sha256: reply_sha256_opt,
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
@@ -6618,6 +6785,7 @@ fn run_single_automated_seat(
                         model_requested: seat.model.to_owned(),
                         model_returned,
                         request_body_sha256: request_body_sha256.clone(),
+                        http_reply_sha256: recorded_http_reply_sha256.clone(),
                         reply_sha256: reply_sha256_opt,
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
@@ -6753,6 +6921,7 @@ fn reserved_call_entry(
         model_requested: model.to_owned(),
         model_returned: None,
         request_body_sha256: request_body_sha256.to_owned(),
+        http_reply_sha256: (config.preview_tool == PreviewToolMode::On).then_some(None),
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,
@@ -6791,6 +6960,7 @@ fn refused_call_entry(
         model_requested: model.to_owned(),
         model_returned: None,
         request_body_sha256: request_body_sha256.to_owned(),
+        http_reply_sha256: (config.preview_tool == PreviewToolMode::On).then_some(None),
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,
@@ -6811,6 +6981,172 @@ enum CallTransportResult {
     OnTime(Result<RawHttpResponse, TransportError>),
     TimedOut,
     Late(RawHttpResponse),
+}
+
+mod raw_reply_gate {
+    use super::*;
+
+    pub(super) struct GateVerifiedHttpResponse {
+        status: u16,
+        body: String,
+        _private: (),
+    }
+
+    impl GateVerifiedHttpResponse {
+        pub(super) fn status(&self) -> u16 {
+            self.status
+        }
+
+        pub(super) fn into_parts(self) -> (u16, String) {
+            (self.status, self.body)
+        }
+    }
+
+    pub(super) enum PersistedTransportOutcome {
+        OnTime(Result<GateVerifiedHttpResponse, TransportError>),
+        TimedOut,
+        Late(GateVerifiedHttpResponse),
+    }
+
+    pub(super) struct RecordedTransportCall {
+        pub(super) outcome: PersistedTransportOutcome,
+        pub(super) http_reply_sha256: Option<Option<String>>,
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_received_response(
+        resp: RawHttpResponse,
+        is_late: bool,
+        config: &TurnConfig,
+        guild: &str,
+        run_id: &str,
+        reservation_id: &str,
+        request_body_sha256: &str,
+        round_index: usize,
+        attempt: u8,
+        seat_retry_suffix: Option<usize>,
+        all_keys: &[ApiKey],
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<(GateVerifiedHttpResponse, Option<Option<String>>), RelayError> {
+        let http_reply_sha256 = if config.preview_tool == PreviewToolMode::On {
+            // Scan the full received body (`resp.body.len()`) so an echoed key beyond
+            // `MAX_REDACTION_SCAN_BYTES` is scrubbed without altering any error/log cap.
+            let scrubbed_body =
+                redact_secrets_multi_with_limit(&resp.body, all_keys, resp.body.len());
+            let body_redacted = scrubbed_body != resp.body;
+            let body_sha256 = sha256_hex(scrubbed_body.as_bytes());
+            let base_sidecar_path = http_reply_file_path(
+                &config.game_dir,
+                guild,
+                &config.day,
+                config.round,
+                round_index,
+                attempt,
+            );
+            let targeted_sidecar_path =
+                apply_retry_suffix_to_json_path(&base_sidecar_path, seat_retry_suffix);
+            let sidecar_path = resolve_non_overwriting_tool_round_path(&targeted_sidecar_path);
+            let record = SavedHttpReplyRecord {
+                day: config.day.clone(),
+                round: config.round,
+                guild: guild.to_owned(),
+                run_id: run_id.to_owned(),
+                reservation_id: reservation_id.to_owned(),
+                request_body_sha256: request_body_sha256.to_owned(),
+                round_index,
+                attempt,
+                status: resp.status,
+                is_late,
+                body_redacted,
+                body_sha256,
+                body: scrubbed_body,
+            };
+            let file_sha256 = write_json_record_atomic(
+                &base_sidecar_path,
+                &sidecar_path,
+                &record,
+                redaction_key,
+            )?;
+            Some(Some(file_sha256))
+        } else {
+            None
+        };
+        Ok((
+            GateVerifiedHttpResponse {
+                status: resp.status,
+                body: resp.body,
+                _private: (),
+            },
+            http_reply_sha256,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn persist_raw_http_reply_at_boundary(
+        call_result: CallTransportResult,
+        config: &TurnConfig,
+        guild: &str,
+        run_id: &str,
+        reservation_id: &str,
+        request_body_sha256: &str,
+        round_index: usize,
+        attempt: u8,
+        seat_retry_suffix: Option<usize>,
+        all_keys: &[ApiKey],
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<RecordedTransportCall, RelayError> {
+        let off_or_on_null = (config.preview_tool == PreviewToolMode::On).then_some(None);
+        match call_result {
+            CallTransportResult::TimedOut => Ok(RecordedTransportCall {
+                outcome: PersistedTransportOutcome::TimedOut,
+                http_reply_sha256: off_or_on_null,
+            }),
+            CallTransportResult::OnTime(Err(err)) => Ok(RecordedTransportCall {
+                outcome: PersistedTransportOutcome::OnTime(Err(err)),
+                http_reply_sha256: off_or_on_null,
+            }),
+            CallTransportResult::OnTime(Ok(resp)) => {
+                let (verified, http_reply_sha256) = record_received_response(
+                    resp,
+                    false,
+                    config,
+                    guild,
+                    run_id,
+                    reservation_id,
+                    request_body_sha256,
+                    round_index,
+                    attempt,
+                    seat_retry_suffix,
+                    all_keys,
+                    redaction_key,
+                )?;
+                Ok(RecordedTransportCall {
+                    outcome: PersistedTransportOutcome::OnTime(Ok(verified)),
+                    http_reply_sha256,
+                })
+            }
+            CallTransportResult::Late(resp) => {
+                let (verified, http_reply_sha256) = record_received_response(
+                    resp,
+                    true,
+                    config,
+                    guild,
+                    run_id,
+                    reservation_id,
+                    request_body_sha256,
+                    round_index,
+                    attempt,
+                    seat_retry_suffix,
+                    all_keys,
+                    redaction_key,
+                )?;
+                Ok(RecordedTransportCall {
+                    outcome: PersistedTransportOutcome::Late(verified),
+                    http_reply_sha256,
+                })
+            }
+        }
+    }
 }
 
 struct DiscardedModelReply {
@@ -7072,15 +7408,15 @@ fn redact_multi_and_truncate(raw: &str, keys: &[ApiKey], max_chars: usize) -> St
 }
 
 fn evaluate_call_result(
-    call_result: CallTransportResult,
+    call_result: raw_reply_gate::PersistedTransportOutcome,
     exclude_thinking: Option<bool>,
     response_format: Option<&ResponseFormatConfig>,
     allow_tools: bool,
     redaction_keys: &[ApiKey],
 ) -> EvaluatedCall {
-    let raw = match call_result {
-        CallTransportResult::TimedOut
-        | CallTransportResult::OnTime(Err(TransportError::Timeout)) => {
+    let (raw_status, raw_body) = match call_result {
+        raw_reply_gate::PersistedTransportOutcome::TimedOut
+        | raw_reply_gate::PersistedTransportOutcome::OnTime(Err(TransportError::Timeout)) => {
             return EvaluatedCall::DeliveryFailure {
                 reason: "timeout".to_owned(),
                 model_returned: None,
@@ -7089,7 +7425,7 @@ fn evaluate_call_result(
                 discarded_reply: None,
             };
         }
-        CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
+        raw_reply_gate::PersistedTransportOutcome::OnTime(Err(TransportError::Network(msg))) => {
             return EvaluatedCall::DeliveryFailure {
                 reason: redact_secrets_multi_with_limit(
                     &format!("transport: {msg}"),
@@ -7102,9 +7438,10 @@ fn evaluate_call_result(
                 discarded_reply: None,
             };
         }
-        CallTransportResult::Late(late_raw) => {
+        raw_reply_gate::PersistedTransportOutcome::Late(late_raw) => {
+            let (late_status, late_body) = late_raw.into_parts();
             let parsed_opt: Result<ChatCompletionResponseWire, _> =
-                serde_json::from_str(&late_raw.body);
+                serde_json::from_str(&late_body);
             let (model_returned, usage, discarded_reply) = match parsed_opt {
                 Ok(p) => {
                     let mret = p.model.map(|m| {
@@ -7115,7 +7452,7 @@ fn evaluate_call_result(
                         )
                     });
                     let usg = p.usage.unwrap_or_default();
-                    let disc = if late_raw.status == 200 && p.error.is_none() {
+                    let disc = if late_status == 200 && p.error.is_none() {
                         p.choices
                             .into_iter()
                             .next()
@@ -7139,10 +7476,10 @@ fn evaluate_call_result(
                 }
                 Err(_) => (None, UsageWire::default(), None),
             };
-            let reason = if late_raw.status == 200 {
+            let reason = if late_status == 200 {
                 "late reply after timeout discarded".to_owned()
             } else {
-                format!("late http {} after timeout discarded", late_raw.status)
+                format!("late http {late_status} after timeout discarded")
             };
             return EvaluatedCall::DeliveryFailure {
                 reason,
@@ -7152,12 +7489,12 @@ fn evaluate_call_result(
                 discarded_reply,
             };
         }
-        CallTransportResult::OnTime(Ok(r)) => r,
+        raw_reply_gate::PersistedTransportOutcome::OnTime(Ok(r)) => r.into_parts(),
     };
 
-    let parsed_opt: Result<ChatCompletionResponseWire, _> = serde_json::from_str(&raw.body);
+    let parsed_opt: Result<ChatCompletionResponseWire, _> = serde_json::from_str(&raw_body);
 
-    if raw.status != 200 {
+    if raw_status != 200 {
         let (model_returned, usage) = match parsed_opt {
             Ok(p) => (
                 p.model.map(|m| {
@@ -7167,9 +7504,9 @@ fn evaluate_call_result(
             ),
             Err(_) => (None, UsageWire::default()),
         };
-        let snippet = redact_multi_and_truncate(raw.body.trim(), redaction_keys, 200);
+        let snippet = redact_multi_and_truncate(raw_body.trim(), redaction_keys, 200);
         return EvaluatedCall::DeliveryFailure {
-            reason: format!("http {}: {snippet}", raw.status),
+            reason: format!("http {raw_status}: {snippet}"),
             model_returned,
             usage,
             is_late_reply: false,
@@ -7399,6 +7736,7 @@ fn determine_seat_retry_suffix(
     let Ok(entries) = fs::read_dir(&seats_dir) else {
         return None;
     };
+    let http_prefix = format!("{guild}.day-{day}-{round}.http-reply-round-");
     let tool_prefix = format!("{guild}.day-{day}-{round}.tool-round-");
     let disc_prefix = format!("{guild}.day-{day}-{round}.discarded-round-");
     let mut found_existing = false;
@@ -7408,7 +7746,10 @@ fn determine_seat_retry_suffix(
         let Some(name) = name_os.to_str() else {
             continue;
         };
-        if !name.starts_with(&tool_prefix) && !name.starts_with(&disc_prefix) {
+        if !name.starts_with(&http_prefix)
+            && !name.starts_with(&tool_prefix)
+            && !name.starts_with(&disc_prefix)
+        {
             continue;
         }
         if !name.ends_with(".json") {

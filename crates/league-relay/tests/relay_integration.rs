@@ -24,17 +24,17 @@ use league_relay::{
     MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
     NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode,
     REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round,
-    SavedDiscardedReplyRecord, SavedToolRoundRecord, SeatFile, SeatOutcome, TranscriptEntry,
-    Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
-    build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
+    SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatFile, SeatOutcome,
+    TranscriptEntry, Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport,
+    WordingEntry, build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
     discarded_reply_file_path, execute_preview_tool_call, extract_scratchpad_update,
-    format_negotiation_block, install_redacting_panic_hook, json_escape_untrusted_str,
-    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, parse_preview_tool_arguments,
-    preview_seat_bundle_executions_for_table_for_test, preview_wording_slot, redact_and_truncate,
-    redact_secrets, redact_secrets_multi_with_limit, render_call_limit_reached_wire_json,
-    render_engine_refusal_wire_json, render_json_escaped_whisper_line,
-    render_malformed_tool_call_wire_json, render_wording_slot_with,
-    reset_preview_seat_bundle_executions_for_table_for_test, run_turn,
+    format_negotiation_block, http_reply_file_path, install_redacting_panic_hook,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
+    parse_preview_tool_arguments, preview_seat_bundle_executions_for_table_for_test,
+    preview_wording_slot, redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
+    render_call_limit_reached_wire_json, render_engine_refusal_wire_json,
+    render_json_escaped_whisper_line, render_malformed_tool_call_wire_json,
+    render_wording_slot_with, reset_preview_seat_bundle_executions_for_table_for_test, run_turn,
     sanitize_scratchpad_for_prompt, sanitize_whisper, set_fail_pending_temp_write_for_test,
     set_fail_tool_round_write_for_test, sha256_hex, split_negotiation_sections,
     strip_thinking_tags, take_durability_events_for_test, tool_round_file_path,
@@ -1849,6 +1849,7 @@ fn additional_branch_and_cli_runner_coverage() -> TestResult {
         model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
         model_returned: Some("google/gemini-2.5-pro-06-05".to_owned()),
         request_body_sha256: "00".repeat(32),
+        http_reply_sha256: None,
         reply_sha256: Some("11".repeat(32)),
         prompt_tokens: Some(10),
         completion_tokens: Some(5),
@@ -5191,6 +5192,7 @@ fn n1_n2_immediate_side_file_on_abort_and_large_exit3_report_redaction() -> Test
             model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
             model_returned: Some("google/gemini-2.5-pro-06-05".to_owned()),
             request_body_sha256: format!("{i:064x}"),
+            http_reply_sha256: None,
             reply_sha256: Some("aa".repeat(32)),
             prompt_tokens: Some(10),
             completion_tokens: Some(5),
@@ -28594,6 +28596,926 @@ fn card8_fix1_discarded_parsed_and_late_replies_saved_when_preview_tool_on_and_u
     let late_off_calls = read_calls_log(&g_late_off)?;
     assert_eq!(late_off_calls[0].outcome, "LATE_DISCARDED");
     assert_eq!(late_off_calls[0].reply_sha256, None);
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_a_empty_content_with_reasoning_both_attempts_saved_in_raw_files() -> TestResult {
+    // Exact reviewer A3 repro shape: plain local seat on `--round act --preview-tool on`,
+    // both attempts answer HTTP 200 with `content: ""` and `reasoning: "ZZ_THOUGHT_RAN_OUT"`.
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "EMPTY_REASONING_WRAPPER")?;
+
+    let empty_reasoning_body = json!({
+        "id": "mock-empty-reasoning",
+        "model": "Qwen/Qwen3-14B",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "reasoning": "ZZ_THOUGHT_RAN_OUT"
+            }
+        }],
+        "usage": { "prompt_tokens": 18, "completion_tokens": 128, "total_tokens": 146 }
+    })
+    .to_string();
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: empty_reasoning_body.clone(),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: empty_reasoning_body.clone(),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+
+    let game_dir = tmp.path().join("g_a3");
+    write_to_seat(&game_dir, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&game_dir, "01", "Saltworks", &real_state)?;
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "30.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 3, "stderr: {}", String::from_utf8_lossy(&err));
+    assert_eq!(srv.recorded_requests()?.len(), 2);
+
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls.len(), 2);
+    for (idx, attempt_num, exp_outcome) in [(0usize, 1u8, "harness"), (1usize, 2u8, "NO_REPLY")] {
+        assert_eq!(calls[idx].outcome, exp_outcome);
+        assert_eq!(calls[idx].reply_sha256, None);
+        let raw_path =
+            http_reply_file_path(&game_dir, "Saltworks", "01", Round::Act, 0, attempt_num);
+        assert!(
+            raw_path.is_file(),
+            "missing raw HTTP reply file {raw_path:?}"
+        );
+        let raw_bytes = fs::read(&raw_path)?;
+        assert_eq!(
+            calls[idx].http_reply_sha256,
+            Some(Some(sha256_hex(&raw_bytes))),
+            "calls[{idx}].http_reply_sha256 must match raw HTTP reply file SHA-256"
+        );
+        let rec: SavedHttpReplyRecord = serde_json::from_slice(&raw_bytes)?;
+        assert_eq!(rec.status, 200);
+        assert!(!rec.is_late);
+        assert!(!rec.body_redacted);
+        assert_eq!(rec.attempt, attempt_num);
+        assert_eq!(rec.round_index, 0);
+        assert_eq!(
+            rec.reservation_id.as_str(),
+            calls[idx].reservation_id.as_deref().unwrap_or("")
+        );
+        assert_eq!(rec.request_body_sha256, calls[idx].request_body_sha256);
+        assert_eq!(rec.body, empty_reasoning_body);
+        assert_eq!(rec.body_sha256, sha256_hex(rec.body.as_bytes()));
+        assert!(rec.body.contains("ZZ_THOUGHT_RAN_OUT"));
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_b_http_200_provider_error_beside_choice_saved_in_raw_file() -> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "PROVIDER_ERR_WRAPPER")?;
+
+    let err_beside_choice = json!({
+        "id": "mock-err-choice",
+        "model": "Qwen/Qwen3-14B",
+        "error": { "message": "upstream partial error", "code": 502 },
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "PARTIAL_CHOICE_BESIDE_ERROR"
+            }
+        }],
+        "usage": { "prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18 }
+    })
+    .to_string();
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: err_beside_choice.clone(),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    "RECOVERED_AFTER_ERR",
+                    "Qwen/Qwen3-14B",
+                    12,
+                    5,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+    let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
+    let local_tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+
+    let g_dir = tmp.path().join("g_b11");
+    write_to_seat(&g_dir, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_dir, "01", "Saltworks", &real_state)?;
+    let summary = run_turn(
+        &TurnConfig::new(
+            g_dir.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_preview_tool(PreviewToolMode::On),
+        &local_tx,
+        None,
+    )?;
+    assert!(summary.all_clean());
+
+    let raw1_path = http_reply_file_path(&g_dir, "Saltworks", "01", Round::Act, 0, 1);
+    assert!(
+        raw1_path.is_file(),
+        "missing HTTP 200 provider-error raw file"
+    );
+    let raw1_bytes = fs::read(&raw1_path)?;
+    let rec1: SavedHttpReplyRecord = serde_json::from_slice(&raw1_bytes)?;
+    assert_eq!(rec1.status, 200);
+    assert_eq!(rec1.body, err_beside_choice);
+    assert!(rec1.body.contains("PARTIAL_CHOICE_BESIDE_ERROR"));
+
+    let calls = read_calls_log(&g_dir)?;
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].outcome, "harness");
+    assert_eq!(calls[0].reply_sha256, None);
+    assert_eq!(
+        calls[0].http_reply_sha256,
+        Some(Some(sha256_hex(&raw1_bytes)))
+    );
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_c_non_json_body_saved_byte_for_byte_and_linked() -> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "NON_JSON_WRAPPER")?;
+
+    let non_json_body = "  <html>\r\n<body>upstream plain HTML body</body>\r\n</html>\n  ";
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let tx = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: non_json_body.to_owned(),
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "CLEAN_AFTER_HTML",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+
+    let g_dir = tmp.path().join("g_non_json");
+    write_to_seat(&g_dir, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_dir, "01", "Saltworks", &real_state)?;
+    let sum = run_turn(
+        &TurnConfig::new(
+            g_dir.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            true,
+            Some(0.50),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx,
+        None,
+    )?;
+    assert!(sum.all_clean());
+
+    let raw1_path = http_reply_file_path(&g_dir, "Saltworks", "01", Round::Act, 0, 1);
+    assert!(raw1_path.is_file(), "missing non-JSON raw reply file");
+    let raw1_bytes = fs::read(&raw1_path)?;
+    let rec1: SavedHttpReplyRecord = serde_json::from_slice(&raw1_bytes)?;
+    assert_eq!(rec1.status, 200);
+    assert!(!rec1.is_late);
+    assert!(!rec1.body_redacted);
+    assert_eq!(rec1.body, non_json_body);
+    assert_eq!(rec1.body_sha256, sha256_hex(non_json_body.as_bytes()));
+
+    let calls = read_calls_log(&g_dir)?;
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        calls[0].http_reply_sha256,
+        Some(Some(sha256_hex(&raw1_bytes)))
+    );
+    assert_eq!(calls[0].reply_sha256, None);
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_d_non_200_and_late_replies_saved_and_timeout_has_null_http_reply_sha256() -> TestResult
+{
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "NON200_LATE_TIMEOUT_WRAPPER")?;
+
+    let fast_seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 0.03,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let body_503 = "Service Temporarily Unavailable raw body";
+    let body_late_502 = r#"{"error":"late 502 bad gateway"}"#;
+    let g_non200_late = tmp.path().join("g_non200_late");
+    write_to_seat(&g_non200_late, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_non200_late, "01", "Saltworks", &real_state)?;
+    let tx_1 = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 503,
+            body: body_503.to_owned(),
+        }),
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(120),
+            RawHttpResponse {
+                status: 502,
+                body: body_late_502.to_owned(),
+            },
+        ),
+    ]);
+    let s1 = run_turn(
+        &TurnConfig::new(
+            g_non200_late.clone(),
+            "01".to_owned(),
+            Round::Act,
+            fast_seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.50),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_1,
+        None,
+    )?;
+    assert!(!s1.all_clean());
+
+    let raw_503 = http_reply_file_path(&g_non200_late, "Saltworks", "01", Round::Act, 0, 1);
+    let raw_late = http_reply_file_path(&g_non200_late, "Saltworks", "01", Round::Act, 0, 2);
+    assert!(raw_503.is_file(), "missing HTTP 503 raw reply file");
+    assert!(raw_late.is_file(), "missing late HTTP 502 raw reply file");
+    let rec_503: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(&raw_503)?)?;
+    assert_eq!(rec_503.status, 503);
+    assert!(!rec_503.is_late);
+    assert_eq!(rec_503.body, body_503);
+    let rec_late: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(&raw_late)?)?;
+    assert_eq!(rec_late.status, 502);
+    assert!(rec_late.is_late);
+    assert_eq!(rec_late.body, body_late_502);
+
+    let calls_1 = read_calls_log(&g_non200_late)?;
+    assert_eq!(calls_1.len(), 2);
+    assert_eq!(
+        calls_1[0].http_reply_sha256,
+        Some(Some(sha256_hex(&fs::read(&raw_503)?)))
+    );
+    assert_eq!(calls_1[1].outcome, "LATE_DISCARDED");
+    assert_eq!(
+        calls_1[1].http_reply_sha256,
+        Some(Some(sha256_hex(&fs::read(&raw_late)?)))
+    );
+
+    // True timeout with no late reply + pre-call CAP_REACHED serialize `"http_reply_sha256":null`.
+    let g_timeout = tmp.path().join("g_timeout");
+    write_to_seat(&g_timeout, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_timeout, "01", "Saltworks", &real_state)?;
+    let tx_2 = ScriptedTransport::new(vec![ScriptStep::Fail(TransportError::Timeout)]);
+    let s2 = run_turn(
+        &TurnConfig::new(
+            g_timeout.clone(),
+            "01".to_owned(),
+            Round::Act,
+            fast_seats,
+            Some(wrapper),
+            true,
+            Some(0.05),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_2,
+        None,
+    )?;
+    assert!(!s2.all_clean());
+    assert!(!http_reply_file_path(&g_timeout, "Saltworks", "01", Round::Act, 0, 1).exists());
+    let timeout_calls = read_calls_log(&g_timeout)?;
+    assert_eq!(timeout_calls.len(), 2);
+    assert_eq!(timeout_calls[0].outcome, "harness");
+    assert_eq!(timeout_calls[0].http_reply_sha256, Some(None));
+    assert_eq!(timeout_calls[1].outcome, "CAP_REACHED");
+    assert_eq!(timeout_calls[1].http_reply_sha256, Some(None));
+    let raw_jsonl = fs::read_to_string(g_timeout.join("relay/calls.jsonl"))?;
+    for line in raw_jsonl.lines().filter(|l| !l.trim().is_empty()) {
+        assert!(
+            line.contains("\"http_reply_sha256\":null"),
+            "missing reply under --preview-tool on must serialize null http_reply_sha256: {line}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_e_raw_file_write_failure_stops_with_named_code_exit_2_and_zero_further_requests()
+-> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "RAW_FAIL_WRAPPER")?;
+    let valid_args = json!({ "market_actions": [], "bundle": {} }).to_string();
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "raw_fail_c1",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    "MUST_NEVER_BE_CALLED",
+                    "Qwen/Qwen3-14B",
+                    10,
+                    4,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+
+    let g_dir = tmp.path().join("g_raw_fail");
+    write_to_seat(&g_dir, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_dir, "01", "Saltworks", &real_state)?;
+    let raw_target = http_reply_file_path(&g_dir, "Saltworks", "01", Round::Act, 0, 1);
+    set_fail_tool_round_write_for_test(&raw_target, true);
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "--error-format",
+            "json",
+            "turn",
+            "--game-dir",
+            g_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "20.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    set_fail_tool_round_write_for_test(&raw_target, false);
+
+    assert_eq!(code, 2, "raw reply write failure must exit 2");
+    let err_json: Json = serde_json::from_str(String::from_utf8_lossy(&err).trim())?;
+    assert_eq!(err_json["code"], json!("TOOL_ROUND_STORE_WRITE_FAILED"));
+    assert_eq!(
+        srv.recorded_requests()?.len(),
+        1,
+        "must send zero further requests after raw reply write failure"
+    );
+    assert!(!raw_target.exists());
+    assert!(!raw_target.with_extension("json.tmp").exists());
+    assert!(
+        !tool_round_file_path(&g_dir, "Saltworks", "01", Round::Act, 0).exists(),
+        "tool round must NOT be evaluated when raw reply write fails"
+    );
+
+    let calls = read_calls_log(&g_dir)?;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].outcome, "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert_eq!(calls[0].http_reply_sha256, Some(None));
+    assert_eq!(calls[0].reply_sha256, None);
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identical_and_row5_untouched()
+-> TestResult {
+    #[derive(serde::Serialize)]
+    struct B2d77ce8CallLogLine<'a> {
+        time_utc: &'a str,
+        day: &'a str,
+        round: Round,
+        guild: &'a str,
+        attempt: u8,
+        trigger: &'a str,
+        model_requested: &'a str,
+        model_returned: Option<&'a str>,
+        request_body_sha256: &'a str,
+        reply_sha256: Option<&'a str>,
+        prompt_tokens: Option<u64>,
+        completion_tokens: Option<u64>,
+        total_tokens: Option<u64>,
+        reasoning_tokens: Option<u64>,
+        cost_unit: CostUnit,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        wall_secs: Option<f64>,
+        cost: Option<f64>,
+        charged_credits: f64,
+        latency_ms: u64,
+        outcome: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reservation_id: Option<&'a str>,
+    }
+
+    fn collect_rel_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> TestResult {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rel_files(root, &path, out)?;
+            } else {
+                let rel = path
+                    .strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(rel);
+            }
+        }
+        Ok(())
+    }
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "OFF_PARITY_WRAPPER")?;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            // Turn 1 attempt 1: empty reply -> harness retry
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("", "Qwen/Qwen3-14B", 10, 2, None, None),
+            },
+            // Turn 1 attempt 2: clean OK delivery
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("DAY1_OFF_ORDER", "Qwen/Qwen3-14B", 12, 4, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+
+    let game_dir = tmp.path().join("g_off_parity");
+    write_to_seat(&game_dir, "01", "act", "Saltworks", "DAY1_ACT")?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "off",
+            "--cap-gpu-secs",
+            "30.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+
+    // Zero raw, tool-round, or discarded-round sidecars anywhere under game_dir.
+    let mut rel_files = Vec::new();
+    collect_rel_files(&game_dir, &game_dir, &mut rel_files)?;
+    rel_files.sort();
+    for rel in &rel_files {
+        assert!(
+            !rel.contains("http-reply")
+                && !rel.contains("tool-round")
+                && !rel.contains("discarded-round"),
+            "unexpected sidecar under --preview-tool off: {rel}"
+        );
+    }
+
+    // Whole ledger lines match exact b2d77ce8 schema byte-for-byte with `http_reply_sha256` omitted.
+    let raw_jsonl = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+    let raw_lines: Vec<&str> = raw_jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(raw_lines.len(), 2);
+    for actual_line in &raw_lines {
+        assert!(!actual_line.contains("http_reply_sha256"));
+        let parsed: CallLogEntry = serde_json::from_str(actual_line)?;
+        assert_eq!(parsed.http_reply_sha256, None);
+        let expected_b2d77ce8 = serde_json::to_string(&B2d77ce8CallLogLine {
+            time_utc: &parsed.time_utc,
+            day: &parsed.day,
+            round: parsed.round,
+            guild: &parsed.guild,
+            attempt: parsed.attempt,
+            trigger: &parsed.trigger,
+            model_requested: &parsed.model_requested,
+            model_returned: parsed.model_returned.as_deref(),
+            request_body_sha256: &parsed.request_body_sha256,
+            reply_sha256: parsed.reply_sha256.as_deref(),
+            prompt_tokens: parsed.prompt_tokens,
+            completion_tokens: parsed.completion_tokens,
+            total_tokens: parsed.total_tokens,
+            reasoning_tokens: parsed.reasoning_tokens,
+            cost_unit: parsed.cost_unit,
+            wall_secs: parsed.wall_secs,
+            cost: parsed.cost,
+            charged_credits: parsed.charged_credits,
+            latency_ms: parsed.latency_ms,
+            outcome: &parsed.outcome,
+            error: parsed.error.as_deref(),
+            reservation_id: parsed.reservation_id.as_deref(),
+        })?;
+        assert_eq!(
+            *actual_line, expected_b2d77ce8,
+            "off-mode calls.jsonl line must match b2d77ce8 byte-for-byte"
+        );
+    }
+
+    // Row 5 untouched (24 digests, seal 0x41e0641516f522895b4d322557758ae0).
+    let (live_r6_paths, _) = render_all_wording_guard_paths()?;
+    assert_eq!(ARM_RENDER_PATH_HISTORY[5].path_digests.len(), 24);
+    assert_eq!(
+        SEALED_IMMUTABLE_HISTORY_ROWS[5].1,
+        0x41e0641516f522895b4d322557758ae0
+    );
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        ACTIVE_WORDING_ARM,
+        &live_r6_paths,
+    )?;
+
+    Ok(())
+}
+
+fn verify_raw_reply_gate_invariants(relay_src: &str) -> Result<(), String> {
+    let gate_mod_start = relay_src
+        .find("mod raw_reply_gate {")
+        .ok_or_else(|| "missing `mod raw_reply_gate`".to_owned())?;
+    let gate_body = &relay_src[gate_mod_start..];
+    let gate_mod_rel_end = gate_body
+        .find("\nenum EvaluatedCall {")
+        .ok_or_else(|| "missing `enum EvaluatedCall` boundary after raw_reply_gate".to_owned())?;
+    let gate_only = &gate_body[..gate_mod_rel_end];
+
+    if !gate_only.contains("pub(super) struct GateVerifiedHttpResponse")
+        || !gate_only.contains("_private: ()")
+    {
+        return Err("GateVerifiedHttpResponse must keep a private constructor witness".to_owned());
+    }
+
+    let is_ctor_line = |l: &str| {
+        let trimmed = l.trim_start();
+        l.contains("GateVerifiedHttpResponse {")
+            && !trimmed.starts_with("pub")
+            && !trimmed.starts_with("struct ")
+            && !trimmed.starts_with("impl ")
+    };
+    let total_constructions = relay_src.lines().filter(|l| is_ctor_line(l)).count();
+    let gate_constructions = gate_only.lines().filter(|l| is_ctor_line(l)).count();
+    if total_constructions != 1 || gate_constructions != 1 {
+        return Err(format!(
+            "expected exactly 1 GateVerifiedHttpResponse constructor inside mod raw_reply_gate, found total={total_constructions}, in_gate={gate_constructions}"
+        ));
+    }
+    let write_pos = gate_only
+        .find("write_json_record_atomic(")
+        .ok_or_else(|| "missing write_json_record_atomic inside mod raw_reply_gate".to_owned())?;
+    let ctor_line_offset = gate_only
+        .lines()
+        .scan(0usize, |acc, l| {
+            let start = *acc;
+            *acc += l.len() + 1;
+            Some((start, l))
+        })
+        .find(|(_, l)| is_ctor_line(l))
+        .map(|(off, _)| off)
+        .ok_or_else(|| {
+            "missing GateVerifiedHttpResponse ctor inside mod raw_reply_gate".to_owned()
+        })?;
+    if write_pos > ctor_line_offset {
+        return Err(
+            "GateVerifiedHttpResponse must only be constructed after write_json_record_atomic"
+                .to_owned(),
+        );
+    }
+
+    let boundary_calls = relay_src
+        .lines()
+        .filter(|l| {
+            l.contains("persist_raw_http_reply_at_boundary(")
+                && !l.contains("fn persist_raw_http_reply_at_boundary(")
+        })
+        .count();
+    if boundary_calls != 1 {
+        return Err(format!(
+            "expected exactly 1 call site of persist_raw_http_reply_at_boundary(, found {boundary_calls}"
+        ));
+    }
+
+    let eval_start = relay_src
+        .find("fn evaluate_call_result(")
+        .ok_or_else(|| "missing fn evaluate_call_result(".to_owned())?;
+    let eval_end = relay_src[eval_start..]
+        .find("\nfn sanitize_cost(")
+        .map_or(relay_src.len(), |off| eval_start + off);
+    let eval_src = &relay_src[eval_start..eval_end];
+    if eval_src.contains("RawHttpResponse") || eval_src.contains("CallTransportResult") {
+        return Err(
+            "evaluate_call_result must take raw_reply_gate::PersistedTransportOutcome only"
+                .to_owned(),
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() -> TestResult {
+    let relay_src = include_str!("../src/relay.rs");
+    verify_raw_reply_gate_invariants(relay_src).map_err(|e| -> Box<dyn Error> { e.into() })?;
+
+    // Negative controls: a second GateVerifiedHttpResponse constructor or RawHttpResponse in
+    // evaluate_call_result must fail `verify_raw_reply_gate_invariants`.
+    let dup_ctor = relay_src.replacen(
+        "Ok(RecordedTransportCall {",
+        "let _rogue = GateVerifiedHttpResponse { status: 0, body: String::new(), _private: () };\n                Ok(RecordedTransportCall {",
+        1,
+    );
+    let Err(dup_err) = verify_raw_reply_gate_invariants(&dup_ctor) else {
+        return Err("second GateVerifiedHttpResponse constructor must fail invariant check".into());
+    };
+    assert!(dup_err.contains("expected exactly 1 GateVerifiedHttpResponse constructor"));
+
+    let rogue_eval = relay_src.replacen(
+        "fn evaluate_call_result(\n    call_result: raw_reply_gate::PersistedTransportOutcome,",
+        "fn evaluate_call_result(\n    call_result: RawHttpResponse,",
+        1,
+    );
+    let Err(eval_err) = verify_raw_reply_gate_invariants(&rogue_eval) else {
+        return Err("RawHttpResponse in evaluate_call_result must fail invariant check".into());
+    };
+    assert!(eval_err.contains("PersistedTransportOutcome"));
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_redacted_in_raw_file()
+-> TestResult {
+    // Non-sk-or key plus Bearer/`sk-or-` to prove substring key redaction AND pattern scrubbing
+    // work both inside and strictly beyond `MAX_REDACTION_SCAN_BYTES` (4096 bytes) without
+    // changing the MAX_REDACTION_SCAN_BYTES cap on logged CallLogEntry.error.
+    const CUSTOM_KEY: &str = "OrKeyFix2RedactionAlphaBravo987654321";
+    const SK_OR_TOK: &str = "sk-or-v1-fix2secretkey0123456789abcdef";
+    let key = ApiKey::from_env_reader(|_| Some(CUSTOM_KEY.to_owned()))?;
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "SECRET_RAW_WRAPPER")?;
+
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let real_state = card7_standard_preview_state(0)?;
+
+    // Case 1: Echoed key near start of HTTP body (< MAX_REDACTION_SCAN_BYTES)
+    let g_near = tmp.path().join("g_secret_near");
+    write_to_seat(&g_near, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_near, "01", "Saltworks", &real_state)?;
+    let near_body = format!("echoed early key={CUSTOM_KEY} and Bearer {SK_OR_TOK} end");
+    let tx_near = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 500,
+            body: near_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "NEAR_RECOVERED",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_near = run_turn(
+        &TurnConfig::new(
+            g_near.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.50),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_near,
+        Some(&key),
+    )?;
+    assert!(s_near.all_clean());
+    let near_raw_path = http_reply_file_path(&g_near, "Saltworks", "01", Round::Act, 0, 1);
+    let near_file_text = fs::read_to_string(&near_raw_path)?;
+    assert_no_8char_key_piece(&near_file_text, CUSTOM_KEY, "raw file near body");
+    assert_no_8char_key_piece(&near_file_text, SK_OR_TOK, "raw file near sk-or");
+    let near_rec: SavedHttpReplyRecord = serde_json::from_str(&near_file_text)?;
+    assert!(near_rec.body_redacted);
+    assert_eq!(near_rec.status, 500);
+    assert_eq!(near_rec.body_sha256, sha256_hex(near_rec.body.as_bytes()));
+
+    // Case 2: Echoed key placed strictly BEYOND MAX_REDACTION_SCAN_BYTES (after 6000 padding bytes)
+    // in a large non-JSON HTTP 500 body, while CallLogEntry.error stays capped at MAX_REDACTION_SCAN_BYTES.
+    let g_far = tmp.path().join("g_secret_far");
+    write_to_seat(&g_far, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_far, "01", "Saltworks", &real_state)?;
+    let pad = "Z".repeat(MAX_REDACTION_SCAN_BYTES + 1900);
+    let far_body = format!("{pad} tail_secret={CUSTOM_KEY} token={SK_OR_TOK} _UNTRUNCATED_TAIL_OK");
+    let tx_far = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 500,
+            body: far_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "FAR_RECOVERED",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_far = run_turn(
+        &TurnConfig::new(
+            g_far.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            true,
+            Some(0.50),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_far,
+        Some(&key),
+    )?;
+    assert!(s_far.all_clean());
+    let far_raw_path = http_reply_file_path(&g_far, "Saltworks", "01", Round::Act, 0, 1);
+    let far_file_text = fs::read_to_string(&far_raw_path)?;
+    assert_no_8char_key_piece(&far_file_text, CUSTOM_KEY, "raw file far body (>4KiB)");
+    assert_no_8char_key_piece(&far_file_text, SK_OR_TOK, "raw file far sk-or (>4KiB)");
+    let far_rec: SavedHttpReplyRecord = serde_json::from_str(&far_file_text)?;
+    assert!(far_rec.body_redacted);
+    assert!(far_rec.body.len() > MAX_REDACTION_SCAN_BYTES + 1900);
+    assert!(far_rec.body.ends_with("_UNTRUNCATED_TAIL_OK"));
+    assert_eq!(far_rec.body_sha256, sha256_hex(far_rec.body.as_bytes()));
+
+    let far_calls = read_calls_log(&g_far)?;
+    assert_eq!(
+        far_calls[0].http_reply_sha256,
+        Some(Some(sha256_hex(far_file_text.as_bytes())))
+    );
+    let logged_err = far_calls[0]
+        .error
+        .as_deref()
+        .ok_or("expected http 500 error")?;
+    assert!(
+        logged_err.len() <= 220 && !logged_err.contains("_UNTRUNCATED_TAIL_OK"),
+        "existing CallLogEntry.error path must stay truncated & capped at MAX_REDACTION_SCAN_BYTES: {logged_err}"
+    );
 
     Ok(())
 }
