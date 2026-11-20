@@ -12,7 +12,8 @@ use league_core::{
     OrderReveal, ProjectOrderPreview, PublicCheckOrderPreview, PublicCheckOutcome,
     PublicPreviewState, PublicSwapOrderPreview, PublicSwapOutcome, RefusedActionPreview,
     RevealSalt, ScheduledShockSpec, SealedOrderBundle, Seat, SeatIdentity, ShockKind, TableId,
-    TableSpec, Turn, TurnEngine, WhatIfPreview, compute_order_commitment, preview_seat_bundle,
+    TableSpec, Turn, TurnEngine, TurnPhase, WhatIfPreview, compute_order_commitment,
+    preview_seat_bundle,
 };
 use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
@@ -25318,6 +25319,480 @@ fn card7_setup_json_locks_preview_tool_and_pre_card7_setup_defaults_to_off() -> 
     assert_eq!(err_off.code(), "INCOMPATIBLE_SETUP");
     assert_eq!(err_off.exit_code(), 1);
     assert_eq!(tx_mismatch.call_count(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn card7_parser_variants_prebook_and_state_validation_branches() -> TestResult {
+    // 1. `PreviewToolMode` helper methods (`parse` case-insensitive + invalid, `as_str`, `wording_arm`).
+    assert_eq!(PreviewToolMode::parse("off")?, PreviewToolMode::Off);
+    assert_eq!(PreviewToolMode::parse(" ON ")?, PreviewToolMode::On);
+    assert!(PreviewToolMode::parse("invalid").is_err());
+    assert_eq!(PreviewToolMode::Off.as_str(), "off");
+    assert_eq!(PreviewToolMode::On.as_str(), "on");
+    assert_eq!(PreviewToolMode::Off.wording_arm(), ACTIVE_WORDING_ARM);
+    assert_eq!(PreviewToolMode::On.wording_arm(), PREVIEW_WORDING_ARM);
+
+    // 2. CLI `--preview-tool` on `prebook-check` (`on`, `off`, and invalid value) + `turn` invalid value.
+    let tmp = TempDir::new()?;
+    let seats_p = tmp.path().join("pb_seats.json");
+    let wrap_p = tmp.path().join("pb_wrap.md");
+    fs::write(&wrap_p, "CLEAN WRAPPER")?;
+    fs::write(
+        &seats_p,
+        json!({
+            "seats": [{
+                "guild": "Saltworks",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:8000",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 64,
+                "timeout_secs": 1.0,
+                "max_gpu_secs_per_call": 1.5
+            }]
+        })
+        .to_string(),
+    )?;
+    for mode in ["on", "off"] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "prebook-check",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrap_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                mode,
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            0,
+            "prebook-check --preview-tool {mode} failed: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+    let mut bad_out = Vec::new();
+    let mut bad_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "--error-format",
+                "json",
+                "prebook-check",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrap_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "bogus",
+            ],
+            |_| None,
+            &mut bad_out,
+            &mut bad_err,
+        ),
+        1
+    );
+    let mut turn_bad_out = Vec::new();
+    let mut turn_bad_err = Vec::new();
+    assert_eq!(
+        execute_cli(
+            [
+                "--error-format",
+                "json",
+                "turn",
+                "--game-dir",
+                tmp.path().to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_p.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "bogus",
+            ],
+            |_| None,
+            &mut turn_bad_out,
+            &mut turn_bad_err,
+        ),
+        1
+    );
+
+    // 3. Exercise every `MarketAction` variant, `SealedOrderBundle` field, `AssetId` kind, `BondSettlementMode`,
+    // `IntentTarget` variant, `CharterRole`, and mixed-case `hex32` through `parse_preview_tool_arguments` +
+    // `execute_preview_tool_call`.
+    let mixed_hex_a = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789";
+    let valid_all = json!({
+        "market_actions": [
+            {
+                "action_kind": "post_offer",
+                "side": "buy",
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "amount": 100,
+                "price_per_unit_cred": 150,
+                "domain_id": 0,
+                "is_hybrid": true
+            },
+            {
+                "action_kind": "post_offer",
+                "side": "sell",
+                "good": { "asset_kind": "refined", "good_index": 0 },
+                "amount": 50,
+                "price_per_unit_cred": 300,
+                "domain_id": null,
+                "is_hybrid": false
+            },
+            { "action_kind": "cancel_offer", "offer_id": 99 },
+            {
+                "action_kind": "create_check",
+                "payee": 1,
+                "asset": { "asset_kind": "cred", "good_index": null },
+                "send_max": 100,
+                "deliver_min": 50,
+                "due_turn": 2,
+                "expiration_turn": 4
+            },
+            { "action_kind": "cancel_check", "check_id": 88 },
+            {
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": { "asset_kind": "cred" },
+                "amount": 100,
+                "finish_after_turn": null,
+                "cancel_after_turn": 3,
+                "condition_hash": null,
+                "bond": null
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 1,
+                "asset": { "asset_kind": "refined", "good_index": 0 },
+                "amount": 10,
+                "finish_after_turn": 1,
+                "cancel_after_turn": 4,
+                "condition_hash": mixed_hex_a,
+                "bond": {
+                    "good": { "asset_kind": "raw", "good_index": 1 },
+                    "required_units": 20,
+                    "deadline_turn": 3
+                }
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 2,
+                "asset": { "asset_kind": "cred" },
+                "amount": 50,
+                "cancel_after_turn": 3,
+                "bond": {
+                    "good": { "asset_kind": "raw", "good_index": 0 },
+                    "required_units": 5,
+                    "deadline_turn": 2,
+                    "mode": "seller_performance_bond"
+                }
+            },
+            {
+                "action_kind": "create_escrow",
+                "destination": 2,
+                "asset": { "asset_kind": "cred" },
+                "amount": 50,
+                "cancel_after_turn": 3,
+                "bond": {
+                    "good": { "asset_kind": "cred" },
+                    "required_units": 5,
+                    "deadline_turn": 2,
+                    "mode": "buyer_dvp_payment"
+                }
+            },
+            { "action_kind": "cancel_expired_escrow", "escrow_id": 77 },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 10,
+                "recipient_seat": 1,
+                "target": { "target_kind": "vote_for_seat", "office_turn": 4, "candidate": 0 },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 11,
+                "recipient_seat": 2,
+                "target": { "target_kind": "preserve_cartel_membership", "office_turn": 4, "domain_id": 0, "beneficiary": 2 },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            {
+                "action_kind": "record_intent_pledge",
+                "pledge_id": 12,
+                "recipient_seat": 3,
+                "target": { "target_kind": "reveal_preimage", "escrow_id": 5, "condition": mixed_hex_a },
+                "honor_weight": 50,
+                "memo_digest": mixed_hex_a
+            },
+            { "action_kind": "flag_wash_freeze", "target_seat": 1 },
+            {
+                "action_kind": "stand_for_office",
+                "proposed_tariffs_bps": [{ "seat": 0, "raw_bps": 100, "refined_bps": 200 }],
+                "cartel_admissions": [{ "domain_id": 0, "seat": 1 }],
+                "cartel_revocations": [{ "domain_id": 0, "seat": 2 }]
+            },
+            { "action_kind": "town_import", "good": { "asset_kind": "raw", "good_index": 0 }, "amount": 100 }
+        ],
+        "bundle": {
+            "converter_runs": [{ "recipe_idx": 0, "runs": 1 }],
+            "project_deliveries": [{ "project_id": 0, "batches": 1 }],
+            "atomic_swaps": [
+                {
+                    "swap_id": 1,
+                    "maker_seat": 0,
+                    "taker_seat": 1,
+                    "maker_asset": { "asset_kind": "cred" },
+                    "maker_amount": 100,
+                    "taker_asset": { "asset_kind": "raw", "good_index": 0 },
+                    "taker_amount": 50,
+                    "domain_id": 0
+                },
+                {
+                    "swap_id": 2,
+                    "maker_seat": 0,
+                    "taker_seat": 2,
+                    "maker_asset": { "asset_kind": "cred" },
+                    "maker_amount": 100,
+                    "taker_asset": { "asset_kind": "raw", "good_index": 1 },
+                    "taker_amount": 50,
+                    "domain_id": null
+                }
+            ],
+            "contract_deliveries": [
+                { "recipient_seat": 1, "good": { "asset_kind": "raw", "good_index": 0 }, "gross_amount": 10, "domain_id": 0, "dual_escrow_id": 7 },
+                { "recipient_seat": 2, "good": { "asset_kind": "raw", "good_index": 1 }, "gross_amount": 10, "domain_id": null, "dual_escrow_id": null }
+            ],
+            "dual_escrows": [
+                {
+                    "proposal_id": 1,
+                    "buyer_seat": 0,
+                    "seller_seat": 1,
+                    "good": { "asset_kind": "raw", "good_index": 0 },
+                    "required_units": 10,
+                    "payment_cred": 100,
+                    "buyer_bond_cred": 10,
+                    "seller_bond_cred": 10,
+                    "deadline_turn": 3,
+                    "domain_id": 0
+                },
+                {
+                    "proposal_id": 2,
+                    "buyer_seat": 0,
+                    "seller_seat": 2,
+                    "good": { "asset_kind": "raw", "good_index": 1 },
+                    "required_units": 10,
+                    "payment_cred": 100,
+                    "buyer_bond_cred": 10,
+                    "seller_bond_cred": 10,
+                    "deadline_turn": 3,
+                    "domain_id": null
+                }
+            ],
+            "debt_repayment_cred": 25,
+            "escrow_finishes": [
+                { "escrow_id": 1, "preimage": null },
+                { "escrow_id": 2, "preimage": mixed_hex_a }
+            ],
+            "check_cashes": [1, 2],
+            "council_vote": { "trade_minister": 0, "cartel_chair": 1 },
+            "charter_bids": [
+                { "role": "clearinghouse_broker", "bid_cred": 10 },
+                { "role": "customs_inspector", "bid_cred": 15 },
+                { "role": "oracle_auditor", "bid_cred": 20 }
+            ]
+        }
+    });
+    let parsed_all = parse_preview_tool_arguments(&valid_all.to_string(), 0)
+        .ok_or("all-variant preview tool args must parse")?;
+    assert_eq!(parsed_all.market_actions.len(), 16);
+    assert_eq!(parsed_all.bundle.charter_bids.len(), 3);
+    assert_eq!(parsed_all.bundle.debt_repayment_cred, 25);
+
+    let pub_state = card7_standard_preview_state(0)?;
+    let wire_ok = execute_preview_tool_call(&pub_state, &valid_all.to_string());
+    let wire_ok_val: Json = serde_json::from_str(&wire_ok)?;
+    assert_eq!(wire_ok_val["status"], json!("ok"));
+
+    // Also run empty-key omitted optionals in bundle and create_escrow without bond key at all.
+    let minimal = json!({
+        "market_actions": [{
+            "action_kind": "create_escrow",
+            "destination": 1,
+            "asset": { "asset_kind": "cred" },
+            "amount": 10,
+            "cancel_after_turn": 3
+        }],
+        "bundle": { "council_vote": null }
+    });
+    assert!(parse_preview_tool_arguments(&minimal.to_string(), 0).is_some());
+
+    // 4. Exhaust every negative parser branch (`parse_asset_val`, `parse_hex32`, `parse_bond_opt`,
+    // `parse_intent_target`, `parse_market_action`, `parse_bundle_obj`).
+    let malformed_cases = [
+        "123",
+        r#"{"market_actions": "not-array", "bundle": {}}"#,
+        r#"{"market_actions": [], "bundle": "not-obj"}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "hold", "good": {"asset_kind": "cred"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "cred", "good_index": 0}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "raw"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "unknown"}, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": 7, "amount": 1, "price_per_unit_cred": 1}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "post_offer", "side": "buy", "good": {"asset_kind": "cred"}, "amount": 1, "price_per_unit_cred": 1, "is_hybrid": "yes"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "bond": 123}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "bond": {"good": {"asset_kind": "cred"}, "required_units": 1, "deadline_turn": 2, "mode": "bad"}}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": "short"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "create_escrow", "destination": 1, "asset": {"asset_kind": "cred"}, "amount": 1, "cancel_after_turn": 2, "condition_hash": 42}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "record_intent_pledge", "pledge_id": 1, "recipient_seat": 1, "target": {"target_kind": "bad"}, "honor_weight": 1, "memo_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}], "bundle": {}}"#,
+        r#"{"market_actions": [{"action_kind": "bogus_kind"}], "bundle": {}}"#,
+        r#"{"market_actions": [], "bundle": {"charter_bids": [{"role": "bad", "bid_cred": 10}]}}"#,
+        r#"{"market_actions": [], "bundle": {"unknown_key": 1}}"#,
+    ];
+    for raw in malformed_cases {
+        assert!(
+            parse_preview_tool_arguments(raw, 0).is_none(),
+            "expected None for {raw}"
+        );
+    }
+
+    // 5. Exercise every remaining `load_preview_states_for_act_turn` refusal branch in `relay.rs`.
+    let relay_seats = tmp.path().join("state_seats.json");
+    let mock_dir = tmp.path().join("state_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        serde_json::to_string(&json!({
+            "rules": [{
+                "when_contains": "SALTWORKS",
+                "status": 200,
+                "response": {
+                    "model": "Qwen/Qwen3-14B",
+                    "choices": [{"message": {"content": "OK"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                }
+            }]
+        }))?,
+    )?;
+    write_card7_four_seat_local_file(&relay_seats, "http://127.0.0.1:8000", 1.5)?;
+
+    let run_state_err = |case_name: &str,
+                         setup_preview_file: &dyn Fn(&Path) -> TestResult|
+     -> Result<String, Box<dyn Error>> {
+        let gdir = tmp.path().join(case_name);
+        write_to_seat(&gdir, "01", "act", "Saltworks", "ACT PROMPT")?;
+        let ppath = gdir.join("to-seat/day-01-act-Saltworks.preview-state.json");
+        setup_preview_file(&ppath)?;
+        let mut o = Vec::new();
+        let mut e = Vec::new();
+        let code = execute_cli(
+            [
+                "--error-format",
+                "json",
+                "turn",
+                "--game-dir",
+                gdir.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "act",
+                "--seats",
+                relay_seats.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "5.0",
+                "--preview-tool",
+                "on",
+            ],
+            |_| None,
+            &mut o,
+            &mut e,
+        );
+        assert_eq!(code, 1, "{case_name} must exit 1");
+        let parsed: Json = serde_json::from_str(&String::from_utf8_lossy(&e))?;
+        Ok(parsed["code"].as_str().ok_or("code")?.to_owned())
+    };
+
+    assert_eq!(
+        run_state_err("ps_isdir", &|p| {
+            fs::create_dir_all(p)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_empty_obj", &|p| {
+            fs::write(p, "{}")?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_baseline_day_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.baseline_predicates.turn = 2;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_DAY_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_baseline_seat_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.baseline_predicates.seat = 1;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_SEAT_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_seats_len_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.seats.pop();
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_SEAT_MISMATCH"
+    );
+    assert_eq!(
+        run_state_err("ps_wrong_phase", &|p| {
+            let mut s = pub_state.clone();
+            s.phase = TurnPhase::Completed;
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_table_id_mismatch", &|p| {
+            let mut s = pub_state.clone();
+            s.table_id = TableId(999_999);
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
+    assert_eq!(
+        run_state_err("ps_probe_invalid_config", &|p| {
+            let mut s = pub_state.clone();
+            s.last_potentials.clear();
+            fs::write(p, serde_json::to_string(&s)?)?;
+            Ok(())
+        })?,
+        "PREVIEW_STATE_MALFORMED"
+    );
 
     Ok(())
 }

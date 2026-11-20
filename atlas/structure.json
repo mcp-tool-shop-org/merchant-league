@@ -1998,7 +1998,7 @@
           "testsInside": true
         },
         {
-          "hash": "2dfd340936ae44b160c4de11b8376b20942eeb6d5c3d6e28532308170af3e63e",
+          "hash": "b53f6fe2e2af0823567f469e89082e164816de141666b48570c79b09e8992d28",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -4937,7 +4937,7 @@
           "path": "crates/league-relay/src/error.rs"
         },
         {
-          "hash": "d1bdce58c0c98ae2172918090412a82eb373c1cf5cc1ebaf4ed3f475488ebb26",
+          "hash": "8a88d19696d2cf1af2aa8d53387de128b557e3a89b9fe5986ffeca456b55aaad",
           "importsFiles": [
             "crates/league-relay/src/cli.rs",
             "crates/league-relay/src/error.rs",
@@ -5848,77 +5848,72 @@
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 4697
+              "line": 4699
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 4698
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "match-err",
-              "line": 4708
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4709
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4743
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4754
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4772
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4793
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 4804
+              "line": 4700
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 4820
+              "line": 4710
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 4821
+              "line": 4711
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4748
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4759
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4777
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4798
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4809
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "match-err",
+              "line": 4825
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 4826
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4849
+              "line": 4854
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4856
+              "line": 4861
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4863
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 4870
+              "line": 4868
             },
             {
               "in": "run_turn_with_diag",
@@ -5933,222 +5928,197 @@
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4900
+              "line": 4885
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4906
+              "line": 4905
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4913
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "match-err",
-              "line": 4929
+              "line": 4911
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4938
+              "line": 4918
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "match-err",
+              "line": 4934
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4977
+              "line": 4943
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 4988
+              "line": 4982
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 4993
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5308
+              "line": 5313
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5317
+              "line": 5322
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5326
+              "line": 5331
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5393
+              "line": 5399
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5407
+              "line": 5413
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5438
+              "line": 5444
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5686
+              "line": 5694
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5725
+              "line": 5733
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5747
+              "line": 5755
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5757
+              "line": 5765
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5794
+              "line": 5802
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5796
+              "line": 5804
             },
             {
               "in": "run_single_automated_seat",
               "kind": "err",
-              "line": 5853
+              "line": 5865
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5875
+              "line": 5887
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5918
+              "line": 5931
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6001
+              "line": 6014
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6018
+              "line": 6031
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6028
+              "line": 6042
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6040
+              "line": 6054
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6116
+              "line": 6130
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6201
+              "line": 6215
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 6418
+              "line": 6433
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 6424
+              "line": 6439
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 6430
+              "line": 6445
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 6440
+              "line": 6455
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6493
+              "line": 6508
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6501
+              "line": 6516
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6527
+              "line": 6542
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6554
+              "line": 6569
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6567
+              "line": 6582
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 6626
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "match-err",
-              "line": 6670
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "err",
-              "line": 6670
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "match-err",
-              "line": 6671
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "err",
-              "line": 6671
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "match-err",
-              "line": 6674
-            },
-            {
-              "in": "call_with_wall_timeout",
-              "kind": "err",
-              "line": 6674
+              "line": 6641
             },
             {
               "in": "call_with_wall_timeout",
@@ -6157,36 +6127,66 @@
             },
             {
               "in": "call_with_wall_timeout",
+              "kind": "err",
+              "line": 6685
+            },
+            {
+              "in": "call_with_wall_timeout",
+              "kind": "match-err",
+              "line": 6686
+            },
+            {
+              "in": "call_with_wall_timeout",
+              "kind": "err",
+              "line": 6686
+            },
+            {
+              "in": "call_with_wall_timeout",
               "kind": "match-err",
               "line": 6689
             },
             {
-              "in": "load_transcript",
+              "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 6773
+              "line": 6689
+            },
+            {
+              "in": "call_with_wall_timeout",
+              "kind": "match-err",
+              "line": 6700
+            },
+            {
+              "in": "call_with_wall_timeout",
+              "kind": "match-err",
+              "line": 6704
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 6782
+              "line": 6788
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 6794
+              "line": 6797
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 6804
+              "line": 6809
+            },
+            {
+              "in": "load_transcript",
+              "kind": "err",
+              "line": 6819
             },
             {
               "in": "format_system_time_utc_rfc3339",
               "kind": "match-err",
-              "line": 6897
+              "line": 6912
             }
           ],
-          "hash": "a238fc55cbacdeb18afebc1841b3c4a4d86b6a34f4cc7c3b8f941590fdfaf13d",
+          "hash": "6885b2870c264cf77f2086f86d0124bd0bda1bfc6037ec171efc6f42d1b9866b",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -6692,55 +6692,55 @@
             {
               "in": "reject_unknown_keys",
               "kind": "err",
-              "line": 1707
+              "line": 1755
             },
             {
               "in": "parse_hex32",
               "kind": "err",
-              "line": 1755
+              "line": 1803
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 1784
+              "line": 1833
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 1792
+              "line": 1841
             },
             {
               "in": "parse_bond_opt",
               "kind": "err",
-              "line": 1819
+              "line": 1868
             },
             {
               "in": "parse_intent_target",
               "kind": "err",
-              "line": 1863
+              "line": 1912
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 1889
+              "line": 1938
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2071
+              "line": 2120
             },
             {
               "in": "parse_bundle_obj",
               "kind": "err",
-              "line": 2269
+              "line": 2320
             },
             {
               "in": "execute_preview_tool_call",
               "kind": "match-err",
-              "line": 2864
+              "line": 2934
             }
           ],
-          "hash": "8e3bb7470526ad235bdf5d57d286517e2db67e17fa1e1891a32feaeba903e5d3",
+          "hash": "6ca9a18c6f1bb8a4a7a9ac6c417e77d6bca0e64ce570d61bbfe50732452455d7",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
@@ -6776,7 +6776,7 @@
           "testsInside": true
         },
         {
-          "hash": "bea806c62e806410f2e80dcea87e926c2e58ea98bffd1e75a14be7d9c52af805",
+          "hash": "fc99f8734da1a284ae6f0cd67097315e127c6203f7a3f84c0d9339c69a3aaf2c",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -11812,7 +11812,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "5f5784e7dba67d1c32d27b9db49323fded7cc7d4",
+    "commit": "ae01208f60a2f5626048d7c5f724e0cca9f1c082",
     "tracked": 579
   },
   "landings": [
