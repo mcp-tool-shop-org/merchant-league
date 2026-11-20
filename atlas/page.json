@@ -93,24 +93,68 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 7,
+      "added": 3,
+      "changed": 9,
       "moved": 0,
-      "parts": 3,
+      "parts": 5,
       "removed": 0
     },
     "items": [
       {
+        "kind": "door",
+        "sentence": "CI's push trigger now also names `.dockerignore` and `Dockerfile`.",
+        "subjects": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs scripts/smoke-container.sh.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "scripts/smoke-container.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": ".dockerignore is now read by scripts/smoke-container.sh.",
+        "subjects": [
+          ".dockerignore",
+          "scripts/smoke-container.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": ".gitignore is now read by scripts/smoke-container.sh.",
+        "subjects": [
+          ".gitignore",
+          "scripts/smoke-container.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "CHANGELOG.md is now also read by scripts/smoke-container.sh.",
+        "subjects": [
+          "CHANGELOG.md",
+          "scripts/smoke-container.sh"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 10 more new writers and readers of places.",
+        "subjects": []
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-20; 7 files changed content.",
+        "sentence": "3 files added and 9 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "5315f091651117b020049204c43504b11f5554b2",
-      "generatedAt": "2026-11-20T02:02:18.054Z"
+      "commit": "a4ec972deed50080e4902dcc2c7fbfb1f3e5b00b",
+      "generatedAt": "2026-11-20T02:55:32.664Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -129,64 +173,64 @@
       "shared": 5
     },
     {
-      "a": "crates/league-seat-types/src/lib.rs",
-      "b": "crates/league-seat-types/src/view.rs",
-      "either": 5,
+      "a": "crates/league-gen/src/empirical.rs",
+      "b": "crates/league-gen/tests/properties.rs",
+      "either": 6,
       "partLabels": [
-        "league-seat-types",
-        "league-seat-types"
+        "league-gen",
+        "league-gen"
       ],
       "parts": [
-        "league-seat-types",
-        "league-seat-types"
+        "league-gen",
+        "league-gen"
       ],
       "relation": "inside",
       "shared": 5
     },
     {
-      "a": "crates/league-seat-types/src/lib.rs",
-      "b": "crates/league-tui/src/host.rs",
-      "either": 5,
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 22,
       "partLabels": [
-        "league-seat-types",
-        "league-tui"
+        "league-relay",
+        "league-relay"
       ],
       "parts": [
-        "league-seat-types",
-        "league-tui"
+        "league-relay",
+        "league-relay"
       ],
-      "relation": "b-imports-a",
-      "shared": 5
+      "relation": "inside",
+      "shared": 18
     },
     {
-      "a": "crates/league-seat-types/src/lib.rs",
-      "b": "crates/league-tui/src/main.rs",
-      "either": 5,
+      "a": "crates/league-core/src/engine.rs",
+      "b": "crates/league-core/tests/replay_invariants.rs",
+      "either": 10,
       "partLabels": [
-        "league-seat-types",
-        "league-tui"
+        "league-core",
+        "league-core"
       ],
       "parts": [
-        "league-seat-types",
-        "league-tui"
+        "league-core",
+        "league-core"
       ],
-      "relation": "b-imports-a",
-      "shared": 5
+      "relation": "inside",
+      "shared": 8
     },
     {
-      "a": "crates/league-seat-types/src/view.rs",
-      "b": "crates/league-tui/src/host.rs",
-      "either": 5,
+      "a": "crates/league-gen/src/generator.rs",
+      "b": "crates/league-gen/src/lib.rs",
+      "either": 9,
       "partLabels": [
-        "league-seat-types",
-        "league-tui"
+        "league-gen",
+        "league-gen"
       ],
       "parts": [
-        "league-seat-types",
-        "league-tui"
+        "league-gen",
+        "league-gen"
       ],
-      "relation": "b-imports-a",
-      "shared": 5
+      "relation": "inside",
+      "shared": 7
     }
   ],
   "changesTogetherNote": [
@@ -194,9 +238,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "a4ec972deed50080e4902dcc2c7fbfb1f3e5b00b",
+  "commit": "8b7ffeb43a8f94d6e892bf97bada37aa91b33721",
   "defaultBranch": "main",
-  "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "14 parts, mostly Rust (373 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -265,7 +309,7 @@
         {
           "boundary": "scripts",
           "depth": 0,
-          "files": 5
+          "files": 6
         }
       ],
       "runs": [
@@ -273,6 +317,7 @@
         "scripts/check-audit-allowlist.test.mjs",
         "scripts/check-copy.sh",
         "scripts/check-testnet-only.sh",
+        "scripts/smoke-container.sh",
         "scripts/test-guards.sh",
         "crates/league-core/src/club/host.rs",
         "crates/league-core/src/engine.rs",
@@ -306,13 +351,13 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 36,
-      "runsMore": 54,
+      "runsCount": 37,
+      "runsMore": 55,
       "sends": [],
       "stages": [],
       "triggers": [
         "on a pull request",
-        "on a push to main touching 13 paths",
+        "on a push to main touching 15 paths",
         "or by hand"
       ],
       "untracked": "site/audit-report.json, which is not tracked"
@@ -613,13 +658,14 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-20T02:55:32.664Z",
+  "generatedAt": "2026-11-20T04:19:19.440Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "26 writes and 14 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "14 writes and 20 reads go to a path their caller passes, not to this repository.",
+    "14 writes and 21 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
+    "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],

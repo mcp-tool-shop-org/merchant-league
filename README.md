@@ -77,19 +77,31 @@ cargo test --workspace --locked
 
 CI builds and tests on Linux, and the workspace is developed on Windows. Other platforms are untested.
 
-Docker is needed only for the stand-alone `xrpld` harness, and its tests are skipped unless you ask for them:
+Docker is needed for building and running the local Club Mode container image or running the stand-alone `xrpld` harness (the harness tests are skipped unless you ask for them):
 
 ```bash
 LEAGUE_XRPLD_LIVE=smoke cargo test -p league-standalone --test standalone_live --locked
 ```
 
-`bash scripts/verify.sh` runs the checks CI runs, except the Docker harness and the Atlas map check. Coverage, `cargo audit` and the site build run only when `cargo-llvm-cov`, `cargo-audit` and `npm` are installed, and the script names any check it skipped.
+`bash scripts/verify.sh` runs the checks CI runs, except the stand-alone Docker harness and the Atlas map check. Coverage, `cargo audit`, `npm`, and the held Club Mode container smoke gate run only when `cargo-llvm-cov`, `cargo-audit`, `npm`, and `docker` are installed, and the script names any check it skipped.
+
+## Run Club Mode in Docker (local build)
+
+The Club Mode (`league-tui`) container image is **not yet published** to any container registry; the multi-stage `Dockerfile` is built locally and verified by the offline CI smoke gate (`scripts/smoke-container.sh`, no registry push).
+
+```bash
+docker build -t merchant-league:local .
+docker run --rm -it --network=none -v "$(pwd)/saves:/saves" merchant-league:local
+```
+
+- **Interactive terminal required:** Pass `-it` to play interactively. Launching without an attached TTY exits `1` with code `TTY_REQUIRED` and its `docker run --rm -it <image>` hint; `--help` and `--version` exit `0` without a TTY.
+- **What the image holds:** Built from digest-pinned `rust:1.100.0-bookworm` (`@sha256:`) onto digest-pinned `gcr.io/distroless/cc-debian12:nonroot` (`@sha256:`), running as non-root `65532:65532` in `WORKDIR /saves`. It contains only `/usr/local/bin/league-tui`, `/usr/share/doc/merchant-league/LICENSE`, and an empty `/saves` directory owned by `65532:65532` — no shell, no toolchain, no source files, and zero network calls (`--network=none`).
 
 ## Security and data
 
 - **What it touches.** In offline Club Mode (`league-tui`), `--save-dir` writes public `club-<id>.save.json`, private hot-seat `club-<id>.seal` (deleted upon successful replay export), verified `club-<id>.replay.json`, and optional `--log-file` metadata diagnostics (never logging PINs, Vault notes, mandates, staged orders, or commit salts, and redacting API/XRPL credentials and sealed JSON keys across all four log levels) on your own machine with zero network calls. In Game mode (not built yet), a player's Testnet keys stay on their own machine, in the git-ignored `.league/` folder, and are never logged. The paper-test relay reads its OpenRouter key only from the `OPENROUTER_API_KEY` environment variable and makes no OpenRouter call without `--live` and a credit cap. Its local seats refuse any API key, reach only a loopback address or a VM address you allow with `--allow-vm-host`, and need a GPU-seconds cap. It keeps its transcripts in the game folder you give it.
 - **What it does not touch.** No real money, no Mainnet, and nothing outside the folders above. There is **no telemetry**: nothing is sent anywhere except the calls a mode needs (the Testnet, a public randomness beacon and, for the relay, OpenRouter or the local model servers you allow).
-- **Permissions.** Network access to the Testnet in Game mode. Docker, with its port bound to `127.0.0.1` only, for the stand-alone harness.
+- **Permissions.** Network access to the Testnet in Game mode. Docker with `--network=none` and `-v "$(pwd)/saves:/saves"` when running the local Club Mode container (touching only `/saves`), or Docker with its port bound to `127.0.0.1` only for the stand-alone harness.
 - **Guards.** Every Testnet connection must report the Testnet's network id. A CI tripwire fails on any Mainnet hostname written in the repository outside vendored code, and a second one fails on copy that frames the game as a source of income. Review covers what a word list can't see.
 
 See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulnerability.

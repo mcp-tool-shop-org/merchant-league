@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # One command for the checks CI runs: format, lints, tests, coverage floor,
-# advisories, the two tripwires with their controls, and the site build.
+# advisories, the two tripwires with their controls, the site build, and
+# the Club Mode container smoke gate.
 #
 # Not here: the stand-alone xrpld harness (it needs Docker; see the README)
 # and the Atlas map check (CI pins its version). CI runs both.
 #
-# Coverage, the advisory audit and the site build run when cargo-llvm-cov,
-# cargo-audit and npm are installed, and are skipped with a note otherwise.
+# Coverage, the advisory audit, the site build, and the Club Mode container
+# smoke gate run when cargo-llvm-cov, cargo-audit, npm, and Docker are
+# available, and are skipped with a note otherwise.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -53,6 +55,14 @@ if command -v npm >/dev/null; then
 else
   echo "skipped: npm is not installed (CI runs it)"
   skipped+=("site build")
+fi
+
+step "Club Mode container build and smoke gate"
+if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+  bash scripts/smoke-container.sh
+else
+  echo "skipped: docker is not available (CI runs it)"
+  skipped+=("container smoke gate")
 fi
 
 if [ ${#skipped[@]} -eq 0 ]; then

@@ -1,0 +1,28 @@
+# Deny all files from the build context by default so docs, scripts, tests/saves,
+# site/node_modules, .git, .league, .env*, and target outputs stay out.
+*
+
+# Allowlist strictly the workspace manifests, crates sources, vendored crates, and LICENSE.
+!Cargo.toml
+!Cargo.lock
+!LICENSE
+!crates/
+!crates/**
+!vendor/
+!vendor/**
+
+# Re-exclude any build artifacts, VCS metadata, env files, or game saves inside allowed trees.
+**/.git
+**/.git/**
+**/target
+**/target/**
+**/saves
+**/saves/**
+**/.league
+**/.league/**
+**/.env*
+**/*.save.json
+**/*.seal
+**/*.replay.json
+**/*.seed
+**/*.log

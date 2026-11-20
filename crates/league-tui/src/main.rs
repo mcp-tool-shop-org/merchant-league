@@ -788,11 +788,13 @@ fn build_session_for_cli(opts: &CliOptions) -> Result<host::TuiHostSession, host
         .map_err(host::TuiError::SaveLoadFailed)?;
     apply_cli_session_options(&mut session, opts, true);
     if let Some(save_dir) = &opts.save_dir {
+        let expected_replay = session.expected_completed_replay_bytes();
         let (s_path, k_path) = host::validate_resume_autosave_target(
             &save_path,
             &seal_path,
             save_dir,
             session.table_id(),
+            expected_replay.as_deref(),
         )
         .map_err(host::TuiError::SaveDirConflict)?;
         session.enable_autosave(s_path, k_path);
@@ -3036,18 +3038,25 @@ mod tests {
         let seeded_secret = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
         let api_secret = "sk-or-v1-plantedTuiErrSecret99";
 
-        let samples: &[(host::TuiError, u8, &str)] = &[
+        let samples: &[(host::TuiError, u8, &str, bool)] = &[
             (
                 host::TuiError::InvalidUsage(format!("bad flag with {seeded_secret}")),
                 1,
                 "INVALID_USAGE",
+                false,
             ),
-            (host::TuiError::PinCliForbidden, 1, "PIN_CLI_FORBIDDEN"),
-            (host::TuiError::TtyRequired, 1, "TTY_REQUIRED"),
+            (
+                host::TuiError::PinCliForbidden,
+                1,
+                "PIN_CLI_FORBIDDEN",
+                false,
+            ),
+            (host::TuiError::TtyRequired, 1, "TTY_REQUIRED", false),
             (
                 host::TuiError::InvalidResumeTarget(format!("missing path {api_secret}")),
                 1,
                 "INVALID_RESUME_TARGET",
+                false,
             ),
             (
                 host::TuiError::SaveDirConflict(StructuredError::new(
@@ -3058,6 +3067,7 @@ mod tests {
                 )),
                 1,
                 "SEASON_SAVE_EXISTS",
+                false,
             ),
             (
                 host::TuiError::AutosaveFailed {
@@ -3071,6 +3081,7 @@ mod tests {
                 },
                 2,
                 "TUI_AUTOSAVE_FAILED",
+                true,
             ),
             (
                 host::TuiError::SaveLoadFailed(StructuredError::new(
@@ -3081,11 +3092,13 @@ mod tests {
                 )),
                 2,
                 "INVALID_CHECKPOINT_PIN_FORMAT",
+                false,
             ),
             (
                 host::TuiError::TerminalIo(format!("tty write failed {seeded_secret}")),
                 2,
                 "TUI_TERMINAL_IO",
+                true,
             ),
             (
                 host::TuiError::SessionHalted(StructuredError::new(
@@ -3096,6 +3109,7 @@ mod tests {
                 )),
                 2,
                 "SESSION_WEDGED",
+                false,
             ),
             (
                 host::TuiError::PostSeasonExportFailed(StructuredError::new(
@@ -3106,6 +3120,18 @@ mod tests {
                 )),
                 3,
                 "TUI_REPLAY_EXPORT_FAILED",
+                true,
+            ),
+            (
+                host::TuiError::PostSeasonExportFailed(StructuredError::new(
+                    "TUI_REPLAY_EXPORT_FAILED",
+                    format!("wipe blocked {api_secret}"),
+                    "Ensure `.seal` can be removed and retry replay export.",
+                    true,
+                )),
+                3,
+                "TUI_REPLAY_EXPORT_FAILED",
+                true,
             ),
             (
                 host::TuiError::PostSeasonExportFailed(StructuredError::new(
@@ -3116,13 +3142,15 @@ mod tests {
                 )),
                 3,
                 "REPLAY_TARGET_EXISTS",
+                false,
             ),
         ];
 
-        for (err, expected_exit, expected_code) in samples {
+        for (err, expected_exit, expected_code, expected_retryable) in samples {
             assert_eq!(err.exit_code(), *expected_exit);
             let structured = err.to_structured_error();
             assert_eq!(structured.code, *expected_code);
+            assert_eq!(structured.retryable, *expected_retryable);
             assert!(!structured.hint.is_empty());
 
             let text_line = host::ErrorFormat::Text.format_line(&structured);
@@ -3144,7 +3172,7 @@ mod tests {
             assert!(json_line.starts_with('{') && json_line.ends_with('}'));
             assert!(json_line.contains(&format!("\"code\":\"{expected_code}\"")));
             assert!(json_line.contains("\"hint\":\""));
-            assert!(json_line.contains("\"retryable\":"));
+            assert!(json_line.contains(&format!("\"retryable\":{expected_retryable}")));
         }
 
         // Verify live failed autosave on `TuiHostSession` surfaces `TuiError::AutosaveFailed` (`exit 2`).
@@ -3364,8 +3392,11 @@ mod tests {
     /// - alternate-screen suppression, `--debug` vs non-debug panic hook (`{session:?}`,
     ///   `{active_view:?}`, `{:?}` of `active_view.zones`, XRPL seed, API key), plus an explicit
     ///   4-seat `1 Human + 3 ClubBot` `Debug` Sweep + `Debug` panic backtrace check with unique
-    ///   5-digit `MinProjectEquity` targets `[91_234..=94_567]` and 4-digit bonuses
-    ///   `[6_123..=7_987]` (`> main.rs line count`).
+    ///   5-digit `MinProjectEquity` targets `[91_234..=94_567]` (above both `main.rs` and `host.rs`
+    ///   total line counts) and 4-digit bonuses `[6_123..=7_987]` (capped at
+    ///   `MAX_MANDATE_BONUS_EQUITY = 8_000`, above `main.rs`'s total line count and all non-test
+    ///   production lines of `host.rs`; `host.rs`'s `#[cfg(test)]` module extends past line `8_000`
+    ///   and does not run in `main.rs` panic frames).
     ///
     /// Paths NOT driven in this single test (covered elsewhere or not automated):
     /// - bare `< 100` 1-2 digit mandate counts (`distinct_goods` / `min_partners`) as standalone
@@ -3939,9 +3970,10 @@ mod tests {
         }
 
         // Explicit 4-seat (1 Human + 3 ClubBots) LogLevel::Debug run with unique 5-digit
-        // MinProjectEquity targets and distinct 4-digit bonuses (within 3000..=8000 and above
-        // `main.rs` line count) proving every human and bot mandate target & bonus number stays
-        // absent across Sweep & Debug panic.
+        // MinProjectEquity targets (above both `main.rs` and `host.rs` line counts) and distinct
+        // 4-digit bonuses within `3_000..=8_000` (`MAX_MANDATE_BONUS_EQUITY`, above `main.rs`'s
+        // line count and all non-`#[cfg(test)]` production lines of `host.rs`) proving every human
+        // and bot mandate target & bonus number stays absent across Sweep & Debug panic.
         {
             let ring = default_dev_ring_table()?;
             let explicit_targets = [91_234, 92_345, 93_456, 94_567];
@@ -5129,6 +5161,7 @@ mod tests {
             .err()
             .ok_or("export over foreign replay must refuse")?;
         assert_eq!(clash_err.code, "REPLAY_TARGET_EXISTS");
+        assert!(!clash_err.retryable);
         assert!(!clash_err.hint.is_empty());
         assert_eq!(std::fs::read(&x_replay_path)?, x_replay_bytes);
         assert!(y_seal.exists());
@@ -5137,7 +5170,22 @@ mod tests {
             .terminal_tui_error()
             .ok_or("clash export must set terminal_tui_error")?;
         assert_eq!(tui_err.exit_code(), 3);
-        assert_eq!(tui_err.to_structured_error().code, "REPLAY_TARGET_EXISTS");
+        let structured_clash = tui_err.to_structured_error();
+        assert_eq!(structured_clash.code, "REPLAY_TARGET_EXISTS");
+        assert!(!structured_clash.retryable);
+        let clash_json = host::ErrorFormat::Json.format_line(&structured_clash);
+        assert!(clash_json.contains("\"code\":\"REPLAY_TARGET_EXISTS\""));
+        assert!(clash_json.contains("\"retryable\":false"));
+
+        // Pressing `e` a second time in the same session is refused again cleanly.
+        let second_clash_err = sess_y_inplace
+            .handle_key_event(s_key('e'), vp)
+            .err()
+            .ok_or("second export over foreign replay must also refuse")?;
+        assert_eq!(second_clash_err.code, "REPLAY_TARGET_EXISTS");
+        assert!(!second_clash_err.retryable);
+        assert_eq!(std::fs::read(&x_replay_path)?, x_replay_bytes);
+        assert!(y_seal.exists());
         terminal.draw(|f| {
             let _ = sess_y_inplace.render_current_frame(f);
         })?;
@@ -5315,6 +5363,175 @@ mod tests {
         let mut lobby2 = host::LobbyHostSession::new(LobbyCliOverrides::default());
         let next2 = lobby2.validate_and_start_in_dir(1, Some(&dir_a2))?;
         assert_eq!(next2.table_id(), TableId(2));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn completed_season_cross_dir_export_retry_after_unwiped_source_seal_succeeds_and_rejects_different_replay()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        let key_ev = |code: KeyCode| {
+            let mut k = KeyEvent::new(code, KeyModifiers::NONE);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let vp = ViewportSize::new(100, 30);
+
+        let dir =
+            std::env::temp_dir().join(format!("ml_fin_cross_dir_retry_{}", std::process::id()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ =
+                std::fs::set_permissions(dir.join("src_a"), std::fs::Permissions::from_mode(0o755));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir_a = dir.join("src_a");
+        let dir_b = dir.join("out_b");
+        let dir_c = dir.join("src_c");
+        std::fs::create_dir_all(&dir_a)?;
+        std::fs::create_dir_all(&dir_c)?;
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        let mut sess_a = start_lobby_table_1_for_test(&dir_a, None, &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_a, vp)?;
+        drop(sess_a);
+
+        let a_save = dir_a.join("club-1.save.json");
+        let a_seal = dir_a.join("club-1.seal");
+        assert!(a_seal.exists());
+
+        // Block removing `src_a/club-1.seal` so Run 1 writes `out_b/club-1.replay.json`
+        // and then fails on `.seal` cleanup with exit 3 (`TUI_REPLAY_EXPORT_FAILED`).
+        #[cfg(windows)]
+        let seal_delete_guard = {
+            use std::os::windows::fs::OpenOptionsExt;
+            Some(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0x0000_0001 | 0x0000_0002)
+                    .open(&a_seal)?,
+            )
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir_a, std::fs::Permissions::from_mode(0o555))?;
+        }
+
+        let run_cli =
+            |args: Vec<String>, events: &mut ScriptedSessionEvents| -> (ExitCode, Vec<u8>) {
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                let ev_cell = std::cell::RefCell::new(Some(events));
+                let code = dispatch_cli_with_env(
+                    args,
+                    |_| None,
+                    true,
+                    &mut out,
+                    &mut err,
+                    |opts, _is_tty, diag_sink| {
+                        let mut session = build_session_for_cli(opts)?;
+                        let Ok(mut term) = Terminal::new(TestBackend::new(100, 30));
+                        diag_sink.set_alternate_screen_active(true);
+                        let ev = ev_cell.borrow_mut().take().ok_or_else(|| {
+                            host::TuiError::TerminalIo("missing events".to_owned())
+                        })?;
+                        let res =
+                            run_session_loop_with_sink(&mut term, &mut session, ev, diag_sink);
+                        diag_sink.set_alternate_screen_active(false);
+                        if res.is_ok()
+                            && let Some(tui_err) = session.terminal_tui_error()
+                        {
+                            Err(tui_err)
+                        } else {
+                            res
+                        }
+                    },
+                );
+                (code, err)
+            };
+
+        let retry_args = vec![
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_b.to_string_lossy().into_owned(),
+            "--error-format".to_owned(),
+            "json".to_owned(),
+        ];
+
+        // Run 1: partial failure (`exit 3`), replay written to `dir_b`, source `.seal` kept in `dir_a`.
+        let mut ev1 = ScriptedSessionEvents::from_events([
+            key_ev(KeyCode::Char('4')),
+            key_ev(KeyCode::Char('e')),
+            key_ev(KeyCode::Char('q')),
+        ]);
+        let (code1, err1_bytes) = run_cli(retry_args.clone(), &mut ev1);
+        let err1_str = String::from_utf8(err1_bytes)?;
+        assert_eq!(code1, ExitCode::from(host::EXIT_PARTIAL_SUCCESS));
+        assert!(err1_str.contains("\"code\":\"TUI_REPLAY_EXPORT_FAILED\""));
+        assert!(err1_str.contains("\"retryable\":true"));
+
+        let b_replay = dir_b.join("club-1.replay.json");
+        assert!(b_replay.exists());
+        assert!(a_seal.exists());
+        let b_replay_bytes = std::fs::read(&b_replay)?;
+        let parsed_b = league_core::SeasonReplayLog::from_club_json_slice(&b_replay_bytes)?;
+        assert!(parsed_b.turns.len() >= 24);
+
+        // Restore delete permission on `src_a` / `club-1.seal`.
+        #[cfg(windows)]
+        drop(seal_delete_guard);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir_a, std::fs::Permissions::from_mode(0o755))?;
+        }
+
+        // Run 2: exact same CLI command succeeds (`exit 0`), keeps `dir_b` replay byte-identical,
+        // and wipes the unwiped `src_a/club-1.seal`.
+        let mut ev2 = ScriptedSessionEvents::from_events([
+            key_ev(KeyCode::Char('4')),
+            key_ev(KeyCode::Char('e')),
+            key_ev(KeyCode::Char('q')),
+        ]);
+        let (code2, err2_bytes) = run_cli(retry_args, &mut ev2);
+        let err2_str = String::from_utf8(err2_bytes)?;
+        assert_eq!(code2, ExitCode::from(host::EXIT_OK), "stderr: {err2_str}");
+        assert!(!err2_str.contains("\"code\":"));
+        assert_eq!(std::fs::read(&b_replay)?, b_replay_bytes);
+        assert!(!a_seal.exists());
+
+        // Negative control: an independent finished Season 2 (`table_id = 1`) in `dir_c` with a
+        // different replay still refuses `--resume dir_c/... --save-dir dir_b` as `SEASON_SAVE_EXISTS`.
+        let mut sess_c = start_lobby_table_1_for_test(&dir_c, Some('2'), &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_c, vp)?;
+        drop(sess_c);
+        let c_save = dir_c.join("club-1.save.json");
+        let c_seal = dir_c.join("club-1.seal");
+        assert!(c_seal.exists());
+
+        let foreign_args = vec![
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            c_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_b.to_string_lossy().into_owned(),
+            "--error-format".to_owned(),
+            "json".to_owned(),
+        ];
+        let mut ev3 = ScriptedSessionEvents::from_events([]);
+        let (code3, err3_bytes) = run_cli(foreign_args, &mut ev3);
+        let err3_str = String::from_utf8(err3_bytes)?;
+        assert_eq!(code3, ExitCode::from(host::EXIT_USER_ERROR));
+        assert!(err3_str.contains("\"code\":\"SEASON_SAVE_EXISTS\""));
+        assert!(err3_str.contains("\"retryable\":false"));
+        assert_eq!(std::fs::read(&b_replay)?, b_replay_bytes);
+        assert!(c_seal.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())

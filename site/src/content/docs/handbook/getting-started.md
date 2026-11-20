@@ -11,7 +11,7 @@ There is no release to install yet. Everything here builds the workspace from so
 
 - **Rust.** Install it with [rustup](https://rustup.rs/). The repository pins its toolchain (1.100.0, with rustfmt, clippy and the LLVM tools) in `rust-toolchain.toml`, and rustup installs it on the first build.
 - **Git.**
-- **Docker**, only if you want to run the stand-alone `xrpld` harness.
+- **Docker**, if you want to build and run the local Club Mode container image or run the stand-alone `xrpld` harness.
 
 CI builds and tests on Linux, and the workspace is developed on Windows. Other platforms are untested.
 
@@ -42,8 +42,21 @@ It runs, in order:
 7. the copy tripwire, which fails on text that frames the game as a source of income (`scripts/check-copy.sh`)
 8. the guards' own controls (`scripts/test-guards.sh`), which plant every banned pattern and check each guard still catches it
 9. the site: `npm ci`, `npm audit` and the build of the landing page and this handbook, when `npm` is installed
+10. the held Club Mode container build and offline smoke gate (`scripts/smoke-container.sh`), when `docker` is available
 
 CI also runs two checks that `verify.sh` leaves out: the stand-alone `xrpld` harness and the Atlas map check (`npx @dogfood-lab/atlas check`), which confirms the committed map in `atlas/` matches the code.
+
+## Run Club Mode in Docker (local build)
+
+There is **no published container image** yet. You can build the held multi-stage image from the repository's `Dockerfile` and run Club Mode offline (`--network=none`, tested in CI without any registry push):
+
+```bash
+docker build -t merchant-league:local .
+docker run --rm -it --network=none -v "$(pwd)/saves:/saves" merchant-league:local
+```
+
+- Pass `-it` so `league-tui` has an interactive TTY (without a TTY, it exits `1` with `TTY_REQUIRED` and prints the `docker run --rm -it <image>` hint; `--help` and `--version` exit `0`).
+- The runtime image is based on digest-pinned `gcr.io/distroless/cc-debian12:nonroot`, runs as `65532:65532` in `/saves`, contains only `/usr/local/bin/league-tui`, `/usr/share/doc/merchant-league/LICENSE`, and an empty `/saves` directory owned by `65532:65532` (no shell, no toolchain, no source files), and makes zero network calls.
 
 ## The stand-alone `xrpld` harness
 

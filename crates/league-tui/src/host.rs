@@ -409,7 +409,7 @@ impl ToStructuredError for TuiError {
                         message: scrub_secret_text(&err.message),
                         hint: err.hint,
                         cause: err.cause.as_deref().map(scrub_secret_text),
-                        retryable: true,
+                        retryable: err.retryable,
                     }
                 } else {
                     StructuredError::new(
@@ -1945,6 +1945,21 @@ impl TuiHostSession {
         self.host.table_id()
     }
 
+    /// Returns the deterministic pretty JSON bytes of this finished season's `SeasonReplayLog`
+    /// when in [`TurnPhase::Completed`] (`None` otherwise), so `--resume A/... --save-dir B`
+    /// retries can recognize a byte-identical replay already written into `B`.
+    #[must_use]
+    pub(crate) fn expected_completed_replay_bytes(&self) -> Option<Vec<u8>> {
+        if self.host.phase() != TurnPhase::Completed {
+            return None;
+        }
+        self.end_of_season
+            .as_ref()?
+            .replay_log
+            .to_json_pretty_bytes()
+            .ok()
+    }
+
     #[cfg(test)]
     #[must_use]
     pub(crate) fn public_spec(&self) -> league_core::PublicTableSpec {
@@ -2919,6 +2934,7 @@ pub(crate) fn validate_resume_autosave_target(
     resumed_seal: &Path,
     target_dir: &Path,
     table_id: TableId,
+    expected_completed_replay: Option<&[u8]>,
 ) -> Result<(PathBuf, PathBuf), StructuredError> {
     let base = format!("club-{}", table_id.0);
     let s_path = target_dir.join(format!("{base}.save.json"));
@@ -2978,9 +2994,20 @@ pub(crate) fn validate_resume_autosave_target(
                 false,
             ));
         }
+        let replay_conflicts = if r_path.exists() {
+            match expected_completed_replay {
+                Some(expected) => {
+                    !std::fs::metadata(&r_path).is_ok_and(|meta| meta.is_file())
+                        || !std::fs::read(&r_path).is_ok_and(|existing| existing == expected)
+                }
+                None => true,
+            }
+        } else {
+            false
+        };
         if (k_path.exists() && !is_same_existing_file(&k_path, resumed_seal))
             || (s_path.exists() && !is_same_existing_file(&s_path, resumed_save))
-            || r_path.exists()
+            || replay_conflicts
         {
             return Err(StructuredError::new(
                 "SEASON_SAVE_EXISTS",
