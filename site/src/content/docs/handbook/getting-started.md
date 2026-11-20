@@ -56,7 +56,15 @@ mkdir -p saves
 docker run --rm -it --network=none --user "$(id -u):$(id -g)" -v "$(pwd)/saves:/saves" merchant-league:local
 ```
 
-- **Saving & mounts:** On Linux Docker Engine, the default `65532:65532` user cannot write to a host bind mount owned by your user (or `root`-created when missing), so pre-creating `./saves` and passing `--user "$(id -u):$(id -g)"` keeps files owned by your non-root account without `chmod 777` or root. Alternatively, a Docker named volume (`docker run --rm -it --network=none -v merchant-league-saves:/saves merchant-league:local`, without `--user`) initializes `/saves` from the image's `65532:65532` ownership. On Docker Desktop (macOS and Windows), bind-mount permissions are virtualized across the Linux VM, so in PowerShell (`mkdir saves; docker run --rm -it --network=none -v "${PWD}/saves:/saves" merchant-league:local`) or macOS the bind mount saves under `65532:65532` without `--user`, while WSL 2 Linux shells can run the Linux command directly.
+On Windows with Docker Desktop, in PowerShell:
+
+```powershell
+docker build -t merchant-league:local .
+mkdir saves
+docker run --rm -it --network=none -v "${PWD}/saves:/saves" merchant-league:local
+```
+
+- **Saving & mounts:** On Linux Docker Engine, the default `65532:65532` user cannot write to a host bind mount owned by your user (or `root`-created when missing), so pre-creating `./saves` and passing `--user "$(id -u):$(id -g)"` keeps files owned by your non-root account without `chmod 777` or root. Alternatively, a Docker named volume (`docker run --rm -it --network=none -v merchant-league-saves:/saves merchant-league:local`, without `--user`) initializes `/saves` from the image's `65532:65532` ownership. On Docker Desktop (macOS and Windows), bind-mount permissions are virtualized across the Linux VM, so the PowerShell command above, and the same bind mount on macOS, work without `--user`, while WSL 2 Linux shells can run the Linux `--user` command above. With rootless Docker Engine, container user IDs map differently (inside the container your own files appear as `root`'s, and any other ID maps to a subordinate ID), so the `--user` command above does not give the container your own account; use the named volume there. Docker Desktop for Linux runs the engine in a VM and shares folders with it by its own mechanism; if the bind mount cannot save there, use the named volume too. Rootless Docker Engine, Docker Desktop for Linux and macOS were not tested by us.
 - Pass `-it` so `league-tui` has an interactive TTY (without a TTY, it exits `1` with `TTY_REQUIRED` and prints the `docker run --rm -it <image>` hint; `--help` and `--version` exit `0`).
 - Built from digest-pinned `rust:1.100.0-bookworm` onto digest-pinned `gcr.io/distroless/cc-debian12:nonroot`, defaulting to `65532:65532` in `/saves`. On top of that pinned distroless base (which carries no shell and no package manager), the build adds only `/usr/local/bin/league-tui`, `/usr/share/doc/merchant-league/LICENSE`, and an empty `/saves` directory owned by `65532:65532` — no toolchain, no source files, and zero network calls.
 
