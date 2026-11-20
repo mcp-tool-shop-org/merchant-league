@@ -29273,6 +29273,8 @@ fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identica
 }
 
 fn verify_raw_reply_gate_invariants(relay_src: &str) -> Result<(), String> {
+    let normalized = relay_src.replace("\r\n", "\n");
+    let relay_src = normalized.as_str();
     let gate_mod_start = relay_src
         .find("mod raw_reply_gate {")
         .ok_or_else(|| "missing `mod raw_reply_gate`".to_owned())?;
@@ -29356,8 +29358,8 @@ fn verify_raw_reply_gate_invariants(relay_src: &str) -> Result<(), String> {
 
 #[test]
 fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() -> TestResult {
-    let relay_src = include_str!("../src/relay.rs");
-    verify_raw_reply_gate_invariants(relay_src).map_err(|e| -> Box<dyn Error> { e.into() })?;
+    let relay_src = include_str!("../src/relay.rs").replace("\r\n", "\n");
+    verify_raw_reply_gate_invariants(&relay_src).map_err(|e| -> Box<dyn Error> { e.into() })?;
 
     // Negative controls: a second GateVerifiedHttpResponse constructor or RawHttpResponse in
     // evaluate_call_result must fail `verify_raw_reply_gate_invariants`.
