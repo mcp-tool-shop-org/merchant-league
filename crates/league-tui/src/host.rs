@@ -298,6 +298,8 @@ pub enum TuiError {
     TtyRequired,
     /// `--resume <PATH>` pointed to a missing or unreadable save target (`exit 1`).
     InvalidResumeTarget(String),
+    /// Conflicting or non-empty `--save-dir` target would overwrite another season (`exit 1`).
+    SaveDirConflict(StructuredError),
     /// Atomic mid-turn `.save.json` / `.seal` autosave failed and halted the session (`exit 2`).
     AutosaveFailed {
         save_path: PathBuf,
@@ -321,7 +323,8 @@ impl TuiError {
             Self::InvalidUsage(_)
             | Self::PinCliForbidden
             | Self::TtyRequired
-            | Self::InvalidResumeTarget(_) => EXIT_USER_ERROR,
+            | Self::InvalidResumeTarget(_)
+            | Self::SaveDirConflict(_) => EXIT_USER_ERROR,
             Self::AutosaveFailed { .. }
             | Self::SaveLoadFailed(_)
             | Self::TerminalIo(_)
@@ -358,6 +361,13 @@ impl ToStructuredError for TuiError {
                 "Pass an existing `club-<id>.save.json` file or directory containing one to `--resume <PATH>`.",
                 false,
             ),
+            Self::SaveDirConflict(err) => StructuredError {
+                code: err.code,
+                message: scrub_secret_text(&err.message),
+                hint: err.hint,
+                cause: err.cause.as_deref().map(scrub_secret_text),
+                retryable: false,
+            },
             Self::AutosaveFailed { save_path, cause } => StructuredError::new(
                 "TUI_AUTOSAVE_FAILED",
                 format!(
@@ -1612,6 +1622,55 @@ impl TuiHostSession {
         Self::from_host(host, commodities, false)
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_explicit_mandates_for_test(
+        ring: &RingTable,
+        table_id: TableId,
+        human_seats: &[u8],
+        targets: [league_core::Units; 4],
+        bonuses: [league_core::Units; 4],
+        bot_tie_seed: u64,
+    ) -> Result<Self, StructuredError> {
+        use league_core::{
+            GradedMandateCard, MandateKind, RevealSalt, SealedEvalSeed,
+            deal_graded_mandates_with_entropy,
+        };
+        use league_gen::ring_table_to_table_spec_with_explicit_entropy;
+
+        let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x31_u8 + i; 32])).collect();
+        let eval_seed =
+            SealedEvalSeed::try_from_bytes([0x63; 32]).map_err(|err| scrub_engine_error(&err))?;
+        let (mut spec, cmap, _deal, eval_seed) = ring_table_to_table_spec_with_explicit_entropy(
+            ring,
+            table_id,
+            human_seats,
+            [0x44; 32],
+            &salts,
+            eval_seed,
+        )
+        .map_err(|err| err.to_structured_error())?;
+        spec.mandate_deck = (0..4)
+            .map(|i| GradedMandateCard {
+                card_id: u16::try_from(i + 1).unwrap_or(1),
+                kind: MandateKind::MinProjectEquity { target: targets[i] },
+                difficulty_completion_bps: 5_000,
+                bonus_equity: bonuses[i],
+            })
+            .collect();
+        let (commits, deal) =
+            deal_graded_mandates_with_entropy(table_id, 4, [0x55; 32], &salts, &spec.mandate_deck)
+                .map_err(|err| scrub_engine_error(&err))?;
+        spec.dealt_mandate_commits = commits;
+        Self::from_explicit_setup(
+            spec,
+            ring.seed,
+            Some(cmap.to_display_map()),
+            deal,
+            eval_seed,
+            bot_tie_seed,
+        )
+    }
+
     /// Advances the monotonic session clock (`elapsed` since session loop start), retires expired
     /// post-Curtain dead time, updates the active seat's header countdown, and locks timed-out
     /// human passes through the Privacy Curtain.
@@ -2782,6 +2841,96 @@ pub(crate) fn parse_club_table_id_from_filename(name: &str) -> Option<u64> {
     digits.parse::<u64>().ok()
 }
 
+pub(crate) fn is_same_existing_file(a: &Path, b: &Path) -> bool {
+    std::fs::canonicalize(a)
+        .ok()
+        .zip(std::fs::canonicalize(b).ok())
+        .is_some_and(|(ca, cb)| ca == cb)
+}
+
+pub(crate) fn validate_resume_autosave_target(
+    resumed_save: &Path,
+    resumed_seal: &Path,
+    target_dir: &Path,
+    table_id: TableId,
+) -> Result<(PathBuf, PathBuf), StructuredError> {
+    let base = format!("club-{}", table_id.0);
+    let s_path = target_dir.join(format!("{base}.save.json"));
+    let k_path = target_dir.join(format!("{base}.seal"));
+    let r_path = target_dir.join(format!("{base}.replay.json"));
+
+    // Decide whether the target is the same season by actual file identity on disk, never by file name.
+    if is_same_existing_file(&s_path, resumed_save) && is_same_existing_file(&k_path, resumed_seal)
+    {
+        return Ok((resumed_save.to_path_buf(), resumed_seal.to_path_buf()));
+    }
+
+    if target_dir.exists() {
+        let entries = std::fs::read_dir(target_dir).map_err(|err| {
+            StructuredError::new(
+                "SAVE_DIR_UNREADABLE",
+                scrub_secret_text(&format!(
+                    "failed inspecting save directory {}: {err}",
+                    target_dir.display()
+                )),
+                "Check `--save-dir` permissions or pass a different directory.",
+                false,
+            )
+        })?;
+        let mut unfinished_seals: Vec<String> = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|err| {
+                StructuredError::new(
+                    "SAVE_DIR_UNREADABLE",
+                    scrub_secret_text(&format!(
+                        "failed iterating save directory {}: {err}",
+                        target_dir.display()
+                    )),
+                    "Check `--save-dir` permissions or pass a different directory.",
+                    false,
+                )
+            })?;
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("club-")
+                && name.ends_with(".seal")
+                && !is_same_existing_file(&path, resumed_seal)
+            {
+                unfinished_seals.push(name);
+            }
+        }
+        if !unfinished_seals.is_empty() {
+            unfinished_seals.sort();
+            let seal_name = &unfinished_seals[0];
+            return Err(StructuredError::new(
+                "UNFINISHED_SEASON_EXISTS",
+                scrub_secret_text(&format!(
+                    "unfinished season `{seal_name}` already exists in {}; refusing to overwrite",
+                    target_dir.display()
+                )),
+                "Resume directly from that directory with `--resume <PATH>`, finish & export its replay if completed, or choose another `--save-dir`.",
+                false,
+            ));
+        }
+        if (k_path.exists() && !is_same_existing_file(&k_path, resumed_seal))
+            || (s_path.exists() && !is_same_existing_file(&s_path, resumed_save))
+            || r_path.exists()
+        {
+            return Err(StructuredError::new(
+                "SEASON_SAVE_EXISTS",
+                scrub_secret_text(&format!(
+                    "season archive for `{base}` already exists in {}; refusing to overwrite",
+                    target_dir.display()
+                )),
+                "Resume without `--save-dir` to save in place, or choose an empty/different `--save-dir`.",
+                false,
+            ));
+        }
+    }
+
+    Ok((s_path, k_path))
+}
+
 pub(crate) fn inspect_save_dir_for_new_season(dir: &Path) -> Result<TableId, StructuredError> {
     if !dir.exists() {
         return Ok(TableId(1));
@@ -2834,6 +2983,28 @@ pub(crate) fn inspect_save_dir_for_new_season(dir: &Path) -> Result<TableId, Str
     }
     let next = max_id.map_or(1, |m| m.saturating_add(1)).max(1);
     Ok(TableId(next))
+}
+
+fn check_explicit_table_slot_in_dir(dir: &Path, table_id: TableId) -> Result<(), StructuredError> {
+    let _ = inspect_save_dir_for_new_season(dir)?;
+    if dir.exists() {
+        let base = format!("club-{}", table_id.0);
+        if dir.join(format!("{base}.save.json")).exists()
+            || dir.join(format!("{base}.seal")).exists()
+            || dir.join(format!("{base}.replay.json")).exists()
+        {
+            return Err(StructuredError::new(
+                "SEASON_SAVE_EXISTS",
+                scrub_secret_text(&format!(
+                    "table `{base}` already exists in {}; refusing to overwrite",
+                    dir.display()
+                )),
+                "Choose another `--save-dir` or start without an explicit occupied TableId.",
+                false,
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Interactive Club Mode pre-game Lobby host session (`docs/club-mode-design.md` §1.2).
@@ -2953,17 +3124,29 @@ impl LobbyHostSession {
             }
             None => TableId(1),
         };
-        self.validate_and_start(table_id, bot_tie_seed, save_dir)
+        self.validate_state_and_start(table_id, bot_tie_seed, save_dir, false)
     }
 
     /// Validates all Lobby settings (`dev` seed only, `4..=6` seats, `>= 1` human, valid clock),
+    /// refuses overwriting any existing unfinished `.seal` or `club-<table_id>.*` files in `save_dir`,
     /// enforces CLI overrides (`--turn-clock`, `--untimed`, `--pins`), builds the [`TuiHostSession`],
     /// and opens the first human seat's Curtain cleanly via `open_curtain_for_seat`.
+    #[cfg(test)]
     pub fn validate_and_start(
         &mut self,
         table_id: TableId,
         bot_tie_seed: u64,
         save_dir: Option<&Path>,
+    ) -> Result<TuiHostSession, StructuredError> {
+        self.validate_state_and_start(table_id, bot_tie_seed, save_dir, true)
+    }
+
+    fn validate_state_and_start(
+        &mut self,
+        table_id: TableId,
+        bot_tie_seed: u64,
+        save_dir: Option<&Path>,
+        check_explicit_dir: bool,
     ) -> Result<TuiHostSession, StructuredError> {
         let seat_count = self.state.seat_count();
         let humans = self.state.human_seat_indices();
@@ -2971,7 +3154,7 @@ impl LobbyHostSession {
         let lobby_untimed = self.state.untimed();
         let lobby_clock_secs = self.state.turn_clock_secs();
         let lobby_pins = self.state.pins_enabled();
-        self.validate_params_and_start(
+        self.validate_params_and_start_inner(
             seat_count,
             &humans,
             &seed_raw,
@@ -2981,9 +3164,11 @@ impl LobbyHostSession {
             table_id,
             bot_tie_seed,
             save_dir,
+            check_explicit_dir,
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn validate_params_and_start(
         &mut self,
@@ -2997,8 +3182,37 @@ impl LobbyHostSession {
         bot_tie_seed: u64,
         save_dir: Option<&Path>,
     ) -> Result<TuiHostSession, StructuredError> {
-        if let Some(dir) = save_dir {
-            inspect_save_dir_for_new_season(dir).map_err(|err| self.record_refusal(err))?;
+        self.validate_params_and_start_inner(
+            seat_count,
+            humans,
+            seed_raw,
+            lobby_untimed,
+            lobby_clock_secs,
+            lobby_pins,
+            table_id,
+            bot_tie_seed,
+            save_dir,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn validate_params_and_start_inner(
+        &mut self,
+        seat_count: u8,
+        humans: &[u8],
+        seed_raw: &str,
+        lobby_untimed: bool,
+        lobby_clock_secs: u16,
+        lobby_pins: bool,
+        table_id: TableId,
+        bot_tie_seed: u64,
+        save_dir: Option<&Path>,
+        check_explicit_dir: bool,
+    ) -> Result<TuiHostSession, StructuredError> {
+        if check_explicit_dir && let Some(dir) = save_dir {
+            check_explicit_table_slot_in_dir(dir, table_id)
+                .map_err(|err| self.record_refusal(err))?;
         }
         let sc = match seat_count {
             4 => SeatCount::Four,
@@ -7354,6 +7568,61 @@ mod tests {
                 assert!(
                     !text.contains(secret),
                     "planted secret `{secret}` leaked in Debug:\n{text}"
+                );
+            }
+        }
+
+        // Also build a real `SeatScreenView` for unlocked Seat 0 (carrying Seat 0's mandate,
+        // Vault note, and staged debt repayment) and verify `{:?}`/`{:#?}` of `&view`, `&view.zones`,
+        // each inner `ViewPanel`, `&view.status_line`, and `&view.modal` contain zero secret text.
+        must_ok(
+            session.handle_key_event(key('2'), vp),
+            "switch composer to bundle tab so staged debt_repay renders",
+        );
+        must_ok(
+            session.handle_key_event(key('r'), vp),
+            "open chronicle modal",
+        );
+        let real_view = must_ok(
+            session.build_current_view(vp),
+            "build real seat view with planted note/mandate/bundle",
+        );
+        let obs0 = must_ok(session.build_seat_observation(Seat(0)), "obs0 debug view");
+        let mandate0_marker =
+            mandate_short_marker(must_some(obs0.own_mandate(), "s0 mandate").kind);
+        let plain = real_view.plain_text();
+        assert!(
+            plain.contains(&mandate0_marker),
+            "view plain_text must hold mandate:\n{plain}"
+        );
+        assert!(
+            plain.contains("SECRET_NOTE_DEBUG_902"),
+            "view plain_text must hold note:\n{plain}"
+        );
+        assert!(
+            plain.contains("765432"),
+            "view plain_text must hold staged debt repayment:\n{plain}"
+        );
+        let mut inner_view_dbg = vec![
+            format!("{real_view:?}"),
+            format!("{real_view:#?}"),
+            format!("{:?}", real_view.zones),
+            format!("{:#?}", real_view.zones),
+            format!("{:?}", real_view.status_line),
+            format!("{:#?}", real_view.status_line),
+            format!("{:?}", real_view.modal),
+            format!("{:#?}", real_view.modal),
+        ];
+        for zp in &real_view.zones {
+            inner_view_dbg.push(format!("{:?}", zp.panel));
+            inner_view_dbg.push(format!("{:#?}", zp.panel));
+        }
+        for text in &inner_view_dbg {
+            assert!(text.contains("<redacted>"), "missing <redacted>:\n{text}");
+            for secret in [&mandate0_marker, "SECRET_NOTE_DEBUG_902", "765432"] {
+                assert!(
+                    !text.contains(secret),
+                    "real view building block leaked `{secret}` in Debug:\n{text}"
                 );
             }
         }

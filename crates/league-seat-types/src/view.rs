@@ -154,7 +154,7 @@ pub enum ViewAlign {
 }
 
 /// Styled owned text fragment within a [`ViewRow`], [`ViewTableCell`], or [`ViewStatusLine`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewSpan {
     /// UTF-8 label or text fragment.
     pub text: String,
@@ -180,7 +180,7 @@ impl ViewSpan {
 }
 
 /// Owned sequence of styled [`ViewSpan`]s rendered on one line.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewRow {
     /// Ordered spans concatenated left-to-right on a single line.
     pub spans: Vec<ViewSpan>,
@@ -213,7 +213,7 @@ impl ViewRow {
 }
 
 /// Owned label string with optional style (used for panel titles, tabs, and badges).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewLabel {
     /// Displayed label text.
     pub text: String,
@@ -504,7 +504,7 @@ pub struct ViewScroll {
 }
 
 /// Column definition inside a [`ViewTable`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ViewTableColumn {
     /// Column header label.
     pub header: ViewLabel,
@@ -515,7 +515,7 @@ pub struct ViewTableColumn {
 }
 
 /// Owned styled cell in a [`ViewTableRow`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTableCell {
     /// Styled spans within this cell.
     pub spans: Vec<ViewSpan>,
@@ -554,7 +554,7 @@ impl ViewTableCell {
 }
 
 /// One row of [`ViewTableCell`]s inside a [`ViewTable`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTableRow {
     /// Ordered cells matching [`ViewTable::columns`].
     pub cells: Vec<ViewTableCell>,
@@ -578,7 +578,7 @@ impl ViewTableRow {
 }
 
 /// Structured tabular view model with typed columns, alignment, and rows.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTable {
     /// Ordered column headers, widths, and alignments.
     pub columns: Vec<ViewTableColumn>,
@@ -612,7 +612,7 @@ impl ViewTable {
 }
 
 /// Single tab entry inside a [`ViewTabBar`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTabItem {
     /// Tab title label.
     pub label: ViewLabel,
@@ -621,7 +621,7 @@ pub struct ViewTabItem {
 }
 
 /// Tab strip metadata carried inside a tabbed [`ViewPanel`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTabBar {
     /// Ordered tabs left-to-right.
     pub tabs: Vec<ViewTabItem>,
@@ -651,7 +651,7 @@ impl ViewTabBar {
 }
 
 /// Modal overlay layer rendered centered over the screen when present.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewModal {
     /// Target modal width percentage (`1..=100`).
     pub width_pct: u16,
@@ -662,7 +662,7 @@ pub struct ViewModal {
 }
 
 /// Bottom status line with optional prominent refusal/alert row plus key-hint and mode spans.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewStatusLine {
     /// Prominent top-row refusal/error banner rendered ahead of shortcuts so it stays visible at 80x24+.
     pub alert: Option<ViewRow>,
@@ -705,7 +705,7 @@ impl ViewStatusLine {
 }
 
 /// Panel bound to a named [`ViewZoneId`] inside [`SeatScreenView::zones`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewZonePanel {
     /// Zone identifier matching a [`ViewZoneSpec`] inside [`ScreenLayout`].
     pub zone: ViewZoneId,
@@ -714,7 +714,7 @@ pub struct ViewZonePanel {
 }
 
 /// Self-contained bordered or plain panel made purely of owned view-model data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewPanel {
     /// Optional header title rendered in the panel border.
     pub title: Option<ViewLabel>,

@@ -15,7 +15,9 @@ use crossterm::event::{self, Event};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use league_core::{TableId, ToStructuredError as _, scrub_secret_text};
+#[cfg(test)]
+use league_core::TableId;
+use league_core::{ToStructuredError as _, scrub_secret_text};
 #[cfg(test)]
 use league_gen::{
     GeneratorConfig, RingTable, SeatCount, SeedPool, TablePurpose, TableSetupOptions,
@@ -661,6 +663,7 @@ fn default_dev_ring_table() -> io::Result<RingTable> {
     Err(io::Error::other("no feasible dev ring table available"))
 }
 
+#[cfg(test)]
 fn default_save_paths(save_dir: &Path, table_id: TableId) -> (PathBuf, PathBuf) {
     let base = format!("club-{}", table_id.0);
     (
@@ -785,7 +788,13 @@ fn build_session_for_cli(opts: &CliOptions) -> Result<host::TuiHostSession, host
         .map_err(host::TuiError::SaveLoadFailed)?;
     apply_cli_session_options(&mut session, opts, true);
     if let Some(save_dir) = &opts.save_dir {
-        let (s_path, k_path) = default_save_paths(save_dir, session.table_id());
+        let (s_path, k_path) = host::validate_resume_autosave_target(
+            &save_path,
+            &seal_path,
+            save_dir,
+            session.table_id(),
+        )
+        .map_err(host::TuiError::SaveDirConflict)?;
         session.enable_autosave(s_path, k_path);
     } else {
         session.enable_autosave(save_path, seal_path);
@@ -1128,6 +1137,11 @@ mod tests {
             self.buffered_input.clear();
             Ok(())
         }
+    }
+
+    #[inline(never)]
+    fn trigger_test_panic_line(msg: String) {
+        panic!("{msg}");
     }
 
     #[derive(Clone)]
@@ -3036,6 +3050,16 @@ mod tests {
                 "INVALID_RESUME_TARGET",
             ),
             (
+                host::TuiError::SaveDirConflict(StructuredError::new(
+                    "SEASON_SAVE_EXISTS",
+                    format!("occupied dir {seeded_secret}"),
+                    "Choose another dir.",
+                    false,
+                )),
+                1,
+                "SEASON_SAVE_EXISTS",
+            ),
+            (
                 host::TuiError::AutosaveFailed {
                     save_path: PathBuf::from("saves/club-1.save.json"),
                     cause: StructuredError::new(
@@ -3319,22 +3343,60 @@ mod tests {
     fn real_session_all_four_log_levels_and_panic_hook_emit_no_private_values_and_suppress_alt_screen()
     -> Result<(), Box<dyn std::error::Error>> {
         use crossterm::event::KeyEventKind;
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
 
         let key_ev = |code: KeyCode, mods: KeyModifiers| {
             let mut k = KeyEvent::new(code, mods);
             k.kind = KeyEventKind::Press;
             Event::Key(k)
         };
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
 
-        let ring = default_dev_ring_table()?;
-        let planted_pin = "4829";
+        let collect_mandate_markers = |session: &host::TuiHostSession| -> Result<
+            (Vec<String>, Vec<String>),
+            Box<dyn std::error::Error>,
+        > {
+            let mut text_markers = Vec::new();
+            let mut num_markers = Vec::new();
+            for s in 0..session.seat_count() {
+                let obs = session.build_seat_observation(league_core::Seat(s))?;
+                let mandate = obs.own_mandate().ok_or("missing seat mandate")?;
+                text_markers.push(host::mandate_short_marker(mandate.kind));
+                text_markers.push(format!("{:?}", mandate.kind));
+                text_markers.push(format!("{:#?}", mandate.kind));
+                let variant = match mandate.kind {
+                    league_core::MandateKind::MinProjectEquity { target } => {
+                        if target >= 100 {
+                            num_markers.push(target.to_string());
+                        }
+                        "MinProjectEquity"
+                    }
+                    league_core::MandateKind::MinRefinedVariety { min_each, .. } => {
+                        if min_each >= 100 {
+                            num_markers.push(min_each.to_string());
+                        }
+                        "MinRefinedVariety"
+                    }
+                    league_core::MandateKind::MaintainCleanCredit { min_tier } => {
+                        text_markers.push(format!("{min_tier:?}"));
+                        "MaintainCleanCredit"
+                    }
+                    league_core::MandateKind::MinActivePartners { .. } => "MinActivePartners",
+                };
+                text_markers.push(variant.to_owned());
+                num_markers.push(mandate.bonus_equity.to_string());
+            }
+            Ok((text_markers, num_markers))
+        };
+
+        let planted_pin = "9483";
         let planted_note = "REAL_PATH_NOTE_991";
         let planted_debt_num = "765432";
         let planted_xrpl = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
         let planted_api_key = "sk-or-v1-logSecretKey77";
 
-        // Exercise all 4 log levels through real `run_session_loop_with_sink` (zero test-supplied
-        // redaction markers) AND through the real `handle_panic_with_restore` panic hook.
+        // Drive real Lobby + session + refusal + Sweep + reveal + failed/succeeded export + panic
+        // across all 4 log levels using real `TuiDiagnosticSink` (zero handed-in markers).
         for level in [
             host::LogLevel::Silent,
             host::LogLevel::Normal,
@@ -3348,20 +3410,76 @@ mod tests {
             ));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir)?;
+            let save_dir = dir.join("saves");
+            std::fs::create_dir_all(&save_dir)?;
             let log_file_path = dir.join(format!("diag-{}.log", level.as_str()));
 
-            let mut session =
-                host::TuiHostSession::from_ring_table(&ring, TableId(81_703), &[0], 19)?;
-            session.enable_seat_pins();
-            session.open_initial_curtain_for_active_human();
+            let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
+            let mut alt_term = Terminal::new(FixedSizeCrosstermBackend::new(
+                SharedVecWriter(written.clone()),
+                100,
+                30,
+            ))?;
+            let mut sink = host::TuiDiagnosticSink::new(level, Some(log_file_path.clone()));
+            sink.set_alternate_screen_active(true);
 
-            let obs0 = session.build_seat_observation(league_core::Seat(0))?;
-            let planted_mandate =
-                host::mandate_short_marker(obs0.own_mandate().ok_or("s0 mandate")?.kind);
-            let planted_salt_hex = session.turn_reveal_salt_hex(league_core::Seat(0))?;
-            let salt_prefix = &planted_salt_hex[..16];
+            // 1. Real Lobby loop: first trigger a validation refusal (`NO_HUMAN_SEATS`), then
+            // re-enable Seat 0 and start with `--untimed --pins --save-dir <save_dir>`.
+            let lobby_opts = match parse_args([
+                "league-tui".to_owned(),
+                "--untimed".to_owned(),
+                "--pins".to_owned(),
+                "--save-dir".to_owned(),
+                save_dir.to_string_lossy().into_owned(),
+            ]) {
+                CliAction::RunClub(o) => o,
+                other => return Err(format!("expected RunClub lobby opts, got {other:?}").into()),
+            };
+            let mut lobby_events_vec = vec![
+                key_ev(KeyCode::Down, KeyModifiers::NONE),
+                key_ev(KeyCode::Char(' '), KeyModifiers::NONE),
+            ];
+            for _ in 0..7 {
+                lobby_events_vec.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+            lobby_events_vec.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+            for _ in 0..7 {
+                lobby_events_vec.push(key_ev(KeyCode::Up, KeyModifiers::NONE));
+            }
+            lobby_events_vec.push(key_ev(KeyCode::Char(' '), KeyModifiers::NONE));
+            for _ in 0..7 {
+                lobby_events_vec.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+            lobby_events_vec.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+            let mut lobby_script = ScriptedSessionEvents::from_events(lobby_events_vec);
+            let mut session = run_lobby_loop_with_sink(
+                &mut alt_term,
+                &lobby_opts,
+                &mut lobby_script,
+                Some(&save_dir),
+                &mut sink,
+            )?
+            .ok_or("lobby must start session")?;
 
-            // Drive Pass A: set PIN "4829", enter Vault note "REAL_PATH_NOTE_991", commit note.
+            let (mut all_text_markers, mandate_number_markers) = collect_mandate_markers(&session)?;
+            for s in 0..session.seat_count() {
+                let salt_hex = session.turn_reveal_salt_hex(league_core::Seat(s))?;
+                let upper = salt_hex.to_ascii_uppercase();
+                let prefix = salt_hex[..16].to_owned();
+                if let (Ok(b0), Ok(b1), Ok(b2)) = (
+                    u8::from_str_radix(&salt_hex[0..2], 16),
+                    u8::from_str_radix(&salt_hex[2..4], 16),
+                    u8::from_str_radix(&salt_hex[4..6], 16),
+                ) {
+                    all_text_markers.push(format!("[{b0}, {b1}, {b2}"));
+                }
+                all_text_markers.push(salt_hex);
+                all_text_markers.push(upper);
+                all_text_markers.push(prefix);
+            }
+
+            // 2. Drive Pass A: lift Curtain, set PIN "9483", enter Vault note, switch to Tab 1
+            // `CancelOffer` and press Enter to trigger one refused in-turn command.
             let mut pass_a_events_vec: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
                 (
                     host::CURTAIN_LIFT_DEAD_TIME,
@@ -3403,22 +3521,28 @@ mod tests {
                 Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
                 Vec::new(),
             ));
-
-            let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
-            let mut alt_term = Terminal::new(FixedSizeCrosstermBackend::new(
-                SharedVecWriter(written.clone()),
-                100,
-                30,
-            ))?;
-            let mut sink = host::TuiDiagnosticSink::new(level, Some(log_file_path.clone()));
-            sink.set_alternate_screen_active(true);
+            pass_a_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('1'), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            pass_a_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char(']'), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            pass_a_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
 
             let mut pass_a_script =
                 ScriptedSessionEvents::from_timed_with_queued(pass_a_events_vec);
             run_session_loop_with_sink(&mut alt_term, &mut session, &mut pass_a_script, &mut sink)?;
 
-            // Stage a debt repayment + preimage escrow order, then lock Pass A -> Pass B -> unlock
-            // with PIN -> lock Pass B -> execute full Turn 1 Sweep into Turn 2.
+            // Stage debt repayment + preimage escrow order, then lock Pass A -> Pass B -> unlock
+            // with PIN -> lock Pass B -> execute Turn 1 -> Turn 2 Sweep.
             session.apply_seat_intent(
                 league_core::Seat(0),
                 league_seat_types::SeatIntent::update_bundle(
@@ -3480,8 +3604,124 @@ mod tests {
                 "real Sweep must advance session to Turn 2"
             );
 
-            // While alternate screen was active, zero diagnostic lines hit `SharedVecWriter`, and
-            // `flush_after_restore` emits nothing before restore.
+            // Unlock Turn 2 Seat 0 briefly to capture a live active `SeatScreenView` holding Seat 0's
+            // dealt mandate and persisted Vault note before advancing to season close.
+            let vp = ViewportSize::new(100, 30);
+            let unlock_with_pin =
+                |sess: &mut host::TuiHostSession| -> Result<(), Box<dyn std::error::Error>> {
+                    sess.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                    sess.handle_key_event(s_key(' '), vp)
+                        .map_err(|e| e.to_string())?;
+                    sess.handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    for d in planted_pin.chars() {
+                        sess.handle_key_event(s_key(d), vp)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    sess.handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    sess.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                    Ok(())
+                };
+            unlock_with_pin(&mut session)?;
+            session.apply_seat_intent(
+                league_core::Seat(0),
+                league_seat_types::SeatIntent::update_bundle(
+                    league_seat_types::BundleDraftAction::SetDebtRepaymentCred(765_432),
+                ),
+            )?;
+            let active_view = session.build_current_view(vp)?;
+            session
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+
+            while session.phase() == league_core::TurnPhase::TalkAndMarket {
+                if session.is_curtain_open() {
+                    unlock_with_pin(&mut session)?;
+                }
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            assert_eq!(
+                session.phase(),
+                league_core::TurnPhase::AwaitingMandateReveal
+            );
+
+            // 3. Drive all mandate reveals + 1 failed replay export via `run_session_loop_with_sink`.
+            let replay_path = save_dir.join("club-1.replay.json");
+            let seal_path = save_dir.join("club-1.seal");
+            std::fs::create_dir_all(replay_path.join("blocker"))?;
+            let mut reveal_and_fail_events = Vec::new();
+            for _ in 0..session.seat_count() {
+                reveal_and_fail_events.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            reveal_and_fail_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('4'), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            reveal_and_fail_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Char('e'), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            let mut fail_script =
+                ScriptedSessionEvents::from_timed_with_queued(reveal_and_fail_events);
+            fail_script.clock = sweep_script.elapsed();
+            run_session_loop_with_sink(&mut alt_term, &mut session, &mut fail_script, &mut sink)?;
+            assert_eq!(session.phase(), league_core::TurnPhase::Completed);
+            assert!(seal_path.exists());
+            assert_eq!(
+                session
+                    .terminal_tui_error()
+                    .ok_or("failed export must set exit 3 error")?
+                    .exit_code(),
+                3
+            );
+
+            // 4. Unblock replay path and drive successful replay export + clean quit.
+            std::fs::remove_dir_all(&replay_path)?;
+            let mut export_ok_script = ScriptedSessionEvents::from_timed_with_queued(vec![
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char('e'), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char('q'), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+            ]);
+            export_ok_script.clock = fail_script.elapsed();
+            run_session_loop_with_sink(
+                &mut alt_term,
+                &mut session,
+                &mut export_ok_script,
+                &mut sink,
+            )?;
+            assert!(!seal_path.exists());
+            assert!(replay_path.exists());
+            assert!(session.terminal_tui_error().is_none());
+
+            // Alternate screen received zero diagnostic lines; restore and inspect flushed output + log file.
             let alt_bytes = String::from_utf8_lossy(&written.borrow()).into_owned();
             assert!(
                 !alt_bytes.contains("[normal]")
@@ -3492,23 +3732,28 @@ mod tests {
             sink.flush_after_restore(&mut pre_restore);
             assert!(pre_restore.is_empty());
 
-            // Restore cooked mode -> flush diagnostics.
             sink.set_alternate_screen_active(false);
             let mut post_restore = Vec::new();
             sink.flush_after_restore(&mut post_restore);
             let flushed_stderr = String::from_utf8(post_restore)?;
             let file_log = std::fs::read_to_string(&log_file_path).unwrap_or_default();
 
+            let mut log_secrets: Vec<&str> = vec![
+                planted_pin,
+                planted_note,
+                planted_debt_num,
+                "5a5a5a5a",
+                "5A5A5A5A",
+                "[90, 90, 90",
+            ];
+            for m in &all_text_markers {
+                log_secrets.push(m.as_str());
+            }
+            for n in &mandate_number_markers {
+                log_secrets.push(n.as_str());
+            }
             for combined in [&flushed_stderr, &file_log] {
-                for secret in [
-                    planted_pin,
-                    planted_note,
-                    planted_mandate.as_str(),
-                    planted_debt_num,
-                    "5a5a5a5a",
-                    planted_salt_hex.as_str(),
-                    salt_prefix,
-                ] {
+                for secret in &log_secrets {
                     assert!(
                         !combined.contains(secret),
                         "real session level `{}` wrote secret `{secret}` to log:\n{combined}",
@@ -3523,17 +3768,26 @@ mod tests {
                 assert!(flushed_stderr.contains("session start"));
             }
             if level >= host::LogLevel::Verbose {
-                assert!(flushed_stderr.contains("state transition:"));
+                assert!(flushed_stderr.contains("lobby built table"));
+                assert!(flushed_stderr.contains("phase=Completed"));
             }
             if level == host::LogLevel::Debug {
+                assert!(flushed_stderr.contains("lobby validation refused [NO_HUMAN_SEATS]"));
+                assert!(flushed_stderr.contains("host refused input action ["));
+                assert!(
+                    flushed_stderr.contains("host refused input action [TUI_REPLAY_EXPORT_FAILED]")
+                );
                 assert!(flushed_stderr.contains("queued terminal input drained"));
             }
 
-            // Force a real panic carrying `{session:?}` + API/XRPL credentials through
-            // `handle_panic_with_restore` at this `level` (no handed-in markers).
+            // Force a real panic carrying `{session:?}`, `{active_view:?}`, `{active_view.zones:?}`
+            // plus XRPL seed & API key through `handle_panic_with_restore` at this `level`.
             let session_dbg = format!("{session:?}");
-            let panic_msg =
-                format!("forced boom {session_dbg} seed={planted_xrpl} key={planted_api_key}");
+            let view_dbg = format!("{active_view:?}");
+            let zones_dbg = format!("{:?}", active_view.zones);
+            let panic_msg = format!(
+                "forced boom {session_dbg} {view_dbg} {zones_dbg} seed={planted_xrpl} key={planted_api_key}"
+            );
             let prev_hook = std::panic::take_hook();
             let ev_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
             let cap_err = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
@@ -3555,7 +3809,7 @@ mod tests {
                 }
             }));
             let res = std::panic::catch_unwind(move || {
-                panic!("{panic_msg}");
+                trigger_test_panic_line(panic_msg);
             });
             std::panic::set_hook(prev_hook);
             assert!(res.is_err());
@@ -3576,25 +3830,198 @@ mod tests {
                 assert_eq!(panic_str.lines().count(), 1);
                 assert!(!panic_str.contains("stack backtrace:"));
             }
-            for secret in [
-                planted_pin,
+            let panic_header = panic_str.lines().next().unwrap_or("");
+            let mut panic_text_secrets: Vec<&str> = vec![
                 planted_note,
-                planted_mandate.as_str(),
                 planted_debt_num,
                 "5a5a5a5a",
-                planted_salt_hex.as_str(),
-                salt_prefix,
+                "5A5A5A5A",
+                "[90, 90, 90",
                 planted_xrpl,
                 planted_api_key,
-            ] {
+            ];
+            for m in &all_text_markers {
+                panic_text_secrets.push(m.as_str());
+            }
+            for secret in &panic_text_secrets {
                 assert!(
                     !panic_str.contains(secret),
                     "panic hook level `{}` leaked `{secret}`:\n{panic_str}",
                     level.as_str()
                 );
             }
+            assert!(
+                !panic_header.contains(planted_pin),
+                "panic header line leaked PIN `{planted_pin}`:\n{panic_header}"
+            );
+            for num in &mandate_number_markers {
+                assert!(
+                    !panic_header.contains(num.as_str()),
+                    "panic header line leaked mandate number `{num}`:\n{panic_header}"
+                );
+            }
 
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // Explicit 4-seat (1 Human + 3 ClubBots) LogLevel::Debug run with unique 5-digit
+        // MinProjectEquity targets and distinct 4-digit bonuses (> main.rs line count) proving
+        // every human and bot mandate target & bonus number stays absent across Sweep & Debug panic.
+        {
+            let ring = default_dev_ring_table()?;
+            let explicit_targets = [91_234, 92_345, 93_456, 94_567];
+            let explicit_bonuses = [5_123, 6_234, 7_345, 7_987];
+            let mut exp_session = host::TuiHostSession::from_explicit_mandates_for_test(
+                &ring,
+                TableId(81_704),
+                &[0],
+                explicit_targets,
+                explicit_bonuses,
+                19,
+            )?;
+            exp_session.enable_seat_pins();
+            exp_session.open_initial_curtain_for_active_human();
+
+            let (mut exp_text, mut exp_nums) = collect_mandate_markers(&exp_session)?;
+            for s in 0..4_u8 {
+                let salt_hex = exp_session.turn_reveal_salt_hex(league_core::Seat(s))?;
+                exp_text.push(salt_hex[..16].to_owned());
+                exp_text.push(salt_hex);
+            }
+            let vp = ViewportSize::new(100, 30);
+            let mut exp_events: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
+                (
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+            ];
+            for d in planted_pin.chars() {
+                exp_events.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            exp_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            exp_events.push((
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ));
+            exp_events.push((
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            exp_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            for d in planted_pin.chars() {
+                exp_events.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            exp_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            exp_events.push((
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                Vec::new(),
+            ));
+            let mut exp_term = Terminal::new(TestBackend::new(100, 30))?;
+            let mut exp_sink = host::TuiDiagnosticSink::new(host::LogLevel::Debug, None);
+            exp_sink.set_alternate_screen_active(true);
+            let mut exp_script = ScriptedSessionEvents::from_timed_with_queued(exp_events);
+            run_session_loop_with_sink(
+                &mut exp_term,
+                &mut exp_session,
+                &mut exp_script,
+                &mut exp_sink,
+            )?;
+            assert_eq!(exp_session.turn(), 2);
+
+            exp_session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+            exp_session
+                .handle_key_event(s_key(' '), vp)
+                .map_err(|e| e.to_string())?;
+            exp_session
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+            for d in planted_pin.chars() {
+                exp_session
+                    .handle_key_event(s_key(d), vp)
+                    .map_err(|e| e.to_string())?;
+            }
+            exp_session
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+            let exp_view = exp_session.build_current_view(vp)?;
+
+            exp_sink.set_alternate_screen_active(false);
+            let mut exp_out = Vec::new();
+            exp_sink.flush_after_restore(&mut exp_out);
+            let exp_log = String::from_utf8(exp_out)?;
+            exp_nums.sort();
+            exp_nums.dedup();
+            for s in exp_text.iter().chain(exp_nums.iter()) {
+                assert!(
+                    !exp_log.contains(s.as_str()),
+                    "explicit mandate Debug log leaked `{s}`:\n{exp_log}"
+                );
+            }
+
+            let exp_panic_msg = format!(
+                "explicit panic {:?} {:?} {:?}",
+                exp_session, exp_view, exp_view.zones
+            );
+            let prev_hook = std::panic::take_hook();
+            let cap_err = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+            let err_clone = std::sync::Arc::clone(&cap_err);
+            std::panic::set_hook(Box::new(move |info| {
+                let mut buf = Vec::new();
+                let mut restore = || {};
+                handle_panic_with_restore(info, host::LogLevel::Debug, &mut restore, &mut buf);
+                if let Ok(mut w) = err_clone.lock() {
+                    w.extend_from_slice(&buf);
+                }
+            }));
+            let res = std::panic::catch_unwind(move || {
+                trigger_test_panic_line(exp_panic_msg);
+            });
+            std::panic::set_hook(prev_hook);
+            assert!(res.is_err());
+            let panic_str =
+                String::from_utf8_lossy(&cap_err.lock().unwrap_or_else(|e| panic!("lock: {e}")))
+                    .into_owned();
+            for s in exp_text.iter().chain(exp_nums.iter()) {
+                assert!(
+                    !panic_str.contains(s.as_str()),
+                    "explicit Debug panic leaked `{s}`:\n{panic_str}"
+                );
+            }
         }
 
         // CLI log flag overrides conflicting `LEAGUE_LOG_LEVEL` env var.
@@ -4122,6 +4549,509 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_with_save_dir_never_overwrites_other_season_supports_in_place_and_empty_dir()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+        let vp = ViewportSize::new(100, 30);
+
+        let dir = std::env::temp_dir().join(format!("ml_resume_save_dir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir_a = dir.join("season_a");
+        let dir_b_unfin = dir.join("season_b_unfinished");
+        let dir_b_fin = dir.join("season_b_finished");
+        let dir_c_empty = dir.join("season_c_empty");
+        std::fs::create_dir_all(&dir_a)?;
+        std::fs::create_dir_all(&dir_b_unfin)?;
+        std::fs::create_dir_all(&dir_b_fin)?;
+        std::fs::create_dir_all(&dir_c_empty)?;
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        let lobby_start_steps = || {
+            let mut v = vec![key_ev(KeyCode::Enter, KeyModifiers::NONE)];
+            for _ in 0..8 {
+                v.insert(0, key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+            v
+        };
+
+        // Start two independent TableId(1) seasons in <dir_a> and <dir_b_unfin> via Lobby.
+        let start_table_1_in =
+            |target_dir: &Path,
+             seed_step: Option<u8>,
+             term: &mut Terminal<TestBackend>|
+             -> Result<host::TuiHostSession, Box<dyn std::error::Error>> {
+                let opts = match parse_args([
+                    "league-tui".to_owned(),
+                    "--untimed".to_owned(),
+                    "--save-dir".to_owned(),
+                    target_dir.to_string_lossy().into_owned(),
+                ]) {
+                    CliAction::RunClub(o) => o,
+                    other => return Err(format!("expected RunClub, got {other:?}").into()),
+                };
+                let mut steps = lobby_start_steps();
+                if seed_step.is_some() {
+                    // Step into Layout Seed row (row 5) and append digit '2' so Season A != Season B.
+                    let mut seeded = Vec::new();
+                    for _ in 0..5 {
+                        seeded.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+                    }
+                    seeded.push(key_ev(KeyCode::Char('2'), KeyModifiers::NONE));
+                    for _ in 0..3 {
+                        seeded.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+                    }
+                    seeded.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+                    steps = seeded;
+                }
+                let mut sink = host::TuiDiagnosticSink::new(host::LogLevel::Silent, None);
+                sink.set_alternate_screen_active(true);
+                let mut ev = ScriptedSessionEvents::from_events(steps);
+                Ok(
+                    run_lobby_loop_with_sink(term, &opts, &mut ev, Some(target_dir), &mut sink)?
+                        .ok_or("lobby table start")?,
+                )
+            };
+
+        let sess_a = start_table_1_in(&dir_a, None, &mut terminal)?;
+        let mut sess_b_unfin = start_table_1_in(&dir_b_unfin, Some(2), &mut terminal)?;
+        assert_eq!(sess_a.table_id(), TableId(1));
+        assert_eq!(sess_b_unfin.table_id(), TableId(1));
+        drop(sess_a);
+
+        let a_save = dir_a.join("club-1.save.json");
+        let a_seal = dir_a.join("club-1.seal");
+        let b_save = dir_b_unfin.join("club-1.save.json");
+        let b_seal = dir_b_unfin.join("club-1.seal");
+        let b_save_bytes = std::fs::read(&b_save)?;
+        let b_seal_bytes = std::fs::read(&b_seal)?;
+
+        // Also put a different season B inside <dir_b_unfin> (no wait: advance B one Curtain
+        // first so B differs on disk too) and verify A cannot overwrite B.
+        sess_b_unfin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        sess_b_unfin
+            .handle_key_event(s_key(' '), vp)
+            .map_err(|e| e.to_string())?;
+        sess_b_unfin
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        sess_b_unfin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        drop(sess_b_unfin);
+
+        // 1. `--resume <A>/club-1.save.json --save-dir <B_unfin>` -> refused with
+        // `UNFINISHED_SEASON_EXISTS` (exit 1), leaving `<B_unfin>/club-1.*` byte-identical.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let conflict_exit = dispatch_cli_with_env(
+            [
+                "league-tui".to_owned(),
+                "--resume".to_owned(),
+                a_save.to_string_lossy().into_owned(),
+                "--save-dir".to_owned(),
+                dir_b_unfin.to_string_lossy().into_owned(),
+                "--error-format".to_owned(),
+                "json".to_owned(),
+            ],
+            |_| None,
+            true,
+            &mut out,
+            &mut err,
+            |opts, _, _| build_session_for_cli(opts).map(|_| ()),
+        );
+        assert_eq!(conflict_exit, ExitCode::from(1));
+        let conflict_json = String::from_utf8(err)?;
+        assert!(conflict_json.contains("\"code\":\"UNFINISHED_SEASON_EXISTS\""));
+        assert_eq!(std::fs::read(&b_save)?, b_save_bytes);
+        assert_eq!(std::fs::read(&b_seal)?, b_seal_bytes);
+
+        // 2. Finish & export a `club-1` season in `<dir_b_fin>` -> `--resume <A>/club-1.save.json
+        // --save-dir <dir_b_fin>` AND direct `validate_and_start(TableId(1), ...)` (C1) must refuse
+        // with `SEASON_SAVE_EXISTS` and leave `<dir_b_fin>` files byte-identical.
+        let mut sess_b_fin = start_table_1_in(&dir_b_fin, Some(2), &mut terminal)?;
+        while sess_b_fin.phase() == league_core::TurnPhase::TalkAndMarket {
+            if sess_b_fin.is_curtain_open() {
+                sess_b_fin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                sess_b_fin
+                    .handle_key_event(s_key(' '), vp)
+                    .map_err(|e| e.to_string())?;
+                sess_b_fin
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+                sess_b_fin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+            }
+            sess_b_fin
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        for _ in 0..sess_b_fin.seat_count() {
+            sess_b_fin
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        sess_b_fin
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        sess_b_fin
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        drop(sess_b_fin);
+        let b_fin_save = dir_b_fin.join("club-1.save.json");
+        let b_fin_replay = dir_b_fin.join("club-1.replay.json");
+        assert!(!dir_b_fin.join("club-1.seal").exists());
+        let b_fin_save_bytes = std::fs::read(&b_fin_save)?;
+        let b_fin_replay_bytes = std::fs::read(&b_fin_replay)?;
+
+        let mut err_fin = Vec::new();
+        let fin_exit = dispatch_cli_with_env(
+            [
+                "league-tui".to_owned(),
+                "--resume".to_owned(),
+                a_save.to_string_lossy().into_owned(),
+                "--save-dir".to_owned(),
+                dir_b_fin.to_string_lossy().into_owned(),
+            ],
+            |_| None,
+            true,
+            &mut Vec::new(),
+            &mut err_fin,
+            |opts, _, _| build_session_for_cli(opts).map(|_| ()),
+        );
+        assert_eq!(fin_exit, ExitCode::from(1));
+        assert!(String::from_utf8(err_fin)?.contains("SEASON_SAVE_EXISTS"));
+        assert_eq!(std::fs::read(&b_fin_save)?, b_fin_save_bytes);
+        assert_eq!(std::fs::read(&b_fin_replay)?, b_fin_replay_bytes);
+
+        let mut direct_lobby = host::LobbyHostSession::new(LobbyCliOverrides::default());
+        let c1_err = direct_lobby
+            .validate_and_start(TableId(1), 1, Some(&dir_b_fin))
+            .err()
+            .ok_or("direct validate_and_start on existing save must refuse")?;
+        assert_eq!(c1_err.code, "SEASON_SAVE_EXISTS");
+        assert_eq!(std::fs::read(&b_fin_save)?, b_fin_save_bytes);
+        assert_eq!(std::fs::read(&b_fin_replay)?, b_fin_replay_bytes);
+
+        // 3. Resume in place with explicit `--save-dir <dir_a>/.` and with no `--save-dir` keep
+        // working and autosave into `<dir_a>` cleanly.
+        let a_save_before_inplace = std::fs::read(&a_save)?;
+        let a_seal_before_inplace = std::fs::read(&a_seal)?;
+        let in_place_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_a.join(".").to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub in-place, got {other:?}").into()),
+        };
+        let mut resumed_inplace = build_session_for_cli(&in_place_opts)?;
+        resumed_inplace.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_inplace
+            .handle_key_event(s_key(' '), vp)
+            .map_err(|e| e.to_string())?;
+        resumed_inplace
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        resumed_inplace.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_inplace
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        assert_ne!(std::fs::read(&a_seal)?, a_seal_before_inplace);
+        assert_ne!(std::fs::read(&a_save)?, a_save_before_inplace);
+
+        let no_savedir_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a_save.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub no savedir, got {other:?}").into()),
+        };
+        let mut resumed_no_dir = build_session_for_cli(&no_savedir_opts)?;
+        let a_seal_mid = std::fs::read(&a_seal)?;
+        resumed_no_dir.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_no_dir
+            .handle_key_event(s_key(' '), vp)
+            .map_err(|e| e.to_string())?;
+        resumed_no_dir
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        resumed_no_dir.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_no_dir
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        assert_ne!(std::fs::read(&a_seal)?, a_seal_mid);
+
+        // 4. `--resume <A>/club-1.save.json --save-dir <empty_C>` succeeds, autosaves into <empty_C>,
+        // and leaves <A> untouched after resume.
+        let a_save_snapshot = std::fs::read(&a_save)?;
+        let a_seal_snapshot = std::fs::read(&a_seal)?;
+        let empty_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_c_empty.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub empty target, got {other:?}").into()),
+        };
+        let mut resumed_c = build_session_for_cli(&empty_opts)?;
+        resumed_c.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_c
+            .handle_key_event(s_key(' '), vp)
+            .map_err(|e| e.to_string())?;
+        resumed_c
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        resumed_c.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_c
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        assert!(dir_c_empty.join("club-1.save.json").exists());
+        assert!(dir_c_empty.join("club-1.seal").exists());
+        assert_eq!(std::fs::read(&a_save)?, a_save_snapshot);
+        assert_eq!(std::fs::read(&a_seal)?, a_seal_snapshot);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    fn strip_tests_and_comments_for_panic_scan(source: &str) -> String {
+        let mut out = String::with_capacity(source.len());
+        let mut iter = source.char_indices().peekable();
+        let mut depth: usize = 0;
+        let mut in_cfg_test = false;
+        let mut cfg_test_depth: Option<usize> = None;
+
+        while let Some((idx, ch)) = iter.next() {
+            let rest = &source[idx..];
+            if rest.starts_with("//") {
+                for (_, nc) in iter.by_ref() {
+                    if nc == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+                continue;
+            }
+            if rest.starts_with("/*") {
+                iter.next();
+                let mut nest = 1_usize;
+                while nest > 0 {
+                    let Some((_, c)) = iter.next() else {
+                        break;
+                    };
+                    if c == '/' && iter.peek().is_some_and(|&(_, nc)| nc == '*') {
+                        iter.next();
+                        nest += 1;
+                    } else if c == '*' && iter.peek().is_some_and(|&(_, nc)| nc == '/') {
+                        iter.next();
+                        nest -= 1;
+                    }
+                }
+                out.push(' ');
+                continue;
+            }
+            if rest.starts_with("#[cfg(test)]") {
+                in_cfg_test = true;
+                for _ in 0..("#[cfg(test)]".len() - 1) {
+                    iter.next();
+                }
+                continue;
+            }
+            if ch == 'r' && (rest.starts_with("r\"") || rest.starts_with("r#")) {
+                let hashes = rest[1..].bytes().take_while(|&b| b == b'#').count();
+                if rest[1 + hashes..].starts_with('"') {
+                    for _ in 0..(hashes + 1) {
+                        iter.next();
+                    }
+                    while let Some((s_idx, _)) = iter.next() {
+                        if source[s_idx..].starts_with('"')
+                            && source[s_idx + 1..]
+                                .bytes()
+                                .take(hashes)
+                                .eq(std::iter::repeat_n(b'#', hashes))
+                        {
+                            for _ in 0..hashes {
+                                iter.next();
+                            }
+                            break;
+                        }
+                    }
+                    out.push_str("\"\"");
+                    continue;
+                }
+            }
+            if ch == '"' {
+                while let Some((_, sc)) = iter.next() {
+                    if sc == '\\' {
+                        iter.next();
+                    } else if sc == '"' {
+                        break;
+                    }
+                }
+                out.push_str("\"\"");
+                continue;
+            }
+            if ch == '\'' {
+                let mut cloned = iter.clone();
+                if let Some((_, c1)) = cloned.next() {
+                    if c1 == '\\' {
+                        iter.next();
+                        iter.next();
+                        for (_, ec) in iter.by_ref() {
+                            if ec == '\'' {
+                                break;
+                            }
+                        }
+                        out.push_str("''");
+                        continue;
+                    } else if cloned.next().is_some_and(|(_, c2)| c2 == '\'') {
+                        iter.next();
+                        iter.next();
+                        out.push_str("''");
+                        continue;
+                    }
+                }
+            }
+
+            if ch == '{' {
+                depth += 1;
+                if in_cfg_test && cfg_test_depth.is_none() {
+                    cfg_test_depth = Some(depth);
+                    in_cfg_test = false;
+                }
+            } else if ch == '}' {
+                if cfg_test_depth == Some(depth) {
+                    cfg_test_depth = None;
+                }
+                depth = depth.saturating_sub(1);
+            } else if (ch == ';' || ch == ',') && cfg_test_depth.is_none() {
+                in_cfg_test = false;
+            }
+
+            if cfg_test_depth.is_none() && !in_cfg_test {
+                out.push(ch);
+            }
+        }
+        out
+    }
+
+    fn scan_prod_for_panics(source: &str) -> Result<(), String> {
+        let filtered = strip_tests_and_comments_for_panic_scan(source);
+        for forbidden in [
+            "panic!",
+            "unreachable!",
+            "todo!",
+            "unimplemented!",
+            "assert!",
+            "assert_eq!",
+            "assert_ne!",
+            "debug_assert!",
+            "debug_assert_eq!",
+            "debug_assert_ne!",
+            ".unwrap(",
+            ".expect(",
+        ] {
+            if filtered.contains(forbidden) {
+                return Err(format!("found forbidden `{forbidden}` in non-test code"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn production_club_seat_and_tui_sources_contain_no_panic_unwrap_expect_or_assert()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // Negative controls for the scanner itself.
+        for bad in [
+            "fn bad() { panic!(\"boom\"); }",
+            "fn bad(x: Option<u8>) { let _ = x.unwrap(); }",
+            "fn bad(x: Option<u8>) { let _ = x.expect(\"missing\"); }",
+            "fn bad(ok: bool) { assert!(ok); }",
+        ] {
+            assert!(
+                scan_prod_for_panics(bad).is_err(),
+                "scanner missed negative control `{bad}`"
+            );
+        }
+        // Positive controls: test module, comments, and string literals are ignored cleanly.
+        assert!(
+            scan_prod_for_panics(
+                "// panic!()\nfn ok() -> &'static str { \"panic!()\" }\n#[cfg(test)]\nmod tests { fn t() { assert!(true); None::<u8>.unwrap(); } }\n",
+            )
+            .is_ok()
+        );
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or("workspace root")?;
+        let dirs = [
+            root.join("crates/league-error/src"),
+            root.join("crates/league-seat-types/src"),
+            root.join("crates/league-seat-ui/src"),
+            root.join("crates/league-core/src/club"),
+            root.join("crates/league-tui/src"),
+        ];
+        for dir in &dirs {
+            let mut stack = vec![dir.clone()];
+            while let Some(d) = stack.pop() {
+                for entry in std::fs::read_dir(&d)? {
+                    let path = entry?.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                        let content = std::fs::read_to_string(&path)?;
+                        scan_prod_for_panics(&content)
+                            .map_err(|err| format!("{}: {err}", path.display()))?;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

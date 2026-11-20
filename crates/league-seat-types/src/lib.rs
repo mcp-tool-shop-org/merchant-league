@@ -88,6 +88,144 @@ impl core::fmt::Debug for SeatScreenView {
         f.debug_struct("SeatScreenView")
             .field("layout", &self.layout)
             .field("zones_len", &self.zones.len())
+            .field("has_status_line", &self.status_line.is_some())
+            .field("has_modal", &self.modal.is_some())
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewSpan {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewSpan")
+            .field("text_len", &self.text.len())
+            .field("style", &self.style)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewRow")
+            .field("spans_len", &self.spans.len())
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewLabel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewLabel")
+            .field("text_len", &self.text.len())
+            .field("style", &self.style)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableColumn {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableColumn")
+            .field("header", &self.header)
+            .field("width", &self.width)
+            .field("alignment", &self.alignment)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableCell {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableCell")
+            .field("spans_len", &self.spans.len())
+            .field("alignment", &self.alignment)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableRow")
+            .field("cells_len", &self.cells.len())
+            .field("style", &self.style)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTable")
+            .field("columns_len", &self.columns.len())
+            .field("rows_len", &self.rows.len())
+            .field("selected_row", &self.selected_row)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTabItem {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTabItem")
+            .field("label", &self.label)
+            .field("enabled", &self.enabled)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTabBar {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTabBar")
+            .field("tabs_len", &self.tabs.len())
+            .field("active_index", &self.active_index)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewModal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewModal")
+            .field("width_pct", &self.width_pct)
+            .field("height_pct", &self.height_pct)
+            .field("panel", &self.panel)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewStatusLine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewStatusLine")
+            .field("has_alert", &self.alert.is_some())
+            .field("left_spans_len", &self.left.len())
+            .field("right_spans_len", &self.right.len())
+            .field("style", &self.style)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewZonePanel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewZonePanel")
+            .field("zone", &self.zone)
+            .field("panel", &self.panel)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewPanel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewPanel")
+            .field("has_title", &self.title.is_some())
+            .field("alignment", &self.alignment)
+            .field("bordered", &self.bordered)
+            .field("has_tabs", &self.tabs.is_some())
+            .field("has_table", &self.table.is_some())
+            .field("rows_len", &self.rows.len())
+            .field("selected_row", &self.selected_row)
+            .field("scroll", &self.scroll)
             .field("content", &"<redacted>")
             .finish()
     }
@@ -1286,15 +1424,70 @@ mod tests {
                 wash_freeze_settlements: Vec::new(),
             },
         };
-        let screen_view = SeatScreenView::single_panel(ViewPanel {
-            title: Some(ViewLabel::plain("Private Vault".to_owned())),
+        let label_title = ViewLabel::plain("PLANTED_VIEW_TITLE_645312".to_owned());
+        let span_item = ViewSpan::plain("PLANTED_VIEW_SPAN_534219".to_owned());
+        let row_note = ViewRow::from_spans(vec![
+            ViewSpan::plain("PLANTED_VIEW_MANDATE_645312".to_owned()),
+            span_item.clone(),
+        ]);
+        let tab_item = ViewTabItem {
+            label: ViewLabel::plain("PLANTED_VIEW_TAB_246810".to_owned()),
+            enabled: true,
+        };
+        let tab_bar = ViewTabBar {
+            tabs: vec![tab_item.clone()],
+            active_index: 0,
+        };
+        let table_col = ViewTableColumn {
+            header: ViewLabel::plain("PLANTED_VIEW_COL_135791".to_owned()),
+            width: ViewSizeHint::Min(10),
+            alignment: ViewAlign::Left,
+        };
+        let table_cell = ViewTableCell::plain("PLANTED_VIEW_ORDER_765432".to_owned());
+        let table_row = ViewTableRow {
+            cells: vec![table_cell.clone()],
+            style: ViewStyle::plain(),
+        };
+        let view_table = ViewTable {
+            columns: vec![table_col.clone()],
+            rows: vec![table_row.clone()],
+            selected_row: Some(0),
+        };
+        let vault_panel = ViewPanel {
+            title: Some(label_title.clone()),
+            tabs: Some(tab_bar.clone()),
+            table: Some(view_table.clone()),
             rows: vec![
-                ViewRow::from_plain("PLANTED_VIEW_MANDATE_645312".to_owned()),
+                row_note.clone(),
                 ViewRow::from_plain("PLANTED_VIEW_NOTE_534219".to_owned()),
-                ViewRow::from_plain("PLANTED_VIEW_ORDER_765432".to_owned()),
             ],
             ..ViewPanel::default()
-        });
+        };
+        let zone_panel = ViewZonePanel {
+            zone: ViewZoneId::PrivateDrawer,
+            panel: vault_panel.clone(),
+        };
+        let view_modal = ViewModal {
+            width_pct: 80,
+            height_pct: 60,
+            panel: ViewPanel {
+                title: Some(ViewLabel::plain("PLANTED_VIEW_MODAL_908172".to_owned())),
+                rows: vec![ViewRow::from_plain("PLANTED_VIEW_ORDER_765432".to_owned())],
+                ..ViewPanel::default()
+            },
+        };
+        let status_line = ViewStatusLine {
+            alert: Some(ViewRow::from_plain("PLANTED_VIEW_ALERT_112233".to_owned())),
+            left: vec![ViewSpan::plain("PLANTED_VIEW_LEFT_445566".to_owned())],
+            right: vec![ViewSpan::plain("PLANTED_VIEW_RIGHT_778899".to_owned())],
+            style: ViewStyle::plain(),
+        };
+        let screen_view = SeatScreenView {
+            layout: ScreenLayout::layout_for_viewport(ViewportSize::new(100, 30)),
+            zones: vec![zone_panel.clone()],
+            status_line: Some(status_line.clone()),
+            modal: Some(view_modal.clone()),
+        };
 
         let markers = [
             "987654",
@@ -1309,9 +1502,17 @@ mod tests {
             "90, 90, 90",
             "PLANTED_CAVEAT_918273",
             "PLANTED_REFUSAL_827364",
+            "PLANTED_VIEW_TITLE_645312",
+            "PLANTED_VIEW_SPAN_534219",
             "PLANTED_VIEW_MANDATE_645312",
+            "PLANTED_VIEW_TAB_246810",
+            "PLANTED_VIEW_COL_135791",
             "PLANTED_VIEW_NOTE_534219",
             "PLANTED_VIEW_ORDER_765432",
+            "PLANTED_VIEW_MODAL_908172",
+            "PLANTED_VIEW_ALERT_112233",
+            "PLANTED_VIEW_LEFT_445566",
+            "PLANTED_VIEW_RIGHT_778899",
         ];
         let debug_strings = [
             alloc::format!("{pm:?}"),
@@ -1322,6 +1523,8 @@ mod tests {
             alloc::format!("{draft_act:#?}"),
             alloc::format!("{intent_bundle:?}"),
             alloc::format!("{intent_bundle:#?}"),
+            alloc::format!("{:?}", what_if_req.assumptions),
+            alloc::format!("{:#?}", what_if_req.assumptions),
             alloc::format!("{what_if_req:?}"),
             alloc::format!("{what_if_req:#?}"),
             alloc::format!("{intent_whatif:?}"),
@@ -1334,6 +1537,34 @@ mod tests {
             alloc::format!("{what_if_preview:#?}"),
             alloc::format!("{screen_view:?}"),
             alloc::format!("{screen_view:#?}"),
+            alloc::format!("{:?}", screen_view.zones),
+            alloc::format!("{:#?}", screen_view.zones),
+            alloc::format!("{zone_panel:?}"),
+            alloc::format!("{zone_panel:#?}"),
+            alloc::format!("{vault_panel:?}"),
+            alloc::format!("{vault_panel:#?}"),
+            alloc::format!("{label_title:?}"),
+            alloc::format!("{label_title:#?}"),
+            alloc::format!("{span_item:?}"),
+            alloc::format!("{span_item:#?}"),
+            alloc::format!("{row_note:?}"),
+            alloc::format!("{row_note:#?}"),
+            alloc::format!("{tab_item:?}"),
+            alloc::format!("{tab_item:#?}"),
+            alloc::format!("{tab_bar:?}"),
+            alloc::format!("{tab_bar:#?}"),
+            alloc::format!("{table_col:?}"),
+            alloc::format!("{table_col:#?}"),
+            alloc::format!("{table_cell:?}"),
+            alloc::format!("{table_cell:#?}"),
+            alloc::format!("{table_row:?}"),
+            alloc::format!("{table_row:#?}"),
+            alloc::format!("{view_table:?}"),
+            alloc::format!("{view_table:#?}"),
+            alloc::format!("{view_modal:?}"),
+            alloc::format!("{view_modal:#?}"),
+            alloc::format!("{status_line:?}"),
+            alloc::format!("{status_line:#?}"),
         ];
         for text in &debug_strings {
             assert!(

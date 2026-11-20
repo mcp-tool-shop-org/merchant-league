@@ -30,7 +30,7 @@ league-tui [options]
 | Option | Meaning |
 | --- | --- |
 | `--save-dir <DIR>` | Directory for atomic `club-<id>.save.json`, private `club-<id>.seal`, and exported `club-<id>.replay.json` |
-| `--resume <PATH>` | Resume from a `club-<id>.save.json` file or directory containing one (always opens behind a Curtain) |
+| `--resume <PATH>` | Resume from a `club-<id>.save.json` file or directory containing one (in-season resumes always open behind a Curtain; post-season resumes open on the public Session Standby reveal view or Completed End-of-Season tabs) |
 | `--turn-clock <180..=300>` | Override whole-turn clock budget in seconds (`75%` Sub-Pass A / `25%` Sub-Pass B across `H` humans; `210` default) |
 | `--untimed` | Disable timed turn auto-locks (overrides Lobby and `.seal` clock settings; conflicts with `--turn-clock`) |
 | `--pins` | Enable 4-digit table-local Curtain PINs entered interactively behind the Curtain (passing `--pin` on CLI fails with `PIN_CLI_FORBIDDEN`) |
@@ -54,7 +54,7 @@ While the alternate screen is active, zero diagnostic lines are written to the t
 | Code | Meaning |
 | --- | --- |
 | 0 | Clean completion (`--help`, `--version`, quit from Lobby or active/completed session cleanly) |
-| 1 | User or configuration error (bad or conflicting flags, invalid `LEAGUE_LOG_LEVEL`, `--pin` on CLI [`PIN_CLI_FORBIDDEN`], missing `--resume` target [`INVALID_RESUME_TARGET`], or non-TTY launch [`TTY_REQUIRED`], checked before raw mode is entered) |
+| 1 | User or configuration error (bad or conflicting flags, invalid `LEAGUE_LOG_LEVEL`, `--pin` on CLI [`PIN_CLI_FORBIDDEN`], missing `--resume` target [`INVALID_RESUME_TARGET`], conflicting `--save-dir` target [`UNFINISHED_SEASON_EXISTS` / `SEASON_SAVE_EXISTS`], or non-TTY launch [`TTY_REQUIRED`], checked before raw mode is entered) |
 | 2 | Runtime error (corrupt `.save.json` / `.seal` checkpoint refusal, autosave failure [`TUI_AUTOSAVE_FAILED`], wedged pass error, or terminal I/O failure) |
 | 3 | Partial success (season finalized cleanly through `TurnPhase::Completed`, but `club-<id>.replay.json` write or `.seal` wipe failed [`TUI_REPLAY_EXPORT_FAILED`]; `.seal` stays intact for retry) |
 
