@@ -22,26 +22,30 @@ use league_relay::{
     FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS, LiveGate, LocalGate,
     LocalOpenAiTransport, MAX_INTENT_HEADER_DEPTH, MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS,
     MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
-    NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode,
-    REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round,
-    SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatFile, SeatOutcome,
-    TranscriptEntry, Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport,
-    WordingEntry, build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
+    NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_ARM_WORDING_R1,
+    PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM, PREVIEW_WORDING_ARM_R1, PREVIEW_WORDING_ARM_R2,
+    PreviewToolMode, REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError,
+    ResponseFormatConfig, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord,
+    SavedToolRoundRecord, SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError,
+    TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
+    build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
     discarded_reply_file_path, execute_preview_tool_call, extract_scratchpad_update,
     format_negotiation_block, http_reply_file_path, install_redacting_panic_hook,
     json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
-    parse_preview_tool_arguments, preview_seat_bundle_executions_for_table_for_test,
-    preview_wording_slot, redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
-    render_call_limit_reached_wire_json, render_engine_refusal_wire_json,
-    render_json_escaped_whisper_line, render_malformed_tool_call_wire_json,
-    render_wording_slot_with, reset_preview_seat_bundle_executions_for_table_for_test, run_turn,
-    sanitize_scratchpad_for_prompt, sanitize_whisper, set_fail_pending_temp_write_for_test,
-    set_fail_tool_round_write_for_test, sha256_hex, split_negotiation_sections,
-    strip_thinking_tags, take_durability_events_for_test, tool_round_file_path,
-    truncate_after_redaction, validate_local_base_url, validate_local_endpoints,
-    validate_local_tokenize_url, validate_pinned_local_model, validate_pinned_openrouter_slug,
-    validate_scratchpad_setup, validate_vm_host_allowance, watch_durability_events_for_test,
-    wording_slot, wording_template,
+    parse_preview_tool_arguments, preview_r1_wording_slot,
+    preview_seat_bundle_executions_for_table_for_test, preview_wording_slot, redact_and_truncate,
+    redact_secrets, redact_secrets_multi_with_limit, render_call_limit_reached_wire_json,
+    render_engine_refusal_wire_json, render_json_escaped_whisper_line,
+    render_malformed_tool_call_wire_json, render_wording_slot_with,
+    reset_preview_seat_bundle_executions_for_table_for_test, run_turn,
+    sanitize_scratchpad_for_prompt, sanitize_whisper,
+    set_fail_between_from_seat_and_ok_ledger_for_test, set_fail_from_seat_write_for_test,
+    set_fail_pending_temp_write_for_test, set_fail_tool_round_write_for_test, sha256_hex,
+    split_negotiation_sections, strip_thinking_tags, take_durability_events_for_test,
+    tool_round_file_path, truncate_after_redaction, validate_local_base_url,
+    validate_local_endpoints, validate_local_tokenize_url, validate_pinned_local_model,
+    validate_pinned_openrouter_slug, validate_scratchpad_setup, validate_vm_host_allowance,
+    watch_durability_events_for_test, wording_slot, wording_template,
 };
 use serde_json::{Value as Json, json};
 use std::collections::VecDeque;
@@ -16521,16 +16525,16 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const MIN_COMMITTED_HISTORY_ROWS: usize = 7;
+const MIN_COMMITTED_HISTORY_ROWS: usize = 8;
 const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
-fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
+fn compute_history_row_seal_parts(arm: &str, path_digests: &[(&str, u128)]) -> u128 {
     let mut buf: Vec<u8> = Vec::with_capacity(512);
-    buf.extend_from_slice(&(row.arm.len() as u64).to_le_bytes());
-    buf.extend_from_slice(row.arm.as_bytes());
+    buf.extend_from_slice(&(arm.len() as u64).to_le_bytes());
+    buf.extend_from_slice(arm.as_bytes());
     buf.push(0xFF);
-    buf.extend_from_slice(&(row.path_digests.len() as u64).to_le_bytes());
-    for &(path_name, path_digest) in row.path_digests {
+    buf.extend_from_slice(&(path_digests.len() as u64).to_le_bytes());
+    for &(path_name, path_digest) in path_digests {
         buf.extend_from_slice(&(path_name.len() as u64).to_le_bytes());
         buf.extend_from_slice(path_name.as_bytes());
         buf.push(b'=');
@@ -16538,6 +16542,10 @@ fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
         buf.push(b';');
     }
     fnv1a_128_digest(&buf)
+}
+
+fn compute_history_row_seal(row: &ArmRenderHistoryRow) -> u128 {
+    compute_history_row_seal_parts(row.arm, row.path_digests)
 }
 
 const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
@@ -17120,6 +17128,120 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    // Row 7 (Card 9 Eval arm `v2_preview_2026_11_20_r2`): keeps all 24 neutral paths and 3 unchanged
+    // preview paths identical to Row 6, updating only the 2 requests embedding `preview_call_budget_sentence`.
+    ArmRenderHistoryRow {
+        arm: "v2_preview_2026_11_20_r2",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x12f0575c512507b475b9f7a2ef87a090,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+            (
+                "emc_excerpt_160_char_clip",
+                0xe7f8ace5cdc194668aeb07b653ad050f,
+            ),
+            (
+                "whisper_partial_word_truncation",
+                0x93d6b1a5a1fabbb05d2b3da069674a69,
+            ),
+            (
+                "seat_text_default_ignorable_escaped",
+                0x07d0fbd1e379a21ec5d5e547602fa5cd,
+            ),
+            (
+                "whisper_supplementary_di_budget_truncation",
+                0x8e1370adcce3bf0cdf5f7794b636bd9b,
+            ),
+            (
+                "preview_act_initial_request_and_tool_schema",
+                0xf6e7f6814368065572f809fdf886d5cc,
+            ),
+            (
+                "preview_talk_round_omits_tool_and_budget",
+                0xb7439d93c89b8f94789bc223dd1949cc,
+            ),
+            (
+                "preview_tool_roundtrip_followup_request",
+                0x96654b1e17a4fd8ba9c2f1900d1bbb85,
+            ),
+            (
+                "preview_wire_all_outcomes_tiers_identities_and_fills",
+                0x38a86148dead3ae6a50e1dd28748620f,
+            ),
+            (
+                "preview_wire_all_refusal_and_limit_codes",
+                0xe9d7cc834765bcd9177c312baf94a42d,
+            ),
+        ],
+    },
 ];
 
 // `P41-C4` review note: an in-tree test can verify every row against `SEALED_IMMUTABLE_HISTORY_ROWS`
@@ -17154,6 +17276,10 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_preview_2026_11_17_r1",
         0x4fd956f044da56e8c99a80bb5e27d10f,
+    ),
+    (
+        "v2_preview_2026_11_20_r2",
+        0xab5f158925fc9edd3ea7cb768f46038b,
     ),
 ];
 
@@ -24216,8 +24342,14 @@ fn find_and_mutate_whole_json_string_token(
 fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() -> TestResult {
     let live_paths = render_all_preview_arm_guard_paths()?;
     assert_eq!(PREVIEW_ARM_WORDING.len(), 250);
-    assert_eq!(ARM_RENDER_PATH_HISTORY[6].arm, PREVIEW_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[6].arm, PREVIEW_WORDING_ARM_R1);
     assert_eq!(ARM_RENDER_PATH_HISTORY[6].path_digests.len(), 29);
+    assert_eq!(
+        SEALED_IMMUTABLE_HISTORY_ROWS[6].1,
+        0x4fd956f044da56e8c99a80bb5e27d10f
+    );
+    assert_eq!(ARM_RENDER_PATH_HISTORY[7].arm, PREVIEW_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[7].path_digests.len(), 29);
 
     verify_arm_render_path_history(
         ARM_RENDER_PATH_HISTORY,
@@ -29103,38 +29235,65 @@ fn card8_fix2_e_raw_file_write_failure_stops_with_named_code_exit_2_and_zero_fur
     Ok(())
 }
 
+fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Error>> {
+    assert!(!raw_line.contains("http_reply_sha256"));
+    let parsed: Json = serde_json::from_str(raw_line)?;
+    let time_utc = parsed["time_utc"].as_str().ok_or("missing time_utc")?;
+    assert!(
+        time_utc.ends_with('Z') && time_utc.len() >= 20,
+        "invalid time_utc format: {time_utc}"
+    );
+    let _latency_ms = parsed["latency_ms"].as_u64().ok_or("missing latency_ms")?;
+    if let Some(wall) = parsed.get("wall_secs") {
+        let w = wall.as_f64().ok_or("non-numeric wall_secs")?;
+        assert!(w.is_finite() && w >= 0.0);
+    }
+    if let Some(resv) = parsed.get("reservation_id") {
+        let r = resv.as_str().ok_or("non-string reservation_id")?;
+        assert!(!r.is_empty());
+    }
+
+    let replace_string_field = |s: &str, key: &str, replacement: &str| -> Result<String, String> {
+        let pat = format!("\"{key}\":\"");
+        let Some(start) = s.find(&pat) else {
+            return Ok(s.to_owned());
+        };
+        let val_start = start + pat.len();
+        let rest = &s[val_start..];
+        let Some(rel_end) = rest.find('"') else {
+            return Err(format!("unterminated string value for {key}"));
+        };
+        let mut out = String::with_capacity(s.len());
+        out.push_str(&s[..val_start]);
+        out.push_str(replacement);
+        out.push_str(&rest[rel_end..]);
+        Ok(out)
+    };
+    let replace_number_field = |s: &str, key: &str, replacement: &str| -> String {
+        let pat = format!("\"{key}\":");
+        let Some(start) = s.find(&pat) else {
+            return s.to_owned();
+        };
+        let val_start = start + pat.len();
+        let rest = &s[val_start..];
+        let end_rel = rest.find([',', '}']).unwrap_or(rest.len());
+        let mut out = String::with_capacity(s.len());
+        out.push_str(&s[..val_start]);
+        out.push_str(replacement);
+        out.push_str(&rest[end_rel..]);
+        out
+    };
+
+    let s = replace_string_field(raw_line, "time_utc", "<TIME_UTC>")?;
+    let s = replace_number_field(&s, "wall_secs", "<WALL_SECS>");
+    let s = replace_number_field(&s, "latency_ms", "<LATENCY_MS>");
+    let s = replace_string_field(&s, "reservation_id", "<RESERVATION_ID>")?;
+    Ok(s)
+}
+
 #[test]
 fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identical_and_row5_untouched()
 -> TestResult {
-    #[derive(serde::Serialize)]
-    struct B2d77ce8CallLogLine<'a> {
-        time_utc: &'a str,
-        day: &'a str,
-        round: Round,
-        guild: &'a str,
-        attempt: u8,
-        trigger: &'a str,
-        model_requested: &'a str,
-        model_returned: Option<&'a str>,
-        request_body_sha256: &'a str,
-        reply_sha256: Option<&'a str>,
-        prompt_tokens: Option<u64>,
-        completion_tokens: Option<u64>,
-        total_tokens: Option<u64>,
-        reasoning_tokens: Option<u64>,
-        cost_unit: CostUnit,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        wall_secs: Option<f64>,
-        cost: Option<f64>,
-        charged_credits: f64,
-        latency_ms: u64,
-        outcome: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reservation_id: Option<&'a str>,
-    }
-
     fn collect_rel_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> TestResult {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
@@ -29153,18 +29312,180 @@ fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identica
     }
 
     let tmp = TempDir::new()?;
+
+    // 1. Committed real `b2d77ce8` golden file parity check across 3 `--mock-dir --preview-tool off` turns
+    //    (`OK`, `harness` + `NO_REPLY`, and `CAP_REACHED`), comparing raw lines in exact key order.
+    let golden_raw = include_str!("fixtures/b2d77ce8_tool_off_calls.jsonl");
+    let golden_lines: Vec<&str> = golden_raw
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    assert_eq!(golden_lines.len(), 4);
+
+    let g_wrapper = tmp.path().join("golden_wrapper.md");
+    fs::write(&g_wrapper, "GOLDEN_PARITY_WRAPPER\n")?;
+    let g_seats = tmp.path().join("golden_seats.json");
+    fs::write(
+        &g_seats,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_mock = tmp.path().join("golden_mock");
+    fs::create_dir_all(&g_mock)?;
+    fs::write(
+        g_mock.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "GOLDEN_TURN1_TALK_OK",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-1",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "GOLDEN_TALK_REPLY_OK" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                            "total_tokens": 18,
+                            "cost": 0.02
+                        }
+                    }
+                },
+                {
+                    "when_contains": "GOLDEN_TURN2_ACT_EMPTY",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-2",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 13,
+                            "completion_tokens": 0,
+                            "total_tokens": 13,
+                            "cost": 0.015
+                        }
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let g_golden = tmp.path().join("g_golden_parity");
+    write_to_seat(
+        &g_golden,
+        "01",
+        "talk",
+        "Saltworks",
+        "GOLDEN_TURN1_TALK_OK\n",
+    )?;
+    write_to_seat(
+        &g_golden,
+        "01",
+        "act",
+        "Saltworks",
+        "GOLDEN_TURN2_ACT_EMPTY\n",
+    )?;
+    write_to_seat(&g_golden, "02", "talk", "Saltworks", "GOLDEN_TURN3_CAP\n")?;
+    for (day, round, expected_exit) in [("01", "talk", 0), ("01", "act", 3), ("02", "talk", 3)] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_golden.to_str().ok_or("utf8")?,
+                "--day",
+                day,
+                "--round",
+                round,
+                "--seats",
+                g_seats.to_str().ok_or("utf8")?,
+                "--wrapper",
+                g_wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                g_mock.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "off",
+                "--cap-credits",
+                "0.09",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            expected_exit,
+            "day {day} {round} stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+
+    let mut golden_rel_files = Vec::new();
+    collect_rel_files(&g_golden, &g_golden, &mut golden_rel_files)?;
+    for rel in &golden_rel_files {
+        assert!(
+            !rel.contains("http-reply")
+                && !rel.contains("tool-round")
+                && !rel.contains("discarded-round"),
+            "unexpected sidecar under --preview-tool off: {rel}"
+        );
+    }
+
+    let raw_jsonl = fs::read_to_string(g_golden.join("relay/calls.jsonl"))?;
+    let raw_lines: Vec<&str> = raw_jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(raw_lines.len(), golden_lines.len());
+    for (idx, (actual_line, golden_line)) in raw_lines.iter().zip(golden_lines.iter()).enumerate() {
+        let actual_canon = canonicalize_b2d77ce8_call_line(actual_line)?;
+        let golden_canon = canonicalize_b2d77ce8_call_line(golden_line)?;
+        assert_eq!(
+            actual_canon, golden_canon,
+            "tool-off line {idx} must match committed b2d77ce8 golden line verbatim aside from timestamp/wall_secs/latency_ms/reservation_id"
+        );
+        assert!(actual_line.ends_with('}'));
+        assert!(!actual_line.contains("http_reply_sha256"));
+    }
+    // Negative control: altering a golden field value or field order must fail the raw line match.
+    let mutbad_val =
+        golden_lines[0].replacen("\"charged_credits\":0.02", "\"charged_credits\":0.03", 1);
+    assert_ne!(
+        canonicalize_b2d77ce8_call_line(raw_lines[0])?,
+        canonicalize_b2d77ce8_call_line(&mutbad_val)?
+    );
+
+    // 2. Local seat harness-retry + OK turn under `--preview-tool off` also writes zero sidecars.
     let wrapper = tmp.path().join("wrapper.md");
     fs::write(&wrapper, "OFF_PARITY_WRAPPER")?;
-
     let srv = LoopbackOpenAiServer::start_with_tokenizer(
         vec![
-            // Turn 1 attempt 1: empty reply -> harness retry
             MockHttpStep::Json {
                 status: 200,
                 delay: Duration::from_millis(1),
                 body: local_completion_body("", "Qwen/Qwen3-14B", 10, 2, None, None),
             },
-            // Turn 1 attempt 2: clean OK delivery
             MockHttpStep::Json {
                 status: 200,
                 delay: Duration::from_millis(1),
@@ -29175,7 +29496,6 @@ fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identica
     )?;
     let seats_path = tmp.path().join("seats.json");
     write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
-
     let game_dir = tmp.path().join("g_off_parity");
     write_to_seat(&game_dir, "01", "act", "Saltworks", "DAY1_ACT")?;
     let mut out = Vec::new();
@@ -29203,55 +29523,14 @@ fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identica
         &mut err,
     );
     assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&err));
-
-    // Zero raw, tool-round, or discarded-round sidecars anywhere under game_dir.
     let mut rel_files = Vec::new();
     collect_rel_files(&game_dir, &game_dir, &mut rel_files)?;
-    rel_files.sort();
     for rel in &rel_files {
         assert!(
             !rel.contains("http-reply")
                 && !rel.contains("tool-round")
                 && !rel.contains("discarded-round"),
             "unexpected sidecar under --preview-tool off: {rel}"
-        );
-    }
-
-    // Whole ledger lines match exact b2d77ce8 schema byte-for-byte with `http_reply_sha256` omitted.
-    let raw_jsonl = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
-    let raw_lines: Vec<&str> = raw_jsonl.lines().filter(|l| !l.trim().is_empty()).collect();
-    assert_eq!(raw_lines.len(), 2);
-    for actual_line in &raw_lines {
-        assert!(!actual_line.contains("http_reply_sha256"));
-        let parsed: CallLogEntry = serde_json::from_str(actual_line)?;
-        assert_eq!(parsed.http_reply_sha256, None);
-        let expected_b2d77ce8 = serde_json::to_string(&B2d77ce8CallLogLine {
-            time_utc: &parsed.time_utc,
-            day: &parsed.day,
-            round: parsed.round,
-            guild: &parsed.guild,
-            attempt: parsed.attempt,
-            trigger: &parsed.trigger,
-            model_requested: &parsed.model_requested,
-            model_returned: parsed.model_returned.as_deref(),
-            request_body_sha256: &parsed.request_body_sha256,
-            reply_sha256: parsed.reply_sha256.as_deref(),
-            prompt_tokens: parsed.prompt_tokens,
-            completion_tokens: parsed.completion_tokens,
-            total_tokens: parsed.total_tokens,
-            reasoning_tokens: parsed.reasoning_tokens,
-            cost_unit: parsed.cost_unit,
-            wall_secs: parsed.wall_secs,
-            cost: parsed.cost,
-            charged_credits: parsed.charged_credits,
-            latency_ms: parsed.latency_ms,
-            outcome: &parsed.outcome,
-            error: parsed.error.as_deref(),
-            reservation_id: parsed.reservation_id.as_deref(),
-        })?;
-        assert_eq!(
-            *actual_line, expected_b2d77ce8,
-            "off-mode calls.jsonl line must match b2d77ce8 byte-for-byte"
         );
     }
 
@@ -29283,6 +29562,53 @@ fn verify_raw_reply_gate_invariants(relay_src: &str) -> Result<(), String> {
         .find("\nenum EvaluatedCall {")
         .ok_or_else(|| "missing `enum EvaluatedCall` boundary after raw_reply_gate".to_owned())?;
     let gate_only = &gate_body[..gate_mod_rel_end];
+    let outside_before = &relay_src[..gate_mod_start];
+    let outside_after = &relay_src[gate_mod_start + gate_mod_rel_end..];
+
+    if !gate_only.contains("pub(super) struct CallTransportResult(CallTransportInner);")
+        || !gate_only.contains("enum CallTransportInner {")
+    {
+        return Err(
+            "CallTransportResult must be an opaque newtype wrapping private CallTransportInner inside mod raw_reply_gate"
+                .to_owned(),
+        );
+    }
+    if gate_only.contains("#[derive(") {
+        return Err(
+            "types inside mod raw_reply_gate must not derive Clone, Copy, or Default".to_owned(),
+        );
+    }
+    if outside_before.contains("CallTransportResult::")
+        || outside_after.contains("CallTransportResult::")
+        || outside_before.contains("CallTransportInner")
+        || outside_after.contains("CallTransportInner")
+    {
+        return Err(
+            "CallTransportResult variants / CallTransportInner must not be named outside mod raw_reply_gate"
+                .to_owned(),
+        );
+    }
+    if outside_before.contains("post_chat_completions(")
+        || outside_after.contains("post_chat_completions(")
+    {
+        return Err(
+            "transport.post_chat_completions must not be called outside mod raw_reply_gate"
+                .to_owned(),
+        );
+    }
+    let post_calls = gate_only.matches("post_chat_completions(").count();
+    if post_calls != 1 {
+        return Err(format!(
+            "expected exactly 1 transport.post_chat_completions( call inside mod raw_reply_gate, found {post_calls}"
+        ));
+    }
+    let timeout_calls_outside = outside_before.matches("call_with_wall_timeout(").count()
+        + outside_after.matches("call_with_wall_timeout(").count();
+    if timeout_calls_outside != 1 {
+        return Err(format!(
+            "expected exactly 1 call site of raw_reply_gate::call_with_wall_timeout( outside gate, found {timeout_calls_outside}"
+        ));
+    }
 
     if !gate_only.contains("pub(super) struct GateVerifiedHttpResponse")
         || !gate_only.contains("_private: ()")
@@ -29361,8 +29687,9 @@ fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() 
     let relay_src = include_str!("../src/relay.rs").replace("\r\n", "\n");
     verify_raw_reply_gate_invariants(&relay_src).map_err(|e| -> Box<dyn Error> { e.into() })?;
 
-    // Negative controls: a second GateVerifiedHttpResponse constructor or RawHttpResponse in
-    // evaluate_call_result must fail `verify_raw_reply_gate_invariants`.
+    // Negative controls: a second GateVerifiedHttpResponse constructor, deriving Clone/Default inside gate,
+    // naming CallTransportResult:: or calling post_chat_completions(/call_with_wall_timeout( outside gate,
+    // or taking RawHttpResponse in evaluate_call_result must fail `verify_raw_reply_gate_invariants`.
     let dup_ctor = relay_src.replacen(
         "Ok(RecordedTransportCall {",
         "let _rogue = GateVerifiedHttpResponse { status: 0, body: String::new(), _private: () };\n                Ok(RecordedTransportCall {",
@@ -29382,6 +29709,32 @@ fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() 
         return Err("RawHttpResponse in evaluate_call_result must fail invariant check".into());
     };
     assert!(eval_err.contains("PersistedTransportOutcome"));
+
+    let rogue_derive = relay_src.replacen(
+        "pub(super) struct CallTransportResult(CallTransportInner);",
+        "#[derive(Clone)]\n    pub(super) struct CallTransportResult(CallTransportInner);",
+        1,
+    );
+    let Err(derive_err) = verify_raw_reply_gate_invariants(&rogue_derive) else {
+        return Err("derive on gate type must fail invariant check".into());
+    };
+    assert!(derive_err.contains("must not derive"));
+
+    let rogue_transport_call = format!(
+        "{relay_src}\nfn _rogue_bypass() {{ transport.post_chat_completions(\"u\", \"b\", d); }}\n"
+    );
+    let Err(tx_err) = verify_raw_reply_gate_invariants(&rogue_transport_call) else {
+        return Err("post_chat_completions outside gate must fail invariant check".into());
+    };
+    assert!(tx_err.contains("post_chat_completions"));
+
+    let rogue_timeout_call = format!(
+        "{relay_src}\nfn _rogue_timeout() {{ raw_reply_gate::call_with_wall_timeout(); }}\n"
+    );
+    let Err(timeout_err) = verify_raw_reply_gate_invariants(&rogue_timeout_call) else {
+        return Err("second call_with_wall_timeout call site must fail invariant check".into());
+    };
+    assert!(timeout_err.contains("call_with_wall_timeout"));
 
     Ok(())
 }
@@ -29519,5 +29872,1092 @@ fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_reda
         "existing CallLogEntry.error path must stay truncated & capped at MAX_REDACTION_SCAN_BYTES: {logged_err}"
     );
 
+    Ok(())
+}
+
+// ============================================================================
+// Wave 2 Card 9: orphan raw-reply hash linking, wording r2, and Card 8 follow-ups
+// ============================================================================
+
+fn card9_make_orphan_test_env(
+    root: &Path,
+    preview_tool: PreviewToolMode,
+    resv_id: &str,
+    request_sha: &str,
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ),
+    Box<dyn Error>,
+> {
+    let game_dir = root.join("game");
+    fs::create_dir_all(game_dir.join("relay").join("seats"))?;
+    let seats_path = root.join("seats.json");
+    let seats_json = json!({
+        "seats": [
+            {
+                "guild": "Saltworks",
+                "backend": "openrouter",
+                "model": "google/gemini-2.5-pro-06-05",
+                "temperature": 0.4,
+                "max_output_tokens": 512,
+                "timeout_secs": 5.0,
+                "max_cost_per_call": 0.05
+            },
+            { "guild": "Weavers", "backend": "file" },
+            { "guild": "Smiths", "backend": "file" },
+            { "guild": "Dyers", "backend": "file" }
+        ]
+    });
+    fs::write(&seats_path, seats_json.to_string())?;
+    let wrapper_path = root.join("wrapper.md");
+    fs::write(&wrapper_path, "ORPHAN_WRAPPER")?;
+
+    let mock_dir = root.join("mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [{
+                "when_contains": "ORPHAN_NEXT_TURN",
+                "status": 200,
+                "response": {
+                    "id": "mock-next",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "NEXT_OK"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14, "cost": 0.01}
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+
+    fs::write(
+        game_dir.join("relay").join("setup.json"),
+        json!({
+            "memory_mode": "snapshot",
+            "scratchpad": "none (no tokenizer)",
+            "cost_unit": "credits",
+            "wording_arm": preview_tool.wording_arm(),
+            "preview_tool": preview_tool.as_str(),
+            "non_pinned_model_facing_strings": [
+                {"source": "system_wrapper", "text": "ORPHAN_WRAPPER"}
+            ],
+            "seats": [
+                {"guild": "Saltworks", "backend": "openrouter", "model": "google/gemini-2.5-pro-06-05", "scratchpad": "none (no tokenizer)"},
+                {"guild": "Weavers", "backend": "file", "scratchpad": "none (manual file seat)"},
+                {"guild": "Smiths", "backend": "file", "scratchpad": "none (manual file seat)"},
+                {"guild": "Dyers", "backend": "file", "scratchpad": "none (manual file seat)"}
+            ]
+        })
+        .to_string(),
+    )?;
+
+    fs::write(game_dir.join("relay").join("calls.jsonl"), "")?;
+    let mut entry_obj = json!({
+        "time_utc": "2026-11-20T00:00:00.000Z",
+        "day": "01",
+        "round": "act",
+        "guild": "Saltworks",
+        "attempt": 1,
+        "trigger": "turn",
+        "model_requested": "google/gemini-2.5-pro-06-05",
+        "model_returned": null,
+        "request_body_sha256": request_sha,
+        "reply_sha256": null,
+        "prompt_tokens": null,
+        "completion_tokens": null,
+        "total_tokens": null,
+        "reasoning_tokens": null,
+        "cost_unit": "credits",
+        "cost": null,
+        "charged_credits": 0.05,
+        "latency_ms": 0,
+        "outcome": "RESERVED",
+        "error": "orphaned pre-call reservation from interrupted run",
+        "reservation_id": resv_id
+    });
+    if preview_tool == PreviewToolMode::On {
+        entry_obj
+            .as_object_mut()
+            .ok_or("entry obj")?
+            .insert("http_reply_sha256".to_owned(), Json::Null);
+    }
+    let reserved_line = json!({
+        "reservation_id": resv_id,
+        "run_id": "999991-0-1",
+        "entry": entry_obj,
+    });
+    fs::write(
+        game_dir.join("relay").join("calls.reserved.jsonl"),
+        format!("{reserved_line}\n"),
+    )?;
+    write_to_seat(&game_dir, "02", "talk", "Saltworks", "ORPHAN_NEXT_TURN")?;
+    Ok((game_dir, seats_path, wrapper_path, mock_dir))
+}
+
+fn card9_write_raw_reply_fixture(
+    path: &Path,
+    reservation_id: &str,
+    request_sha: &str,
+    body_text: &str,
+) -> Result<(Vec<u8>, String), Box<dyn Error>> {
+    let record = json!({
+        "day": "01",
+        "round": "act",
+        "guild": "Saltworks",
+        "run_id": "999991-0-1",
+        "reservation_id": reservation_id,
+        "request_body_sha256": request_sha,
+        "round_index": 0,
+        "attempt": 1,
+        "status": 200,
+        "is_late": false,
+        "body_redacted": false,
+        "redacted_secret_field_paths": [],
+        "body_sha256": sha256_hex(body_text.as_bytes()),
+        "body": body_text
+    });
+    let mut text = serde_json::to_string_pretty(&record)?;
+    text.push('\n');
+    let bytes = text.into_bytes();
+    let sha = sha256_hex(&bytes);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, &bytes)?;
+    Ok((bytes, sha))
+}
+
+fn card9_run_next_turn_cli(
+    game_dir: &Path,
+    seats_path: &Path,
+    wrapper_path: &Path,
+    mock_dir: &Path,
+    preview_tool: PreviewToolMode,
+) -> (i32, String) {
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().unwrap_or(""),
+            "--day",
+            "02",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().unwrap_or(""),
+            "--wrapper",
+            wrapper_path.to_str().unwrap_or(""),
+            "--mock-dir",
+            mock_dir.to_str().unwrap_or(""),
+            "--preview-tool",
+            preview_tool.as_str(),
+            "--cap-credits",
+            "0.50",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    (code, String::from_utf8_lossy(&err).into_owned())
+}
+
+#[test]
+fn card9_must1_a_orphan_migration_links_single_matching_raw_reply_sha256() -> TestResult {
+    let tmp = TempDir::new()?;
+    let req_sha = "11".repeat(32);
+    let resv_id = "orph-card9-a-1";
+    let (game_dir, seats_path, wrapper_path, mock_dir) =
+        card9_make_orphan_test_env(tmp.path(), PreviewToolMode::On, resv_id, &req_sha)?;
+    let raw_path = game_dir
+        .join("relay")
+        .join("seats")
+        .join("Saltworks.day-01-act.http-reply-round-0-attempt-1.retry-1.json");
+    let (_, expected_raw_sha) =
+        card9_write_raw_reply_fixture(&raw_path, resv_id, &req_sha, "{\"id\":\"a1\"}")?;
+
+    let (code, stderr) = card9_run_next_turn_cli(
+        &game_dir,
+        &seats_path,
+        &wrapper_path,
+        &mock_dir,
+        PreviewToolMode::On,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].outcome, "RESERVED");
+    assert_eq!(calls[0].reservation_id.as_deref(), Some(resv_id));
+    assert_eq!(calls[0].http_reply_sha256, Some(Some(expected_raw_sha)));
+    assert_eq!(calls[0].request_body_sha256, req_sha);
+    assert_eq!(calls[0].charged_credits, 0.05);
+    assert_eq!(calls[0].reply_sha256, None);
+    Ok(())
+}
+
+#[test]
+fn card9_must1_b_orphan_migration_zero_raw_files_keeps_null_sha256() -> TestResult {
+    let tmp = TempDir::new()?;
+    let req_sha = "22".repeat(32);
+    let resv_id = "orph-card9-b-1";
+    let (game_dir, seats_path, wrapper_path, mock_dir) =
+        card9_make_orphan_test_env(tmp.path(), PreviewToolMode::On, resv_id, &req_sha)?;
+
+    let (code, stderr) = card9_run_next_turn_cli(
+        &game_dir,
+        &seats_path,
+        &wrapper_path,
+        &mock_dir,
+        PreviewToolMode::On,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let raw = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+    let first_line = raw.lines().next().ok_or("missing calls.jsonl line")?;
+    assert!(first_line.contains("\"http_reply_sha256\":null"));
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls[0].outcome, "RESERVED");
+    assert_eq!(calls[0].http_reply_sha256, Some(None));
+    assert!(!stderr.contains("ambiguous_raw_replies"));
+    Ok(())
+}
+
+#[test]
+fn card9_must1_c_orphan_migration_ambiguous_raw_matches_sets_null_and_emits_diagnostic()
+-> TestResult {
+    let tmp = TempDir::new()?;
+    let req_sha = "33".repeat(32);
+    let resv_id = "orph-card9-ambig-77";
+    let (game_dir, seats_path, wrapper_path, mock_dir) =
+        card9_make_orphan_test_env(tmp.path(), PreviewToolMode::On, resv_id, &req_sha)?;
+
+    let raw1 = http_reply_file_path(&game_dir, "Saltworks", "01", Round::Act, 0, 1);
+    let raw2 = game_dir
+        .join("relay")
+        .join("seats")
+        .join("Saltworks.day-01-act.http-reply-round-0-attempt-1.retry-1.json");
+    card9_write_raw_reply_fixture(&raw1, resv_id, &req_sha, "AMBIG_BODY_SECRET_1")?;
+    card9_write_raw_reply_fixture(&raw2, resv_id, &req_sha, "AMBIG_BODY_SECRET_2")?;
+
+    let (code, stderr) = card9_run_next_turn_cli(
+        &game_dir,
+        &seats_path,
+        &wrapper_path,
+        &mock_dir,
+        PreviewToolMode::On,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls[0].outcome, "RESERVED");
+    assert_eq!(calls[0].http_reply_sha256, Some(None));
+    let diag_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("ambiguous_raw_replies"))
+        .collect();
+    assert_eq!(diag_lines.len(), 1, "expected 1 diagnostic in: {stderr}");
+    assert!(diag_lines[0].contains(resv_id));
+    assert!(diag_lines[0].contains("2"));
+    assert!(!diag_lines[0].contains(".http-reply-round-"));
+    assert!(!diag_lines[0].contains(".retry-1.json"));
+    assert!(!diag_lines[0].contains("AMBIG_BODY_SECRET"));
+    Ok(())
+}
+
+#[test]
+fn card9_must1_d_orphan_migration_ignores_mismatched_reservation_id_and_other_seats() -> TestResult
+{
+    let tmp = TempDir::new()?;
+    let req_sha = "44".repeat(32);
+    let resv_id = "orph-card9-d-target";
+    let (game_dir, seats_path, wrapper_path, mock_dir) =
+        card9_make_orphan_test_env(tmp.path(), PreviewToolMode::On, resv_id, &req_sha)?;
+
+    // Different reservation_id in Saltworks's relay/seats/ -> ignored.
+    let salt_wrong_id = http_reply_file_path(&game_dir, "Saltworks", "01", Round::Act, 0, 1);
+    card9_write_raw_reply_fixture(&salt_wrong_id, "other-resv-999", &req_sha, "OTHER_ID")?;
+    // Matching reservation_id inside ANOTHER seat's file -> ignored.
+    let other_seat = http_reply_file_path(&game_dir, "Weavers", "01", Round::Act, 0, 1);
+    card9_write_raw_reply_fixture(&other_seat, resv_id, &req_sha, "WRONG_SEAT")?;
+    // Matching reservation_id outside relay/seats/ (in relay/ or nested subdir) -> ignored.
+    let outside_seats = game_dir
+        .join("relay")
+        .join("Saltworks.day-01-act.http-reply-round-0-attempt-1.json");
+    card9_write_raw_reply_fixture(&outside_seats, resv_id, &req_sha, "OUTSIDE_SEATS")?;
+    let nested_subdir = game_dir
+        .join("relay")
+        .join("seats")
+        .join("nested")
+        .join("Saltworks.day-01-act.http-reply-round-0-attempt-1.json");
+    card9_write_raw_reply_fixture(&nested_subdir, resv_id, &req_sha, "NESTED_SUBDIR")?;
+
+    let (code, stderr) = card9_run_next_turn_cli(
+        &game_dir,
+        &seats_path,
+        &wrapper_path,
+        &mock_dir,
+        PreviewToolMode::On,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls[0].outcome, "RESERVED");
+    assert_eq!(calls[0].http_reply_sha256, Some(None));
+    Ok(())
+}
+
+#[test]
+fn card9_must1_e_orphan_migration_tool_off_line_is_byte_identical_to_987897c6() -> TestResult {
+    let tmp = TempDir::new()?;
+    let req_sha = "55".repeat(32);
+    let resv_id = "orph-card9-e-off";
+    let (game_dir, seats_path, wrapper_path, mock_dir) =
+        card9_make_orphan_test_env(tmp.path(), PreviewToolMode::Off, resv_id, &req_sha)?;
+    let planted_raw = http_reply_file_path(&game_dir, "Saltworks", "01", Round::Act, 0, 1);
+    card9_write_raw_reply_fixture(&planted_raw, resv_id, &req_sha, "SHOULD_NOT_LINK_WHEN_OFF")?;
+
+    let expected_987897c6_line = json!({
+        "time_utc": "2026-11-20T00:00:00.000Z",
+        "day": "01",
+        "round": "act",
+        "guild": "Saltworks",
+        "attempt": 1,
+        "trigger": "turn",
+        "model_requested": "google/gemini-2.5-pro-06-05",
+        "model_returned": null,
+        "request_body_sha256": req_sha,
+        "reply_sha256": null,
+        "prompt_tokens": null,
+        "completion_tokens": null,
+        "total_tokens": null,
+        "reasoning_tokens": null,
+        "cost_unit": "credits",
+        "cost": null,
+        "charged_credits": 0.05,
+        "latency_ms": 0,
+        "outcome": "RESERVED",
+        "error": "orphaned pre-call reservation from interrupted run",
+        "reservation_id": resv_id
+    });
+    let expected_str = serde_json::to_string(&expected_987897c6_line)?;
+
+    let (code, stderr) = card9_run_next_turn_cli(
+        &game_dir,
+        &seats_path,
+        &wrapper_path,
+        &mock_dir,
+        PreviewToolMode::Off,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let raw = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?;
+    let first_line = raw.lines().next().ok_or("missing line 0")?;
+    assert!(!first_line.contains("http_reply_sha256"));
+    // Compare parsed field-order-preserving `CallLogEntry` exact JSON string:
+    let migrated_json: Json = serde_json::from_str(first_line)?;
+    let expected_json: Json = serde_json::from_str(&expected_str)?;
+    assert_eq!(migrated_json, expected_json);
+    assert_eq!(
+        serde_json::from_str::<CallLogEntry>(first_line)?.http_reply_sha256,
+        None
+    );
+    Ok(())
+}
+
+#[test]
+fn card9_must2_preview_r2_differs_from_r1_in_one_slot_and_row7_whole_token_mutations_fail()
+-> TestResult {
+    assert_eq!(PREVIEW_WORDING_ARM_R1, "v2_preview_2026_11_17_r1");
+    assert_eq!(PREVIEW_WORDING_ARM_R2, "v2_preview_2026_11_20_r2");
+    assert_eq!(PREVIEW_WORDING_ARM, PREVIEW_WORDING_ARM_R2);
+    assert_eq!(PreviewToolMode::On.wording_arm(), PREVIEW_WORDING_ARM_R2);
+    assert_eq!(PREVIEW_ARM_WORDING_R1.len(), 250);
+    assert_eq!(PREVIEW_ARM_WORDING_R2.len(), 250);
+    assert_eq!(PREVIEW_ARM_WORDING.len(), 250);
+
+    let mut changed_slots = Vec::new();
+    for (r1, r2) in PREVIEW_ARM_WORDING_R1
+        .iter()
+        .zip(PREVIEW_ARM_WORDING_R2.iter())
+    {
+        assert_eq!(r1.slot, r2.slot);
+        if r1.shown_text != r2.shown_text {
+            changed_slots.push(r1.slot);
+        }
+    }
+    assert_eq!(changed_slots, vec!["preview_call_budget_sentence"]);
+    assert_eq!(
+        preview_r1_wording_slot("preview_call_budget_sentence"),
+        "You have a tool called preview_turn_orders to test candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke preview_turn_orders at most 3 times on this turn; additional calls return a call-limit refusal. Rely on public rules feedback from preview outputs only, and finish with a single final JSON reply matching the required response schema."
+    );
+    assert_eq!(
+        preview_wording_slot("preview_call_budget_sentence"),
+        "You have a tool called preview_turn_orders to test candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke preview_turn_orders at most 3 times on this turn; additional calls return a call-limit refusal. The preview applies the public rules to your own orders only; it does not show what other seats will do. Finish with a single final JSON reply."
+    );
+
+    let live_paths = render_all_preview_arm_guard_paths()?;
+    assert_eq!(ARM_RENDER_PATH_HISTORY[5].path_digests.len(), 24);
+    assert_eq!(
+        SEALED_IMMUTABLE_HISTORY_ROWS[5].1,
+        0x41e0641516f522895b4d322557758ae0
+    );
+    assert_eq!(ARM_RENDER_PATH_HISTORY[6].arm, PREVIEW_WORDING_ARM_R1);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[6].path_digests.len(), 29);
+    assert_eq!(
+        SEALED_IMMUTABLE_HISTORY_ROWS[6].1,
+        0x4fd956f044da56e8c99a80bb5e27d10f
+    );
+    assert_eq!(ARM_RENDER_PATH_HISTORY[7].arm, PREVIEW_WORDING_ARM_R2);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[7].path_digests.len(), 29);
+
+    verify_arm_render_path_history(
+        ARM_RENDER_PATH_HISTORY,
+        SEALED_IMMUTABLE_HISTORY_ROWS,
+        PREVIEW_WORDING_ARM_R2,
+        &live_paths,
+    )?;
+
+    // Whole-token mutation failure across all 250 entries of `PREVIEW_ARM_WORDING_R2`.
+    let allowed: std::collections::HashSet<String> = PREVIEW_ARM_WORDING_R2
+        .iter()
+        .map(|e| preview_wording_slot(e.slot))
+        .collect();
+    for entry in PREVIEW_ARM_WORDING_R2 {
+        let needle = preview_wording_slot(entry.slot);
+        let last_ch = needle.chars().last().ok_or("empty slot")?;
+        let mut repl_ch = if last_ch == 'X' { 'Y' } else { 'X' };
+        let mutated = format!("{}{repl_ch}", &needle[..needle.len() - last_ch.len_utf8()]);
+        if mutated == needle {
+            repl_ch = 'Z';
+        }
+        let mutated_str = if mutated != needle {
+            mutated
+        } else {
+            format!("{needle}{repl_ch}")
+        };
+        let found = if entry.slot == "preview_call_budget_sentence" {
+            let (idx, (name, body)) = live_paths
+                .iter()
+                .enumerate()
+                .skip(24)
+                .find(|(_, (n, _))| *n == "preview_act_initial_request_and_tool_schema")
+                .ok_or("missing preview_act_initial_request_and_tool_schema")?;
+            let mut req: Json = serde_json::from_str(body)?;
+            let sys = req["messages"][0]["content"].as_str().ok_or("sys")?;
+            let suffix = format!("\n\n{needle}");
+            assert!(sys.ends_with(&suffix));
+            req["messages"][0]["content"] = json!(format!(
+                "{}\n\n{mutated_str}",
+                &sys[..sys.len() - suffix.len()]
+            ));
+            Some((idx, *name, serde_json::to_string(&req)?))
+        } else {
+            live_paths
+                .iter()
+                .enumerate()
+                .skip(24)
+                .find_map(|(idx, (name, body))| {
+                    find_and_mutate_whole_json_string_token(body, &needle, &mutated_str)
+                        .map(|m| (idx, *name, m))
+                })
+        };
+        let (path_idx, _, mutated_body) =
+            found.ok_or_else(|| format!("r2 entry '{}' not found as whole token", entry.slot))?;
+        let mut cloned = live_paths.clone();
+        cloned[path_idx].1 = mutated_body;
+        assert!(
+            verify_arm_render_path_history(
+                ARM_RENDER_PATH_HISTORY,
+                SEALED_IMMUTABLE_HISTORY_ROWS,
+                PREVIEW_WORDING_ARM_R2,
+                &cloned,
+            )
+            .is_err(),
+            "1-char mutation of r2 slot '{}' must fail Row 7",
+            entry.slot
+        );
+    }
+
+    // Unpinned-byte coverage for `r2` tool & wire outputs + initial act system suffix.
+    let mut wire_tokens = Vec::new();
+    collect_all_wire_keys_and_strings(
+        &build_preview_turn_orders_tool_definition(),
+        &mut wire_tokens,
+    );
+    collect_all_wire_keys_and_strings(
+        &serde_json::from_str::<Json>(&card7_all_outcomes_wire_json_array()?)?,
+        &mut wire_tokens,
+    );
+    collect_all_wire_keys_and_strings(
+        &serde_json::from_str::<Json>(&card7_all_refusals_wire_json_array()?)?,
+        &mut wire_tokens,
+    );
+    for tok in wire_tokens {
+        assert!(
+            allowed.contains(&tok),
+            "unpinned token in r2 wire output: {tok}"
+        );
+    }
+    let act_init: Json = serde_json::from_str(&live_paths[24].1)?;
+    let act_sys = act_init["messages"][0]["content"]
+        .as_str()
+        .ok_or("act sys")?;
+    assert!(act_sys.ends_with(&preview_wording_slot("preview_call_budget_sentence")));
+    Ok(())
+}
+
+#[test]
+fn card9_must3_five_call_mock_turn_all_sidecars_equal_turn_ledger_run_id() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "MUST3_WRAPPER")?;
+    let seats_path = tmp.path().join("seats.json");
+    let state = card7_standard_preview_state(0)?;
+    let valid_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 100
+        }],
+        "bundle": {}
+    })
+    .to_string();
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            // Call 1 (round 0 attempt 1): malformed JSON discarded (with reasoning excluded = false -> discarded sidecar)
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    "",
+                    "Qwen/Qwen3-14B",
+                    10,
+                    2,
+                    Some(1),
+                    Some("disc reason"),
+                ),
+            },
+            // Call 2 (round 0 attempt 2): tool call 1
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "tc_1",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            // Call 3 (round 1 attempt 1): tool call 2
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "tc_2",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            // Call 4 (round 2 attempt 1): tool call 3
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "tc_3",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            // Call 5 (round 3 attempt 1): final delivered OK reply
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("FINAL_5_CALL_OK", "Qwen/Qwen3-14B", 40, 6, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 2.0,
+                    "max_gpu_secs_per_call": 5.0,
+                    "reasoning": { "effort": "low", "exclude_from_transcript": false }
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    let game_dir = tmp.path().join("g_must3");
+    write_to_seat(&game_dir, "01", "act", "Saltworks", "FIVE_CALL_TURN")?;
+    write_card7_preview_state(&game_dir, "01", "Saltworks", &state)?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "60.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls.len(), 5);
+    let run_id_of = |resv: &str| -> Result<String, Box<dyn Error>> {
+        let (prefix, _) = resv.rsplit_once('-').ok_or("reservation_id suffix")?;
+        Ok(prefix.to_owned())
+    };
+    let turn_run_id = run_id_of(calls[0].reservation_id.as_deref().ok_or("missing resv 0")?)?;
+    assert!(!turn_run_id.is_empty());
+    for c in &calls {
+        let rid = run_id_of(c.reservation_id.as_deref().ok_or("missing resv")?)?;
+        assert_eq!(rid, turn_run_id);
+    }
+
+    let seats_dir = game_dir.join("relay").join("seats");
+    let mut raw_count = 0usize;
+    let mut tool_count = 0usize;
+    let mut disc_count = 0usize;
+    for entry in fs::read_dir(&seats_dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let bytes = fs::read(entry.path())?;
+        if name.contains(".http-reply-round-") {
+            let rec: SavedHttpReplyRecord = serde_json::from_slice(&bytes)?;
+            assert!(!rec.run_id.is_empty());
+            assert_eq!(rec.run_id, turn_run_id);
+            raw_count += 1;
+        } else if name.contains(".tool-round-") {
+            let rec: SavedToolRoundRecord = serde_json::from_slice(&bytes)?;
+            assert!(!rec.run_id.is_empty());
+            assert_eq!(rec.run_id, turn_run_id);
+            tool_count += 1;
+        } else if name.contains(".discarded-round-") {
+            let rec: SavedDiscardedReplyRecord = serde_json::from_slice(&bytes)?;
+            assert!(!rec.run_id.is_empty());
+            assert_eq!(rec.run_id, turn_run_id);
+            disc_count += 1;
+        }
+    }
+    assert_eq!(raw_count, 5);
+    assert_eq!(tool_count, 3);
+    assert_eq!(disc_count, 1);
+    Ok(())
+}
+
+#[test]
+fn card9_should8_and_9_raw_paths_and_sidecar_full_body_key_redaction_preserve_from_seat()
+-> TestResult {
+    const CUSTOM_KEY: &str = "OrKeyCard9SidecarRedactionSecret1234";
+    let key = ApiKey::from_env_reader(|_| Some(CUSTOM_KEY.to_owned()))?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "REDACT_WRAPPER")?;
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 256,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let state = card7_standard_preview_state(0)?;
+
+    // Case A: tool round with secret-named nested field (`preimage`) + echoed API key beyond 4 KiB
+    // in assistant_content + discarded round with key beyond 4 KiB + verbatim `from-seat/` reply!
+    let pad = "Z".repeat(MAX_REDACTION_SCAN_BYTES + 1200);
+    let tool_args_with_secret = json!({
+        "market_actions": [],
+        "bundle": {},
+        "preimage": "0xSuperSecretPreimageVal"
+    })
+    .to_string();
+    let echoed_tool_body = json!({
+        "id": "tc-secret-1",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": format!("{pad} key_echo={CUSTOM_KEY}"),
+                "tool_calls": [{
+                    "id": "call_id_original_1",
+                    "type": "function",
+                    "function": {
+                        "name": "preview_turn_orders",
+                        "arguments": tool_args_with_secret
+                    }
+                }]
+            }
+        }],
+        "usage": {"prompt_tokens": 20, "completion_tokens": 12, "total_tokens": 32, "cost": 0.01}
+    })
+    .to_string();
+
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": { "orders": { "type": "string" } }
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // Discarded talk round (attempt 1 violates `--response-schema` -> refused & discarded)
+    let discarded_talk_body = json!({
+        "id": "disc-secret-1",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": format!("{{\"wrong\":\"{pad} discarded_echo={CUSTOM_KEY}\"}}"),
+                "tool_calls": [{
+                    "id": "call_disc_1",
+                    "type": "function",
+                    "function": { "name": "preview_turn_orders", "arguments": "{\"salt\":\"SaltySecret\"}" }
+                }]
+            }
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.005}
+    })
+    .to_string();
+
+    let delivered_with_echo = json!({
+        "orders": format!("VERBATIM_FROM_SEAT_ECHO={CUSTOM_KEY}")
+    })
+    .to_string();
+
+    // Run `talk` turn: attempt 1 discarded (should 9 discarded sidecar), attempt 2 delivered verbatim.
+    let g = tmp.path().join("g_should89");
+    write_to_seat(&g, "01", "talk", "Saltworks", "TALK")?;
+    let tx_talk = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: discarded_talk_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            &delivered_with_echo,
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_talk = run_turn(
+        &TurnConfig::new(
+            g.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper),
+            true,
+            Some(0.50),
+        )
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_talk,
+        Some(&key),
+    )?;
+    assert!(s_talk.all_clean());
+
+    // `from-seat/` stays as received (verbatim, NOT redacted per Should 9).
+    let from_seat_talk = fs::read_to_string(g.join("from-seat/day-01-talk-Saltworks.md"))?;
+    assert_eq!(from_seat_talk, delivered_with_echo);
+
+    // Raw file for discarded attempt lists `/choices/0/message/tool_calls/0/function/arguments/salt` (no value!).
+    let raw_disc_path = http_reply_file_path(&g, "Saltworks", "01", Round::Talk, 0, 1);
+    let raw_disc: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(&raw_disc_path)?)?;
+    assert!(raw_disc.body_redacted);
+    assert_eq!(
+        raw_disc.redacted_secret_field_paths,
+        vec!["/choices/0/message/tool_calls/0/function/arguments/salt"]
+    );
+    assert!(!format!("{:?}", raw_disc.redacted_secret_field_paths).contains("SaltySecret"));
+
+    // Discarded sidecar redacts key beyond 4 KiB and secret-named field cleanly + sets body_redacted=true.
+    let disc_path = discarded_reply_file_path(&g, "Saltworks", "01", Round::Talk, 0, 1);
+    let disc_text = fs::read_to_string(&disc_path)?;
+    assert_no_8char_key_piece(&disc_text, CUSTOM_KEY, "discarded-round sidecar (>4KiB)");
+    assert!(!disc_text.contains("SaltySecret"));
+    let disc_rec: SavedDiscardedReplyRecord = serde_json::from_str(&disc_text)?;
+    assert!(disc_rec.body_redacted);
+
+    // Run `act` turn: round 0 tool call with key > 4 KiB & `preimage` secret field; round 1 final OK.
+    write_to_seat(&g, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g, "01", "Saltworks", &state)?;
+    let tx_act = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: echoed_tool_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            &delivered_with_echo,
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_act = run_turn(
+        &TurnConfig::new(
+            g.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            None,
+            true,
+            Some(0.50),
+        )
+        .with_response_format(Some(rf))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_act,
+        Some(&key),
+    )?;
+    assert!(s_act.all_clean());
+
+    let raw_tool_path = http_reply_file_path(&g, "Saltworks", "01", Round::Act, 0, 1);
+    let raw_tool: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(&raw_tool_path)?)?;
+    assert!(raw_tool.body_redacted);
+    assert_eq!(
+        raw_tool.redacted_secret_field_paths,
+        vec!["/choices/0/message/tool_calls/0/function/arguments/preimage"]
+    );
+    assert!(
+        !format!("{:?}", raw_tool.redacted_secret_field_paths).contains("0xSuperSecretPreimageVal")
+    );
+
+    let tr_path = tool_round_file_path(&g, "Saltworks", "01", Round::Act, 0);
+    let tr_text = fs::read_to_string(&tr_path)?;
+    assert_no_8char_key_piece(&tr_text, CUSTOM_KEY, "tool-round sidecar (>4KiB)");
+    assert!(!tr_text.contains("0xSuperSecretPreimageVal"));
+    let tr_rec: SavedToolRoundRecord = serde_json::from_str(&tr_text)?;
+    assert!(tr_rec.body_redacted);
+    assert_eq!(
+        tr_rec.assistant_content_sha256,
+        tr_rec
+            .assistant_content
+            .as_ref()
+            .map(|c| sha256_hex(c.as_bytes()))
+    );
+    assert_eq!(
+        fs::read_to_string(g.join("from-seat/day-01-act-Saltworks.md"))?,
+        delivered_with_echo
+    );
+    Ok(())
+}
+
+#[test]
+fn card9_should10_write_failure_ledger_line_charges_max_cost_per_call_and_null_tokens() -> TestResult
+{
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "SHOULD10_WRAPPER")?;
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp.path().join("mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [{
+                "when_contains": "SHOULD10_ACT",
+                "status": 200,
+                "response": {
+                    "id": "should10-1",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 99, "completion_tokens": 44, "total_tokens": 143, "cost": 0.002}
+                }
+            }]
+        })
+        .to_string(),
+    )?;
+    let g = tmp.path().join("g_should10");
+    write_to_seat(&g, "01", "talk", "Saltworks", "SHOULD10_ACT")?;
+    let fail_raw = http_reply_file_path(&g, "Saltworks", "01", Round::Talk, 0, 1);
+    set_fail_tool_round_write_for_test(&fail_raw, true);
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--mock-dir",
+            mock_dir.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-credits",
+            "0.50",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    set_fail_tool_round_write_for_test(&fail_raw, false);
+    assert_eq!(code, 2, "stderr: {}", String::from_utf8_lossy(&err));
+
+    let calls = read_calls_log(&g)?;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].outcome, "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert_eq!(calls[0].http_reply_sha256, Some(None));
+    assert_eq!(calls[0].reply_sha256, None);
+    assert_eq!(calls[0].cost_unit, CostUnit::Credits);
+    assert_eq!(calls[0].cost, None);
+    assert_eq!(calls[0].charged_credits, 0.05);
+    assert_eq!(calls[0].prompt_tokens, None);
+    assert_eq!(calls[0].completion_tokens, None);
+    assert_eq!(calls[0].total_tokens, None);
+    assert_eq!(calls[0].reasoning_tokens, None);
+    Ok(())
+}
+
+#[test]
+fn card9_should11_delivered_from_seat_file_is_written_before_ok_ledger_line() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "SHOULD11_WRAPPER")?;
+    let seats = single_openrouter_seats("Saltworks", 3.0)?;
+
+    // Part A: inject failure BETWEEN `from-seat/` write and `OK` ledger write.
+    let g_between = tmp.path().join("g_should11_between");
+    write_to_seat(&g_between, "01", "talk", "Saltworks", "ORDER_11A")?;
+    let from_seat_a = g_between.join("from-seat/day-01-talk-Saltworks.md");
+    set_fail_between_from_seat_and_ok_ledger_for_test(&from_seat_a, true);
+    let tx_a = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "DELIVERED_BEFORE_OK",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let s_a = run_turn(
+        &TurnConfig::new(
+            g_between.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.50),
+        ),
+        &tx_a,
+        None,
+    )?;
+    set_fail_between_from_seat_and_ok_ledger_for_test(&from_seat_a, false);
+    assert!(!s_a.all_clean());
+    // `from-seat/` MUST already exist on disk even though `OK` ledger write failed/did not happen!
+    assert_eq!(fs::read_to_string(&from_seat_a)?, "DELIVERED_BEFORE_OK");
+    let calls_path_a = g_between.join("relay/calls.jsonl");
+    if calls_path_a.exists() {
+        assert!(!fs::read_to_string(&calls_path_a)?.contains("\"OK\""));
+    }
+    let reserved_raw_a = fs::read_to_string(g_between.join("relay/calls.reserved.jsonl"))?;
+    assert!(reserved_raw_a.contains("\"RESERVED\""));
+
+    // Part B: inject failure DURING `from-seat/` write -> zero `from-seat/` file, zero `OK` ledger line,
+    // recorded `SEAT_OUTPUT_WRITE_FAILED` instead of orphaned reservation or false `OK`.
+    let g_fail_write = tmp.path().join("g_should11_write_fail");
+    write_to_seat(&g_fail_write, "01", "talk", "Saltworks", "ORDER_11B")?;
+    let from_seat_b = g_fail_write.join("from-seat/day-01-talk-Saltworks.md");
+    set_fail_from_seat_write_for_test(&from_seat_b, true);
+    let tx_b = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "SHOULD_NOT_LAND",
+        "google/gemini-2.5-pro-06-05",
+        Some(0.01),
+    ))]);
+    let s_b = run_turn(
+        &TurnConfig::new(
+            g_fail_write.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats,
+            Some(wrapper),
+            true,
+            Some(0.50),
+        ),
+        &tx_b,
+        None,
+    )?;
+    set_fail_from_seat_write_for_test(&from_seat_b, false);
+    assert!(!s_b.all_clean());
+    assert!(!from_seat_b.exists());
+    let calls_b = read_calls_log(&g_fail_write)?;
+    assert_eq!(calls_b.len(), 1);
+    assert_eq!(calls_b[0].outcome, "SEAT_OUTPUT_WRITE_FAILED");
+    assert_eq!(calls_b[0].reply_sha256, None);
     Ok(())
 }

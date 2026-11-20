@@ -856,9 +856,15 @@ pub fn strip_thinking_tags(raw: &str) -> String {
     out
 }
 
-/// Pinned model-facing wording arm for `--preview-tool on` (`Card 7`, coexisting with
+/// Historical Card 7 preview wording arm (`r1`, preserved byte-identical alongside [`PREVIEW_WORDING_ARM`]).
+pub const PREVIEW_WORDING_ARM_R1: &str = "v2_preview_2026_11_17_r1";
+
+/// Card 9 preview wording arm (`r2`), replacing `preview_call_budget_sentence` sentence 3 only.
+pub const PREVIEW_WORDING_ARM_R2: &str = "v2_preview_2026_11_20_r2";
+
+/// Active pinned model-facing wording arm for `--preview-tool on` (coexisting with
 /// [`ACTIVE_WORDING_ARM`] for `--preview-tool off`).
-pub const PREVIEW_WORDING_ARM: &str = "v2_preview_2026_11_17_r1";
+pub const PREVIEW_WORDING_ARM: &str = PREVIEW_WORDING_ARM_R2;
 
 /// Maximum number of `preview_turn_orders` tool calls allowed per `act` turn (`Card 7`).
 pub const MAX_PREVIEW_TOOL_CALLS_PER_TURN: usize = 3;
@@ -870,7 +876,7 @@ pub enum PreviewToolMode {
     /// Preview tool disabled (`v2_neutral_2026_11_15_r6` arm; default and pre-Card-7 lock).
     #[default]
     Off,
-    /// Preview tool enabled on `act` turns (`v2_preview_2026_11_17_r1` arm).
+    /// Preview tool enabled on `act` turns ([`PREVIEW_WORDING_ARM`] arm).
     On,
 }
 
@@ -914,28 +920,21 @@ macro_rules! pentry {
     };
 }
 
-/// Complete model-facing wording entries for the [`PREVIEW_WORDING_ARM`] arm.
-///
-/// Every JSON key, enum string, schema description, refusal line, close-mark caveat, and
-/// call-budget instruction emitted under `--preview-tool on` comes from this table. Every token
-/// across slots and `shown_text` values must pass `league-relay`'s `"note"` / `"scratchpad"`
-/// token-confusable filters and contain zero `Default_Ignorable_Code_Point` characters.
-pub const PREVIEW_ARM_WORDING: &[WordingEntry] = &[
-    // --- Prompt & tool header entries ---
-    pentry!("preview_tool_name", "preview_turn_orders"),
-    pentry!(
-        "preview_tool_description",
-        "Simulate candidate own-seat market actions and a sealed order bundle against the public current-turn state without advancing the game or contacting peers. Returns projected outcomes, refused market actions, sweep projections, and close-mark caveats for the acting seat only."
-    ),
-    pentry!(
-        "preview_call_budget_sentence",
-        "You have a tool called preview_turn_orders to test candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke preview_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. Rely on public rules feedback from preview outputs only, and finish with a single final JSON reply matching the required response schema."
-    ),
-    pentry!(
-        "preview_close_mark_caveat",
-        "Projected holding marks reflect latest observed prices only; closing trade marks after other seats reveal bids, quotes, and swaps may differ."
-    ),
-    // --- OpenAI / JSON Schema structural keywords ---
+macro_rules! preview_arm_entries {
+    ($budget_sentence:expr) => {
+        &[
+            // --- Prompt & tool header entries ---
+            pentry!("preview_tool_name", "preview_turn_orders"),
+            pentry!(
+                "preview_tool_description",
+                "Simulate candidate own-seat market actions and a sealed order bundle against the public current-turn state without advancing the game or contacting peers. Returns projected outcomes, refused market actions, sweep projections, and close-mark caveats for the acting seat only."
+            ),
+            pentry!("preview_call_budget_sentence", $budget_sentence),
+            pentry!(
+                "preview_close_mark_caveat",
+                "Projected holding marks reflect latest observed prices only; closing trade marks after other seats reveal bids, quotes, and swaps may differ."
+            ),
+            // --- OpenAI / JSON Schema structural keywords ---
     pentry!("schema_kw_type", "type"),
     pentry!("schema_kw_function", "function"),
     pentry!("schema_kw_name", "name"),
@@ -1290,12 +1289,30 @@ pub const PREVIEW_ARM_WORDING: &[WordingEntry] = &[
         "preview_err_UNLISTED_ENGINE_ERROR",
         "Action was refused by a rules validation check."
     ),
-];
+        ]
+    };
+}
 
-/// Return the raw wording template for a slot in [`PREVIEW_ARM_WORDING`].
-#[must_use]
-pub fn preview_wording_template(slot: &str) -> &'static str {
-    for entry in PREVIEW_ARM_WORDING {
+/// Historical Card 7 wording entries for [`PREVIEW_WORDING_ARM_R1`] (`v2_preview_2026_11_17_r1`).
+pub const PREVIEW_ARM_WORDING_R1: &[WordingEntry] = preview_arm_entries!(
+    "You have a tool called preview_turn_orders to test candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke preview_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. Rely on public rules feedback from preview outputs only, and finish with a single final JSON reply matching the required response schema."
+);
+
+/// Card 9 wording entries for [`PREVIEW_WORDING_ARM_R2`] (`v2_preview_2026_11_20_r2`).
+pub const PREVIEW_ARM_WORDING_R2: &[WordingEntry] = preview_arm_entries!(
+    "You have a tool called preview_turn_orders to test candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke preview_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The preview applies the public rules to your own orders only; it does not show what other seats will do. Finish with a single final JSON reply."
+);
+
+/// Complete model-facing wording entries for the active [`PREVIEW_WORDING_ARM`] arm.
+///
+/// Every JSON key, enum string, schema description, refusal line, close-mark caveat, and
+/// call-budget instruction emitted under `--preview-tool on` comes from this table. Every token
+/// across slots and `shown_text` values must pass `league-relay`'s `"note"` / `"scratchpad"`
+/// token-confusable filters and contain zero `Default_Ignorable_Code_Point` characters.
+pub const PREVIEW_ARM_WORDING: &[WordingEntry] = PREVIEW_ARM_WORDING_R2;
+
+fn lookup_preview_wording_template(entries: &[WordingEntry], slot: &str) -> &'static str {
+    for entry in entries {
         if entry.slot == slot {
             return entry.shown_text;
         }
@@ -1303,13 +1320,35 @@ pub fn preview_wording_template(slot: &str) -> &'static str {
     panic!("unknown preview wording slot: {slot}");
 }
 
-/// Render a slot from [`PREVIEW_ARM_WORDING`], substituting pinned preview constants.
-#[must_use]
-pub fn preview_wording_slot(slot: &str) -> String {
-    preview_wording_template(slot).replace(
+fn render_preview_wording_slot_from(entries: &[WordingEntry], slot: &str) -> String {
+    lookup_preview_wording_template(entries, slot).replace(
         "{MAX_PREVIEW_TOOL_CALLS_PER_TURN}",
         &MAX_PREVIEW_TOOL_CALLS_PER_TURN.to_string(),
     )
+}
+
+/// Return the raw wording template for a slot in [`PREVIEW_ARM_WORDING_R1`].
+#[must_use]
+pub fn preview_r1_wording_template(slot: &str) -> &'static str {
+    lookup_preview_wording_template(PREVIEW_ARM_WORDING_R1, slot)
+}
+
+/// Render a slot from [`PREVIEW_ARM_WORDING_R1`], substituting pinned preview constants.
+#[must_use]
+pub fn preview_r1_wording_slot(slot: &str) -> String {
+    render_preview_wording_slot_from(PREVIEW_ARM_WORDING_R1, slot)
+}
+
+/// Return the raw wording template for a slot in [`PREVIEW_ARM_WORDING`].
+#[must_use]
+pub fn preview_wording_template(slot: &str) -> &'static str {
+    lookup_preview_wording_template(PREVIEW_ARM_WORDING, slot)
+}
+
+/// Render a slot from [`PREVIEW_ARM_WORDING`], substituting pinned preview constants.
+#[must_use]
+pub fn preview_wording_slot(slot: &str) -> String {
+    render_preview_wording_slot_from(PREVIEW_ARM_WORDING, slot)
 }
 
 fn jkey(slot: &str) -> String {

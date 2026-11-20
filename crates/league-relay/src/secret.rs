@@ -458,18 +458,147 @@ fn cap_utf8_with_secret_lookahead(input: &str, max_bytes: usize) -> &str {
     &window[..effective_cut]
 }
 
-/// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`) and scrub
-/// every secret in `keys` (`8+` char substrings), env-var secret assignments, `Bearer <token>` /
-/// `Bearer\t<token>` (`C1`), `sk-*` API keys, XRPL seeds (via [`league_error`]), and
-/// sealed/unrevealed game secrets including JSON-escaped fields (`B1`, `C-7`, `SHIP_GATE.md` `:40`).
-pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
+const MAX_JSON_POINTER_STRING_DEPTH: usize = 8;
+
+pub(crate) fn is_sealed_secret_field_key(key: &str) -> bool {
+    SEALED_SECRET_FIELD_KEYS
+        .iter()
+        .any(|cand| cand.eq_ignore_ascii_case(key))
+}
+
+fn escape_json_pointer_token(token: &str) -> String {
+    if !token.contains('~') && !token.contains('/') {
+        return token.to_owned();
+    }
+    let mut out = String::with_capacity(token.len() + 4);
+    for ch in token.chars() {
+        match ch {
+            '~' => out.push_str("~0"),
+            '/' => out.push_str("~1"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn json_secret_value_would_be_blanked(val: &serde_json::Value) -> bool {
+    match val {
+        serde_json::Value::String(s) => !s.is_empty() && s != REDACTED_MARKER,
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_) => true,
+    }
+}
+
+fn collect_secret_field_json_paths(
+    val: &serde_json::Value,
+    prefix: &str,
+    string_depth: usize,
+    out: &mut Vec<String>,
+) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let path = format!("{prefix}/{}", escape_json_pointer_token(k));
+                if is_sealed_secret_field_key(k) {
+                    if json_secret_value_would_be_blanked(v) {
+                        out.push(path);
+                    }
+                    // Branch 1 skips past a matched secret object/array/string rather than keeping
+                    // inner keys separately, so do not descend into a blanked secret value.
+                    continue;
+                }
+                collect_secret_field_json_paths(v, &path, string_depth, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                let path = format!("{prefix}/{idx}");
+                collect_secret_field_json_paths(item, &path, string_depth, out);
+            }
+        }
+        serde_json::Value::String(s) if string_depth < MAX_JSON_POINTER_STRING_DEPTH => {
+            let trimmed = s.trim_start();
+            if (trimmed.starts_with('{') || trimmed.starts_with('['))
+                && let Ok(nested) = serde_json::from_str::<serde_json::Value>(s)
+                && matches!(
+                    nested,
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_)
+                )
+            {
+                collect_secret_field_json_paths(&nested, prefix, string_depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_secrets_multi_core(
+    input: &str,
+    keys: &[ApiKey],
+    max_bytes: usize,
+    collect_paths: bool,
+) -> (String, Vec<String>) {
     let bounded = cap_utf8_with_secret_lookahead(input, max_bytes);
+    let mut raw_paths: Vec<String> = Vec::new();
+    let parsed_bounded = if collect_paths {
+        Some(serde_json::from_str::<serde_json::Value>(bounded))
+    } else {
+        None
+    };
+    if let Some(Ok(ref val)) = parsed_bounded {
+        collect_secret_field_json_paths(val, "", 0, &mut raw_paths);
+    }
+
     let mut scrubbed = bounded.to_owned();
     for k in keys {
         scrubbed = redact_key_substrings(&scrubbed, k.secret_str());
     }
     scrubbed = league_error::scrub_secret_text_with_marker(&scrubbed, REDACTED_MARKER);
-    redact_sealed_and_unrevealed_secrets(&scrubbed)
+    let (final_scrubbed, branch1_keys) = redact_sealed_and_unrevealed_secrets_inner(&scrubbed);
+    if !collect_paths {
+        return (final_scrubbed, Vec::new());
+    }
+
+    let candidate_paths = if matches!(parsed_bounded, Some(Ok(_))) {
+        raw_paths
+    } else {
+        branch1_keys
+            .into_iter()
+            .map(|k| format!("/{}", escape_json_pointer_token(&k)))
+            .collect::<Vec<_>>()
+    };
+
+    let mut deduped = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for p in candidate_paths {
+        let safe_path = redact_secrets_multi_with_limit(&p, keys, p.len());
+        if seen.insert(safe_path.clone()) {
+            deduped.push(safe_path);
+        }
+    }
+    (final_scrubbed, deduped)
+}
+
+/// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`), scrub
+/// secrets as in [`redact_secrets_multi_with_limit`], and also return deduplicated RFC 6901 JSON
+/// Pointer paths of any `SEALED_SECRET_FIELD_KEYS` fields whose non-empty values were blanked.
+pub fn redact_secrets_multi_with_limit_and_paths(
+    input: &str,
+    keys: &[ApiKey],
+    max_bytes: usize,
+) -> (String, Vec<String>) {
+    redact_secrets_multi_core(input, keys, max_bytes, true)
+}
+
+/// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`) and scrub
+/// every secret in `keys` (`8+` char substrings), env-var secret assignments, `Bearer <token>` /
+/// `Bearer\t<token>` (`C1`), `sk-*` API keys, XRPL seeds (via [`league_error`]), and
+/// sealed/unrevealed game secrets including JSON-escaped fields (`B1`, `C-7`, `SHIP_GATE.md` `:40`).
+pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
+    redact_secrets_multi_core(input, keys, max_bytes, false).0
 }
 
 /// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
@@ -785,9 +914,10 @@ fn find_json_string_end(bytes: &[u8], quote_start: usize) -> Option<usize> {
     None
 }
 
-fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
+fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<String>) {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
+    let mut blanked_keys = Vec::new();
     let mut i = 0;
 
     while i < bytes.len() {
@@ -805,9 +935,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
             };
             if let Some(key_end) = key_close_opt
                 && let key = &input[key_start..key_end]
-                && SEALED_SECRET_FIELD_KEYS
-                    .iter()
-                    .any(|cand| cand.eq_ignore_ascii_case(key))
+                && is_sealed_secret_field_key(key)
             {
                 let mut j = key_end + quote_len;
                 while j < bytes.len() && bytes[j].is_ascii_whitespace() {
@@ -831,12 +959,16 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                             let inner = &input[j + 1..val_end];
                             if !inner.is_empty() {
                                 out.push_str(REDACTED_MARKER);
+                                if inner != REDACTED_MARKER {
+                                    blanked_keys.push(key.to_owned());
+                                }
                             }
                             out.push('"');
                             i = val_end + 1;
                         } else {
                             if j + 1 < bytes.len() {
                                 out.push_str(REDACTED_MARKER);
+                                blanked_keys.push(key.to_owned());
                             }
                             i = bytes.len();
                         }
@@ -855,12 +987,16 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                             let inner = &input[j + quote_len..val_end];
                             if !inner.is_empty() {
                                 out.push_str(REDACTED_MARKER);
+                                if inner != REDACTED_MARKER {
+                                    blanked_keys.push(key.to_owned());
+                                }
                             }
                             out.push_str(quote_seq);
                             i = val_end + quote_len;
                         } else {
                             if j + quote_len < bytes.len() {
                                 out.push_str(REDACTED_MARKER);
+                                blanked_keys.push(key.to_owned());
                             }
                             i = bytes.len();
                         }
@@ -870,6 +1006,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                         out.push_str(&input[i..j]);
                         out.push_str(quote_seq);
                         out.push_str(REDACTED_MARKER);
+                        blanked_keys.push(key.to_owned());
                         i = bytes.len();
                         continue;
                     }
@@ -878,6 +1015,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                         out.push_str(&input[i..j]);
                         out.push_str(quote_seq);
                         out.push_str(REDACTED_MARKER);
+                        blanked_keys.push(key.to_owned());
                         if let Some(val_end) =
                             find_matching_delimited(bytes, j, bytes[j], close, quote_bs)
                         {
@@ -903,6 +1041,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
                         out.push_str(quote_seq);
                         out.push_str(REDACTED_MARKER);
                         out.push_str(quote_seq);
+                        blanked_keys.push(key.to_owned());
                     }
                     i = val_end;
                     continue;
@@ -1024,7 +1163,7 @@ fn redact_sealed_and_unrevealed_secrets(input: &str) -> String {
         i += ch.len_utf8();
     }
 
-    out
+    (out, blanked_keys)
 }
 
 #[cfg(test)]
@@ -1222,5 +1361,67 @@ mod tests {
             );
             assert_eq!(redact_secrets(&scrubbed, None), scrubbed);
         }
+    }
+
+    #[test]
+    fn card9_should8_redacted_secret_field_paths_tracks_nested_and_escaped_json_without_values() {
+        let key = ApiKey("sk-or-v1-live-secret-key-987654".to_owned());
+        let payload = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "hello",
+                    "tool_calls": [{
+                        "function": {
+                            "name": "preview_turn_orders",
+                            "arguments": "{\"preimage\":\"0xsecret_preimage_val\",\"salt\":\"\",\"nested\":{\"xrpl_seed\":\"sEdSecretSeedValue\"}}"
+                        }
+                    }]
+                }
+            }],
+            "api_key": "sk-or-v1-live-secret-key-987654",
+            "empty_salt": "",
+            "already_clean": REDACTED_MARKER,
+            "authorization": "",
+            "non_secret_with_key": "sk-or-v1-live-secret-key-987654"
+        })
+        .to_string();
+
+        let (scrubbed, paths) = redact_secrets_multi_with_limit_and_paths(
+            &payload,
+            std::slice::from_ref(&key),
+            payload.len(),
+        );
+        assert_eq!(
+            redact_secrets_multi_with_limit(&payload, std::slice::from_ref(&key), payload.len()),
+            scrubbed
+        );
+        assert_eq!(
+            paths,
+            vec![
+                "/api_key",
+                "/choices/0/message/tool_calls/0/function/arguments/nested/xrpl_seed",
+                "/choices/0/message/tool_calls/0/function/arguments/preimage",
+            ]
+        );
+        for secret in ["0xsecret_preimage_val", "sEdSecretSeedValue", "987654"] {
+            assert!(!scrubbed.contains(secret));
+            for p in &paths {
+                assert!(!p.contains(secret), "path leaked value: {p}");
+            }
+        }
+
+        // Empty or already-redacted secret fields produce zero paths.
+        let clean_only = format!(r#"{{"salt":"","preimage":"{REDACTED_MARKER}"}}"#);
+        let (clean_scrubbed, clean_paths) =
+            redact_secrets_multi_with_limit_and_paths(&clean_only, &[], clean_only.len());
+        assert_eq!(clean_scrubbed, clean_only);
+        assert!(clean_paths.is_empty());
+
+        // Malformed / truncated JSON falls back to Branch-1 blanked key paths.
+        let truncated = r#"{"outer":{"reveal_salt":"unterminated_secret_val"#;
+        let (trunc_scrubbed, trunc_paths) =
+            redact_secrets_multi_with_limit_and_paths(truncated, &[], truncated.len());
+        assert!(!trunc_scrubbed.contains("unterminated_secret_val"));
+        assert_eq!(trunc_paths, vec!["/reveal_salt"]);
     }
 }
