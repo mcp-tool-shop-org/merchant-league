@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-20 from commit 5315f09 by Atlas 1.26.0.
+Mapped at 2026-11-20 from commit a4ec972 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-20 (890d1f2)
+## What changed since 2026-11-20 (5315f09)
 
-Nothing structural changed since 2026-11-20; 9 files changed content.
+Nothing structural changed since 2026-11-20; 7 files changed content.
 
 ## What comes in
 
@@ -62,10 +62,10 @@ CI writes only to site/audit-report.json, which is not tracked.
 ## What tends to change together
 
 - **crates/league-relay/src/secret.rs** and **crates/league-relay/src/transport.rs** changed together in 5 of 5 commits, inside the league-relay part.
-- **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 18 of 22 commits, inside the league-relay part.
-- **crates/league-core/src/engine.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 8 of 10 commits, inside the league-core part.
-- **crates/league-gen/src/generator.rs** and **crates/league-gen/src/lib.rs** changed together in 7 of 9 commits, inside the league-gen part.
+- **crates/league-seat-types/src/lib.rs** and **crates/league-seat-types/src/view.rs** changed together in 5 of 5 commits, inside the league-seat-types part.
+- **crates/league-seat-types/src/lib.rs** and **crates/league-tui/src/host.rs** changed together in 5 of 5 commits, and the league-tui part imports the league-seat-types part.
+- **crates/league-seat-types/src/lib.rs** and **crates/league-tui/src/main.rs** changed together in 5 of 5 commits, and the league-tui part imports the league-seat-types part.
+- **crates/league-seat-types/src/view.rs** and **crates/league-tui/src/host.rs** changed together in 5 of 5 commits, and the league-tui part imports the league-seat-types part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
@@ -95,7 +95,7 @@ Nothing in the files this map could read writes to a tracked place; 1 file could
 
 ## Hand-authored
 
-People write .github/, docs/ and the repository root; 25 writes with paths built at run time may land here.
+People write .github/, docs/ and the repository root; 26 writes with paths built at run time may land here.
 
 ## Where to start
 
@@ -106,7 +106,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 25 writes and 13 reads use paths built at run time and are not named here.
+- 26 writes and 14 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 14 writes and 20 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.

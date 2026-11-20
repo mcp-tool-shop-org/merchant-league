@@ -3107,6 +3107,16 @@ mod tests {
                 3,
                 "TUI_REPLAY_EXPORT_FAILED",
             ),
+            (
+                host::TuiError::PostSeasonExportFailed(StructuredError::new(
+                    "REPLAY_TARGET_EXISTS",
+                    format!("replay target occupied {api_secret}"),
+                    "use --save-dir",
+                    false,
+                )),
+                3,
+                "REPLAY_TARGET_EXISTS",
+            ),
         ];
 
         for (err, expected_exit, expected_code) in samples {
@@ -3339,6 +3349,32 @@ mod tests {
         Ok(())
     }
 
+    /// Drives a real Club Mode table across all four log levels (`Silent`, `Normal`, `Verbose`,
+    /// `Debug`) using a real `TuiDiagnosticSink` (stderr capture + `--log-file`, zero markers
+    /// injected into logger or panic hook) and real `handle_panic_with_restore`.
+    ///
+    /// Paths driven and checked here:
+    /// - `run_lobby_loop_with_sink` (`NO_HUMAN_SEATS` refusal + table start);
+    /// - `run_session_loop_with_sink` across every pass from Turn 1 through season close (Curtain
+    ///   open/lift, `CSI 2 J` clear, input drain, `--pins` set & verify, Vault note entry, in-turn
+    ///   `CancelOffer` `UNKNOWN_OBJECT` refusal, staged `SealedOrderBundle` + `PreimageSecret`, and
+    ///   every Sweep through Turn 24..=32 close);
+    /// - all `AwaitingMandateReveal` reveal steps, one failed (`TUI_REPLAY_EXPORT_FAILED`, exit 3)
+    ///   and one succeeded replay export, and clean `q` exit (`run_session_loop_with_sink`);
+    /// - alternate-screen suppression, `--debug` vs non-debug panic hook (`{session:?}`,
+    ///   `{active_view:?}`, `{:?}` of `active_view.zones`, XRPL seed, API key), plus an explicit
+    ///   4-seat `1 Human + 3 ClubBot` `Debug` Sweep + `Debug` panic backtrace check with unique
+    ///   5-digit `MinProjectEquity` targets `[91_234..=94_567]` and 4-digit bonuses
+    ///   `[6_123..=7_987]` (`> main.rs line count`).
+    ///
+    /// Paths NOT driven in this single test (covered elsewhere or not automated):
+    /// - bare `< 100` 1-2 digit mandate counts (`distinct_goods` / `min_partners`) as standalone
+    ///   substring needles (because they collide with `turn=`/`table=#`; full `MandateKind` short
+    ///   and `Debug` strings ARE checked), and 4-digit numbers inside `--debug` backtraces of the
+    ///   main loop (checked on the panic header line and in the explicit 4-seat `Debug` sub-check);
+    /// - `dispatch_cli_with_env` stderr error-line formatting, wrong-PIN tries, timed timeouts,
+    ///   `resumed session (...)`, `lobby quit`, `queued terminal input drained on key`,
+    ///   `frame render error`, `session stream ended`, 5-/6-seat log runs, and live OS TTY launch.
     #[test]
     fn real_session_all_four_log_levels_and_panic_hook_emit_no_private_values_and_suppress_alt_screen()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -3604,32 +3640,46 @@ mod tests {
                 "real Sweep must advance session to Turn 2"
             );
 
-            // Unlock Turn 2 Seat 0 briefly to capture a live active `SeatScreenView` holding Seat 0's
-            // dealt mandate and persisted Vault note before advancing to season close.
+            // Unlock Turn 2 Seat 0 via `run_session_loop_with_sink` to capture a live active
+            // `SeatScreenView` holding Seat 0's dealt mandate and Vault note, then drive every
+            // remaining pass through season close via `run_session_loop_with_sink`.
             let vp = ViewportSize::new(100, 30);
-            let unlock_with_pin =
-                |sess: &mut host::TuiHostSession| -> Result<(), Box<dyn std::error::Error>> {
-                    sess.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
-                    sess.handle_key_event(s_key(' '), vp)
-                        .map_err(|e| e.to_string())?;
-                    sess.handle_key_event(
-                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
-                        vp,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    for d in planted_pin.chars() {
-                        sess.handle_key_event(s_key(d), vp)
-                            .map_err(|e| e.to_string())?;
-                    }
-                    sess.handle_key_event(
-                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
-                        vp,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    sess.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
-                    Ok(())
-                };
-            unlock_with_pin(&mut session)?;
+            let mut loop_clock = sweep_script.elapsed();
+            let mut t2_unlock_events: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
+                (
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+            ];
+            for d in planted_pin.chars() {
+                t2_unlock_events.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            t2_unlock_events.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            let mut t2_unlock_script =
+                ScriptedSessionEvents::from_timed_with_queued(t2_unlock_events);
+            t2_unlock_script.clock = loop_clock;
+            run_session_loop_with_sink(
+                &mut alt_term,
+                &mut session,
+                &mut t2_unlock_script,
+                &mut sink,
+            )?;
+            loop_clock = t2_unlock_script.elapsed();
+
             session.apply_seat_intent(
                 league_core::Seat(0),
                 league_seat_types::SeatIntent::update_bundle(
@@ -3637,23 +3687,47 @@ mod tests {
                 ),
             )?;
             let active_view = session.build_current_view(vp)?;
-            session
-                .handle_key_event(
-                    SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
-                    vp,
-                )
-                .map_err(|e| e.to_string())?;
 
             while session.phase() == league_core::TurnPhase::TalkAndMarket {
+                let mut pass_events: Vec<(Duration, Option<Event>, Vec<Event>)> = Vec::new();
                 if session.is_curtain_open() {
-                    unlock_with_pin(&mut session)?;
+                    pass_events.push((
+                        host::CURTAIN_LIFT_DEAD_TIME,
+                        Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                        Vec::new(),
+                    ));
+                    pass_events.push((
+                        Duration::ZERO,
+                        Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                        Vec::new(),
+                    ));
+                    for d in planted_pin.chars() {
+                        pass_events.push((
+                            Duration::ZERO,
+                            Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                            Vec::new(),
+                        ));
+                    }
+                    pass_events.push((
+                        Duration::ZERO,
+                        Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                        Vec::new(),
+                    ));
                 }
-                session
-                    .handle_key_event(
-                        SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
-                        vp,
-                    )
-                    .map_err(|e| e.to_string())?;
+                pass_events.push((
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                    Vec::new(),
+                ));
+                let mut pass_script = ScriptedSessionEvents::from_timed_with_queued(pass_events);
+                pass_script.clock = loop_clock;
+                run_session_loop_with_sink(
+                    &mut alt_term,
+                    &mut session,
+                    &mut pass_script,
+                    &mut sink,
+                )?;
+                loop_clock = pass_script.elapsed();
             }
             assert_eq!(
                 session.phase(),
@@ -3684,7 +3758,7 @@ mod tests {
             ));
             let mut fail_script =
                 ScriptedSessionEvents::from_timed_with_queued(reveal_and_fail_events);
-            fail_script.clock = sweep_script.elapsed();
+            fail_script.clock = loop_clock;
             run_session_loop_with_sink(&mut alt_term, &mut session, &mut fail_script, &mut sink)?;
             assert_eq!(session.phase(), league_core::TurnPhase::Completed);
             assert!(seal_path.exists());
@@ -3773,7 +3847,7 @@ mod tests {
             }
             if level == host::LogLevel::Debug {
                 assert!(flushed_stderr.contains("lobby validation refused [NO_HUMAN_SEATS]"));
-                assert!(flushed_stderr.contains("host refused input action ["));
+                assert!(flushed_stderr.contains("host refused input action [UNKNOWN_OBJECT]"));
                 assert!(
                     flushed_stderr.contains("host refused input action [TUI_REPLAY_EXPORT_FAILED]")
                 );
@@ -3865,12 +3939,13 @@ mod tests {
         }
 
         // Explicit 4-seat (1 Human + 3 ClubBots) LogLevel::Debug run with unique 5-digit
-        // MinProjectEquity targets and distinct 4-digit bonuses (> main.rs line count) proving
-        // every human and bot mandate target & bonus number stays absent across Sweep & Debug panic.
+        // MinProjectEquity targets and distinct 4-digit bonuses (within 3000..=8000 and above
+        // `main.rs` line count) proving every human and bot mandate target & bonus number stays
+        // absent across Sweep & Debug panic.
         {
             let ring = default_dev_ring_table()?;
             let explicit_targets = [91_234, 92_345, 93_456, 94_567];
-            let explicit_bonuses = [5_123, 6_234, 7_345, 7_987];
+            let explicit_bonuses = [6_123, 6_789, 7_345, 7_987];
             let mut exp_session = host::TuiHostSession::from_explicit_mandates_for_test(
                 &ring,
                 TableId(81_704),
@@ -4634,11 +4709,9 @@ mod tests {
         let a_seal = dir_a.join("club-1.seal");
         let b_save = dir_b_unfin.join("club-1.save.json");
         let b_seal = dir_b_unfin.join("club-1.seal");
-        let b_save_bytes = std::fs::read(&b_save)?;
-        let b_seal_bytes = std::fs::read(&b_seal)?;
 
-        // Also put a different season B inside <dir_b_unfin> (no wait: advance B one Curtain
-        // first so B differs on disk too) and verify A cannot overwrite B.
+        // Advance Season B through its Curtain and lock Sub-Pass A (`Ctrl+L`) so B autosaves a
+        // later Curtain cursor on disk before snapshot capture, and confirm A != B on disk.
         sess_b_unfin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
         sess_b_unfin
             .handle_key_event(s_key(' '), vp)
@@ -4650,7 +4723,17 @@ mod tests {
             )
             .map_err(|e| e.to_string())?;
         sess_b_unfin.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        sess_b_unfin
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
         drop(sess_b_unfin);
+        let b_save_bytes = std::fs::read(&b_save)?;
+        let b_seal_bytes = std::fs::read(&b_seal)?;
+        assert_ne!(b_save_bytes, std::fs::read(&a_save)?);
+        assert_ne!(b_seal_bytes, std::fs::read(&a_seal)?);
 
         // 1. `--resume <A>/club-1.save.json --save-dir <B_unfin>` -> refused with
         // `UNFINISHED_SEASON_EXISTS` (exit 1), leaving `<B_unfin>/club-1.*` byte-identical.
@@ -4853,6 +4936,385 @@ mod tests {
         assert!(dir_c_empty.join("club-1.seal").exists());
         assert_eq!(std::fs::read(&a_save)?, a_save_snapshot);
         assert_eq!(std::fs::read(&a_seal)?, a_seal_snapshot);
+
+        // 5. `--resume <A>/club-1.save.json --save-dir <missing_D>` (not yet created on disk)
+        // creates <missing_D> cleanly on autosave while leaving <A> byte-identical.
+        let dir_d_missing = dir.join("season_d_missing");
+        assert!(!dir_d_missing.exists());
+        let missing_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_d_missing.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub missing target, got {other:?}").into()),
+        };
+        let mut resumed_d = build_session_for_cli(&missing_opts)?;
+        resumed_d.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_d
+            .handle_key_event(s_key(' '), vp)
+            .map_err(|e| e.to_string())?;
+        resumed_d
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        resumed_d.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+        resumed_d
+            .handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        assert!(dir_d_missing.join("club-1.save.json").exists());
+        assert!(dir_d_missing.join("club-1.seal").exists());
+        assert_eq!(std::fs::read(&a_save)?, a_save_snapshot);
+        assert_eq!(std::fs::read(&a_seal)?, a_seal_snapshot);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    fn start_lobby_table_1_for_test(
+        target_dir: &Path,
+        seed_suffix_digit: Option<char>,
+        term: &mut Terminal<TestBackend>,
+    ) -> Result<host::TuiHostSession, Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let opts = match parse_args([
+            "league-tui".to_owned(),
+            "--untimed".to_owned(),
+            "--save-dir".to_owned(),
+            target_dir.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub, got {other:?}").into()),
+        };
+        let mut steps = Vec::new();
+        if let Some(digit) = seed_suffix_digit {
+            for _ in 0..5 {
+                steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+            steps.push(key_ev(KeyCode::Char(digit), KeyModifiers::NONE));
+            for _ in 0..3 {
+                steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+        } else {
+            for _ in 0..8 {
+                steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+        }
+        steps.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+        let mut sink = host::TuiDiagnosticSink::new(host::LogLevel::Silent, None);
+        sink.set_alternate_screen_active(true);
+        let mut ev = ScriptedSessionEvents::from_events(steps);
+        Ok(
+            run_lobby_loop_with_sink(term, &opts, &mut ev, Some(target_dir), &mut sink)?
+                .ok_or("lobby table start")?,
+        )
+    }
+
+    fn advance_session_to_completed_for_test(
+        session: &mut host::TuiHostSession,
+        vp: ViewportSize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+
+        while session.phase() == league_core::TurnPhase::TalkAndMarket {
+            if session.is_curtain_open() {
+                session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                session
+                    .handle_key_event(s_key(' '), vp)
+                    .map_err(|e| e.to_string())?;
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+                session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+            }
+            session
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        for _ in 0..session.seat_count() {
+            session
+                .handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        if session.phase() != league_core::TurnPhase::Completed {
+            return Err(format!("expected Completed phase, got {:?}", session.phase()).into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn export_never_overwrites_other_season_replay_on_renamed_resume_and_allows_repeat_same_season_export()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+        let vp = ViewportSize::new(100, 30);
+
+        let dir = std::env::temp_dir().join(format!("ml_replay_target_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir_a = dir.join("dir_a");
+        let dir_y_tmp = dir.join("dir_y_tmp");
+        let dir_y_out = dir.join("dir_y_out");
+        std::fs::create_dir_all(&dir_a)?;
+        std::fs::create_dir_all(&dir_y_tmp)?;
+        std::fs::create_dir_all(&dir_y_out)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        // Season X (`TableId(1)`, default seed) plays to completion in `dir_a` and exports
+        // `club-1.replay.json`, wiping `club-1.seal`.
+        let mut sess_x = start_lobby_table_1_for_test(&dir_a, None, &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_x, vp)?;
+        sess_x
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        sess_x
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        drop(sess_x);
+        let x_replay_path = dir_a.join("club-1.replay.json");
+        assert!(x_replay_path.exists());
+        assert!(!dir_a.join("club-1.seal").exists());
+        let x_replay_bytes = std::fs::read(&x_replay_path)?;
+
+        // Season Y (`TableId(1)`, distinct seed '2') reaches Completed without exporting, then
+        // moves into `dir_a` under renamed files `y.save.json` / `y.seal`.
+        let mut sess_y = start_lobby_table_1_for_test(&dir_y_tmp, Some('2'), &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_y, vp)?;
+        drop(sess_y);
+        let y_save = dir_a.join("y.save.json");
+        let y_seal = dir_a.join("y.seal");
+        let y_seal_snapshot = std::fs::read(dir_y_tmp.join("club-1.seal"))?;
+        std::fs::copy(dir_y_tmp.join("club-1.save.json"), &y_save)?;
+        std::fs::write(&y_seal, &y_seal_snapshot)?;
+
+        // 1. In-place resume (`--resume dir_a/y.save.json` with no `--save-dir`) refuses export with
+        // `REPLAY_TARGET_EXISTS` instead of overwriting Season X's `dir_a/club-1.replay.json`,
+        // preserves `y.seal`, sets exit code 3, and displays a usable hint on Tab 4.
+        let opts_in_place = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            y_save.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub, got {other:?}").into()),
+        };
+        let mut sess_y_inplace = build_session_for_cli(&opts_in_place)?;
+        sess_y_inplace
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        let clash_err = sess_y_inplace
+            .handle_key_event(s_key('e'), vp)
+            .err()
+            .ok_or("export over foreign replay must refuse")?;
+        assert_eq!(clash_err.code, "REPLAY_TARGET_EXISTS");
+        assert!(!clash_err.hint.is_empty());
+        assert_eq!(std::fs::read(&x_replay_path)?, x_replay_bytes);
+        assert!(y_seal.exists());
+        assert!(sess_y_inplace.has_partial_post_season_failure());
+        let tui_err = sess_y_inplace
+            .terminal_tui_error()
+            .ok_or("clash export must set terminal_tui_error")?;
+        assert_eq!(tui_err.exit_code(), 3);
+        assert_eq!(tui_err.to_structured_error().code, "REPLAY_TARGET_EXISTS");
+        terminal.draw(|f| {
+            let _ = sess_y_inplace.render_current_frame(f);
+        })?;
+        let clash_buf = terminal.backend().buffer();
+        let clash_screen = (0..clash_buf.area.height)
+            .map(|y| {
+                (0..clash_buf.area.width)
+                    .map(|x| clash_buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(clash_screen.contains("REPLAY_TARGET_EXISTS"));
+        assert!(clash_screen.contains("Hint:"));
+        drop(sess_y_inplace);
+
+        // 2. Resuming `dir_a/y.save.json` into `--save-dir <dir_y_out>` exports Season Y's distinct
+        // replay, wipes `dir_a/y.seal`, and allows repeated export of the SAME season (`e` again).
+        let opts_out = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            y_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_y_out.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub, got {other:?}").into()),
+        };
+        let mut sess_y_out = build_session_for_cli(&opts_out)?;
+        sess_y_out
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        sess_y_out
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        let y_replay_path = dir_y_out.join("club-1.replay.json");
+        assert!(y_replay_path.exists());
+        assert!(!y_seal.exists());
+        assert!(sess_y_out.terminal_tui_error().is_none());
+        let y_replay_bytes = std::fs::read(&y_replay_path)?;
+        assert_ne!(y_replay_bytes, x_replay_bytes);
+        assert_eq!(std::fs::read(&x_replay_path)?, x_replay_bytes);
+        let parsed_y = league_core::SeasonReplayLog::from_club_json_slice(&y_replay_bytes)?;
+        assert!(parsed_y.turns.len() >= 24);
+
+        // Repeat export of the same season in the same session keeps working idempotently.
+        sess_y_out
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        assert_eq!(std::fs::read(&y_replay_path)?, y_replay_bytes);
+        assert!(sess_y_out.terminal_tui_error().is_none());
+        drop(sess_y_out);
+
+        // Simulated retry after partial `.seal`-wipe failure (replay already matches byte-for-byte
+        // alongside the in-place resumed `.save.json`/`.seal`): resume and export succeeds cleanly
+        // and wipes the `.seal` without treating identical replay bytes as `REPLAY_TARGET_EXISTS`.
+        let y_retry_save = dir_y_out.join("y_retry.save.json");
+        let y_retry_seal = dir_y_out.join("y_retry.seal");
+        std::fs::copy(&y_save, &y_retry_save)?;
+        std::fs::write(&y_retry_seal, &y_seal_snapshot)?;
+        let opts_retry = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            y_retry_save.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub retry, got {other:?}").into()),
+        };
+        let mut sess_y_retry = build_session_for_cli(&opts_retry)?;
+        sess_y_retry
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        sess_y_retry
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        assert!(!y_retry_seal.exists());
+        assert_eq!(std::fs::read(&y_replay_path)?, y_replay_bytes);
+        assert!(sess_y_retry.terminal_tui_error().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn finished_season_resumed_into_missing_or_empty_save_dir_exports_and_wipes_source_seal()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+        let vp = ViewportSize::new(100, 30);
+
+        let dir = std::env::temp_dir().join(format!("ml_fin_cross_dir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dir_a1 = dir.join("src_a1");
+        let dir_b_missing = dir.join("out_b_missing");
+        let dir_a2 = dir.join("src_a2");
+        let dir_b_empty = dir.join("out_b_empty");
+        std::fs::create_dir_all(&dir_a1)?;
+        std::fs::create_dir_all(&dir_a2)?;
+        std::fs::create_dir_all(&dir_b_empty)?;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        // Case 1: Finished season in <dir_a1> resumed into missing <dir_b_missing>.
+        assert!(!dir_b_missing.exists());
+        let mut sess_a1 = start_lobby_table_1_for_test(&dir_a1, None, &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_a1, vp)?;
+        drop(sess_a1);
+        let a1_save = dir_a1.join("club-1.save.json");
+        let a1_seal = dir_a1.join("club-1.seal");
+        assert!(a1_seal.exists());
+
+        let opts_missing = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a1_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_b_missing.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub missing dir, got {other:?}").into()),
+        };
+        let mut res_missing = build_session_for_cli(&opts_missing)?;
+        assert_eq!(res_missing.phase(), league_core::TurnPhase::Completed);
+        assert!(!res_missing.is_curtain_open());
+        assert_eq!(res_missing.observe_seat_call_count(), 0);
+        res_missing
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        res_missing
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        let missing_replay = dir_b_missing.join("club-1.replay.json");
+        assert!(missing_replay.exists());
+        assert!(!a1_seal.exists());
+        assert!(!dir_b_missing.join("club-1.seal").exists());
+        let parsed1 =
+            league_core::SeasonReplayLog::from_club_json_slice(&std::fs::read(&missing_replay)?)?;
+        assert!(parsed1.turns.len() >= 24);
+        let mut lobby1 = host::LobbyHostSession::new(LobbyCliOverrides::default());
+        let next1 = lobby1.validate_and_start_in_dir(1, Some(&dir_a1))?;
+        assert_eq!(next1.table_id(), TableId(2));
+
+        // Case 2: Finished season in <dir_a2> resumed into existing empty <dir_b_empty>.
+        let mut sess_a2 = start_lobby_table_1_for_test(&dir_a2, None, &mut terminal)?;
+        advance_session_to_completed_for_test(&mut sess_a2, vp)?;
+        drop(sess_a2);
+        let a2_save = dir_a2.join("club-1.save.json");
+        let a2_seal = dir_a2.join("club-1.seal");
+        assert!(a2_seal.exists());
+
+        let opts_empty = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            a2_save.to_string_lossy().into_owned(),
+            "--save-dir".to_owned(),
+            dir_b_empty.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub empty dir, got {other:?}").into()),
+        };
+        let mut res_empty = build_session_for_cli(&opts_empty)?;
+        assert_eq!(res_empty.phase(), league_core::TurnPhase::Completed);
+        res_empty
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        res_empty
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        let empty_replay = dir_b_empty.join("club-1.replay.json");
+        assert!(empty_replay.exists());
+        assert!(!a2_seal.exists());
+        assert!(!dir_b_empty.join("club-1.seal").exists());
+        let parsed2 =
+            league_core::SeasonReplayLog::from_club_json_slice(&std::fs::read(&empty_replay)?)?;
+        assert!(parsed2.turns.len() >= 24);
+        let mut lobby2 = host::LobbyHostSession::new(LobbyCliOverrides::default());
+        let next2 = lobby2.validate_and_start_in_dir(1, Some(&dir_a2))?;
+        assert_eq!(next2.table_id(), TableId(2));
 
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())

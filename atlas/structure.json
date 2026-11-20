@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "91d4cdf8ec3ff833090713b55e6c0b00d459510942e4519f1c9abef58b673cb9",
+          "hash": "48bf66f337c03b739d1e30c67fe7d6ad67d7fb94b6e0eee69203be3776262faa",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -7819,10 +7819,10 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 0,
+      "dynamicReads": 1,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
-      "dynamicWrites": 2,
+      "dynamicWrites": 3,
       "entryPoints": [
         "crates/league-tui/src/main.rs"
       ],
@@ -7861,152 +7861,142 @@
             {
               "in": "extract_revealed_mandates",
               "kind": "err",
-              "line": 1087
+              "line": 1090
             },
             {
               "in": "write_atomic_file_bytes",
               "kind": "match-err",
-              "line": 1134
+              "line": 1139
             },
             {
               "in": "write_atomic_file_bytes",
               "kind": "err",
-              "line": 1135
+              "line": 1140
             },
             {
               "in": "expire_active_seat_pass",
               "kind": "match-err",
-              "line": 1460
+              "line": 1467
             },
             {
               "in": "maybe_autosave",
               "kind": "match-err",
-              "line": 1525
+              "line": 1532
             },
             {
               "in": "maybe_autosave",
               "kind": "err",
-              "line": 1535
+              "line": 1542
             },
             {
               "in": "write_save_and_seal",
               "kind": "err",
-              "line": 1843
+              "line": 1850
             },
             {
               "in": "wipe_seal_after_season_export",
               "kind": "err",
-              "line": 1911
+              "line": 1920
             },
             {
               "in": "wipe_seal_after_season_export",
               "kind": "err",
-              "line": 1918
+              "line": 1927
             },
             {
               "in": "handle_key_event",
               "kind": "match-err",
-              "line": 2257
+              "line": 2274
             },
             {
               "in": "handle_key_event",
               "kind": "err",
-              "line": 2260
+              "line": 2277
             },
             {
               "in": "handle_key_event",
               "kind": "match-err",
-              "line": 2313
+              "line": 2330
             },
             {
               "in": "handle_key_event",
               "kind": "err",
-              "line": 2316
+              "line": 2333
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2344
+              "line": 2361
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2354
+              "line": 2371
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2386
+              "line": 2403
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2407
+              "line": 2424
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2418
+              "line": 2435
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2441
+              "line": 2458
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2450
+              "line": 2467
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2483
+              "line": 2500
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2514
+              "line": 2531
             },
             {
               "in": "apply_seat_intent",
               "kind": "match-err",
-              "line": 2532
+              "line": 2549
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2534
+              "line": 2551
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2548
+              "line": 2565
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2564
+              "line": 2581
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2601
+              "line": 2618
             },
             {
               "in": "apply_post_season_intent",
               "kind": "match-err",
-              "line": 2624
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "err",
-              "line": 2629
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "match-err",
-              "line": 2632
+              "line": 2641
             },
             {
               "in": "apply_post_season_intent",
@@ -8015,71 +8005,101 @@
             },
             {
               "in": "apply_post_season_intent",
+              "kind": "err",
+              "line": 2666
+            },
+            {
+              "in": "apply_post_season_intent",
               "kind": "match-err",
-              "line": 2648
+              "line": 2668
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2665
+              "line": 2682
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "match-err",
+              "line": 2685
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "match-err",
+              "line": 2688
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2673
+              "line": 2703
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "match-err",
+              "line": 2713
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "err",
+              "line": 2730
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "err",
+              "line": 2739
             },
             {
               "in": "validate_resume_autosave_target",
               "kind": "err",
-              "line": 2905
+              "line": 2971
             },
             {
               "in": "validate_resume_autosave_target",
               "kind": "err",
-              "line": 2919
+              "line": 2985
             },
             {
               "in": "inspect_save_dir_for_new_season",
               "kind": "err",
-              "line": 2974
+              "line": 3040
             },
             {
               "in": "check_explicit_table_slot_in_dir",
               "kind": "err",
-              "line": 2996
-            },
-            {
-              "in": "validate_params_and_start_inner",
-              "kind": "err",
-              "line": 3222
-            },
-            {
-              "in": "validate_params_and_start_inner",
-              "kind": "err",
-              "line": 3230
-            },
-            {
-              "in": "validate_params_and_start_inner",
-              "kind": "err",
-              "line": 3256
-            },
-            {
-              "in": "validate_params_and_start_inner",
-              "kind": "err",
-              "line": 3263
-            },
-            {
-              "in": "validate_params_and_start_inner",
-              "kind": "err",
-              "line": 3277
+              "line": 3062
             },
             {
               "in": "validate_params_and_start_inner",
               "kind": "err",
               "line": 3288
+            },
+            {
+              "in": "validate_params_and_start_inner",
+              "kind": "err",
+              "line": 3296
+            },
+            {
+              "in": "validate_params_and_start_inner",
+              "kind": "err",
+              "line": 3322
+            },
+            {
+              "in": "validate_params_and_start_inner",
+              "kind": "err",
+              "line": 3329
+            },
+            {
+              "in": "validate_params_and_start_inner",
+              "kind": "err",
+              "line": 3343
+            },
+            {
+              "in": "validate_params_and_start_inner",
+              "kind": "err",
+              "line": 3354
             }
           ],
-          "hash": "94861683b65a6062a191887f822d36794384127344be0d95de1e46c60b70c2f0",
+          "hash": "0dbbff569444663818c0191a9eb6f804451154016b8929cd43531fd345ab848e",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -8107,7 +8127,7 @@
             {
               "calls": [
                 {
-                  "line": 575,
+                  "line": 578,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -8123,7 +8143,7 @@
             {
               "calls": [
                 {
-                  "line": 587,
+                  "line": 590,
                   "name": "Char",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8131,7 +8151,7 @@
                   }
                 },
                 {
-                  "line": 602,
+                  "line": 605,
                   "name": "F",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8139,7 +8159,7 @@
                   }
                 },
                 {
-                  "line": 611,
+                  "line": 614,
                   "name": "new",
                   "receiver": "SeatKeyEvent",
                   "target": {
@@ -8147,7 +8167,7 @@
                   }
                 },
                 {
-                  "line": 614,
+                  "line": 617,
                   "name": "Char",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8155,7 +8175,7 @@
                   }
                 },
                 {
-                  "line": 618,
+                  "line": 621,
                   "name": "repeated",
                   "receiver": "SeatKeyEvent",
                   "target": {
@@ -8171,14 +8191,14 @@
             {
               "calls": [
                 {
-                  "line": 1070,
+                  "line": 1073,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 1068,
+                  "line": 1071,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8194,7 +8214,7 @@
             {
               "calls": [
                 {
-                  "line": 1078,
+                  "line": 1081,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8210,7 +8230,7 @@
               "calls": [
                 {
                   "branch": "log.mandate_reveals.len() != seat_count",
-                  "line": 1070,
+                  "line": 1073,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8219,7 +8239,7 @@
                 },
                 {
                   "branch": "log.mandate_reveals.len() != seat_count",
-                  "line": 1068,
+                  "line": 1071,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8236,14 +8256,14 @@
             {
               "calls": [
                 {
-                  "line": 2872,
+                  "line": 2938,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 2870,
+                  "line": 2936,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8251,14 +8271,14 @@
                   }
                 },
                 {
-                  "line": 2885,
+                  "line": 2951,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 2883,
+                  "line": 2949,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8267,7 +8287,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2907,
+                  "line": 2973,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8275,7 +8295,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2905,
+                  "line": 2971,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8284,7 +8304,7 @@
                 },
                 {
                   "branch": "(k_path.exists() && !is_same_existing_file(&k_path, resumed…",
-                  "line": 2921,
+                  "line": 2987,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8292,7 +8312,7 @@
                 },
                 {
                   "branch": "(k_path.exists() && !is_same_existing_file(&k_path, resumed…",
-                  "line": 2919,
+                  "line": 2985,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8309,21 +8329,21 @@
               "calls": [
                 {
                   "branch": "!dir.exists()",
-                  "line": 2936,
+                  "line": 3002,
                   "name": "TableId",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 2941,
+                  "line": 3007,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 2939,
+                  "line": 3005,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8331,14 +8351,14 @@
                   }
                 },
                 {
-                  "line": 2955,
+                  "line": 3021,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 2953,
+                  "line": 3019,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8347,7 +8367,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2976,
+                  "line": 3042,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8355,7 +8375,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2974,
+                  "line": 3040,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8363,7 +8383,7 @@
                   }
                 },
                 {
-                  "line": 2985,
+                  "line": 3051,
                   "name": "TableId",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8379,7 +8399,7 @@
               "calls": [
                 {
                   "branch": "!dir.exists()",
-                  "line": 2936,
+                  "line": 3002,
                   "name": "TableId",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8387,7 +8407,7 @@
                   "via": "inspect_save_dir_for_new_season"
                 },
                 {
-                  "line": 2941,
+                  "line": 3007,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8395,7 +8415,7 @@
                   "via": "inspect_save_dir_for_new_season"
                 },
                 {
-                  "line": 2939,
+                  "line": 3005,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8404,7 +8424,7 @@
                   "via": "inspect_save_dir_for_new_season"
                 },
                 {
-                  "line": 2955,
+                  "line": 3021,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8412,7 +8432,7 @@
                   "via": "inspect_save_dir_for_new_season"
                 },
                 {
-                  "line": 2953,
+                  "line": 3019,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8422,7 +8442,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2976,
+                  "line": 3042,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8431,7 +8451,7 @@
                 },
                 {
                   "branch": "!unfinished_seals.is_empty()",
-                  "line": 2974,
+                  "line": 3040,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8440,7 +8460,7 @@
                   "via": "inspect_save_dir_for_new_season"
                 },
                 {
-                  "line": 2985,
+                  "line": 3051,
                   "name": "TableId",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8449,7 +8469,7 @@
                 },
                 {
                   "branch": "dir.join(format!(\"{base}.save.json\")).exists() || dir.join(…",
-                  "line": 2998,
+                  "line": 3064,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8457,7 +8477,7 @@
                 },
                 {
                   "branch": "dir.join(format!(\"{base}.save.json\")).exists() || dir.join(…",
-                  "line": 2996,
+                  "line": 3062,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8618,7 +8638,7 @@
               "line": 1033
             }
           ],
-          "hash": "7b30014b6935b1fd384566ee4b52bc7a5926380091147cb9fbc607a8fe42d39d",
+          "hash": "d6dfa2ddf93ac28872ca90bbc32f59972b56b22a88d55b541d7979adb7db250b",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -10147,7 +10167,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "804a4ae78df39aae9f6be4decb28cc30fc4e6ce4b208cf2634491a01362e0fd8",
+          "hash": "e4a75b64ae856f4281e730fc4463ae99a910f8a7fd1b18065184ffab79cd7217",
           "path": "CHANGELOG.md"
         },
         {
@@ -10187,7 +10207,7 @@
           "path": "README.ja.md"
         },
         {
-          "hash": "c32673083e4c39e69abd37f94f2d2a062323c87f4dc77e9e208670af86f0f14e",
+          "hash": "4a438dd0b06072b08837829a690b5215c2aab9d7a9cdd801b554432dbec418c8",
           "path": "README.md"
         },
         {
@@ -11573,7 +11593,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "5315f091651117b020049204c43504b11f5554b2",
+    "commit": "a4ec972deed50080e4902dcc2c7fbfb1f3e5b00b",
     "tracked": 576
   },
   "landings": [
@@ -12656,11 +12676,11 @@
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
-      "hash": "5c1d2df967fe66a405228d994fe96470cdc3ed1506e5b51b2bf16cb52453fa08",
+      "hash": "3db1685c5c94ad690cee7a840d48cbb6e6382eb78898b9d5cd73edcbe5fc214f",
       "path": "site/src/content/docs/handbook/playing-a-turn.md"
     },
     {
-      "hash": "dc6b62fb78efe6890fad77afba744ed6dc525dd64e587832228fd0c4e566dcaf",
+      "hash": "da8dfaa4a908f4b90d227a0aca6fa8cd224e23454517ed8304c317346260bd58",
       "path": "site/src/content/docs/handbook/reference.md"
     },
     {

@@ -400,7 +400,10 @@ impl ToStructuredError for TuiError {
                 retryable: err.retryable,
             },
             Self::PostSeasonExportFailed(err) => {
-                if err.code == "TUI_REPLAY_EXPORT_FAILED" {
+                if matches!(
+                    err.code,
+                    "TUI_REPLAY_EXPORT_FAILED" | "REPLAY_TARGET_EXISTS"
+                ) {
                     StructuredError {
                         code: err.code,
                         message: scrub_secret_text(&err.message),
@@ -1118,6 +1121,8 @@ fn write_atomic_file_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
         .unwrap_or("replay.json");
     let tmp_path = parent.join(format!("{file_name}.tmp.{}", std::process::id()));
     let write_res = (|| -> Result<(), String> {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create directory {}: {err}", parent.display()))?;
         let mut f = OpenOptions::new()
             .write(true)
             .create(true)
@@ -1174,6 +1179,7 @@ pub struct TuiHostSession {
     autosave_halted_info: Option<(PathBuf, StructuredError)>,
     halted_tui_error: Option<TuiError>,
     autosave_paths: Option<(PathBuf, PathBuf)>,
+    resumed_seal_path: Option<PathBuf>,
     end_of_season: Option<EndOfSeasonSessionState>,
     post_season_error: Option<StructuredError>,
     turn_clock_budget_secs: Option<u16>,
@@ -1280,6 +1286,7 @@ impl TuiHostSession {
             autosave_halted_info: None,
             halted_tui_error: None,
             autosave_paths: None,
+            resumed_seal_path: None,
             end_of_season: None,
             post_season_error: None,
             turn_clock_budget_secs: ckpt.turn_clock_secs,
@@ -1862,7 +1869,9 @@ impl TuiHostSession {
     ) -> Result<Self, StructuredError> {
         let host = ClubHost::read_save_and_seal(save_path, seal_path)
             .map_err(|err| scrub_engine_error(&err))?;
-        Self::from_host(host, commodities, true)
+        let mut session = Self::from_host(host, commodities, true)?;
+        session.resumed_seal_path = Some(seal_path.to_path_buf());
+        Ok(session)
     }
 
     /// Opens the Privacy Curtain for the currently active human seat using `open_curtain_for_seat`.
@@ -2029,6 +2038,14 @@ impl TuiHostSession {
                                 &scrub_secret_text(&err.message),
                                 74,
                             );
+                            if !err.hint.is_empty() {
+                                push_wrapped_plain_rows(
+                                    &mut panel.rows,
+                                    "Hint",
+                                    &scrub_secret_text(err.hint),
+                                    74,
+                                );
+                            }
                         }
                     }
                     if let Some(err) = &eos.export_error
@@ -2629,7 +2646,47 @@ impl TuiHostSession {
                         return Err(err);
                     }
                 };
-                if let Err(io_err) = write_atomic_file_bytes(&replay_path, &bytes) {
+                let already_written = match std::fs::metadata(&replay_path) {
+                    Ok(meta) if !meta.is_dir() => match std::fs::read(&replay_path) {
+                        Ok(existing) if existing == bytes => true,
+                        Ok(_) => {
+                            let err = StructuredError::new(
+                                "REPLAY_TARGET_EXISTS",
+                                scrub_secret_text(&format!(
+                                    "Replay file {} already exists for a different season; refusing to overwrite",
+                                    replay_path.display()
+                                )),
+                                "Resume with `--resume <PATH> --save-dir <EMPTY_DIR>` (or move the existing replay file) to export into another directory; `.seal` was kept.",
+                                false,
+                            );
+                            if let Some(eos) = &mut self.end_of_season {
+                                eos.data.export_state = ReplayExportState::Failed;
+                                eos.export_error = Some(err.clone());
+                            }
+                            return Err(err);
+                        }
+                        Err(read_err) => {
+                            let err = StructuredError::new(
+                                "TUI_REPLAY_EXPORT_FAILED",
+                                scrub_secret_text(&format!(
+                                    "Replay export failed reading existing {}: {read_err}",
+                                    replay_path.display()
+                                )),
+                                "Check file permissions/path and press `e` or `Enter` to retry replay export.",
+                                true,
+                            );
+                            if let Some(eos) = &mut self.end_of_season {
+                                eos.data.export_state = ReplayExportState::Failed;
+                                eos.export_error = Some(err.clone());
+                            }
+                            return Err(err);
+                        }
+                    },
+                    Ok(_) | Err(_) => false,
+                };
+                if !already_written
+                    && let Err(io_err) = write_atomic_file_bytes(&replay_path, &bytes)
+                {
                     let err = StructuredError::new(
                         "TUI_REPLAY_EXPORT_FAILED",
                         scrub_secret_text(&format!(
@@ -2645,24 +2702,33 @@ impl TuiHostSession {
                     }
                     return Err(err);
                 }
-                if let Err(wipe_err) = self.wipe_seal_after_season_export(&seal_path) {
-                    let err = StructuredError::new(
-                        "TUI_REPLAY_EXPORT_FAILED",
-                        scrub_secret_text(&format!(
-                            "Replay written at {}, but failed removing {}: {}",
-                            replay_path.display(),
-                            seal_path.display(),
-                            wipe_err.message
-                        )),
-                        "Ensure `.seal` can be removed and retry replay export.",
-                        true,
-                    )
-                    .with_cause(wipe_err.code);
-                    if let Some(eos) = &mut self.end_of_season {
-                        eos.data.export_state = ReplayExportState::Failed;
-                        eos.export_error = Some(err.clone());
+                let mut seal_targets = vec![seal_path.clone()];
+                if let Some(src_seal) = &self.resumed_seal_path
+                    && src_seal != &seal_path
+                    && !is_same_existing_file(src_seal, &seal_path)
+                {
+                    seal_targets.push(src_seal.clone());
+                }
+                for target_seal in &seal_targets {
+                    if let Err(wipe_err) = self.wipe_seal_after_season_export(target_seal) {
+                        let err = StructuredError::new(
+                            "TUI_REPLAY_EXPORT_FAILED",
+                            scrub_secret_text(&format!(
+                                "Replay written at {}, but failed removing {}: {}",
+                                replay_path.display(),
+                                target_seal.display(),
+                                wipe_err.message
+                            )),
+                            "Ensure `.seal` can be removed and retry replay export.",
+                            true,
+                        )
+                        .with_cause(wipe_err.code);
+                        if let Some(eos) = &mut self.end_of_season {
+                            eos.data.export_state = ReplayExportState::Failed;
+                            eos.export_error = Some(err.clone());
+                        }
+                        return Err(err);
                     }
-                    return Err(err);
                 }
                 if let Some(eos) = &mut self.end_of_season {
                     eos.data.export_state = ReplayExportState::Exported;
@@ -2908,7 +2974,7 @@ pub(crate) fn validate_resume_autosave_target(
                     "unfinished season `{seal_name}` already exists in {}; refusing to overwrite",
                     target_dir.display()
                 )),
-                "Resume directly from that directory with `--resume <PATH>`, finish & export its replay if completed, or choose another `--save-dir`.",
+                "Resume without `--save-dir` to save in place, choose an empty/different `--save-dir`, or finish & export the other directory's season first.",
                 false,
             ));
         }

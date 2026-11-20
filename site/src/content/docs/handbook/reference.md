@@ -54,9 +54,9 @@ While the alternate screen is active, zero diagnostic lines are written to the t
 | Code | Meaning |
 | --- | --- |
 | 0 | Clean completion (`--help`, `--version`, quit from Lobby or active/completed session cleanly) |
-| 1 | User or configuration error (bad or conflicting flags, invalid `LEAGUE_LOG_LEVEL`, `--pin` on CLI [`PIN_CLI_FORBIDDEN`], missing `--resume` target [`INVALID_RESUME_TARGET`], conflicting `--save-dir` target [`UNFINISHED_SEASON_EXISTS` / `SEASON_SAVE_EXISTS`], or non-TTY launch [`TTY_REQUIRED`], checked before raw mode is entered) |
+| 1 | User or configuration error (bad or conflicting flags, invalid `LEAGUE_LOG_LEVEL`, `--pin` on CLI [`PIN_CLI_FORBIDDEN`], missing `--resume` target [`INVALID_RESUME_TARGET`], conflicting or unreadable `--save-dir` target [`UNFINISHED_SEASON_EXISTS` / `SEASON_SAVE_EXISTS` / `SAVE_DIR_UNREADABLE`], or non-TTY launch [`TTY_REQUIRED`], checked before raw mode is entered) |
 | 2 | Runtime error (corrupt `.save.json` / `.seal` checkpoint refusal, autosave failure [`TUI_AUTOSAVE_FAILED`], wedged pass error, or terminal I/O failure) |
-| 3 | Partial success (season finalized cleanly through `TurnPhase::Completed`, but `club-<id>.replay.json` write or `.seal` wipe failed [`TUI_REPLAY_EXPORT_FAILED`]; `.seal` stays intact for retry) |
+| 3 | Partial success (season finalized cleanly through `TurnPhase::Completed`, but `club-<id>.replay.json` write, target check, or `.seal` wipe failed [`TUI_REPLAY_EXPORT_FAILED` / `REPLAY_TARGET_EXISTS`]; `.seal` stays intact for retry) |
 
 An uncaught main-thread panic exits with Rust's standard code `101` after restoring cooked terminal mode.
 
