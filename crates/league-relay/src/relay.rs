@@ -4673,14 +4673,49 @@ impl<'a> CallLedger<'a> {
         over_estimate: bool,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.finish_call_and_record_with_rollback(
+            reservation_id,
+            reserved_amount,
+            entry,
+            over_estimate,
+            None,
+            redaction_key,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_call_and_record_with_rollback(
+        &mut self,
+        reservation_id: &str,
+        reserved_amount: f64,
+        entry: &CallLogEntry,
+        over_estimate: bool,
+        rollback_on_append_err: Option<&Path>,
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<(), RelayError> {
         self.check_lock_identity(redaction_key);
-        if entry_marks_cost_unknown(entry) {
+        let mut comp_entry_buf;
+        let effective_entry = if let Some(lock_err) = &self.lock_compromised
+            && let Some(p) = rollback_on_append_err
+        {
+            let _ = fs::remove_file(p);
+            comp_entry_buf = entry.clone();
+            comp_entry_buf.reply_sha256 = None;
+            if comp_entry_buf.outcome == "OK" {
+                comp_entry_buf.outcome = "LEDGER_ERROR".to_owned();
+                comp_entry_buf.error = Some(lock_err.to_string());
+            }
+            &comp_entry_buf
+        } else {
+            entry
+        };
+        if entry_marks_cost_unknown(effective_entry) {
             self.cost_unknown_in_turn = true;
         }
-        if over_estimate || entry.outcome == "COST_OVER_ESTIMATE" {
+        if over_estimate || effective_entry.outcome == "COST_OVER_ESTIMATE" {
             self.cost_over_estimate_in_turn = true;
         }
-        let append_res = serde_json::to_string(entry)
+        let append_res = serde_json::to_string(effective_entry)
             .map_err(|e| io_err(&self.calls_path, e, redaction_key))
             .and_then(|mut line| {
                 line.push('\n');
@@ -4697,9 +4732,13 @@ impl<'a> CallLedger<'a> {
                 Ok(())
             }
             Err(e) => {
+                if let Some(p) = rollback_on_append_err {
+                    let _ = fs::remove_file(p);
+                }
                 self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
-                let held_charge = entry.charged_credits.max(reserved_amount);
-                self.pending_unwritten.push((held_charge, entry.clone()));
+                let held_charge = effective_entry.charged_credits.max(reserved_amount);
+                self.pending_unwritten
+                    .push((held_charge, effective_entry.clone()));
                 self.ledger_write_failed_in_turn = true;
                 self.check_lock_identity(redaction_key);
                 let pending_snapshot: Vec<CallLogEntry> = self
@@ -6616,14 +6655,33 @@ fn run_single_automated_seat(
                             "seat_reply_hash seat={guild} attempt={attempt} reply_sha256={reply_sha256}"
                         )
                     });
-                    {
+                    let pre_lock_err = {
                         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                         guard.check_lock_identity(redaction_key);
-                        if let Some(lock_err) = &guard.lock_compromised {
+                        guard.lock_compromised.clone()
+                    };
+                    if let Some(lock_err) = pre_lock_err {
+                        let mut comp_entry = entry;
+                        comp_entry.reply_sha256 = None;
+                        if comp_entry.outcome == "OK" {
+                            comp_entry.outcome = "LEDGER_ERROR".to_owned();
+                            comp_entry.error = Some(lock_err.to_string());
+                        }
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &comp_entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
                             return SeatOutcome::SeatError {
-                                detail: lock_err.to_string(),
+                                detail: e.to_string(),
                             };
                         }
+                        return SeatOutcome::SeatError {
+                            detail: lock_err.to_string(),
+                        };
                     }
                     if let Err(write_err) =
                         write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
@@ -6661,11 +6719,12 @@ fn run_single_automated_seat(
                     }
                     {
                         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
-                        if let Err(e) = guard.finish_call_and_record(
+                        if let Err(e) = guard.finish_call_and_record_with_rollback(
                             &reservation_id,
                             seat.max_per_call_spend,
                             &entry,
                             over_estimate,
+                            Some(&from_seat_path),
                             redaction_key,
                         ) {
                             return SeatOutcome::SeatError {
