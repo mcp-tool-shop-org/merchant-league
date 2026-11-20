@@ -42,7 +42,7 @@ It runs, in order:
 7. the copy tripwire, which fails on text that frames the game as a source of income (`scripts/check-copy.sh`)
 8. the guards' own controls (`scripts/test-guards.sh`), which plant every banned pattern and check each guard still catches it
 9. the site: `npm ci`, `npm audit` and the build of the landing page and this handbook, when `npm` is installed
-10. the held Club Mode container build and offline smoke gate (`scripts/smoke-container.sh`), when `docker` is available
+10. the held Club Mode container build and offline smoke gate (`scripts/smoke-container.sh`), on Linux when `docker` and POSIX `python3` (`pty`/`fcntl`/`termios`) are available
 
 CI also runs two checks that `verify.sh` leaves out: the stand-alone `xrpld` harness and the Atlas map check (`npx @dogfood-lab/atlas check`), which confirms the committed map in `atlas/` matches the code.
 
@@ -52,11 +52,13 @@ There is **no published container image** yet. You can build the held multi-stag
 
 ```bash
 docker build -t merchant-league:local .
-docker run --rm -it --network=none -v "$(pwd)/saves:/saves" merchant-league:local
+mkdir -p saves
+docker run --rm -it --network=none --user "$(id -u):$(id -g)" -v "$(pwd)/saves:/saves" merchant-league:local
 ```
 
+- **Saving & mounts:** On Linux Docker Engine, the default `65532:65532` user cannot write to a host bind mount owned by your user (or `root`-created when missing), so pre-creating `./saves` and passing `--user "$(id -u):$(id -g)"` keeps files owned by your non-root account without `chmod 777` or root. Alternatively, a Docker named volume (`docker run --rm -it --network=none -v merchant-league-saves:/saves merchant-league:local`, without `--user`) initializes `/saves` from the image's `65532:65532` ownership. On Docker Desktop (macOS and Windows), bind-mount permissions are virtualized across the Linux VM, so in PowerShell (`mkdir saves; docker run --rm -it --network=none -v "${PWD}/saves:/saves" merchant-league:local`) or macOS the bind mount saves under `65532:65532` without `--user`, while WSL 2 Linux shells can run the Linux command directly.
 - Pass `-it` so `league-tui` has an interactive TTY (without a TTY, it exits `1` with `TTY_REQUIRED` and prints the `docker run --rm -it <image>` hint; `--help` and `--version` exit `0`).
-- The runtime image is based on digest-pinned `gcr.io/distroless/cc-debian12:nonroot`, runs as `65532:65532` in `/saves`, contains only `/usr/local/bin/league-tui`, `/usr/share/doc/merchant-league/LICENSE`, and an empty `/saves` directory owned by `65532:65532` (no shell, no toolchain, no source files), and makes zero network calls.
+- Built from digest-pinned `rust:1.100.0-bookworm` onto digest-pinned `gcr.io/distroless/cc-debian12:nonroot`, defaulting to `65532:65532` in `/saves`. On top of that pinned distroless base (which carries no shell and no package manager), the build adds only `/usr/local/bin/league-tui`, `/usr/share/doc/merchant-league/LICENSE`, and an empty `/saves` directory owned by `65532:65532` — no toolchain, no source files, and zero network calls.
 
 ## The stand-alone `xrpld` harness
 

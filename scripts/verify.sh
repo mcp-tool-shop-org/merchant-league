@@ -7,8 +7,8 @@
 # and the Atlas map check (CI pins its version). CI runs both.
 #
 # Coverage, the advisory audit, the site build, and the Club Mode container
-# smoke gate run when cargo-llvm-cov, cargo-audit, npm, and Docker are
-# available, and are skipped with a note otherwise.
+# smoke gate run when cargo-llvm-cov, cargo-audit, npm, and Linux Docker
+# (with POSIX python3 pty/fcntl/termios) are available, and skip with a note otherwise.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,11 +58,14 @@ else
 fi
 
 step "Club Mode container build and smoke gate"
-if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
-  bash scripts/smoke-container.sh
-else
+if ! command -v docker >/dev/null || ! docker info >/dev/null 2>&1; then
   echo "skipped: docker is not available (CI runs it)"
   skipped+=("container smoke gate")
+elif [ "$(uname -s)" != "Linux" ] || ! command -v python3 >/dev/null || ! python3 -c 'import pty, fcntl, termios' >/dev/null 2>&1; then
+  echo "skipped: container smoke gate requires Linux with POSIX python3 pty/fcntl/termios (CI runs it)"
+  skipped+=("container smoke gate")
+else
+  bash scripts/smoke-container.sh
 fi
 
 if [ ${#skipped[@]} -eq 0 ]; then
