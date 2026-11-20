@@ -2920,6 +2920,45 @@ impl AiPreviewWireOutput {
     }
 }
 
+#[cfg(any(test, feature = "test-hooks"))]
+fn preview_seat_bundle_execution_counts()
+-> &'static std::sync::Mutex<std::collections::BTreeMap<u64, usize>> {
+    static COUNTS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<u64, usize>>> =
+        std::sync::OnceLock::new();
+    COUNTS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn record_preview_seat_bundle_execution_for_test(table_id: u64) {
+    let mut guard = preview_seat_bundle_execution_counts()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let slot = guard.entry(table_id).or_insert(0);
+    *slot += 1;
+}
+
+/// Test-only helper: reset the [`preview_seat_bundle`] execution counter for `table_id`.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn reset_preview_seat_bundle_executions_for_table_for_test(table_id: u64) {
+    let mut guard = preview_seat_bundle_execution_counts()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    guard.remove(&table_id);
+}
+
+/// Test-only helper: return how many times [`execute_preview_tool_call`] invoked
+/// [`preview_seat_bundle`] for `table_id`.
+#[cfg(any(test, feature = "test-hooks"))]
+#[must_use]
+pub fn preview_seat_bundle_executions_for_table_for_test(table_id: u64) -> usize {
+    preview_seat_bundle_execution_counts()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&table_id)
+        .copied()
+        .unwrap_or(0)
+}
+
 /// Evaluate [`AiPreviewRequest`] through [`preview_seat_bundle`] and return pinned wire JSON.
 #[must_use]
 pub fn execute_preview_tool_call(
@@ -2929,6 +2968,8 @@ pub fn execute_preview_tool_call(
     let Some(req) = parse_preview_tool_arguments(raw_arguments, preview_state.seat) else {
         return render_malformed_tool_call_wire_json();
     };
+    #[cfg(any(test, feature = "test-hooks"))]
+    record_preview_seat_bundle_execution_for_test(preview_state.table_id.0);
     match preview_seat_bundle(preview_state, &req) {
         Ok(preview) => AiPreviewWireOutput::from_what_if_preview(&preview).to_json_string(),
         Err(err) => render_engine_refusal_wire_json(err.code()),

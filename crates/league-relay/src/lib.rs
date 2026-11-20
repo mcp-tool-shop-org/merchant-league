@@ -19,13 +19,14 @@ pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR
 pub use error::{PreviewStateErrorKind, RelayError, StructuredError, ToStructuredError};
 pub use relay::{
     CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
-    Round, SeatOutcome, SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary,
-    prepend_wrapper, run_turn, sha256_hex, validate_day, validate_scratchpad_setup,
+    Round, SavedToolRoundCall, SavedToolRoundRecord, SeatOutcome, SeatReport, SetupSeatRecord,
+    TranscriptEntry, TurnConfig, TurnSummary, prepend_wrapper, run_turn, sha256_hex,
+    tool_round_file_path, validate_day, validate_scratchpad_setup,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{
-    DurabilityEvent, set_fail_pending_temp_write_for_test, take_durability_events_for_test,
-    watch_durability_events_for_test,
+    DurabilityEvent, set_fail_pending_temp_write_for_test, set_fail_tool_round_write_for_test,
+    take_durability_events_for_test, watch_durability_events_for_test,
 };
 pub use seats::{
     BackendKind, CostUnit, LOCAL_TIMEOUT_MARGIN_SECS, LocalSeat, OpenRouterSeat, ReasoningEffort,
@@ -59,4 +60,9 @@ pub use wording::{
     render_malformed_tool_call_wire_json, render_wording_slot_with, render_wording_template_with,
     sanitize_scratchpad_for_prompt, sanitize_whisper, split_negotiation_sections,
     strip_thinking_tags, try_render_wording_template_with, wording_slot, wording_template,
+};
+#[cfg(any(test, feature = "test-hooks"))]
+pub use wording::{
+    preview_seat_bundle_executions_for_table_for_test,
+    reset_preview_seat_bundle_executions_for_table_for_test,
 };

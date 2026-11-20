@@ -7436,12 +7436,230 @@ mod tests {
         );
         session.advance_clock(CURTAIN_LIFT_DEAD_TIME);
 
-        // Verify `.save.json` contains neither PIN while `.seal` holds both PINs.
-        let save_txt =
-            std::fs::read_to_string(&save_path).unwrap_or_else(|e| panic!("read pin save: {e}"));
-        let seal_txt =
-            std::fs::read_to_string(&seal_path).unwrap_or_else(|e| panic!("read pin seal: {e}"));
-        assert!(!save_txt.contains("4829") && !save_txt.contains("7135"));
+        // Verify parsed `.save.json` contains neither PIN nor PIN field anywhere outside the
+        // random 64-hex `eval_vrf_pubkey` values (`review B11`), while `.seal` holds both PINs.
+        let save_txt = must_ok(std::fs::read_to_string(&save_path), "read pin save");
+        let seal_txt = must_ok(std::fs::read_to_string(&seal_path), "read pin seal");
+
+        enum SaveJson {
+            Null,
+            Bool,
+            Atom(String),
+            Array(Vec<SaveJson>),
+            Object(Vec<(String, SaveJson)>),
+        }
+        fn skip_ws(b: &[u8], i: &mut usize) {
+            while *i < b.len() && matches!(b[*i], b' ' | b'\t' | b'\r' | b'\n') {
+                *i += 1;
+            }
+        }
+        fn parse_json_str(b: &[u8], i: &mut usize) -> Result<String, &'static str> {
+            if b.get(*i) != Some(&b'"') {
+                return Err("expected quote");
+            }
+            *i += 1;
+            let mut out: Vec<u8> = Vec::new();
+            while *i < b.len() {
+                let c = b[*i];
+                *i += 1;
+                if c == b'"' {
+                    return String::from_utf8(out).map_err(|_| "invalid utf-8 in json string");
+                }
+                if c == b'\\' {
+                    let esc = *b.get(*i).ok_or("eof in escape")?;
+                    *i += 1;
+                    match esc {
+                        b'"' => out.push(b'"'),
+                        b'\\' => out.push(b'\\'),
+                        b'/' => out.push(b'/'),
+                        b'b' => out.push(0x08),
+                        b'f' => out.push(0x0c),
+                        b'n' => out.push(b'\n'),
+                        b'r' => out.push(b'\r'),
+                        b't' => out.push(b'\t'),
+                        b'u' => {
+                            let hex_slice = b.get(*i..*i + 4).ok_or("eof in unicode escape")?;
+                            let hex_str = std::str::from_utf8(hex_slice)
+                                .map_err(|_| "invalid utf-8 in unicode escape")?;
+                            let cp = u32::from_str_radix(hex_str, 16)
+                                .map_err(|_| "invalid hex in unicode escape")?;
+                            *i += 4;
+                            let ch = char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER);
+                            let mut buf = [0u8; 4];
+                            out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                        }
+                        other => out.push(other),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            Err("unterminated json string")
+        }
+        fn parse_json_val(b: &[u8], i: &mut usize) -> Result<SaveJson, &'static str> {
+            skip_ws(b, i);
+            match *b.get(*i).ok_or("unexpected eof")? {
+                b'"' => Ok(SaveJson::Atom(parse_json_str(b, i)?)),
+                b'{' => {
+                    *i += 1;
+                    let mut fields = Vec::new();
+                    skip_ws(b, i);
+                    if b.get(*i) == Some(&b'}') {
+                        *i += 1;
+                        return Ok(SaveJson::Object(fields));
+                    }
+                    loop {
+                        skip_ws(b, i);
+                        let key = parse_json_str(b, i)?;
+                        skip_ws(b, i);
+                        if b.get(*i) != Some(&b':') {
+                            return Err("expected colon");
+                        }
+                        *i += 1;
+                        let val = parse_json_val(b, i)?;
+                        fields.push((key, val));
+                        skip_ws(b, i);
+                        match b.get(*i) {
+                            Some(&b',') => *i += 1,
+                            Some(&b'}') => {
+                                *i += 1;
+                                return Ok(SaveJson::Object(fields));
+                            }
+                            _ => return Err("expected comma or closing brace"),
+                        }
+                    }
+                }
+                b'[' => {
+                    *i += 1;
+                    let mut items = Vec::new();
+                    skip_ws(b, i);
+                    if b.get(*i) == Some(&b']') {
+                        *i += 1;
+                        return Ok(SaveJson::Array(items));
+                    }
+                    loop {
+                        items.push(parse_json_val(b, i)?);
+                        skip_ws(b, i);
+                        match b.get(*i) {
+                            Some(&b',') => *i += 1,
+                            Some(&b']') => {
+                                *i += 1;
+                                return Ok(SaveJson::Array(items));
+                            }
+                            _ => return Err("expected comma or closing bracket"),
+                        }
+                    }
+                }
+                b't' => {
+                    if b.get(*i..*i + 4) != Some(b"true") {
+                        return Err("expected true");
+                    }
+                    *i += 4;
+                    Ok(SaveJson::Bool)
+                }
+                b'f' => {
+                    if b.get(*i..*i + 5) != Some(b"false") {
+                        return Err("expected false");
+                    }
+                    *i += 5;
+                    Ok(SaveJson::Bool)
+                }
+                b'n' => {
+                    if b.get(*i..*i + 4) != Some(b"null") {
+                        return Err("expected null");
+                    }
+                    *i += 4;
+                    Ok(SaveJson::Null)
+                }
+                _ => {
+                    let start = *i;
+                    while *i < b.len()
+                        && !matches!(b[*i], b',' | b'}' | b']' | b' ' | b'\n' | b'\r' | b'\t')
+                    {
+                        *i += 1;
+                    }
+                    let num_str = std::str::from_utf8(&b[start..*i])
+                        .map_err(|_| "invalid utf-8 in json atom")?;
+                    Ok(SaveJson::Atom(num_str.to_owned()))
+                }
+            }
+        }
+        let mut cursor = 0usize;
+        let save_ast = must_ok(
+            parse_json_val(save_txt.as_bytes(), &mut cursor),
+            "parse save json",
+        );
+        skip_ws(save_txt.as_bytes(), &mut cursor);
+        assert_eq!(cursor, save_txt.len());
+
+        let root_fields = must_some(
+            match &save_ast {
+                SaveJson::Object(fields) => Some(fields),
+                _ => None,
+            },
+            "save json root must be object",
+        );
+        let root_vrf = must_some(
+            root_fields.iter().find_map(|(k, v)| match (k.as_str(), v) {
+                ("eval_vrf_pubkey", SaveJson::Atom(s)) => Some(s.as_str()),
+                _ => None,
+            }),
+            "root eval_vrf_pubkey",
+        );
+        let spec_vrf = must_some(
+            root_fields.iter().find_map(|(k, v)| match (k.as_str(), v) {
+                ("spec", SaveJson::Object(spec_fields)) => {
+                    spec_fields
+                        .iter()
+                        .find_map(|(sk, sv)| match (sk.as_str(), sv) {
+                            ("eval_vrf_pubkey", SaveJson::Atom(s)) => Some(s.as_str()),
+                            _ => None,
+                        })
+                }
+                _ => None,
+            }),
+            "spec eval_vrf_pubkey",
+        );
+        assert_eq!(root_vrf.len(), 64);
+        assert_eq!(root_vrf, spec_vrf);
+        assert!(
+            root_vrf
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        );
+
+        fn check_save_ast_pin_free(pointer: &str, val: &SaveJson) {
+            match val {
+                SaveJson::Atom(s) => {
+                    if pointer == "/eval_vrf_pubkey" || pointer == "/spec/eval_vrf_pubkey" {
+                        return;
+                    }
+                    assert!(
+                        !s.contains("4829") && !s.contains("7135"),
+                        "public save leaked PIN at {pointer}: {s}"
+                    );
+                }
+                SaveJson::Array(items) => {
+                    for (idx, item) in items.iter().enumerate() {
+                        check_save_ast_pin_free(&format!("{pointer}/{idx}"), item);
+                    }
+                }
+                SaveJson::Object(fields) => {
+                    for (k, v) in fields {
+                        assert!(
+                            !k.contains("seat_pins")
+                                && !k.contains("session_seat_pins")
+                                && !k.contains("4829")
+                                && !k.contains("7135"),
+                            "public save leaked PIN key `{k}` at {pointer}"
+                        );
+                        check_save_ast_pin_free(&format!("{pointer}/{k}"), v);
+                    }
+                }
+                SaveJson::Null | SaveJson::Bool => {}
+            }
+        }
+        check_save_ast_pin_free("", &save_ast);
         assert!(!save_txt.contains("session_seat_pins"));
         assert!(seal_txt.contains("4829") && seal_txt.contains("7135"));
 

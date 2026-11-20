@@ -2580,6 +2580,78 @@ impl TurnSummary {
     }
 }
 
+/// Returned on-disk sidecar record for one HTTP round in which `--preview-tool on`
+/// received one or more model tool calls (`<game-dir>/relay/seats/<Guild>.day-DD-<round>.tool-round-<idx>.json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedToolRoundCall {
+    /// Zero-based position of this tool call within the assistant message's `tool_calls` array.
+    pub call_index: usize,
+    /// OpenAI tool call identifier echoed back onto the follow-up `role: "tool"` message.
+    pub id: String,
+    /// Tool call type echoed on the wire (`"function"` for standard or filled fallback).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Requested function/tool name echoed on the wire.
+    pub name: String,
+    /// Raw JSON `arguments` string exactly as received (or compact JSON fallback if an odd provider sent an object/non-string).
+    pub arguments: String,
+    /// Exact raw JSON value for this element when the provider sent an oddly shaped `tool_calls` entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_received_call: Option<serde_json::Value>,
+    /// Lowercase hex SHA-256 of the received tool-call object as received.
+    pub call_sha256: String,
+    /// Lowercase hex SHA-256 of `arguments.as_bytes()`.
+    pub arguments_sha256: String,
+    /// Exact UTF-8 JSON placed on the wire in the follow-up `role: "tool"` message's `content`
+    /// (including pinned `MALFORMED_TOOL_CALL` and `CALL_LIMIT_REACHED` refusals).
+    pub result_wire_json: String,
+    /// Lowercase hex SHA-256 of `result_wire_json.as_bytes()`.
+    pub result_sha256: String,
+}
+
+/// Complete durable record of one `--preview-tool on` HTTP tool round, written atomically
+/// (`*.tmp` -> `flush` + `sync_all` -> rename) before the follow-up HTTP request is sent
+/// (`relay/calls.jsonl` `TOOL_CALL` entries store this file's SHA-256 in `reply_sha256`).
+/// Later turns do not replay saved tool rounds into `snapshot`, `emc`, or `full` prompt context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedToolRoundRecord {
+    /// Two-digit game day (`"01"`..=`"99"`).
+    pub day: String,
+    /// Round (`talk` or `act`).
+    pub round: Round,
+    /// Seated guild name.
+    pub guild: String,
+    /// Zero-based index of this tool round within the current turn for `guild`.
+    pub round_index: usize,
+    /// HTTP attempt number (`1` or `2`) within that round that returned `tool_calls`.
+    pub attempt: u8,
+    /// Optional assistant `content` sent alongside `tool_calls`, exactly as received and echoed.
+    pub assistant_content: Option<String>,
+    /// Lowercase hex SHA-256 of `assistant_content` when `Some`, or `None`.
+    pub assistant_content_sha256: Option<String>,
+    /// Optional reasoning trace stored only when `exclude_from_transcript == false` (same gate as `<Guild>.jsonl`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// Lowercase hex SHA-256 of the canonical assistant reply JSON (`assistant_content` + received `tool_calls`).
+    pub assistant_reply_sha256: String,
+    /// Received tool calls and exact wire results returned for each call in order.
+    pub calls: Vec<SavedToolRoundCall>,
+}
+
+/// Path to the immutable per-round sidecar file beside `<game-dir>/relay/seats/<Guild>.jsonl`.
+#[must_use]
+pub fn tool_round_file_path(
+    game_dir: &Path,
+    guild: &str,
+    day: &str,
+    round: Round,
+    round_index: usize,
+) -> PathBuf {
+    game_dir.join("relay").join("seats").join(format!(
+        "{guild}.day-{day}-{round}.tool-round-{round_index}.json"
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ChatToolCallFunctionWire {
     name: String,
@@ -2592,6 +2664,12 @@ struct ChatToolCallWire {
     #[serde(rename = "type")]
     kind: String,
     function: ChatToolCallFunctionWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedToolCallItem {
+    wire: ChatToolCallWire,
+    odd_raw_value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -2678,7 +2756,7 @@ struct ChatChoiceMessageWire {
     #[serde(default)]
     reasoning_content: Option<String>,
     #[serde(default)]
-    tool_calls: Option<Vec<ChatToolCallWire>>,
+    tool_calls: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -2936,6 +3014,34 @@ fn should_fail_pending_temp_write_for_test(pending_path: &Path) -> bool {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .contains(pending_path)
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn fail_tool_round_write_paths() -> &'static Mutex<HashSet<PathBuf>> {
+    static PATHS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Test-only fault-injection hook: when `fail` is `true`, probing or writing a tool-round
+/// record at `path` fails before committing/renaming and cleans up any temporary file.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn set_fail_tool_round_write_for_test(path: &Path, fail: bool) {
+    let mut set = fail_tool_round_write_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if fail {
+        set.insert(path.to_path_buf());
+    } else {
+        set.remove(path);
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn should_fail_tool_round_write_for_test(path: &Path) -> bool {
+    fail_tool_round_write_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(path)
 }
 
 /// Test-only durability-ordering event recorded for a watched `<game-dir>/relay` directory.
@@ -3876,6 +3982,7 @@ struct CallLedger<'a> {
     unreleased_reservations: Vec<String>,
     lock_compromised: Option<RelayError>,
     ledger_write_failed_in_turn: bool,
+    tool_round_store_failed: Option<RelayError>,
     cost_unknown_in_turn: bool,
     cost_over_estimate_in_turn: bool,
     initial_recorded_entries: usize,
@@ -4054,6 +4161,7 @@ impl<'a> CallLedger<'a> {
             unreleased_reservations: Vec::new(),
             lock_compromised: None,
             ledger_write_failed_in_turn: false,
+            tool_round_store_failed: None,
             cost_unknown_in_turn,
             cost_over_estimate_in_turn,
             initial_recorded_entries,
@@ -4188,7 +4296,7 @@ impl<'a> CallLedger<'a> {
         if let Some(lock_err) = &self.lock_compromised {
             return Ok(PreCallDecision::LockCompromised(lock_err.clone()));
         }
-        if self.ledger_write_failed_in_turn {
+        if self.ledger_write_failed_in_turn || self.tool_round_store_failed.is_some() {
             return Ok(PreCallDecision::LedgerWriteFailed);
         }
         if self.cost_over_estimate_in_turn {
@@ -4514,7 +4622,10 @@ fn entry_marks_cost_unknown(entry: &CallLogEntry) -> bool {
     if entry.cost.is_some() {
         return false;
     }
-    if entry.outcome == "OK" || entry.outcome == "TOOL_CALL" {
+    if entry.outcome == "OK"
+        || entry.outcome == "TOOL_CALL"
+        || entry.outcome == "TOOL_ROUND_STORE_WRITE_FAILED"
+    {
         return true;
     }
     if entry.cost_unit == CostUnit::GpuSeconds {
@@ -4955,6 +5066,9 @@ pub(crate) fn run_turn_with_diag(
     } else {
         None
     };
+    if config.preview_tool == PreviewToolMode::On {
+        probe_tool_round_store(&config.game_dir, redaction_key)?;
+    }
 
     let wrapper_text = match &config.wrapper_path {
         Some(path) => Some(fs::read_to_string(path).map_err(|e| io_err(path, e, redaction_key))?),
@@ -5162,7 +5276,7 @@ pub(crate) fn run_turn_with_diag(
 
     let summary = TurnSummary { reports };
 
-    {
+    let tool_round_store_err = {
         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
         let finalize_res = guard.finalize_turn(redaction_key);
         let cumulative_charged = guard
@@ -5180,7 +5294,8 @@ pub(crate) fn run_turn_with_diag(
             )
         });
         finalize_res?;
-    }
+        guard.tool_round_store_failed.take()
+    };
 
     let lock_path_str = redact_secrets(&turn_lock.lock_path.display().to_string(), redaction_key);
     drop(ledger);
@@ -5188,6 +5303,9 @@ pub(crate) fn run_turn_with_diag(
     diag_log(diag_sink, LogLevel::Debug, || {
         format!("lock=released path={lock_path_str}")
     });
+    if let Some(err) = tool_round_store_err {
+        return Err(err);
+    }
     Ok(summary)
 }
 
@@ -5581,6 +5699,7 @@ fn run_single_automated_seat(
         preview_state_opt.map(|_| vec![build_preview_turn_orders_tool_definition()]);
     let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
     let mut preview_calls_used = 0usize;
+    let mut tool_round_index = 0usize;
     let mut limit_refusal_sent = false;
 
     'http_rounds: loop {
@@ -6149,6 +6268,7 @@ fn run_single_automated_seat(
                 EvaluatedCall::ToolCalls {
                     calls,
                     assistant_content,
+                    persisted_reasoning,
                     model_returned,
                     usage,
                 } => {
@@ -6159,6 +6279,11 @@ fn run_single_automated_seat(
                             wall_secs,
                             seat.max_per_call_spend,
                         );
+                    let mut echoed_calls: Vec<ChatToolCallWire> = Vec::new();
+                    let mut saved_record_opt: Option<(PathBuf, SavedToolRoundRecord, String)> =
+                        None;
+                    let mut store_failure: Option<RelayError> = None;
+
                     let (outcome_str, err_opt, hit_repeat_limit) = if over_estimate {
                         let msg = observed_cost.map(|c| {
                             format!(
@@ -6169,17 +6294,115 @@ fn run_single_automated_seat(
                         ("COST_OVER_ESTIMATE".to_owned(), msg, false)
                     } else if limit_refusal_sent {
                         (
-                        "NO_REPLY".to_owned(),
-                        Some(
-                            "preview tool call limit reached; model failed to submit final reply"
-                                .to_owned(),
-                        ),
-                        true,
-                    )
+                            "NO_REPLY".to_owned(),
+                            Some(
+                                "preview tool call limit reached; model failed to submit final reply"
+                                    .to_owned(),
+                            ),
+                            true,
+                        )
                     } else {
-                        ("TOOL_CALL".to_owned(), None, false)
+                        let Some(preview_state) = preview_state_opt else {
+                            return SeatOutcome::SeatError {
+                                detail: "internal error: missing preview state on tool round"
+                                    .to_owned(),
+                            };
+                        };
+                        let expected_tool_name = preview_wording_template("preview_tool_name");
+                        let mut saved_calls: Vec<SavedToolRoundCall> =
+                            Vec::with_capacity(calls.len());
+                        let mut received_wire_vals: Vec<serde_json::Value> =
+                            Vec::with_capacity(calls.len());
+                        for (call_idx, parsed_call) in calls.into_iter().enumerate() {
+                            let call = parsed_call.wire;
+                            let call_val = match &parsed_call.odd_raw_value {
+                                Some(raw) => raw.clone(),
+                                None => {
+                                    serde_json::to_value(&call).unwrap_or(serde_json::Value::Null)
+                                }
+                            };
+                            let call_json_bytes =
+                                serde_json::to_string(&call_val).unwrap_or_default();
+                            received_wire_vals.push(call_val);
+                            let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN
+                            {
+                                limit_refusal_sent = true;
+                                render_call_limit_reached_wire_json()
+                            } else {
+                                preview_calls_used += 1;
+                                if parsed_call.odd_raw_value.is_none()
+                                    && call.kind == "function"
+                                    && call.function.name == expected_tool_name
+                                {
+                                    execute_preview_tool_call(
+                                        preview_state,
+                                        &call.function.arguments,
+                                    )
+                                } else {
+                                    render_malformed_tool_call_wire_json()
+                                }
+                            };
+                            saved_calls.push(SavedToolRoundCall {
+                                call_index: call_idx,
+                                id: call.id.clone(),
+                                kind: call.kind.clone(),
+                                name: call.function.name.clone(),
+                                arguments_sha256: sha256_hex(call.function.arguments.as_bytes()),
+                                arguments: call.function.arguments.clone(),
+                                raw_received_call: parsed_call.odd_raw_value,
+                                call_sha256: sha256_hex(call_json_bytes.as_bytes()),
+                                result_sha256: sha256_hex(tool_body.as_bytes()),
+                                result_wire_json: tool_body,
+                            });
+                            echoed_calls.push(call);
+                        }
+                        let canonical_reply = serde_json::json!({
+                            "content": &assistant_content,
+                            "tool_calls": received_wire_vals,
+                        })
+                        .to_string();
+                        let record = SavedToolRoundRecord {
+                            day: config.day.clone(),
+                            round: config.round,
+                            guild: guild.to_owned(),
+                            round_index: tool_round_index,
+                            attempt,
+                            assistant_content_sha256: assistant_content
+                                .as_ref()
+                                .map(|c| sha256_hex(c.as_bytes())),
+                            assistant_content: assistant_content.clone(),
+                            reasoning: persisted_reasoning,
+                            assistant_reply_sha256: sha256_hex(canonical_reply.as_bytes()),
+                            calls: saved_calls,
+                        };
+                        let base_sidecar_path = tool_round_file_path(
+                            &config.game_dir,
+                            guild,
+                            &config.day,
+                            config.round,
+                            tool_round_index,
+                        );
+                        let sidecar_path =
+                            resolve_non_overwriting_tool_round_path(&base_sidecar_path);
+                        match write_tool_round_record_atomic(
+                            &base_sidecar_path,
+                            &sidecar_path,
+                            &record,
+                            redaction_key,
+                        ) {
+                            Ok(file_sha256) => {
+                                saved_record_opt = Some((sidecar_path, record, file_sha256));
+                                ("TOOL_CALL".to_owned(), None, false)
+                            }
+                            Err(err) => {
+                                let msg = err.to_string();
+                                store_failure = Some(err);
+                                ("TOOL_ROUND_STORE_WRITE_FAILED".to_owned(), Some(msg), false)
+                            }
+                        }
                     };
                     let outcome_for_diag = outcome_str.clone();
+                    let reply_sha256_opt = saved_record_opt.as_ref().map(|(_, _, sha)| sha.clone());
                     let entry = CallLogEntry {
                         time_utc: now_utc_rfc3339(),
                         day: config.day.clone(),
@@ -6190,7 +6413,7 @@ fn run_single_automated_seat(
                         model_requested: seat.model.to_owned(),
                         model_returned,
                         request_body_sha256: request_body_sha256.clone(),
-                        reply_sha256: None,
+                        reply_sha256: reply_sha256_opt,
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
                         total_tokens: usage.total_tokens,
@@ -6212,6 +6435,9 @@ fn run_single_automated_seat(
                     });
                     {
                         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Some(ref err) = store_failure {
+                            guard.tool_round_store_failed = Some(err.clone());
+                        }
                         if let Err(e) = guard.finish_call_and_record(
                             &reservation_id,
                             seat.max_per_call_spend,
@@ -6229,6 +6455,11 @@ fn run_single_automated_seat(
                             };
                         }
                     }
+                    if let Some(err) = store_failure {
+                        return SeatOutcome::SeatError {
+                            detail: err.to_string(),
+                        };
+                    }
                     if over_estimate {
                         return SeatOutcome::CostOverEstimateRefused {
                             calls_path: calls_path.to_path_buf(),
@@ -6241,38 +6472,26 @@ fn run_single_automated_seat(
                             request_body_sha256,
                         };
                     }
-                    let Some(preview_state) = preview_state_opt else {
+                    let Some((_, saved_record, _)) = saved_record_opt else {
                         return SeatOutcome::SeatError {
-                            detail: "internal error: missing preview state on tool round"
-                                .to_owned(),
+                            detail: "internal error: missing saved tool-round record".to_owned(),
                         };
                     };
                     tool_history.push(OwnedToolHistoryMessage {
                         role: "assistant".to_owned(),
                         content: assistant_content,
-                        tool_calls: Some(calls.clone()),
+                        tool_calls: Some(echoed_calls),
                         tool_call_id: None,
                     });
-                    let expected_tool_name = preview_wording_template("preview_tool_name");
-                    for call in calls {
-                        let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
-                            limit_refusal_sent = true;
-                            render_call_limit_reached_wire_json()
-                        } else {
-                            preview_calls_used += 1;
-                            if call.kind == "function" && call.function.name == expected_tool_name {
-                                execute_preview_tool_call(preview_state, &call.function.arguments)
-                            } else {
-                                render_malformed_tool_call_wire_json()
-                            }
-                        };
+                    for saved_call in saved_record.calls {
                         tool_history.push(OwnedToolHistoryMessage {
                             role: "tool".to_owned(),
-                            content: Some(tool_body),
+                            content: Some(saved_call.result_wire_json),
                             tool_calls: None,
-                            tool_call_id: Some(call.id),
+                            tool_call_id: Some(saved_call.id),
                         });
                     }
+                    tool_round_index += 1;
                     continue 'http_rounds;
                 }
             }
@@ -6397,8 +6616,9 @@ enum EvaluatedCall {
         usage: UsageWire,
     },
     ToolCalls {
-        calls: Vec<ChatToolCallWire>,
+        calls: Vec<ParsedToolCallItem>,
         assistant_content: Option<String>,
+        persisted_reasoning: Option<String>,
         model_returned: Option<String>,
         usage: UsageWire,
     },
@@ -6408,6 +6628,73 @@ enum EvaluatedCall {
         usage: UsageWire,
         is_late_reply: bool,
     },
+}
+
+fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
+    if let Some(obj) = elem.as_object()
+        && let Some(serde_json::Value::String(id)) = obj.get("id")
+        && !id.is_empty()
+        && let Some(serde_json::Value::String(kind)) = obj.get("type")
+        && let Some(serde_json::Value::Object(fobj)) = obj.get("function")
+        && let Some(serde_json::Value::String(name)) = fobj.get("name")
+        && let Some(serde_json::Value::String(arguments)) = fobj.get("arguments")
+    {
+        return ParsedToolCallItem {
+            wire: ChatToolCallWire {
+                id: id.clone(),
+                kind: kind.clone(),
+                function: ChatToolCallFunctionWire {
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                },
+            },
+            odd_raw_value: None,
+        };
+    }
+
+    let id = elem
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| preview_wording_slot("wire_err_malformed_tool_call"));
+    let kind = elem
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| preview_wording_slot("schema_kw_function"));
+    let fn_val = elem.get("function");
+    let name = fn_val
+        .and_then(|f| f.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| preview_wording_slot("preview_tool_name"));
+    let arguments = match fn_val.and_then(|f| f.get("arguments")) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    ParsedToolCallItem {
+        wire: ChatToolCallWire {
+            id,
+            kind,
+            function: ChatToolCallFunctionWire { name, arguments },
+        },
+        odd_raw_value: Some(elem),
+    }
+}
+
+fn parse_response_tool_calls(raw_val: serde_json::Value) -> Option<Vec<ParsedToolCallItem>> {
+    match raw_val {
+        serde_json::Value::Null => None,
+        serde_json::Value::Array(arr) if arr.is_empty() => None,
+        serde_json::Value::Array(arr) => {
+            Some(arr.into_iter().map(parse_single_tool_call_item).collect())
+        }
+        other => Some(vec![parse_single_tool_call_item(other)]),
+    }
 }
 
 fn validate_json_value_against_schema(
@@ -6614,13 +6901,19 @@ fn evaluate_call_result(
         None => (None, None, None),
     };
 
+    let persisted_reasoning = match exclude_thinking {
+        Some(false) => raw_reasoning_opt.filter(|r| !r.trim().is_empty()),
+        _ => None,
+    };
+
     if allow_tools
-        && let Some(calls) = raw_tool_calls_opt
-        && !calls.is_empty()
+        && let Some(raw_calls) = raw_tool_calls_opt
+        && let Some(calls) = parse_response_tool_calls(raw_calls)
     {
         return EvaluatedCall::ToolCalls {
             calls,
             assistant_content: raw_content_opt,
+            persisted_reasoning,
             model_returned,
             usage,
         };
@@ -6630,10 +6923,6 @@ fn evaluate_call_result(
         Some(true) => strip_thinking_tags(&c),
         _ => c,
     });
-    let persisted_reasoning = match exclude_thinking {
-        Some(false) => raw_reasoning_opt.filter(|r| !r.trim().is_empty()),
-        _ => None,
-    };
 
     match processed_content {
         Some(content) if !content.trim().is_empty() => {
@@ -6715,6 +7004,145 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
     } else {
         "panic".to_owned()
     }
+}
+
+fn tool_round_store_err(path: &Path, err: impl fmt::Display, key: Option<&ApiKey>) -> RelayError {
+    RelayError::ToolRoundStoreWriteFailed {
+        detail: redact_secrets(&format!("{}: {err}", path.display()), key),
+    }
+}
+
+fn tool_round_seats_dir(game_dir: &Path) -> PathBuf {
+    game_dir.join("relay").join("seats")
+}
+
+fn probe_tool_round_store(
+    game_dir: &Path,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    let seats_dir = tool_round_seats_dir(game_dir);
+    #[cfg(any(test, feature = "test-hooks"))]
+    if should_fail_tool_round_write_for_test(&seats_dir) {
+        return Err(tool_round_store_err(
+            &seats_dir,
+            "injected write failure on tool-round store probe",
+            redaction_key,
+        ));
+    }
+    fs::create_dir_all(&seats_dir)
+        .map_err(|e| tool_round_store_err(&seats_dir, e, redaction_key))?;
+    let probe_path = seats_dir.join(".tool-round-write-probe.tmp");
+    #[cfg(any(test, feature = "test-hooks"))]
+    if should_fail_tool_round_write_for_test(&probe_path) {
+        return Err(tool_round_store_err(
+            &probe_path,
+            "injected write failure on tool-round store probe",
+            redaction_key,
+        ));
+    }
+    if probe_path.exists() {
+        fs::remove_file(&probe_path)
+            .map_err(|e| tool_round_store_err(&probe_path, e, redaction_key))?;
+    }
+    let mut probe_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe_path)
+        .map_err(|e| tool_round_store_err(&probe_path, e, redaction_key))?;
+    let write_res: Result<(), std::io::Error> = (|| {
+        probe_file.write_all(b"probe")?;
+        probe_file.flush()?;
+        probe_file.sync_all()
+    })();
+    drop(probe_file);
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&probe_path);
+        return Err(tool_round_store_err(&probe_path, e, redaction_key));
+    }
+    fs::remove_file(&probe_path).map_err(|e| tool_round_store_err(&probe_path, e, redaction_key))
+}
+
+fn resolve_non_overwriting_tool_round_path(base_path: &Path) -> PathBuf {
+    if !base_path.exists() {
+        return base_path.to_path_buf();
+    }
+    let stem = base_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("tool-round");
+    let ext = base_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("json");
+    let mut attempt = 1usize;
+    loop {
+        let candidate = base_path.with_file_name(format!("{stem}.retry-{attempt}.{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        attempt += 1;
+    }
+}
+
+fn write_tool_round_record_atomic(
+    _base_sidecar_path: &Path,
+    sidecar_path: &Path,
+    record: &SavedToolRoundRecord,
+    redaction_key: Option<&ApiKey>,
+) -> Result<String, RelayError> {
+    if let Some(parent) = sidecar_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| tool_round_store_err(parent, e, redaction_key))?;
+    }
+    let mut json_text = serde_json::to_string_pretty(record)
+        .map_err(|e| tool_round_store_err(sidecar_path, e, redaction_key))?;
+    json_text.push('\n');
+    let file_sha256 = sha256_hex(json_text.as_bytes());
+    let file_name = sidecar_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("tool-round.json");
+    let tmp_path = sidecar_path.with_file_name(format!("{file_name}.tmp"));
+    if tmp_path.exists() {
+        fs::remove_file(&tmp_path)
+            .map_err(|e| tool_round_store_err(&tmp_path, e, redaction_key))?;
+    }
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| tool_round_store_err(&tmp_path, e, redaction_key))?;
+    let write_res: Result<(), std::io::Error> = (|| {
+        #[cfg(any(test, feature = "test-hooks"))]
+        if should_fail_tool_round_write_for_test(_base_sidecar_path)
+            || should_fail_tool_round_write_for_test(sidecar_path)
+            || should_fail_tool_round_write_for_test(&tmp_path)
+        {
+            let prefix_len = json_text.len().min(16);
+            let _ = tmp_file.write_all(&json_text.as_bytes()[..prefix_len]);
+            return Err(std::io::Error::other(
+                "injected write failure on tool-round record",
+            ));
+        }
+        tmp_file.write_all(json_text.as_bytes())?;
+        tmp_file.flush()?;
+        tmp_file.sync_all()
+    })();
+    drop(tmp_file);
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(tool_round_store_err(&tmp_path, e, redaction_key));
+    }
+    if let Err(e) = fs::rename(&tmp_path, sidecar_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(tool_round_store_err(sidecar_path, e, redaction_key));
+    }
+    #[cfg(unix)]
+    if let Some(parent) = sidecar_path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(file_sha256)
 }
 
 fn transcript_file_path(game_dir: &Path, guild: &str) -> PathBuf {

@@ -331,6 +331,9 @@ fn relay_and_transport_errors_project_onto_shared_structured_error() -> TestResu
             entries_summary: format!("seat=Saltworks {secret_blob}"),
             detail: format!("detail {secret_blob}"),
         },
+        RelayError::ToolRoundStoreWriteFailed {
+            detail: format!("store failed {secret_blob}"),
+        },
     ];
 
     for err in &variants {
@@ -1131,6 +1134,9 @@ fn exit_code_4_is_never_returned_across_all_outcomes_and_errors() -> TestResult 
             charged_credits: "0.01".to_owned(),
             entries_summary: "sum".to_owned(),
             detail: "det".to_owned(),
+        },
+        RelayError::ToolRoundStoreWriteFailed {
+            detail: "store failed".to_owned(),
         },
     ];
     for e in &errors {
