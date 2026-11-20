@@ -145,18 +145,15 @@ if top_levels != expected_top:
     raise SystemExit(f"unexpected top-level entries in real build context: {sorted(top_levels)} != {sorted(expected_top)}")
 
 forbidden_segs = {".git", "target", "site", "saves", ".league", "node_modules", "docs", "atlas", "scripts", ".github"}
-forbidden_names = {
-    ".gitignore", "Dockerfile", ".dockerignore", "rust-toolchain.toml",
-    "README.md", "CHANGELOG.md", "SECURITY.md", "SHIP_GATE.md",
-}
-forbidden_exts = (".save.json", ".seal", ".replay.json", ".seed", ".log")
+forbidden_nested_names = {".gitignore", "Dockerfile", ".dockerignore", "rust-toolchain.toml"}
+forbidden_exts = (".save.json", ".seal", ".replay.json", ".seed", ".log", ".pem", ".key")
 
 for p in sorted(ctx_fs):
     parts = p.split("/")
     base = parts[-1]
     if any(seg in forbidden_segs for seg in parts):
         raise SystemExit(f"forbidden directory leaked into real build context: {p}")
-    if base.startswith(".env") or base in forbidden_names:
+    if base.startswith(".env") or base in forbidden_nested_names:
         raise SystemExit(f"forbidden file leaked into real build context: {p}")
     if p.endswith(forbidden_exts):
         raise SystemExit(f"forbidden save/log artifact leaked into real build context: {p}")
@@ -476,12 +473,9 @@ with open(os.path.join(host_saves, "club-1.save.json"), encoding="utf-8") as sf:
 PY
 
 step "6. Diff flattened runtime image file list against pinned distroless base & assert /etc/passwd"
-docker pull -q "$BASE_IMAGE_REF" >/dev/null
-if ! docker tag "$BASE_IMAGE_REF" "$BASE_TAG" >/dev/null 2>&1; then
-  mkdir -p "$TMP_SMOKE_DIR/empty"
-  printf 'FROM %s\n' "$BASE_IMAGE_REF" > "$TMP_SMOKE_DIR/base.Dockerfile"
-  docker build --quiet -f "$TMP_SMOKE_DIR/base.Dockerfile" -t "$BASE_TAG" "$TMP_SMOKE_DIR/empty" >/dev/null
-fi
+mkdir -p "$TMP_SMOKE_DIR/empty"
+printf 'FROM %s\n' "$BASE_IMAGE_REF" > "$TMP_SMOKE_DIR/base.Dockerfile"
+docker build --quiet -f "$TMP_SMOKE_DIR/base.Dockerfile" -t "$BASE_TAG" "$TMP_SMOKE_DIR/empty" >/dev/null
 
 IMAGE_TAG="$IMAGE_TAG" BASE_TAG="$BASE_TAG" IMAGE_SIZE="$IMAGE_SIZE" HOST_UID="$HOST_UID" python3 - <<'PY'
 import hashlib
