@@ -19,9 +19,10 @@ pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR
 pub use error::{PreviewStateErrorKind, RelayError, StructuredError, ToStructuredError};
 pub use relay::{
     CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
-    Round, SavedToolRoundCall, SavedToolRoundRecord, SeatOutcome, SeatReport, SetupSeatRecord,
-    TranscriptEntry, TurnConfig, TurnSummary, prepend_wrapper, run_turn, sha256_hex,
-    tool_round_file_path, validate_day, validate_scratchpad_setup,
+    Round, SavedDiscardedReplyRecord, SavedToolRoundCall, SavedToolRoundRecord, SeatOutcome,
+    SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig, TurnSummary,
+    discarded_reply_file_path, prepend_wrapper, run_turn, sha256_hex, tool_round_file_path,
+    validate_day, validate_scratchpad_setup,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{

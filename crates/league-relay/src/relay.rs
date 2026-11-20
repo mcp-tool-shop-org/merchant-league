@@ -2586,32 +2586,37 @@ impl TurnSummary {
 pub struct SavedToolRoundCall {
     /// Zero-based position of this tool call within the assistant message's `tool_calls` array.
     pub call_index: usize,
-    /// OpenAI tool call identifier echoed back onto the follow-up `role: "tool"` message.
+    /// OpenAI tool call identifier echoed back onto the follow-up `role: "tool"` message (or synthesized pinned fallback when missing).
     pub id: String,
     /// Tool call type echoed on the wire (`"function"` for standard or filled fallback).
     #[serde(rename = "type")]
     pub kind: String,
     /// Requested function/tool name echoed on the wire.
     pub name: String,
-    /// Raw JSON `arguments` string exactly as received (or compact JSON fallback if an odd provider sent an object/non-string).
+    /// Raw JSON `arguments` string parsed from `function.arguments` (or compact JSON fallback if an odd provider sent an object/non-string).
     pub arguments: String,
-    /// Exact raw JSON value for this element when the provider sent an oddly shaped `tool_calls` entry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_received_call: Option<serde_json::Value>,
-    /// Lowercase hex SHA-256 of the received tool-call object as received.
+    /// Parsed `serde_json::Value` for this element as decoded from the response JSON (always
+    /// recorded for every call, including provider-extra fields such as `index`; key order and
+    /// whitespace are not preserved).
+    pub raw_received_call: serde_json::Value,
+    /// Lowercase hex SHA-256 of compact JSON serialized from `raw_received_call`.
     pub call_sha256: String,
     /// Lowercase hex SHA-256 of `arguments.as_bytes()`.
     pub arguments_sha256: String,
+    /// Explicit flag recording whether a `role: "tool"` message was sent back in a follow-up request
+    /// (`true` on continued `TOOL_CALL` rounds; `false` on terminal `NO_REPLY` and `COST_OVER_ESTIMATE` rounds).
+    pub tool_result_sent: bool,
     /// Exact UTF-8 JSON placed on the wire in the follow-up `role: "tool"` message's `content`
-    /// (including pinned `MALFORMED_TOOL_CALL` and `CALL_LIMIT_REACHED` refusals).
-    pub result_wire_json: String,
-    /// Lowercase hex SHA-256 of `result_wire_json.as_bytes()`.
-    pub result_sha256: String,
+    /// (`Some` when `tool_result_sent == true`; explicit `null` when no tool message was sent).
+    pub result_wire_json: Option<String>,
+    /// Lowercase hex SHA-256 of `result_wire_json.as_bytes()` (`Some` when `tool_result_sent == true`; `null` otherwise).
+    pub result_sha256: Option<String>,
 }
 
 /// Complete durable record of one `--preview-tool on` HTTP tool round, written atomically
-/// (`*.tmp` -> `flush` + `sync_all` -> rename) before the follow-up HTTP request is sent
-/// (`relay/calls.jsonl` `TOOL_CALL` entries store this file's SHA-256 in `reply_sha256`).
+/// (`*.tmp` -> `flush` + `sync_all` -> rename) before returning or sending the follow-up HTTP
+/// request (`relay/calls.jsonl` `TOOL_CALL`, terminal repeat-limit `NO_REPLY`, and tool-call
+/// `COST_OVER_ESTIMATE` entries store this file's SHA-256 in `reply_sha256`).
 /// Later turns do not replay saved tool rounds into `snapshot`, `emc`, or `full` prompt context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedToolRoundRecord {
@@ -2621,21 +2626,69 @@ pub struct SavedToolRoundRecord {
     pub round: Round,
     /// Seated guild name.
     pub guild: String,
-    /// Zero-based index of this tool round within the current turn for `guild`.
+    /// Ledger run identifier tying all sidecars from the same `run_turn` execution together.
+    pub run_id: String,
+    /// Ledger reservation identifier matching the call row in `relay/calls.jsonl`.
+    pub reservation_id: String,
+    /// Lowercase hex SHA-256 of the HTTP request body that produced this reply.
+    pub request_body_sha256: String,
+    /// Zero-based index of this HTTP round within the current turn for `guild`.
     pub round_index: usize,
     /// HTTP attempt number (`1` or `2`) within that round that returned `tool_calls`.
     pub attempt: u8,
-    /// Optional assistant `content` sent alongside `tool_calls`, exactly as received and echoed.
+    /// Ledger outcome recorded for this tool round (`"TOOL_CALL"`, `"NO_REPLY"`, or `"COST_OVER_ESTIMATE"`).
+    pub outcome: String,
+    /// Optional assistant `content` sent alongside `tool_calls`, exactly as received (before `<think>` stripping) and echoed.
     pub assistant_content: Option<String>,
     /// Lowercase hex SHA-256 of `assistant_content` when `Some`, or `None`.
     pub assistant_content_sha256: Option<String>,
-    /// Optional reasoning trace stored only when `exclude_from_transcript == false` (same gate as `<Guild>.jsonl`).
+    /// Optional reasoning trace stored only when `exclude_from_transcript == false` (same rule as `<Guild>.jsonl`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
     /// Lowercase hex SHA-256 of the canonical assistant reply JSON (`assistant_content` + received `tool_calls`).
     pub assistant_reply_sha256: String,
-    /// Received tool calls and exact wire results returned for each call in order.
+    /// Received tool calls and explicit sent/unsent wire tool results in order.
     pub calls: Vec<SavedToolRoundCall>,
+}
+
+/// Complete durable record of an HTTP 200 parsed model reply that was discarded rather than
+/// delivered (`LATE_DISCARDED`, `harness`/`NO_REPLY` schema/empty refusal, scratchpad token-cap /
+/// `TOKENIZE_UNAVAILABLE` failure) when `--preview-tool on` is active (`reply_sha256` on the
+/// corresponding `relay/calls.jsonl` row stores this file's SHA-256).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedDiscardedReplyRecord {
+    /// Two-digit game day (`"01"`..=`"99"`).
+    pub day: String,
+    /// Round (`talk` or `act`).
+    pub round: Round,
+    /// Seated guild name.
+    pub guild: String,
+    /// Ledger run identifier tying all sidecars from the same `run_turn` execution together.
+    pub run_id: String,
+    /// Ledger reservation identifier matching the call row in `relay/calls.jsonl`.
+    pub reservation_id: String,
+    /// Lowercase hex SHA-256 of the HTTP request body that produced this reply.
+    pub request_body_sha256: String,
+    /// Zero-based HTTP round index within the current turn for `guild`.
+    pub round_index: usize,
+    /// HTTP attempt number (`1` or `2`).
+    pub attempt: u8,
+    /// Ledger outcome recorded for this discarded reply (`"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"COST_OVER_ESTIMATE"`, or `"TOKENIZE_UNAVAILABLE"`).
+    pub outcome: String,
+    /// Redacted refusal/discard reason logged in `relay/calls.jsonl`.
+    pub discard_reason: String,
+    /// Whether this reply arrived after the call timeout (`true` for `LATE_DISCARDED`).
+    pub is_late: bool,
+    /// Raw assistant `content` as received before `<think>` stripping, if present.
+    pub assistant_content: Option<String>,
+    /// Lowercase hex SHA-256 of `assistant_content` when `Some`, or `None`.
+    pub assistant_content_sha256: Option<String>,
+    /// Optional reasoning trace stored only when `exclude_from_transcript == false` (same rule as `<Guild>.jsonl`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// Raw `tool_calls` JSON value as decoded from the message when present (e.g. `round == talk`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_tool_calls: Option<serde_json::Value>,
 }
 
 /// Path to the immutable per-round sidecar file beside `<game-dir>/relay/seats/<Guild>.jsonl`.
@@ -2649,6 +2702,21 @@ pub fn tool_round_file_path(
 ) -> PathBuf {
     game_dir.join("relay").join("seats").join(format!(
         "{guild}.day-{day}-{round}.tool-round-{round_index}.json"
+    ))
+}
+
+/// Path to an immutable per-attempt discarded-reply sidecar beside `<game-dir>/relay/seats/<Guild>.jsonl`.
+#[must_use]
+pub fn discarded_reply_file_path(
+    game_dir: &Path,
+    guild: &str,
+    day: &str,
+    round: Round,
+    round_index: usize,
+    attempt: u8,
+) -> PathBuf {
+    game_dir.join("relay").join("seats").join(format!(
+        "{guild}.day-{day}-{round}.discarded-round-{round_index}-attempt-{attempt}.json"
     ))
 }
 
@@ -2669,7 +2737,8 @@ struct ChatToolCallWire {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedToolCallItem {
     wire: ChatToolCallWire,
-    odd_raw_value: Option<serde_json::Value>,
+    raw_received_call: serde_json::Value,
+    is_well_formed: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -5159,7 +5228,7 @@ pub(crate) fn run_turn_with_diag(
         redaction_key,
     )?);
 
-    {
+    let ledger_run_id = {
         let guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
         let prior_spend = guard.initial_recorded_spend;
         let prior_entries = guard.initial_recorded_entries;
@@ -5182,11 +5251,13 @@ pub(crate) fn run_turn_with_diag(
                 redact_secrets(&calls_path.display().to_string(), redaction_key)
             )
         });
-    }
+        run_id
+    };
 
     let reports: Vec<SeatReport> = std::thread::scope(|scope| {
         let mut slots: Vec<(usize, SeatReport)> = Vec::with_capacity(config.seats.seats.len());
         let mut handles = Vec::new();
+        let run_id_ref = ledger_run_id.as_str();
 
         for (idx, seat) in config.seats.seats.iter().enumerate() {
             let keeps_scratchpad = scratchpad_plan
@@ -5227,6 +5298,7 @@ pub(crate) fn run_turn_with_diag(
                             &view,
                             wrapper_ref,
                             preview_state_ref,
+                            run_id_ref,
                             transport,
                             ledger_ref,
                             calls_ref,
@@ -5253,6 +5325,7 @@ pub(crate) fn run_turn_with_diag(
                             &view,
                             wrapper_ref,
                             preview_state_ref,
+                            run_id_ref,
                             transport,
                             ledger_ref,
                             calls_ref,
@@ -5396,6 +5469,7 @@ fn run_single_automated_seat(
     seat: &AutomatedSeatView<'_>,
     wrapper_text: Option<&str>,
     preview_state_opt: Option<&PublicPreviewState>,
+    run_id: &str,
     transport: &dyn Transport,
     ledger: &Mutex<CallLedger<'_>>,
     calls_path: &Path,
@@ -5413,6 +5487,11 @@ fn run_single_automated_seat(
     let transcript_path = transcript_file_path(&config.game_dir, guild);
     let scratchpad_path = scratchpad_file_path(&config.game_dir, guild);
     let emc_path = emc_file_path(&config.game_dir, guild);
+    let seat_retry_suffix = if config.preview_tool == PreviewToolMode::On {
+        determine_seat_retry_suffix(&config.game_dir, guild, &config.day, config.round)
+    } else {
+        None
+    };
 
     if from_seat_path.exists() {
         return SeatOutcome::SeatError {
@@ -5949,7 +6028,9 @@ fn run_single_automated_seat(
             let evaluated = match raw_evaluated {
                 EvaluatedCall::Success {
                     reply_content,
+                    raw_reply_content,
                     persisted_reasoning,
+                    raw_tool_calls,
                     model_returned,
                     usage,
                 } if config.memory_mode == MemoryMode::Snapshot && seat.keeps_scratchpad => {
@@ -5962,12 +6043,19 @@ fn run_single_automated_seat(
                             model_returned,
                             usage,
                             is_late_reply: false,
+                            discarded_reply: build_discarded_reply(
+                                Some(raw_reply_content),
+                                persisted_reasoning,
+                                raw_tool_calls,
+                            ),
                         },
                         Some(candidate_pad) if candidate_pad.is_empty() => {
                             validated_scratchpad_update = Some(String::new());
                             EvaluatedCall::Success {
                                 reply_content,
+                                raw_reply_content,
                                 persisted_reasoning,
+                                raw_tool_calls,
                                 model_returned,
                                 usage,
                             }
@@ -5990,7 +6078,9 @@ fn run_single_automated_seat(
                                     validated_scratchpad_update = Some(candidate_pad);
                                     EvaluatedCall::Success {
                                         reply_content,
+                                        raw_reply_content,
                                         persisted_reasoning,
+                                        raw_tool_calls,
                                         model_returned,
                                         usage,
                                     }
@@ -6002,6 +6092,11 @@ fn run_single_automated_seat(
                                     model_returned,
                                     usage,
                                     is_late_reply: false,
+                                    discarded_reply: build_discarded_reply(
+                                        Some(raw_reply_content),
+                                        persisted_reasoning,
+                                        raw_tool_calls,
+                                    ),
                                 },
                                 Err(tok_err) => {
                                     let detail = redact_secrets(
@@ -6017,6 +6112,51 @@ fn run_single_automated_seat(
                                             wall_secs,
                                             seat.max_per_call_spend,
                                         );
+                                    let planned_outcome = if over_estimate {
+                                        "COST_OVER_ESTIMATE"
+                                    } else {
+                                        "TOKENIZE_UNAVAILABLE"
+                                    };
+                                    let (reply_sha256_opt, final_outcome, final_err, store_failure) =
+                                        if config.preview_tool == PreviewToolMode::On {
+                                            match persist_discarded_reply_if_enabled(
+                                                config,
+                                                guild,
+                                                run_id,
+                                                &reservation_id,
+                                                &request_body_sha256,
+                                                tool_round_index,
+                                                attempt,
+                                                planned_outcome,
+                                                &detail,
+                                                false,
+                                                DiscardedModelReply {
+                                                    assistant_content: Some(raw_reply_content),
+                                                    reasoning: persisted_reasoning,
+                                                    raw_tool_calls,
+                                                },
+                                                seat_retry_suffix,
+                                                redaction_key,
+                                            ) {
+                                                Ok(file_sha) => (
+                                                    Some(file_sha),
+                                                    planned_outcome.to_owned(),
+                                                    detail.clone(),
+                                                    None,
+                                                ),
+                                                Err(store_err) => {
+                                                    let msg = store_err.to_string();
+                                                    (
+                                                        None,
+                                                        "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
+                                                        msg,
+                                                        Some(store_err),
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            (None, planned_outcome.to_owned(), detail.clone(), None)
+                                        };
                                     let entry = CallLogEntry {
                                         time_utc: now_utc_rfc3339(),
                                         day: config.day.clone(),
@@ -6027,7 +6167,7 @@ fn run_single_automated_seat(
                                         model_requested: seat.model.to_owned(),
                                         model_returned,
                                         request_body_sha256: request_body_sha256.clone(),
-                                        reply_sha256: None,
+                                        reply_sha256: reply_sha256_opt,
                                         prompt_tokens: usage.prompt_tokens,
                                         completion_tokens: usage.completion_tokens,
                                         total_tokens: usage.total_tokens,
@@ -6037,16 +6177,15 @@ fn run_single_automated_seat(
                                         cost: valid_cost,
                                         charged_credits,
                                         latency_ms,
-                                        outcome: if over_estimate {
-                                            "COST_OVER_ESTIMATE".to_owned()
-                                        } else {
-                                            "TOKENIZE_UNAVAILABLE".to_owned()
-                                        },
-                                        error: Some(detail.clone()),
+                                        outcome: final_outcome,
+                                        error: Some(final_err.clone()),
                                         reservation_id: Some(reservation_id.clone()),
                                     };
                                     let mut guard =
                                         ledger.lock().unwrap_or_else(|p| p.into_inner());
+                                    if let Some(ref err) = store_failure {
+                                        guard.tool_round_store_failed = Some(err.clone());
+                                    }
                                     if let Err(e) = guard.finish_call_and_record(
                                         &reservation_id,
                                         seat.max_per_call_spend,
@@ -6056,6 +6195,11 @@ fn run_single_automated_seat(
                                     ) {
                                         return SeatOutcome::SeatError {
                                             detail: e.to_string(),
+                                        };
+                                    }
+                                    if let Some(err) = store_failure {
+                                        return SeatOutcome::SeatError {
+                                            detail: err.to_string(),
                                         };
                                     }
                                     return SeatOutcome::SeatError { detail };
@@ -6070,7 +6214,9 @@ fn run_single_automated_seat(
             match evaluated {
                 EvaluatedCall::Success {
                     reply_content,
+                    raw_reply_content: _,
                     persisted_reasoning,
+                    raw_tool_calls: _,
                     model_returned,
                     usage,
                 } => {
@@ -6198,6 +6344,7 @@ fn run_single_automated_seat(
                     model_returned,
                     usage,
                     is_late_reply,
+                    discarded_reply,
                 } => {
                     let (valid_cost, charged_credits, over_estimate, _) = compute_call_accounting(
                         seat.cost_unit,
@@ -6205,7 +6352,7 @@ fn run_single_automated_seat(
                         wall_secs,
                         seat.max_per_call_spend,
                     );
-                    let outcome_label = if is_late_reply {
+                    let planned_outcome = if is_late_reply {
                         "LATE_DISCARDED"
                     } else if over_estimate {
                         "COST_OVER_ESTIMATE"
@@ -6214,6 +6361,42 @@ fn run_single_automated_seat(
                     } else {
                         "NO_REPLY"
                     };
+                    let (reply_sha256_opt, outcome_label, err_msg, store_failure) =
+                        if config.preview_tool == PreviewToolMode::On
+                            && let Some(discarded) = discarded_reply
+                        {
+                            match persist_discarded_reply_if_enabled(
+                                config,
+                                guild,
+                                run_id,
+                                &reservation_id,
+                                &request_body_sha256,
+                                tool_round_index,
+                                attempt,
+                                planned_outcome,
+                                &reason,
+                                is_late_reply,
+                                discarded,
+                                seat_retry_suffix,
+                                redaction_key,
+                            ) {
+                                Ok(file_sha) => {
+                                    (Some(file_sha), planned_outcome.to_owned(), reason, None)
+                                }
+                                Err(store_err) => {
+                                    let msg = store_err.to_string();
+                                    (
+                                        None,
+                                        "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
+                                        msg,
+                                        Some(store_err),
+                                    )
+                                }
+                            }
+                        } else {
+                            (None, planned_outcome.to_owned(), reason, None)
+                        };
+                    let outcome_for_diag = outcome_label.clone();
                     let entry = CallLogEntry {
                         time_utc: now_utc_rfc3339(),
                         day: config.day.clone(),
@@ -6224,7 +6407,7 @@ fn run_single_automated_seat(
                         model_requested: seat.model.to_owned(),
                         model_returned,
                         request_body_sha256: request_body_sha256.clone(),
-                        reply_sha256: None,
+                        reply_sha256: reply_sha256_opt,
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
                         total_tokens: usage.total_tokens,
@@ -6234,18 +6417,21 @@ fn run_single_automated_seat(
                         cost: valid_cost,
                         charged_credits,
                         latency_ms,
-                        outcome: outcome_label.to_owned(),
-                        error: Some(reason),
+                        outcome: outcome_label,
+                        error: Some(err_msg),
                         reservation_id: Some(reservation_id.clone()),
                     };
                     diag_log(diag_sink, LogLevel::Verbose, || {
                         format!(
-                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_label} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
+                            "seat_attempt seat={guild} attempt={attempt} trigger={trigger} outcome={outcome_for_diag} latency_ms={latency_ms} wall_secs={wall_secs:.6} charged={charged_credits:.6} max_per_call={:.6} cost_unit={}",
                             seat.max_per_call_spend, seat.cost_unit
                         )
                     });
                     {
                         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Some(ref err) = store_failure {
+                            guard.tool_round_store_failed = Some(err.clone());
+                        }
                         if let Err(e) = guard.finish_call_and_record(
                             &reservation_id,
                             seat.max_per_call_spend,
@@ -6257,6 +6443,11 @@ fn run_single_automated_seat(
                                 detail: e.to_string(),
                             };
                         }
+                    }
+                    if let Some(err) = store_failure {
+                        return SeatOutcome::SeatError {
+                            detail: err.to_string(),
+                        };
                     }
                     if attempt == 2 {
                         return SeatOutcome::NoReply {
@@ -6280,11 +6471,65 @@ fn run_single_automated_seat(
                             seat.max_per_call_spend,
                         );
                     let mut echoed_calls: Vec<ChatToolCallWire> = Vec::new();
-                    let mut saved_record_opt: Option<(PathBuf, SavedToolRoundRecord, String)> =
-                        None;
-                    let mut store_failure: Option<RelayError> = None;
-
-                    let (outcome_str, err_opt, hit_repeat_limit) = if over_estimate {
+                    let was_already_limit_refused = limit_refusal_sent;
+                    let is_terminal_round = over_estimate || was_already_limit_refused;
+                    if !is_terminal_round && preview_state_opt.is_none() {
+                        return SeatOutcome::SeatError {
+                            detail: "internal error: missing preview state on tool round"
+                                .to_owned(),
+                        };
+                    }
+                    let expected_tool_name = preview_wording_template("preview_tool_name");
+                    let mut saved_calls: Vec<SavedToolRoundCall> = Vec::with_capacity(calls.len());
+                    let mut received_wire_vals: Vec<serde_json::Value> =
+                        Vec::with_capacity(calls.len());
+                    for (call_idx, parsed_call) in calls.into_iter().enumerate() {
+                        let call = parsed_call.wire;
+                        let call_val = parsed_call.raw_received_call;
+                        let call_json_bytes = serde_json::to_string(&call_val).unwrap_or_default();
+                        received_wire_vals.push(call_val.clone());
+                        let (tool_result_sent, result_wire_json, result_sha256) =
+                            if is_terminal_round {
+                                (false, None, None)
+                            } else {
+                                let tool_body =
+                                    if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
+                                        limit_refusal_sent = true;
+                                        render_call_limit_reached_wire_json()
+                                    } else {
+                                        preview_calls_used += 1;
+                                        if let Some(preview_state) = preview_state_opt
+                                            && parsed_call.is_well_formed
+                                            && call.kind == "function"
+                                            && call.function.name == expected_tool_name
+                                        {
+                                            execute_preview_tool_call(
+                                                preview_state,
+                                                &call.function.arguments,
+                                            )
+                                        } else {
+                                            render_malformed_tool_call_wire_json()
+                                        }
+                                    };
+                                let rsha = sha256_hex(tool_body.as_bytes());
+                                (true, Some(tool_body), Some(rsha))
+                            };
+                        saved_calls.push(SavedToolRoundCall {
+                            call_index: call_idx,
+                            id: call.id.clone(),
+                            kind: call.kind.clone(),
+                            name: call.function.name.clone(),
+                            arguments_sha256: sha256_hex(call.function.arguments.as_bytes()),
+                            arguments: call.function.arguments.clone(),
+                            raw_received_call: call_val,
+                            call_sha256: sha256_hex(call_json_bytes.as_bytes()),
+                            tool_result_sent,
+                            result_sha256,
+                            result_wire_json,
+                        });
+                        echoed_calls.push(call);
+                    }
+                    let (planned_outcome, planned_err, hit_repeat_limit) = if over_estimate {
                         let msg = observed_cost.map(|c| {
                             format!(
                                 "returned cost {c:.6} exceeded {estimate_label} {:.6}",
@@ -6292,7 +6537,7 @@ fn run_single_automated_seat(
                             )
                         });
                         ("COST_OVER_ESTIMATE".to_owned(), msg, false)
-                    } else if limit_refusal_sent {
+                    } else if was_already_limit_refused {
                         (
                             "NO_REPLY".to_owned(),
                             Some(
@@ -6302,105 +6547,65 @@ fn run_single_automated_seat(
                             true,
                         )
                     } else {
-                        let Some(preview_state) = preview_state_opt else {
-                            return SeatOutcome::SeatError {
-                                detail: "internal error: missing preview state on tool round"
-                                    .to_owned(),
-                            };
-                        };
-                        let expected_tool_name = preview_wording_template("preview_tool_name");
-                        let mut saved_calls: Vec<SavedToolRoundCall> =
-                            Vec::with_capacity(calls.len());
-                        let mut received_wire_vals: Vec<serde_json::Value> =
-                            Vec::with_capacity(calls.len());
-                        for (call_idx, parsed_call) in calls.into_iter().enumerate() {
-                            let call = parsed_call.wire;
-                            let call_val = match &parsed_call.odd_raw_value {
-                                Some(raw) => raw.clone(),
-                                None => {
-                                    serde_json::to_value(&call).unwrap_or(serde_json::Value::Null)
-                                }
-                            };
-                            let call_json_bytes =
-                                serde_json::to_string(&call_val).unwrap_or_default();
-                            received_wire_vals.push(call_val);
-                            let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN
-                            {
-                                limit_refusal_sent = true;
-                                render_call_limit_reached_wire_json()
-                            } else {
-                                preview_calls_used += 1;
-                                if parsed_call.odd_raw_value.is_none()
-                                    && call.kind == "function"
-                                    && call.function.name == expected_tool_name
-                                {
-                                    execute_preview_tool_call(
-                                        preview_state,
-                                        &call.function.arguments,
-                                    )
-                                } else {
-                                    render_malformed_tool_call_wire_json()
-                                }
-                            };
-                            saved_calls.push(SavedToolRoundCall {
-                                call_index: call_idx,
-                                id: call.id.clone(),
-                                kind: call.kind.clone(),
-                                name: call.function.name.clone(),
-                                arguments_sha256: sha256_hex(call.function.arguments.as_bytes()),
-                                arguments: call.function.arguments.clone(),
-                                raw_received_call: parsed_call.odd_raw_value,
-                                call_sha256: sha256_hex(call_json_bytes.as_bytes()),
-                                result_sha256: sha256_hex(tool_body.as_bytes()),
-                                result_wire_json: tool_body,
-                            });
-                            echoed_calls.push(call);
-                        }
-                        let canonical_reply = serde_json::json!({
-                            "content": &assistant_content,
-                            "tool_calls": received_wire_vals,
-                        })
-                        .to_string();
-                        let record = SavedToolRoundRecord {
-                            day: config.day.clone(),
-                            round: config.round,
-                            guild: guild.to_owned(),
-                            round_index: tool_round_index,
-                            attempt,
-                            assistant_content_sha256: assistant_content
-                                .as_ref()
-                                .map(|c| sha256_hex(c.as_bytes())),
-                            assistant_content: assistant_content.clone(),
-                            reasoning: persisted_reasoning,
-                            assistant_reply_sha256: sha256_hex(canonical_reply.as_bytes()),
-                            calls: saved_calls,
-                        };
-                        let base_sidecar_path = tool_round_file_path(
-                            &config.game_dir,
-                            guild,
-                            &config.day,
-                            config.round,
-                            tool_round_index,
-                        );
-                        let sidecar_path =
-                            resolve_non_overwriting_tool_round_path(&base_sidecar_path);
-                        match write_tool_round_record_atomic(
+                        ("TOOL_CALL".to_owned(), None, false)
+                    };
+                    let canonical_reply = serde_json::json!({
+                        "content": &assistant_content,
+                        "tool_calls": received_wire_vals,
+                    })
+                    .to_string();
+                    let record = SavedToolRoundRecord {
+                        day: config.day.clone(),
+                        round: config.round,
+                        guild: guild.to_owned(),
+                        run_id: run_id.to_owned(),
+                        reservation_id: reservation_id.clone(),
+                        request_body_sha256: request_body_sha256.clone(),
+                        round_index: tool_round_index,
+                        attempt,
+                        outcome: planned_outcome.clone(),
+                        assistant_content_sha256: assistant_content
+                            .as_ref()
+                            .map(|c| sha256_hex(c.as_bytes())),
+                        assistant_content: assistant_content.clone(),
+                        reasoning: persisted_reasoning,
+                        assistant_reply_sha256: sha256_hex(canonical_reply.as_bytes()),
+                        calls: saved_calls,
+                    };
+                    let base_sidecar_path = tool_round_file_path(
+                        &config.game_dir,
+                        guild,
+                        &config.day,
+                        config.round,
+                        tool_round_index,
+                    );
+                    let targeted_sidecar_path =
+                        apply_retry_suffix_to_json_path(&base_sidecar_path, seat_retry_suffix);
+                    let sidecar_path =
+                        resolve_non_overwriting_tool_round_path(&targeted_sidecar_path);
+                    let (outcome_str, err_opt, saved_record_opt, store_failure) =
+                        match write_json_record_atomic(
                             &base_sidecar_path,
                             &sidecar_path,
                             &record,
                             redaction_key,
                         ) {
-                            Ok(file_sha256) => {
-                                saved_record_opt = Some((sidecar_path, record, file_sha256));
-                                ("TOOL_CALL".to_owned(), None, false)
-                            }
+                            Ok(file_sha256) => (
+                                planned_outcome,
+                                planned_err,
+                                Some((sidecar_path, record, file_sha256)),
+                                None,
+                            ),
                             Err(err) => {
                                 let msg = err.to_string();
-                                store_failure = Some(err);
-                                ("TOOL_ROUND_STORE_WRITE_FAILED".to_owned(), Some(msg), false)
+                                (
+                                    "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
+                                    Some(msg),
+                                    None,
+                                    Some(err),
+                                )
                             }
-                        }
-                    };
+                        };
                     let outcome_for_diag = outcome_str.clone();
                     let reply_sha256_opt = saved_record_opt.as_ref().map(|(_, _, sha)| sha.clone());
                     let entry = CallLogEntry {
@@ -6486,7 +6691,7 @@ fn run_single_automated_seat(
                     for saved_call in saved_record.calls {
                         tool_history.push(OwnedToolHistoryMessage {
                             role: "tool".to_owned(),
-                            content: Some(saved_call.result_wire_json),
+                            content: saved_call.result_wire_json,
                             tool_calls: None,
                             tool_call_id: Some(saved_call.id),
                         });
@@ -6608,10 +6813,90 @@ enum CallTransportResult {
     Late(RawHttpResponse),
 }
 
+struct DiscardedModelReply {
+    assistant_content: Option<String>,
+    reasoning: Option<String>,
+    raw_tool_calls: Option<serde_json::Value>,
+}
+
+fn non_empty_raw_tool_calls(
+    raw_tool_calls: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    raw_tool_calls.filter(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+}
+
+fn build_discarded_reply(
+    content: Option<String>,
+    reasoning: Option<String>,
+    raw_tool_calls: Option<serde_json::Value>,
+) -> Option<DiscardedModelReply> {
+    let raw_tool_calls = non_empty_raw_tool_calls(raw_tool_calls);
+    let has_content = content.as_ref().is_some_and(|s| !s.is_empty());
+    if !has_content && reasoning.is_none() && raw_tool_calls.is_none() {
+        return None;
+    }
+    Some(DiscardedModelReply {
+        assistant_content: content,
+        reasoning,
+        raw_tool_calls,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_discarded_reply_if_enabled(
+    config: &TurnConfig,
+    guild: &str,
+    run_id: &str,
+    reservation_id: &str,
+    request_body_sha256: &str,
+    round_index: usize,
+    attempt: u8,
+    outcome: &str,
+    discard_reason: &str,
+    is_late: bool,
+    discarded: DiscardedModelReply,
+    retry_suffix: Option<usize>,
+    redaction_key: Option<&ApiKey>,
+) -> Result<String, RelayError> {
+    let base_sidecar_path = discarded_reply_file_path(
+        &config.game_dir,
+        guild,
+        &config.day,
+        config.round,
+        round_index,
+        attempt,
+    );
+    let targeted_sidecar_path = apply_retry_suffix_to_json_path(&base_sidecar_path, retry_suffix);
+    let sidecar_path = resolve_non_overwriting_tool_round_path(&targeted_sidecar_path);
+    let record = SavedDiscardedReplyRecord {
+        day: config.day.clone(),
+        round: config.round,
+        guild: guild.to_owned(),
+        run_id: run_id.to_owned(),
+        reservation_id: reservation_id.to_owned(),
+        request_body_sha256: request_body_sha256.to_owned(),
+        round_index,
+        attempt,
+        outcome: outcome.to_owned(),
+        discard_reason: discard_reason.to_owned(),
+        is_late,
+        assistant_content_sha256: discarded
+            .assistant_content
+            .as_ref()
+            .map(|c| sha256_hex(c.as_bytes())),
+        assistant_content: discarded.assistant_content,
+        reasoning: discarded.reasoning,
+        raw_tool_calls: discarded.raw_tool_calls,
+    };
+    write_json_record_atomic(&base_sidecar_path, &sidecar_path, &record, redaction_key)
+}
+
 enum EvaluatedCall {
     Success {
         reply_content: String,
+        raw_reply_content: String,
         persisted_reasoning: Option<String>,
+        raw_tool_calls: Option<serde_json::Value>,
         model_returned: Option<String>,
         usage: UsageWire,
     },
@@ -6627,6 +6912,7 @@ enum EvaluatedCall {
         model_returned: Option<String>,
         usage: UsageWire,
         is_late_reply: bool,
+        discarded_reply: Option<DiscardedModelReply>,
     },
 }
 
@@ -6648,7 +6934,8 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
                     arguments: arguments.clone(),
                 },
             },
-            odd_raw_value: None,
+            raw_received_call: elem,
+            is_well_formed: true,
         };
     }
 
@@ -6682,7 +6969,8 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
             kind,
             function: ChatToolCallFunctionWire { name, arguments },
         },
-        odd_raw_value: Some(elem),
+        raw_received_call: elem,
+        is_well_formed: false,
     }
 }
 
@@ -6798,6 +7086,7 @@ fn evaluate_call_result(
                 model_returned: None,
                 usage: UsageWire::default(),
                 is_late_reply: false,
+                discarded_reply: None,
             };
         }
         CallTransportResult::OnTime(Err(TransportError::Network(msg))) => {
@@ -6810,23 +7099,45 @@ fn evaluate_call_result(
                 model_returned: None,
                 usage: UsageWire::default(),
                 is_late_reply: false,
+                discarded_reply: None,
             };
         }
         CallTransportResult::Late(late_raw) => {
             let parsed_opt: Result<ChatCompletionResponseWire, _> =
                 serde_json::from_str(&late_raw.body);
-            let (model_returned, usage) = match parsed_opt {
-                Ok(p) => (
-                    p.model.map(|m| {
+            let (model_returned, usage, discarded_reply) = match parsed_opt {
+                Ok(p) => {
+                    let mret = p.model.map(|m| {
                         redact_secrets_multi_with_limit(
                             &m,
                             redaction_keys,
                             MAX_REDACTION_SCAN_BYTES,
                         )
-                    }),
-                    p.usage.unwrap_or_default(),
-                ),
-                Err(_) => (None, UsageWire::default()),
+                    });
+                    let usg = p.usage.unwrap_or_default();
+                    let disc = if late_raw.status == 200 && p.error.is_none() {
+                        p.choices
+                            .into_iter()
+                            .next()
+                            .and_then(|c| c.message)
+                            .and_then(|msg| {
+                                let raw_reasoning = msg.reasoning.or(msg.reasoning_content);
+                                let persisted_reasoning = match exclude_thinking {
+                                    Some(false) => raw_reasoning.filter(|r| !r.trim().is_empty()),
+                                    _ => None,
+                                };
+                                build_discarded_reply(
+                                    msg.content,
+                                    persisted_reasoning,
+                                    msg.tool_calls,
+                                )
+                            })
+                    } else {
+                        None
+                    };
+                    (mret, usg, disc)
+                }
+                Err(_) => (None, UsageWire::default(), None),
             };
             let reason = if late_raw.status == 200 {
                 "late reply after timeout discarded".to_owned()
@@ -6838,6 +7149,7 @@ fn evaluate_call_result(
                 model_returned,
                 usage,
                 is_late_reply: true,
+                discarded_reply,
             };
         }
         CallTransportResult::OnTime(Ok(r)) => r,
@@ -6861,6 +7173,7 @@ fn evaluate_call_result(
             model_returned,
             usage,
             is_late_reply: false,
+            discarded_reply: None,
         };
     }
 
@@ -6876,6 +7189,7 @@ fn evaluate_call_result(
                 model_returned: None,
                 usage: UsageWire::default(),
                 is_late_reply: false,
+                discarded_reply: None,
             };
         }
     };
@@ -6892,6 +7206,7 @@ fn evaluate_call_result(
             model_returned,
             usage,
             is_late_reply: false,
+            discarded_reply: None,
         };
     }
 
@@ -6907,7 +7222,7 @@ fn evaluate_call_result(
     };
 
     if allow_tools
-        && let Some(raw_calls) = raw_tool_calls_opt
+        && let Some(raw_calls) = raw_tool_calls_opt.clone()
         && let Some(calls) = parse_response_tool_calls(raw_calls)
     {
         return EvaluatedCall::ToolCalls {
@@ -6919,9 +7234,9 @@ fn evaluate_call_result(
         };
     }
 
-    let processed_content = raw_content_opt.map(|c| match exclude_thinking {
-        Some(true) => strip_thinking_tags(&c),
-        _ => c,
+    let processed_content = raw_content_opt.as_ref().map(|c| match exclude_thinking {
+        Some(true) => strip_thinking_tags(c),
+        _ => c.clone(),
     });
 
     match processed_content {
@@ -6934,11 +7249,18 @@ fn evaluate_call_result(
                     model_returned,
                     usage,
                     is_late_reply: false,
+                    discarded_reply: build_discarded_reply(
+                        raw_content_opt,
+                        persisted_reasoning,
+                        raw_tool_calls_opt,
+                    ),
                 };
             }
             EvaluatedCall::Success {
                 reply_content: content,
+                raw_reply_content: raw_content_opt.unwrap_or_default(),
                 persisted_reasoning,
+                raw_tool_calls: non_empty_raw_tool_calls(raw_tool_calls_opt),
                 model_returned,
                 usage,
             }
@@ -6948,6 +7270,11 @@ fn evaluate_call_result(
             model_returned,
             usage,
             is_late_reply: false,
+            discarded_reply: build_discarded_reply(
+                raw_content_opt,
+                persisted_reasoning,
+                raw_tool_calls_opt,
+            ),
         },
     }
 }
@@ -7062,6 +7389,61 @@ fn probe_tool_round_store(
     fs::remove_file(&probe_path).map_err(|e| tool_round_store_err(&probe_path, e, redaction_key))
 }
 
+fn determine_seat_retry_suffix(
+    game_dir: &Path,
+    guild: &str,
+    day: &str,
+    round: Round,
+) -> Option<usize> {
+    let seats_dir = tool_round_seats_dir(game_dir);
+    let Ok(entries) = fs::read_dir(&seats_dir) else {
+        return None;
+    };
+    let tool_prefix = format!("{guild}.day-{day}-{round}.tool-round-");
+    let disc_prefix = format!("{guild}.day-{day}-{round}.discarded-round-");
+    let mut found_existing = false;
+    let mut max_retry = 0usize;
+    for entry in entries.flatten() {
+        let name_os = entry.file_name();
+        let Some(name) = name_os.to_str() else {
+            continue;
+        };
+        if !name.starts_with(&tool_prefix) && !name.starts_with(&disc_prefix) {
+            continue;
+        }
+        if !name.ends_with(".json") {
+            continue;
+        }
+        found_existing = true;
+        if let Some(rest_idx) = name.rfind(".retry-") {
+            let num_part = &name[rest_idx + ".retry-".len()..name.len() - ".json".len()];
+            if let Ok(n) = num_part.parse::<usize>() {
+                max_retry = max_retry.max(n);
+            }
+        }
+    }
+    if found_existing {
+        Some(max_retry + 1)
+    } else {
+        None
+    }
+}
+
+fn apply_retry_suffix_to_json_path(base_path: &Path, retry_suffix: Option<usize>) -> PathBuf {
+    let Some(attempt) = retry_suffix else {
+        return base_path.to_path_buf();
+    };
+    let stem = base_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("tool-round");
+    let ext = base_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("json");
+    base_path.with_file_name(format!("{stem}.retry-{attempt}.{ext}"))
+}
+
 fn resolve_non_overwriting_tool_round_path(base_path: &Path) -> PathBuf {
     if !base_path.exists() {
         return base_path.to_path_buf();
@@ -7084,10 +7466,10 @@ fn resolve_non_overwriting_tool_round_path(base_path: &Path) -> PathBuf {
     }
 }
 
-fn write_tool_round_record_atomic(
+fn write_json_record_atomic<T: Serialize>(
     _base_sidecar_path: &Path,
     sidecar_path: &Path,
-    record: &SavedToolRoundRecord,
+    record: &T,
     redaction_key: Option<&ApiKey>,
 ) -> Result<String, RelayError> {
     if let Some(parent) = sidecar_path.parent() {

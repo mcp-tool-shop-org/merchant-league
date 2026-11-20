@@ -24,12 +24,12 @@ use league_relay::{
     MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode, NegotiationInputs,
     NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode,
     REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round,
-    SavedToolRoundRecord, SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError,
-    TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
+    SavedDiscardedReplyRecord, SavedToolRoundRecord, SeatFile, SeatOutcome, TranscriptEntry,
+    Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
     build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
-    execute_preview_tool_call, extract_scratchpad_update, format_negotiation_block,
-    install_redacting_panic_hook, json_escape_untrusted_str, load_negotiation_inputs_if_present,
-    normalize_allowed_vm_hosts, parse_preview_tool_arguments,
+    discarded_reply_file_path, execute_preview_tool_call, extract_scratchpad_update,
+    format_negotiation_block, install_redacting_panic_hook, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, parse_preview_tool_arguments,
     preview_seat_bundle_executions_for_table_for_test, preview_wording_slot, redact_and_truncate,
     redact_secrets, redact_secrets_multi_with_limit, render_call_limit_reached_wire_json,
     render_engine_refusal_wire_json, render_json_escaped_whisper_line,
@@ -25496,6 +25496,19 @@ fn card7_three_call_limit_and_per_round_cap_reservations() -> TestResult {
         .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(repeat_calls.len(), 5);
     assert_eq!(repeat_calls[4].outcome, "NO_REPLY");
+    let repeat_round4_path = tool_round_file_path(&g_repeat, "Saltworks", "01", Round::Act, 4);
+    assert!(repeat_round4_path.is_file());
+    let repeat_round4_bytes = fs::read(&repeat_round4_path)?;
+    assert_eq!(
+        repeat_calls[4].reply_sha256.as_deref(),
+        Some(sha256_hex(&repeat_round4_bytes).as_str())
+    );
+    let repeat_round4: SavedToolRoundRecord = serde_json::from_slice(&repeat_round4_bytes)?;
+    assert_eq!(repeat_round4.outcome, "NO_REPLY");
+    assert_eq!(repeat_round4.calls.len(), 1);
+    assert!(!repeat_round4.calls[0].tool_result_sent);
+    assert_eq!(repeat_round4.calls[0].result_wire_json, None);
+    assert_eq!(repeat_round4.calls[0].result_sha256, None);
 
     // Part C: Tight `--cap-credits` allowing only 2 HTTP rounds -> round 3 hits CAP_REACHED mid-turn via `try_reserve`.
     let or_seats_json = json!({
@@ -26312,11 +26325,18 @@ fn card8_tool_round_store_startup_probe_refuses_before_any_request_and_skips_whe
     fs::write(&wrapper, "PROBE_WRAPPER")?;
 
     let srv = LoopbackOpenAiServer::start_with_tokenizer(
-        vec![MockHttpStep::Json {
-            status: 200,
-            delay: Duration::from_millis(1),
-            body: local_completion_body("TALK_OFF_OK", "Qwen/Qwen3-14B", 10, 3, None, None),
-        }],
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("TALK_OFF_OK", "Qwen/Qwen3-14B", 10, 3, None, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("TALK_SPARE_OK", "Qwen/Qwen3-14B", 10, 3, None, None),
+            },
+        ],
         TokenizeBehavior::WordCount,
     )?;
     let seats_path = tmp.path().join("seats.json");
@@ -26370,6 +26390,8 @@ fn card8_tool_round_store_startup_probe_refuses_before_any_request_and_skips_whe
     write_to_seat(&g_blocked_probe, "01", "talk", "Saltworks", "TALK")?;
     let probe_path = g_blocked_probe.join("relay/seats/.tool-round-write-probe.tmp");
     set_fail_tool_round_write_for_test(&probe_path, true);
+    let gate = LocalGate::acquire(false, Some(10.0), false, &[])?;
+    let local_tx = LocalOpenAiTransport::new(gate);
     let res_probe = run_turn(
         &TurnConfig::new(
             g_blocked_probe.clone(),
@@ -26382,15 +26404,15 @@ fn card8_tool_round_store_startup_probe_refuses_before_any_request_and_skips_whe
         )
         .with_cap_gpu_secs(Some(10.0))
         .with_preview_tool(PreviewToolMode::On),
-        &ScriptedTransport::new(vec![]),
+        &local_tx,
         None,
     );
     set_fail_tool_round_write_for_test(&probe_path, false);
+    assert_eq!(srv.recorded_requests()?.len(), 0);
     let Err(probe_err) = res_probe else {
         return Err("probe failure must refuse turn".into());
     };
     assert_eq!(probe_err.code(), "TOOL_ROUND_STORE_WRITE_FAILED");
-    assert_eq!(srv.recorded_requests()?.len(), 0);
 
     // 3. With `--preview-tool off`, the tool-round probe does NOT run (`probe_path` hook ignored)
     //    and the turn completes cleanly without leaving any probe or tool-round file.
@@ -26561,9 +26583,19 @@ fn rebuild_followup_request_body_from_disk_only(
             tool_call_id: None,
         });
         for c in &rec.calls {
+            let result_wire = if c.tool_result_sent {
+                c.result_wire_json
+                    .as_deref()
+                    .ok_or("missing result_wire_json")?
+            } else {
+                return Err(
+                    "cannot rebuild follow-up from terminal tool round without tool_result_sent"
+                        .into(),
+                );
+            };
             messages.push(RebuiltMessageWire {
                 role: "tool",
-                content: Some(&c.result_wire_json),
+                content: Some(result_wire),
                 tool_calls: None,
                 tool_call_id: Some(&c.id),
             });
@@ -26631,6 +26663,7 @@ fn card8_saved_tool_rounds_rebuild_every_followup_request_byte_for_byte_from_dis
                     "content": content,
                     "reasoning_content": reasoning,
                     "tool_calls": [{
+                        "index": 0,
                         "id": id,
                         "type": "function",
                         "function": {
@@ -26644,6 +26677,20 @@ fn card8_saved_tool_rounds_rebuild_every_followup_request_byte_for_byte_from_dis
         })
         .to_string()
     };
+    let expected_round_inputs: [(&str, Option<&str>, &str); 4] = [
+        (
+            "call_ok_1",
+            Some("Checking first offer preview."),
+            good_args_1.as_str(),
+        ),
+        ("call_bad_2", None, malformed_args_2.as_str()),
+        (
+            "call_ok_3",
+            Some("Checking fallback."),
+            good_args_3.as_str(),
+        ),
+        ("call_over_4", None, over_limit_args_4.as_str()),
+    ];
 
     let srv = LoopbackOpenAiServer::start_with_tokenizer(
         vec![
@@ -26782,34 +26829,59 @@ fn card8_saved_tool_rounds_rebuild_every_followup_request_byte_for_byte_from_dis
             Some(sha256_hex(&raw_bytes).as_str()),
             "TOOL_CALL entry {r_idx} reply_sha256 must match on-disk sidecar file sha256"
         );
+        let (exp_id, exp_content, exp_args) = expected_round_inputs[r_idx];
         let rec: SavedToolRoundRecord = serde_json::from_slice(&raw_bytes)?;
+        assert_eq!(rec.outcome, "TOOL_CALL");
+        assert!(!rec.run_id.is_empty());
+        assert_eq!(
+            call_entries[r_idx].reservation_id.as_deref(),
+            Some(rec.reservation_id.as_str())
+        );
+        assert_eq!(
+            rec.request_body_sha256,
+            call_entries[r_idx].request_body_sha256
+        );
         assert_eq!(rec.round_index, r_idx);
         assert_eq!(rec.attempt, 1);
+        assert_eq!(
+            rec.assistant_content.as_deref(),
+            exp_content,
+            "stored assistant_content must match raw model output"
+        );
         assert_eq!(
             rec.reasoning, None,
             "exclude_from_transcript=true hides reasoning"
         );
         assert_eq!(rec.calls.len(), 1);
+        assert_eq!(rec.calls[0].id, exp_id);
+        assert_eq!(rec.calls[0].name, "preview_turn_orders");
+        assert_eq!(
+            rec.calls[0].arguments, exp_args,
+            "stored arguments must match raw received arguments string"
+        );
+        assert_eq!(
+            rec.calls[0].raw_received_call["index"],
+            json!(0),
+            "raw_received_call must preserve provider extra fields"
+        );
         assert_eq!(
             rec.calls[0].arguments_sha256,
             sha256_hex(rec.calls[0].arguments.as_bytes())
         );
+        assert!(rec.calls[0].tool_result_sent);
+        let result_wire = rec.calls[0]
+            .result_wire_json
+            .as_deref()
+            .ok_or("expected tool result_wire_json")?;
         assert_eq!(
-            rec.calls[0].result_sha256,
-            sha256_hex(rec.calls[0].result_wire_json.as_bytes())
+            rec.calls[0].result_sha256.as_deref(),
+            Some(sha256_hex(result_wire.as_bytes()).as_str())
         );
         if r_idx == 1 {
-            assert!(
-                rec.calls[0]
-                    .result_wire_json
-                    .contains("MALFORMED_TOOL_CALL")
-            );
+            assert!(result_wire.contains("MALFORMED_TOOL_CALL"));
         }
         if r_idx == 3 {
-            assert_eq!(
-                rec.calls[0].result_wire_json,
-                render_call_limit_reached_wire_json()
-            );
+            assert_eq!(result_wire, render_call_limit_reached_wire_json());
         }
 
         // Rebuild follow-up request `r_idx + 1` byte for byte using ONLY files on disk!
@@ -27093,10 +27165,11 @@ fn card8_injected_tool_round_write_failure_ends_turn_with_named_code_and_sends_n
     assert_eq!(call_lines[1].outcome, "TOOL_ROUND_STORE_WRITE_FAILED");
     assert_eq!(call_lines[1].reply_sha256, None);
 
-    // Re-running the aborted turn must preserve the original round-0 sidecar untouched and write
-    // a non-overwriting `.retry-1.json` sidecar whose SHA-256 matches the new `TOOL_CALL` ledger row.
+    // Re-running the aborted turn must preserve the original round-0 sidecar untouched and assign
+    // a consistent per-seat `.retry-1.json` suffix + new `run_id` across ALL rounds of the re-run.
     let round0_original_bytes = fs::read(&round0_path)?;
     let round0_original_sha = sha256_hex(&round0_original_bytes);
+    let round0_original_rec: SavedToolRoundRecord = serde_json::from_slice(&round0_original_bytes)?;
     let srv_retry = LoopbackOpenAiServer::start_with_tokenizer(
         vec![
             MockHttpStep::Json {
@@ -27104,6 +27177,16 @@ fn card8_injected_tool_round_write_failure_ends_turn_with_named_code_and_sends_n
                 delay: Duration::from_millis(1),
                 body: card7_tool_call_response_body(
                     "c_retry_0",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "c_retry_1",
                     "preview_turn_orders",
                     &valid_args,
                     None,
@@ -27153,13 +27236,21 @@ fn card8_injected_tool_round_write_failure_ends_turn_with_named_code_and_sends_n
     assert_eq!(fs::read(&round0_path)?, round0_original_bytes);
     let retry_round0_path =
         game_dir.join("relay/seats/Saltworks.day-01-act.tool-round-0.retry-1.json");
+    let retry_round1_path =
+        game_dir.join("relay/seats/Saltworks.day-01-act.tool-round-1.retry-1.json");
     assert!(retry_round0_path.is_file());
+    assert!(retry_round1_path.is_file());
+    assert!(!round1_path.exists());
+    let retry_rec0: SavedToolRoundRecord = serde_json::from_slice(&fs::read(&retry_round0_path)?)?;
+    let retry_rec1: SavedToolRoundRecord = serde_json::from_slice(&fs::read(&retry_round1_path)?)?;
+    assert_ne!(retry_rec0.run_id, round0_original_rec.run_id);
+    assert_eq!(retry_rec0.run_id, retry_rec1.run_id);
     let retry_calls: Vec<CallLogEntry> = fs::read_to_string(game_dir.join("relay/calls.jsonl"))?
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(serde_json::from_str)
         .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(retry_calls.len(), 4);
+    assert_eq!(retry_calls.len(), 5);
     assert_eq!(
         retry_calls[0].reply_sha256.as_deref(),
         Some(round0_original_sha.as_str())
@@ -27167,6 +27258,10 @@ fn card8_injected_tool_round_write_failure_ends_turn_with_named_code_and_sends_n
     assert_eq!(
         retry_calls[2].reply_sha256.as_deref(),
         Some(sha256_hex(&fs::read(&retry_round0_path)?).as_str())
+    );
+    assert_eq!(
+        retry_calls[3].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&retry_round1_path)?).as_str())
     );
 
     Ok(())
@@ -27455,11 +27550,18 @@ fn card8_off_mode_ignores_odd_tool_calls_and_on_mode_returns_malformed_tool_call
     let saved0: SavedToolRoundRecord = serde_json::from_str(&fs::read_to_string(
         tool_round_file_path(&g_on, "Saltworks", "01", Round::Act, 0),
     )?)?;
-    assert!(saved0.calls[0].raw_received_call.is_some());
+    assert_eq!(saved0.outcome, "TOOL_CALL");
+    assert!(saved0.calls[0].tool_result_sent);
+    assert!(saved0.calls[0].raw_received_call.get("type").is_none());
     let saved1: SavedToolRoundRecord = serde_json::from_str(&fs::read_to_string(
         tool_round_file_path(&g_on, "Saltworks", "01", Round::Act, 1),
     )?)?;
-    assert!(saved1.calls[0].raw_received_call.is_some());
+    assert_eq!(saved1.outcome, "TOOL_CALL");
+    assert!(saved1.calls[0].tool_result_sent);
+    assert!(
+        saved1.calls[0].raw_received_call["function"]["arguments"].is_object(),
+        "raw_received_call must keep unstringified object arguments as parsed JSON"
+    );
 
     Ok(())
 }
@@ -27538,6 +27640,960 @@ fn card8_history_check_finds_current_row_by_arm_and_accepts_neutral_after_previe
         return Err("dropping a neutral path in r8 must fail".into());
     };
     assert!(drop_err.contains("dropped previously guarded render path"));
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix1_fifth_tool_call_after_limit_saved_on_disk_and_linked_in_no_reply_ledger_line()
+-> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "FIFTH_CALL_WRAPPER")?;
+    let valid_args = json!({ "market_actions": [], "bundle": {} }).to_string();
+    let fifth_args = r#"{"market_actions":[],"bundle":{"fifth":5}}"#;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_ok_1",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_ok_2",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_ok_3",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_over_4",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: json!({
+                    "id": "mock-call-5",
+                    "model": "Qwen/Qwen3-14B",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "Fifth try despite limit.",
+                            "reasoning_content": "trace 5",
+                            "tool_calls": [{
+                                "index": 1,
+                                "id": "call_5_after_limit",
+                                "type": "function",
+                                "function": {
+                                    "name": "preview_turn_orders",
+                                    "arguments": fifth_args
+                                }
+                            }]
+                        }
+                    }],
+                    "usage": { "prompt_tokens": 20, "completion_tokens": 12, "total_tokens": 32 }
+                })
+                .to_string(),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+
+    let g_save = tmp.path().join("g_save_5th");
+    write_to_seat(&g_save, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_save, "01", "Saltworks", &real_state)?;
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_save.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "30.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 3, "stderr: {}", String::from_utf8_lossy(&err));
+    assert!(!g_save.join("from-seat/day-01-act-Saltworks.md").exists());
+
+    let calls: Vec<CallLogEntry> = fs::read_to_string(g_save.join("relay/calls.jsonl"))?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(calls.len(), 5);
+    assert!(calls[..4].iter().all(|c| c.outcome == "TOOL_CALL"));
+    assert_eq!(calls[4].outcome, "NO_REPLY");
+
+    let round4_path = tool_round_file_path(&g_save, "Saltworks", "01", Round::Act, 4);
+    assert!(
+        round4_path.is_file(),
+        "missing terminal 5th tool-round sidecar"
+    );
+    let raw_bytes = fs::read(&round4_path)?;
+    assert_eq!(
+        calls[4].reply_sha256.as_deref(),
+        Some(sha256_hex(&raw_bytes).as_str()),
+        "NO_REPLY ledger line must store SHA-256 of 5th tool-round record"
+    );
+    let rec4: SavedToolRoundRecord = serde_json::from_slice(&raw_bytes)?;
+    assert_eq!(rec4.outcome, "NO_REPLY");
+    assert_eq!(rec4.round_index, 4);
+    assert!(!rec4.run_id.is_empty());
+    assert_eq!(
+        calls[4].reservation_id.as_deref(),
+        Some(rec4.reservation_id.as_str())
+    );
+    assert_eq!(rec4.request_body_sha256, calls[4].request_body_sha256);
+    assert_eq!(
+        rec4.assistant_content.as_deref(),
+        Some("Fifth try despite limit.")
+    );
+    assert_eq!(
+        rec4.reasoning, None,
+        "exclude_from_transcript=true keeps reasoning null"
+    );
+    assert_eq!(rec4.calls.len(), 1);
+    assert_eq!(rec4.calls[0].id, "call_5_after_limit");
+    assert_eq!(rec4.calls[0].arguments, fifth_args);
+    assert_eq!(rec4.calls[0].raw_received_call["index"], json!(1));
+    assert!(!rec4.calls[0].tool_result_sent);
+    assert_eq!(rec4.calls[0].result_wire_json, None);
+    assert_eq!(rec4.calls[0].result_sha256, None);
+    let raw_val: Json = serde_json::from_slice(&raw_bytes)?;
+    assert_eq!(raw_val["calls"][0]["tool_result_sent"], json!(false));
+    assert_eq!(raw_val["calls"][0]["result_wire_json"], Json::Null);
+    assert_eq!(raw_val["calls"][0]["result_sha256"], Json::Null);
+
+    // Inject write failure on round 4 -> fails cleanly with TOOL_ROUND_STORE_WRITE_FAILED (exit 2).
+    let srv_fail = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_f1",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_f2",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_f3",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_f4",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_f5",
+                    "preview_turn_orders",
+                    &valid_args,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_fail = tmp.path().join("seats_fail.json");
+    write_card7_four_seat_local_file(&seats_fail, &srv_fail.base_url, 2.0)?;
+    let g_fail = tmp.path().join("g_fail_5th");
+    write_to_seat(&g_fail, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_fail, "01", "Saltworks", &real_state)?;
+    let fail_round4_path = tool_round_file_path(&g_fail, "Saltworks", "01", Round::Act, 4);
+    set_fail_tool_round_write_for_test(&fail_round4_path, true);
+    let mut out_f = Vec::new();
+    let mut err_f = Vec::new();
+    let code_f = execute_cli(
+        [
+            "--error-format",
+            "json",
+            "turn",
+            "--game-dir",
+            g_fail.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "act",
+            "--seats",
+            seats_fail.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "30.0",
+        ],
+        |_| None,
+        &mut out_f,
+        &mut err_f,
+    );
+    set_fail_tool_round_write_for_test(&fail_round4_path, false);
+    assert_eq!(code_f, 2);
+    let err_json: Json = serde_json::from_str(String::from_utf8_lossy(&err_f).trim())?;
+    assert_eq!(err_json["code"], json!("TOOL_ROUND_STORE_WRITE_FAILED"));
+    assert!(!fail_round4_path.exists());
+    assert!(!fail_round4_path.with_extension("json.tmp").exists());
+    let fail_calls: Vec<CallLogEntry> = fs::read_to_string(g_fail.join("relay/calls.jsonl"))?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(fail_calls.len(), 5);
+    assert_eq!(fail_calls[4].outcome, "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert_eq!(fail_calls[4].reply_sha256, None);
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix1_over_estimate_tool_call_saved_on_disk_and_linked_in_cost_over_estimate_ledger_line()
+-> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "OVER_ESTIMATE_TOOL_WRAPPER")?;
+
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "openai/gpt-4o-mini-2024-07-18",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05,
+                    "reasoning": {
+                        "effort": "low",
+                        "exclude_from_transcript": false
+                    }
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let over_est_args = r#"{"market_actions":[],"bundle":{"over":1}}"#;
+    let over_est_body = json!({
+        "id": "mock-over-est",
+        "model": "openai/gpt-4o-mini-2024-07-18",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "<think>plan</think>Expensive tool call.",
+                "reasoning": "expensive trace",
+                "tool_calls": [{
+                    "index": 2,
+                    "id": "call_over_est_0",
+                    "type": "function",
+                    "function": {
+                        "name": "preview_turn_orders",
+                        "arguments": over_est_args
+                    }
+                }]
+            }
+        }],
+        "usage": {
+            "prompt_tokens": 25,
+            "completion_tokens": 15,
+            "total_tokens": 40,
+            "cost": 0.12
+        }
+    })
+    .to_string();
+
+    let g_ok = tmp.path().join("g_over_est");
+    write_to_seat(&g_ok, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_ok, "01", "Saltworks", &real_state)?;
+    let tx_ok = ScriptedTransport::new(vec![ScriptStep::Respond(RawHttpResponse {
+        status: 200,
+        body: over_est_body.clone(),
+    })]);
+    let summary = run_turn(
+        &TurnConfig::new(
+            g_ok.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(1.0),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_ok,
+        None,
+    )?;
+    assert_eq!(tx_ok.call_count(), 1);
+    assert!(matches!(
+        summary.reports[0].outcome,
+        SeatOutcome::CostOverEstimateRefused { .. }
+    ));
+
+    let sidecar = tool_round_file_path(&g_ok, "Saltworks", "01", Round::Act, 0);
+    assert!(
+        sidecar.is_file(),
+        "missing over-estimate tool-round sidecar"
+    );
+    let raw_bytes = fs::read(&sidecar)?;
+    let calls = read_calls_log(&g_ok)?;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].outcome, "COST_OVER_ESTIMATE");
+    assert_eq!(
+        calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&raw_bytes).as_str()),
+        "COST_OVER_ESTIMATE ledger line must link sidecar SHA-256"
+    );
+
+    let rec0: SavedToolRoundRecord = serde_json::from_slice(&raw_bytes)?;
+    assert_eq!(rec0.outcome, "COST_OVER_ESTIMATE");
+    assert!(!rec0.run_id.is_empty());
+    assert_eq!(
+        calls[0].reservation_id.as_deref(),
+        Some(rec0.reservation_id.as_str())
+    );
+    assert_eq!(rec0.request_body_sha256, calls[0].request_body_sha256);
+    assert_eq!(
+        rec0.assistant_content.as_deref(),
+        Some("<think>plan</think>Expensive tool call."),
+        "tool-round record keeps raw assistant content including <think> tags"
+    );
+    assert_eq!(
+        rec0.reasoning.as_deref(),
+        Some("expensive trace"),
+        "exclude_from_transcript=false stores reasoning"
+    );
+    assert_eq!(rec0.calls.len(), 1);
+    assert_eq!(rec0.calls[0].id, "call_over_est_0");
+    assert_eq!(rec0.calls[0].arguments, over_est_args);
+    assert_eq!(rec0.calls[0].raw_received_call["index"], json!(2));
+    assert!(!rec0.calls[0].tool_result_sent);
+    assert_eq!(rec0.calls[0].result_wire_json, None);
+    assert_eq!(rec0.calls[0].result_sha256, None);
+
+    // Inject write failure -> run_turn errors with TOOL_ROUND_STORE_WRITE_FAILED.
+    let g_fail = tmp.path().join("g_over_est_fail");
+    write_to_seat(&g_fail, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_fail, "01", "Saltworks", &real_state)?;
+    let fail_sidecar = tool_round_file_path(&g_fail, "Saltworks", "01", Round::Act, 0);
+    set_fail_tool_round_write_for_test(&fail_sidecar, true);
+    let tx_fail = ScriptedTransport::new(vec![ScriptStep::Respond(RawHttpResponse {
+        status: 200,
+        body: over_est_body,
+    })]);
+    let res_fail = run_turn(
+        &TurnConfig::new(
+            g_fail.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            true,
+            Some(1.0),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_fail,
+        None,
+    );
+    set_fail_tool_round_write_for_test(&fail_sidecar, false);
+    let Err(err_fail) = res_fail else {
+        return Err("over-estimate write failure must return TOOL_ROUND_STORE_WRITE_FAILED".into());
+    };
+    assert_eq!(err_fail.code(), "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert!(!fail_sidecar.exists());
+    let fail_calls = read_calls_log(&g_fail)?;
+    assert_eq!(fail_calls[0].outcome, "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert_eq!(fail_calls[0].reply_sha256, None);
+
+    Ok(())
+}
+
+#[test]
+fn card8_fix1_discarded_parsed_and_late_replies_saved_when_preview_tool_on_and_untouched_when_off()
+-> TestResult {
+    let real_state = card7_standard_preview_state(0)?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "DISCARDED_WRAPPER")?;
+
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "required": ["orders", "notes"],
+                "properties": {
+                    "orders": { "type": "array" },
+                    "notes": { "type": "string" }
+                },
+                "additionalProperties": false
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let local_srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            // Subcase A attempt 1: schema failure on --preview-tool on with <think> tags preserved
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"<think>draft</think>{"wrong":1}"#,
+                    "Qwen/Qwen3-14B",
+                    12,
+                    8,
+                    None,
+                    None,
+                ),
+            },
+            // Subcase A attempt 2: valid reply
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"{"orders":[],"notes":"ok"}"#,
+                    "Qwen/Qwen3-14B",
+                    12,
+                    6,
+                    None,
+                    None,
+                ),
+            },
+            // Subcase B attempt 1: > 500-token scratchpad cap failure
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    &json!({
+                        "orders": [],
+                        "notes": vec!["w"; 505].join(" ")
+                    })
+                    .to_string(),
+                    "Qwen/Qwen3-14B",
+                    12,
+                    510,
+                    None,
+                    None,
+                ),
+            },
+            // Subcase B attempt 2: valid reply
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"{"orders":[],"notes":"trimmed"}"#,
+                    "Qwen/Qwen3-14B",
+                    12,
+                    6,
+                    None,
+                    None,
+                ),
+            },
+            // Subcase C attempt 1: talk mode tool_calls with null content (empty reply)
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: json!({
+                    "id": "mock-talk-tc",
+                    "model": "Qwen/Qwen3-14B",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": "talk_tc_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "preview_turn_orders",
+                                    "arguments": "{}"
+                                }
+                            }]
+                        }
+                    }],
+                    "usage": { "prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14 }
+                })
+                .to_string(),
+            },
+            // Subcase C attempt 2: valid reply
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"{"orders":[],"notes":"talk ok"}"#,
+                    "Qwen/Qwen3-14B",
+                    12,
+                    6,
+                    None,
+                    None,
+                ),
+            },
+            // Subcase D (--preview-tool off): schema failure attempt 1 + ok attempt 2
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(r#"{"wrong":1}"#, "Qwen/Qwen3-14B", 12, 5, None, None),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"{"orders":[],"notes":"off ok"}"#,
+                    "Qwen/Qwen3-14B",
+                    12,
+                    6,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let local_seats_path = tmp.path().join("local_seats.json");
+    write_card7_four_seat_local_file(&local_seats_path, &local_srv.base_url, 2.0)?;
+    let local_seats = SeatFile::from_json_str(&fs::read_to_string(&local_seats_path)?, None)?;
+    let local_tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+
+    // Subcase A: schema failure saved under --preview-tool on with raw <think> content intact
+    let g_schema = tmp.path().join("g_schema");
+    write_to_seat(&g_schema, "01", "talk", "Saltworks", "TALK")?;
+    let s_schema = run_turn(
+        &TurnConfig::new(
+            g_schema.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            local_seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_memory_mode(MemoryMode::Snapshot)
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &local_tx,
+        None,
+    )?;
+    assert!(s_schema.all_clean());
+    let disc_schema = discarded_reply_file_path(&g_schema, "Saltworks", "01", Round::Talk, 0, 1);
+    assert!(disc_schema.is_file());
+    let disc_schema_rec: SavedDiscardedReplyRecord =
+        serde_json::from_slice(&fs::read(&disc_schema)?)?;
+    assert_eq!(disc_schema_rec.outcome, "harness");
+    assert!(!disc_schema_rec.is_late);
+    assert_eq!(
+        disc_schema_rec.assistant_content.as_deref(),
+        Some(r#"<think>draft</think>{"wrong":1}"#)
+    );
+    let schema_calls = read_calls_log(&g_schema)?;
+    assert_eq!(schema_calls[0].outcome, "harness");
+    assert_eq!(
+        schema_calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&disc_schema)?).as_str())
+    );
+
+    // Subcase B: scratchpad > 500 tokens saved under --preview-tool on
+    let g_pad = tmp.path().join("g_pad");
+    write_to_seat(&g_pad, "01", "talk", "Saltworks", "TALK")?;
+    let s_pad = run_turn(
+        &TurnConfig::new(
+            g_pad.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            local_seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_memory_mode(MemoryMode::Snapshot)
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &local_tx,
+        None,
+    )?;
+    assert!(s_pad.all_clean());
+    let disc_pad = discarded_reply_file_path(&g_pad, "Saltworks", "01", Round::Talk, 0, 1);
+    assert!(disc_pad.is_file());
+    let disc_pad_rec: SavedDiscardedReplyRecord = serde_json::from_slice(&fs::read(&disc_pad)?)?;
+    assert_eq!(disc_pad_rec.outcome, "harness");
+    assert!(disc_pad_rec.discard_reason.contains("500-token cap"));
+    let pad_calls = read_calls_log(&g_pad)?;
+    assert_eq!(
+        pad_calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&disc_pad)?).as_str())
+    );
+
+    // Subcase B2: /tokenize 500 error (TOKENIZE_UNAVAILABLE) under --preview-tool on also saves discarded reply
+    let tok_fail_srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                r#"{"orders":[],"notes":"needs token count"}"#,
+                "Qwen/Qwen3-14B",
+                12,
+                8,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::HttpStatus(500, "tok err".to_owned()),
+    )?;
+    let tok_fail_seats_path = tmp.path().join("tok_fail_seats.json");
+    write_card7_four_seat_local_file(&tok_fail_seats_path, &tok_fail_srv.base_url, 2.0)?;
+    let tok_fail_seats = SeatFile::from_json_str(&fs::read_to_string(&tok_fail_seats_path)?, None)?;
+    let g_tok_fail = tmp.path().join("g_tok_fail");
+    write_to_seat(&g_tok_fail, "01", "talk", "Saltworks", "TALK")?;
+    let s_tok_fail = run_turn(
+        &TurnConfig::new(
+            g_tok_fail.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            tok_fail_seats,
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_memory_mode(MemoryMode::Snapshot)
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &local_tx,
+        None,
+    )?;
+    assert!(!s_tok_fail.all_clean());
+    let disc_tok = discarded_reply_file_path(&g_tok_fail, "Saltworks", "01", Round::Talk, 0, 1);
+    assert!(disc_tok.is_file());
+    let disc_tok_rec: SavedDiscardedReplyRecord = serde_json::from_slice(&fs::read(&disc_tok)?)?;
+    assert_eq!(disc_tok_rec.outcome, "TOKENIZE_UNAVAILABLE");
+    assert_eq!(
+        disc_tok_rec.assistant_content.as_deref(),
+        Some(r#"{"orders":[],"notes":"needs token count"}"#)
+    );
+    let tok_calls = read_calls_log(&g_tok_fail)?;
+    assert_eq!(tok_calls[0].outcome, "TOKENIZE_UNAVAILABLE");
+    assert_eq!(
+        tok_calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&disc_tok)?).as_str())
+    );
+
+    // Subcase C: talk-mode tool_calls + null content saved with raw_tool_calls intact
+    let g_talk_tc = tmp.path().join("g_talk_tc");
+    write_to_seat(&g_talk_tc, "01", "talk", "Saltworks", "TALK")?;
+    let s_talk_tc = run_turn(
+        &TurnConfig::new(
+            g_talk_tc.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            local_seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_memory_mode(MemoryMode::Snapshot)
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &local_tx,
+        None,
+    )?;
+    assert!(s_talk_tc.all_clean());
+    let disc_talk_tc = discarded_reply_file_path(&g_talk_tc, "Saltworks", "01", Round::Talk, 0, 1);
+    assert!(disc_talk_tc.is_file());
+    let disc_talk_rec: SavedDiscardedReplyRecord =
+        serde_json::from_slice(&fs::read(&disc_talk_tc)?)?;
+    assert_eq!(disc_talk_rec.discard_reason, "empty reply");
+    assert_eq!(
+        disc_talk_rec
+            .raw_tool_calls
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(1)
+    );
+    let talk_tc_calls = read_calls_log(&g_talk_tc)?;
+    assert_eq!(
+        talk_tc_calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&disc_talk_tc)?).as_str())
+    );
+
+    // Subcase D: --preview-tool off writes zero discarded-reply sidecars and keeps reply_sha256 None
+    let g_off = tmp.path().join("g_off_schema");
+    write_to_seat(&g_off, "01", "talk", "Saltworks", "TALK")?;
+    let s_off = run_turn(
+        &TurnConfig::new(
+            g_off.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            local_seats,
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_memory_mode(MemoryMode::Snapshot)
+        .with_response_format(Some(rf))
+        .with_preview_tool(PreviewToolMode::Off),
+        &local_tx,
+        None,
+    )?;
+    assert!(s_off.all_clean());
+    assert!(!discarded_reply_file_path(&g_off, "Saltworks", "01", Round::Talk, 0, 1).exists());
+    let off_calls = read_calls_log(&g_off)?;
+    assert_eq!(off_calls[0].outcome, "harness");
+    assert_eq!(off_calls[0].reply_sha256, None);
+
+    // Subcase E: LATE_DISCARDED HTTP 200 on round == act saved when on, untouched when off,
+    // and fails closed with TOOL_ROUND_STORE_WRITE_FAILED if write fails.
+    let fast_seat = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.3,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 0.03,
+                    "max_cost_per_call": 0.01
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let late_body = json!({
+        "id": "mock-late-200",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "Late partial thought",
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "late_call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "preview_turn_orders",
+                        "arguments": "{}"
+                    }
+                }]
+            }
+        }],
+        "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.01 }
+    })
+    .to_string();
+
+    let g_late_on = tmp.path().join("g_late_on");
+    write_to_seat(&g_late_on, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_late_on, "01", "Saltworks", &real_state)?;
+    let tx_late_on = ScriptedTransport::new(vec![
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(120),
+            RawHttpResponse {
+                status: 200,
+                body: late_body.clone(),
+            },
+        ),
+        ScriptStep::Respond(ok_completion_json(
+            "ON_TIME_AFTER_LATE",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_late_on = run_turn(
+        &TurnConfig::new(
+            g_late_on.clone(),
+            "01".to_owned(),
+            Round::Act,
+            fast_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_late_on,
+        None,
+    )?;
+    assert!(s_late_on.all_clean());
+    let disc_late = discarded_reply_file_path(&g_late_on, "Saltworks", "01", Round::Act, 0, 1);
+    assert!(disc_late.is_file());
+    let disc_late_rec: SavedDiscardedReplyRecord = serde_json::from_slice(&fs::read(&disc_late)?)?;
+    assert_eq!(disc_late_rec.outcome, "LATE_DISCARDED");
+    assert!(disc_late_rec.is_late);
+    assert_eq!(
+        disc_late_rec.assistant_content.as_deref(),
+        Some("Late partial thought")
+    );
+    assert_eq!(
+        disc_late_rec
+            .raw_tool_calls
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .map(Vec::len),
+        Some(1)
+    );
+    let late_on_calls = read_calls_log(&g_late_on)?;
+    assert_eq!(late_on_calls[0].outcome, "LATE_DISCARDED");
+    assert_eq!(
+        late_on_calls[0].reply_sha256.as_deref(),
+        Some(sha256_hex(&fs::read(&disc_late)?).as_str())
+    );
+
+    // Late write failure -> TOOL_ROUND_STORE_WRITE_FAILED
+    let g_late_fail = tmp.path().join("g_late_fail");
+    write_to_seat(&g_late_fail, "01", "act", "Saltworks", "ACT")?;
+    write_card7_preview_state(&g_late_fail, "01", "Saltworks", &real_state)?;
+    let late_fail_path =
+        discarded_reply_file_path(&g_late_fail, "Saltworks", "01", Round::Act, 0, 1);
+    set_fail_tool_round_write_for_test(&late_fail_path, true);
+    let tx_late_fail = ScriptedTransport::new(vec![ScriptStep::SleepThenRespond(
+        Duration::from_millis(120),
+        RawHttpResponse {
+            status: 200,
+            body: late_body.clone(),
+        },
+    )]);
+    let res_late_fail = run_turn(
+        &TurnConfig::new(
+            g_late_fail.clone(),
+            "01".to_owned(),
+            Round::Act,
+            fast_seat.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.02),
+        )
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_late_fail,
+        None,
+    );
+    set_fail_tool_round_write_for_test(&late_fail_path, false);
+    let Err(late_err) = res_late_fail else {
+        return Err(
+            "late discarded write failure must return TOOL_ROUND_STORE_WRITE_FAILED".into(),
+        );
+    };
+    assert_eq!(late_err.code(), "TOOL_ROUND_STORE_WRITE_FAILED");
+    assert!(!late_fail_path.exists());
+
+    // Late HTTP 200 with --preview-tool off saves nothing and leaves reply_sha256 None
+    let g_late_off = tmp.path().join("g_late_off");
+    write_to_seat(&g_late_off, "01", "talk", "Saltworks", "TALK")?;
+    let tx_late_off = ScriptedTransport::new(vec![
+        ScriptStep::SleepThenRespond(
+            Duration::from_millis(120),
+            RawHttpResponse {
+                status: 200,
+                body: late_body,
+            },
+        ),
+        ScriptStep::Respond(ok_completion_json(
+            "ON_TIME_OFF",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_late_off = run_turn(
+        &TurnConfig::new(
+            g_late_off.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            fast_seat,
+            Some(wrapper),
+            true,
+            Some(0.02),
+        )
+        .with_preview_tool(PreviewToolMode::Off),
+        &tx_late_off,
+        None,
+    )?;
+    assert!(s_late_off.all_clean());
+    assert!(!discarded_reply_file_path(&g_late_off, "Saltworks", "01", Round::Talk, 0, 1).exists());
+    let late_off_calls = read_calls_log(&g_late_off)?;
+    assert_eq!(late_off_calls[0].outcome, "LATE_DISCARDED");
+    assert_eq!(late_off_calls[0].reply_sha256, None);
 
     Ok(())
 }
