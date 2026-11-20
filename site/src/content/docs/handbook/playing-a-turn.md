@@ -26,7 +26,7 @@ Use `Up`/`Down` (or `Tab`/`BackTab`) in the **Club Mode Lobby** to configure you
 - **Curtain PINs (`Enabled` / `Disabled`):** Toggle optional 4-digit table-local Curtain PINs (`Space`/`Left`/`Right`). Never pass PIN digits on the command line; when enabled, each human seat sets its own PIN behind the Privacy Curtain at its first turn.
 - **CLI overrides win:** Passing `--turn-clock <180..=300>`, `--untimed`, or `--pins` on the CLI overrides any conflicting Lobby or resumed `.seal` option (displayed inline on the Lobby row).
 
-Every valid Lobby start opens Seat `0`'s initial **Privacy Curtain** cleanly with zero `SeatObservation`s built beforehand.
+Every valid Lobby start opens Seat `0`'s initial **Privacy Curtain** cleanly with zero `SeatObservation`s built beforehand. If an unfinished `club-*.seal` file already exists in `--save-dir`, Lobby refuses to start with `UNFINISHED_SEASON_EXISTS` so active progress cannot be overwritten; once a completed season's replay is exported (wiping its `.seal`), starting a new season selects the next free table ID (`club-2`, …).
 
 ## Four-zone workspace
 
@@ -87,7 +87,7 @@ Resume any time via:
 cargo run -p league-tui --locked -- --resume ./saves/club-1.save.json
 ```
 
-Every resume advances any leading `ClubBot` seats up to the active human cursor, **always opens behind a Privacy Curtain** (requiring that seat's PIN if enabled) with zero human `SeatObservation`s built beforehand, preserves your saved timed/untimed setting (unless overridden on CLI), and restarts the resumed pass clock at that seat's full per-pass budget.
+For an active **in-season** save (`TalkAndMarket`), resuming advances any leading `ClubBot` seats up to the active human cursor, **always opens behind a Privacy Curtain** (requiring that seat's PIN if enabled) with zero human `SeatObservation`s built beforehand, preserves your saved timed/untimed setting (unless overridden on CLI), and restarts the resumed pass clock at that seat's full per-pass budget. For a **post-season** save (`AwaitingMandateReveal` or `Completed`), resuming opens directly on the public `Session Standby` reveal screen (`Reveals: k/N`, showing zero mandates) or the `Completed` End-of-Season tabs so you can finish reveals or retry replay export without a Curtain.
 
 ## Closing a season & exporting the replay
 

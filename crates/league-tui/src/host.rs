@@ -276,16 +276,11 @@ fn scrub_sealed_key_values(input: &str) -> String {
     current
 }
 
-/// Scrubs credentials, sealed JSON payloads, explicit session secret markers, and raw terminal
-/// control sequences so diagnostic logs and panic lines remain safe across all [`LogLevel`]s.
-pub(crate) fn scrub_tui_diagnostic_text(raw: &str, extra_markers: &[String]) -> String {
+/// Scrubs credentials, sealed JSON payloads, and raw terminal control sequences so diagnostic
+/// logs and panic lines remain safe across all [`LogLevel`]s.
+pub(crate) fn scrub_tui_diagnostic_text(raw: &str) -> String {
     let mut scrubbed = scrub_secret_text(raw);
     scrubbed = scrub_sealed_key_values(&scrubbed);
-    for marker in extra_markers {
-        if !marker.is_empty() {
-            scrubbed = scrubbed.replace(marker.as_str(), "[REDACTED]");
-        }
-    }
     strip_terminal_controls(&scrubbed)
 }
 
@@ -303,8 +298,6 @@ pub enum TuiError {
     TtyRequired,
     /// `--resume <PATH>` pointed to a missing or unreadable save target (`exit 1`).
     InvalidResumeTarget(String),
-    /// Lobby validation refused seed, seat count, human count, or clock inputs (`exit 1`).
-    LobbyValidation(StructuredError),
     /// Atomic mid-turn `.save.json` / `.seal` autosave failed and halted the session (`exit 2`).
     AutosaveFailed {
         save_path: PathBuf,
@@ -328,8 +321,7 @@ impl TuiError {
             Self::InvalidUsage(_)
             | Self::PinCliForbidden
             | Self::TtyRequired
-            | Self::InvalidResumeTarget(_)
-            | Self::LobbyValidation(_) => EXIT_USER_ERROR,
+            | Self::InvalidResumeTarget(_) => EXIT_USER_ERROR,
             Self::AutosaveFailed { .. }
             | Self::SaveLoadFailed(_)
             | Self::TerminalIo(_)
@@ -366,13 +358,6 @@ impl ToStructuredError for TuiError {
                 "Pass an existing `club-<id>.save.json` file or directory containing one to `--resume <PATH>`.",
                 false,
             ),
-            Self::LobbyValidation(err) => StructuredError {
-                code: err.code,
-                message: scrub_secret_text(&err.message),
-                hint: err.hint,
-                cause: err.cause.as_deref().map(scrub_secret_text),
-                retryable: false,
-            },
             Self::AutosaveFailed { save_path, cause } => StructuredError::new(
                 "TUI_AUTOSAVE_FAILED",
                 format!(
@@ -450,7 +435,6 @@ pub(crate) struct TuiDiagnosticSink {
     alternate_screen_active: bool,
     buffered_lines: Vec<String>,
     log_file: Option<PathBuf>,
-    extra_markers: Vec<String>,
 }
 
 impl TuiDiagnosticSink {
@@ -460,7 +444,6 @@ impl TuiDiagnosticSink {
             alternate_screen_active: false,
             buffered_lines: Vec::new(),
             log_file,
-            extra_markers: Vec::new(),
         }
     }
 
@@ -468,25 +451,11 @@ impl TuiDiagnosticSink {
         self.alternate_screen_active = active;
     }
 
-    #[cfg(test)]
-    pub(crate) fn add_redaction_markers<I, S>(&mut self, markers: I)
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        for m in markers {
-            let owned = m.as_ref().to_owned();
-            if !owned.is_empty() && !self.extra_markers.contains(&owned) {
-                self.extra_markers.push(owned);
-            }
-        }
-    }
-
     pub(crate) fn emit(&mut self, msg_level: LogLevel, raw_msg: &str) {
         if self.level == LogLevel::Silent || self.level < msg_level {
             return;
         }
-        let scrubbed = scrub_tui_diagnostic_text(raw_msg, &self.extra_markers);
+        let scrubbed = scrub_tui_diagnostic_text(raw_msg);
         let line = format!("[{}] {scrubbed}", msg_level.as_str());
         if let Some(path) = &self.log_file
             && let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
@@ -494,21 +463,6 @@ impl TuiDiagnosticSink {
             let _ = writeln!(file, "{line}");
         }
         self.buffered_lines.push(line);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn emit_error(&mut self, err: &TuiError, fmt_kind: ErrorFormat) {
-        let structured = err.to_structured_error();
-        let line =
-            scrub_tui_diagnostic_text(&fmt_kind.format_line(&structured), &self.extra_markers);
-        if let Some(path) = &self.log_file
-            && let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
-        {
-            let _ = writeln!(file, "{line}");
-        }
-        if !self.alternate_screen_active {
-            self.buffered_lines.push(line);
-        }
     }
 
     pub(crate) fn flush_after_restore(&mut self, err_out: &mut dyn Write) {
@@ -1901,10 +1855,10 @@ impl TuiHostSession {
                 Some("Resolve or resume from a clean autosave before wiping .seal."),
             ));
         }
-        if self.host.phase() == TurnPhase::TalkAndMarket {
+        if self.host.phase() != TurnPhase::Completed {
             return Err(host_error(
                 "SEASON_NOT_FINISHED",
-                "refused wiping .seal while season is still open",
+                "refused wiping .seal before season reaches Completed phase",
                 None,
             ));
         }
@@ -1921,6 +1875,18 @@ impl TuiHostSession {
     #[must_use]
     pub const fn table_id(&self) -> TableId {
         self.host.table_id()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn public_spec(&self) -> league_core::PublicTableSpec {
+        self.host.public_spec()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn pins_enabled(&self) -> bool {
+        self.pins_enabled
     }
 
     /// Records a scrubbed host-level error banner for the currently active seat.
@@ -2804,11 +2770,78 @@ impl TuiHostSession {
     }
 }
 
+pub(crate) fn parse_club_table_id_from_filename(name: &str) -> Option<u64> {
+    let rest = name.strip_prefix("club-")?;
+    let digits = rest
+        .strip_suffix(".save.json")
+        .or_else(|| rest.strip_suffix(".replay.json"))
+        .or_else(|| rest.strip_suffix(".seal"))?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()
+}
+
+pub(crate) fn inspect_save_dir_for_new_season(dir: &Path) -> Result<TableId, StructuredError> {
+    if !dir.exists() {
+        return Ok(TableId(1));
+    }
+    let entries = std::fs::read_dir(dir).map_err(|err| {
+        StructuredError::new(
+            "SAVE_DIR_UNREADABLE",
+            scrub_secret_text(&format!(
+                "failed inspecting save directory {}: {err}",
+                dir.display()
+            )),
+            "Check `--save-dir` permissions or pass a different directory.",
+            false,
+        )
+    })?;
+    let mut unfinished_seals: Vec<String> = Vec::new();
+    let mut max_id: Option<u64> = None;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            StructuredError::new(
+                "SAVE_DIR_UNREADABLE",
+                scrub_secret_text(&format!(
+                    "failed iterating save directory {}: {err}",
+                    dir.display()
+                )),
+                "Check `--save-dir` permissions or pass a different directory.",
+                false,
+            )
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("club-") && name.ends_with(".seal") {
+            unfinished_seals.push(name.clone());
+        }
+        if let Some(id) = parse_club_table_id_from_filename(&name) {
+            max_id = Some(max_id.map_or(id, |m| m.max(id)));
+        }
+    }
+    if !unfinished_seals.is_empty() {
+        unfinished_seals.sort();
+        let seal_name = &unfinished_seals[0];
+        return Err(StructuredError::new(
+            "UNFINISHED_SEASON_EXISTS",
+            scrub_secret_text(&format!(
+                "unfinished season `{seal_name}` already exists in {}; refusing to overwrite",
+                dir.display()
+            )),
+            "Resume it with `--resume <PATH>`, finish & export its replay if completed, or choose another `--save-dir`.",
+            false,
+        ));
+    }
+    let next = max_id.map_or(1, |m| m.saturating_add(1)).max(1);
+    Ok(TableId(next))
+}
+
 /// Interactive Club Mode pre-game Lobby host session (`docs/club-mode-design.md` §1.2).
 ///
 /// Holds zero `ClubHost`, mandate, salt, or VRF state until `validate_and_start` validates every
-/// Lobby parameter, enforces CLI flag precedence (`CLI > Lobby`), and opens the first human seat's
-/// Privacy Curtain strictly via [`TuiHostSession::open_initial_curtain_for_active_human`].
+/// Lobby parameter, enforces CLI flag precedence (`CLI > Lobby`), refuses overwriting any existing
+/// unfinished `.seal` in `save_dir`, and opens the first human seat's Privacy Curtain strictly via
+/// [`TuiHostSession::open_initial_curtain_for_active_human`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LobbyHostSession {
     state: LobbyState,
@@ -2906,6 +2939,24 @@ impl LobbyHostSession {
     }
 
     /// Validates all Lobby settings (`dev` seed only, `4..=6` seats, `>= 1` human, valid clock),
+    /// allocates the next free `TableId` inside `save_dir` (refusing `UNFINISHED_SEASON_EXISTS` if
+    /// any `club-*.seal` still exists there), enforces CLI overrides, builds [`TuiHostSession`],
+    /// and opens Seat 0's Curtain cleanly via `open_curtain_for_seat`.
+    pub(crate) fn validate_and_start_in_dir(
+        &mut self,
+        bot_tie_seed: u64,
+        save_dir: Option<&Path>,
+    ) -> Result<TuiHostSession, StructuredError> {
+        let table_id = match save_dir {
+            Some(dir) => {
+                inspect_save_dir_for_new_season(dir).map_err(|err| self.record_refusal(err))?
+            }
+            None => TableId(1),
+        };
+        self.validate_and_start(table_id, bot_tie_seed, save_dir)
+    }
+
+    /// Validates all Lobby settings (`dev` seed only, `4..=6` seats, `>= 1` human, valid clock),
     /// enforces CLI overrides (`--turn-clock`, `--untimed`, `--pins`), builds the [`TuiHostSession`],
     /// and opens the first human seat's Curtain cleanly via `open_curtain_for_seat`.
     pub fn validate_and_start(
@@ -2946,6 +2997,9 @@ impl LobbyHostSession {
         bot_tie_seed: u64,
         save_dir: Option<&Path>,
     ) -> Result<TuiHostSession, StructuredError> {
+        if let Some(dir) = save_dir {
+            inspect_save_dir_for_new_season(dir).map_err(|err| self.record_refusal(err))?;
+        }
         let sc = match seat_count {
             4 => SeatCount::Four,
             5 => SeatCount::Five,
@@ -6864,6 +6918,20 @@ mod tests {
             run3_receipt_bytes, baseline_receipt_bytes,
             "mid-turn paused/resumed season must produce byte-identical PublicSweepReceipts"
         );
+        // C1: `wipe_seal_after_season_export` must still refuse in `AwaitingMandateReveal` and
+        // succeed only once `TurnPhase::Completed` is reached.
+        let standby_wipe_err = must_err(
+            run3.wipe_seal_after_season_export(&seal_path),
+            "cannot wipe .seal during AwaitingMandateReveal",
+        );
+        assert_eq!(standby_wipe_err.code, "SEASON_NOT_FINISHED");
+        for _ in 0..run3.seat_count() {
+            must_ok(
+                run3.apply_post_season_intent(SeatIntent::submit_mandate_reveal()),
+                "reveal mandate before C1 wipe",
+            );
+        }
+        assert_eq!(run3.phase(), TurnPhase::Completed);
 
         must_ok(
             run3.wipe_seal_after_season_export(&seal_path),
@@ -7907,6 +7975,194 @@ mod tests {
         assert!(fail_screen.contains("TUI_REPLAY_EXPORT_FAILED"));
         assert!(fail_screen.contains("Replay export failed"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn six_seat_mixed_humans_and_bots_end_of_season_hides_mandates_until_final_reveal() {
+        let dir = std::env::temp_dir().join(format!("ml_six_seat_eos_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        must_ok(std::fs::create_dir_all(&dir), "mkdir 6-seat eos");
+        let save_path = dir.join("club-81640.save.json");
+        let seal_path = dir.join("club-81640.seal");
+        let replay_path = dir.join("club-81640.replay.json");
+
+        let ring = dev_ring_table_for_seats(1, SeatCount::Six);
+        let deal_seed = distinct_mandate_deal_seed(&ring, &[0, 2, 4]);
+        let (mut session, mut headless, _cmap) = build_explicit_sessions(
+            &ring,
+            TableId(81_640),
+            &[0, 2, 4],
+            deal_seed,
+            [0x79; 32],
+            71,
+        );
+        assert_eq!(session.seat_count(), 6);
+        session.enable_autosave(save_path, seal_path.clone());
+
+        let vp = ViewportSize::new(100, 30);
+        let mut terminal = must_ok(Terminal::new(TestBackend::new(100, 30)), "100x30");
+        let mut frames = Vec::new();
+
+        // Play all 24..=32 turns through AwaitingMandateReveal on 6 seats (Humans=[0, 2, 4], Bots=[1, 3, 5]).
+        while session.phase() == TurnPhase::TalkAndMarket {
+            let t = session.turn();
+            let mut headless_bundles = vec![SealedOrderBundle::default(); 6];
+            for offset in 0..6 {
+                let s = u8::try_from((usize::from(t - 1) + offset) % 6).unwrap_or(0);
+                if matches!(s, 0 | 2 | 4) {
+                    unlock_curtain_and_capture(&mut session, &mut terminal, vp, &mut frames);
+                    assert_eq!(session.active_human_seat(), Some(Seat(s)));
+                    draw_and_capture(&session, &mut terminal, vp, t, Some(s), &mut frames);
+                    must_ok(session.handle_key_event(ctrl_key('l'), vp), "6-seat lock A");
+                } else {
+                    let obs = must_ok(headless.observe_seat(Seat(s)), "6-seat bot obs A");
+                    let m = *must_some(obs.own_mandate(), "6-seat bot m A");
+                    for act in ClubBot::new(headless.bot_tie_seed()).plan_pass_a(&obs, &m) {
+                        must_ok(headless.apply_market_action(act), "6-seat bot act A");
+                    }
+                }
+            }
+            must_ok(headless.begin_cancel_lock(), "6-seat headless cancel lock");
+            for offset in 0..6 {
+                let s = u8::try_from((usize::from(t - 1) + offset) % 6).unwrap_or(0);
+                if matches!(s, 0 | 2 | 4) {
+                    unlock_curtain_and_capture(&mut session, &mut terminal, vp, &mut frames);
+                    assert_eq!(session.active_human_seat(), Some(Seat(s)));
+                    draw_and_capture(&session, &mut terminal, vp, t, Some(s), &mut frames);
+                    must_ok(session.handle_key_event(ctrl_key('l'), vp), "6-seat lock B");
+                } else {
+                    let obs = must_ok(headless.observe_seat(Seat(s)), "6-seat bot obs B");
+                    let m = *must_some(obs.own_mandate(), "6-seat bot m B");
+                    let (acts, bundle) =
+                        ClubBot::new(headless.bot_tie_seed()).plan_pass_b_and_bundle(&obs, &m);
+                    for act in acts {
+                        must_ok(headless.apply_market_action(act), "6-seat bot act B");
+                    }
+                    headless_bundles[usize::from(s)] = bundle;
+                }
+            }
+            let mut reveals = BTreeMap::new();
+            for s in 0..6_u8 {
+                reveals.insert(
+                    s,
+                    OrderReveal {
+                        bundle: std::mem::take(&mut headless_bundles[usize::from(s)]),
+                        salt: must_ok(
+                            ClubSessionCheckpoint::turn_reveal_salt(&headless, Seat(s)),
+                            "6-seat headless salt",
+                        ),
+                    },
+                );
+            }
+            must_ok(headless.commit_and_reveal_all(&reveals), "6-seat commit");
+            must_ok(headless.sweep_turn(), "6-seat sweep");
+        }
+
+        assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
+        let (_sb, log, _sec, _met) =
+            must_ok(headless.finalize_club_season(), "6-seat finalize headless");
+        let (replay_out, _) = must_ok(replay_season_with_state_predicates(&log), "6-seat replay");
+        let mandates: Vec<MandateLeakSpec> = log
+            .mandate_reveals
+            .iter()
+            .map(|r| build_mandate_leak_spec(&must_some(r.as_ref(), "rev").mandate))
+            .collect();
+        let salt_hexes: Vec<String> = log
+            .mandate_reveals
+            .iter()
+            .map(|r| {
+                must_some(r.as_ref(), "rev")
+                    .salt
+                    .0
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect()
+            })
+            .collect();
+        let mut drawn_shocks = Vec::new();
+        for lt in &log.turns {
+            for shock in &lt.drawn_shocks {
+                drawn_shocks.push((shock.realize_turn, shock.forecast_turn, shock.magnitude_bps));
+            }
+        }
+
+        // Every AwaitingMandateReveal frame from 0/6 through 5/6 shows strictly public standby
+        // and ZERO mandates of any of the 6 seats.
+        for count in 0..6_usize {
+            draw_and_capture(
+                &session,
+                &mut terminal,
+                vp,
+                headless.turn(),
+                None,
+                &mut frames,
+            );
+            let txt = screen_text(&terminal);
+            assert!(txt.contains("Session Standby"));
+            assert!(txt.contains(&format!("{count}/6")));
+            assert!(!txt.contains("End of Season"));
+            for m in &mandates {
+                assert!(
+                    !txt.contains(&m.short_full) && !txt.contains(&m.bonus_line),
+                    "6-seat reveal frame {count}/6 leaked mandate `{}`:\n{txt}",
+                    m.short_full
+                );
+            }
+            if count + 1 < 6 {
+                must_ok(
+                    session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+                    "6-seat submit reveal",
+                );
+                assert_eq!(session.phase(), TurnPhase::AwaitingMandateReveal);
+            }
+        }
+        assert_no_season_leaks(
+            &frames,
+            &mandates,
+            &salt_hexes,
+            &replay_out.state_digests,
+            &drawn_shocks,
+        );
+
+        // 6th reveal transitions to Completed 4-tab End-of-Season showing all 6 seats & mandates.
+        must_ok(
+            session.handle_key_event(key_code(SeatKeyCode::Enter), vp),
+            "6-seat final reveal",
+        );
+        assert_eq!(session.phase(), TurnPhase::Completed);
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "6-seat draw tab 1")),
+            "6-seat draw tab 1",
+        );
+        let tab1 = screen_text(&terminal);
+        for s in 0..6 {
+            assert!(
+                tab1.contains(&format!("S{s} ")),
+                "Tab 1 missing S{s}:\n{tab1}"
+            );
+        }
+        must_ok(session.handle_key_event(key('2'), vp), "6-seat tab 2");
+        must_ok(
+            terminal.draw(|f| must_ok(session.render_current_frame(f), "6-seat draw tab 2")),
+            "6-seat draw tab 2",
+        );
+        let tab2 = screen_text(&terminal);
+        for m in &mandates {
+            assert!(
+                tab2.contains(&m.short_full),
+                "6-seat Tab 2 missing mandate `{}`:\n{tab2}",
+                m.short_full
+            );
+        }
+        must_ok(session.handle_key_event(key('4'), vp), "6-seat tab 4");
+        must_ok(session.handle_key_event(key('e'), vp), "6-seat export");
+        assert!(!seal_path.exists());
+        let exported = must_ok(
+            SeasonReplayLog::from_club_json_slice(&must_ok(std::fs::read(&replay_path), "read")),
+            "verify 6-seat exported replay",
+        );
+        assert_eq!(exported.turns.len(), log.turns.len());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

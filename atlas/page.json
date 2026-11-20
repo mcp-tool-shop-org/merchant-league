@@ -94,21 +94,21 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 4,
+      "changed": 14,
       "moved": 0,
-      "parts": 4,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-19; 4 files changed content.",
+        "sentence": "Nothing structural changed since 2026-11-19; 14 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "2b6dd8cb8a30cf0a5303c1d78ca6621fcfae64b6",
-      "generatedAt": "2026-11-19T23:16:19.267Z"
+      "commit": "d5564a379f17a3e3349ab60d4bb948511ab66b89",
+      "generatedAt": "2026-11-19T23:56:00.153Z"
     },
     "unchanged": true
   },
@@ -194,7 +194,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 6 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "d5564a379f17a3e3349ab60d4bb948511ab66b89",
+  "commit": "890d1f21ec47586bc25ff64e56eaa1edc4ebbb3a",
   "defaultBranch": "main",
   "derived": "14 parts, mostly Rust (373 files), JavaScript (4), shell (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 8 doors; the busiest is CI, which reaches 11 parts. It deploys a site to GitHub Pages. People run league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -613,12 +613,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-19T23:56:00.153Z",
+  "generatedAt": "2026-11-20T00:57:46.664Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "26 writes and 13 reads use paths built at run time and are not named here.",
+    "25 writes and 13 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "14 writes and 18 reads go to a path their caller passes, not to this repository.",
+    "14 writes and 19 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
@@ -676,7 +676,7 @@
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 26,
+  "unnamedWrites": 25,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "ea9291f54964bf57ac1e7d52b1a5869da008784b93f1885a5cd409ca3893afde",
+          "hash": "28bd873003af16572a7b262a189121063483937d9a115613c4abedefa22366ee",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -489,95 +489,95 @@
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1082
+              "line": 1085
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1089
+              "line": 1092
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1097
+              "line": 1100
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1110
+              "line": 1113
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1118
+              "line": 1121
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1137
+              "line": 1140
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1144
+              "line": 1147
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1150
+              "line": 1153
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1160
+              "line": 1163
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1183
+              "line": 1186
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 1228
+              "line": 1231
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 1270
+              "line": 1273
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 1271
+              "line": 1274
             },
             {
               "in": "wipe_seal_file",
               "kind": "err",
-              "line": 1271
+              "line": 1274
             },
             {
               "in": "write_atomic_bytes",
               "kind": "match-err",
-              "line": 1313
+              "line": 1316
             },
             {
               "in": "write_atomic_bytes",
               "kind": "err",
-              "line": 1320
+              "line": 1323
             },
             {
               "in": "write_atomic_bytes",
               "kind": "match-err",
-              "line": 1326
+              "line": 1329
             },
             {
               "in": "write_atomic_bytes",
               "kind": "err",
-              "line": 1328
+              "line": 1331
             }
           ],
-          "hash": "9f5a59ca48c111d4f233c99cf0f3335e03df7299c4bac2401570e966796b446a",
+          "hash": "d5e86558bba8fe23d693b3d3cec31fe57794e02300cbcfea1d6a5b53ab12352d",
           "importOrder": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -1947,7 +1947,7 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "bf74902ebacc522f5ae1287bfdc9adabe778bca789f5179628d2050b31309ad6",
+          "hash": "4ca6a23227e814e3457a6a0963eda37f302e074052951bddaf52cf1a2164ea17",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-core/src/types.rs",
@@ -6813,7 +6813,7 @@
           "path": "crates/league-seat-types/src/intent.rs"
         },
         {
-          "hash": "0e1a06383aa5e7e447cf09f3cbfd12b24cd249ae0a29728e71afa7bf4d6b93e6",
+          "hash": "5622cf76e4f2030a948d1ebc767ea5141e08332c7490333701212120a19b5958",
           "importOrder": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6846,7 +6846,7 @@
           "testsInside": true
         },
         {
-          "hash": "882ba0da10f6ea5cdd501a9b127031818b89931b5b55252f92ab5a41b6c53e1b",
+          "hash": "49bc703c8c9a1e3c5429b4ddbd5e4467432d26a29e008232b822cdf13f20f4e0",
           "importsFiles": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -6914,7 +6914,7 @@
           "path": "crates/league-seat-types/src/types.rs"
         },
         {
-          "hash": "e600f72adbc44c1fe5eb1be09b62d8f0db295a4533ccc2fdb4a01f951f882ba7",
+          "hash": "60aef7d760e28a74771034464dcb9f50bd245edd018c60bd298e1d11b860fb0f",
           "importsFiles": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/predicates_types.rs",
@@ -6994,7 +6994,7 @@
             "render_turn_screen",
             "title_view"
           ],
-          "hash": "dac16a78b34b6ce902baab3ffd73f3111e43a1a8f7ade40a9fdd56af5e178703",
+          "hash": "afe8e96345f6abbfdb875cdb79e568d31329c48b4ff796c5153adeda87b4a332",
           "importsFiles": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-seat-ui/src/composer.rs",
@@ -7822,7 +7822,7 @@
       "dynamicReads": 0,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
-      "dynamicWrites": 3,
+      "dynamicWrites": 2,
       "entryPoints": [
         "crates/league-tui/src/main.rs"
       ],
@@ -7833,13 +7833,15 @@
           "path": "crates/league-tui/Cargo.toml"
         },
         {
-          "entry": "map_crossterm_key",
+          "entry": "inspect_save_dir_for_new_season",
           "entryRule": 4,
           "exports": [
             "draw_screen_view",
+            "inspect_save_dir_for_new_season",
             "mandate_short_marker",
             "map_crossterm_key",
             "panic_hook_log_level",
+            "parse_club_table_id_from_filename",
             "scrub_tui_diagnostic_text",
             "set_panic_hook_log_level"
           ],
@@ -7857,82 +7859,92 @@
             {
               "in": "extract_revealed_mandates",
               "kind": "err",
-              "line": 1123
+              "line": 1077
             },
             {
               "in": "write_atomic_file_bytes",
               "kind": "match-err",
-              "line": 1170
+              "line": 1124
             },
             {
               "in": "write_atomic_file_bytes",
               "kind": "err",
-              "line": 1171
+              "line": 1125
             },
             {
               "in": "expire_active_seat_pass",
               "kind": "match-err",
-              "line": 1496
+              "line": 1450
             },
             {
               "in": "maybe_autosave",
               "kind": "match-err",
-              "line": 1561
+              "line": 1515
             },
             {
               "in": "maybe_autosave",
               "kind": "err",
-              "line": 1571
+              "line": 1525
             },
             {
               "in": "write_save_and_seal",
               "kind": "err",
-              "line": 1830
+              "line": 1784
             },
             {
               "in": "wipe_seal_after_season_export",
               "kind": "err",
-              "line": 1898
+              "line": 1852
             },
             {
               "in": "wipe_seal_after_season_export",
               "kind": "err",
-              "line": 1905
+              "line": 1859
             },
             {
               "in": "handle_key_event",
               "kind": "match-err",
-              "line": 2232
+              "line": 2198
             },
             {
               "in": "handle_key_event",
               "kind": "err",
-              "line": 2235
+              "line": 2201
             },
             {
               "in": "handle_key_event",
               "kind": "match-err",
-              "line": 2288
+              "line": 2254
             },
             {
               "in": "handle_key_event",
               "kind": "err",
-              "line": 2291
+              "line": 2257
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2319
+              "line": 2285
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2329
+              "line": 2295
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2361
+              "line": 2327
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "err",
+              "line": 2348
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "err",
+              "line": 2359
             },
             {
               "in": "apply_seat_intent",
@@ -7942,120 +7954,115 @@
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2393
+              "line": 2391
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2416
+              "line": 2424
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2425
+              "line": 2455
+            },
+            {
+              "in": "apply_seat_intent",
+              "kind": "match-err",
+              "line": 2473
             },
             {
               "in": "apply_seat_intent",
               "kind": "err",
-              "line": 2458
+              "line": 2475
             },
             {
-              "in": "apply_seat_intent",
+              "in": "apply_post_season_intent",
               "kind": "err",
               "line": 2489
             },
             {
-              "in": "apply_seat_intent",
-              "kind": "match-err",
-              "line": 2507
-            },
-            {
-              "in": "apply_seat_intent",
+              "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2509
+              "line": 2505
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2523
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "err",
-              "line": 2539
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "err",
-              "line": 2576
+              "line": 2542
             },
             {
               "in": "apply_post_season_intent",
               "kind": "match-err",
-              "line": 2599
+              "line": 2565
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2604
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "match-err",
-              "line": 2607
-            },
-            {
-              "in": "apply_post_season_intent",
-              "kind": "err",
-              "line": 2621
+              "line": 2570
             },
             {
               "in": "apply_post_season_intent",
               "kind": "match-err",
-              "line": 2623
+              "line": 2573
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2640
+              "line": 2587
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "match-err",
+              "line": 2589
             },
             {
               "in": "apply_post_season_intent",
               "kind": "err",
-              "line": 2648
+              "line": 2606
+            },
+            {
+              "in": "apply_post_season_intent",
+              "kind": "err",
+              "line": 2614
+            },
+            {
+              "in": "inspect_save_dir_for_new_season",
+              "kind": "err",
+              "line": 2825
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 2954
+              "line": 3008
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 2962
+              "line": 3016
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 2988
+              "line": 3042
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 2995
+              "line": 3049
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 3009
+              "line": 3063
             },
             {
               "in": "validate_params_and_start",
               "kind": "err",
-              "line": 3020
+              "line": 3074
             }
           ],
-          "hash": "7674c828053eadfdf0795bfc282f13ebff95631a301d1e46e44ed53f41734a44",
+          "hash": "9f39e201be48756059ddd5b19cfbdc9dc959cf43ec8e5b46e5a3c82d1f5f632b",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -8083,7 +8090,7 @@
             {
               "calls": [
                 {
-                  "line": 611,
+                  "line": 565,
                   "name": "from_plain",
                   "receiver": "ViewRow",
                   "target": {
@@ -8099,7 +8106,7 @@
             {
               "calls": [
                 {
-                  "line": 623,
+                  "line": 577,
                   "name": "Char",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8107,7 +8114,7 @@
                   }
                 },
                 {
-                  "line": 638,
+                  "line": 592,
                   "name": "F",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8115,7 +8122,7 @@
                   }
                 },
                 {
-                  "line": 647,
+                  "line": 601,
                   "name": "new",
                   "receiver": "SeatKeyEvent",
                   "target": {
@@ -8123,7 +8130,7 @@
                   }
                 },
                 {
-                  "line": 650,
+                  "line": 604,
                   "name": "Char",
                   "receiver": "SeatKeyCode",
                   "target": {
@@ -8131,7 +8138,7 @@
                   }
                 },
                 {
-                  "line": 654,
+                  "line": 608,
                   "name": "repeated",
                   "receiver": "SeatKeyEvent",
                   "target": {
@@ -8147,14 +8154,14 @@
             {
               "calls": [
                 {
-                  "line": 1106,
+                  "line": 1060,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 1104,
+                  "line": 1058,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8170,7 +8177,7 @@
             {
               "calls": [
                 {
-                  "line": 1114,
+                  "line": 1068,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8186,7 +8193,7 @@
               "calls": [
                 {
                   "branch": "log.mandate_reveals.len() != seat_count",
-                  "line": 1106,
+                  "line": 1060,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8195,7 +8202,7 @@
                 },
                 {
                   "branch": "log.mandate_reveals.len() != seat_count",
-                  "line": 1104,
+                  "line": 1058,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -8208,6 +8215,76 @@
               "invokedAtTopLevel": false,
               "isDefaultExport": false,
               "name": "extract_revealed_mandates"
+            },
+            {
+              "calls": [
+                {
+                  "branch": "!dir.exists()",
+                  "line": 2787,
+                  "name": "TableId",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 2792,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 2790,
+                  "name": "new",
+                  "receiver": "StructuredError",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 2806,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 2804,
+                  "name": "new",
+                  "receiver": "StructuredError",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "branch": "!unfinished_seals.is_empty()",
+                  "line": 2827,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "branch": "!unfinished_seals.is_empty()",
+                  "line": 2825,
+                  "name": "new",
+                  "receiver": "StructuredError",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                },
+                {
+                  "line": 2836,
+                  "name": "TableId",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "inspect_save_dir_for_new_season"
             }
           ],
           "testsInside": true
@@ -8219,140 +8296,145 @@
             {
               "in": "take_flag_value",
               "kind": "err",
-              "line": 109
+              "line": 110
             },
             {
               "in": "take_flag_value",
               "kind": "err",
-              "line": 114
+              "line": 115
             },
             {
               "in": "set_log_level_checked",
               "kind": "err",
-              "line": 128
+              "line": 129
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 248
+              "line": 249
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 255
+              "line": 256
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 265
+              "line": 266
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 310
+              "line": 311
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 314
+              "line": 315
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 332
+              "line": 333
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 336
+              "line": 337
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 338
+              "line": 339
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 349
+              "line": 350
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 361
+              "line": 362
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 374
+              "line": 375
             },
             {
               "in": "parse_args",
               "kind": "match-err",
-              "line": 385
+              "line": 386
             },
             {
               "in": "run_session_loop_with_sink",
               "kind": "match-err",
-              "line": 588
+              "line": 581
             },
             {
               "in": "run_session_loop_with_sink",
               "kind": "err",
-              "line": 599
+              "line": 592
             },
             {
               "in": "run_session_loop_with_sink",
               "kind": "match-err",
-              "line": 633
+              "line": 626
             },
             {
               "in": "default_dev_ring_table",
               "kind": "err",
-              "line": 667
+              "line": 661
             },
             {
               "in": "resolve_resume_paths_checked",
               "kind": "err",
-              "line": 680
+              "line": 674
             },
             {
               "in": "resolve_resume_paths_checked",
               "kind": "err",
-              "line": 728
+              "line": 752
+            },
+            {
+              "in": "build_session_for_cli",
+              "kind": "err",
+              "line": 779
             },
             {
               "in": "run_lobby_loop_with_sink",
               "kind": "match-err",
-              "line": 862
+              "line": 874
             },
             {
               "in": "run_interactive",
               "kind": "err",
-              "line": 884
+              "line": 896
             },
             {
               "in": "run_interactive",
               "kind": "err",
-              "line": 915
+              "line": 927
             },
             {
               "in": "run_interactive",
               "kind": "err",
-              "line": 938
+              "line": 950
             },
             {
               "in": "dispatch_cli_with_env",
               "kind": "match-err",
-              "line": 999
+              "line": 1011
             },
             {
               "in": "dispatch_cli_with_env",
               "kind": "match-err",
-              "line": 1012
+              "line": 1024
             }
           ],
-          "hash": "6159b07c1de07deb83efef9a5f5e3e0908820213c8fb6228fe5d4e9612b746ce",
+          "hash": "6b1f681623ed1e3baa45b543325a356fe6d522185f3b487ac1795bdf0fb05c37",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -8366,7 +8448,7 @@
             {
               "calls": [
                 {
-                  "line": 109,
+                  "line": 110,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8382,7 +8464,7 @@
               "calls": [
                 {
                   "branch": "let Some(prev) = *slot && prev != next",
-                  "line": 128,
+                  "line": 129,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8397,14 +8479,14 @@
             {
               "calls": [
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "default",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 144,
+                  "line": 145,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8419,7 +8501,7 @@
             {
               "calls": [
                 {
-                  "line": 171,
+                  "line": 172,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8435,7 +8517,7 @@
               "calls": [
                 {
                   "branch": "let Some(raw_env) = env_reader(host::LEAGUE_LOG_LEVEL_ENV) …",
-                  "line": 220,
+                  "line": 221,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8450,7 +8532,7 @@
             {
               "calls": [
                 {
-                  "line": 109,
+                  "line": 110,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8459,14 +8541,14 @@
                 },
                 {
                   "branch": "opts.untimed",
-                  "line": 259,
+                  "line": 260,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 266,
+                  "line": 267,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8474,7 +8556,7 @@
                 },
                 {
                   "branch": "!(MIN_TURN_CLOCK_SECS..=MAX_TURN_CLOCK_SECS).contains(&secs)",
-                  "line": 277,
+                  "line": 278,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8482,7 +8564,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 286,
+                  "line": 287,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8490,7 +8572,7 @@
                 },
                 {
                   "branch": "opts.turn_clock_secs.is_some()",
-                  "line": 291,
+                  "line": 292,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8498,14 +8580,14 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 300,
+                  "line": 301,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 312,
+                  "line": 313,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8513,14 +8595,14 @@
                 },
                 {
                   "branch": "let Some(prev) = seen_error_format && prev != parsed",
-                  "line": 319,
+                  "line": 320,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 334,
+                  "line": 335,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8528,7 +8610,7 @@
                 },
                 {
                   "branch": "let Some(prev) = *slot && prev != next",
-                  "line": 128,
+                  "line": 129,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8537,21 +8619,21 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 345,
+                  "line": 346,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 393,
+                  "line": 394,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 391,
+                  "line": 392,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8597,14 +8679,14 @@
             {
               "calls": [
                 {
-                  "line": 483,
+                  "line": 476,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 485,
+                  "line": 478,
                   "name": "panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8627,28 +8709,28 @@
             {
               "calls": [
                 {
-                  "line": 502,
+                  "line": 495,
                   "name": "title_view",
                   "target": {
                     "file": "crates/league-seat-ui/src/lib.rs"
                   }
                 },
                 {
-                  "line": 503,
+                  "line": 496,
                   "name": "draw_screen_view",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 509,
+                  "line": 502,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 510,
+                  "line": 503,
                   "name": "action_for",
                   "target": {
                     "file": "crates/league-seat-ui/src/lib.rs"
@@ -8663,14 +8745,14 @@
             {
               "calls": [
                 {
-                  "line": 531,
+                  "line": 524,
                   "name": "new",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8678,7 +8760,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8686,7 +8768,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8694,7 +8776,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8702,7 +8784,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8710,7 +8792,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8719,7 +8801,7 @@
                 },
                 {
                   "branch": "let Some(err) = render_err",
-                  "line": 599,
+                  "line": 592,
                   "name": "SessionHalted",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8727,7 +8809,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 603,
+                  "line": 596,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8735,7 +8817,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 603,
+                  "line": 596,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8743,7 +8825,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 604,
+                  "line": 597,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -8752,7 +8834,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 607,
+                  "line": 600,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8760,7 +8842,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 607,
+                  "line": 600,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8768,7 +8850,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 626,
+                  "line": 619,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -8776,7 +8858,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 626,
+                  "line": 619,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8784,7 +8866,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 632,
+                  "line": 625,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8800,42 +8882,42 @@
             {
               "calls": [
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8843,28 +8925,28 @@
                 },
                 {
                   "branch": "let Some(err) = render_err",
-                  "line": 599,
+                  "line": 592,
                   "name": "SessionHalted",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 603,
+                  "line": 596,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 603,
+                  "line": 596,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 604,
+                  "line": 597,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -8872,35 +8954,35 @@
                   }
                 },
                 {
-                  "line": 607,
+                  "line": 600,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 607,
+                  "line": 600,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 626,
+                  "line": 619,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 626,
+                  "line": 619,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 632,
+                  "line": 625,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8915,7 +8997,7 @@
             {
               "calls": [
                 {
-                  "line": 651,
+                  "line": 645,
                   "name": "default",
                   "receiver": "GeneratorConfig",
                   "target": {
@@ -8923,21 +9005,21 @@
                   }
                 },
                 {
-                  "line": 658,
+                  "line": 652,
                   "name": "is_reserved_test_seed",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
                   }
                 },
                 {
-                  "line": 658,
+                  "line": 652,
                   "name": "seed_pool",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
                   }
                 },
                 {
-                  "line": 661,
+                  "line": 655,
                   "name": "generate_ring_table_for_setup",
                   "target": {
                     "file": "crates/league-gen/src/lib.rs"
@@ -8953,7 +9035,7 @@
               "calls": [
                 {
                   "branch": "!target.exists()",
-                  "line": 680,
+                  "line": 674,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8961,14 +9043,30 @@
                 },
                 {
                   "branch": "target.is_dir()",
-                  "line": 688,
+                  "line": 682,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 720,
+                  "branch": "target.is_dir()",
+                  "line": 716,
+                  "name": "parse_club_table_id_from_filename",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  }
+                },
+                {
+                  "branch": "target.is_dir()",
+                  "line": 736,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  }
+                },
+                {
+                  "line": 744,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8976,7 +9074,7 @@
                 },
                 {
                   "branch": "!seal.exists()",
-                  "line": 728,
+                  "line": 752,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -8991,8 +9089,15 @@
             {
               "calls": [
                 {
-                  "branch": "let Some(resume_target) = &opts.resume_path",
-                  "line": 680,
+                  "line": 779,
+                  "name": "InvalidUsage",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  }
+                },
+                {
+                  "branch": "!target.exists()",
+                  "line": 674,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9000,77 +9105,52 @@
                   "via": "resolve_resume_paths_checked"
                 },
                 {
-                  "branch": "let Some(resume_target) = &opts.resume_path",
-                  "line": 756,
+                  "branch": "target.is_dir()",
+                  "line": 682,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "target.is_dir()",
+                  "line": 716,
+                  "name": "parse_club_table_id_from_filename",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "target.is_dir()",
+                  "line": 736,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "line": 744,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "!seal.exists()",
+                  "line": 752,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "line": 784,
                   "name": "read_save_and_seal",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  }
-                },
-                {
-                  "line": 651,
-                  "name": "default",
-                  "receiver": "GeneratorConfig",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 658,
-                  "name": "is_reserved_test_seed",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 658,
-                  "name": "seed_pool",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 661,
-                  "name": "generate_ring_table_for_setup",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 768,
-                  "name": "new",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  }
-                },
-                {
-                  "line": 768,
-                  "name": "LobbyValidation",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  }
-                },
-                {
-                  "line": 775,
-                  "name": "TableId",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  }
-                },
-                {
-                  "line": 775,
-                  "name": "from_ring_table",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  }
-                },
-                {
-                  "line": 776,
-                  "name": "LobbyValidation",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
@@ -9084,14 +9164,14 @@
             {
               "calls": [
                 {
-                  "line": 804,
+                  "line": 816,
                   "name": "new",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 827,
+                  "line": 839,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9099,7 +9179,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 827,
+                  "line": 839,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9107,7 +9187,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 834,
+                  "line": 846,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9115,7 +9195,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 834,
+                  "line": 846,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9123,7 +9203,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 835,
+                  "line": 847,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -9132,7 +9212,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 838,
+                  "line": 850,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9140,7 +9220,7 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 838,
+                  "line": 850,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9148,18 +9228,10 @@
                   "via": "run_lobby_loop_with_sink"
                 },
                 {
-                  "line": 843,
+                  "line": 855,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
-                  },
-                  "via": "run_lobby_loop_with_sink"
-                },
-                {
-                  "line": 851,
-                  "name": "TableId",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
                   },
                   "via": "run_lobby_loop_with_sink"
                 }
@@ -9172,42 +9244,42 @@
             {
               "calls": [
                 {
-                  "line": 822,
+                  "line": 834,
                   "name": "new",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 827,
+                  "line": 839,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 827,
+                  "line": 839,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 834,
+                  "line": 846,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 834,
+                  "line": 846,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 835,
+                  "line": 847,
                   "name": "new",
                   "receiver": "ViewportSize",
                   "target": {
@@ -9215,31 +9287,24 @@
                   }
                 },
                 {
-                  "line": 838,
+                  "line": 850,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 838,
+                  "line": 850,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 843,
+                  "line": 855,
                   "name": "map_crossterm_key",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
-                  }
-                },
-                {
-                  "line": 851,
-                  "name": "TableId",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
                   }
                 }
               ],
@@ -9251,8 +9316,16 @@
             {
               "calls": [
                 {
-                  "branch": "let Some(resume_target) = &opts.resume_path",
-                  "line": 680,
+                  "line": 779,
+                  "name": "InvalidUsage",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "build_session_for_cli"
+                },
+                {
+                  "branch": "!target.exists()",
+                  "line": 674,
                   "name": "InvalidResumeTarget",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9260,8 +9333,51 @@
                   "via": "resolve_resume_paths_checked"
                 },
                 {
-                  "branch": "let Some(resume_target) = &opts.resume_path",
-                  "line": 756,
+                  "branch": "target.is_dir()",
+                  "line": 682,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "target.is_dir()",
+                  "line": 716,
+                  "name": "parse_club_table_id_from_filename",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "target.is_dir()",
+                  "line": 736,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "line": 744,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "branch": "!seal.exists()",
+                  "line": 752,
+                  "name": "InvalidResumeTarget",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "resolve_resume_paths_checked"
+                },
+                {
+                  "line": 784,
                   "name": "read_save_and_seal",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9269,122 +9385,49 @@
                   "via": "build_session_for_cli"
                 },
                 {
-                  "line": 651,
-                  "name": "default",
-                  "receiver": "GeneratorConfig",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 658,
-                  "name": "is_reserved_test_seed",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 658,
-                  "name": "seed_pool",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 661,
-                  "name": "generate_ring_table_for_setup",
-                  "target": {
-                    "file": "crates/league-gen/src/lib.rs"
-                  },
-                  "via": "default_dev_ring_table"
-                },
-                {
-                  "line": 768,
-                  "name": "new",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  },
-                  "via": "build_session_for_cli"
-                },
-                {
-                  "line": 768,
-                  "name": "LobbyValidation",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  },
-                  "via": "build_session_for_cli"
-                },
-                {
-                  "line": 775,
-                  "name": "TableId",
-                  "target": {
-                    "file": "crates/league-core/src/lib.rs"
-                  },
-                  "via": "build_session_for_cli"
-                },
-                {
-                  "line": 775,
-                  "name": "from_ring_table",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  },
-                  "via": "build_session_for_cli"
-                },
-                {
-                  "line": 776,
-                  "name": "LobbyValidation",
-                  "target": {
-                    "file": "crates/league-tui/src/host.rs"
-                  },
-                  "via": "build_session_for_cli"
-                },
-                {
-                  "line": 898,
+                  "line": 910,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 898,
+                  "line": 910,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 902,
+                  "line": 914,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 902,
+                  "line": 914,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 905,
+                  "line": 917,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
                   }
                 },
                 {
-                  "line": 905,
+                  "line": 917,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9392,7 +9435,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 576,
+                  "line": 569,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9400,7 +9443,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9408,7 +9451,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 582,
+                  "line": 575,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9416,7 +9459,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9424,7 +9467,7 @@
                   "via": "run_session_loop_with_sink"
                 },
                 {
-                  "line": 592,
+                  "line": 585,
                   "name": "TerminalIo",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9433,10 +9476,35 @@
                 },
                 {
                   "branch": "let Some(err) = render_err",
-                  "line": 599,
+                  "line": 592,
                   "name": "SessionHalted",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "run_session_loop_with_sink"
+                },
+                {
+                  "line": 596,
+                  "name": "scrub_secret_text",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  },
+                  "via": "run_session_loop_with_sink"
+                },
+                {
+                  "line": 596,
+                  "name": "TerminalIo",
+                  "target": {
+                    "file": "crates/league-tui/src/host.rs"
+                  },
+                  "via": "run_session_loop_with_sink"
+                },
+                {
+                  "line": 597,
+                  "name": "new",
+                  "receiver": "ViewportSize",
+                  "target": {
+                    "file": "crates/league-seat-types/src/lib.rs"
                   },
                   "via": "run_session_loop_with_sink"
                 }
@@ -9450,7 +9518,7 @@
             {
               "calls": [
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "default",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9458,7 +9526,7 @@
                   "via": "infer_error_format_best_effort"
                 },
                 {
-                  "line": 144,
+                  "line": 145,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9466,14 +9534,14 @@
                   "via": "infer_error_format_best_effort"
                 },
                 {
-                  "line": 968,
+                  "line": 980,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 109,
+                  "line": 110,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9482,7 +9550,7 @@
                 },
                 {
                   "branch": "opts.untimed",
-                  "line": 259,
+                  "line": 260,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9490,7 +9558,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 266,
+                  "line": 267,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9499,7 +9567,7 @@
                 },
                 {
                   "branch": "!(MIN_TURN_CLOCK_SECS..=MAX_TURN_CLOCK_SECS).contains(&secs)",
-                  "line": 277,
+                  "line": 278,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9508,7 +9576,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 286,
+                  "line": 287,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9517,7 +9585,7 @@
                 },
                 {
                   "branch": "opts.turn_clock_secs.is_some()",
-                  "line": 291,
+                  "line": 292,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9526,7 +9594,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 300,
+                  "line": 301,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9534,7 +9602,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 312,
+                  "line": 313,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9543,7 +9611,7 @@
                 },
                 {
                   "branch": "let Some(prev) = seen_error_format && prev != parsed",
-                  "line": 319,
+                  "line": 320,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9551,7 +9619,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 334,
+                  "line": 335,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9560,7 +9628,7 @@
                 },
                 {
                   "branch": "let Some(prev) = *slot && prev != next",
-                  "line": 128,
+                  "line": 129,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9569,7 +9637,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 345,
+                  "line": 346,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9577,7 +9645,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 393,
+                  "line": 394,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9585,7 +9653,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 391,
+                  "line": 392,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9594,7 +9662,7 @@
                 },
                 {
                   "branch": "let Some(raw_env) = env_reader(host::LEAGUE_LOG_LEVEL_ENV) …",
-                  "line": 220,
+                  "line": 221,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9602,14 +9670,14 @@
                   "via": "resolve_log_level"
                 },
                 {
-                  "line": 1005,
+                  "line": 1017,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
                   }
                 },
                 {
-                  "line": 1006,
+                  "line": 1018,
                   "name": "new",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9624,7 +9692,7 @@
             {
               "calls": [
                 {
-                  "line": 171,
+                  "line": 172,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9632,7 +9700,7 @@
                   "via": "infer_log_level_best_effort"
                 },
                 {
-                  "line": 483,
+                  "line": 476,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9640,7 +9708,7 @@
                   "via": "install_redacting_panic_hook_with_level"
                 },
                 {
-                  "line": 485,
+                  "line": 478,
                   "name": "panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9665,7 +9733,7 @@
                   "via": "format_panic_output"
                 },
                 {
-                  "line": 139,
+                  "line": 140,
                   "name": "default",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9673,7 +9741,7 @@
                   "via": "infer_error_format_best_effort"
                 },
                 {
-                  "line": 144,
+                  "line": 145,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9681,7 +9749,7 @@
                   "via": "infer_error_format_best_effort"
                 },
                 {
-                  "line": 968,
+                  "line": 980,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9689,7 +9757,7 @@
                   "via": "dispatch_cli_with_env"
                 },
                 {
-                  "line": 109,
+                  "line": 110,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9698,7 +9766,7 @@
                 },
                 {
                   "branch": "opts.untimed",
-                  "line": 259,
+                  "line": 260,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9706,7 +9774,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 266,
+                  "line": 267,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9715,7 +9783,7 @@
                 },
                 {
                   "branch": "!(MIN_TURN_CLOCK_SECS..=MAX_TURN_CLOCK_SECS).contains(&secs)",
-                  "line": 277,
+                  "line": 278,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9724,7 +9792,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 286,
+                  "line": 287,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9733,7 +9801,7 @@
                 },
                 {
                   "branch": "opts.turn_clock_secs.is_some()",
-                  "line": 291,
+                  "line": 292,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9742,7 +9810,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 300,
+                  "line": 301,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9750,7 +9818,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 312,
+                  "line": 313,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9759,7 +9827,7 @@
                 },
                 {
                   "branch": "let Some(prev) = seen_error_format && prev != parsed",
-                  "line": 319,
+                  "line": 320,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9767,7 +9835,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 334,
+                  "line": 335,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9776,7 +9844,7 @@
                 },
                 {
                   "branch": "let Some(prev) = *slot && prev != next",
-                  "line": 128,
+                  "line": 129,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9785,7 +9853,7 @@
                 },
                 {
                   "branch": "inline_val.is_some()",
-                  "line": 345,
+                  "line": 346,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9793,7 +9861,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 393,
+                  "line": 394,
                   "name": "scrub_secret_text",
                   "target": {
                     "file": "crates/league-core/src/lib.rs"
@@ -9801,7 +9869,7 @@
                   "via": "parse_args"
                 },
                 {
-                  "line": 391,
+                  "line": 392,
                   "name": "InvalidUsage",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9810,7 +9878,7 @@
                 },
                 {
                   "branch": "let Some(raw_env) = env_reader(host::LEAGUE_LOG_LEVEL_ENV) …",
-                  "line": 220,
+                  "line": 221,
                   "name": "parse",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9818,7 +9886,7 @@
                   "via": "resolve_log_level"
                 },
                 {
-                  "line": 1005,
+                  "line": 1017,
                   "name": "set_panic_hook_log_level",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9826,7 +9894,7 @@
                   "via": "dispatch_cli_with_env"
                 },
                 {
-                  "line": 1006,
+                  "line": 1018,
                   "name": "new",
                   "target": {
                     "file": "crates/league-tui/src/host.rs"
@@ -9851,14 +9919,14 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 1,
+          "reads": 2,
           "where": [
             "caller"
           ],
           "writes": 1
         }
       ],
-      "outsideReads": 1,
+      "outsideReads": 2,
       "outsideWrites": 1,
       "role": "code",
       "testRunners": [
@@ -9889,7 +9957,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "9e136071bd53883e3a6fe27e6549225af30d52ee43475ea27397facc5fb8474d",
+          "hash": "45088b877dce8d1d7bfa3c6bc38a4e6202dbcaa546e9a96091b9f5982b20cd54",
           "path": "CHANGELOG.md"
         },
         {
@@ -9929,7 +9997,7 @@
           "path": "README.ja.md"
         },
         {
-          "hash": "4a15411a2e2c5f8f7e1ec9aaa57a5a25fd54e4ab946cd0078b5e2eec90e219c7",
+          "hash": "aa0175055741a0fc2b910afadcafe7c3af636a71e652df5e2a68d96c8bfca861",
           "path": "README.md"
         },
         {
@@ -9945,7 +10013,7 @@
           "path": "SECURITY.md"
         },
         {
-          "hash": "13ce874b97417ce95af69ed8bb80ce7a430b20fd11d5c6d536d2e91628e58a4c",
+          "hash": "e2a331552046bef6e03b0822f585c75291a470d5100f6367634d8ccf0b8bf161",
           "path": "SHIP_GATE.md"
         },
         {
@@ -11315,7 +11383,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "d5564a379f17a3e3349ab60d4bb948511ab66b89",
+    "commit": "890d1f21ec47586bc25ff64e56eaa1edc4ebbb3a",
     "tracked": 576
   },
   "landings": [
@@ -12398,11 +12466,11 @@
       "path": "site/src/content/docs/handbook/index.md"
     },
     {
-      "hash": "a35258c1167f1a827ff86c781b0eb33fbd735401c2a1bd3bbdf316567e4a84d5",
+      "hash": "86cec97a1c4e61a6ce8f4e8302749841e7afcd46a122d65b90d7f0f95a2f6a76",
       "path": "site/src/content/docs/handbook/playing-a-turn.md"
     },
     {
-      "hash": "2ab1136c2b1b254cda4150198319984b447c120b33bc1c2c547caa6c590a7b6b",
+      "hash": "6a4724b4ad4f896ff68b6b9f258e24e02fcb542d1e877dd76e3612f87aadd2e9",
       "path": "site/src/content/docs/handbook/reference.md"
     },
     {

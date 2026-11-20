@@ -1103,6 +1103,31 @@ fn every_checkpoint_and_seal_validation_rule_refuses_bad_seal_by_name() {
         b"{not_json".to_vec(),
     );
     idx += 1;
+    // C5: Serde type mismatch inside `.seal` must return MALFORMED_SEAL_JSON without quoting
+    // raw field values from the malformed JSON.
+    {
+        let mut quoted_seal = base_seal.clone();
+        quoted_seal["session_turn_clock_secs"] = serde_json::json!("SEAL_VALUE_QUOTE_SECRET_4411");
+        let sp = dir.join(format!("save-{idx}.json"));
+        let sl = dir.join(format!("seal-{idx}.seal"));
+        must_ok(
+            std::fs::write(&sp, must_ok(serde_json::to_vec_pretty(&base_save), "vec")),
+            "write save c5",
+        );
+        must_ok(
+            std::fs::write(&sl, must_ok(serde_json::to_vec(&quoted_seal), "vec")),
+            "write seal c5",
+        );
+        let err = must_err(ClubHost::read_save_and_seal(&sp, &sl), "c5 seal type err");
+        let structured = err.to_structured_error();
+        let combined = format!("{} | {} | {}", structured.code, err, structured.message);
+        assert!(combined.contains("MALFORMED_SEAL_JSON"), "{combined}");
+        assert!(
+            !combined.contains("SEAL_VALUE_QUOTE_SECRET_4411"),
+            "MALFORMED_SEAL_JSON must never echo malformed seal field values: {combined}"
+        );
+        idx += 1;
+    }
     check_case(
         idx,
         "UNSUPPORTED_REPLAY_VERSION",

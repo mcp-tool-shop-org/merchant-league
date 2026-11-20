@@ -16,6 +16,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use league_core::{TableId, ToStructuredError as _, scrub_secret_text};
+#[cfg(test)]
 use league_gen::{
     GeneratorConfig, RingTable, SeatCount, SeedPool, TablePurpose, TableSetupOptions,
     generate_ring_table_for_setup, is_reserved_test_seed, seed_pool,
@@ -429,20 +430,19 @@ fn format_panic_output(
     payload: &str,
     location: Option<&str>,
     level: host::LogLevel,
-    extra_markers: &[String],
     backtrace_text: Option<&str>,
 ) -> String {
     let collapsed = payload.replace(['\r', '\n'], " ");
-    let scrubbed_msg = host::scrub_tui_diagnostic_text(&collapsed, extra_markers);
+    let scrubbed_msg = host::scrub_tui_diagnostic_text(&collapsed);
     let loc = match location {
-        Some(raw) => host::scrub_tui_diagnostic_text(raw, extra_markers),
+        Some(raw) => host::scrub_tui_diagnostic_text(raw),
         None => "unknown".to_owned(),
     };
     let mut out = format!("panic at {loc}: {scrubbed_msg}\n");
     if level == host::LogLevel::Debug
         && let Some(bt) = backtrace_text
     {
-        let scrubbed_bt = host::scrub_tui_diagnostic_text(bt, extra_markers);
+        let scrubbed_bt = host::scrub_tui_diagnostic_text(bt);
         out.push_str(&format!("stack backtrace:\n{scrubbed_bt}\n"));
     }
     out
@@ -451,7 +451,6 @@ fn format_panic_output(
 fn handle_panic_with_restore(
     info: &std::panic::PanicHookInfo<'_>,
     level: host::LogLevel,
-    extra_markers: &[String],
     restore_terminal: &mut dyn FnMut(),
     err_out: &mut dyn io::Write,
 ) {
@@ -468,13 +467,7 @@ fn handle_panic_with_restore(
         .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()));
     let bt_owned = (level == host::LogLevel::Debug)
         .then(|| std::backtrace::Backtrace::force_capture().to_string());
-    let rendered = format_panic_output(
-        payload,
-        loc_owned.as_deref(),
-        level,
-        extra_markers,
-        bt_owned.as_deref(),
-    );
+    let rendered = format_panic_output(payload, loc_owned.as_deref(), level, bt_owned.as_deref());
     let _ = err_out.write_all(rendered.as_bytes());
     let _ = err_out.flush();
 }
@@ -484,7 +477,7 @@ fn install_redacting_panic_hook_with_level(level: host::LogLevel) {
     std::panic::set_hook(Box::new(|info| {
         let level = host::panic_hook_log_level();
         let mut stderr = io::stderr();
-        handle_panic_with_restore(info, level, &[], &mut restore_cooked_terminal, &mut stderr);
+        handle_panic_with_restore(info, level, &mut restore_cooked_terminal, &mut stderr);
     }));
 }
 
@@ -645,6 +638,7 @@ where
     }
 }
 
+#[cfg(test)]
 fn default_dev_ring_table() -> io::Result<RingTable> {
     let cfg = GeneratorConfig {
         seat_count: Some(SeatCount::Four),
@@ -707,8 +701,38 @@ fn resolve_resume_paths_checked(target: &Path) -> Result<(PathBuf, PathBuf), hos
                 matches.push(path);
             }
         }
-        matches.sort();
-        let save = matches.into_iter().next().ok_or_else(|| {
+        matches.sort_by(|a, b| {
+            let name_a = a
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let name_b = b
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let key_a = (
+                host::parse_club_table_id_from_filename(&name_a).unwrap_or(u64::MAX),
+                name_a,
+            );
+            let key_b = (
+                host::parse_club_table_id_from_filename(&name_b).unwrap_or(u64::MAX),
+                name_b,
+            );
+            key_a.cmp(&key_b)
+        });
+        let preferred = matches
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_suffix(".save.json"))
+                    .is_some_and(|stem| p.with_file_name(format!("{stem}.seal")).exists())
+            })
+            .cloned()
+            .or_else(|| matches.into_iter().next());
+        let save = preferred.ok_or_else(|| {
             host::TuiError::InvalidResumeTarget(format!(
                 "no club-*.save.json found in {}",
                 target.display()
@@ -751,33 +775,21 @@ fn apply_cli_session_options(
 }
 
 fn build_session_for_cli(opts: &CliOptions) -> Result<host::TuiHostSession, host::TuiError> {
-    if let Some(resume_target) = &opts.resume_path {
-        let (save_path, seal_path) = resolve_resume_paths_checked(resume_target)?;
-        let mut session = host::TuiHostSession::read_save_and_seal(&save_path, &seal_path, None)
-            .map_err(host::TuiError::SaveLoadFailed)?;
-        apply_cli_session_options(&mut session, opts, true);
-        if let Some(save_dir) = &opts.save_dir {
-            let (s_path, k_path) = default_save_paths(save_dir, session.table_id());
-            session.enable_autosave(s_path, k_path);
-        } else {
-            session.enable_autosave(save_path, seal_path);
-        }
-        return Ok(session);
+    let Some(resume_target) = &opts.resume_path else {
+        return Err(host::TuiError::InvalidUsage(
+            "--resume <PATH> is required to load a saved session".to_owned(),
+        ));
+    };
+    let (save_path, seal_path) = resolve_resume_paths_checked(resume_target)?;
+    let mut session = host::TuiHostSession::read_save_and_seal(&save_path, &seal_path, None)
+        .map_err(host::TuiError::SaveLoadFailed)?;
+    apply_cli_session_options(&mut session, opts, true);
+    if let Some(save_dir) = &opts.save_dir {
+        let (s_path, k_path) = default_save_paths(save_dir, session.table_id());
+        session.enable_autosave(s_path, k_path);
+    } else {
+        session.enable_autosave(save_path, seal_path);
     }
-    let ring = default_dev_ring_table().map_err(|err| {
-        host::TuiError::LobbyValidation(league_core::StructuredError::new(
-            "NO_FEASIBLE_TABLE",
-            err.to_string(),
-            "Try another dev seed.",
-            false,
-        ))
-    })?;
-    let mut session = host::TuiHostSession::from_ring_table(&ring, TableId(1), &[0], 1)
-        .map_err(|err| host::TuiError::LobbyValidation(err.to_structured_error()))?;
-    apply_cli_session_options(&mut session, opts, false);
-    let save_dir = opts.save_dir.clone().unwrap_or_else(|| PathBuf::from("."));
-    let (save_path, seal_path) = default_save_paths(&save_dir, session.table_id());
-    session.enable_autosave(save_path, seal_path);
     Ok(session)
 }
 
@@ -848,7 +860,7 @@ where
                             return Ok(None);
                         }
                         LobbyAction::StartSeason => {
-                            match lobby.validate_and_start(TableId(1), 1, save_dir) {
+                            match lobby.validate_and_start_in_dir(1, save_dir) {
                                 Ok(session) => {
                                     diag_sink.emit(
                                         host::LogLevel::Verbose,
@@ -3024,16 +3036,6 @@ mod tests {
                 "INVALID_RESUME_TARGET",
             ),
             (
-                host::TuiError::LobbyValidation(StructuredError::new(
-                    "RESERVED_SEED_FORBIDDEN",
-                    "reserved seed 1000000",
-                    "Use 0..=9999.",
-                    false,
-                )),
-                1,
-                "RESERVED_SEED_FORBIDDEN",
-            ),
-            (
                 host::TuiError::AutosaveFailed {
                     save_path: PathBuf::from("saves/club-1.save.json"),
                     cause: StructuredError::new(
@@ -3314,95 +3316,94 @@ mod tests {
     }
 
     #[test]
-    fn all_four_log_levels_suppress_alternate_screen_writes_and_redact_all_five_secret_markers()
+    fn real_session_all_four_log_levels_and_panic_hook_emit_no_private_values_and_suppress_alt_screen()
     -> Result<(), Box<dyn std::error::Error>> {
         use crossterm::event::KeyEventKind;
 
-        let dir = std::env::temp_dir().join(format!("ml_log_levels_test_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)?;
-
-        let ring = default_dev_ring_table()?;
-        let mut session =
-            host::TuiHostSession::from_ring_table(&ring, TableId(81_703), &[0, 1], 19)?;
-        session.enable_seat_pins();
-
-        let planted_pin = "4829";
-        let planted_note = "SECRET_LOG_NOTE_marker_991";
-        let planted_debt_num = "765432";
-        let obs0 = session.build_seat_observation(league_core::Seat(0))?;
-        let planted_mandate =
-            host::mandate_short_marker(obs0.own_mandate().ok_or("s0 mandate")?.kind);
-        let planted_salt_hex = session.turn_reveal_salt_hex(league_core::Seat(0))?;
-        let planted_xrpl = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
-        let planted_api_key = "sk-or-v1-logSecretKey77";
-
-        // Drive Seat 0 to set PIN `"4829"`, stage private note & debt order `"765432"`, then lock.
         let key_ev = |code: KeyCode, mods: KeyModifiers| {
             let mut k = KeyEvent::new(code, mods);
             k.kind = KeyEventKind::Press;
             Event::Key(k)
         };
-        let mut init_events: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
-            (
-                host::CURTAIN_LIFT_DEAD_TIME,
-                Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
-                Vec::new(),
-            ),
-            (
-                Duration::ZERO,
-                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
-                Vec::new(),
-            ),
-        ];
-        for d in planted_pin.chars() {
-            init_events.push((
-                Duration::ZERO,
-                Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
-                Vec::new(),
-            ));
-        }
-        init_events.push((
-            Duration::ZERO,
-            Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
-            Vec::new(),
-        ));
-        init_events.push((
-            host::CURTAIN_LIFT_DEAD_TIME,
-            Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
-            Vec::new(),
-        ));
-        for ch in planted_note.chars() {
-            init_events.push((
-                Duration::ZERO,
-                Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
-                Vec::new(),
-            ));
-        }
-        init_events.push((
-            Duration::ZERO,
-            Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
-            Vec::new(),
-        ));
 
-        let mut init_script = ScriptedSessionEvents::from_timed_with_queued(init_events);
-        let mut init_term = Terminal::new(TestBackend::new(100, 30))?;
-        run_session_loop(&mut init_term, &mut session, &mut init_script)?;
-        session.apply_seat_intent(
-            league_core::Seat(0),
-            league_seat_types::SeatIntent::update_bundle(
-                league_seat_types::BundleDraftAction::SetDebtRepaymentCred(765_432),
-            ),
-        )?;
+        let ring = default_dev_ring_table()?;
+        let planted_pin = "4829";
+        let planted_note = "REAL_PATH_NOTE_991";
+        let planted_debt_num = "765432";
+        let planted_xrpl = "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r";
+        let planted_api_key = "sk-or-v1-logSecretKey77";
 
-        // Exercise all 4 levels via CLI flags + env fallback (`LEAGUE_LOG_LEVEL`).
+        // Exercise all 4 log levels through real `run_session_loop_with_sink` (zero test-supplied
+        // redaction markers) AND through the real `handle_panic_with_restore` panic hook.
         for level in [
             host::LogLevel::Silent,
             host::LogLevel::Normal,
             host::LogLevel::Verbose,
             host::LogLevel::Debug,
         ] {
+            let dir = std::env::temp_dir().join(format!(
+                "ml_real_log_level_{}_{}",
+                level.as_str(),
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir)?;
             let log_file_path = dir.join(format!("diag-{}.log", level.as_str()));
+
+            let mut session =
+                host::TuiHostSession::from_ring_table(&ring, TableId(81_703), &[0], 19)?;
+            session.enable_seat_pins();
+            session.open_initial_curtain_for_active_human();
+
+            let obs0 = session.build_seat_observation(league_core::Seat(0))?;
+            let planted_mandate =
+                host::mandate_short_marker(obs0.own_mandate().ok_or("s0 mandate")?.kind);
+            let planted_salt_hex = session.turn_reveal_salt_hex(league_core::Seat(0))?;
+            let salt_prefix = &planted_salt_hex[..16];
+
+            // Drive Pass A: set PIN "4829", enter Vault note "REAL_PATH_NOTE_991", commit note.
+            let mut pass_a_events_vec: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
+                (
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+            ];
+            for d in planted_pin.chars() {
+                pass_a_events_vec.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            pass_a_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            pass_a_events_vec.push((
+                host::CURTAIN_LIFT_DEAD_TIME,
+                Some(key_ev(KeyCode::Char('n'), KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            for ch in planted_note.chars() {
+                pass_a_events_vec.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(ch), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            pass_a_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+
             let written = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
             let mut alt_term = Terminal::new(FixedSizeCrosstermBackend::new(
                 SharedVecWriter(written.clone()),
@@ -3410,45 +3411,83 @@ mod tests {
                 30,
             ))?;
             let mut sink = host::TuiDiagnosticSink::new(level, Some(log_file_path.clone()));
-            sink.add_redaction_markers([
-                planted_pin,
-                planted_note,
-                planted_mandate.as_str(),
-                planted_debt_num,
-                planted_salt_hex.as_str(),
-            ]);
             sink.set_alternate_screen_active(true);
 
-            let mut step_events = ScriptedSessionEvents::from_timed_with_queued([(
+            let mut pass_a_script =
+                ScriptedSessionEvents::from_timed_with_queued(pass_a_events_vec);
+            run_session_loop_with_sink(&mut alt_term, &mut session, &mut pass_a_script, &mut sink)?;
+
+            // Stage a debt repayment + preimage escrow order, then lock Pass A -> Pass B -> unlock
+            // with PIN -> lock Pass B -> execute full Turn 1 Sweep into Turn 2.
+            session.apply_seat_intent(
+                league_core::Seat(0),
+                league_seat_types::SeatIntent::update_bundle(
+                    league_seat_types::BundleDraftAction::SetDebtRepaymentCred(765_432),
+                ),
+            )?;
+            session.apply_seat_intent(
+                league_core::Seat(0),
+                league_seat_types::SeatIntent::update_bundle(
+                    league_seat_types::BundleDraftAction::StageEscrowFinish(
+                        league_seat_types::EscrowFinishUnlock {
+                            escrow_id: 88,
+                            preimage: Some(league_core::PreimageSecret([0x5A; 32])),
+                        },
+                    ),
+                ),
+            )?;
+
+            let mut sweep_events_vec: Vec<(Duration, Option<Event>, Vec<Event>)> = vec![
+                (
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+                    Vec::new(),
+                ),
+                (
+                    host::CURTAIN_LIFT_DEAD_TIME,
+                    Some(key_ev(KeyCode::Char(' '), KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+                (
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                    Vec::new(),
+                ),
+            ];
+            for d in planted_pin.chars() {
+                sweep_events_vec.push((
+                    Duration::ZERO,
+                    Some(key_ev(KeyCode::Char(d), KeyModifiers::NONE)),
+                    Vec::new(),
+                ));
+            }
+            sweep_events_vec.push((
+                Duration::ZERO,
+                Some(key_ev(KeyCode::Enter, KeyModifiers::NONE)),
+                Vec::new(),
+            ));
+            sweep_events_vec.push((
                 host::CURTAIN_LIFT_DEAD_TIME,
                 Some(key_ev(KeyCode::Char('l'), KeyModifiers::CONTROL)),
                 Vec::new(),
-            )]);
-            run_session_loop_with_sink(&mut alt_term, &mut session, &mut step_events, &mut sink)?;
+            ));
+            let mut sweep_script = ScriptedSessionEvents::from_timed_with_queued(sweep_events_vec);
+            sweep_script.clock = pass_a_script.elapsed();
+            run_session_loop_with_sink(&mut alt_term, &mut session, &mut sweep_script, &mut sink)?;
+            assert_eq!(
+                session.turn(),
+                2,
+                "real Sweep must advance session to Turn 2"
+            );
 
-            // While alternate screen was active, zero diagnostic lines hit stdout/stderr or `SharedVecWriter`.
+            // While alternate screen was active, zero diagnostic lines hit `SharedVecWriter`, and
+            // `flush_after_restore` emits nothing before restore.
             let alt_bytes = String::from_utf8_lossy(&written.borrow()).into_owned();
             assert!(
                 !alt_bytes.contains("[normal]")
                     && !alt_bytes.contains("[verbose]")
                     && !alt_bytes.contains("[debug]")
             );
-
-            // Also attempt to log all 5 secret markers explicitly inside the active sink across this level.
-            sink.emit(
-                level,
-                &format!(
-                    "secret_probe pin={planted_pin} note={planted_note} mandate={planted_mandate} debt={planted_debt_num} salt={planted_salt_hex} seed={planted_xrpl} key={planted_api_key} \"seat_pins\":[\"4829\"] \"preimage_secret\":\"hiddenSaltVal\""
-                ),
-            );
-            sink.emit_error(
-                &host::TuiError::TerminalIo(format!(
-                    "err pin={planted_pin} note={planted_note} mandate={planted_mandate} debt={planted_debt_num} salt={planted_salt_hex} seed={planted_xrpl} key={planted_api_key}"
-                )),
-                host::ErrorFormat::Text,
-            );
-
-            // Attempting to flush before terminal restore emits nothing.
             let mut pre_restore = Vec::new();
             sink.flush_after_restore(&mut pre_restore);
             assert!(pre_restore.is_empty());
@@ -3466,26 +3505,96 @@ mod tests {
                     planted_note,
                     planted_mandate.as_str(),
                     planted_debt_num,
+                    "5a5a5a5a",
                     planted_salt_hex.as_str(),
-                    planted_xrpl,
-                    planted_api_key,
-                    "hiddenSaltVal",
+                    salt_prefix,
                 ] {
                     assert!(
                         !combined.contains(secret),
-                        "level `{}` leaked `{secret}` in log:\n{combined}",
+                        "real session level `{}` wrote secret `{secret}` to log:\n{combined}",
                         level.as_str()
                     );
                 }
             }
             if level == host::LogLevel::Silent {
-                assert!(!flushed_stderr.contains("session start"));
+                assert!(flushed_stderr.is_empty());
+                assert!(file_log.is_empty());
             } else {
                 assert!(flushed_stderr.contains("session start"));
             }
             if level >= host::LogLevel::Verbose {
                 assert!(flushed_stderr.contains("state transition:"));
             }
+            if level == host::LogLevel::Debug {
+                assert!(flushed_stderr.contains("queued terminal input drained"));
+            }
+
+            // Force a real panic carrying `{session:?}` + API/XRPL credentials through
+            // `handle_panic_with_restore` at this `level` (no handed-in markers).
+            let session_dbg = format!("{session:?}");
+            let panic_msg =
+                format!("forced boom {session_dbg} seed={planted_xrpl} key={planted_api_key}");
+            let prev_hook = std::panic::take_hook();
+            let ev_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let cap_err = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+            let ev_clone = std::sync::Arc::clone(&ev_log);
+            let err_clone = std::sync::Arc::clone(&cap_err);
+            std::panic::set_hook(Box::new(move |info| {
+                let mut buf = Vec::new();
+                let mut restore = || {
+                    if let Ok(mut g) = ev_clone.lock() {
+                        g.push("restore".to_owned());
+                    }
+                };
+                handle_panic_with_restore(info, level, &mut restore, &mut buf);
+                if let Ok(mut g) = ev_clone.lock() {
+                    g.push("write".to_owned());
+                }
+                if let Ok(mut w) = err_clone.lock() {
+                    w.extend_from_slice(&buf);
+                }
+            }));
+            let res = std::panic::catch_unwind(move || {
+                panic!("{panic_msg}");
+            });
+            std::panic::set_hook(prev_hook);
+            assert!(res.is_err());
+
+            let order = ev_log
+                .lock()
+                .unwrap_or_else(|e| panic!("lock: {e}"))
+                .clone();
+            assert_eq!(order, vec!["restore".to_owned(), "write".to_owned()]);
+            let panic_bytes = cap_err
+                .lock()
+                .unwrap_or_else(|e| panic!("lock: {e}"))
+                .clone();
+            let panic_str = String::from_utf8_lossy(&panic_bytes);
+            if level == host::LogLevel::Debug {
+                assert!(panic_str.contains("stack backtrace:"));
+            } else {
+                assert_eq!(panic_str.lines().count(), 1);
+                assert!(!panic_str.contains("stack backtrace:"));
+            }
+            for secret in [
+                planted_pin,
+                planted_note,
+                planted_mandate.as_str(),
+                planted_debt_num,
+                "5a5a5a5a",
+                planted_salt_hex.as_str(),
+                salt_prefix,
+                planted_xrpl,
+                planted_api_key,
+            ] {
+                assert!(
+                    !panic_str.contains(secret),
+                    "panic hook level `{}` leaked `{secret}`:\n{panic_str}",
+                    level.as_str()
+                );
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
         // CLI log flag overrides conflicting `LEAGUE_LOG_LEVEL` env var.
@@ -3500,27 +3609,18 @@ mod tests {
             host::LogLevel::Verbose
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 
     #[test]
     fn panic_hook_restores_terminal_prints_one_redacted_line_and_gates_backtrace_on_debug() {
-        let extra = vec![
-            "4829".to_owned(),
-            "PANIC_SECRET_NOTE_77".to_owned(),
-            "MinProjectEquity >=3".to_owned(),
-            "765432".to_owned(),
-            "deadbeef01234567".to_owned(),
-        ];
-        let planted_payload = "boom\npin=4829 note=PANIC_SECRET_NOTE_77 mandate=MinProjectEquity >=3 order=765432 salt=deadbeef01234567 seed=sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r key=sk-or-v1-panicKey88";
+        let planted_payload = "boom\nseed=sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r key=sk-or-v1-panicKey88 \"seat_pins\":[\"4829\"] \"preimage_secret\":\"hiddenSaltVal\"";
 
         // Test 1: real std::panic::catch_unwind with a forced panic invokes terminal restore
-        // strictly BEFORE writing to stderr, emits exactly one line under Normal, and leaks zero secrets.
+        // strictly BEFORE writing to stderr, emits one single line under Normal, and scrubs keys/seeds.
         let prev_hook = std::panic::take_hook();
         let events_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let captured_err = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let extra_hook = extra.clone();
         let ev_clone = std::sync::Arc::clone(&events_log);
         let err_clone = std::sync::Arc::clone(&captured_err);
         std::panic::set_hook(Box::new(move |info| {
@@ -3530,13 +3630,7 @@ mod tests {
                     g.push("restore".to_owned());
                 }
             };
-            handle_panic_with_restore(
-                info,
-                host::LogLevel::Normal,
-                &extra_hook,
-                &mut restore,
-                &mut buf,
-            );
+            handle_panic_with_restore(info, host::LogLevel::Normal, &mut restore, &mut buf);
             if let Ok(mut g) = ev_clone.lock() {
                 g.push("write".to_owned());
             }
@@ -3568,10 +3662,7 @@ mod tests {
         assert!(!normal_str.contains("stack backtrace:"));
         for secret in [
             "4829",
-            "PANIC_SECRET_NOTE_77",
-            "MinProjectEquity >=3",
-            "765432",
-            "deadbeef01234567",
+            "hiddenSaltVal",
             "sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r",
             "sk-or-v1-panicKey88",
         ] {
@@ -3582,12 +3673,11 @@ mod tests {
         }
 
         // Test 2: Debug level adds scrubbed stack backtrace while Normal/Silent/Verbose omit it.
-        let fake_bt = "  0: my_fn\n  secret=PANIC_SECRET_NOTE_77 sk-or-v1-btKey11";
+        let fake_bt = "  0: my_fn\n  \"seat_notes\":[\"btSecretNote\"] sk-or-v1-btKey11";
         let no_bt = format_panic_output(
             planted_payload,
             Some("main.rs:10:1"),
             host::LogLevel::Verbose,
-            &extra,
             Some(fake_bt),
         );
         assert_eq!(no_bt.lines().count(), 1);
@@ -3597,12 +3687,441 @@ mod tests {
             planted_payload,
             Some("main.rs:10:1"),
             host::LogLevel::Debug,
-            &extra,
             Some(fake_bt),
         );
         assert!(with_bt.contains("stack backtrace:"));
-        assert!(!with_bt.contains("PANIC_SECRET_NOTE_77"));
+        assert!(!with_bt.contains("btSecretNote"));
         assert!(!with_bt.contains("sk-or-v1-btKey11"));
         assert!(with_bt.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn lobby_never_overwrites_unfinished_season_and_allocates_next_table_id_after_export()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let dir = std::env::temp_dir().join(format!("ml_lobby_overwrite_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let dir_str = dir.to_string_lossy().into_owned();
+
+        // Parse real CLI flags `--untimed --save-dir <dir>` to start Season 1 from Lobby.
+        let opts = match parse_args([
+            "league-tui".to_owned(),
+            "--untimed".to_owned(),
+            "--save-dir".to_owned(),
+            dir_str.clone(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub, got {other:?}").into()),
+        };
+
+        let lobby_start_steps = || {
+            let mut v = vec![key_ev(KeyCode::Enter, KeyModifiers::NONE)];
+            for _ in 0..8 {
+                v.insert(0, key_ev(KeyCode::Down, KeyModifiers::NONE));
+            }
+            v
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        let mut sink = host::TuiDiagnosticSink::new(host::LogLevel::Normal, None);
+        sink.set_alternate_screen_active(true);
+
+        // Season 1 starts as `club-1.save.json` + `club-1.seal`.
+        let mut ev1 = ScriptedSessionEvents::from_events(lobby_start_steps());
+        let mut s1 =
+            run_lobby_loop_with_sink(&mut terminal, &opts, &mut ev1, Some(&dir), &mut sink)?
+                .ok_or("Season 1 must start")?;
+        assert_eq!(s1.table_id(), TableId(1));
+        let s1_save_path = dir.join("club-1.save.json");
+        let s1_seal_path = dir.join("club-1.seal");
+        let s1_replay_path = dir.join("club-1.replay.json");
+        let s1_save_before = std::fs::read(&s1_save_path)?;
+        let s1_seal_before = std::fs::read(&s1_seal_path)?;
+
+        // Attempt 2 while Season 1 is unfinished -> refused with `UNFINISHED_SEASON_EXISTS`,
+        // showing banner on Lobby and leaving `club-1.*` byte-identical.
+        let mut refuse_steps = lobby_start_steps();
+        refuse_steps.push(key_ev(KeyCode::Char('q'), KeyModifiers::NONE));
+        let mut ev2 = ScriptedSessionEvents::from_events(refuse_steps.clone());
+        let s2_attempt =
+            run_lobby_loop_with_sink(&mut terminal, &opts, &mut ev2, Some(&dir), &mut sink)?;
+        assert!(s2_attempt.is_none());
+        let refuse_screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(refuse_screen.contains("REFUSED [UNFINISHED_SEASON_EXISTS]:"));
+        assert!(!dir.join("club-2.save.json").exists());
+        assert_eq!(std::fs::read(&s1_save_path)?, s1_save_before);
+        assert_eq!(std::fs::read(&s1_seal_path)?, s1_seal_before);
+
+        // Drive Season 1 to `Completed` without exporting yet -> `club-1.seal` still present, so a
+        // new Lobby start MUST still refuse and preserve `club-1.*` byte-identical.
+        let vp = ViewportSize::new(100, 30);
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+        while s1.phase() == league_core::TurnPhase::TalkAndMarket {
+            if s1.is_curtain_open() {
+                s1.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                s1.handle_key_event(s_key(' '), vp)
+                    .map_err(|e| e.to_string())?;
+                s1.handle_key_event(
+                    SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                    vp,
+                )
+                .map_err(|e| e.to_string())?;
+                s1.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+            }
+            s1.handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for _ in 0..s1.seat_count() {
+            s1.handle_key_event(
+                SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                vp,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        assert_eq!(s1.phase(), league_core::TurnPhase::Completed);
+        let s1_save_completed = std::fs::read(&s1_save_path)?;
+        let s1_seal_completed = std::fs::read(&s1_seal_path)?;
+
+        let mut ev3 = ScriptedSessionEvents::from_events(refuse_steps);
+        assert!(
+            run_lobby_loop_with_sink(&mut terminal, &opts, &mut ev3, Some(&dir), &mut sink)?
+                .is_none()
+        );
+        assert_eq!(std::fs::read(&s1_save_path)?, s1_save_completed);
+        assert_eq!(std::fs::read(&s1_seal_path)?, s1_seal_completed);
+
+        // Export Season 1's replay -> `club-1.seal` is wiped (`club-1.replay.json` written).
+        s1.handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        s1.handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        assert!(!s1_seal_path.exists());
+        assert!(s1_replay_path.exists());
+        let s1_replay_bytes = std::fs::read(&s1_replay_path)?;
+
+        // Season 2 starts cleanly in the same `--save-dir` as `TableId(2)` without touching Season 1!
+        let mut ev4 = ScriptedSessionEvents::from_events(lobby_start_steps());
+        let s2 = run_lobby_loop_with_sink(&mut terminal, &opts, &mut ev4, Some(&dir), &mut sink)?
+            .ok_or("Season 2 must start once Season 1 is exported")?;
+        assert_eq!(s2.table_id(), TableId(2));
+        assert!(dir.join("club-2.save.json").exists());
+        assert!(dir.join("club-2.seal").exists());
+        assert_eq!(std::fs::read(&s1_save_path)?, s1_save_completed);
+        assert_eq!(std::fs::read(&s1_replay_path)?, s1_replay_bytes);
+
+        // Resuming via `--resume <dir>` selects active `club-2` behind Seat 0's Curtain.
+        let resume_opts =
+            match parse_args(["league-tui".to_owned(), "--resume".to_owned(), dir_str]) {
+                CliAction::RunClub(o) => o,
+                other => return Err(format!("expected RunClub resume, got {other:?}").into()),
+            };
+        let resumed_s2 = build_session_for_cli(&resume_opts)?;
+        assert_eq!(resumed_s2.table_id(), TableId(2));
+        assert!(resumed_s2.is_curtain_open());
+
+        let _ = league_core::SeasonReplayLog::from_club_json_slice(&s1_replay_bytes)?;
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn lobby_cli_flags_match_equivalent_lobby_keys_through_real_parser()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crossterm::event::KeyEventKind;
+
+        let key_ev = |code: KeyCode, mods: KeyModifiers| {
+            let mut k = KeyEvent::new(code, mods);
+            k.kind = KeyEventKind::Press;
+            Event::Key(k)
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+
+        let cli_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--turn-clock".to_owned(),
+            "240".to_owned(),
+            "--pins".to_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub, got {other:?}").into()),
+        };
+        let mut cli_lobby_steps = Vec::new();
+        for _ in 0..8 {
+            cli_lobby_steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+        }
+        cli_lobby_steps.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+        let mut ev_cli = ScriptedSessionEvents::from_events(cli_lobby_steps);
+        let sess_cli = run_lobby_loop(&mut terminal, &cli_opts, &mut ev_cli, None)?
+            .ok_or("CLI flags Lobby start must succeed")?;
+
+        let default_opts = match parse_args(["league-tui".to_owned()]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub default, got {other:?}").into()),
+        };
+        let mut ui_steps = Vec::new();
+        for _ in 0..6 {
+            ui_steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+        }
+        ui_steps.push(key_ev(KeyCode::Right, KeyModifiers::NONE));
+        ui_steps.push(key_ev(KeyCode::Right, KeyModifiers::NONE));
+        ui_steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+        ui_steps.push(key_ev(KeyCode::Char(' '), KeyModifiers::NONE));
+        ui_steps.push(key_ev(KeyCode::Down, KeyModifiers::NONE));
+        ui_steps.push(key_ev(KeyCode::Enter, KeyModifiers::NONE));
+        let mut ev_ui = ScriptedSessionEvents::from_events(ui_steps);
+        let sess_ui = run_lobby_loop(&mut terminal, &default_opts, &mut ev_ui, None)?
+            .ok_or("Lobby UI equivalent start must succeed")?;
+
+        let mut spec_cli = sess_cli.public_spec();
+        let mut spec_ui = sess_ui.public_spec();
+        spec_cli.eval_vrf_pubkey = None;
+        spec_ui.eval_vrf_pubkey = None;
+        assert_eq!(spec_cli, spec_ui);
+        assert_eq!(sess_cli.pass_budget_secs(), Some(180));
+        assert_eq!(sess_ui.pass_budget_secs(), Some(180));
+        assert!(sess_cli.pins_enabled() && sess_ui.pins_enabled());
+        assert!(sess_cli.is_curtain_open() && sess_ui.is_curtain_open());
+        assert_eq!(sess_cli.observe_seat_call_count(), 0);
+        assert_eq!(sess_ui.observe_seat_call_count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn completed_season_failed_export_resumes_via_cli_and_wipes_seal_only_after_retry_succeeds()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+
+        let dir = std::env::temp_dir().join(format!("ml_eos_resume_retry_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+
+        let ring = default_dev_ring_table()?;
+        let save_path = dir.join("club-81710.save.json");
+        let seal_path = dir.join("club-81710.seal");
+        let replay_path = dir.join("club-81710.replay.json");
+        let vp = ViewportSize::new(100, 30);
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+
+        {
+            let mut session =
+                host::TuiHostSession::from_ring_table(&ring, TableId(81_710), &[0], 61)?;
+            session.enable_autosave(save_path.clone(), seal_path.clone());
+            while session.phase() == league_core::TurnPhase::TalkAndMarket {
+                if session.is_curtain_open() {
+                    session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                    session
+                        .handle_key_event(s_key(' '), vp)
+                        .map_err(|e| e.to_string())?;
+                    session
+                        .handle_key_event(
+                            SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                            vp,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                }
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            for _ in 0..session.seat_count() {
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            assert_eq!(session.phase(), league_core::TurnPhase::Completed);
+
+            // Force ExportReplay failure by blocking `club-81710.replay.json` with a directory.
+            std::fs::create_dir_all(replay_path.join("blocker"))?;
+            session
+                .handle_key_event(s_key('4'), vp)
+                .map_err(|e| e.to_string())?;
+            let err = session
+                .handle_key_event(s_key('e'), vp)
+                .err()
+                .ok_or("blocked export must fail")?;
+            assert_eq!(err.code, "TUI_REPLAY_EXPORT_FAILED");
+            let tui_err = session
+                .terminal_tui_error()
+                .ok_or("failed export must set terminal_tui_error")?;
+            assert_eq!(tui_err.exit_code(), 3);
+            assert!(
+                seal_path.exists(),
+                ".seal must stay on disk after failed export"
+            );
+        }
+
+        // Remove blocker, resume via real `--resume` CLI path, verify End-of-Season restores,
+        // export succeeds cleanly, and `.seal` is wiped only then.
+        std::fs::remove_dir_all(&replay_path)?;
+        assert!(seal_path.exists());
+        let resume_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            save_path.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub resume, got {other:?}").into()),
+        };
+        let mut resumed = build_session_for_cli(&resume_opts)?;
+        assert_eq!(resumed.phase(), league_core::TurnPhase::Completed);
+        assert!(!resumed.is_curtain_open());
+        assert_eq!(resumed.observe_seat_call_count(), 0);
+        assert!(
+            seal_path.exists(),
+            ".seal must remain until retry export runs"
+        );
+
+        resumed
+            .handle_key_event(s_key('4'), vp)
+            .map_err(|e| e.to_string())?;
+        resumed
+            .handle_key_event(s_key('e'), vp)
+            .map_err(|e| e.to_string())?;
+        assert!(
+            !seal_path.exists(),
+            ".seal must be wiped once retry export succeeds"
+        );
+        assert!(resumed.terminal_tui_error().is_none());
+        let parsed =
+            league_core::SeasonReplayLog::from_club_json_slice(&std::fs::read(&replay_path)?)?;
+        assert!(parsed.turns.len() >= 24);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_during_awaiting_mandate_reveal_shows_no_mandates_on_first_frame()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use league_seat_types::{SeatKeyCode, SeatKeyEvent, SeatKeyModifiers};
+
+        let dir = std::env::temp_dir().join(format!("ml_standby_resume_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+
+        let ring = default_dev_ring_table()?;
+        let save_path = dir.join("club-81720.save.json");
+        let seal_path = dir.join("club-81720.seal");
+        let vp = ViewportSize::new(100, 30);
+        let s_key = |c: char| SeatKeyEvent::new(SeatKeyCode::Char(c), SeatKeyModifiers::NONE);
+
+        let mut all_markers = Vec::new();
+        {
+            let mut session =
+                host::TuiHostSession::from_ring_table(&ring, TableId(81_720), &[0], 63)?;
+            for s in 0..session.seat_count() {
+                let m = *session
+                    .build_seat_observation(league_core::Seat(s))?
+                    .own_mandate()
+                    .ok_or("mandate")?;
+                all_markers.push(host::mandate_short_marker(m.kind));
+            }
+            session.enable_autosave(save_path.clone(), seal_path.clone());
+            while session.phase() == league_core::TurnPhase::TalkAndMarket {
+                if session.is_curtain_open() {
+                    session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                    session
+                        .handle_key_event(s_key(' '), vp)
+                        .map_err(|e| e.to_string())?;
+                    session
+                        .handle_key_event(
+                            SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                            vp,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    session.advance_clock(host::CURTAIN_LIFT_DEAD_TIME);
+                }
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Char('l'), SeatKeyModifiers::CTRL),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            assert_eq!(
+                session.phase(),
+                league_core::TurnPhase::AwaitingMandateReveal
+            );
+            // Submit 2 of 4 reveals and explicitly persist checkpoint mid-reveal.
+            for _ in 0..2 {
+                session
+                    .handle_key_event(
+                        SeatKeyEvent::new(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+                        vp,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            session
+                .write_save_and_seal(&save_path, &seal_path)
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Resume during `AwaitingMandateReveal` via `--resume` CLI path.
+        let resume_opts = match parse_args([
+            "league-tui".to_owned(),
+            "--resume".to_owned(),
+            save_path.to_string_lossy().into_owned(),
+        ]) {
+            CliAction::RunClub(o) => o,
+            other => return Err(format!("expected RunClub resume, got {other:?}").into()),
+        };
+        let resumed = build_session_for_cli(&resume_opts)?;
+        assert_eq!(
+            resumed.phase(),
+            league_core::TurnPhase::AwaitingMandateReveal
+        );
+        assert!(!resumed.is_curtain_open());
+        assert_eq!(resumed.observe_seat_call_count(), 0);
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|f| {
+            resumed
+                .render_current_frame(f)
+                .unwrap_or_else(|e| panic!("render resumed standby: {e}"));
+        })?;
+        let first_frame: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert_eq!(resumed.observe_seat_call_count(), 0);
+        assert!(first_frame.contains("Session Standby"));
+        assert!(first_frame.contains("AwaitingMandateReveal"));
+        assert!(first_frame.contains("2/4"));
+        assert!(!first_frame.contains("Private Vault"));
+        for marker in &all_markers {
+            assert!(
+                !first_frame.contains(marker),
+                "first resumed standby frame leaked mandate `{marker}`:\n{first_frame}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
     }
 }

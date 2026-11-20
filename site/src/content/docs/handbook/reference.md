@@ -47,7 +47,7 @@ league-tui [options]
 
 ### `league-tui` logging and panic safety
 
-While the alternate screen is active, zero diagnostic lines are written to the terminal screen stream; buffered diagnostics flush to `stderr` only after cooked terminal mode is restored (`disable_raw_mode()` + `LeaveAlternateScreen`). Credentials, sealed keys, PINs, private Vault notes, dealt mandates, staged orders, and commit salts are redacted across all four log levels. An uncaught panic restores cooked terminal mode before writing one redacted line to `stderr` (`stack backtrace:` appears solely under `--debug`).
+While the alternate screen is active, zero diagnostic lines are written to the terminal screen stream; buffered diagnostics flush to `stderr` only after cooked terminal mode is restored (`disable_raw_mode()` + `LeaveAlternateScreen`). Credentials, API keys, XRPL seeds, and sealed JSON keys are redacted across all four log levels, while PINs, private Vault notes, dealt mandates, staged orders, and commit salts are never passed to logger or panic lines. An uncaught panic restores cooked terminal mode before writing one redacted line to `stderr` (`stack backtrace:` appears solely under `--debug`).
 
 ### `league-tui` exit codes
 

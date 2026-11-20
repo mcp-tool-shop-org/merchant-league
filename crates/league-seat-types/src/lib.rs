@@ -83,6 +83,16 @@ pub use view::{
     ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
 };
 
+impl core::fmt::Debug for SeatScreenView {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SeatScreenView")
+            .field("layout", &self.layout)
+            .field("zones_len", &self.zones.len())
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical
 /// `EngineState` / `SeasonReplayLog` JSON encodings are shared.
 pub mod wire_serde {
@@ -161,15 +171,16 @@ mod tests {
         GoodScarcity, GradedMandateCard, HumanWhatIfRequest, MandateKind, MarketAction, MarketDay,
         NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, OfferProposal, OfferSide,
         ParitySpecSource, PreimageSecret, PreviewTieMode, PrivateMandate, ProjectDeliveryOrder,
-        PublicSweepReceipt, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
-        ScreenLayout, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat, SeatCommodityDisplay,
-        SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind, SeatKeyCode, SeatKeyEvent,
-        SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatScreenView, SeatState,
-        SeatStatePredicates, ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId,
-        TableMode, ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis,
-        ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll,
-        ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable,
-        ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize,
+        PublicSweepReceipt, PublicTableSpec, RefusedActionPreview, RegentDoctrine,
+        STATE_PREDICATES_VERSION, ScreenLayout, SealedOrderBundle, SeasonEndAndMarks, SeasonId,
+        Seat, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind,
+        SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatObservation, SeatObservationPublicParts,
+        SeatScreenView, SeatSpoilagePreview, SeatState, SeatStatePredicates, SeatUpkeepPreview,
+        ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode,
+        ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis, ViewColor,
+        ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
+        ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
+        ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize, WhatIfPreview,
         drand_quicknet_round_for_close, format_numeraire_display, lookup_commodity_display,
         lookup_commodity_display_bytes,
     };
@@ -1215,6 +1226,76 @@ mod tests {
             public_receipts: Vec::new(),
         });
 
+        let what_if_preview = WhatIfPreview {
+            seat: 0,
+            turn: 1,
+            baseline_predicates: obs.baseline_predicates.clone(),
+            pre_seat_state: obs.seats[0].clone(),
+            post_market_seat_state: obs.seats[0].clone(),
+            post_sweep_seat_state: obs.seats[0].clone(),
+            post_sweep_predicates: obs.baseline_predicates.clone(),
+            close_mark_caveat: "PLANTED_CAVEAT_918273".to_owned(),
+            refused_market_actions: vec![RefusedActionPreview {
+                action_index: 0,
+                error_code: "REFUSED".to_owned(),
+                message: "PLANTED_REFUSAL_827364".to_owned(),
+            }],
+            converter_orders: Vec::new(),
+            project_orders: Vec::new(),
+            swap_orders: Vec::new(),
+            check_orders: Vec::new(),
+            escrow_orders: Vec::new(),
+            upkeep: SeatUpkeepPreview {
+                upkeep_good: 0,
+                upkeep_required: 1_800,
+                paid_with_refined: 0,
+                debt_interest_accrued: 0,
+                new_shortfall_debt: 3_600,
+                debt_repaid_cred: 765_432,
+            },
+            spoilage: SeatSpoilagePreview {
+                perishable_spoiled_units: 0,
+            },
+            public_fills: Vec::new(),
+            step0_to_7_receipt: Step0To7SweepSummary {
+                turn: 1,
+                non_reveal_seats: Vec::new(),
+                regent_acted_seats: Vec::new(),
+                converted_to_ai: Vec::new(),
+                escrows_finished: Vec::new(),
+                escrows_cancelled_or_forfeited: Vec::new(),
+                atomic_swaps_settled: 0,
+                converter_batches_run: 0,
+                converter_orders_clamped: 0,
+                checks_cashed: Vec::new(),
+                checks_bounced: Vec::new(),
+                cartel_evictions: Vec::new(),
+                projects_completed: 0,
+                project_orders_clamped: 0,
+                total_upkeep_shortfall_debt: 0,
+                total_spoilage_clawed_back: 0,
+                broken_promises: Vec::new(),
+                elected_officers: None,
+                charters_awarded: Vec::new(),
+                cred_debt_repaid: 765_432,
+                charter_cred_burned: 0,
+                town_import_cred_spent: 0,
+                works_stipend_cred_minted: 0,
+                batch_trades_cleared: 0,
+                fills: Vec::new(),
+                wash_freeze_settlements: Vec::new(),
+            },
+        };
+        let screen_view = SeatScreenView::single_panel(ViewPanel {
+            title: Some(ViewLabel::plain("Private Vault".to_owned())),
+            rows: vec![
+                ViewRow::from_plain("PLANTED_VIEW_MANDATE_645312".to_owned()),
+                ViewRow::from_plain("PLANTED_VIEW_NOTE_534219".to_owned()),
+                ViewRow::from_plain("PLANTED_VIEW_ORDER_765432".to_owned()),
+            ],
+            ..ViewPanel::default()
+        });
+
         let markers = [
             "987654",
             "7777",
@@ -1226,6 +1307,11 @@ mod tests {
             "5a5a5a",
             "5A5A5A",
             "90, 90, 90",
+            "PLANTED_CAVEAT_918273",
+            "PLANTED_REFUSAL_827364",
+            "PLANTED_VIEW_MANDATE_645312",
+            "PLANTED_VIEW_NOTE_534219",
+            "PLANTED_VIEW_ORDER_765432",
         ];
         let debug_strings = [
             alloc::format!("{pm:?}"),
@@ -1244,6 +1330,10 @@ mod tests {
             alloc::format!("{ai_req:#?}"),
             alloc::format!("{obs:?}"),
             alloc::format!("{obs:#?}"),
+            alloc::format!("{what_if_preview:?}"),
+            alloc::format!("{what_if_preview:#?}"),
+            alloc::format!("{screen_view:?}"),
+            alloc::format!("{screen_view:#?}"),
         ];
         for text in &debug_strings {
             assert!(

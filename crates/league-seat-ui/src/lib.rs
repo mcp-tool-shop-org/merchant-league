@@ -1919,6 +1919,13 @@ mod tests {
             ..SealedOrderBundle::default()
         };
         let obs = sample_seat_observation();
+        let view = render_turn_screen(
+            &obs,
+            &st,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+        );
         let step = handle_seat_key(
             &obs,
             st.clone(),
@@ -1937,6 +1944,8 @@ mod tests {
             alloc::format!("{:#?}", st.bundle_fields),
             alloc::format!("{step:?}"),
             alloc::format!("{step:#?}"),
+            alloc::format!("{view:?}"),
+            alloc::format!("{view:#?}"),
         ];
         for text in &samples {
             assert!(text.contains("<redacted>"), "missing <redacted>:\n{text}");

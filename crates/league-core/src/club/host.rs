@@ -1075,7 +1075,10 @@ impl ClubHost {
         }
         let seal: ClubSealPayload = serde_json::from_slice(seal_bytes).map_err(|err| {
             EngineError::InvalidConfig(format!(
-                "MALFORMED_SEAL_JSON: Club seal JSON does not parse: {err}"
+                "MALFORMED_SEAL_JSON: Club seal JSON does not parse at line {}, column {} ({:?})",
+                err.line(),
+                err.column(),
+                err.classify()
             ))
         })?;
         if seal.format_version != CLUB_SEAL_FORMAT_VERSION {

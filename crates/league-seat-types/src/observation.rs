@@ -801,7 +801,9 @@ impl Step0To7SweepSummary {
 
 /// Scrubbed Steps 0–7 preview response returned by `preview_what_if`,
 /// `preview_what_if_with_beacon`, and `preview_seat_bundle`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Redacts detailed preview state and order outcomes in `Debug`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhatIfPreview {
     /// Previewed seat index.
     pub seat: u8,
@@ -839,4 +841,14 @@ pub struct WhatIfPreview {
     pub public_fills: Vec<FillRecord>,
     /// Full Steps 0–7 deterministic receipt summary.
     pub step0_to_7_receipt: Step0To7SweepSummary,
+}
+
+impl fmt::Debug for WhatIfPreview {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WhatIfPreview")
+            .field("seat", &self.seat)
+            .field("turn", &self.turn)
+            .field("preview", &"<redacted>")
+            .finish()
+    }
 }

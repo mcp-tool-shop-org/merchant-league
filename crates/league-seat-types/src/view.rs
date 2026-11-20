@@ -765,7 +765,10 @@ impl ViewPanel {
 }
 
 /// Complete plain owned view model emitted by `league-seat-ui` for `league-tui` to draw.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+///
+/// Redacting `core::fmt::Debug` is implemented in `crate` root so rendered mandates, notes, and
+/// staged orders stay redacted while keeping `view.rs` free of trait `impl` blocks.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct SeatScreenView {
     /// Layout specification mapping viewport size onto named zones.
     pub layout: ScreenLayout,
