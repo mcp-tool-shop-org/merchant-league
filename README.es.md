@@ -12,8 +12,6 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Merchant League
-
 Un juego de comercio y política de ritmo lento para cuatro a seis jugadores, que se juega en la **Testnet** de XRP Ledger. Los jugadores pueden ser personas o jugadores de IA, en la misma mesa y bajo las mismas reglas.
 
 **Estado: prototipo, fase de diseño.** El motor de reglas, el generador de mesas y la función de repetición ya están construidos y probados. El juego en sí **todavía no se puede jugar**: no hay cliente de juego ni versión disponible. Solo Testnet: no hay dinero real y no hay posibilidad de pasar a Mainnet.

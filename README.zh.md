@@ -12,8 +12,6 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Merchant League
-
 一款慢节奏的贸易和政治游戏，适合四到六名玩家，在 XRP Ledger **测试网**上进行。玩家可以是真人，也可以是 AI 玩家，在同一张桌子上，遵循相同的规则。
 
 **状态：原型，设计阶段。** 规则引擎、桌子生成器和重播功能已经构建并经过测试。游戏本身**尚未可玩**：没有游戏客户端，也没有发布版本。仅限测试网：不涉及真实货币，也没有连接到主网的途径。

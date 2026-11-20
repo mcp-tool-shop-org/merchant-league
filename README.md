@@ -12,8 +12,6 @@
   <a href="https://mcp-tool-shop-org.github.io/merchant-league/"><img src="https://img.shields.io/badge/landing-page-2ea44f.svg" alt="Landing Page"></a>
 </p>
 
-# Merchant League
-
 A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.
 
 **Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`). Public-Testnet Game mode and the container image are not built yet, and there is **no release yet**. Testnet only: no real money, and no path to Mainnet.
