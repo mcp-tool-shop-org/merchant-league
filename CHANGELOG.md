@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Docs (`README.md`, handbook `getting-started`): the Windows PowerShell commands for the local Club Mode container in their own block; a note that rootless Docker Engine and Docker Desktop for Linux need the named volume; the handbook's Docker Desktop sentence worded as the README's (follow-ups B1 and B2 of the Card 6 review).
+
 - Docs (`README.md`, handbook `playing-a-turn`): say exactly when `--resume` with another `--save-dir` is refused, what an in-season resume into another directory leaves behind, and that save files are not renamed or moved by hand (follow-ups B1, C3 and C5 of the Card 5 Part B2b review).
 
 - Wave 2 Card 5 Part B2b (`league-seat-types`, `league-seat-ui`, `league-tui`, `league-core`, `SHIP_GATE.md`, `README.md`, `site/`, `docs/club-mode-design.md`, `CHANGELOG.md`, `atlas`): B2a review closures, Lobby & End-of-Season interactive screens with `.seal` wipe on replay export, `league-tui` ship gates, and player/handbook docs (`2026-11-19`):
