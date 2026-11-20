@@ -9,6 +9,8 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "Dockerfile"
+      - ".dockerignore"
       - "rust-toolchain.toml"
       - "crates/**"
       - "vendor/**"
@@ -35,7 +37,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
@@ -165,6 +167,10 @@ jobs:
         run: |
           timeout 300 cargo test -p league-standalone --test standalone_live --locked -- --nocapture --test-threads=1
           test -z "$(docker ps -aq --filter label=merchant-league.harness=standalone)"
+
+      - name: Club Mode container smoke gate (offline, no push)
+        timeout-minutes: 15
+        run: bash scripts/smoke-container.sh
 
   # The advisory audit runs in its own job. A new advisory is an event in the
   # outside database, not in this change: in its own job it turns only this

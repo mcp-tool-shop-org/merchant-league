@@ -43,7 +43,7 @@
 
 ## D. Shipping Hygiene
 
-- [x] `[all]` `verify` script exists (test + build + smoke in one command) (2026-11-17: scripts/verify.sh: fmt, Clippy, tests, the two tripwires and their controls; coverage, `cargo audit` and the site build when their tools are installed; the Docker harness and the Atlas check run only in CI)
+- [x] `[all]` `verify` script exists (test + build + smoke in one command) (2026-11-19: scripts/verify.sh: fmt, Clippy, tests, the two tripwires and their controls; coverage, `cargo audit`, the site build, and the held Club Mode container smoke gate on Linux with POSIX `python3` when their tools are installed; the stand-alone `xrpld` Docker harness and the Atlas check run only in CI)
 - [x] `[all]` Version in manifest matches git tag — executed by `npx @mcptoolshop/shipcheck manifest` (D2: manifest version not behind the newest released tag; `--expect <ver>` for a strict release-time match) (2026-11-17: `shipcheck manifest` reads npm/PyPI manifests only, so checked by hand: Cargo workspace 0.0.0, `publish = false`, no tags yet)
 - [x] `[all]` Dependency scanning runs in CI (ecosystem-appropriate) — executed by `npx @mcptoolshop/shipcheck ci` (D3: a recognized scanner is *configured* in CI, or dependabot is present) (2026-11-17: cargo audit --deny warnings for the Cargo tree and `npm audit --audit-level=high` for the site, both in CI; `shipcheck ci` passes)
 - [x] `[all]` No known high/critical vulnerabilities in any dependency tree, and Dependabot alerts are enabled — executed by `npx @mcptoolshop/shipcheck deps` (the OUTCOME: audits **every** tree incl. subtrees, not just the root; `ci` only proves a scanner is configured) (2026-11-17: cargo audit in CI; site npm audit 0; Dependabot alerts enabled)
