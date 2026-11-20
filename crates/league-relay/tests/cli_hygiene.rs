@@ -331,6 +331,9 @@ fn relay_and_transport_errors_project_onto_shared_structured_error() -> TestResu
             entries_summary: format!("seat=Saltworks {secret_blob}"),
             detail: format!("detail {secret_blob}"),
         },
+        RelayError::ToolRoundStoreWriteFailed {
+            detail: format!("store failed {secret_blob}"),
+        },
     ];
 
     for err in &variants {
@@ -923,6 +926,7 @@ fn exit_code_2_on_turn_locked_unrecorded_charge_io_corrupt_log_prebook_fail_and_
         model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
         model_returned: None,
         request_body_sha256: "00".repeat(32),
+        http_reply_sha256: None,
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,
@@ -1131,6 +1135,9 @@ fn exit_code_4_is_never_returned_across_all_outcomes_and_errors() -> TestResult 
             charged_credits: "0.01".to_owned(),
             entries_summary: "sum".to_owned(),
             detail: "det".to_owned(),
+        },
+        RelayError::ToolRoundStoreWriteFailed {
+            detail: "store failed".to_owned(),
         },
     ];
     for e in &errors {
@@ -1784,6 +1791,7 @@ fn verify_planted_secrets_redacted_at_level(level_flag: &str) -> TestResult {
         model_requested: "google/gemini-2.5-pro-06-05".to_owned(),
         model_returned: None,
         request_body_sha256: "00".repeat(32),
+        http_reply_sha256: None,
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,

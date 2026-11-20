@@ -125,6 +125,12 @@ pub enum RelayError {
         /// Redacted underlying ledger and side-file I/O error details.
         detail: String,
     },
+    /// The durable `--preview-tool on` tool-round sidecar store (`<game-dir>/relay/seats/`) failed
+    /// its start-up write probe or atomic round write; no further HTTP request is sent.
+    ToolRoundStoreWriteFailed {
+        /// Redacted I/O path and error detail.
+        detail: String,
+    },
 }
 
 impl RelayError {
@@ -145,6 +151,7 @@ impl RelayError {
             Self::PreviewState { kind, .. } => kind.code(),
             Self::TurnLocked { .. } => "TURN_LOCKED",
             Self::UnrecordedCharge { .. } => "UNRECORDED_CHARGE",
+            Self::ToolRoundStoreWriteFailed { .. } => "TOOL_ROUND_STORE_WRITE_FAILED",
         }
     }
 
@@ -187,6 +194,9 @@ impl RelayError {
             Self::UnrecordedCharge { .. } => {
                 "restore write permissions under <game-dir>/relay/ so the next run reconciles relay/calls.reserved.jsonl automatically; do not copy the entry into relay/calls.jsonl by hand"
             }
+            Self::ToolRoundStoreWriteFailed { .. } => {
+                "ensure <game-dir>/relay/seats/ is a writable directory with free disk space before running with --preview-tool on"
+            }
         }
     }
 
@@ -212,7 +222,8 @@ impl RelayError {
             Self::Io(_)
             | Self::CorruptLog(_)
             | Self::TurnLocked { .. }
-            | Self::UnrecordedCharge { .. } => 2,
+            | Self::UnrecordedCharge { .. }
+            | Self::ToolRoundStoreWriteFailed { .. } => 2,
         }
     }
 
@@ -237,6 +248,9 @@ impl ToStructuredError for RelayError {
                 holder: Some(h), ..
             } if !h.is_empty() => base.with_cause(redact_secrets_multi_with_limit(h, &[], limit)),
             Self::UnrecordedCharge { detail, .. } if !detail.is_empty() => {
+                base.with_cause(redact_secrets_multi_with_limit(detail, &[], limit))
+            }
+            Self::ToolRoundStoreWriteFailed { detail } if !detail.is_empty() => {
                 base.with_cause(redact_secrets_multi_with_limit(detail, &[], limit))
             }
             _ => base,
@@ -304,6 +318,9 @@ impl fmt::Display for RelayError {
                     f,
                     "post-call charge {amount_with_unit} could not be written to ledger or pending side file ({entries_summary}); the charge is held as a reservation in relay/calls.reserved.jsonl that the next run counts at {estimate_field} — do not enter it into relay/calls.jsonl by hand or it will be counted twice: {detail}"
                 )
+            }
+            RelayError::ToolRoundStoreWriteFailed { detail } => {
+                write!(f, "tool-round store write failed: {detail}")
             }
         }
     }

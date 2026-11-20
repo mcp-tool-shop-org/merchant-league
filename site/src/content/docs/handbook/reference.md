@@ -84,7 +84,7 @@ league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <p
 | `--cap-gpu-secs <n>` | The total GPU-seconds cap for local, OpenAI-compatible seats |
 | `--allow-vm-host <host>` | One more local server address a local seat may use |
 | `--mock-dir <dir>` | Run against canned responses in `<dir>/responses.json` |
-| `--preview-tool <off\|on>` | Enable Card 7 own-orders `preview_turn_orders` tool on `act` turns (`off` default; locks wording arm `v2_preview_2026_11_17_r1` and requires `to-seat/day-DD-act-<Guild>.preview-state.json`) |
+| `--preview-tool <off\|on>` | Enable own-orders `preview_turn_orders` tool on `act` turns (`off` default; locks wording arm `v2_preview_2026_11_17_r1`, probes `relay/seats/` writability at startup, requires `to-seat/day-DD-act-<Guild>.preview-state.json` with `seat` equal to the `0`-based index in `seats.json`; when the tool is `on`, every HTTP reply body is kept as received before the relay reads it in `relay/seats/<Guild>.day-DD-<round>.http-reply-round-<n>-attempt-<a>.json` linked by `http_reply_sha256` (a reservation line carries `null`; after an interrupted run a raw reply file with the same `reservation_id` may exist beside it; join by `reservation_id`) — including non-200, late, non-JSON, provider-error, and thinking-only / token-exhausted replies even though no answer was delivered — and structured `tool-round-<n>.json` and `discarded-round-<n>-attempt-<a>.json` sidecars linked by `reply_sha256` are built from it without ever replaying raw or sidecar files to any model or showing them to seats; refuses odd `tool_calls` via `MALFORMED_TOOL_CALL` on `act` while not executing `tool_calls` when `off` or `talk`) |
 | `--error-format <text|json>` | Error encoding on `stderr`: `text` (default) or compact `StructuredError` JSON |
 | `--log-level <level>` | Diagnostic verbosity: `silent`, `normal` (default), `verbose`, or `debug` (or `LEAGUE_LOG_LEVEL`) |
 | `-q`, `--silent` | Shorthand for `--log-level silent` |
@@ -98,7 +98,7 @@ league-relay prebook-check --seats <file> --wrapper <path> [--response-schema <p
 | --- | --- |
 | 0 | Done; every seat's turn was clean (`--help` and passing `prebook-check` also exit `0`) |
 | 1 | User or configuration error (bad arguments or `LEAGUE_LOG_LEVEL`, bad seats file, refused key placement, live/local gate refusal, missing `--wrapper` on turn 1, incompatible setup, or missing/malformed/wrong-day/wrong-seat `.preview-state.json` [`PREVIEW_STATE_*`] with `--preview-tool on` on `act`) |
-| 2 | Runtime error (`TURN_LOCKED`, `UNRECORDED_CHARGE`, file I/O or missing `--game-dir`, corrupt log/setup, failed `prebook-check`, or a `turn` with `0` clean seats) |
+| 2 | Runtime error (`TURN_LOCKED`, `UNRECORDED_CHARGE`, `TOOL_ROUND_STORE_WRITE_FAILED`, file I/O or missing `--game-dir`, corrupt log/setup, failed `prebook-check`, or a `turn` with `0` clean seats) |
 | 3 | Partial success (`turn` recorded cleanly on disk with at least `1` clean seat and at least `1` failed seat) |
 
 An uncaught panic on the main thread exits with Rust's standard code `101` (with secrets redacted on `stderr`, and a stack backtrace emitted only under `--debug`).
