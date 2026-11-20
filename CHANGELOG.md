@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Docs (`README.md`, handbook `getting-started`): the Windows PowerShell commands for the local Club Mode container in their own block; a note that rootless Docker Engine and Docker Desktop for Linux need the named volume; the handbook's Docker Desktop sentence worded as the README's (follow-ups B1 and B2 of the Card 6 review).
+- Docs (`README.md`, handbook `getting-started`): the Windows PowerShell commands for the local Club Mode container in their own block; a note to use the named volume on rootless Docker Engine, and on Docker Desktop for Linux if the bind mount cannot save (neither tested by us, nor macOS); the handbook's Docker Desktop sentence worded as the README's (follow-ups B1 and B2 of the Card 6 review).
 
 - Docs (`README.md`, handbook `playing-a-turn`): say exactly when `--resume` with another `--save-dir` is refused, what an in-season resume into another directory leaves behind, and that save files are not renamed or moved by hand (follow-ups B1, C3 and C5 of the Card 5 Part B2b review).
 
