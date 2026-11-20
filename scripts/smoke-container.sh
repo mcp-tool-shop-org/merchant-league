@@ -172,7 +172,8 @@ proc = subprocess.Popen(
 )
 os.close(slave_fd)
 
-ansi_re = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+ansi_re = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
+raw_pending = b""
 buf = ""
 phase = "wait_lobby"
 lobby_cut = 0
@@ -189,6 +190,12 @@ try:
             except OSError:
                 chunk = b""
             if chunk:
+                raw_pending += chunk
+                while b"\x1b[6n" in raw_pending:
+                    _, _, raw_pending = raw_pending.partition(b"\x1b[6n")
+                    os.write(master_fd, b"\x1b[1;1R")
+                if len(raw_pending) > 8:
+                    raw_pending = raw_pending[-8:]
                 buf += ansi_re.sub("", chunk.decode("utf-8", errors="replace"))
 
         if phase == "wait_lobby" and "Seat Count:" in buf:
@@ -220,8 +227,10 @@ finally:
         pass
 
 print(f"PTY container run => exit={rc} (expected 0), phase={phase}")
+if rc != 0 or phase != "quitting":
+    print(f"PTY tail={buf[-1000:]!r}")
 if rc != 0:
-    raise SystemExit(f"PTY run failed cleanly (rc={rc}, phase={phase})")
+    raise SystemExit(f"PTY run failed (rc={rc}, phase={phase})")
 if phase != "quitting":
     raise SystemExit(f"PTY run did not reach Privacy Curtain cleanly (phase={phase})")
 
@@ -242,9 +251,12 @@ cp_bytes = subprocess.check_output(["docker", "cp", f"{ctr}:/saves", "-"])
 seen = {}
 with tarfile.open(fileobj=io.BytesIO(cp_bytes), mode="r|*") as tf:
     for m in tf:
-        print(f"docker cp member: {m.name:30s} uid={m.uid} gid={m.gid} mode={oct(m.mode)} size={m.size}")
+        norm_name = m.name.lstrip("./").rstrip("/")
+        if not norm_name:
+            continue
+        print(f"docker cp member: {norm_name:30s} uid={m.uid} gid={m.gid} mode={oct(m.mode)} size={m.size}")
         raw = tf.extractfile(m).read() if m.isfile() else b""
-        seen[m.name] = (m.uid, m.gid, m.mode, m.size, raw)
+        seen[norm_name] = (m.uid, m.gid, m.mode, m.size, raw)
 
 for req_name in ("saves", "saves/club-1.save.json", "saves/club-1.seal", "saves/smoke.log"):
     if req_name not in seen:
@@ -305,12 +317,17 @@ with tarfile.open(fileobj=io.BytesIO(save_bytes), mode="r:*") as tf:
     non_empty_history = [h for h in config.get("history", []) if not h.get("empty_layer", False)]
 
     fs = {}
-    added_by_last_3 = []
+    stage2_added = []
     for idx, layer_path in enumerate(layers):
         cmd_note = (
             non_empty_history[idx].get("created_by", "")
             if idx < len(non_empty_history)
             else ""
+        )
+        is_stage2_layer = (
+            any(tok in cmd_note for tok in ("league-tui", "merchant-league/LICENSE", "/saves"))
+            if non_empty_history
+            else idx >= max(0, len(layers) - 4)
         )
         with tarfile.open(fileobj=io.BytesIO(read_archive_entry(layer_path)), mode="r:*") as ltf:
             for m in ltf:
@@ -337,17 +354,17 @@ with tarfile.open(fileobj=io.BytesIO(save_bytes), mode="r:*") as tf:
                     "size": m.size,
                     "layer": idx,
                 }
-                if idx >= max(0, len(layers) - 3):
-                    added_by_last_3.append((idx, rel, mtype, m.uid, m.gid, m.mode & 0o7777, m.size, cmd_note))
+                if is_stage2_layer:
+                    stage2_added.append((idx, rel, mtype, m.uid, m.gid, m.mode & 0o7777, m.size, cmd_note))
 
 print(f"image total size bytes       : {image_size}")
 print(f"total layers                 : {len(layers)}")
 print(f"total flattened entries      : {len(fs)}")
-print("stage-2 added entries (top 3 COPY layers):")
-for idx, rel, mtype, uid, gid, mode, size, _ in added_by_last_3:
+print("stage-2 added entries:")
+for idx, rel, mtype, uid, gid, mode, size, _ in stage2_added:
     print(f"  L{idx}: {uid}:{gid} {oct(mode)} {mtype:7s} {size:10d} /{rel}")
 
-stage2_non_dirs = {rel for (_, rel, mtype, *_) in added_by_last_3 if mtype != "dir"}
+stage2_non_dirs = {rel for (_, rel, mtype, *_) in stage2_added if mtype != "dir"}
 expected_stage2_files = {"usr/local/bin/league-tui", "usr/share/doc/merchant-league/LICENSE"}
 if stage2_non_dirs != expected_stage2_files:
     raise SystemExit(f"unexpected Stage-2 non-dir entries: {sorted(stage2_non_dirs)} != {sorted(expected_stage2_files)}")
