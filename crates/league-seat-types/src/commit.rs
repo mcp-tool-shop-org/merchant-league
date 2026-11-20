@@ -195,7 +195,7 @@ pub struct DualEscrowProposal {
 }
 
 /// Simultaneous discretionary actions committed in Phase 2 (`Commit`) and disclosed in `Reveal`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedOrderBundle {
     /// Tier-2 converter batches executed via `BatchV1_1`.
     pub converter_runs: Vec<ConverterRunOrder>,
@@ -219,6 +219,12 @@ pub struct SealedOrderBundle {
     pub council_vote: Option<CouncilVoteBallot>,
     /// Sealed-bid Syndicate Charter offers (effective on `turn % 6 == 0`).
     pub charter_bids: Vec<CharterBidOrder>,
+}
+
+impl fmt::Debug for SealedOrderBundle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SealedOrderBundle(<redacted>)")
+    }
 }
 
 /// Verifiable breakable pledge target for Track-2 Soft Diplomatic Honor auditing.
@@ -342,12 +348,18 @@ impl MandateKind {
 }
 
 /// Secret Turn-1 Charter Mandate dealt to a seat and revealed upon Season Close.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrivateMandate {
     /// Objective rule evaluated at terminal Turn `T`.
     pub kind: MandateKind,
     /// Irreversible equity bonus granted when objective holds and commitment reveals validly.
     pub bonus_equity: Units,
+}
+
+impl fmt::Debug for PrivateMandate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PrivateMandate(<redacted>)")
+    }
 }
 
 /// Card in a table's public Turn-1 Private Mandate deck with calibrated difficulty and bonus (`3–8 VP`).

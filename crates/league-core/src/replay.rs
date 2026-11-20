@@ -773,6 +773,28 @@ impl SeasonReplayLog {
         Ok(log)
     }
 
+    /// Serializes a validated [`SeasonReplayLog`] as pretty JSON bytes and round-trip verifies
+    /// the encoded log via the mode-locked parser before returning.
+    pub fn to_json_pretty_bytes(&self) -> Result<Vec<u8>, EngineError> {
+        let bytes = serde_json::to_vec_pretty(self).map_err(|err| {
+            EngineError::InvalidConfig(format!(
+                "REPLAY_SERIALIZE_FAILED: failed to serialize SeasonReplayLog: {err}"
+            ))
+        })?;
+        match self.mode {
+            TableMode::Club => {
+                let _ = Self::from_club_json_slice(&bytes)?;
+            }
+            TableMode::Eval => {
+                let _ = Self::from_eval_json_slice(&bytes)?;
+            }
+            TableMode::Game => {
+                let _ = Self::from_json_slice(&bytes)?;
+            }
+        }
+        Ok(bytes)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_checked(
         spec: TableSpec,

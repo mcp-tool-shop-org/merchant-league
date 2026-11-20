@@ -75,12 +75,161 @@ pub use types::{
     TableMode, Turn, UNIT_SCALE, UNSOLD_EXCESS_PARITY_BPS, Units,
 };
 pub use view::{
-    CurtainPinMode, CurtainPinPrompt, ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers,
-    SeatScreenView, TurnClockDisplay, ViewAlign, ViewAxis, ViewColor, ViewLabel, ViewLayoutMode,
-    ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle,
-    ViewTabBar, ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow,
-    ViewZoneGroup, ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
+    AwaitingRevealProgress, CurtainPinMode, CurtainPinPrompt, EndOfSeasonData, LobbyCliOverrides,
+    ReplayExportState, ScreenLayout, SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatScreenView,
+    TurnClockDisplay, ViewAlign, ViewAxis, ViewColor, ViewLabel, ViewLayoutMode, ViewModal,
+    ViewPanel, ViewRow, ViewScroll, ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar,
+    ViewTabItem, ViewTable, ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneGroup,
+    ViewZoneId, ViewZonePanel, ViewZoneSpec, ViewportSize,
 };
+
+impl core::fmt::Debug for SeatScreenView {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SeatScreenView")
+            .field("layout", &self.layout)
+            .field("zones_len", &self.zones.len())
+            .field("has_status_line", &self.status_line.is_some())
+            .field("has_modal", &self.modal.is_some())
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewSpan {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewSpan")
+            .field("text_len", &self.text.len())
+            .field("style", &self.style)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewRow")
+            .field("spans_len", &self.spans.len())
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewLabel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewLabel")
+            .field("text_len", &self.text.len())
+            .field("style", &self.style)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableColumn {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableColumn")
+            .field("header", &self.header)
+            .field("width", &self.width)
+            .field("alignment", &self.alignment)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableCell {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableCell")
+            .field("spans_len", &self.spans.len())
+            .field("alignment", &self.alignment)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTableRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTableRow")
+            .field("cells_len", &self.cells.len())
+            .field("style", &self.style)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTable")
+            .field("columns_len", &self.columns.len())
+            .field("rows_len", &self.rows.len())
+            .field("selected_row", &self.selected_row)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTabItem {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTabItem")
+            .field("label", &self.label)
+            .field("enabled", &self.enabled)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewTabBar {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewTabBar")
+            .field("tabs_len", &self.tabs.len())
+            .field("active_index", &self.active_index)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewModal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewModal")
+            .field("width_pct", &self.width_pct)
+            .field("height_pct", &self.height_pct)
+            .field("panel", &self.panel)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewStatusLine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewStatusLine")
+            .field("has_alert", &self.alert.is_some())
+            .field("left_spans_len", &self.left.len())
+            .field("right_spans_len", &self.right.len())
+            .field("style", &self.style)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewZonePanel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewZonePanel")
+            .field("zone", &self.zone)
+            .field("panel", &self.panel)
+            .finish()
+    }
+}
+
+impl core::fmt::Debug for ViewPanel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ViewPanel")
+            .field("has_title", &self.title.is_some())
+            .field("alignment", &self.alignment)
+            .field("bordered", &self.bordered)
+            .field("has_tabs", &self.tabs.is_some())
+            .field("has_table", &self.table.is_some())
+            .field("rows_len", &self.rows.len())
+            .field("selected_row", &self.selected_row)
+            .field("scroll", &self.scroll)
+            .field("content", &"<redacted>")
+            .finish()
+    }
+}
 
 /// Internal serde helpers re-exported within `crates/` via explicit crate usage where identical
 /// `EngineState` / `SeasonReplayLog` JSON encodings are shared.
@@ -160,15 +309,16 @@ mod tests {
         GoodScarcity, GradedMandateCard, HumanWhatIfRequest, MandateKind, MarketAction, MarketDay,
         NUMERAIRE_CODE, NUMERAIRE_DISPLAY_LABEL, NUMERAIRE_PLAIN_LABEL, OfferProposal, OfferSide,
         ParitySpecSource, PreimageSecret, PreviewTieMode, PrivateMandate, ProjectDeliveryOrder,
-        PublicSweepReceipt, PublicTableSpec, RegentDoctrine, STATE_PREDICATES_VERSION,
-        ScreenLayout, SealedOrderBundle, SeasonEndAndMarks, SeasonId, Seat, SeatCommodityDisplay,
-        SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind, SeatKeyCode, SeatKeyEvent,
-        SeatKeyModifiers, SeatObservation, SeatObservationPublicParts, SeatScreenView, SeatState,
-        SeatStatePredicates, ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId,
-        TableMode, ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis,
-        ViewColor, ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll,
-        ViewSizeHint, ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable,
-        ViewTableCell, ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize,
+        PublicSweepReceipt, PublicTableSpec, RefusedActionPreview, RegentDoctrine,
+        STATE_PREDICATES_VERSION, ScreenLayout, SealedOrderBundle, SeasonEndAndMarks, SeasonId,
+        Seat, SeatCommodityDisplay, SeatConfig, SeatIdentity, SeatIntent, SeatIntentKind,
+        SeatKeyCode, SeatKeyEvent, SeatKeyModifiers, SeatObservation, SeatObservationPublicParts,
+        SeatScreenView, SeatSpoilagePreview, SeatState, SeatStatePredicates, SeatUpkeepPreview,
+        ShockKind, SpoilageAndConversion, Step0To7SweepSummary, TableId, TableMode,
+        ToStructuredError, Turn, TurnPhase, UpkeepAndDebt, ViewAlign, ViewAxis, ViewColor,
+        ViewLabel, ViewLayoutMode, ViewModal, ViewPanel, ViewRow, ViewScroll, ViewSizeHint,
+        ViewSpan, ViewStatusLine, ViewStyle, ViewTabBar, ViewTabItem, ViewTable, ViewTableCell,
+        ViewTableColumn, ViewTableRow, ViewZoneId, ViewZonePanel, ViewportSize, WhatIfPreview,
         drand_quicknet_round_for_close, format_numeraire_display, lookup_commodity_display,
         lookup_commodity_display_bytes,
     };
@@ -1033,5 +1183,400 @@ mod tests {
         };
         let json_res = receipt.to_json_string();
         assert!(json_res.is_ok());
+    }
+
+    #[test]
+    fn debug_and_pretty_debug_redact_all_private_seat_types() {
+        let pm = PrivateMandate {
+            kind: MandateKind::MinProjectEquity { target: 987_654 },
+            bonus_equity: 7_777,
+        };
+        let bundle = SealedOrderBundle {
+            converter_runs: vec![ConverterRunOrder {
+                recipe_idx: 2,
+                runs: 9,
+            }],
+            project_deliveries: vec![ProjectDeliveryOrder {
+                project_id: 42,
+                batches: 3,
+            }],
+            atomic_swaps: vec![],
+            contract_deliveries: vec![],
+            dual_escrows: vec![],
+            debt_repayment_cred: 654_321,
+            escrow_finishes: vec![EscrowFinishUnlock {
+                escrow_id: 88,
+                preimage: Some(PreimageSecret([0x5A; 32])),
+            }],
+            check_cashes: vec![55],
+            council_vote: None,
+            charter_bids: vec![],
+        };
+        let draft_act = BundleDraftAction::SetDebtRepaymentCred(765_432);
+        let intent_bundle = SeatIntent::update_bundle(draft_act.clone());
+        let what_if_req = HumanWhatIfRequest {
+            seat: 0,
+            market_actions: vec![MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Raw(0),
+                amount: 876_543,
+            }],
+            cancel_lock_at: None,
+            bundle: bundle.clone(),
+            tie_mode: PreviewTieMode::NeutralSeed,
+            assumptions: CounterpartyAssumptions {
+                assumed_cancelled_offer_ids: vec![432_109],
+                assumed_peer_market_actions: vec![],
+                assumed_peer_bundles: BTreeMap::new(),
+                assumed_cosigned_swaps: vec![],
+                assumed_cosigned_dual_escrows: vec![],
+                assumed_peer_deliveries: vec![],
+                assumed_peer_escrow_finishes: vec![],
+                assumed_bounced_check_ids: vec![321_987],
+            },
+        };
+        let intent_whatif = SeatIntent::request_what_if(what_if_req.clone());
+        let ai_req = crate::AiPreviewRequest {
+            seat: 1,
+            market_actions: vec![],
+            bundle: bundle.clone(),
+        };
+
+        let seat_cfg = SeatConfig {
+            seat: 0,
+            identity: SeatIdentity::Human,
+            initial_cred: 15_000,
+            raw_yield_per_turn: 10_000,
+            refined_project_value: 2_000,
+            upkeep_good: 0,
+            upkeep_amount: 1_800,
+            initial_raw_tariff_bps: 800,
+            initial_refined_tariff_bps: 600,
+            perishable_decay_bps: 2_000,
+            regent: None,
+            converters: Vec::new(),
+        };
+        let spec = PublicTableSpec {
+            table_id: TableId(55),
+            mode: TableMode::Club,
+            seat_count: 1,
+            seats: vec![seat_cfg],
+            projects: Vec::new(),
+            closing_hazard_bps: [3_500; 8],
+            mandate_deck: Vec::new(),
+            drand_schedule: None,
+            eval_vrf_pubkey: None,
+            town_import_premium_bps: 22_500,
+            works_stipend_per_unit_cred: 350,
+            mandate_alpha_bps: 250,
+            cancel_lock_bps: 2_500,
+            wash_round_trip_min_units: 1_000,
+            wash_freeze_bond_cred: 500,
+            wash_freeze_bounty_cred: 500,
+        };
+        let preds = SeatStatePredicates {
+            version: STATE_PREDICATES_VERSION,
+            table_id: TableId(55),
+            turn: 2,
+            phase: TurnPhase::TalkAndMarket,
+            seat: 0,
+            upkeep: UpkeepAndDebt {
+                upkeep_good: 0,
+                owed_units: 1_800,
+                held_units: 0,
+                held_on_own_resting_sells: 0,
+                shortfall_units: 1_800,
+                debt_added_at_sweep: 3_600,
+                interest_bps: 400,
+            },
+            spoilage: SpoilageAndConversion {
+                own_raw_good: 0,
+                own_raw_yield_at_sweep: 10_000,
+                spoilage_bps_by_good: vec![2_000],
+                spoil_units_held_by_good: vec![0],
+                spoil_units_on_resting_offers: 0,
+                spoil_units_total: 0,
+                workshop_capacity_runs_left: 0,
+                recipes: Vec::new(),
+            },
+            scarcity: Vec::new(),
+            coalitions: Vec::new(),
+            season_end: SeasonEndAndMarks {
+                season_closed: false,
+                turns_until_earliest_close: 23,
+                turns_until_latest_close: 31,
+                holdings: Vec::new(),
+                projects: Vec::new(),
+            },
+            cancel_locked: false,
+        };
+        let obs = SeatObservation::unmandated(SeatObservationPublicParts {
+            seat: 0,
+            table_id: TableId(55),
+            turn: 1,
+            phase: TurnPhase::TalkAndMarket,
+            cancel_locked: false,
+            trade_minister: 0,
+            cartel_chair: None,
+            spec: spec.clone(),
+            parities: FundamentalParities::from_spec(&spec),
+            seats: vec![SeatState {
+                seat: 0,
+                identity: SeatIdentity::Human,
+                cred: 15_000,
+                cred_debt: 0,
+                raw: vec![0],
+                refined: vec![0],
+                project_equity: 0,
+                raw_tariff_bps: 800,
+                refined_tariff_bps: 600,
+                credit_tier: CreditTier::Aaa,
+                hard_credit_defaults: 0,
+                bond_breaches: 0,
+                broken_promises: 0,
+                honor_penalties: 0,
+                consecutive_misses: 0,
+                consecutive_zero_production_turns: 0,
+                wash_frozen_until_turn: 0,
+            }],
+            offers: BTreeMap::new(),
+            checks: BTreeMap::new(),
+            escrows: BTreeMap::new(),
+            dual_escrows: BTreeMap::new(),
+            pledges: BTreeMap::new(),
+            audited_pledges: BTreeSet::new(),
+            domains: Vec::new(),
+            council_platforms: BTreeMap::new(),
+            charters: Vec::new(),
+            active_shocks: Vec::new(),
+            public_forecasts: Vec::new(),
+            auditor_hints: Vec::new(),
+            next_offer_id: 1,
+            next_check_id: 1,
+            next_escrow_id: 1,
+            delivery_ledger: BTreeMap::new(),
+            last_potentials: vec![15_000],
+            pending_town_import_cred_spent: 0,
+            fill_log: Vec::new(),
+            pending_wash_freezes: Vec::new(),
+            eval_vrf_pubkey: None,
+            baseline_predicates: preds,
+            public_receipts: Vec::new(),
+        });
+
+        let what_if_preview = WhatIfPreview {
+            seat: 0,
+            turn: 1,
+            baseline_predicates: obs.baseline_predicates.clone(),
+            pre_seat_state: obs.seats[0].clone(),
+            post_market_seat_state: obs.seats[0].clone(),
+            post_sweep_seat_state: obs.seats[0].clone(),
+            post_sweep_predicates: obs.baseline_predicates.clone(),
+            close_mark_caveat: "PLANTED_CAVEAT_918273".to_owned(),
+            refused_market_actions: vec![RefusedActionPreview {
+                action_index: 0,
+                error_code: "REFUSED".to_owned(),
+                message: "PLANTED_REFUSAL_827364".to_owned(),
+            }],
+            converter_orders: Vec::new(),
+            project_orders: Vec::new(),
+            swap_orders: Vec::new(),
+            check_orders: Vec::new(),
+            escrow_orders: Vec::new(),
+            upkeep: SeatUpkeepPreview {
+                upkeep_good: 0,
+                upkeep_required: 1_800,
+                paid_with_refined: 0,
+                debt_interest_accrued: 0,
+                new_shortfall_debt: 3_600,
+                debt_repaid_cred: 765_432,
+            },
+            spoilage: SeatSpoilagePreview {
+                perishable_spoiled_units: 0,
+            },
+            public_fills: Vec::new(),
+            step0_to_7_receipt: Step0To7SweepSummary {
+                turn: 1,
+                non_reveal_seats: Vec::new(),
+                regent_acted_seats: Vec::new(),
+                converted_to_ai: Vec::new(),
+                escrows_finished: Vec::new(),
+                escrows_cancelled_or_forfeited: Vec::new(),
+                atomic_swaps_settled: 0,
+                converter_batches_run: 0,
+                converter_orders_clamped: 0,
+                checks_cashed: Vec::new(),
+                checks_bounced: Vec::new(),
+                cartel_evictions: Vec::new(),
+                projects_completed: 0,
+                project_orders_clamped: 0,
+                total_upkeep_shortfall_debt: 0,
+                total_spoilage_clawed_back: 0,
+                broken_promises: Vec::new(),
+                elected_officers: None,
+                charters_awarded: Vec::new(),
+                cred_debt_repaid: 765_432,
+                charter_cred_burned: 0,
+                town_import_cred_spent: 0,
+                works_stipend_cred_minted: 0,
+                batch_trades_cleared: 0,
+                fills: Vec::new(),
+                wash_freeze_settlements: Vec::new(),
+            },
+        };
+        let label_title = ViewLabel::plain("PLANTED_VIEW_TITLE_645312".to_owned());
+        let span_item = ViewSpan::plain("PLANTED_VIEW_SPAN_534219".to_owned());
+        let row_note = ViewRow::from_spans(vec![
+            ViewSpan::plain("PLANTED_VIEW_MANDATE_645312".to_owned()),
+            span_item.clone(),
+        ]);
+        let tab_item = ViewTabItem {
+            label: ViewLabel::plain("PLANTED_VIEW_TAB_246810".to_owned()),
+            enabled: true,
+        };
+        let tab_bar = ViewTabBar {
+            tabs: vec![tab_item.clone()],
+            active_index: 0,
+        };
+        let table_col = ViewTableColumn {
+            header: ViewLabel::plain("PLANTED_VIEW_COL_135791".to_owned()),
+            width: ViewSizeHint::Min(10),
+            alignment: ViewAlign::Left,
+        };
+        let table_cell = ViewTableCell::plain("PLANTED_VIEW_ORDER_765432".to_owned());
+        let table_row = ViewTableRow {
+            cells: vec![table_cell.clone()],
+            style: ViewStyle::plain(),
+        };
+        let view_table = ViewTable {
+            columns: vec![table_col.clone()],
+            rows: vec![table_row.clone()],
+            selected_row: Some(0),
+        };
+        let vault_panel = ViewPanel {
+            title: Some(label_title.clone()),
+            tabs: Some(tab_bar.clone()),
+            table: Some(view_table.clone()),
+            rows: vec![
+                row_note.clone(),
+                ViewRow::from_plain("PLANTED_VIEW_NOTE_534219".to_owned()),
+            ],
+            ..ViewPanel::default()
+        };
+        let zone_panel = ViewZonePanel {
+            zone: ViewZoneId::PrivateDrawer,
+            panel: vault_panel.clone(),
+        };
+        let view_modal = ViewModal {
+            width_pct: 80,
+            height_pct: 60,
+            panel: ViewPanel {
+                title: Some(ViewLabel::plain("PLANTED_VIEW_MODAL_908172".to_owned())),
+                rows: vec![ViewRow::from_plain("PLANTED_VIEW_ORDER_765432".to_owned())],
+                ..ViewPanel::default()
+            },
+        };
+        let status_line = ViewStatusLine {
+            alert: Some(ViewRow::from_plain("PLANTED_VIEW_ALERT_112233".to_owned())),
+            left: vec![ViewSpan::plain("PLANTED_VIEW_LEFT_445566".to_owned())],
+            right: vec![ViewSpan::plain("PLANTED_VIEW_RIGHT_778899".to_owned())],
+            style: ViewStyle::plain(),
+        };
+        let screen_view = SeatScreenView {
+            layout: ScreenLayout::layout_for_viewport(ViewportSize::new(100, 30)),
+            zones: vec![zone_panel.clone()],
+            status_line: Some(status_line.clone()),
+            modal: Some(view_modal.clone()),
+        };
+
+        let markers = [
+            "987654",
+            "7777",
+            "654321",
+            "765432",
+            "876543",
+            "432109",
+            "321987",
+            "5a5a5a",
+            "5A5A5A",
+            "90, 90, 90",
+            "PLANTED_CAVEAT_918273",
+            "PLANTED_REFUSAL_827364",
+            "PLANTED_VIEW_TITLE_645312",
+            "PLANTED_VIEW_SPAN_534219",
+            "PLANTED_VIEW_MANDATE_645312",
+            "PLANTED_VIEW_TAB_246810",
+            "PLANTED_VIEW_COL_135791",
+            "PLANTED_VIEW_NOTE_534219",
+            "PLANTED_VIEW_ORDER_765432",
+            "PLANTED_VIEW_MODAL_908172",
+            "PLANTED_VIEW_ALERT_112233",
+            "PLANTED_VIEW_LEFT_445566",
+            "PLANTED_VIEW_RIGHT_778899",
+        ];
+        let debug_strings = [
+            alloc::format!("{pm:?}"),
+            alloc::format!("{pm:#?}"),
+            alloc::format!("{bundle:?}"),
+            alloc::format!("{bundle:#?}"),
+            alloc::format!("{draft_act:?}"),
+            alloc::format!("{draft_act:#?}"),
+            alloc::format!("{intent_bundle:?}"),
+            alloc::format!("{intent_bundle:#?}"),
+            alloc::format!("{:?}", what_if_req.assumptions),
+            alloc::format!("{:#?}", what_if_req.assumptions),
+            alloc::format!("{what_if_req:?}"),
+            alloc::format!("{what_if_req:#?}"),
+            alloc::format!("{intent_whatif:?}"),
+            alloc::format!("{intent_whatif:#?}"),
+            alloc::format!("{ai_req:?}"),
+            alloc::format!("{ai_req:#?}"),
+            alloc::format!("{obs:?}"),
+            alloc::format!("{obs:#?}"),
+            alloc::format!("{what_if_preview:?}"),
+            alloc::format!("{what_if_preview:#?}"),
+            alloc::format!("{screen_view:?}"),
+            alloc::format!("{screen_view:#?}"),
+            alloc::format!("{:?}", screen_view.zones),
+            alloc::format!("{:#?}", screen_view.zones),
+            alloc::format!("{zone_panel:?}"),
+            alloc::format!("{zone_panel:#?}"),
+            alloc::format!("{vault_panel:?}"),
+            alloc::format!("{vault_panel:#?}"),
+            alloc::format!("{label_title:?}"),
+            alloc::format!("{label_title:#?}"),
+            alloc::format!("{span_item:?}"),
+            alloc::format!("{span_item:#?}"),
+            alloc::format!("{row_note:?}"),
+            alloc::format!("{row_note:#?}"),
+            alloc::format!("{tab_item:?}"),
+            alloc::format!("{tab_item:#?}"),
+            alloc::format!("{tab_bar:?}"),
+            alloc::format!("{tab_bar:#?}"),
+            alloc::format!("{table_col:?}"),
+            alloc::format!("{table_col:#?}"),
+            alloc::format!("{table_cell:?}"),
+            alloc::format!("{table_cell:#?}"),
+            alloc::format!("{table_row:?}"),
+            alloc::format!("{table_row:#?}"),
+            alloc::format!("{view_table:?}"),
+            alloc::format!("{view_table:#?}"),
+            alloc::format!("{view_modal:?}"),
+            alloc::format!("{view_modal:#?}"),
+            alloc::format!("{status_line:?}"),
+            alloc::format!("{status_line:#?}"),
+        ];
+        for text in &debug_strings {
+            assert!(
+                text.contains("<redacted>") || text.contains("own_mandate: None"),
+                "expected <redacted> or own_mandate: None marker in Debug:\n{text}"
+            );
+            for m in &markers {
+                assert!(
+                    !text.contains(m),
+                    "planted secret marker `{m}` leaked into Debug:\n{text}"
+                );
+            }
+        }
     }
 }

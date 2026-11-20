@@ -4,6 +4,11 @@ use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
+use crate::commit::PrivateMandate;
+use crate::predicates_types::{SeatSeasonMetrics, SeatStatePredicates};
+use crate::scoring_types::FinalScoreboard;
+use crate::types::{TableId, Turn};
+
 /// Plain terminal palette color carried in a seat UI view model without depending on `ratatui`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
@@ -149,7 +154,7 @@ pub enum ViewAlign {
 }
 
 /// Styled owned text fragment within a [`ViewRow`], [`ViewTableCell`], or [`ViewStatusLine`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewSpan {
     /// UTF-8 label or text fragment.
     pub text: String,
@@ -175,7 +180,7 @@ impl ViewSpan {
 }
 
 /// Owned sequence of styled [`ViewSpan`]s rendered on one line.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewRow {
     /// Ordered spans concatenated left-to-right on a single line.
     pub spans: Vec<ViewSpan>,
@@ -208,7 +213,7 @@ impl ViewRow {
 }
 
 /// Owned label string with optional style (used for panel titles, tabs, and badges).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewLabel {
     /// Displayed label text.
     pub text: String,
@@ -499,7 +504,7 @@ pub struct ViewScroll {
 }
 
 /// Column definition inside a [`ViewTable`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ViewTableColumn {
     /// Column header label.
     pub header: ViewLabel,
@@ -510,7 +515,7 @@ pub struct ViewTableColumn {
 }
 
 /// Owned styled cell in a [`ViewTableRow`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTableCell {
     /// Styled spans within this cell.
     pub spans: Vec<ViewSpan>,
@@ -549,7 +554,7 @@ impl ViewTableCell {
 }
 
 /// One row of [`ViewTableCell`]s inside a [`ViewTable`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTableRow {
     /// Ordered cells matching [`ViewTable::columns`].
     pub cells: Vec<ViewTableCell>,
@@ -573,7 +578,7 @@ impl ViewTableRow {
 }
 
 /// Structured tabular view model with typed columns, alignment, and rows.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTable {
     /// Ordered column headers, widths, and alignments.
     pub columns: Vec<ViewTableColumn>,
@@ -607,7 +612,7 @@ impl ViewTable {
 }
 
 /// Single tab entry inside a [`ViewTabBar`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTabItem {
     /// Tab title label.
     pub label: ViewLabel,
@@ -616,7 +621,7 @@ pub struct ViewTabItem {
 }
 
 /// Tab strip metadata carried inside a tabbed [`ViewPanel`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewTabBar {
     /// Ordered tabs left-to-right.
     pub tabs: Vec<ViewTabItem>,
@@ -646,7 +651,7 @@ impl ViewTabBar {
 }
 
 /// Modal overlay layer rendered centered over the screen when present.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewModal {
     /// Target modal width percentage (`1..=100`).
     pub width_pct: u16,
@@ -657,7 +662,7 @@ pub struct ViewModal {
 }
 
 /// Bottom status line with optional prominent refusal/alert row plus key-hint and mode spans.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewStatusLine {
     /// Prominent top-row refusal/error banner rendered ahead of shortcuts so it stays visible at 80x24+.
     pub alert: Option<ViewRow>,
@@ -700,7 +705,7 @@ impl ViewStatusLine {
 }
 
 /// Panel bound to a named [`ViewZoneId`] inside [`SeatScreenView::zones`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewZonePanel {
     /// Zone identifier matching a [`ViewZoneSpec`] inside [`ScreenLayout`].
     pub zone: ViewZoneId,
@@ -709,7 +714,7 @@ pub struct ViewZonePanel {
 }
 
 /// Self-contained bordered or plain panel made purely of owned view-model data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct ViewPanel {
     /// Optional header title rendered in the panel border.
     pub title: Option<ViewLabel>,
@@ -760,7 +765,10 @@ impl ViewPanel {
 }
 
 /// Complete plain owned view model emitted by `league-seat-ui` for `league-tui` to draw.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+///
+/// Redacting `core::fmt::Debug` is implemented in `crate` root so rendered mandates, notes, and
+/// staged orders stay redacted while keeping `view.rs` free of trait `impl` blocks.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct SeatScreenView {
     /// Layout specification mapping viewport size onto named zones.
     pub layout: ScreenLayout,
@@ -1039,6 +1047,64 @@ pub struct CurtainPinPrompt {
     pub locked_out_reset: bool,
 }
 
+/// Command-line override flags displayed cleanly in the Club Mode Lobby (`CLI > Lobby`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct LobbyCliOverrides {
+    /// Whole-turn timed budget forced by `--turn-clock <180..=300>`, if passed on CLI.
+    pub turn_clock_secs: Option<u16>,
+    /// `true` when `--untimed` was passed on CLI.
+    pub untimed: bool,
+    /// `true` when `--pins` was passed on CLI.
+    pub pins_enabled: bool,
+}
+
+/// Public progress counter rendered during `TurnPhase::AwaitingMandateReveal` before finalization.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub struct AwaitingRevealProgress {
+    /// Number of seats whose Turn-1 mandate reveal has been submitted (`0..=seat_count`).
+    pub revealed_count: u8,
+    /// Total seats at the table (`4..=6`).
+    pub seat_count: u8,
+}
+
+/// Public status of interactive `SeasonReplayLog` export on End-of-Season Tab 4.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum ReplayExportState {
+    /// Replay file has not been exported from End-of-Season Tab 4 yet.
+    #[default]
+    Ready,
+    /// Replay log was verified, written to disk, and `.seal` was wiped.
+    Exported,
+    /// Replay write or verification failed; `.seal` was preserved on disk.
+    Failed,
+}
+
+/// Plain post-finalize season summary rendered by `league-seat-ui` only in `TurnPhase::Completed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndOfSeasonData {
+    /// Closed table identifier.
+    pub table_id: TableId,
+    /// Terminal turn number (`24..=32`).
+    pub closed_turn: Turn,
+    /// Final ranked scoreboard across all seats.
+    pub scoreboard: FinalScoreboard,
+    /// All seats' unsealed Turn-1 Private Charter Mandates (`0..seat_count`), populated strictly
+    /// after `finalize_season()`.
+    pub revealed_mandates: Vec<PrivateMandate>,
+    /// Closing `SeatStatePredicates` (`at_close`) holding terminal `HoldingMark` splits.
+    pub close_predicates: Vec<SeatStatePredicates>,
+    /// Per-seat paper-test solvency and holding metrics (`SeatSeasonMetrics`).
+    pub season_metrics: Vec<SeatSeasonMetrics>,
+    /// Replay export status for Tab 4 (`Ready`, `Exported`, `Failed`).
+    pub export_state: ReplayExportState,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,5 +1126,17 @@ mod tests {
         assert_eq!(prompt.entered_count, 0);
         assert_eq!(prompt.failed_attempts, 0);
         assert!(!prompt.locked_out_reset);
+
+        let ov = LobbyCliOverrides::default();
+        assert_eq!(ov.turn_clock_secs, None);
+        assert!(!ov.untimed);
+        assert!(!ov.pins_enabled);
+
+        let prog = AwaitingRevealProgress {
+            revealed_count: 1,
+            seat_count: 4,
+        };
+        assert_eq!(prog.revealed_count, 1);
+        assert_eq!(ReplayExportState::default(), ReplayExportState::Ready);
     }
 }

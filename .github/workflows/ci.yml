@@ -114,12 +114,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      # Coverage floor 91, raised for Card 5 Part B2a. Never lowered to
-      # make a build green.
+      # Coverage floor 92, raised for Card 5 Part B2b (CI measured 92.16% lines). Never
+      # lowered to make a build green.
       - name: Coverage
         run: |
           command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked --version "0.9.1"
-          cargo llvm-cov --workspace --locked --fail-under-lines 91
+          cargo llvm-cov --workspace --locked --fail-under-lines 92
 
       - name: Testnet only
         run: bash scripts/check-testnet-only.sh

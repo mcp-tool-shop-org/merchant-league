@@ -839,3 +839,316 @@ fn table_spec_validation_math_helpers_and_persistence_error_branches() {
     );
     assert_eq!(std_host.seat_count(), 4);
 }
+
+#[test]
+fn debug_and_pretty_debug_redact_club_checkpoint_mandate_and_reveals() {
+    use league_core::club::host::{ClubPauseCursor, ClubSessionCheckpoint};
+    use league_core::{
+        MandateKind, MandateReveal, PrivateMandate, SealedMandateDeal, SealedOrderBundle,
+        ToStructuredError,
+    };
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x7A + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x6D; 32]), "eval_seed");
+    let host = must_ok(
+        ClubHost::from_explicit_setup(TableId(903_701), 4, 7, [0x4B; 32], &salts, eval_seed, 55),
+        "host setup",
+    );
+    let obs = must_ok(host.observe_seat(Seat(0)), "observe seat 0");
+
+    let ckpt = ClubSessionCheckpoint {
+        pause_cursor: Some(ClubPauseCursor {
+            sub_pass_b: false,
+            pass_offset: 1,
+            curtain_next_seat: Some(1),
+        }),
+        pending_bundles: vec![SealedOrderBundle {
+            debt_repayment_cred: 777_111,
+            ..SealedOrderBundle::default()
+        }],
+        sub_pass_b_committed: vec![false, true, false, false],
+        seat_notes: vec!["PLANTED_CKPT_NOTE_8421".to_owned()],
+        seat_pins: vec![Some("9317".to_owned()), None, None, None],
+        pins_enabled: true,
+        turn_clock_secs: Some(210),
+        untimed: false,
+    };
+    let deal = SealedMandateDeal {
+        deal_seed: [0x6C; 32],
+        seat_reveals: vec![MandateReveal {
+            mandate: PrivateMandate {
+                kind: MandateKind::MinProjectEquity { target: 654_987 },
+                bonus_equity: 4_500,
+            },
+            salt: RevealSalt([0x7F; 32]),
+        }],
+    };
+    let order_rev = OrderReveal {
+        bundle: SealedOrderBundle {
+            debt_repayment_cred: 888_222,
+            ..SealedOrderBundle::default()
+        },
+        salt: RevealSalt([0x5E; 32]),
+    };
+
+    for dbg in [format!("{ckpt:?}"), format!("{ckpt:#?}")] {
+        assert!(
+            dbg.contains("<redacted>"),
+            "ckpt missing <redacted>:\n{dbg}"
+        );
+        for secret in ["777111", "PLANTED_CKPT_NOTE_8421", "9317"] {
+            assert!(!dbg.contains(secret), "ckpt leaked `{secret}`:\n{dbg}");
+        }
+    }
+    for dbg in [format!("{host:?}"), format!("{host:#?}")] {
+        assert!(dbg.contains("<hidden>"), "host missing <hidden>:\n{dbg}");
+    }
+    for dbg in [format!("{obs:?}"), format!("{obs:#?}")] {
+        assert!(dbg.contains("<redacted>"), "obs missing <redacted>:\n{dbg}");
+    }
+    for dbg in [format!("{deal:?}"), format!("{deal:#?}")] {
+        assert!(
+            dbg.contains("[REDACTED]"),
+            "deal missing [REDACTED]:\n{dbg}"
+        );
+        assert!(!dbg.contains("6c6c6c"));
+        assert!(!dbg.contains("654987"));
+    }
+    for dbg in [format!("{order_rev:?}"), format!("{order_rev:#?}")] {
+        assert!(dbg.contains("<redacted>") && dbg.contains("<hidden>"));
+        assert!(!dbg.contains("888222"));
+        assert!(!dbg.contains("5e5e5e"));
+    }
+    let err = league_core::EngineError::InvalidConfig("secret_leak_check".to_owned());
+    assert_eq!(err.to_structured_error().code, "INVALID_CONFIG");
+}
+
+#[test]
+fn every_checkpoint_and_seal_validation_rule_refuses_bad_seal_by_name() {
+    use league_core::ToStructuredError;
+
+    let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
+    let eval_seed = must_ok(SealedEvalSeed::try_from_bytes([0x5C; 32]), "eval_seed");
+    let mut host = must_ok(
+        ClubHost::from_explicit_setup(TableId(903_702), 4, 7, [0x4A; 32], &salts, eval_seed, 55),
+        "setup",
+    );
+    let dir = unique_tmp_dir("bad_seal_rules");
+    let save_path = dir.join("club-903702.save.json");
+    let seal_path = dir.join("club-903702.seal");
+
+    // Populate one Turn sweep digest + checkpoint so every digest & checkpoint field is exercised.
+    let bots: Vec<ClubBot> = (0..4).map(|i| ClubBot::new(100 + i as u64)).collect();
+    assert_eq!(drive_club_turn_with_bots(&mut host, &bots, 1), 0);
+    must_ok(
+        host.write_save_and_seal(&save_path, &seal_path),
+        "write valid",
+    );
+
+    let base_save: serde_json::Value = must_ok(
+        serde_json::from_str(&must_ok(std::fs::read_to_string(&save_path), "read save")),
+        "parse save",
+    );
+    let base_seal: serde_json::Value = must_ok(
+        serde_json::from_str(&must_ok(std::fs::read_to_string(&seal_path), "read seal")),
+        "parse seal",
+    );
+
+    let check_case = |idx: usize, expected_code: &str, save_bytes: Vec<u8>, seal_bytes: Vec<u8>| {
+        let sp = dir.join(format!("save-{idx}.json"));
+        let sl = dir.join(format!("seal-{idx}.seal"));
+        must_ok(std::fs::write(&sp, save_bytes), "write save case");
+        must_ok(std::fs::write(&sl, seal_bytes), "write seal case");
+        let err = must_err(
+            ClubHost::read_save_and_seal(&sp, &sl),
+            &format!("case {idx} ({expected_code})"),
+        );
+        let structured = err.to_structured_error();
+        let combined = format!("{} | {} | {}", structured.code, err, structured.message);
+        assert!(
+            combined.contains(expected_code),
+            "case {idx}: expected `{expected_code}` in `{combined}`"
+        );
+    };
+
+    let mut idx = 0_usize;
+    let mut run_seal = |expected_code: &str, mutate_seal: &dyn Fn(&mut serde_json::Value)| {
+        let mut s = base_seal.clone();
+        mutate_seal(&mut s);
+        check_case(
+            idx,
+            expected_code,
+            must_ok(serde_json::to_vec_pretty(&base_save), "vec"),
+            must_ok(serde_json::to_vec(&s), "vec"),
+        );
+        idx += 1;
+    };
+
+    // Checkpoint rules (one test per rule).
+    run_seal("INVALID_CHECKPOINT_PASS_OFFSET", &|s| {
+        s["session_pause_cursor"] =
+            serde_json::json!({"sub_pass_b": false, "pass_offset": 9, "curtain_next_seat": null});
+    });
+    run_seal("INVALID_SEAT", &|s| {
+        s["session_pause_cursor"] =
+            serde_json::json!({"sub_pass_b": false, "pass_offset": 0, "curtain_next_seat": 9});
+    });
+    run_seal("INVALID_CHECKPOINT_BUNDLES_LEN", &|s| {
+        let one = s["session_pending_bundles"][0].clone();
+        s["session_pending_bundles"] = serde_json::json!([one.clone(), one]);
+    });
+    run_seal("INVALID_CHECKPOINT_COMMITTED_LEN", &|s| {
+        s["session_sub_pass_b_committed"] = serde_json::json!([false, true]);
+    });
+    run_seal("INVALID_CHECKPOINT_NOTES_LEN", &|s| {
+        s["session_seat_notes"] = serde_json::json!(["a", "b"]);
+    });
+    run_seal("INVALID_CHECKPOINT_PINS_LEN", &|s| {
+        s["session_seat_pins"] = serde_json::json!([null, null]);
+    });
+    run_seal("INVALID_CHECKPOINT_PINS_LEN", &|s| {
+        s["session_pins_enabled"] = serde_json::json!(true);
+        s["session_seat_pins"] = serde_json::json!([]);
+    });
+    run_seal("INVALID_CHECKPOINT_PIN_FORMAT", &|s| {
+        s["session_pins_enabled"] = serde_json::json!(true);
+        s["session_seat_pins"] = serde_json::json!(["12a4", null, null, null]);
+    });
+    run_seal("CONFLICTING_CHECKPOINT_CLOCK", &|s| {
+        s["session_untimed"] = serde_json::json!(true);
+        s["session_turn_clock_secs"] = serde_json::json!(210);
+    });
+    run_seal("INVALID_CHECKPOINT_TURN_CLOCK", &|s| {
+        s["session_turn_clock_secs"] = serde_json::json!(179);
+    });
+    run_seal("INVALID_CHECKPOINT_TURN_CLOCK", &|s| {
+        s["session_turn_clock_secs"] = serde_json::json!(301);
+    });
+
+    run_seal("RESERVED_SEED_FORBIDDEN", &|s| {
+        s["layout_seed"] = serde_json::json!(1_000_000);
+    });
+    run_seal("SEED_POOL_MISMATCH", &|s| {
+        s["layout_seed"] = serde_json::json!(10_000);
+    });
+    run_seal("SEAL_LAYOUT_SEED_MISMATCH", &|s| {
+        s["layout_seed"] = serde_json::json!(8);
+    });
+    run_seal("INVALID_SEAL_TABLE_MODE", &|s| {
+        s["engine"]["state"]["spec"]["mode"] = serde_json::json!("Eval");
+    });
+    run_seal("MISSING_SEAL_EVAL_VRF_PUBKEY", &|s| {
+        s["engine"]["state"]["spec"]["eval_vrf_pubkey"] = serde_json::Value::Null;
+    });
+    run_seal("INVALID_SEAL_VRF_PROOF_COUNT", &|s| {
+        let Some(arr) = s["vrf_proofs"].as_array_mut() else {
+            panic!("missing vrf_proofs array");
+        };
+        arr.pop();
+    });
+    run_seal("INVALID_SEAL_VRF_PROOF_LEN", &|s| {
+        s["vrf_proofs"][0] = serde_json::json!([]);
+    });
+    run_seal("INVALID_ORDER", &|s| {
+        let Some(arr) = s["vrf_proofs"][0].as_array_mut() else {
+            panic!("missing vrf_proofs[0] bytes");
+        };
+        let Some(first) = arr[0].as_u64() else {
+            panic!("missing u64 proof byte");
+        };
+        arr[0] = serde_json::json!(first ^ 1);
+    });
+    run_seal("INVALID_SEALED_MANDATE_DEAL", &|s| {
+        s["sealed_mandate_deal"]["seat_reveals"][0]["mandate"]["bonus_equity"] =
+            serde_json::json!(9_999);
+    });
+    run_seal("INVALID_SEAL_MANDATE_LEN", &|s| {
+        let Some(arr) = s["mandate_commits"].as_array_mut() else {
+            panic!("missing mandate_commits array");
+        };
+        arr.pop();
+    });
+    run_seal("INVALID_SEAL_DIGEST_LEN", &|s| {
+        let Some(arr) = s["live_state_digests"].as_array_mut() else {
+            panic!("missing live_state_digests array");
+        };
+        arr.push(serde_json::json!(vec![1_u8; 32]));
+    });
+    run_seal("DEGENERATE_COMMIT_SALT_ENTROPY", &|s| {
+        s["commit_salt_entropy"] = serde_json::json!("0".repeat(64));
+    });
+    run_seal("INVALID_CURRENT_TURN_SALTS", &|s| {
+        let zero = "0".repeat(64);
+        s["current_turn_salts"] = serde_json::json!([zero, zero, zero, zero]);
+    });
+    run_seal("INVALID_CURRENT_TURN_SALTS", &|s| {
+        let one = "1".repeat(64);
+        s["current_turn_salts"] = serde_json::json!([one, one]);
+    });
+    run_seal("UNSUPPORTED_REPLAY_VERSION", &|s| {
+        s["format_version"] = serde_json::json!(99);
+    });
+
+    check_case(
+        idx,
+        "MALFORMED_SAVE_JSON",
+        b"{not_json".to_vec(),
+        must_ok(serde_json::to_vec(&base_seal), "vec"),
+    );
+    idx += 1;
+    check_case(
+        idx,
+        "MALFORMED_SEAL_JSON",
+        must_ok(serde_json::to_vec_pretty(&base_save), "vec"),
+        b"{not_json".to_vec(),
+    );
+    idx += 1;
+    // C5: Serde type mismatch inside `.seal` must return MALFORMED_SEAL_JSON without quoting
+    // raw field values from the malformed JSON.
+    {
+        let mut quoted_seal = base_seal.clone();
+        quoted_seal["session_turn_clock_secs"] = serde_json::json!("SEAL_VALUE_QUOTE_SECRET_4411");
+        let sp = dir.join(format!("save-{idx}.json"));
+        let sl = dir.join(format!("seal-{idx}.seal"));
+        must_ok(
+            std::fs::write(&sp, must_ok(serde_json::to_vec_pretty(&base_save), "vec")),
+            "write save c5",
+        );
+        must_ok(
+            std::fs::write(&sl, must_ok(serde_json::to_vec(&quoted_seal), "vec")),
+            "write seal c5",
+        );
+        let err = must_err(ClubHost::read_save_and_seal(&sp, &sl), "c5 seal type err");
+        let structured = err.to_structured_error();
+        let combined = format!("{} | {} | {}", structured.code, err, structured.message);
+        assert!(combined.contains("MALFORMED_SEAL_JSON"), "{combined}");
+        assert!(
+            !combined.contains("SEAL_VALUE_QUOTE_SECRET_4411"),
+            "MALFORMED_SEAL_JSON must never echo malformed seal field values: {combined}"
+        );
+        idx += 1;
+    }
+    check_case(
+        idx,
+        "UNSUPPORTED_REPLAY_VERSION",
+        {
+            let mut sv = base_save.clone();
+            sv["format_version"] = serde_json::json!(99);
+            must_ok(serde_json::to_vec_pretty(&sv), "vec")
+        },
+        must_ok(serde_json::to_vec(&base_seal), "vec"),
+    );
+    idx += 1;
+    check_case(
+        idx,
+        "SAVE_SEAL_SNAPSHOT_MISMATCH",
+        {
+            let mut sv = base_save;
+            sv["turn"] = serde_json::json!(9);
+            must_ok(serde_json::to_vec_pretty(&sv), "vec")
+        },
+        must_ok(serde_json::to_vec(&base_seal), "vec"),
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

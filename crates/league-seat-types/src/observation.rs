@@ -1,6 +1,7 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -192,7 +193,7 @@ impl ParitySpecSource for PublicTableSpec {
 /// `SeatObservation`, so neither seat code nor host code can forge `own_mandate` via a serde
 /// round-trip (pinned by the `compile_fail,E0277` doctest on `league_core::ClubHost::observe_seat`,
 /// since `league-seat-types` disables doctests via `[lib] doctest = false`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct SeatObservation {
     /// Observing seat index (`0..seat_count`).
     pub seat: u8,
@@ -458,6 +459,23 @@ impl SeatObservation {
     }
 }
 
+impl fmt::Debug for SeatObservation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeatObservation")
+            .field("seat", &self.seat)
+            .field("table_id", &self.table_id)
+            .field("turn", &self.turn)
+            .field("phase", &self.phase)
+            .field("cancel_locked", &self.cancel_locked)
+            .field(
+                "own_mandate",
+                &self.own_mandate.as_ref().map(|_| "<redacted>"),
+            )
+            .field("auditor_hints_len", &self.auditor_hints.len())
+            .finish()
+    }
+}
+
 /// Sanitized public snapshot exported from [`SeatObservation::to_public_preview_state`] for
 /// side-effect-free Steps 0–7 simulations (`preview_what_if` / `preview_seat_bundle`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -536,7 +554,7 @@ pub enum PreviewTieMode {
 }
 
 /// Caller-supplied hypothetical counterparty assumptions for [`HumanWhatIfRequest`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CounterpartyAssumptions {
     /// Resting offer IDs assumed cancelled before Phase-1 execution (ignored when `cancel_locked`).
     #[serde(default)]
@@ -564,8 +582,14 @@ pub struct CounterpartyAssumptions {
     pub assumed_peer_bundles: BTreeMap<u8, SealedOrderBundle>,
 }
 
+impl fmt::Debug for CounterpartyAssumptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CounterpartyAssumptions(<redacted>)")
+    }
+}
+
 /// Human What-If Sandbox request executed by `preview_what_if` over [`PublicPreviewState`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HumanWhatIfRequest {
     /// Asking seat index (`0..seat_count`).
     pub seat: u8,
@@ -582,8 +606,19 @@ pub struct HumanWhatIfRequest {
     pub assumptions: CounterpartyAssumptions,
 }
 
+impl fmt::Debug for HumanWhatIfRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HumanWhatIfRequest")
+            .field("seat", &self.seat)
+            .field("tie_mode", &self.tie_mode)
+            .field("bundle", &"<redacted>")
+            .field("assumptions", &"<redacted>")
+            .finish()
+    }
+}
+
 /// AI-seat preview request executed by `preview_seat_bundle` (`A2`, zero assumptions).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiPreviewRequest {
     /// Asking AI seat index (`0..seat_count`).
     pub seat: u8,
@@ -591,6 +626,16 @@ pub struct AiPreviewRequest {
     pub market_actions: Vec<MarketAction>,
     /// Own Phase-2 [`SealedOrderBundle`].
     pub bundle: SealedOrderBundle,
+}
+
+impl fmt::Debug for AiPreviewRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AiPreviewRequest")
+            .field("seat", &self.seat)
+            .field("market_actions_len", &self.market_actions.len())
+            .field("bundle", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Refused Phase-1 [`MarketAction`] entry inside [`WhatIfPreview::refused_market_actions`].
@@ -756,7 +801,9 @@ impl Step0To7SweepSummary {
 
 /// Scrubbed Steps 0–7 preview response returned by `preview_what_if`,
 /// `preview_what_if_with_beacon`, and `preview_seat_bundle`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Redacts detailed preview state and order outcomes in `Debug`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhatIfPreview {
     /// Previewed seat index.
     pub seat: u8,
@@ -794,4 +841,14 @@ pub struct WhatIfPreview {
     pub public_fills: Vec<FillRecord>,
     /// Full Steps 0–7 deterministic receipt summary.
     pub step0_to_7_receipt: Step0To7SweepSummary,
+}
+
+impl fmt::Debug for WhatIfPreview {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WhatIfPreview")
+            .field("seat", &self.seat)
+            .field("turn", &self.turn)
+            .field("preview", &"<redacted>")
+            .finish()
+    }
 }

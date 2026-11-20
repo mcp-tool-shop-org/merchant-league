@@ -31,7 +31,8 @@ use league_seat_types::{
 };
 
 pub use state::{
-    BundleSection, CenterTab, FocusZone, MarketActionKind, PassKind, SeatUiSelection, SeatUiState,
+    BundleSection, CenterTab, EndOfSeasonStep, EndOfSeasonTab, EndOfSeasonUiState, FocusZone,
+    LobbyAction, LobbyState, LobbyStep, MarketActionKind, PassKind, SeatUiSelection, SeatUiState,
     SeatUiStep,
 };
 
@@ -162,6 +163,80 @@ pub fn neutral_session_view(
     )
 }
 
+/// Renders the Club Mode pre-game Lobby screen using strictly pure UI state and CLI overrides.
+#[must_use]
+pub fn render_lobby_screen(
+    state: &LobbyState,
+    overrides: league_seat_types::LobbyCliOverrides,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    render::build_lobby_screen(state, overrides, viewport)
+}
+
+/// Handles one key event inside the Club Mode Lobby screen.
+#[must_use]
+pub fn handle_lobby_key(
+    mut state: LobbyState,
+    overrides: league_seat_types::LobbyCliOverrides,
+    viewport: ViewportSize,
+    key: SeatKeyEvent,
+) -> LobbyStep {
+    let action = composer::apply_lobby_key(&mut state, overrides, key);
+    let view = render::build_lobby_screen(&state, overrides, viewport);
+    LobbyStep {
+        view,
+        state,
+        action,
+    }
+}
+
+/// Renders the strictly public `AwaitingMandateReveal` standby view showing only revealed counts
+/// (`0/N..N-1/N`) without revealing any Turn-1 Private Charter Mandate before finalization.
+#[must_use]
+pub fn render_awaiting_reveal_screen(
+    table_id: TableId,
+    turn: Turn,
+    progress: league_seat_types::AwaitingRevealProgress,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    render::build_awaiting_reveal_screen(table_id, turn, progress, viewport)
+}
+
+/// Handles one key event while the table is in `TurnPhase::AwaitingMandateReveal`.
+#[must_use]
+pub fn handle_awaiting_reveal_key(key: SeatKeyEvent) -> Option<league_seat_types::SeatIntent> {
+    composer::apply_awaiting_reveal_key(key)
+}
+
+/// Renders the 4-tab End-of-Season screen once `finalize_season()` has completed (`TurnPhase::Completed`).
+#[must_use]
+pub fn render_end_of_season_screen(
+    data: &league_seat_types::EndOfSeasonData,
+    state: &EndOfSeasonUiState,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+) -> SeatScreenView {
+    render::build_end_of_season_screen(data, state, commodities, viewport)
+}
+
+/// Handles one key event inside the 4-tab End-of-Season screen.
+#[must_use]
+pub fn handle_end_of_season_key(
+    data: &league_seat_types::EndOfSeasonData,
+    mut state: EndOfSeasonUiState,
+    commodities: Option<&CommodityDisplayMap>,
+    viewport: ViewportSize,
+    key: SeatKeyEvent,
+) -> EndOfSeasonStep {
+    let intent = composer::apply_end_of_season_key(&mut state, key);
+    let view = render::build_end_of_season_screen(data, &state, commodities, viewport);
+    EndOfSeasonStep {
+        view,
+        state,
+        intent,
+    }
+}
+
 /// Build one seat's minimal observation view model from [`SeatObservation`] alone.
 #[must_use]
 pub fn render_seat(obs: &SeatObservation) -> SeatScreenView {
@@ -270,9 +345,12 @@ mod tests {
     };
 
     use crate::{
-        Action, CenterTab, PassKind, SeatUiState, TITLE_LINES, action_for, curtain_view,
-        format_own_mandate_line, handle_seat_key, neutral_session_view, render, render_seat,
-        render_seat_with_commodities, render_turn_screen, title_view,
+        Action, CenterTab, EndOfSeasonTab, EndOfSeasonUiState, LobbyAction, LobbyState, PassKind,
+        SeatUiState, TITLE_LINES, action_for, curtain_view, format_own_mandate_line,
+        handle_awaiting_reveal_key, handle_end_of_season_key, handle_lobby_key, handle_seat_key,
+        neutral_session_view, render, render_awaiting_reveal_screen, render_end_of_season_screen,
+        render_lobby_screen, render_seat, render_seat_with_commodities, render_turn_screen,
+        title_view,
     };
 
     fn key(code: SeatKeyCode, modifiers: SeatKeyModifiers) -> SeatKeyEvent {
@@ -1826,5 +1904,249 @@ mod tests {
         )
         .plain_text();
         assert!(pin_locked_out.contains("PIN entry failed 3 times — Curtain re-locked."));
+    }
+
+    #[test]
+    fn debug_and_pretty_debug_redact_seat_ui_state_and_composers() {
+        let mut st = SeatUiState::new();
+        st.composer_draft = "PLANTED_COMPOSER_55123".to_owned();
+        st.whisper_draft = "PLANTED_WHISPER_66123".to_owned();
+        st.notes_draft = "PLANTED_NOTE_77123".to_owned();
+        st.market_fields.amount = 884_321;
+        st.bundle_fields.debt_repayment_cred = 995_432;
+        st.staged_bundle = SealedOrderBundle {
+            debt_repayment_cred: 667_788,
+            ..SealedOrderBundle::default()
+        };
+        let obs = sample_seat_observation();
+        let view = render_turn_screen(
+            &obs,
+            &st,
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+        );
+        let step = handle_seat_key(
+            &obs,
+            st.clone(),
+            PassKind::SubPassA,
+            None,
+            ViewportSize::new(100, 30),
+            key(SeatKeyCode::Char('n'), SeatKeyModifiers::NONE),
+        );
+
+        let samples = [
+            alloc::format!("{st:?}"),
+            alloc::format!("{st:#?}"),
+            alloc::format!("{:?}", st.market_fields),
+            alloc::format!("{:#?}", st.market_fields),
+            alloc::format!("{:?}", st.bundle_fields),
+            alloc::format!("{:#?}", st.bundle_fields),
+            alloc::format!("{step:?}"),
+            alloc::format!("{step:#?}"),
+            alloc::format!("{view:?}"),
+            alloc::format!("{view:#?}"),
+        ];
+        for text in &samples {
+            assert!(text.contains("<redacted>"), "missing <redacted>:\n{text}");
+            for marker in [
+                "PLANTED_COMPOSER_55123",
+                "PLANTED_WHISPER_66123",
+                "PLANTED_NOTE_77123",
+                "884321",
+                "995432",
+                "667788",
+            ] {
+                assert!(
+                    !text.contains(marker),
+                    "SeatUi Debug leaked planted marker `{marker}`:\n{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lobby_awaiting_reveal_and_end_of_season_screens_and_keys_work() {
+        use league_seat_types::{
+            AwaitingRevealProgress, EndOfSeasonData, FinalScoreboard, HoldingMark,
+            LobbyCliOverrides, ReplayExportState, SeatScoreEntry, SeatSeasonMetrics,
+        };
+
+        let vp = ViewportSize::new(100, 30);
+        let overrides = LobbyCliOverrides {
+            turn_clock_secs: Some(240),
+            untimed: false,
+            pins_enabled: true,
+        };
+        let lobby = LobbyState::new();
+        assert_eq!(lobby.seat_count(), 4);
+        assert_eq!(lobby.human_seat_indices(), vec![0]);
+        assert_eq!(lobby.seed_text(), "1");
+
+        // Increase seat count (`Right`), move down to Seat 1, toggle Human, move to Seed, type '5'.
+        let step1 = handle_lobby_key(
+            lobby,
+            overrides,
+            vp,
+            key(SeatKeyCode::Right, SeatKeyModifiers::NONE),
+        );
+        assert_eq!(step1.state.seat_count(), 5);
+        let step2 = handle_lobby_key(
+            step1.state,
+            overrides,
+            vp,
+            key(SeatKeyCode::Down, SeatKeyModifiers::NONE),
+        );
+        let step3 = handle_lobby_key(
+            step2.state,
+            overrides,
+            vp,
+            key(SeatKeyCode::Down, SeatKeyModifiers::NONE),
+        );
+        let step4 = handle_lobby_key(
+            step3.state,
+            overrides,
+            vp,
+            key(SeatKeyCode::Char(' '), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(step4.state.human_seat_indices(), vec![0, 1]);
+        assert!(step4.state.seat_is_human(Seat(1)));
+
+        let lobby_txt = render_lobby_screen(&step4.state, overrides, vp).plain_text();
+        assert!(lobby_txt.contains("Club Mode Lobby"));
+        assert!(lobby_txt.contains("Seat Count: 5"));
+        assert!(lobby_txt.contains("CLI override --turn-clock"));
+        assert!(lobby_txt.contains("CLI override --pins"));
+
+        let start_step = handle_lobby_key(
+            step4.state.clone(),
+            overrides,
+            vp,
+            key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+        );
+        assert_eq!(start_step.action, LobbyAction::StartSeason);
+        let quit_step = handle_lobby_key(
+            step4.state,
+            overrides,
+            vp,
+            key(SeatKeyCode::Char('q'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(quit_step.action, LobbyAction::Quit);
+
+        // AwaitingMandateReveal standby screen must never expose mandates before completion.
+        let standby = render_awaiting_reveal_screen(
+            TableId(55),
+            Turn(25),
+            AwaitingRevealProgress {
+                revealed_count: 2,
+                seat_count: 4,
+            },
+            vp,
+        )
+        .plain_text();
+        assert!(standby.contains("Session Standby"));
+        assert!(standby.contains("AwaitingMandateReveal"));
+        assert!(standby.contains("2/4"));
+        assert!(!standby.contains("MinProjectEquity"));
+        assert_eq!(
+            handle_awaiting_reveal_key(key(SeatKeyCode::Enter, SeatKeyModifiers::NONE))
+                .map(|i| i.kind),
+            Some(SeatIntentKind::SubmitMandateReveal)
+        );
+        assert_eq!(
+            handle_awaiting_reveal_key(key(SeatKeyCode::Char('q'), SeatKeyModifiers::NONE))
+                .map(|i| i.kind),
+            Some(SeatIntentKind::Quit)
+        );
+
+        // EndOfSeason 4 tabs + navigation + export replay intent.
+        let mut pred = sample_seat_observation().baseline_predicates;
+        pred.season_end.holdings = vec![HoldingMark {
+            good: AssetId::Raw(0),
+            units: 1_500,
+            marked_value: 2_000,
+            units_marked_by_bids: 1_000,
+            units_at_floor: 500,
+            value_at_floor: 500,
+        }];
+        let eos_data = EndOfSeasonData {
+            table_id: TableId(55),
+            closed_turn: Turn(25),
+            scoreboard: FinalScoreboard {
+                table_id: TableId(55),
+                closed_turn: 25,
+                standings: vec![SeatScoreEntry {
+                    seat: 0,
+                    project_equity: 8_000,
+                    net_asset_equity: 12_000,
+                    mandate_bonus: 3_000,
+                    total_equity: 23_000,
+                    credit_tier: CreditTier::Aaa,
+                    hard_credit_defaults: 0,
+                    bond_breaches: 0,
+                    broken_promises: 0,
+                    honor_penalties: 0,
+                }],
+            },
+            revealed_mandates: vec![PrivateMandate {
+                kind: MandateKind::MaintainCleanCredit {
+                    min_tier: CreditTier::Bbb,
+                },
+                bonus_equity: 3_000,
+            }],
+            close_predicates: vec![pred],
+            season_metrics: vec![SeatSeasonMetrics {
+                seat: 0,
+                held_enough_but_short_turns: vec![],
+                covered_with_own_offers_but_short_turns: vec![],
+                spoiled_units: 0,
+                stranded_units_at_close: 500,
+                stranded_value_at_close: 500,
+            }],
+            export_state: ReplayExportState::Ready,
+        };
+        let ui = EndOfSeasonUiState::new();
+        let tab1_txt = render_end_of_season_screen(&eos_data, &ui, None, vp).plain_text();
+        assert!(tab1_txt.contains("23000") && tab1_txt.contains("Final Standings"));
+
+        let s_tab2 = handle_end_of_season_key(
+            &eos_data,
+            ui,
+            None,
+            vp,
+            key(SeatKeyCode::Char('2'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(s_tab2.state.active_tab(), EndOfSeasonTab::Mandates);
+        assert!(s_tab2.view.plain_text().contains("CleanCredit >= Bbb"));
+
+        let s_tab3 = handle_end_of_season_key(
+            &eos_data,
+            s_tab2.state,
+            None,
+            vp,
+            key(SeatKeyCode::Char('3'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(s_tab3.state.active_tab(), EndOfSeasonTab::SeasonMetrics);
+        assert!(s_tab3.view.plain_text().contains("stranded_u=500"));
+
+        let s_tab4 = handle_end_of_season_key(
+            &eos_data,
+            s_tab3.state,
+            None,
+            vp,
+            key(SeatKeyCode::Char('4'), SeatKeyModifiers::NONE),
+        );
+        assert_eq!(s_tab4.state.active_tab(), EndOfSeasonTab::ReplayExport);
+        let export_step = handle_end_of_season_key(
+            &eos_data,
+            s_tab4.state,
+            None,
+            vp,
+            key(SeatKeyCode::Enter, SeatKeyModifiers::NONE),
+        );
+        assert_eq!(
+            export_step.intent.map(|i| i.kind),
+            Some(SeatIntentKind::ExportReplay)
+        );
     }
 }
