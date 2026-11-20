@@ -14,6 +14,7 @@ SAVES_CTR="ml-saves-smoke-$$"
 TMP_SMOKE_DIR=$(mktemp -d)
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
+START_EPOCH=$(date +%s)
 
 cleanup() {
   docker rm -f "$SAVES_CTR" >/dev/null 2>&1 || true
@@ -25,13 +26,39 @@ trap cleanup EXIT
 step() { printf '\n[smoke-container] == %s\n' "$1"; }
 
 step "0. Check Dockerfile Rust builder tag matches rust-toolchain.toml channel"
-TOOLCHAIN_CHANNEL=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
-DOCKERFILE_RUST_VER=$(sed -n 's|^FROM docker\.io/library/rust:\([0-9.]*\)-bookworm@sha256:[0-9a-f]\{64\} AS builder$|\1|p' Dockerfile)
-BASE_IMAGE_REF=$(sed -n 's|^FROM \(gcr\.io/distroless/cc-debian12:nonroot@sha256:[0-9a-f]\{64\}\)$|\1|p' Dockerfile)
-echo "rust-toolchain.toml channel=${TOOLCHAIN_CHANNEL}; Dockerfile builder rust=${DOCKERFILE_RUST_VER}; base=${BASE_IMAGE_REF}"
-[ -n "$TOOLCHAIN_CHANNEL" ]
-[ "$TOOLCHAIN_CHANNEL" = "$DOCKERFILE_RUST_VER" ]
-[ -n "$BASE_IMAGE_REF" ]
+TMP_SMOKE_DIR="$TMP_SMOKE_DIR" python3 - <<'PY'
+import os
+import re
+
+with open("rust-toolchain.toml", encoding="utf-8") as f:
+    tc_text = f.read()
+with open("Dockerfile", encoding="utf-8") as f:
+    df_text = f.read()
+
+m_tc = re.search(r'(?m)^channel\s*=\s*"([^"]+)"\s*$', tc_text)
+m_df_rust = re.search(
+    r'(?m)^FROM\s+docker\.io/library/rust:([0-9]+(?:\.[0-9]+)*)-bookworm@sha256:[0-9a-f]{64}\s+AS\s+builder\s*$',
+    df_text,
+)
+m_df_base = re.search(
+    r'(?m)^FROM\s+(gcr\.io/distroless/cc-debian12:nonroot@sha256:[0-9a-f]{64})\s*$',
+    df_text,
+)
+
+channel = m_tc.group(1) if m_tc else ""
+rust_ver = m_df_rust.group(1) if m_df_rust else ""
+base_ref = m_df_base.group(1) if m_df_base else ""
+print(f"rust-toolchain.toml channel={channel}; Dockerfile builder rust={rust_ver}; base={base_ref}")
+
+if not channel or not rust_ver or channel != rust_ver or not base_ref:
+    raise SystemExit(
+        f"toolchain/base parse mismatch: channel={channel!r} rust={rust_ver!r} base={base_ref!r}"
+    )
+
+with open(os.path.join(os.environ["TMP_SMOKE_DIR"], "base_image_ref.txt"), "w", encoding="utf-8") as out:
+    out.write(base_ref)
+PY
+BASE_IMAGE_REF=$(cat "$TMP_SMOKE_DIR/base_image_ref.txt")
 
 step "1. Verify real .dockerignore build context (FROM scratch) and negative controls"
 cat > "$TMP_SMOKE_DIR/ctx.Dockerfile" <<'EOF'
@@ -64,18 +91,31 @@ save_bytes, _ = proc.communicate()
 if proc.returncode != 0:
     raise SystemExit(f"docker image save failed for {tag}: {proc.returncode}")
 
+def norm_archive_key(p: str) -> str:
+    while p.startswith("./"):
+        p = p[2:]
+    return p.lstrip("/")
+
+
+def norm_fs_path(p: str) -> str:
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.strip("/")
+    return "" if p == "." else p
+
+
 with tarfile.open(fileobj=io.BytesIO(save_bytes), mode="r:*") as tf:
-    members = {m.name.lstrip("./"): m for m in tf.getmembers()}
+    members = {norm_archive_key(m.name): m for m in tf.getmembers()}
 
     def read_entry(rel_path: str) -> bytes:
-        cur = rel_path.lstrip("./")
+        cur = norm_archive_key(rel_path)
         for _ in range(8):
             m = members[cur]
             if m.issym():
-                cur = posixpath.normpath(posixpath.join(posixpath.dirname(cur), m.linkname)).lstrip("./")
+                cur = norm_archive_key(posixpath.normpath(posixpath.join(posixpath.dirname(cur), m.linkname)))
                 continue
             if m.islnk():
-                cur = m.linkname.lstrip("./")
+                cur = norm_archive_key(m.linkname)
                 continue
             f = tf.extractfile(m)
             if f is None:
@@ -84,13 +124,13 @@ with tarfile.open(fileobj=io.BytesIO(save_bytes), mode="r:*") as tf:
         raise SystemExit(f"symlink loop for {rel_path}")
 
     manifest = json.loads(read_entry("manifest.json").decode("utf-8"))[0]
-    layers = [l.lstrip("./") for l in manifest["Layers"]]
+    layers = [norm_archive_key(l) for l in manifest["Layers"]]
 
     ctx_fs = {}
     for layer_path in layers:
         with tarfile.open(fileobj=io.BytesIO(read_entry(layer_path)), mode="r:*") as ltf:
             for m in ltf:
-                rel = m.name.lstrip("./").rstrip("/")
+                rel = norm_fs_path(m.name)
                 if not rel or rel == "ctx":
                     continue
                 if not rel.startswith("ctx/"):
@@ -370,8 +410,11 @@ cp_bytes = subprocess.check_output(["docker", "cp", f"{ctr}:/saves", "-"])
 seen = {}
 with tarfile.open(fileobj=io.BytesIO(cp_bytes), mode="r|*") as tf:
     for m in tf:
-        norm_name = m.name.lstrip("./").rstrip("/")
-        if not norm_name:
+        norm_name = m.name
+        while norm_name.startswith("./"):
+            norm_name = norm_name[2:]
+        norm_name = norm_name.strip("/")
+        if not norm_name or norm_name == ".":
             continue
         print(f"docker cp member: {norm_name:30s} uid={m.uid} gid={m.gid} mode={oct(m.mode)} size={m.size}")
         raw = tf.extractfile(m).read() if m.isfile() else b""
@@ -433,9 +476,12 @@ with open(os.path.join(host_saves, "club-1.save.json"), encoding="utf-8") as sf:
 PY
 
 step "6. Diff flattened runtime image file list against pinned distroless base & assert /etc/passwd"
-mkdir -p "$TMP_SMOKE_DIR/empty"
-printf 'FROM %s\n' "$BASE_IMAGE_REF" > "$TMP_SMOKE_DIR/base.Dockerfile"
-docker build --quiet -f "$TMP_SMOKE_DIR/base.Dockerfile" -t "$BASE_TAG" "$TMP_SMOKE_DIR/empty" >/dev/null
+docker pull -q "$BASE_IMAGE_REF" >/dev/null
+if ! docker tag "$BASE_IMAGE_REF" "$BASE_TAG" >/dev/null 2>&1; then
+  mkdir -p "$TMP_SMOKE_DIR/empty"
+  printf 'FROM %s\n' "$BASE_IMAGE_REF" > "$TMP_SMOKE_DIR/base.Dockerfile"
+  docker build --quiet -f "$TMP_SMOKE_DIR/base.Dockerfile" -t "$BASE_TAG" "$TMP_SMOKE_DIR/empty" >/dev/null
+fi
 
 IMAGE_TAG="$IMAGE_TAG" BASE_TAG="$BASE_TAG" IMAGE_SIZE="$IMAGE_SIZE" HOST_UID="$HOST_UID" python3 - <<'PY'
 import hashlib
@@ -452,6 +498,19 @@ image_size = os.environ["IMAGE_SIZE"]
 host_uid = os.environ["HOST_UID"]
 
 
+def norm_archive_key(p: str) -> str:
+    while p.startswith("./"):
+        p = p[2:]
+    return p.lstrip("/")
+
+
+def norm_fs_path(p: str) -> str:
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.strip("/")
+    return "" if p == "." else p
+
+
 def flatten_image(tag: str):
     proc = subprocess.Popen(["docker", "image", "save", tag], stdout=subprocess.PIPE)
     save_bytes, _ = proc.communicate()
@@ -459,17 +518,17 @@ def flatten_image(tag: str):
         raise SystemExit(f"docker image save failed for {tag}: {proc.returncode}")
 
     with tarfile.open(fileobj=io.BytesIO(save_bytes), mode="r:*") as tf:
-        members = {m.name.lstrip("./"): m for m in tf.getmembers()}
+        members = {norm_archive_key(m.name): m for m in tf.getmembers()}
 
         def read_entry(rel_path: str) -> bytes:
-            cur = rel_path.lstrip("./")
+            cur = norm_archive_key(rel_path)
             for _ in range(8):
                 m = members[cur]
                 if m.issym():
-                    cur = posixpath.normpath(posixpath.join(posixpath.dirname(cur), m.linkname)).lstrip("./")
+                    cur = norm_archive_key(posixpath.normpath(posixpath.join(posixpath.dirname(cur), m.linkname)))
                     continue
                 if m.islnk():
-                    cur = m.linkname.lstrip("./")
+                    cur = norm_archive_key(m.linkname)
                     continue
                 f = tf.extractfile(m)
                 if f is None:
@@ -478,13 +537,13 @@ def flatten_image(tag: str):
             raise SystemExit(f"symlink loop in {rel_path}")
 
         manifest = json.loads(read_entry("manifest.json").decode("utf-8"))[0]
-        layers = [l.lstrip("./") for l in manifest["Layers"]]
+        layers = [norm_archive_key(l) for l in manifest["Layers"]]
         fs = {}
         blobs = {}
         for idx, layer_path in enumerate(layers):
             with tarfile.open(fileobj=io.BytesIO(read_entry(layer_path)), mode="r:*") as ltf:
                 for m in ltf:
-                    rel = m.name.lstrip("./").rstrip("/")
+                    rel = norm_fs_path(m.name)
                     if not rel:
                         continue
                     parent, _, base = rel.rpartition("/")
