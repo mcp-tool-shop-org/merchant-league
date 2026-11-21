@@ -11,8 +11,10 @@ use crate::seats::{
     SeatReasoningConfig, validate_local_base_url,
 };
 use crate::secret::{
-    ApiKey, LogLevel, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, redact_secrets,
-    redact_secrets_multi_with_limit, truncate_after_redaction,
+    ApiKey, LogLevel, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, REDACTED_MARKER,
+    is_credential_secret_field_key, redact_credentials_multi_with_limit, redact_secrets,
+    redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+    truncate_after_redaction,
 };
 use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
@@ -2413,8 +2415,10 @@ pub struct CallLogEntry {
     pub charged_credits: f64,
     /// Wall-clock call duration in milliseconds (`0` when refused or reserved pre-call).
     pub latency_ms: u64,
-    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"RESERVED"`,
-    /// `"CAP_REACHED"`, `"COST_UNKNOWN"`, `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
+    /// Call outcome: `"OK"`, `"TOOL_CALL"`, `"TOOL_ROUND_STORE_WRITE_FAILED"`,
+    /// `"SEAT_OUTPUT_WRITE_FAILED"`, `"TOKENIZE_UNAVAILABLE"`, `"harness"`, `"NO_REPLY"`,
+    /// `"LATE_DISCARDED"`, `"RESERVED"`, `"CAP_REACHED"`, `"COST_UNKNOWN"`,
+    /// `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
     pub outcome: String,
     /// Redacted failure or refusal reason when `outcome != "OK"`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2665,6 +2669,9 @@ pub struct SavedToolRoundRecord {
     pub reasoning: Option<String>,
     /// Lowercase hex SHA-256 of the canonical assistant reply JSON (`assistant_content` + received `tool_calls`).
     pub assistant_reply_sha256: String,
+    /// Whether credential-only redaction changed any stored field of this record (game values kept as written).
+    #[serde(default)]
+    pub body_redacted: bool,
     /// Received tool calls and explicit sent/unsent wire tool results in order.
     pub calls: Vec<SavedToolRoundCall>,
 }
@@ -2706,6 +2713,9 @@ pub struct SavedDiscardedReplyRecord {
     /// Raw `tool_calls` JSON value as decoded from the message when present (e.g. `round == talk`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_tool_calls: Option<serde_json::Value>,
+    /// Whether credential-only redaction changed any stored field of this record (game values kept as written).
+    #[serde(default)]
+    pub body_redacted: bool,
 }
 
 /// Path to the immutable per-round sidecar file beside `<game-dir>/relay/seats/<Guild>.jsonl`.
@@ -2742,10 +2752,10 @@ pub fn discarded_reply_file_path(
 /// at a single boundary before parsing, status inspection, branching, or evaluation
 /// (`<game-dir>/relay/seats/<Guild>.day-<DD>-<round>.http-reply-round-<round_index>-attempt-<attempt>.json`).
 ///
-/// The `body` field stores the received HTTP body after full-body secret redaction
-/// (`redact_secrets_multi_with_limit` across `body.len()`) and nothing else: no trimming,
-/// no truncation, no `<think>` stripping, no transcript rule, and no re-serialization of JSON.
-/// Never replayed into any model prompt or shown to any seat.
+/// The `body` field stores the received HTTP body after credential-only redaction
+/// (`redact_secrets_multi_with_limit_and_paths` across `body.len()`, preserving game values)
+/// and nothing else: no trimming, no truncation, no `<think>` stripping, no transcript rule,
+/// and no re-serialization of JSON. Never replayed into any model prompt or shown to any seat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedHttpReplyRecord {
     /// Two-digit game day (`"01"`..=`"99"`).
@@ -2766,13 +2776,16 @@ pub struct SavedHttpReplyRecord {
     pub attempt: u8,
     /// Raw HTTP status code (e.g., `200`, `502`, `503`).
     pub status: u16,
-    /// Whether this HTTP reply arrived after the seat wall timeout (`CallTransportResult::Late`).
+    /// Whether this HTTP reply arrived after the seat wall timeout (`Late`).
     pub is_late: bool,
-    /// Whether full-body secret redaction changed any byte of `body`.
+    /// Whether credential-only redaction changed any byte of `body`.
     pub body_redacted: bool,
+    /// RFC 6901 JSON Pointer paths of credential-named fields whose values were blanked (paths only, never values).
+    #[serde(default)]
+    pub redacted_secret_field_paths: Vec<String>,
     /// Lowercase hex SHA-256 of `body.as_bytes()` as stored in this record.
     pub body_sha256: String,
-    /// Raw HTTP response body text as received (secret-redacted only, verbatim otherwise).
+    /// Raw HTTP response body text as received (credential-redacted only, verbatim otherwise).
     pub body: String,
 }
 
@@ -3179,6 +3192,63 @@ pub fn set_fail_tool_round_write_for_test(path: &Path, fail: bool) {
 #[cfg(any(test, feature = "test-hooks"))]
 fn should_fail_tool_round_write_for_test(path: &Path) -> bool {
     fail_tool_round_write_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(path)
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn fail_from_seat_write_paths() -> &'static Mutex<HashSet<PathBuf>> {
+    static PATHS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Test-only fault-injection hook: when `fail` is `true`, writing a delivered `from-seat/`
+/// file at `path` fails before committing/renaming and before any `"OK"` ledger line is written.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn set_fail_from_seat_write_for_test(path: &Path, fail: bool) {
+    let mut set = fail_from_seat_write_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if fail {
+        set.insert(path.to_path_buf());
+    } else {
+        set.remove(path);
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn should_fail_from_seat_write_for_test(path: &Path) -> bool {
+    fail_from_seat_write_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(path)
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn fail_between_from_seat_and_ok_ledger_paths() -> &'static Mutex<HashSet<PathBuf>> {
+    static PATHS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Test-only fault-injection hook: when `fail` is `true`, writing a delivered `from-seat/`
+/// file at `path` succeeds on disk, and an error is injected immediately before writing the
+/// `"OK"` ledger line to `relay/calls.jsonl`.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn set_fail_between_from_seat_and_ok_ledger_for_test(path: &Path, fail: bool) {
+    let mut set = fail_between_from_seat_and_ok_ledger_paths()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if fail {
+        set.insert(path.to_path_buf());
+    } else {
+        set.remove(path);
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+fn should_fail_between_from_seat_and_ok_ledger_for_test(path: &Path) -> bool {
+    fail_between_from_seat_and_ok_ledger_paths()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .contains(path)
@@ -4144,7 +4214,107 @@ enum PreCallDecision {
     CostOverEstimate,
 }
 
+fn is_non_empty_ascii_digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn matches_seat_http_reply_filename(file_name: &str, guild: &str) -> bool {
+    let prefix = format!("{guild}.day-");
+    let Some(mid) = file_name
+        .strip_prefix(&prefix)
+        .and_then(|s| s.strip_suffix(".json"))
+    else {
+        return false;
+    };
+    let bytes = mid.as_bytes();
+    if bytes.len() < 4
+        || !bytes[0].is_ascii_digit()
+        || !bytes[1].is_ascii_digit()
+        || bytes[2] != b'-'
+    {
+        return false;
+    }
+    if validate_day(&mid[..2]).is_err() {
+        return false;
+    }
+    let after_day = &mid[3..];
+    let rest = if let Some(s) = after_day.strip_prefix("talk.http-reply-round-") {
+        s
+    } else if let Some(s) = after_day.strip_prefix("act.http-reply-round-") {
+        s
+    } else {
+        return false;
+    };
+    let Some((round_str, attempt_and_retry)) = rest.split_once("-attempt-") else {
+        return false;
+    };
+    if !is_non_empty_ascii_digits(round_str) || round_str.parse::<usize>().is_err() {
+        return false;
+    }
+    if let Some((attempt_str, retry_str)) = attempt_and_retry.split_once(".retry-") {
+        is_non_empty_ascii_digits(attempt_str)
+            && attempt_str.parse::<u8>().is_ok()
+            && is_non_empty_ascii_digits(retry_str)
+            && retry_str.parse::<usize>().is_ok_and(|k| k >= 1)
+    } else {
+        is_non_empty_ascii_digits(attempt_and_retry) && attempt_and_retry.parse::<u8>().is_ok()
+    }
+}
+
+fn resolve_orphan_raw_reply_sha256(
+    calls_path: &Path,
+    orphan_entry: &CallLogEntry,
+    diag_sink: Option<&RelayDiagSink>,
+) -> Option<String> {
+    let res_id = orphan_entry.reservation_id.as_deref().unwrap_or("");
+    if res_id.is_empty() || orphan_entry.outcome != "RESERVED" {
+        return None;
+    }
+    let seats_dir = calls_path.parent()?.join("seats");
+    let Ok(entries) = fs::read_dir(&seats_dir) else {
+        return None;
+    };
+    let mut matching_hashes: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_file() {
+            continue;
+        }
+        let file_name_os = entry.file_name();
+        let Some(file_name) = file_name_os.to_str() else {
+            continue;
+        };
+        if !matches_seat_http_reply_filename(file_name, &orphan_entry.guild) {
+            continue;
+        }
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(rec) = serde_json::from_slice::<SavedHttpReplyRecord>(&bytes) else {
+            continue;
+        };
+        if rec.reservation_id == res_id {
+            matching_hashes.push(sha256_hex(&bytes));
+        }
+    }
+    match matching_hashes.len() {
+        0 => None,
+        1 => matching_hashes.into_iter().next(),
+        count => {
+            diag_log(diag_sink, LogLevel::Normal, || {
+                format!(
+                    "orphan_migration=ambiguous_raw_replies reservation_id={res_id} matching_files={count}"
+                )
+            });
+            None
+        }
+    }
+}
+
 impl<'a> CallLedger<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn open(
         turn_lock: &'a TurnLock,
         calls_path: PathBuf,
@@ -4153,6 +4323,7 @@ impl<'a> CallLedger<'a> {
         cost_unit: Option<CostUnit>,
         cap_limit: Option<f64>,
         redaction_key: Option<&ApiKey>,
+        diag_sink: Option<&RelayDiagSink>,
     ) -> Result<Self, RelayError> {
         turn_lock.verify_identity(redaction_key)?;
         let pending_path = pending_calls_path(&calls_path);
@@ -4216,6 +4387,13 @@ impl<'a> CallLedger<'a> {
                     let mut orphan_entry = r.entry.clone();
                     if orphan_entry.reservation_id.is_none() && !r.reservation_id.is_empty() {
                         orphan_entry.reservation_id = Some(r.reservation_id.clone());
+                    }
+                    if orphan_entry.outcome == "RESERVED"
+                        && matches!(orphan_entry.http_reply_sha256, Some(None))
+                        && let Some(sha) =
+                            resolve_orphan_raw_reply_sha256(&calls_path, &orphan_entry, diag_sink)
+                    {
+                        orphan_entry.http_reply_sha256 = Some(Some(sha));
                     }
                     orphans_to_migrate.push((r.clone(), orphan_entry));
                 }
@@ -4498,14 +4676,49 @@ impl<'a> CallLedger<'a> {
         over_estimate: bool,
         redaction_key: Option<&ApiKey>,
     ) -> Result<(), RelayError> {
+        self.finish_call_and_record_with_rollback(
+            reservation_id,
+            reserved_amount,
+            entry,
+            over_estimate,
+            None,
+            redaction_key,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_call_and_record_with_rollback(
+        &mut self,
+        reservation_id: &str,
+        reserved_amount: f64,
+        entry: &CallLogEntry,
+        over_estimate: bool,
+        rollback_on_append_err: Option<&Path>,
+        redaction_key: Option<&ApiKey>,
+    ) -> Result<(), RelayError> {
         self.check_lock_identity(redaction_key);
-        if entry_marks_cost_unknown(entry) {
+        let mut comp_entry_buf;
+        let effective_entry = if let Some(lock_err) = &self.lock_compromised
+            && let Some(p) = rollback_on_append_err
+        {
+            let _ = fs::remove_file(p);
+            comp_entry_buf = entry.clone();
+            comp_entry_buf.reply_sha256 = None;
+            if comp_entry_buf.outcome == "OK" {
+                comp_entry_buf.outcome = "LEDGER_ERROR".to_owned();
+                comp_entry_buf.error = Some(lock_err.to_string());
+            }
+            &comp_entry_buf
+        } else {
+            entry
+        };
+        if entry_marks_cost_unknown(effective_entry) {
             self.cost_unknown_in_turn = true;
         }
-        if over_estimate || entry.outcome == "COST_OVER_ESTIMATE" {
+        if over_estimate || effective_entry.outcome == "COST_OVER_ESTIMATE" {
             self.cost_over_estimate_in_turn = true;
         }
-        let append_res = serde_json::to_string(entry)
+        let append_res = serde_json::to_string(effective_entry)
             .map_err(|e| io_err(&self.calls_path, e, redaction_key))
             .and_then(|mut line| {
                 line.push('\n');
@@ -4522,9 +4735,18 @@ impl<'a> CallLedger<'a> {
                 Ok(())
             }
             Err(e) => {
+                let mut pending_entry = effective_entry.clone();
+                if let Some(p) = rollback_on_append_err {
+                    let _ = fs::remove_file(p);
+                    pending_entry.reply_sha256 = None;
+                    if pending_entry.outcome == "OK" {
+                        pending_entry.outcome = "LEDGER_ERROR".to_owned();
+                        pending_entry.error = Some(e.to_string());
+                    }
+                }
                 self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
-                let held_charge = entry.charged_credits.max(reserved_amount);
-                self.pending_unwritten.push((held_charge, entry.clone()));
+                let held_charge = pending_entry.charged_credits.max(reserved_amount);
+                self.pending_unwritten.push((held_charge, pending_entry));
                 self.ledger_write_failed_in_turn = true;
                 self.check_lock_identity(redaction_key);
                 let pending_snapshot: Vec<CallLogEntry> = self
@@ -5297,6 +5519,7 @@ pub(crate) fn run_turn_with_diag(
         seat_cost_unit,
         active_cap,
         redaction_key,
+        diag_sink,
     )?);
 
     let ledger_run_id = {
@@ -6054,7 +6277,7 @@ fn run_single_automated_seat(
                 )
             });
 
-            let (call_result, elapsed) = call_with_wall_timeout(
+            let (call_result, elapsed) = raw_reply_gate::call_with_wall_timeout(
                 transport,
                 seat.endpoint_url,
                 &request_body,
@@ -6299,6 +6522,7 @@ fn run_single_automated_seat(
                                                     raw_tool_calls,
                                                 },
                                                 seat_retry_suffix,
+                                                &all_keys,
                                                 redaction_key,
                                             ) {
                                                 Ok(file_sha) => (
@@ -6439,13 +6663,76 @@ fn run_single_automated_seat(
                             "seat_reply_hash seat={guild} attempt={attempt} reply_sha256={reply_sha256}"
                         )
                     });
-                    {
+                    let pre_lock_err = {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        guard.check_lock_identity(redaction_key);
+                        guard.lock_compromised.clone()
+                    };
+                    if let Some(lock_err) = pre_lock_err {
+                        let mut comp_entry = entry;
+                        comp_entry.reply_sha256 = None;
+                        if comp_entry.outcome == "OK" {
+                            comp_entry.outcome = "LEDGER_ERROR".to_owned();
+                            comp_entry.error = Some(lock_err.to_string());
+                        }
                         let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
                         if let Err(e) = guard.finish_call_and_record(
                             &reservation_id,
                             seat.max_per_call_spend,
+                            &comp_entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        return SeatOutcome::SeatError {
+                            detail: lock_err.to_string(),
+                        };
+                    }
+                    if let Err(write_err) =
+                        write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
+                    {
+                        let mut fail_entry = entry;
+                        fail_entry.outcome = "SEAT_OUTPUT_WRITE_FAILED".to_owned();
+                        fail_entry.reply_sha256 = None;
+                        fail_entry.error = Some(write_err.to_string());
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record(
+                            &reservation_id,
+                            seat.max_per_call_spend,
+                            &fail_entry,
+                            over_estimate,
+                            redaction_key,
+                        ) {
+                            return SeatOutcome::SeatError {
+                                detail: e.to_string(),
+                            };
+                        }
+                        return SeatOutcome::SeatError {
+                            detail: write_err.to_string(),
+                        };
+                    }
+                    #[cfg(any(test, feature = "test-hooks"))]
+                    if should_fail_between_from_seat_and_ok_ledger_for_test(&from_seat_path) {
+                        return SeatOutcome::SeatError {
+                            detail: io_err(
+                                &from_seat_path,
+                                "injected failure between from-seat write and OK ledger line",
+                                redaction_key,
+                            )
+                            .to_string(),
+                        };
+                    }
+                    {
+                        let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = guard.finish_call_and_record_with_rollback(
+                            &reservation_id,
+                            seat.max_per_call_spend,
                             &entry,
                             over_estimate,
+                            Some(&from_seat_path),
                             redaction_key,
                         ) {
                             return SeatOutcome::SeatError {
@@ -6457,13 +6744,6 @@ fn run_single_automated_seat(
                                 detail: lock_err.to_string(),
                             };
                         }
-                    }
-                    if let Err(e) =
-                        write_verbatim_reply(&from_seat_path, &reply_content, redaction_key)
-                    {
-                        return SeatOutcome::SeatError {
-                            detail: e.to_string(),
-                        };
                     }
                     if let Some(updated_pad) = validated_scratchpad_update {
                         if let Some(parent) = scratchpad_path.parent() {
@@ -6543,6 +6823,7 @@ fn run_single_automated_seat(
                                 is_late_reply,
                                 discarded,
                                 seat_retry_suffix,
+                                &all_keys,
                                 redaction_key,
                             ) {
                                 Ok(file_sha) => {
@@ -6649,49 +6930,68 @@ fn run_single_automated_seat(
                     let mut saved_calls: Vec<SavedToolRoundCall> = Vec::with_capacity(calls.len());
                     let mut received_wire_vals: Vec<serde_json::Value> =
                         Vec::with_capacity(calls.len());
+                    let mut wire_tool_messages: Vec<(String, Option<String>)> =
+                        Vec::with_capacity(calls.len());
+                    let mut record_redacted = false;
                     for (call_idx, parsed_call) in calls.into_iter().enumerate() {
                         let call = parsed_call.wire;
                         let call_val = parsed_call.raw_received_call;
-                        let call_json_bytes = serde_json::to_string(&call_val).unwrap_or_default();
-                        received_wire_vals.push(call_val.clone());
-                        let (tool_result_sent, result_wire_json, result_sha256) =
-                            if is_terminal_round {
-                                (false, None, None)
+                        let (tool_result_sent, result_wire_json) = if is_terminal_round {
+                            (false, None)
+                        } else {
+                            let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN
+                            {
+                                limit_refusal_sent = true;
+                                render_call_limit_reached_wire_json()
                             } else {
-                                let tool_body =
-                                    if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
-                                        limit_refusal_sent = true;
-                                        render_call_limit_reached_wire_json()
-                                    } else {
-                                        preview_calls_used += 1;
-                                        if let Some(preview_state) = preview_state_opt
-                                            && parsed_call.is_well_formed
-                                            && call.kind == "function"
-                                            && call.function.name == expected_tool_name
-                                        {
-                                            execute_preview_tool_call(
-                                                preview_state,
-                                                &call.function.arguments,
-                                            )
-                                        } else {
-                                            render_malformed_tool_call_wire_json()
-                                        }
-                                    };
-                                let rsha = sha256_hex(tool_body.as_bytes());
-                                (true, Some(tool_body), Some(rsha))
+                                preview_calls_used += 1;
+                                if let Some(preview_state) = preview_state_opt
+                                    && parsed_call.is_well_formed
+                                    && call.kind == "function"
+                                    && call.function.name == expected_tool_name
+                                {
+                                    execute_preview_tool_call(
+                                        preview_state,
+                                        &call.function.arguments,
+                                    )
+                                } else {
+                                    render_malformed_tool_call_wire_json()
+                                }
                             };
+                            (true, Some(tool_body))
+                        };
+                        wire_tool_messages.push((call.id.clone(), result_wire_json.clone()));
+
+                        let (scrubbed_id, c_id) = scrub_string_full(&call.id, &all_keys);
+                        let (scrubbed_kind, c_kind) = scrub_string_full(&call.kind, &all_keys);
+                        let (scrubbed_name, c_name) =
+                            scrub_string_full(&call.function.name, &all_keys);
+                        let (scrubbed_args, c_args) =
+                            scrub_string_full(&call.function.arguments, &all_keys);
+                        let (scrubbed_raw_call, c_raw) = scrub_json_value_full(call_val, &all_keys);
+                        let (scrubbed_res_wire, c_res) =
+                            scrub_opt_string_full(result_wire_json, &all_keys);
+                        if c_id || c_kind || c_name || c_args || c_raw || c_res {
+                            record_redacted = true;
+                        }
+                        let call_json_bytes =
+                            serde_json::to_string(&scrubbed_raw_call).unwrap_or_default();
+                        received_wire_vals.push(scrubbed_raw_call.clone());
+                        let result_sha256 = scrubbed_res_wire
+                            .as_ref()
+                            .map(|body| sha256_hex(body.as_bytes()));
                         saved_calls.push(SavedToolRoundCall {
                             call_index: call_idx,
-                            id: call.id.clone(),
-                            kind: call.kind.clone(),
-                            name: call.function.name.clone(),
-                            arguments_sha256: sha256_hex(call.function.arguments.as_bytes()),
-                            arguments: call.function.arguments.clone(),
-                            raw_received_call: call_val,
+                            id: scrubbed_id,
+                            kind: scrubbed_kind,
+                            name: scrubbed_name,
+                            arguments_sha256: sha256_hex(scrubbed_args.as_bytes()),
+                            arguments: scrubbed_args,
+                            raw_received_call: scrubbed_raw_call,
                             call_sha256: sha256_hex(call_json_bytes.as_bytes()),
                             tool_result_sent,
                             result_sha256,
-                            result_wire_json,
+                            result_wire_json: scrubbed_res_wire,
                         });
                         echoed_calls.push(call);
                     }
@@ -6715,8 +7015,15 @@ fn run_single_automated_seat(
                     } else {
                         ("TOOL_CALL".to_owned(), None, false)
                     };
+                    let (scrubbed_assistant_content, c_ac) =
+                        scrub_opt_string_full(assistant_content.clone(), &all_keys);
+                    let (scrubbed_reasoning, c_rsn) =
+                        scrub_opt_string_full(persisted_reasoning, &all_keys);
+                    if c_ac || c_rsn {
+                        record_redacted = true;
+                    }
                     let canonical_reply = serde_json::json!({
-                        "content": &assistant_content,
+                        "content": &scrubbed_assistant_content,
                         "tool_calls": received_wire_vals,
                     })
                     .to_string();
@@ -6730,12 +7037,13 @@ fn run_single_automated_seat(
                         round_index: tool_round_index,
                         attempt,
                         outcome: planned_outcome.clone(),
-                        assistant_content_sha256: assistant_content
+                        assistant_content_sha256: scrubbed_assistant_content
                             .as_ref()
                             .map(|c| sha256_hex(c.as_bytes())),
-                        assistant_content: assistant_content.clone(),
-                        reasoning: persisted_reasoning,
+                        assistant_content: scrubbed_assistant_content,
+                        reasoning: scrubbed_reasoning,
                         assistant_reply_sha256: sha256_hex(canonical_reply.as_bytes()),
+                        body_redacted: record_redacted,
                         calls: saved_calls,
                     };
                     let base_sidecar_path = tool_round_file_path(
@@ -6844,7 +7152,7 @@ fn run_single_automated_seat(
                             request_body_sha256,
                         };
                     }
-                    let Some((_, saved_record, _)) = saved_record_opt else {
+                    let Some((_, _saved_record, _)) = saved_record_opt else {
                         return SeatOutcome::SeatError {
                             detail: "internal error: missing saved tool-round record".to_owned(),
                         };
@@ -6855,12 +7163,12 @@ fn run_single_automated_seat(
                         tool_calls: Some(echoed_calls),
                         tool_call_id: None,
                     });
-                    for saved_call in saved_record.calls {
+                    for (tool_call_id, wire_result) in wire_tool_messages {
                         tool_history.push(OwnedToolHistoryMessage {
                             role: "tool".to_owned(),
-                            content: saved_call.result_wire_json,
+                            content: wire_result,
                             tool_calls: None,
-                            tool_call_id: Some(saved_call.id),
+                            tool_call_id: Some(tool_call_id),
                         });
                     }
                     tool_round_index += 1;
@@ -6976,19 +7284,66 @@ fn refused_call_entry(
     }
 }
 
-enum CallTransportResult {
-    OnTime(Result<RawHttpResponse, TransportError>),
-    TimedOut,
-    Late(RawHttpResponse),
-}
-
 mod raw_reply_gate {
     use super::{
-        ApiKey, CallTransportResult, PreviewToolMode, RawHttpResponse, RelayError,
-        SavedHttpReplyRecord, TransportError, TurnConfig, apply_retry_suffix_to_json_path,
-        http_reply_file_path, redact_secrets_multi_with_limit,
+        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, PreviewToolMode,
+        RawHttpResponse, RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
+        apply_retry_suffix_to_json_path, catch_unwind, http_reply_file_path, mpsc, panic_message,
+        redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
         resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
     };
+
+    enum CallTransportInner {
+        OnTime(Result<RawHttpResponse, TransportError>),
+        TimedOut,
+        Late(RawHttpResponse),
+    }
+
+    pub(super) struct CallTransportResult(CallTransportInner);
+
+    pub(super) fn call_with_wall_timeout(
+        transport: &dyn Transport,
+        url: &str,
+        body: &str,
+        timeout: Duration,
+        redaction_keys: &[ApiKey],
+    ) -> (CallTransportResult, Duration) {
+        let start = Instant::now();
+        let (tx, rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let res = match catch_unwind(AssertUnwindSafe(|| {
+                    transport.post_chat_completions(url, body, timeout)
+                })) {
+                    Ok(Ok(resp)) => Ok(resp),
+                    Ok(Err(TransportError::Timeout)) => Err(TransportError::Timeout),
+                    Ok(Err(TransportError::Network(msg))) => {
+                        Err(TransportError::Network(redact_secrets_multi_with_limit(
+                            &msg,
+                            redaction_keys,
+                            MAX_REDACTION_SCAN_BYTES,
+                        )))
+                    }
+                    Err(payload) => Err(TransportError::Network(redact_secrets_multi_with_limit(
+                        &format!("transport panicked: {}", panic_message(&*payload)),
+                        redaction_keys,
+                        MAX_REDACTION_SCAN_BYTES,
+                    ))),
+                };
+                let _ = tx.send(res);
+            });
+
+            let outcome = match rx.recv_timeout(timeout) {
+                Ok(res) => CallTransportInner::OnTime(res),
+                Err(mpsc::RecvTimeoutError::Timeout) => match rx.recv() {
+                    Ok(Ok(late_resp)) => CallTransportInner::Late(late_resp),
+                    _ => CallTransportInner::TimedOut,
+                },
+                Err(mpsc::RecvTimeoutError::Disconnected) => CallTransportInner::TimedOut,
+            };
+            (CallTransportResult(outcome), start.elapsed())
+        })
+    }
 
     pub(super) struct GateVerifiedHttpResponse {
         status: u16,
@@ -7035,8 +7390,8 @@ mod raw_reply_gate {
         let http_reply_sha256 = if config.preview_tool == PreviewToolMode::On {
             // Scan the full received body (`resp.body.len()`) so an echoed key beyond
             // `MAX_REDACTION_SCAN_BYTES` is scrubbed without altering any error/log cap.
-            let scrubbed_body =
-                redact_secrets_multi_with_limit(&resp.body, all_keys, resp.body.len());
+            let (scrubbed_body, redacted_secret_field_paths) =
+                redact_secrets_multi_with_limit_and_paths(&resp.body, all_keys, resp.body.len());
             let body_redacted = scrubbed_body != resp.body;
             let body_sha256 = sha256_hex(scrubbed_body.as_bytes());
             let base_sidecar_path = http_reply_file_path(
@@ -7062,6 +7417,7 @@ mod raw_reply_gate {
                 status: resp.status,
                 is_late,
                 body_redacted,
+                redacted_secret_field_paths,
                 body_sha256,
                 body: scrubbed_body,
             };
@@ -7100,16 +7456,16 @@ mod raw_reply_gate {
         redaction_key: Option<&ApiKey>,
     ) -> Result<RecordedTransportCall, RelayError> {
         let off_or_on_null = (config.preview_tool == PreviewToolMode::On).then_some(None);
-        match call_result {
-            CallTransportResult::TimedOut => Ok(RecordedTransportCall {
+        match call_result.0 {
+            CallTransportInner::TimedOut => Ok(RecordedTransportCall {
                 outcome: PersistedTransportOutcome::TimedOut,
                 http_reply_sha256: off_or_on_null,
             }),
-            CallTransportResult::OnTime(Err(err)) => Ok(RecordedTransportCall {
+            CallTransportInner::OnTime(Err(err)) => Ok(RecordedTransportCall {
                 outcome: PersistedTransportOutcome::OnTime(Err(err)),
                 http_reply_sha256: off_or_on_null,
             }),
-            CallTransportResult::OnTime(Ok(resp)) => {
+            CallTransportInner::OnTime(Ok(resp)) => {
                 let (verified, http_reply_sha256) = record_received_response(
                     resp,
                     false,
@@ -7129,7 +7485,7 @@ mod raw_reply_gate {
                     http_reply_sha256,
                 })
             }
-            CallTransportResult::Late(resp) => {
+            CallTransportInner::Late(resp) => {
                 let (verified, http_reply_sha256) = record_received_response(
                     resp,
                     true,
@@ -7182,6 +7538,67 @@ fn build_discarded_reply(
     })
 }
 
+fn scrub_string_full(raw: &str, all_keys: &[ApiKey]) -> (String, bool) {
+    let scrubbed = redact_credentials_multi_with_limit(raw, all_keys, raw.len());
+    let changed = scrubbed != raw;
+    (scrubbed, changed)
+}
+
+fn scrub_opt_string_full(raw: Option<String>, all_keys: &[ApiKey]) -> (Option<String>, bool) {
+    match raw {
+        Some(s) => {
+            let (scrubbed, changed) = scrub_string_full(&s, all_keys);
+            (Some(scrubbed), changed)
+        }
+        None => (None, false),
+    }
+}
+
+fn scrub_json_value_full(val: serde_json::Value, all_keys: &[ApiKey]) -> (serde_json::Value, bool) {
+    match val {
+        serde_json::Value::String(s) => {
+            let (scrubbed, changed) = scrub_string_full(&s, all_keys);
+            (serde_json::Value::String(scrubbed), changed)
+        }
+        serde_json::Value::Array(items) => {
+            let mut changed = false;
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let (s_item, c) = scrub_json_value_full(item, all_keys);
+                changed |= c;
+                out.push(s_item);
+            }
+            (serde_json::Value::Array(out), changed)
+        }
+        serde_json::Value::Object(map) => {
+            let mut changed = false;
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (k, v) in map {
+                let (sk, ck) = scrub_string_full(&k, all_keys);
+                changed |= ck;
+                if is_credential_secret_field_key(&k) {
+                    let keep_as_is = match &v {
+                        serde_json::Value::String(s) => s.is_empty() || s == REDACTED_MARKER,
+                        _ => false,
+                    };
+                    if keep_as_is {
+                        out.insert(sk, v);
+                    } else {
+                        changed = true;
+                        out.insert(sk, serde_json::Value::String(REDACTED_MARKER.to_owned()));
+                    }
+                } else {
+                    let (sv, cv) = scrub_json_value_full(v, all_keys);
+                    changed |= cv;
+                    out.insert(sk, sv);
+                }
+            }
+            (serde_json::Value::Object(out), changed)
+        }
+        other => (other, false),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn persist_discarded_reply_if_enabled(
     config: &TurnConfig,
@@ -7196,6 +7613,7 @@ fn persist_discarded_reply_if_enabled(
     is_late: bool,
     discarded: DiscardedModelReply,
     retry_suffix: Option<usize>,
+    all_keys: &[ApiKey],
     redaction_key: Option<&ApiKey>,
 ) -> Result<String, RelayError> {
     let base_sidecar_path = discarded_reply_file_path(
@@ -7208,6 +7626,17 @@ fn persist_discarded_reply_if_enabled(
     );
     let targeted_sidecar_path = apply_retry_suffix_to_json_path(&base_sidecar_path, retry_suffix);
     let sidecar_path = resolve_non_overwriting_tool_round_path(&targeted_sidecar_path);
+    let (scrubbed_reason, c_reason) = scrub_string_full(discard_reason, all_keys);
+    let (scrubbed_content, c_content) =
+        scrub_opt_string_full(discarded.assistant_content, all_keys);
+    let (scrubbed_reasoning, c_reasoning) = scrub_opt_string_full(discarded.reasoning, all_keys);
+    let (scrubbed_tool_calls, c_tools) = match discarded.raw_tool_calls {
+        Some(v) => {
+            let (sv, cv) = scrub_json_value_full(v, all_keys);
+            (Some(sv), cv)
+        }
+        None => (None, false),
+    };
     let record = SavedDiscardedReplyRecord {
         day: config.day.clone(),
         round: config.round,
@@ -7218,15 +7647,13 @@ fn persist_discarded_reply_if_enabled(
         round_index,
         attempt,
         outcome: outcome.to_owned(),
-        discard_reason: discard_reason.to_owned(),
+        discard_reason: scrubbed_reason,
         is_late,
-        assistant_content_sha256: discarded
-            .assistant_content
-            .as_ref()
-            .map(|c| sha256_hex(c.as_bytes())),
-        assistant_content: discarded.assistant_content,
-        reasoning: discarded.reasoning,
-        raw_tool_calls: discarded.raw_tool_calls,
+        assistant_content_sha256: scrubbed_content.as_ref().map(|c| sha256_hex(c.as_bytes())),
+        assistant_content: scrubbed_content,
+        reasoning: scrubbed_reasoning,
+        raw_tool_calls: scrubbed_tool_calls,
+        body_redacted: c_reason || c_content || c_reasoning || c_tools,
     };
     write_json_record_atomic(&base_sidecar_path, &sidecar_path, &record, redaction_key)
 }
@@ -7624,46 +8051,6 @@ fn sanitize_cost(cost: Option<f64>) -> Option<f64> {
     cost.filter(|c| c.is_finite() && *c >= 0.0)
 }
 
-fn call_with_wall_timeout(
-    transport: &dyn Transport,
-    url: &str,
-    body: &str,
-    timeout: Duration,
-    redaction_keys: &[ApiKey],
-) -> (CallTransportResult, Duration) {
-    let start = Instant::now();
-    let (tx, rx) = mpsc::channel();
-    std::thread::scope(|scope| {
-        scope.spawn(move || {
-            let res = match catch_unwind(AssertUnwindSafe(|| {
-                transport.post_chat_completions(url, body, timeout)
-            })) {
-                Ok(Ok(resp)) => Ok(resp),
-                Ok(Err(TransportError::Timeout)) => Err(TransportError::Timeout),
-                Ok(Err(TransportError::Network(msg))) => Err(TransportError::Network(
-                    redact_secrets_multi_with_limit(&msg, redaction_keys, MAX_REDACTION_SCAN_BYTES),
-                )),
-                Err(payload) => Err(TransportError::Network(redact_secrets_multi_with_limit(
-                    &format!("transport panicked: {}", panic_message(&*payload)),
-                    redaction_keys,
-                    MAX_REDACTION_SCAN_BYTES,
-                ))),
-            };
-            let _ = tx.send(res);
-        });
-
-        let outcome = match rx.recv_timeout(timeout) {
-            Ok(res) => CallTransportResult::OnTime(res),
-            Err(mpsc::RecvTimeoutError::Timeout) => match rx.recv() {
-                Ok(Ok(late_resp)) => CallTransportResult::Late(late_resp),
-                _ => CallTransportResult::TimedOut,
-            },
-            Err(mpsc::RecvTimeoutError::Disconnected) => CallTransportResult::TimedOut,
-        };
-        (outcome, start.elapsed())
-    })
-}
-
 fn panic_message(payload: &(dyn Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_owned()
@@ -7997,8 +8384,50 @@ fn write_verbatim_reply(
     if let Some(parent) = from_seat_path.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e, redaction_key))?;
     }
-    fs::write(from_seat_path, reply_content.as_bytes())
-        .map_err(|e| io_err(from_seat_path, e, redaction_key))
+    let file_name = from_seat_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("from-seat.md");
+    let tmp_path = from_seat_path.with_file_name(format!("{file_name}.tmp"));
+    if tmp_path.exists() {
+        fs::remove_file(&tmp_path).map_err(|e| io_err(&tmp_path, e, redaction_key))?;
+    }
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| io_err(&tmp_path, e, redaction_key))?;
+    let write_res: Result<(), std::io::Error> = (|| {
+        #[cfg(any(test, feature = "test-hooks"))]
+        if should_fail_from_seat_write_for_test(from_seat_path)
+            || should_fail_from_seat_write_for_test(&tmp_path)
+        {
+            let prefix_len = reply_content.len().min(16);
+            let _ = tmp_file.write_all(&reply_content.as_bytes()[..prefix_len]);
+            return Err(std::io::Error::other(
+                "injected write failure on from-seat reply",
+            ));
+        }
+        tmp_file.write_all(reply_content.as_bytes())?;
+        tmp_file.flush()?;
+        tmp_file.sync_all()
+    })();
+    drop(tmp_file);
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(&tmp_path, e, redaction_key));
+    }
+    if let Err(e) = fs::rename(&tmp_path, from_seat_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(io_err(from_seat_path, e, redaction_key));
+    }
+    #[cfg(unix)]
+    if let Some(parent) = from_seat_path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

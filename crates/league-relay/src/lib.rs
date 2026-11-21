@@ -26,8 +26,10 @@ pub use relay::{
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{
-    DurabilityEvent, set_fail_pending_temp_write_for_test, set_fail_tool_round_write_for_test,
-    take_durability_events_for_test, watch_durability_events_for_test,
+    DurabilityEvent, set_fail_between_from_seat_and_ok_ledger_for_test,
+    set_fail_from_seat_write_for_test, set_fail_pending_temp_write_for_test,
+    set_fail_tool_round_write_for_test, take_durability_events_for_test,
+    watch_durability_events_for_test,
 };
 pub use seats::{
     BackendKind, CostUnit, LOCAL_TIMEOUT_MARGIN_SECS, LocalSeat, OpenRouterSeat, ReasoningEffort,
@@ -40,8 +42,8 @@ pub use secret::{
     MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV,
     REDACTED_MARKER, cap_utf8_bytes, collect_env_redaction_keys, install_redacting_panic_hook,
     install_redacting_panic_hook_with_level, panic_hook_log_level, redact_and_truncate,
-    redact_secrets, redact_secrets_multi_with_limit, redact_secrets_with_limit,
-    set_panic_hook_log_level, truncate_after_redaction,
+    redact_secrets, redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+    redact_secrets_with_limit, set_panic_hook_log_level, truncate_after_redaction,
 };
 pub use transport::{
     LocalOpenAiTransport, MockDirTransport, OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse,
@@ -51,11 +53,13 @@ pub use wording::{
     ACTIVE_WORDING_ARM, AiPreviewWireOutput, EMC_OLDER_REPLY_EXCERPT_CHARS,
     EMC_VERBATIM_TURN_WINDOW, MAX_INTENT_HEADER_DEPTH, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
     MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING,
-    NegotiationInputs, PREVIEW_ARM_WORDING, PREVIEW_WORDING_ARM, PreviewToolMode, SanitizedWhisper,
-    UntrustedWhisper, WordingEntry, build_preview_turn_orders_tool_definition, cap_words_and_chars,
-    escape_default_ignorable_code_points, execute_preview_tool_call, extract_scratchpad_update,
-    format_negotiation_block, format_sanitized_scratchpad_section, format_scratchpad_section,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present, parse_preview_tool_arguments,
+    NegotiationInputs, PREVIEW_ARM_WORDING, PREVIEW_ARM_WORDING_R1, PREVIEW_ARM_WORDING_R2,
+    PREVIEW_WORDING_ARM, PREVIEW_WORDING_ARM_R1, PREVIEW_WORDING_ARM_R2, PreviewToolMode,
+    SanitizedWhisper, UntrustedWhisper, WordingEntry, build_preview_turn_orders_tool_definition,
+    cap_words_and_chars, escape_default_ignorable_code_points, execute_preview_tool_call,
+    extract_scratchpad_update, format_negotiation_block, format_sanitized_scratchpad_section,
+    format_scratchpad_section, json_escape_untrusted_str, load_negotiation_inputs_if_present,
+    parse_preview_tool_arguments, preview_r1_wording_slot, preview_r1_wording_template,
     preview_wording_slot, preview_wording_template, render_call_limit_reached_wire_json,
     render_engine_refusal_wire_json, render_json_escaped_whisper_line,
     render_malformed_tool_call_wire_json, render_wording_slot_with, render_wording_template_with,
