@@ -166,6 +166,9 @@ pub struct EvalActApplyOutcome {
 #[derive(Serialize, Deserialize)]
 struct EvalSealPayload {
     format_version: u32,
+    game_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pre_act_checkpoint_sha256: Option<String>,
     layout_seed: u64,
     vrf_proofs: Vec<Vec<u8>>,
     engine: TurnEngine,
@@ -192,6 +195,7 @@ struct EvalSealPayload {
 /// `SealedEvalSeed` directly: every seat reads only [`SeatObservation`] via [`Self::observe_seat`]
 /// and [`PublicSweepReceipt`] via [`Self::sweep_turn`] / [`Self::public_receipts`].
 pub struct EvalHost {
+    game_id: String,
     layout_seed: u64,
     bot_tie_seed: u64,
     vrf_proofs: Vec<Vec<u8>>,
@@ -207,6 +211,7 @@ pub struct EvalHost {
     current_reveals: BTreeMap<u8, OrderReveal>,
     turn_salts: Vec<Vec<RevealSalt>>,
     recorded_act_submissions: BTreeMap<u8, EvalActSubmission>,
+    active_pre_act_checkpoint_sha256: Option<String>,
 }
 
 impl fmt::Debug for EvalHost {
@@ -214,6 +219,7 @@ impl fmt::Debug for EvalHost {
         let st = self.engine.state();
         let layout_view = replay_layout_seed_for_raw(self.layout_seed);
         f.debug_struct("EvalHost")
+            .field("game_id", &self.game_id)
             .field("table_id", &st.table_id)
             .field("layout_seed", &layout_view)
             .field("turn", &st.turn)
@@ -284,6 +290,7 @@ impl EvalHost {
             ));
         }
 
+        let game_id = generate_eval_game_id()?;
         let vrf_proofs = derive_all_vrf_proofs(eval_seed, spec.table_id)?;
         let n = usize::from(spec.seat_count);
         let seat_count = spec.seat_count;
@@ -299,6 +306,7 @@ impl EvalHost {
         }
 
         Ok(Self {
+            game_id,
             layout_seed,
             bot_tie_seed,
             vrf_proofs,
@@ -314,6 +322,7 @@ impl EvalHost {
             current_reveals: BTreeMap::new(),
             turn_salts,
             recorded_act_submissions: BTreeMap::new(),
+            active_pre_act_checkpoint_sha256: None,
         })
     }
 
@@ -350,6 +359,38 @@ impl EvalHost {
             eval_seed,
         )?;
         Self::new(spec, layout_seed, deal, eval_seed, bot_tie_seed)
+    }
+
+    /// Builds a reproducible Eval table from raw `[u8; 32]` entropy arrays (`deal_seed`,
+    /// per-seat `seat_salts`, and `eval_seed`) without requiring external callers to construct
+    /// internal secret-wrapper types.
+    pub fn from_explicit_entropy(
+        table_id: TableId,
+        seat_count: u8,
+        layout_seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[[u8; 32]],
+        eval_seed: [u8; 32],
+        bot_tie_seed: u64,
+    ) -> Result<Self, EngineError> {
+        let salts: Vec<RevealSalt> = seat_salts.iter().copied().map(RevealSalt).collect();
+        let eval_seed = SealedEvalSeed::try_from_bytes(eval_seed)?;
+        Self::from_explicit_setup(
+            table_id,
+            seat_count,
+            layout_seed,
+            deal_seed,
+            &salts,
+            eval_seed,
+            bot_tie_seed,
+        )
+    }
+
+    /// Returns the per-game identifier assigned when this game directory/host was initialized
+    /// (different for every D2 duplicate).
+    #[must_use]
+    pub fn game_id(&self) -> &str {
+        &self.game_id
     }
 
     /// Returns the clear layout seed for this table (`ReplayLayoutSeed` handles redaction when
@@ -449,8 +490,8 @@ impl EvalHost {
         self.engine.preview_regent_bundle_for_seat(turn, seat)
     }
 
-    /// Returns the `.seal`-held Phase-2 commit salt for `seat` on the host's active turn.
-    pub fn turn_reveal_salt(&self, seat: Seat) -> Result<RevealSalt, EngineError> {
+    /// Private Phase-2 commit salt helper for `seat` on the host's active turn.
+    fn turn_reveal_salt(&self, seat: Seat) -> Result<RevealSalt, EngineError> {
         let turn_idx = self.turn().checked_sub(1).map(usize::from).ok_or_else(|| {
             EngineError::InvalidPhase("turn_reveal_salt requires turn >= 1".to_owned())
         })?;
@@ -461,9 +502,9 @@ impl EvalHost {
             .ok_or(EngineError::InvalidSeat(seat.0))
     }
 
-    /// Returns the recorded per-seat act submissions held in memory for the current turn.
-    #[must_use]
-    pub const fn recorded_act_submissions(&self) -> &BTreeMap<u8, EvalActSubmission> {
+    /// Private helper returning recorded per-seat act submissions held in memory for the turn.
+    #[cfg(test)]
+    const fn recorded_act_submissions(&self) -> &BTreeMap<u8, EvalActSubmission> {
         &self.recorded_act_submissions
     }
 
@@ -687,6 +728,7 @@ impl EvalHost {
             drawn_shocks: raw_receipt.newly_drawn_shocks,
         });
         self.recorded_act_submissions.clear();
+        self.active_pre_act_checkpoint_sha256 = None;
         Ok(public_receipt)
     }
 
@@ -831,8 +873,17 @@ impl EvalHost {
     }
 
     pub(crate) fn to_seal_bytes(&self) -> Result<Vec<u8>, EngineError> {
+        self.to_seal_bytes_with_checkpoint_sha(None)
+    }
+
+    fn to_seal_bytes_with_checkpoint_sha(
+        &self,
+        pre_act_checkpoint_sha256: Option<String>,
+    ) -> Result<Vec<u8>, EngineError> {
         let seal = EvalSealPayload {
             format_version: EVAL_SEAL_FORMAT_VERSION,
+            game_id: self.game_id.clone(),
+            pre_act_checkpoint_sha256,
             layout_seed: self.layout_seed,
             vrf_proofs: self.vrf_proofs.clone(),
             engine: self.engine.clone(),
@@ -894,6 +945,7 @@ impl EvalHost {
         }
 
         let host = Self {
+            game_id: seal.game_id,
             layout_seed: seal.layout_seed,
             bot_tie_seed: seal.bot_tie_seed,
             vrf_proofs: seal.vrf_proofs,
@@ -909,6 +961,7 @@ impl EvalHost {
             current_reveals: seal.current_reveals,
             turn_salts: seal.turn_salts,
             recorded_act_submissions: seal.recorded_act_submissions,
+            active_pre_act_checkpoint_sha256: None,
         };
         if host.public_save_snapshot()? != save {
             return Err(EngineError::InvalidConfig(
@@ -960,22 +1013,58 @@ impl EvalHost {
         }
     }
 
-    /// Writes `checkpoints/day-DD-pre-act.save.json` and `checkpoints/day-DD-pre-act.seal`
-    /// atomically at the start of an act round before any seat's act reply is read.
-    pub fn write_pre_act_checkpoint(
+    /// Writes `eval-<id>.save.json` and `eval-<id>.seal` inside `game_dir` from a single `(dir, id)`
+    /// pair so callers cannot swap public and private paths (`R8`).
+    pub fn write_game_save_and_seal(
         &self,
+        game_dir: &Path,
+    ) -> Result<(PathBuf, PathBuf), EngineError> {
+        let (save_path, seal_path) = eval_game_save_and_seal_paths(game_dir, self.table_id());
+        self.write_save_and_seal(&save_path, &seal_path)?;
+        Ok((save_path, seal_path))
+    }
+
+    /// Reads and validates `eval-<id>.save.json` and `eval-<id>.seal` from `game_dir` (`R8`).
+    pub fn read_game_save_and_seal(
+        game_dir: &Path,
+        table_id: TableId,
+    ) -> Result<Self, EngineError> {
+        let (save_path, seal_path) = eval_game_save_and_seal_paths(game_dir, table_id);
+        Self::read_save_and_seal(&save_path, &seal_path)
+    }
+
+    /// Forks a D2 duplicate table from `eval-<id>.save.json` and `eval-<id>.seal` in `game_dir`,
+    /// assigning a fresh per-game identifier distinct from the source table (`R5`, `R8`).
+    pub fn fork_duplicate_from_game_dir(
+        game_dir: &Path,
+        table_id: TableId,
+    ) -> Result<Self, EngineError> {
+        let (save_path, seal_path) = eval_game_save_and_seal_paths(game_dir, table_id);
+        Self::fork_duplicate_from_turn_0(&save_path, &seal_path)
+    }
+
+    /// Writes `checkpoints/day-DD-pre-act.save.json` and `checkpoints/day-DD-pre-act.seal`
+    /// atomically at the start of an act round before any seat's act reply is read, binding
+    /// this host's active pre-act checkpoint SHA-256 for [`Self::write_act_recorded_seal`].
+    pub fn write_pre_act_checkpoint(
+        &mut self,
         checkpoints_dir: &Path,
     ) -> Result<(PathBuf, PathBuf), EngineError> {
         self.ensure_pre_act_state("write_pre_act_checkpoint")?;
         let day = self.turn();
         let save_path = checkpoints_dir.join(format!("day-{day:02}-pre-act.save.json"));
         let seal_path = checkpoints_dir.join(format!("day-{day:02}-pre-act.seal"));
-        self.write_save_and_seal(&save_path, &seal_path)?;
+        let (save_bytes, seal_bytes) = self.to_save_and_seal_bytes()?;
+        write_atomic_bytes(&seal_path, &seal_bytes)?;
+        write_atomic_bytes(&save_path, &save_bytes)?;
+        self.active_pre_act_checkpoint_sha256 =
+            Some(compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes));
         Ok((save_path, seal_path))
     }
 
     /// Writes `checkpoints/day-DD-act-recorded.seal` atomically after all act replies are applied
-    /// and before [`Self::sweep_turn`].
+    /// and before [`Self::sweep_turn`], binding `game_id` and the active pre-act checkpoint pair's
+    /// SHA-256.
     pub fn write_act_recorded_seal(&self, checkpoints_dir: &Path) -> Result<PathBuf, EngineError> {
         if self.phase() != TurnPhase::Reveal {
             return Err(EngineError::InvalidPhase(
@@ -990,29 +1079,133 @@ impl EvalHost {
                 self.recorded_act_submissions.len()
             )));
         }
+        let expected_ckpt_sha = self
+            .active_pre_act_checkpoint_sha256
+            .as_deref()
+            .ok_or_else(|| {
+                EngineError::InvalidPhase(
+                    "MISSING_PRE_ACT_CHECKPOINT: write_pre_act_checkpoint must precede write_act_recorded_seal"
+                        .to_owned(),
+                )
+            })?;
         let day = self.turn();
+        let pre_save_path = checkpoints_dir.join(format!("day-{day:02}-pre-act.save.json"));
+        let pre_seal_path = checkpoints_dir.join(format!("day-{day:02}-pre-act.seal"));
+        let pre_save_bytes = fs::read(&pre_save_path).map_err(|err| {
+            EngineError::InvalidConfig(format!(
+                "PRE_ACT_CHECKPOINT_MISMATCH: missing pre-act save {}: {err}",
+                pre_save_path.display()
+            ))
+        })?;
+        let pre_seal_bytes = fs::read(&pre_seal_path).map_err(|err| {
+            EngineError::InvalidConfig(format!(
+                "PRE_ACT_CHECKPOINT_MISMATCH: missing pre-act seal {}: {err}",
+                pre_seal_path.display()
+            ))
+        })?;
+        let disk_sha = compute_pre_act_pair_sha256_hex(&pre_save_bytes, &pre_seal_bytes);
+        if disk_sha != expected_ckpt_sha {
+            return Err(EngineError::InvalidConfig(
+                "PRE_ACT_CHECKPOINT_MISMATCH: on-disk day-DD-pre-act checkpoint does not match host pre-act digest"
+                    .to_owned(),
+            ));
+        }
         let seal_path = checkpoints_dir.join(format!("day-{day:02}-act-recorded.seal"));
-        let seal_bytes = self.to_seal_bytes()?;
+        let seal_bytes =
+            self.to_seal_bytes_with_checkpoint_sha(Some(expected_ckpt_sha.to_owned()))?;
         write_atomic_bytes(&seal_path, &seal_bytes)?;
         Ok(seal_path)
     }
 
     /// Reads and validates the per-seat act submissions recorded inside
-    /// `checkpoints/day-DD-act-recorded.seal`.
+    /// `checkpoints/day-DD-act-recorded.seal`, verifying that the recorded seal belongs to this
+    /// host's `game_id`, pre-act checkpoint SHA-256, table, turn, and origin (`R5`).
     pub fn read_recorded_act_submissions(
+        &self,
         recorded_seal_path: &Path,
     ) -> Result<BTreeMap<u8, EvalActSubmission>, EngineError> {
-        let seal = read_verified_act_recorded_seal(recorded_seal_path)?;
+        let seal = self.read_and_verify_recorded_seal_for_host(
+            "read_recorded_act_submissions",
+            recorded_seal_path,
+        )?;
         Ok(seal.recorded_act_submissions)
     }
 
-    /// Loads `checkpoints/day-DD-act-recorded.seal`, verifies it matches this host's table,
-    /// turn, layout seed, VRF proofs, and mandate deal, and applies the recorded submissions.
+    /// Loads `checkpoints/day-DD-act-recorded.seal`, verifies it matches this host's `game_id`,
+    /// pre-act checkpoint SHA-256, table, turn, layout seed, VRF proofs, and mandate deal, and
+    /// applies the recorded submissions.
     pub fn apply_recorded_act_submissions_from_seal(
         &mut self,
         recorded_seal_path: &Path,
     ) -> Result<EvalActApplyOutcome, EngineError> {
-        self.ensure_pre_act_state("apply_recorded_act_submissions_from_seal")?;
+        let seal = self.read_and_verify_recorded_seal_for_host(
+            "apply_recorded_act_submissions_from_seal",
+            recorded_seal_path,
+        )?;
+        self.apply_act_submissions(&seal.recorded_act_submissions)
+    }
+
+    /// Forks an independent [`EvalHost`] from a verified turn-0 or pre-act checkpoint pair,
+    /// retaining `game_id` and binding `active_pre_act_checkpoint_sha256` to that pair.
+    pub fn fork_from_checkpoint(save_path: &Path, seal_path: &Path) -> Result<Self, EngineError> {
+        let save_bytes = fs::read(save_path).map_err(|err| {
+            EngineError::InvalidConfig(format!(
+                "failed to read Eval checkpoint save {}: {err}",
+                save_path.display()
+            ))
+        })?;
+        let seal_bytes = fs::read(seal_path).map_err(|err| {
+            EngineError::InvalidConfig(format!(
+                "failed to read Eval checkpoint seal {}: {err}",
+                seal_path.display()
+            ))
+        })?;
+        let mut host = Self::from_save_and_seal_bytes(&save_bytes, &seal_bytes)?;
+        host.ensure_pre_act_state("fork_from_checkpoint")?;
+        host.active_pre_act_checkpoint_sha256 =
+            Some(compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes));
+        Ok(host)
+    }
+
+    /// Forks a fresh D2 duplicate [`EvalHost`] from a turn-0 checkpoint pair, assigning a distinct
+    /// OS-CSPRNG `game_id` so recorded seals from one duplicate are refused on another (`R5`).
+    pub fn fork_duplicate_from_turn_0(
+        save_path: &Path,
+        seal_path: &Path,
+    ) -> Result<Self, EngineError> {
+        let mut host = Self::read_save_and_seal(save_path, seal_path)?;
+        if host.turn() != 1 || !host.logged_turns.is_empty() {
+            return Err(EngineError::InvalidPhase(format!(
+                "INVALID_TURN_0_CHECKPOINT: expected turn 1 with 0 logged turns, got turn {} ({} logged)",
+                host.turn(),
+                host.logged_turns.len()
+            )));
+        }
+        host.ensure_pre_act_state("fork_duplicate_from_turn_0")?;
+        let src_game_id = host.game_id.clone();
+        let mut next_game_id = generate_eval_game_id()?;
+        while next_game_id == src_game_id {
+            next_game_id = generate_eval_game_id()?;
+        }
+        host.game_id = next_game_id;
+        host.active_pre_act_checkpoint_sha256 = None;
+        Ok(host)
+    }
+
+    fn read_and_verify_recorded_seal_for_host(
+        &self,
+        op: &str,
+        recorded_seal_path: &Path,
+    ) -> Result<EvalSealPayload, EngineError> {
+        self.ensure_pre_act_state(op)?;
+        let expected_ckpt_sha = self
+            .active_pre_act_checkpoint_sha256
+            .as_deref()
+            .ok_or_else(|| {
+                EngineError::InvalidPhase(format!(
+                    "MISSING_PRE_ACT_CHECKPOINT: {op} requires an active pre-act checkpoint from fork_from_checkpoint or write_pre_act_checkpoint"
+                ))
+            })?;
         let seal = read_verified_act_recorded_seal(recorded_seal_path)?;
         let st = seal.engine.state();
         if st.table_id != self.table_id() {
@@ -1038,14 +1231,19 @@ impl EvalHost {
                     .to_owned(),
             ));
         }
-        self.apply_act_submissions(&seal.recorded_act_submissions)
-    }
-
-    /// Forks an independent [`EvalHost`] from a verified turn-0 or pre-act checkpoint pair.
-    pub fn fork_from_checkpoint(save_path: &Path, seal_path: &Path) -> Result<Self, EngineError> {
-        let host = Self::read_save_and_seal(save_path, seal_path)?;
-        host.ensure_pre_act_state("fork_from_checkpoint")?;
-        Ok(host)
+        if seal.game_id != self.game_id {
+            return Err(EngineError::InvalidConfig(format!(
+                "RECORDED_SEAL_GAME_ID_MISMATCH: expected game_id {}, got {}",
+                self.game_id, seal.game_id
+            )));
+        }
+        if seal.pre_act_checkpoint_sha256.as_deref() != Some(expected_ckpt_sha) {
+            return Err(EngineError::InvalidConfig(
+                "RECORDED_SEAL_CHECKPOINT_MISMATCH: recorded act seal checkpoint SHA-256 does not match this host's pre-act save+seal pair"
+                    .to_owned(),
+            ));
+        }
+        Ok(seal)
     }
 
     fn ensure_pre_act_state(&self, op: &str) -> Result<(), EngineError> {
@@ -1107,7 +1305,44 @@ fn read_verified_act_recorded_seal(
             seal.recorded_act_submissions.len()
         )));
     }
+    if seal.pre_act_checkpoint_sha256.is_none() {
+        return Err(EngineError::InvalidConfig(
+            "MISSING_ACT_RECORDED_CHECKPOINT_SHA256: recorded act seal must carry pre_act_checkpoint_sha256"
+                .to_owned(),
+        ));
+    }
     Ok(seal)
+}
+
+fn eval_game_save_and_seal_paths(game_dir: &Path, table_id: TableId) -> (PathBuf, PathBuf) {
+    let id = table_id.0;
+    (
+        game_dir.join(format!("eval-{id}.save.json")),
+        game_dir.join(format!("eval-{id}.seal")),
+    )
+}
+
+fn is_lower_ascii_hex_len(raw: &str, expected_len: usize) -> bool {
+    raw.len() == expected_len
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn generate_eval_game_id() -> Result<String, EngineError> {
+    let entropy = draw_nonzero_256_bits()?;
+    Ok(hex::encode(&entropy[..16]))
+}
+
+fn compute_pre_act_pair_sha256_hex(save_bytes: &[u8], seal_bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"league-core/eval-pre-act-pair/v1|");
+    hasher.update((save_bytes.len() as u64).to_le_bytes());
+    hasher.update(save_bytes);
+    hasher.update((seal_bytes.len() as u64).to_le_bytes());
+    hasher.update(seal_bytes);
+    let digest: [u8; 32] = hasher.finalize().into();
+    hex::encode(digest)
 }
 
 fn validate_eval_seal_bytes(seal_bytes: &[u8]) -> Result<EvalSealPayload, EngineError> {
@@ -1136,6 +1371,19 @@ fn validate_eval_seal_bytes(seal_bytes: &[u8]) -> Result<EvalSealPayload, Engine
             found: seal.format_version,
             newest_known: EVAL_SEAL_FORMAT_VERSION,
         });
+    }
+    if !is_lower_ascii_hex_len(&seal.game_id, 32) {
+        return Err(EngineError::InvalidConfig(
+            "INVALID_SEAL_GAME_ID: EvalHost seal requires a 32-hex game_id".to_owned(),
+        ));
+    }
+    if let Some(ref ckpt_sha) = seal.pre_act_checkpoint_sha256
+        && !is_lower_ascii_hex_len(ckpt_sha, 64)
+    {
+        return Err(EngineError::InvalidConfig(
+            "INVALID_ACT_RECORDED_CHECKPOINT_SHA256: pre_act_checkpoint_sha256 must be 64 lowercase hex characters"
+                .to_owned(),
+        ));
     }
 
     let spec = &seal.engine.state().spec;
@@ -1359,6 +1607,30 @@ mod tests {
         assert!(dbg.contains("EvalHost"));
         assert!(dbg.contains("<hidden>"));
         assert!(!dbg.contains("30303030"));
+
+        // R6: verify Debug omits all secrets the host actually holds (deal seed + all 4 salts)
+        // across hex, Rust decimal byte list, and JSON number array encodings.
+        let held_secrets: [[u8; 32]; 5] = [
+            [0x39; 32], // deal_seed in explicit_host(.., 0x30)
+            [0x31; 32], // seat 0 salt
+            [0x32; 32], // seat 1 salt
+            [0x33; 32], // seat 2 salt
+            [0x34; 32], // seat 3 salt
+        ];
+        for secret_bytes in &held_secrets {
+            let hex_enc = hex::encode(secret_bytes);
+            let dec_enc = format!("{secret_bytes:?}");
+            let json_enc = must_ok(
+                serde_json::to_string(secret_bytes.as_slice()),
+                "ser secret_bytes",
+            );
+            for enc in [&hex_enc, &dec_enc, &json_enc] {
+                assert!(
+                    !dbg.contains(enc),
+                    "EvalHost Debug leaked held secret encoding `{enc}`"
+                );
+            }
+        }
 
         let sub = EvalActSubmission::default();
         let sub_dbg = format!("{sub:?}");
@@ -1611,5 +1883,130 @@ mod tests {
             "wipe_seal_file idempotent",
         );
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn eval_host_internal_guards_cover_private_fields_and_tamper_variants()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // Keep tests inside `src/eval/host.rs` strictly scoped to `pub(crate)` / private fields so
+        // `tests/eval_host.rs` exercises the public API cleanly without inflating `src/` test lines.
+        let mut h = explicit_host(TableId(910_040), 7, 0x20);
+        let reveals: BTreeMap<u8, OrderReveal> = (0..4_u8)
+            .map(|s| {
+                Ok((
+                    s,
+                    OrderReveal {
+                        bundle: SealedOrderBundle::default(),
+                        salt: h.turn_reveal_salt(Seat(s))?,
+                    },
+                ))
+            })
+            .collect::<Result<_, EngineError>>()?;
+        h.commit_and_reveal_all(&reveals)?;
+        let tmp = std::env::temp_dir().join(format!("ml_eval_priv_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(h.write_act_recorded_seal(&tmp.join("ckpts")).is_err());
+
+        let (reveal_save, reveal_seal) = h.to_save_and_seal_bytes()?;
+        assert!(EvalHost::from_save_and_seal_bytes(b"{not-json", &reveal_seal).is_err());
+        assert!(EvalHost::from_save_and_seal_bytes(&reveal_save, b"{not-json").is_err());
+
+        let base_seal_val: serde_json::Value = serde_json::from_slice(&reveal_seal)?;
+        type SealMutation = (&'static str, fn(&mut serde_json::Value));
+        let seal_mutations: [SealMutation; 5] = [
+            ("INVALID_SEAL_GAME_ID", |v| {
+                v["game_id"] = serde_json::json!("not-hex")
+            }),
+            ("INVALID_ACT_RECORDED_CHECKPOINT_SHA256", |v| {
+                v["pre_act_checkpoint_sha256"] = serde_json::json!("short")
+            }),
+            ("INVALID_SEAL_DRAND_SCHEDULE", |v| {
+                v["engine"]["state"]["spec"]["drand_schedule"] = serde_json::json!({
+                    "turn_1_close_unix": 1700000000_u64,
+                    "turn_period_secs": 30_u64
+                });
+            }),
+            ("MISSING_SEAL_EVAL_VRF_PUBKEY", |v| {
+                v["engine"]["state"]["spec"]["eval_vrf_pubkey"] = serde_json::Value::Null;
+            }),
+            ("INVALID_SEAL_TURN_SALTS", |v| {
+                v["turn_salts"][0][0] = serde_json::json!("00".repeat(32));
+            }),
+        ];
+        for (expected_code, mutator) in seal_mutations {
+            let mut mutated = base_seal_val.clone();
+            mutator(&mut mutated);
+            let bytes = serde_json::to_vec(&mutated)?;
+            let err = EvalHost::from_save_and_seal_bytes(&reveal_save, &bytes)
+                .err()
+                .ok_or(expected_code)?;
+            assert!(err.to_string().contains(expected_code));
+        }
+
+        let mut h_dirty_subs = explicit_host(TableId(910_044), 7, 0x20);
+        h_dirty_subs
+            .recorded_act_submissions
+            .insert(0, EvalActSubmission::default());
+        assert!(
+            h_dirty_subs
+                .write_pre_act_checkpoint(&tmp.join("dirty_ckpts"))
+                .is_err()
+        );
+
+        let raw_salts = [[0x11_u8; 32], [0x22_u8; 32], [0x33_u8; 32], [0x44_u8; 32]];
+        let entropy_host = EvalHost::from_explicit_entropy(
+            TableId(910_045),
+            4,
+            7,
+            [0x55_u8; 32],
+            &raw_salts,
+            [0x66_u8; 32],
+            0x20,
+        )?;
+        let typed_salts: Vec<RevealSalt> = raw_salts.iter().copied().map(RevealSalt).collect();
+        let setup_host = EvalHost::from_explicit_setup(
+            TableId(910_045),
+            4,
+            7,
+            [0x55_u8; 32],
+            &typed_salts,
+            SealedEvalSeed::try_from_bytes([0x66_u8; 32])?,
+            0x20,
+        )?;
+        assert_eq!(
+            entropy_host.mandate_for_seat(Seat(0))?,
+            setup_host.mandate_for_seat(Seat(0))?
+        );
+        assert_eq!(
+            entropy_host.observe_seat(Seat(0))?,
+            setup_host.observe_seat(Seat(0))?
+        );
+        assert!(
+            EvalHost::from_explicit_entropy(
+                TableId(910_046),
+                4,
+                7,
+                [0x55_u8; 32],
+                &raw_salts,
+                [0_u8; 32],
+                0x20,
+            )
+            .is_err()
+        );
+        assert!(
+            EvalHost::from_explicit_entropy(
+                TableId(910_047),
+                4,
+                7,
+                [0x55_u8; 32],
+                &raw_salts[..3],
+                [0x66_u8; 32],
+                0x20,
+            )
+            .is_err()
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+        Ok(())
     }
 }

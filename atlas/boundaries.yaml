@@ -16,6 +16,10 @@ boundaries:
     globs:
       - crates/league-error/**
     role: code
+  - name: league-eval
+    globs:
+      - crates/league-eval/**
+    role: code
   - name: league-gen
     globs:
       - crates/league-gen/**

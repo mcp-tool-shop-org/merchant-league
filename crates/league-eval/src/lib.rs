@@ -1,0 +1,47 @@
+//! Merchant League Evaluation Mode (`league-eval`) driver, frozen-state branch runner, and
+//! deterministic state selector (`Card 10`).
+//!
+//! All state transitions run exclusively through [`league_core::EvalHost`] (with
+//! [`league_core::ClubBot`] for manual `file` seats) and prompt delivery runs through `league-relay`.
+
+#![forbid(unsafe_code)]
+
+pub mod cli;
+pub mod driver;
+pub mod error;
+pub mod records;
+pub mod reply;
+pub mod schema;
+pub mod select;
+pub mod view;
+pub mod wording;
+
+pub use cli::{ErrorFormat, execute_cli, main_entry};
+pub use driver::{
+    BranchOptions, NoopTransport, PlayOptions, persist_eval_game_state, run_branch_with_transport,
+    run_play_with_transport, seat_keeps_notes, validate_eval_seats_file,
+};
+pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
+pub use records::{
+    BranchArmOutcome, BranchSummary, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
+    EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, PREFLIGHT_WRONG_PART_STOP_THRESHOLD,
+    RefusalCodeCounts, RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata,
+    summarize_branch_outcomes,
+};
+pub use reply::{
+    InvalidRecipientDiagnostic, ParsedActReply, ParsedEvalMessage, ParsedTalkReply,
+    ReplyRefusalCode, parse_eval_act_reply, parse_eval_talk_reply,
+};
+pub use schema::{build_eval_response_format_config, build_eval_response_format_value};
+pub use select::{
+    SelectOptions, SelectedPreActState, SelectionList, TurnStratum, expand_home_path,
+    expand_home_path_with_home, run_select, sanitize_home_path, sanitize_home_path_with_homes,
+};
+pub use view::{
+    EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,
+    build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
+};
+pub use wording::{
+    EVAL_MESSAGES_MAX_ITEMS, EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM, eval_internal_slot_names,
+    eval_wording_slot,
+};

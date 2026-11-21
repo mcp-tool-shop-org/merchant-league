@@ -86,6 +86,7 @@ jobs:
       - name: Standalone host/gen/relay feature check
         run: |
           cargo build -p league-tui --locked
+          cargo build -p league-eval --locked
           if cargo tree -p league-tui -e features --locked | grep -q 'engine-internals'; then
             echo "ERROR: league-tui enabled league-core/engine-internals in standalone build"
             exit 1
@@ -100,6 +101,14 @@ jobs:
           fi
           if cargo tree -p league-relay -e normal,build,dev --target all --all-features --locked | grep -q 'engine-internals'; then
             echo "ERROR: league-relay optionally enabled league-core/engine-internals"
+            exit 1
+          fi
+          if cargo tree -p league-eval -e features --locked | grep -q 'engine-internals'; then
+            echo "ERROR: league-eval default dependency tree enabled league-core/engine-internals"
+            exit 1
+          fi
+          if cargo tree -p league-eval -e normal,build,dev --target all --all-features --locked | grep -q 'engine-internals'; then
+            echo "ERROR: league-eval optionally enabled league-core/engine-internals"
             exit 1
           fi
 

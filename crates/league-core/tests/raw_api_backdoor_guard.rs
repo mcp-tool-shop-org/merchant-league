@@ -84,7 +84,7 @@ const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 22] = [
     "preview_bundle_with_context_and_mode",
 ];
 
-const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 39] = [
+const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 42] = [
     "TurnEngine",
     "EngineState",
     "engine_internals",
@@ -111,11 +111,14 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 39] = [
     "write_save_and_seal",
     "read_save_and_seal",
     "wipe_seal_file",
+    "turn_reveal_salt",
+    "recorded_act_submissions",
     "write_pre_act_checkpoint",
     "write_act_recorded_seal",
     "read_recorded_act_submissions",
     "apply_recorded_act_submissions_from_seal",
     "fork_from_checkpoint",
+    "from_explicit_entropy",
     "public_save_snapshot",
     "private_hints_for_auditor",
     "preview_bundle",
@@ -128,14 +131,65 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 39] = [
 
 const TUI_HOST_MODULES: [&str; 2] = ["src/host.rs", "src/main.rs"];
 
-const NON_SEAT_WORKSPACE_CRATES: [&str; 7] = [
+const NON_SEAT_WORKSPACE_CRATES: [&str; 8] = [
     "league-core",
     "league-standalone",
     "league-error",
+    "league-eval",
     "league-ledger",
     "league-season",
     "league-gen",
     "league-tui",
+];
+
+const ALLOWED_LEAGUE_EVAL_CORE_ITEMS: &[&str] = &[
+    "EvalHost",
+    "EvalActSubmission",
+    "EvalSeatApplyReport",
+    "ClubBot",
+    "PublicSweepReceipt",
+    "SeatObservation",
+    "PublicPreviewState",
+    "ReplayOutcome",
+    "SealedOrderBundle",
+    "MarketAction",
+    "AssetId",
+    "OfferProposal",
+    "OfferSide",
+    "Seat",
+    "TableId",
+    "TurnPhase",
+    "HARD_TURN_CAP",
+    "replay_eval_season",
+    "EngineError",
+    "StructuredError",
+    "ToStructuredError",
+    "scrub_secret_text",
+];
+const _: () = assert!(ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() == 22);
+
+const FORBIDDEN_EVAL_CORE_SYMBOLS: [&str; 21] = [
+    "TurnEngine",
+    "EngineState",
+    "ClubHost",
+    "ClubSaveSnapshot",
+    "ClubSealPayload",
+    "EvalSealPayload",
+    "SweepReceipt",
+    "SweepMode",
+    "BundlePreview",
+    "ScheduledShockSpec",
+    "SealedEvalSeed",
+    "SealedMandateDeal",
+    "engine_internals",
+    "write_save_and_seal",
+    "turn_reveal_salt",
+    "recorded_act_submissions",
+    "from_host_parts",
+    "with_own_mandate",
+    "observe_seat_with_mandate",
+    "SeatObservationPublicParts",
+    "unmandated",
 ];
 
 const ALLOWED_LEAGUE_RELAY_CORE_ITEMS: &[&str] = &[
@@ -197,10 +251,12 @@ fn skip_balanced_braces(tokens: &[Tok], pos: &mut usize) {
     }
 }
 
-fn check_league_core_use_suffix(
+fn check_league_core_use_suffix_for(
     tokens: &[Tok],
     pos: &mut usize,
+    crate_label: &str,
     rel_path: &str,
+    allowed_items: &[&str],
 ) -> Result<(), String> {
     if matches!(tokens.get(*pos), Some(Tok::LBrace)) {
         *pos += 1;
@@ -209,35 +265,35 @@ fn check_league_core_use_suffix(
                 *pos += 1;
                 return Ok(());
             }
-            check_league_core_use_suffix(tokens, pos, rel_path)?;
+            check_league_core_use_suffix_for(tokens, pos, crate_label, rel_path, allowed_items)?;
             if matches!(tokens.get(*pos), Some(Tok::Other(','))) {
                 *pos += 1;
             }
         }
         return Err(format!(
-            "league-relay/{rel_path}: unterminated `league_core` use-group"
+            "{crate_label}/{rel_path}: unterminated `league_core` use-group"
         ));
     }
 
     if matches!(tokens.get(*pos), Some(Tok::Other('*'))) {
         return Err(format!(
-            "league-relay/{rel_path}: glob import from `league_core` is forbidden"
+            "{crate_label}/{rel_path}: glob import from `league_core` is forbidden"
         ));
     }
 
     let Some(Tok::Ident(item)) = tokens.get(*pos) else {
         return Err(format!(
-            "league-relay/{rel_path}: unsupported `league_core::` path syntax"
+            "{crate_label}/{rel_path}: unsupported `league_core::` path syntax"
         ));
     };
     if item == "self" {
         return Err(format!(
-            "league-relay/{rel_path}: `use league_core::self` module binding is forbidden"
+            "{crate_label}/{rel_path}: `use league_core::self` module binding is forbidden"
         ));
     }
-    if !ALLOWED_LEAGUE_RELAY_CORE_ITEMS.contains(&item.as_str()) {
+    if !allowed_items.contains(&item.as_str()) {
         return Err(format!(
-            "league-relay/{rel_path} names non-allowlisted `league_core::{item}`"
+            "{crate_label}/{rel_path} names non-allowlisted `league_core::{item}`"
         ));
     }
     let is_type_or_enum = item.chars().next().is_some_and(char::is_uppercase);
@@ -248,7 +304,7 @@ fn check_league_core_use_suffix(
     {
         if !is_type_or_enum {
             return Err(format!(
-                "league-relay/{rel_path}: nested path under `league_core::{item}::` is forbidden"
+                "{crate_label}/{rel_path}: nested path under `league_core::{item}::` is forbidden"
             ));
         }
         *pos += 2;
@@ -258,7 +314,7 @@ fn check_league_core_use_suffix(
         }
         if matches!(tokens.get(*pos), Some(Tok::Other('*'))) {
             return Err(format!(
-                "league-relay/{rel_path}: glob import under `league_core::{item}::*` is forbidden"
+                "{crate_label}/{rel_path}: glob import under `league_core::{item}::*` is forbidden"
             ));
         }
         if matches!(tokens.get(*pos), Some(Tok::Ident(_))) {
@@ -271,6 +327,77 @@ fn check_league_core_use_suffix(
         if matches!(tokens.get(*pos), Some(Tok::Ident(_))) {
             *pos += 1;
         }
+    }
+    Ok(())
+}
+
+fn check_league_core_use_suffix(
+    tokens: &[Tok],
+    pos: &mut usize,
+    rel_path: &str,
+) -> Result<(), String> {
+    check_league_core_use_suffix_for(
+        tokens,
+        pos,
+        "league-relay",
+        rel_path,
+        ALLOWED_LEAGUE_RELAY_CORE_ITEMS,
+    )
+}
+
+fn check_league_eval_core_isolation(files: &[(String, String)]) -> Result<(), String> {
+    for (rel_path, src) in files {
+        let tokens = tokenize_rust(src);
+        let mut i = 0usize;
+        while i < tokens.len() {
+            if matches!(tokens.get(i), Some(Tok::Pound))
+                && matches!(tokens.get(i + 1), Some(Tok::LBracket))
+                && matches!(tokens.get(i + 2), Some(Tok::Ident(kw)) if kw == "path")
+            {
+                return Err(format!(
+                    "league-eval/{rel_path}: `#[path]` attribute is forbidden"
+                ));
+            }
+            if matches!(tokens.get(i), Some(Tok::Ident(kw)) if kw == "extern")
+                && matches!(tokens.get(i + 1), Some(Tok::Ident(kw)) if kw == "crate")
+                && matches!(tokens.get(i + 2), Some(Tok::Ident(krate)) if krate == "league_core")
+            {
+                return Err(format!(
+                    "league-eval/{rel_path}: `extern crate league_core` is forbidden"
+                ));
+            }
+            if let Some(Tok::Ident(ident)) = tokens.get(i) {
+                if FORBIDDEN_EVAL_CORE_SYMBOLS.contains(&ident.as_str())
+                    || FORBIDDEN_RAW_FNS.contains(&ident.as_str())
+                {
+                    return Err(format!(
+                        "league-eval/{rel_path} references forbidden symbol `{ident}`"
+                    ));
+                }
+                if ident == "league_core"
+                    && matches!(tokens.get(i + 1), Some(Tok::Other(':')))
+                    && matches!(tokens.get(i + 2), Some(Tok::Other(':')))
+                {
+                    let mut pos = i + 3;
+                    check_league_core_use_suffix_for(
+                        &tokens,
+                        &mut pos,
+                        "league-eval",
+                        rel_path,
+                        ALLOWED_LEAGUE_EVAL_CORE_ITEMS,
+                    )?;
+                    i = pos;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+    if ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() != 22 {
+        return Err(format!(
+            "ALLOWED_LEAGUE_EVAL_CORE_ITEMS must contain exactly the 22 used core items, found {}",
+            ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len()
+        ));
     }
     Ok(())
 }
@@ -1253,10 +1380,11 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
-const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 37] = [
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 41] = [
     "new",
     "from_standard_setup",
     "from_explicit_setup",
+    "game_id",
     "layout_seed",
     "bot_tie_seed",
     "table_id",
@@ -1269,8 +1397,6 @@ const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 37] = [
     "observe_seat",
     "mandate_for_seat",
     "preview_regent_bundle_for_seat",
-    "turn_reveal_salt",
-    "recorded_act_submissions",
     "apply_market_action",
     "begin_cancel_lock",
     "advance_to_commit",
@@ -1286,11 +1412,16 @@ const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 37] = [
     "write_save_and_seal",
     "read_save_and_seal",
     "wipe_seal_file",
+    "write_game_save_and_seal",
+    "read_game_save_and_seal",
+    "fork_duplicate_from_game_dir",
     "write_pre_act_checkpoint",
     "write_act_recorded_seal",
     "read_recorded_act_submissions",
     "apply_recorded_act_submissions_from_seal",
     "fork_from_checkpoint",
+    "fork_duplicate_from_turn_0",
+    "from_explicit_entropy",
 ];
 
 const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [
@@ -9063,9 +9194,13 @@ fn check_workspace_manifests_and_crate_sources(
                 .collect();
             let crate_aliases = collect_crate_restricted_aliases_from_files(&alias_inputs);
             let is_non_seat_crate = NON_SEAT_WORKSPACE_CRATES.contains(&crate_name.as_str());
+            let mut eval_files: Vec<(String, String)> = Vec::new();
             let mut seat_files: Vec<(String, String)> = Vec::new();
 
             for (rel_in_crate, src) in loaded {
+                if crate_name == "league-eval" {
+                    eval_files.push((rel_in_crate.clone(), src.clone()));
+                }
                 let is_relay_integration_test =
                     crate_name == "league-relay" && rel_in_crate.starts_with("tests/");
                 scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
@@ -9130,6 +9265,9 @@ fn check_workspace_manifests_and_crate_sources(
                 }
             }
 
+            if !eval_files.is_empty() {
+                check_league_eval_core_isolation(&eval_files)?;
+            }
             if !seat_files.is_empty() {
                 let check_all_paths = crate_name != "league-relay";
                 scan_seat_files_two_pass(&seat_files, false, check_all_paths)?;
@@ -9145,6 +9283,7 @@ fn check_workspace_manifests_and_crate_sources(
     for expected in [
         "league-core",
         "league-error",
+        "league-eval",
         "league-gen",
         "league-ledger",
         "league-relay",
@@ -9221,6 +9360,7 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
     let member_names = [
         "league-core",
         "league-error",
+        "league-eval",
         "league-gen",
         "league-ledger",
         "league-relay",
@@ -9315,6 +9455,14 @@ fn write_minimal_workspace_tree(root: &Path) -> std::io::Result<()> {
         root.join("crates/league-tui/Cargo.toml"),
         "[package]\nname = \"league-tui\"\n[[bin]]\nname = \"league-tui\"\npath = \"src/main.rs\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\nleague-seat-ui = { path = \"../league-seat-ui\" }\n",
     )?;
+    fs::write(
+        root.join("crates/league-eval/Cargo.toml"),
+        "[package]\nname = \"league-eval\"\n[dependencies]\nleague-core = { path = \"../league-core\" }\nleague-error = { path = \"../league-error\" }\nleague-relay = { path = \"../league-relay\" }\n",
+    )?;
+    fs::write(
+        root.join("crates/league-eval/src/lib.rs"),
+        "use league_core::EvalHost;\npub fn host_id(h: &EvalHost) -> &str { h.game_id() }\n",
+    )?;
     Ok(())
 }
 
@@ -9363,6 +9511,7 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         Err(err) => panic!("workspace engine-internals isolation check failed: {err}"),
     };
     assert!(checked_crates.contains(&"league-error".to_owned()));
+    assert!(checked_crates.contains(&"league-eval".to_owned()));
     assert!(checked_crates.contains(&"league-seat-types".to_owned()));
     assert!(checked_crates.contains(&"league-seat-ui".to_owned()));
     assert!(checked_crates.contains(&"league-tui".to_owned()));
@@ -9538,6 +9687,43 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         panic!("write case_h bad: {err}");
     }
     assert!(check_workspace_manifests_and_crate_sources(&case_h).is_err());
+
+    // Control Eval: `league-eval` calling `ClubHost`, `write_save_and_seal`, or enabling `engine-internals` -> Err.
+    let case_eval_bad_sym = tmp_root.join("case_eval_bad_sym");
+    if let Err(err) = write_minimal_workspace_tree(&case_eval_bad_sym) {
+        panic!("setup case_eval_bad_sym: {err}");
+    }
+    if let Err(err) = fs::write(
+        case_eval_bad_sym.join("crates/league-eval/src/lib.rs"),
+        "use league_core::{EvalHost, ClubHost};\npub fn bad(h: &EvalHost, c: &ClubHost) { let _ = (h, c); }\n",
+    ) {
+        panic!("write case_eval_bad_sym: {err}");
+    }
+    assert!(check_workspace_manifests_and_crate_sources(&case_eval_bad_sym).is_err());
+
+    let case_eval_bad_r8 = tmp_root.join("case_eval_bad_r8");
+    if let Err(err) = write_minimal_workspace_tree(&case_eval_bad_r8) {
+        panic!("setup case_eval_bad_r8: {err}");
+    }
+    if let Err(err) = fs::write(
+        case_eval_bad_r8.join("crates/league-eval/src/lib.rs"),
+        "use league_core::EvalHost;\npub fn bad(h: &EvalHost, p: &std::path::Path) { let _ = h.write_save_and_seal(p, p); }\n",
+    ) {
+        panic!("write case_eval_bad_r8: {err}");
+    }
+    assert!(check_workspace_manifests_and_crate_sources(&case_eval_bad_r8).is_err());
+
+    let case_eval_bad_feat = tmp_root.join("case_eval_bad_feat");
+    if let Err(err) = write_minimal_workspace_tree(&case_eval_bad_feat) {
+        panic!("setup case_eval_bad_feat: {err}");
+    }
+    if let Err(err) = fs::write(
+        case_eval_bad_feat.join("crates/league-eval/Cargo.toml"),
+        "[dependencies]\nleague-core = { path = \"../league-core\", features = [\"engine-internals\"] }\n",
+    ) {
+        panic!("write case_eval_bad_feat: {err}");
+    }
+    assert!(check_workspace_manifests_and_crate_sources(&case_eval_bad_feat).is_err());
 
     let _ = fs::remove_dir_all(&tmp_root);
 }
@@ -9887,6 +10073,7 @@ fn planted_c2_workspace_member_outside_crates_dir_fails_when_violating_guard() {
 members = [
     "crates/league-core",
     "crates/league-error",
+    "crates/league-eval",
     "crates/league-gen",
     "crates/league-ledger",
     "crates/league-relay",
@@ -10081,7 +10268,7 @@ fn planted_b2_relay_and_ledger_all_dep_routes_and_c4_root_key_fail() {
     );
     let _ = fs::write(
         root.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-helper\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         root.join("crates/league-ledger/Cargo.toml"),
@@ -10546,7 +10733,7 @@ fn planted_c3_league_relay_and_future_ai_seat_crate_enforced_by_seat_rule() {
     );
     let _ = fs::write(
         seat_ws.join("Cargo.toml"),
-        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
+        "[workspace]\nmembers = [\n    \"crates/league-ai-seat\",\n    \"crates/league-core\",\n    \"crates/league-error\",\n    \"crates/league-eval\",\n    \"crates/league-gen\",\n    \"crates/league-ledger\",\n    \"crates/league-relay\",\n    \"crates/league-season\",\n    \"crates/league-seat-types\",\n    \"crates/league-seat-ui\",\n    \"crates/league-standalone\",\n    \"crates/league-tui\",\n]\n",
     );
     let _ = fs::write(
         ai_seat_dir.join("src/lib.rs"),
