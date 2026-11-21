@@ -2474,5 +2474,87 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
         .is_err()
     );
 
+    // 5. Additional CLI (`cmd_branch` default arms, `--error-format=text`, missing value EOF) & `write_text_atomic` edge paths.
+    assert_eq!(
+        execute_cli(
+            ["--error-format=text".into(), "--version".into()],
+            &mut out,
+            &mut err
+        ),
+        0
+    );
+    assert_eq!(
+        execute_cli(["play".into(), "--game-dir".into()], &mut out, &mut err),
+        1
+    );
+    assert_eq!(
+        execute_cli(
+            [
+                "branch".into(),
+                "--error-format".into(),
+                "text".into(),
+                "--checkpoint".into(),
+                play_with_extra_flags
+                    .join("checkpoints/day-01-pre-act")
+                    .into_os_string(),
+                "--seat".into(),
+                "Foundry".into(),
+                "--seats".into(),
+                tmp.join("seats.json").into_os_string(),
+                "--wrapper".into(),
+                tmp.join("wrapper.md").into_os_string(),
+                "--out".into(),
+                tmp.join("branch_default_arms").into_os_string(),
+                "--memory-mode".into(),
+                "snapshot".into(),
+                "--cap-credits".into(),
+                "1.5".into(),
+                "--cap-gpu-secs".into(),
+                "4.0".into(),
+            ],
+            &mut out,
+            &mut err
+        ),
+        0
+    );
+    let bad_list = tmp.join("bad_list.json");
+    must_ok(fs::write(&bad_list, b"{not-json"), "write bad_list");
+    assert_eq!(
+        execute_cli(
+            [
+                "branch".into(),
+                "--list".into(),
+                bad_list.into_os_string(),
+                "--seats".into(),
+                tmp.join("seats.json").into_os_string(),
+                "--wrapper".into(),
+                tmp.join("wrapper.md").into_os_string(),
+                "--arm".into(),
+                "off".into(),
+                "--out".into(),
+                tmp.join("branch_bad_list").into_os_string(),
+            ],
+            &mut out,
+            &mut err
+        ),
+        2
+    );
+
+    // Pre-existing `.tmp.<pid>` cleanup and overwrite in `write_text_atomic` via `run_select`.
+    let sel_overwrite = tmp.join("sel_overwrite.json");
+    let stale_tmp = tmp.join(format!("sel_overwrite.json.tmp.{}", std::process::id()));
+    must_ok(fs::write(&stale_tmp, b"stale"), "write stale tmp");
+    must_ok(fs::write(&sel_overwrite, b"{}"), "write prior target");
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![play_with_extra_flags],
+            per_game: 1,
+            strata: [1, 0, 0],
+            selection_seed: 7,
+            out_path: sel_overwrite,
+        })
+        .is_ok()
+    );
+
     let _ = fs::remove_dir_all(&tmp);
 }

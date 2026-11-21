@@ -149,21 +149,6 @@ impl<'de> Visitor<'de> for StrictUniqueVisitor {
         Ok(Value::String(v.to_owned()))
     }
 
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
-        Ok(Value::String(v))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(Value::Null)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        StrictUniqueValue.deserialize(deserializer)
-    }
-
     fn visit_unit<E>(self) -> Result<Self::Value, E> {
         Ok(Value::Null)
     }
@@ -572,6 +557,7 @@ mod tests {
             "Mint".to_owned(),
         ];
         for bad in [
+            r#"{bad"#,
             r#"{"messages":"not-arr","market_actions":[],"bundle":{}}"#,
             r#"{"messages":[42],"market_actions":[],"bundle":{}}"#,
             r#"{"messages":[{"to_guild":"Quarry","body":"hi","extra":1}],"market_actions":[],"bundle":{}}"#,
@@ -584,5 +570,16 @@ mod tests {
             let talk = parse_eval_talk_reply(bad, 0, "Foundry", &seated, false);
             assert_eq!(talk.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
         }
+        let talk_bundle = parse_eval_talk_reply(
+            r#"{"messages":[],"market_actions":[],"bundle":{"debt_repayment_cred":10}}"#,
+            0,
+            "Foundry",
+            &seated,
+            false,
+        );
+        assert_eq!(
+            talk_bundle.refusal_code,
+            Some(ReplyRefusalCode::TalkReplyHasOrders)
+        );
     }
 }

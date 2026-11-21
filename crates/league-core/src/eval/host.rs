@@ -1861,239 +1861,32 @@ mod tests {
     }
 
     #[test]
-    fn eval_host_comprehensive_guard_and_persistence_paths() {
-        let tmp = std::env::temp_dir().join(format!("ml_eval_unit_guards_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tmp);
-        must_ok(fs::create_dir_all(&tmp), "mkdir tmp");
-
-        // 1. Getters, out-of-range preview_regent_bundle_for_seat, manual market/commit/reveal/sweep paths.
-        let mut manual = explicit_host(TableId(910_040), 7, 0x20);
-        assert_eq!(manual.layout_seed(), 7);
-        assert_eq!(manual.public_spec().table_id, TableId(910_040));
-        assert!(matches!(
-            manual.preview_regent_bundle_for_seat(Seat(9)),
-            Err(EngineError::InvalidSeat(9))
-        ));
-        assert!(manual.sweep_turn().is_err());
-        assert!(
-            manual
-                .apply_market_action(MarketAction::TownImport {
-                    seat: 0,
-                    good: AssetId::Raw(0),
-                    amount: 0,
-                })
-                .is_err()
-        );
-        must_ok(
-            manual.apply_market_action(MarketAction::TownImport {
-                seat: 0,
-                good: AssetId::Raw(0),
-                amount: 50,
-            }),
-            "valid TownImport",
-        );
-        assert!(
-            manual
-                .write_pre_act_checkpoint(&tmp.join("manual_ckpts"))
-                .err()
-                .is_some_and(|e| e.to_string().contains("INVALID_PRE_ACT_STATE"))
-        );
-        must_ok(manual.begin_cancel_lock(), "begin_cancel_lock");
-        assert!(manual.cancel_locked());
-
+    fn eval_host_internal_guards_cover_private_fields_and_tamper_variants()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // Keep tests inside `src/eval/host.rs` strictly scoped to `pub(crate)` / private fields so
+        // `tests/eval_host.rs` exercises the public API cleanly without inflating `src/` test lines.
+        let mut h = explicit_host(TableId(910_040), 7, 0x20);
         let reveals: BTreeMap<u8, OrderReveal> = (0..4_u8)
             .map(|s| {
-                (
+                Ok((
                     s,
                     OrderReveal {
                         bundle: SealedOrderBundle::default(),
-                        salt: must_ok(manual.turn_reveal_salt(Seat(s)), "salt"),
+                        salt: h.turn_reveal_salt(Seat(s))?,
                     },
-                )
+                ))
             })
-            .collect();
-        must_ok(
-            manual.commit_and_reveal_all(&reveals),
-            "commit_and_reveal_all",
-        );
-        assert_eq!(manual.phase(), TurnPhase::Reveal);
-        assert!(manual.begin_cancel_lock().is_err());
-        assert!(
-            manual
-                .write_act_recorded_seal(&tmp.join("manual_ckpts"))
-                .err()
-                .is_some_and(|e| e.to_string().contains("MISSING_RECORDED_ACT_SUBMISSIONS"))
-        );
-        let rec = must_ok(manual.sweep_turn(), "manual sweep");
-        assert_eq!(rec.turn, 1);
+            .collect::<Result<_, EngineError>>()?;
+        h.commit_and_reveal_all(&reveals)?;
+        let tmp = std::env::temp_dir().join(format!("ml_eval_priv_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(h.write_act_recorded_seal(&tmp.join("ckpts")).is_err());
 
-        // 2. apply_act_submissions: Pass A invalid own action, Pass B invalid own action, MISSING_PRE_ACT_CHECKPOINT.
-        let mut act_host = explicit_host(TableId(910_041), 7, 0x20);
-        assert!(
-            act_host
-                .read_recorded_act_submissions(&tmp.join("nonexistent.seal"))
-                .err()
-                .is_some_and(|e| e.to_string().contains("MISSING_PRE_ACT_CHECKPOINT"))
-        );
-        let bad_own_subs = BTreeMap::from([(
-            0_u8,
-            EvalActSubmission {
-                market_actions: vec![MarketAction::CancelOffer {
-                    seat: 0,
-                    offer_id: 999,
-                }],
-                pass_b_actions: vec![MarketAction::CancelOffer {
-                    seat: 0,
-                    offer_id: 998,
-                }],
-                bundle: SealedOrderBundle::default(),
-            },
-        )]);
-        let bad_outcome = must_ok(
-            act_host.apply_act_submissions(&bad_own_subs),
-            "apply bad own actions",
-        );
-        assert_eq!(
-            bad_outcome.seats.get(&0).map(|r| (
-                r.refused_market_actions.len(),
-                r.refused_pass_b_actions.len()
-            )),
-            Some((1, 1))
-        );
-        assert!(
-            act_host
-                .write_act_recorded_seal(&tmp.join("no_pre_ckpts"))
-                .err()
-                .is_some_and(|e| e.to_string().contains("MISSING_PRE_ACT_CHECKPOINT"))
-        );
-        let (reveal_save, reveal_seal) =
-            must_ok(act_host.write_game_save_and_seal(&tmp), "save reveal pair");
+        let (reveal_save, reveal_seal) = h.to_save_and_seal_bytes()?;
+        assert!(EvalHost::from_save_and_seal_bytes(b"{not-json", &reveal_seal).is_err());
+        assert!(EvalHost::from_save_and_seal_bytes(&reveal_save, b"{not-json").is_err());
 
-        // 3. write_act_recorded_seal pre-act disk verification errors (`PRE_ACT_CHECKPOINT_MISMATCH`)
-        //    plus `MISSING_ACT_RECORDED_CHECKPOINT_SHA256` & `INVALID_TURN_0_CHECKPOINT`.
-        let mut h_pre = explicit_host(TableId(910_042), 7, 0x20);
-        let ckpt_dir = tmp.join("ckpts_42");
-        let (pre_save, pre_seal) = must_ok(h_pre.write_pre_act_checkpoint(&ckpt_dir), "write pre");
-        must_ok(h_pre.apply_act_submissions(&BTreeMap::new()), "apply empty");
-
-        // Missing on-disk pre-act seal -> PRE_ACT_CHECKPOINT_MISMATCH
-        let pre_seal_bak = fs::read(&pre_seal).unwrap_or_default();
-        let _ = fs::remove_file(&pre_seal);
-        assert!(
-            h_pre
-                .write_act_recorded_seal(&ckpt_dir)
-                .err()
-                .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
-        );
-        // Changed on-disk pre-act seal -> PRE_ACT_CHECKPOINT_MISMATCH
-        must_ok(fs::write(&pre_seal, b"tampered"), "write tampered seal");
-        assert!(
-            h_pre
-                .write_act_recorded_seal(&ckpt_dir)
-                .err()
-                .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
-        );
-        // Missing on-disk pre-act save -> PRE_ACT_CHECKPOINT_MISMATCH
-        must_ok(fs::write(&pre_seal, &pre_seal_bak), "restore pre_seal");
-        let _ = fs::remove_file(&pre_save);
-        assert!(
-            h_pre
-                .write_act_recorded_seal(&ckpt_dir)
-                .err()
-                .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
-        );
-
-        let mut h_fork = must_ok(
-            EvalHost::from_save_and_seal_bytes(
-                &fs::read(&reveal_save).unwrap_or_default(),
-                &fs::read(&reveal_seal).unwrap_or_default(),
-            ),
-            "load reveal",
-        );
-        let _ = must_ok(h_fork.sweep_turn(), "sweep to turn 2");
-        let t2_pair = must_ok(
-            h_fork.write_game_save_and_seal(&tmp.join("turn2_dir")),
-            "write turn 2",
-        );
-        assert!(
-            EvalHost::fork_duplicate_from_turn_0(&t2_pair.0, &t2_pair.1)
-                .err()
-                .is_some_and(|e| e.to_string().contains("INVALID_TURN_0_CHECKPOINT"))
-        );
-        let _ = must_ok(
-            h_fork.write_pre_act_checkpoint(&tmp.join("ckpts_42_t2")),
-            "write pre turn 2",
-        );
-        assert!(
-            h_fork
-                .read_recorded_act_submissions(&tmp.join("does_not_exist.seal"))
-                .err()
-                .is_some_and(|e| e
-                    .to_string()
-                    .contains("failed to read Eval recorded-act seal"))
-        );
-        assert!(
-            h_fork
-                .read_recorded_act_submissions(&reveal_seal)
-                .err()
-                .is_some_and(|e| {
-                    e.to_string()
-                        .contains("MISSING_ACT_RECORDED_CHECKPOINT_SHA256")
-                })
-        );
-
-        // Duplicate from game dir on valid turn-0 table works cleanly.
-        let mut turn0 = explicit_host(TableId(910_043), 7, 0x20);
-        let t0_dir = tmp.join("t0_dir");
-        let _ = must_ok(turn0.write_game_save_and_seal(&t0_dir), "write t0");
-        let dup = must_ok(
-            EvalHost::fork_duplicate_from_game_dir(&t0_dir, TableId(910_043)),
-            "fork_duplicate_from_game_dir",
-        );
-        assert_ne!(dup.game_id(), turn0.game_id());
-        let (_, _) = must_ok(turn0.write_pre_act_checkpoint(&ckpt_dir), "reset pre ckpt");
-
-        // 4. Malformed JSON, missing files, and seal shape checks in `validate_eval_seal_bytes`.
-        assert!(
-            EvalHost::read_save_and_seal(&tmp.join("no.save"), &reveal_seal)
-                .err()
-                .is_some_and(|e| e.to_string().contains("failed to read Eval save"))
-        );
-        assert!(
-            EvalHost::read_save_and_seal(&reveal_save, &tmp.join("no.seal"))
-                .err()
-                .is_some_and(|e| e.to_string().contains("failed to read Eval seal"))
-        );
-        assert!(
-            EvalHost::fork_from_checkpoint(&tmp.join("no.save"), &reveal_seal)
-                .err()
-                .is_some_and(|e| e
-                    .to_string()
-                    .contains("failed to read Eval checkpoint save"))
-        );
-        assert!(
-            EvalHost::fork_from_checkpoint(&reveal_save, &tmp.join("no.seal"))
-                .err()
-                .is_some_and(|e| e
-                    .to_string()
-                    .contains("failed to read Eval checkpoint seal"))
-        );
-
-        let valid_save_bytes = must_ok(fs::read(&reveal_save), "read valid save");
-        let valid_seal_bytes = must_ok(fs::read(&reveal_seal), "read valid seal");
-        assert!(
-            EvalHost::from_save_and_seal_bytes(b"{not-json", &valid_seal_bytes)
-                .err()
-                .is_some_and(|e| e.to_string().contains("MALFORMED_SAVE_JSON"))
-        );
-        assert!(
-            EvalHost::from_save_and_seal_bytes(&valid_save_bytes, b"{not-json")
-                .err()
-                .is_some_and(|e| e.to_string().contains("MALFORMED_SEAL_JSON"))
-        );
-
-        let base_seal_val: serde_json::Value =
-            must_ok(serde_json::from_slice(&valid_seal_bytes), "parse base seal");
+        let base_seal_val: serde_json::Value = serde_json::from_slice(&reveal_seal)?;
         type SealMutation = (&'static str, fn(&mut serde_json::Value));
         let seal_mutations: [SealMutation; 5] = [
             ("INVALID_SEAL_GAME_ID", |v| {
@@ -2118,20 +1911,23 @@ mod tests {
         for (expected_code, mutator) in seal_mutations {
             let mut mutated = base_seal_val.clone();
             mutator(&mut mutated);
-            let bytes = must_ok(serde_json::to_vec(&mutated), "ser mutated");
-            assert!(
-                EvalHost::from_save_and_seal_bytes(&valid_save_bytes, &bytes)
-                    .err()
-                    .is_some_and(|e| e.to_string().contains(expected_code)),
-                "expected {expected_code}"
-            );
+            let bytes = serde_json::to_vec(&mutated)?;
+            let err = EvalHost::from_save_and_seal_bytes(&reveal_save, &bytes)
+                .err()
+                .ok_or(expected_code)?;
+            assert!(err.to_string().contains(expected_code));
         }
 
-        // 5. `write_atomic_bytes` failure when parent is an existing regular file.
-        let file_parent = tmp.join("regular_file_parent");
-        must_ok(fs::write(&file_parent, b"x"), "write parent file");
-        assert!(turn0.write_game_save_and_seal(&file_parent).is_err());
-
+        let mut h_dirty_subs = explicit_host(TableId(910_044), 7, 0x20);
+        h_dirty_subs
+            .recorded_act_submissions
+            .insert(0, EvalActSubmission::default());
+        assert!(
+            h_dirty_subs
+                .write_pre_act_checkpoint(&tmp.join("dirty_ckpts"))
+                .is_err()
+        );
         let _ = fs::remove_dir_all(&tmp);
+        Ok(())
     }
 }

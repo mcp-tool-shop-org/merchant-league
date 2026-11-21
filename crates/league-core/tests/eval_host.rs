@@ -1309,3 +1309,231 @@ impl<T, E: std::fmt::Display> ExpectErrString<T> for Result<T, E> {
         }
     }
 }
+
+#[test]
+fn eval_host_public_api_guard_and_persistence_edge_cases() {
+    use league_core::{CommitmentHash, Seat};
+
+    let tmp = unique_tmp_dir("pub_api_guards");
+    assert!(EvalHost::from_standard_setup(TableId(920_099), 3, 7, 1).is_err());
+
+    let mut manual = must_ok(
+        EvalHost::from_standard_setup(TableId(920_040), 4, 7, 1),
+        "setup",
+    );
+    assert_eq!(manual.layout_seed(), 7);
+    assert_eq!(manual.public_spec().table_id, TableId(920_040));
+    assert!(manual.preview_regent_bundle_for_seat(Seat(9)).is_err());
+    assert!(manual.sweep_turn().is_err());
+    assert!(manual.advance_to_reveal().is_err());
+    assert!(
+        manual
+            .apply_market_action(MarketAction::TownImport {
+                seat: 0,
+                good: AssetId::Raw(0),
+                amount: 0,
+            })
+            .is_err()
+    );
+    must_ok(
+        manual.apply_market_action(MarketAction::TownImport {
+            seat: 0,
+            good: AssetId::Raw(0),
+            amount: 50,
+        }),
+        "valid TownImport",
+    );
+    assert!(
+        manual
+            .write_pre_act_checkpoint(&tmp.join("manual_ckpts"))
+            .err()
+            .is_some_and(|e| e.to_string().contains("INVALID_PRE_ACT_STATE"))
+    );
+    must_ok(manual.begin_cancel_lock(), "begin_cancel_lock");
+    assert!(manual.cancel_locked());
+
+    must_ok(manual.advance_to_commit(), "advance_to_commit");
+    assert!(manual.advance_to_commit().is_err());
+    assert!(
+        manual
+            .submit_order_commitment(Seat(9), CommitmentHash([0_u8; 32]))
+            .is_err()
+    );
+    must_ok(manual.advance_to_reveal(), "advance_to_reveal");
+    assert!(manual.advance_to_reveal().is_err());
+    assert!(manual.begin_cancel_lock().is_err());
+    assert!(
+        manual
+            .apply_act_submissions(&BTreeMap::new())
+            .err()
+            .is_some_and(|e| e.to_string().contains("INVALID_CHECKPOINT_PHASE"))
+    );
+    let _ = must_ok(manual.sweep_turn(), "sweep after manual reveal");
+
+    // Pass A & Pass B invalid own action + MISSING_PRE_ACT_CHECKPOINT + pre-act mismatch + missing files.
+    let mut act_host = must_ok(
+        EvalHost::from_standard_setup(TableId(920_041), 4, 7, 1),
+        "setup2",
+    );
+    assert!(
+        act_host
+            .read_recorded_act_submissions(&tmp.join("nonexistent.seal"))
+            .err()
+            .is_some_and(|e| e.to_string().contains("MISSING_PRE_ACT_CHECKPOINT"))
+    );
+    let bad_own_subs = BTreeMap::from([(
+        0_u8,
+        EvalActSubmission {
+            market_actions: vec![MarketAction::CancelOffer {
+                seat: 0,
+                offer_id: 999,
+            }],
+            pass_b_actions: vec![MarketAction::CancelOffer {
+                seat: 0,
+                offer_id: 998,
+            }],
+            bundle: SealedOrderBundle::default(),
+        },
+    )]);
+    let bad_outcome = must_ok(
+        act_host.apply_act_submissions(&bad_own_subs),
+        "apply bad own actions",
+    );
+    assert_eq!(
+        bad_outcome.seats.get(&0).map(|r| (
+            r.refused_market_actions.len(),
+            r.refused_pass_b_actions.len()
+        )),
+        Some((1, 1))
+    );
+    assert!(
+        act_host
+            .write_act_recorded_seal(&tmp.join("no_pre_ckpts"))
+            .err()
+            .is_some_and(|e| e.to_string().contains("MISSING_PRE_ACT_CHECKPOINT"))
+    );
+    let (reveal_save, reveal_seal) =
+        must_ok(act_host.write_game_save_and_seal(&tmp), "save reveal pair");
+
+    let mut h_pre = must_ok(
+        EvalHost::from_standard_setup(TableId(920_042), 4, 7, 1),
+        "setup3",
+    );
+    let ckpt_dir = tmp.join("ckpts_42");
+    let (pre_save, pre_seal) = must_ok(h_pre.write_pre_act_checkpoint(&ckpt_dir), "write pre");
+    must_ok(h_pre.apply_act_submissions(&BTreeMap::new()), "apply empty");
+
+    let pre_seal_bak = fs::read(&pre_seal).unwrap_or_default();
+    let _ = fs::remove_file(&pre_seal);
+    assert!(
+        h_pre
+            .write_act_recorded_seal(&ckpt_dir)
+            .err()
+            .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
+    );
+    must_ok(fs::write(&pre_seal, b"tampered"), "write tampered seal");
+    assert!(
+        h_pre
+            .write_act_recorded_seal(&ckpt_dir)
+            .err()
+            .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
+    );
+    must_ok(fs::write(&pre_seal, &pre_seal_bak), "restore pre_seal");
+    let _ = fs::remove_file(&pre_save);
+    assert!(
+        h_pre
+            .write_act_recorded_seal(&ckpt_dir)
+            .err()
+            .is_some_and(|e| e.to_string().contains("PRE_ACT_CHECKPOINT_MISMATCH"))
+    );
+
+    let mut h_fork = must_ok(
+        EvalHost::read_save_and_seal(&reveal_save, &reveal_seal),
+        "load reveal",
+    );
+    let _ = must_ok(h_fork.sweep_turn(), "sweep to turn 2");
+    let t2_pair = must_ok(
+        h_fork.write_game_save_and_seal(&tmp.join("turn2_dir")),
+        "write turn 2",
+    );
+    assert!(
+        EvalHost::fork_duplicate_from_turn_0(&t2_pair.0, &t2_pair.1)
+            .err()
+            .is_some_and(|e| e.to_string().contains("INVALID_TURN_0_CHECKPOINT"))
+    );
+    let _ = must_ok(
+        h_fork.write_pre_act_checkpoint(&tmp.join("ckpts_42_t2")),
+        "write pre turn 2",
+    );
+    assert!(
+        h_fork
+            .read_recorded_act_submissions(&tmp.join("does_not_exist.seal"))
+            .err()
+            .is_some_and(|e| e
+                .to_string()
+                .contains("failed to read Eval recorded-act seal"))
+    );
+    assert!(
+        h_fork
+            .read_recorded_act_submissions(&reveal_seal)
+            .err()
+            .is_some_and(|e| {
+                e.to_string()
+                    .contains("MISSING_ACT_RECORDED_CHECKPOINT_SHA256")
+            })
+    );
+
+    let turn0 = must_ok(
+        EvalHost::from_standard_setup(TableId(920_043), 4, 7, 1),
+        "setup4",
+    );
+    let t0_dir = tmp.join("t0_dir");
+    let _ = must_ok(turn0.write_game_save_and_seal(&t0_dir), "write t0");
+    let dup = must_ok(
+        EvalHost::fork_duplicate_from_game_dir(&t0_dir, TableId(920_043)),
+        "fork_duplicate_from_game_dir",
+    );
+    assert_ne!(dup.game_id(), turn0.game_id());
+
+    assert!(
+        EvalHost::read_save_and_seal(&tmp.join("no.save"), &reveal_seal)
+            .err()
+            .is_some_and(|e| e.to_string().contains("failed to read Eval save"))
+    );
+    assert!(
+        EvalHost::read_save_and_seal(&reveal_save, &tmp.join("no.seal"))
+            .err()
+            .is_some_and(|e| e.to_string().contains("failed to read Eval seal"))
+    );
+    assert!(
+        EvalHost::fork_from_checkpoint(&tmp.join("no.save"), &reveal_seal)
+            .err()
+            .is_some_and(|e| e
+                .to_string()
+                .contains("failed to read Eval checkpoint save"))
+    );
+    assert!(
+        EvalHost::fork_from_checkpoint(&reveal_save, &tmp.join("no.seal"))
+            .err()
+            .is_some_and(|e| e
+                .to_string()
+                .contains("failed to read Eval checkpoint seal"))
+    );
+
+    let file_parent = tmp.join("regular_file_parent");
+    must_ok(fs::write(&file_parent, b"x"), "write parent file");
+    assert!(turn0.write_game_save_and_seal(&file_parent).is_err());
+
+    let existing_target_dir = tmp.join("existing_dir_as_file");
+    must_ok(
+        fs::create_dir_all(&existing_target_dir),
+        "mkdir existing target",
+    );
+    assert!(
+        turn0
+            .write_save_and_seal(&existing_target_dir, &tmp.join("ok.seal"))
+            .is_err()
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
