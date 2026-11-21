@@ -617,7 +617,7 @@ fn redact_secrets_multi_core(
 /// credentials ONLY (`ApiKey` substrings, env-var/Bearer/`sk-*`/XRPL-seed credential patterns, and
 /// [`CREDENTIAL_SECRET_FIELD_KEYS`]) while preserving game values, and return deduplicated
 /// RFC 6901 JSON Pointer paths of credential-named fields whose non-empty values were blanked.
-pub fn redact_secrets_multi_with_limit_and_paths(
+pub fn redact_credentials_multi_with_limit_and_paths(
     input: &str,
     keys: &[ApiKey],
     max_bytes: usize,
@@ -1450,7 +1450,7 @@ mod tests {
         })
         .to_string();
 
-        let (scrubbed, paths) = redact_secrets_multi_with_limit_and_paths(
+        let (scrubbed, paths) = redact_credentials_multi_with_limit_and_paths(
             &payload,
             std::slice::from_ref(&key),
             payload.len(),
@@ -1502,20 +1502,26 @@ mod tests {
             r#"{{"salt":"keep","preimage":"0xabc","authorization":"","api_key":"{REDACTED_MARKER}"}}"#
         );
         let (clean_scrubbed, clean_paths) =
-            redact_secrets_multi_with_limit_and_paths(&clean_only, &[], clean_only.len());
+            redact_credentials_multi_with_limit_and_paths(&clean_only, &[], clean_only.len());
         assert_eq!(clean_scrubbed, clean_only);
         assert!(clean_paths.is_empty());
 
         // Malformed / truncated JSON falls back to Branch-1 blanked credential key paths only.
         let truncated_cred = r#"{"outer":{"secret_seed":"unterminated_cred_val"#;
-        let (trunc_cred_scrubbed, trunc_cred_paths) =
-            redact_secrets_multi_with_limit_and_paths(truncated_cred, &[], truncated_cred.len());
+        let (trunc_cred_scrubbed, trunc_cred_paths) = redact_credentials_multi_with_limit_and_paths(
+            truncated_cred,
+            &[],
+            truncated_cred.len(),
+        );
         assert!(!trunc_cred_scrubbed.contains("unterminated_cred_val"));
         assert_eq!(trunc_cred_paths, vec!["/secret_seed"]);
 
         let truncated_game = r#"{"outer":{"reveal_salt":"unterminated_game_val"#;
-        let (trunc_game_scrubbed, trunc_game_paths) =
-            redact_secrets_multi_with_limit_and_paths(truncated_game, &[], truncated_game.len());
+        let (trunc_game_scrubbed, trunc_game_paths) = redact_credentials_multi_with_limit_and_paths(
+            truncated_game,
+            &[],
+            truncated_game.len(),
+        );
         assert_eq!(trunc_game_scrubbed, truncated_game);
         assert!(trunc_game_paths.is_empty());
     }

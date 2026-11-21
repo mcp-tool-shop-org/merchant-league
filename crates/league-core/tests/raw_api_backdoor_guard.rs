@@ -26,7 +26,7 @@ const FORBIDDEN_RAW_FNS: [&str; 8] = [
     "preview_bundle_with_context_and_mode",
 ];
 
-const RAW_ENGINE_ONLY_TYPES: [&str; 10] = [
+const RAW_ENGINE_ONLY_TYPES: [&str; 11] = [
     "TurnEngine",
     "EngineState",
     "SweepMode",
@@ -36,10 +36,11 @@ const RAW_ENGINE_ONLY_TYPES: [&str; 10] = [
     "SealedEvalSeed",
     "SealedMandateDeal",
     "ClubSealPayload",
+    "EvalSealPayload",
     "engine_internals",
 ];
 
-const RAW_ENGINE_AND_HOST_TYPES: [&str; 13] = [
+const RAW_ENGINE_AND_HOST_TYPES: [&str; 16] = [
     "TurnEngine",
     "EngineState",
     "SweepMode",
@@ -52,10 +53,13 @@ const RAW_ENGINE_AND_HOST_TYPES: [&str; 13] = [
     "ClubHost",
     "ClubSaveSnapshot",
     "ClubSealPayload",
+    "EvalHost",
+    "EvalSaveSnapshot",
+    "EvalSealPayload",
     "engine_internals",
 ];
 
-const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 20] = [
+const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 22] = [
     "TurnEngine",
     "EngineState",
     "SweepMode",
@@ -63,11 +67,13 @@ const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 20] = [
     "BundlePreview",
     "ScheduledShockSpec",
     "ClubSealPayload",
+    "EvalSealPayload",
     "engine_internals",
     "from_host_parts",
     "with_own_mandate",
     "observe_seat_with_mandate",
     "to_save_and_seal_bytes",
+    "to_seal_bytes",
     "from_save_and_seal_bytes",
     "private_hints_for_auditor",
     "preview_bundle",
@@ -78,7 +84,7 @@ const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 20] = [
     "preview_bundle_with_context_and_mode",
 ];
 
-const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 30] = [
+const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 39] = [
     "TurnEngine",
     "EngineState",
     "engine_internals",
@@ -92,15 +98,24 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 30] = [
     "ClubHost",
     "ClubSaveSnapshot",
     "ClubSealPayload",
+    "EvalHost",
+    "EvalSaveSnapshot",
+    "EvalSealPayload",
     "mandate_for_seat",
     "from_host_parts",
     "with_own_mandate",
     "observe_seat_with_mandate",
     "to_save_and_seal_bytes",
+    "to_seal_bytes",
     "from_save_and_seal_bytes",
     "write_save_and_seal",
     "read_save_and_seal",
     "wipe_seal_file",
+    "write_pre_act_checkpoint",
+    "write_act_recorded_seal",
+    "read_recorded_act_submissions",
+    "apply_recorded_act_submissions_from_seal",
+    "fork_from_checkpoint",
     "public_save_snapshot",
     "private_hints_for_auditor",
     "preview_bundle",
@@ -1152,13 +1167,14 @@ const SEAT_PRIMARY_PARAM_TYPES: [&str; 6] = [
     "AiPreviewRequest",
 ];
 
-const PRODUCTION_REQUIRED_MODS: [&str; 11] = [
+const PRODUCTION_REQUIRED_MODS: [&str; 12] = [
     "bot",
     "club",
     "commit",
     "contracts",
     "engine",
     "error",
+    "eval",
     "observation",
     "predicates",
     "replay",
@@ -1166,13 +1182,14 @@ const PRODUCTION_REQUIRED_MODS: [&str; 11] = [
     "types",
 ];
 
-const PRODUCTION_ALLOWED_MODS: [&str; 11] = [
+const PRODUCTION_ALLOWED_MODS: [&str; 12] = [
     "bot",
     "club",
     "commit",
     "contracts",
     "engine",
     "error",
+    "eval",
     "observation",
     "predicates",
     "replay",
@@ -1236,6 +1253,46 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 37] = [
+    "new",
+    "from_standard_setup",
+    "from_explicit_setup",
+    "layout_seed",
+    "bot_tie_seed",
+    "table_id",
+    "seat_count",
+    "turn",
+    "phase",
+    "cancel_locked",
+    "public_spec",
+    "public_receipts",
+    "observe_seat",
+    "mandate_for_seat",
+    "preview_regent_bundle_for_seat",
+    "turn_reveal_salt",
+    "recorded_act_submissions",
+    "apply_market_action",
+    "begin_cancel_lock",
+    "advance_to_commit",
+    "submit_order_commitment",
+    "advance_to_reveal",
+    "submit_order_reveal",
+    "commit_and_reveal_all",
+    "apply_act_submissions",
+    "sweep_turn",
+    "finalize_eval_season",
+    "export_replay_log",
+    "public_save_snapshot",
+    "write_save_and_seal",
+    "read_save_and_seal",
+    "wipe_seal_file",
+    "write_pre_act_checkpoint",
+    "write_act_recorded_seal",
+    "read_recorded_act_submissions",
+    "apply_recorded_act_submissions_from_seal",
+    "fork_from_checkpoint",
+];
+
 const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [
     "preview_neutral_beacon",
     "preview_what_if_with_beacon",
@@ -1243,7 +1300,7 @@ const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [
     "preview_seat_bundle",
 ];
 
-const PRODUCTION_ALLOWED_REEXPORTS: [&str; 257] = [
+const PRODUCTION_ALLOWED_REEXPORTS: [&str; 264] = [
     // bot (landed in Part B)
     "bot::ClubBot",
     "bot::ClubBotDecision",
@@ -1253,6 +1310,14 @@ const PRODUCTION_ALLOWED_REEXPORTS: [&str; 257] = [
     "club::ClubHost",
     "club::ClubSaveSnapshot",
     "club::DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE",
+    // eval (landed in Card 10 PR 1)
+    "eval::EVAL_SAVE_FORMAT_VERSION",
+    "eval::EVAL_SEAL_FORMAT_VERSION",
+    "eval::EvalActApplyOutcome",
+    "eval::EvalActSubmission",
+    "eval::EvalHost",
+    "eval::EvalSaveSnapshot",
+    "eval::EvalSeatApplyReport",
     // commit
     "commit::AtomicSwapProposal",
     "commit::CharterBidOrder",
@@ -2297,7 +2362,8 @@ fn check_pub_fn_body_and_return(
                 if r == "preview_bundle_with_context_internal"
                     || r == "sweep_turn_detailed_with_mode"
                     || (r == "observe_seat_with_mandate"
-                        && !(scope_name == "ClubHost" && fn_name == "observe_seat"))
+                        && !((scope_name == "ClubHost" || scope_name == "EvalHost")
+                            && fn_name == "observe_seat"))
                     || (r != "observe_seat_with_mandate" && FORBIDDEN_RAW_FNS.contains(&r.as_str()))
                 {
                     return Err(format!(
@@ -2365,7 +2431,7 @@ fn check_pub_fn_body_and_return(
                 }
                 if matches!(
                     resolved_ident.as_str(),
-                    "SweepMode" | "ClubSealPayload" | "engine_internals"
+                    "SweepMode" | "ClubSealPayload" | "EvalSealPayload" | "engine_internals"
                 ) {
                     return Err(format!(
                         "{rel_path}: `pub fn {scope_name}::{fn_name}` must not expose `{resolved_ident}`{via_note}"
@@ -2527,6 +2593,8 @@ fn parse_impl_header(
         let resolved = aliases.resolve(&raw_name);
         if resolved.contains("ClubHost") {
             "ClubHost".to_owned()
+        } else if resolved.contains("EvalHost") {
+            "EvalHost".to_owned()
         } else if resolved.contains("TurnEngine") {
             "TurnEngine".to_owned()
         } else {
@@ -2542,7 +2610,11 @@ fn parse_impl_header(
                 continue;
             }
             let resolved = aliases.resolve(s);
-            if resolved.contains("ClubHost") || resolved.contains("ClubSaveSnapshot") {
+            if resolved.contains("ClubHost")
+                || resolved.contains("ClubSaveSnapshot")
+                || resolved.contains("EvalHost")
+                || resolved.contains("EvalSaveSnapshot")
+            {
                 mentions_host = true;
                 break;
             }
@@ -2558,7 +2630,7 @@ fn check_struct_fields_not_public(
     tokens: &[Tok],
     body_start: usize,
 ) -> Result<(), String> {
-    if !matches!(struct_name, "ClubHost" | "TurnEngine") {
+    if !matches!(struct_name, "ClubHost" | "EvalHost" | "TurnEngine") {
         return Ok(());
     }
     let open = tokens.get(body_start);
@@ -2620,13 +2692,16 @@ fn check_public_struct_no_raw_pub_fields(
     body_start: usize,
     aliases: &FileAliasTable,
 ) -> Result<(), String> {
-    const ALWAYS_BANNED_CORE_PUB_FIELDS: [&str; 8] = [
+    const ALWAYS_BANNED_CORE_PUB_FIELDS: [&str; 11] = [
         "TurnEngine",
         "EngineState",
         "SweepMode",
         "ClubHost",
         "ClubSaveSnapshot",
         "ClubSealPayload",
+        "EvalHost",
+        "EvalSaveSnapshot",
+        "EvalSealPayload",
         "SealedEvalSeed",
         "engine_internals",
     ];
@@ -3150,7 +3225,13 @@ fn scan_file_public_api_with_crate_aliases(
                     if let Some(alias_name) = &item.alias {
                         if let Some(raw) = resolved_leaf.iter().find(|r| {
                             RAW_ENGINE_ONLY_TYPES.contains(&r.as_str())
-                                || matches!(r.as_str(), "ClubHost" | "ClubSaveSnapshot")
+                                || matches!(
+                                    r.as_str(),
+                                    "ClubHost"
+                                        | "ClubSaveSnapshot"
+                                        | "EvalHost"
+                                        | "EvalSaveSnapshot"
+                                )
                         }) {
                             return Err(format!(
                                 "{rel_path}: public `pub use {path} as {alias_name}` must not alias raw engine/host type `{raw}`"
@@ -3607,6 +3688,7 @@ fn is_seat_src_type_and_fn_file(rel_path: &str, check_all_paths: bool) -> bool {
         || rel_path == "bot.rs"
         || rel_path.starts_with("bot/")
         || rel_path.starts_with("club/")
+        || rel_path.starts_with("eval/")
         || !rel_path.contains('/')
 }
 
@@ -4539,7 +4621,7 @@ fn scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
     forbid_host_reexports: bool,
     crate_aliases: &FileAliasTable,
 ) -> Result<(), String> {
-    const NON_CORE_PUB_FN_BANNED_RETURNS: [&str; 10] = [
+    const NON_CORE_PUB_FN_BANNED_RETURNS: [&str; 13] = [
         "TurnEngine",
         "EngineState",
         "SweepMode",
@@ -4549,6 +4631,9 @@ fn scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
         "ClubHost",
         "ClubSaveSnapshot",
         "ClubSealPayload",
+        "EvalHost",
+        "EvalSaveSnapshot",
+        "EvalSealPayload",
         "engine_internals",
     ];
     let tokens = tokenize_rust(source);
@@ -4708,8 +4793,10 @@ fn scan_non_core_crate_aliases_and_reexports_with_crate_aliases(
                     } else {
                         RAW_ENGINE_ONLY_TYPES.iter().any(|t| {
                             *t == r_str && *t != "SealedMandateDeal" && *t != "SealedEvalSeed"
-                        }) || matches!(r_str, "ClubHost" | "ClubSaveSnapshot")
-                            || FORBIDDEN_RAW_FNS.contains(&r_str)
+                        }) || matches!(
+                            r_str,
+                            "ClubHost" | "ClubSaveSnapshot" | "EvalHost" | "EvalSaveSnapshot"
+                        ) || FORBIDDEN_RAW_FNS.contains(&r_str)
                             || r_str == "engine_internals"
                     }
                 });
@@ -7248,6 +7335,7 @@ struct ExpectedCoreSurface<'a> {
     allowed_reexports: &'a [&'a str],
     allowed_turn_engine_pub_fns: &'a [&'a str],
     allowed_club_host_pub_fns: Option<&'a [&'a str]>,
+    allowed_eval_host_pub_fns: Option<&'a [&'a str]>,
     allowed_observation_pub_fns: &'a [&'a str],
 }
 
@@ -7258,6 +7346,7 @@ const PRODUCTION_SURFACE: ExpectedCoreSurface<'static> = ExpectedCoreSurface {
     allowed_reexports: &PRODUCTION_ALLOWED_REEXPORTS,
     allowed_turn_engine_pub_fns: &ALLOWED_TURN_ENGINE_PUB_FNS,
     allowed_club_host_pub_fns: Some(&ALLOWED_CLUB_HOST_PUB_FNS),
+    allowed_eval_host_pub_fns: Some(&ALLOWED_EVAL_HOST_PUB_FNS),
     allowed_observation_pub_fns: &ALLOWED_OBSERVATION_PUB_FNS,
 };
 
@@ -7268,6 +7357,7 @@ const MINIMAL_TEST_SURFACE: ExpectedCoreSurface<'static> = ExpectedCoreSurface {
     allowed_reexports: &[],
     allowed_turn_engine_pub_fns: &["observe_seat"],
     allowed_club_host_pub_fns: None,
+    allowed_eval_host_pub_fns: None,
     allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
 };
 
@@ -7362,6 +7452,19 @@ fn scan_league_core_src_tree_with_surface(
             }
         }
 
+        if let Some(allowed_eval_host) = surface.allowed_eval_host_pub_fns
+            && let Some(host_fns) = scan.pub_fns_by_scope.get("impl:EvalHost")
+        {
+            let allowed_set: BTreeSet<&str> = allowed_eval_host.iter().copied().collect();
+            for f in host_fns {
+                if !allowed_set.contains(f.as_str()) {
+                    return Err(format!(
+                        "{rel}: `impl EvalHost` exposes unlisted `pub fn {f}`"
+                    ));
+                }
+            }
+        }
+
         if rel == "observation.rs" {
             observation_checked = true;
             let obs_fns = scan
@@ -7411,9 +7514,11 @@ fn scan_league_core_src_tree_with_surface(
                             "league-core/src/{rel}: `SeatObservation::from_host_parts` may only be called from `observation.rs`"
                         ));
                     }
-                    "observe_seat_with_mandate" if rel != "engine.rs" && rel != "club/host.rs" => {
+                    "observe_seat_with_mandate"
+                        if rel != "engine.rs" && rel != "club/host.rs" && rel != "eval/host.rs" =>
+                    {
                         return Err(format!(
-                            "league-core/src/{rel}: `observe_seat_with_mandate` may only be used by `engine.rs` and `club/host.rs`"
+                            "league-core/src/{rel}: `observe_seat_with_mandate` may only be used by `engine.rs`, `club/host.rs`, and `eval/host.rs`"
                         ));
                     }
                     "build_seat_observation_from_engine_state"
@@ -7428,13 +7533,15 @@ fn scan_league_core_src_tree_with_surface(
             }
         }
 
-        // Seat-side rule inside `league-core/src`: `bot` module and non-host `club/` files.
-        if rel == "club/mod.rs" {
+        // Seat-side rule inside `league-core/src`: `bot` module and non-host `club/`/`eval/` files.
+        if rel == "club/mod.rs" || rel == "eval/mod.rs" {
             check_club_mod_rs_source(&rel, &source)?;
         }
         if rel == "bot.rs" || rel.starts_with("bot/") {
             bot_seat_files.push((rel.clone(), source.clone()));
-        } else if rel.starts_with("club/") && rel != "club/host.rs" && rel != "club/mod.rs" {
+        } else if (rel.starts_with("club/") && rel != "club/host.rs" && rel != "club/mod.rs")
+            || (rel.starts_with("eval/") && rel != "eval/host.rs" && rel != "eval/mod.rs")
+        {
             club_seat_files.push((rel.clone(), source));
         }
 
@@ -9232,6 +9339,8 @@ fn raw_api_backdoors_stay_shut_and_seat_crates_cannot_enable_engine_internals() 
         "contracts.rs",
         "engine.rs",
         "error.rs",
+        "eval/host.rs",
+        "eval/mod.rs",
         "lib.rs",
         "observation.rs",
         "predicates.rs",
@@ -9745,6 +9854,7 @@ fn planted_b4_renamed_raw_state_wrapper_and_reexport_path_fail() {
         allowed_reexports: &["engine::TurnEngine"],
         allowed_turn_engine_pub_fns: &["observe_seat"],
         allowed_club_host_pub_fns: None,
+        allowed_eval_host_pub_fns: None,
         allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
     };
     if let Err(err) = fs::write(
@@ -10277,6 +10387,7 @@ fn planted_b2_alias_trait_field_and_non_core_lib_reexport_controls_a1_to_a9_fail
         allowed_reexports: &[],
         allowed_turn_engine_pub_fns: &["observe_seat"],
         allowed_club_host_pub_fns: Some(&["from_standard_setup"]),
+        allowed_eval_host_pub_fns: None,
         allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
     };
     let setup_host_core = |dir: &Path| {
@@ -10695,6 +10806,7 @@ fn planted_item7_a2_alias_routes_x3_x3b_x3c_y1_y2_y5_x5_x5b_and_c1_y6_all_fail()
         allowed_reexports: &[],
         allowed_turn_engine_pub_fns: &["observe_seat"],
         allowed_club_host_pub_fns: Some(&["from_standard_setup"]),
+        allowed_eval_host_pub_fns: None,
         allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
     };
     let setup_host_core = |dir: &Path| {
@@ -11265,6 +11377,7 @@ fn planted_fix2_items4_5_honest_guard_routes_and_host_mandate_isolation() {
             allowed_reexports: &[],
             allowed_turn_engine_pub_fns: &["observe_seat"],
             allowed_club_host_pub_fns: None,
+            allowed_eval_host_pub_fns: None,
             allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
         },
     )
@@ -11417,6 +11530,7 @@ fn planted_fix3_item1_cfg_escapes_and_core_v_new_all_fail() {
         allowed_reexports: &[],
         allowed_turn_engine_pub_fns: &["observe_seat"],
         allowed_club_host_pub_fns: None,
+        allowed_eval_host_pub_fns: None,
         allowed_observation_pub_fns: &["preview_what_if", "preview_seat_bundle"],
     };
     for (label, content, expected_substr) in vnew_cases {

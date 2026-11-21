@@ -12,8 +12,8 @@ use crate::seats::{
 };
 use crate::secret::{
     ApiKey, LogLevel, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, REDACTED_MARKER,
-    is_credential_secret_field_key, redact_credentials_multi_with_limit, redact_secrets,
-    redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+    is_credential_secret_field_key, redact_credentials_multi_with_limit,
+    redact_credentials_multi_with_limit_and_paths, redact_secrets, redact_secrets_multi_with_limit,
     truncate_after_redaction,
 };
 use crate::transport::{
@@ -2753,7 +2753,7 @@ pub fn discarded_reply_file_path(
 /// (`<game-dir>/relay/seats/<Guild>.day-<DD>-<round>.http-reply-round-<round_index>-attempt-<attempt>.json`).
 ///
 /// The `body` field stores the received HTTP body after credential-only redaction
-/// (`redact_secrets_multi_with_limit_and_paths` across `body.len()`, preserving game values)
+/// (`redact_credentials_multi_with_limit_and_paths` across `body.len()`, preserving game values)
 /// and nothing else: no trimming, no truncation, no `<think>` stripping, no transcript rule,
 /// and no re-serialization of JSON. Never replayed into any model prompt or shown to any seat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -7289,7 +7289,7 @@ mod raw_reply_gate {
         ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, PreviewToolMode,
         RawHttpResponse, RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
         apply_retry_suffix_to_json_path, catch_unwind, http_reply_file_path, mpsc, panic_message,
-        redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+        redact_credentials_multi_with_limit_and_paths, redact_secrets_multi_with_limit,
         resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
     };
 
@@ -7391,7 +7391,11 @@ mod raw_reply_gate {
             // Scan the full received body (`resp.body.len()`) so an echoed key beyond
             // `MAX_REDACTION_SCAN_BYTES` is scrubbed without altering any error/log cap.
             let (scrubbed_body, redacted_secret_field_paths) =
-                redact_secrets_multi_with_limit_and_paths(&resp.body, all_keys, resp.body.len());
+                redact_credentials_multi_with_limit_and_paths(
+                    &resp.body,
+                    all_keys,
+                    resp.body.len(),
+                );
             let body_redacted = scrubbed_body != resp.body;
             let body_sha256 = sha256_hex(scrubbed_body.as_bytes());
             let base_sidecar_path = http_reply_file_path(
