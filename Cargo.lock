@@ -1421,6 +1421,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "league-eval"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "league-core",
+ "league-error",
+ "league-relay",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "league-gen"
 version = "0.1.0"
 dependencies = [
