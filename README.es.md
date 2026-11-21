@@ -43,14 +43,14 @@ Ambos modos comparten un motor de reglas. Un juego se reproduce exactamente a pa
 | `league-core` | El motor de reglas: las fases del turno, los contratos, la puntuación, el final de la temporada, la repetición y los predicados de estado que sustentan el sistema de pistas planificado |
 | `league-gen` | El generador de mesas, con sus comprobaciones de equidad y sus conjuntos de semillas |
 | `league-ledger` | El cliente de la red de pruebas XRPL. Rechaza cualquier red que no sea la red de pruebas |
-| `league-standalone` | El entorno `xrpld` independiente para el modo de entrenamiento, en un contenedor con recursos limitados y fijados |
+| `league-standalone` | El entorno `xrpld` independiente para el modo de entrenamiento, en un contenedor fijado y con recursos limitados |
 | `league-season` | Las fechas de reinicio anunciadas de la Testnet y una comprobación que detecta un reinicio no anunciado |
-| `league-relay` | La herramienta que se utilizó para realizar las pruebas de juego con jugadores de IA |
+| `league-relay` | La herramienta que ejecutó las pruebas de juego en papel con asientos de IA |
 | `league-tui` | El host del terminal del modo Club sin conexión: configuración del lobby, turnos compartidos (hot-seat) en cuatro zonas, cortina de privacidad con PIN opcionales, pases de tiempo limitado, guardado/reanudación a mitad del turno, tabla de clasificación al final de la temporada y exportación de repeticiones |
 
 ## Juega una temporada
 
-El modo **Club** sin conexión ejecuta una temporada completa de `24..=32` turnos en tu terminal (`4–6` jugadores humanos o `ClubBot` jugadores en una sola máquina):
+El modo **Club** sin conexión ejecuta una temporada completa de `24..=32` turnos, en modo hot-seat, en tu terminal (`4–6` asientos humanos o `ClubBot` en una sola máquina):
 
 ```bash
 cargo run -p league-tui --locked -- --save-dir ./saves

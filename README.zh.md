@@ -14,7 +14,7 @@
 
 这是一款慢节奏的交易和政治游戏，适合四到六名玩家，在 XRP Ledger **测试网**上进行。玩家可以是真人，也可以是 AI 玩家，在同一张桌子上，遵循相同的规则。
 
-**状态：原型，正在积极设计中。** `league-tui` 中的离线 **俱乐部模式** 可以在一台共享终端上从源代码进行游戏（真人与 `ClubBot` 座位共 4–6 个，从大厅开始，到赛季结束的排行榜和游戏回放导出；私聊功能将在 `v0.1.0` 之后启用）。公共测试网游戏模式和容器镜像尚未构建，目前**尚未发布**。仅限测试网：不涉及真实货币，也没有通往主网的途径。
+**状态：原型，正在积极设计中。** `league-tui` 中的离线 **俱乐部模式** 可以在一台共享终端上从源代码进行游戏（真人与 `ClubBot` 座位共 4–6 个，从大厅开始，到赛季结束的排行榜和游戏回放导出；私聊功能推迟到 `v0.1.0` 之后）。公共测试网游戏模式和容器镜像尚未构建，目前**尚未发布**。仅限测试网：不涉及真实货币，也没有通往主网的途径。
 
 ## 游戏
 
@@ -31,7 +31,7 @@
 
 | 模式 | 运行环境 | 目标用户 |
 | --- | --- | --- |
-| **游戏模式** | 公共 XRPL 测试网，大约每天进行两轮游戏 | 玩家，可以单独游戏，也可以与 AI 玩家一起游戏 |
+| **游戏模式** | 公共 XRPL 测试网，大约每天进行两轮游戏 | 真人玩家（仅真人，或与 AI 座位同桌） |
 | **训练和评估模式** | 一个私有的独立 `xrpld` 节点，在本地 Docker 容器中运行，在几毫秒内关闭账本（ledger）。 | AI 玩家：训练、基准测试和游戏回放 |
 
 两种模式共享一个规则引擎。游戏可以从其种子和日志中完全重现。
@@ -103,11 +103,11 @@ docker run --rm -it --network=none -v "${PWD}/saves:/saves" merchant-league:loca
 
 - **保存和挂载：** 在 Linux Docker 引擎中，默认镜像用户 `65532:65532` 无法写入属于您帐户的主机目录（或因 `-v` 路径缺失而由 `root` 创建的目录），因此预先创建 `./saves` 并传递 `--user "$(id -u):$(id -g)"` 可以使保存的文件归属于您的非 root 用户，而无需 root 权限或 `chmod 777`。 或者，使用 Docker 命名卷（`docker run --rm -it --network=none -v merchant-league-saves:/saves merchant-league:local`，无需 `--user`），它沿用镜像中归 `65532:65532` 所有的 `/saves`。 在 Docker Desktop（macOS 和 Windows）中，绑定挂载权限在虚拟机中进行了虚拟化，因此上述 PowerShell 命令以及在 macOS 上的相同绑定挂载，无需 `--user` 即可工作，而 WSL 2 Linux shell 可以运行上述 Linux `--user` 命令。 对于无 root 权限的 Docker 引擎，容器用户 ID 的映射方式不同（在容器内部，您自己的文件显示为 `root` 的，任何其他 ID 都会映射到从属 ID），因此上述 `--user` 命令不会授予容器您自己的帐户；请在那里使用命名卷。 Linux 版本的 Docker Desktop 在虚拟机中运行引擎，并通过其自身的机制与其共享文件夹；如果绑定挂载无法在那里保存，请也使用命名卷。 我们尚未测试无 root 权限的 Docker 引擎、Linux 版本的 Docker Desktop 和 macOS。
 - **需要交互式终端：** 传递 `-it` 以进行交互式操作。 在未附加 TTY 的情况下启动会以状态码 `1` 退出，并给出错误码 `TTY_REQUIRED` 及其 `docker run --rm -it <image>` 提示；`--help` 和 `--version` 在没有 TTY 时以状态码 `0` 退出。
-- **镜像包含的内容：** 从固定哈希值的 `rust:1.100.0-bookworm`（`@sha256:`）构建到固定哈希值的 `gcr.io/distroless/cc-debian12:nonroot`（`@sha256:`），默认情况下在 `WORKDIR /saves` 中为非 root `65532:65532`。 在这个固定的无依赖基础镜像之上（该镜像不包含 shell 和包管理器），构建过程仅添加 `/usr/local/bin/league-tui`、`/usr/share/doc/merchant-league/LICENSE` 和一个由 `65532:65532` 拥有的空 `/saves` 目录——没有工具链、没有源代码文件，也没有网络调用（`--network=none`）。
+- **镜像包含的内容：** 从固定哈希值的 `rust:1.100.0-bookworm`（`@sha256:`）构建到固定哈希值的 `gcr.io/distroless/cc-debian12:nonroot`（`@sha256:`），默认情况下在 `WORKDIR /saves` 中为非 root `65532:65532`。 在这个固定的distroless（无发行版）基础镜像之上（该镜像不包含 shell 和包管理器），构建过程仅添加 `/usr/local/bin/league-tui`、`/usr/share/doc/merchant-league/LICENSE` 和一个由 `65532:65532` 拥有的空 `/saves` 目录——没有工具链、没有源代码文件，也没有网络调用（`--network=none`）。
 
 ## 安全与数据
 
-- **它会访问什么。** 在离线俱乐部模式（`league-tui`）中，`--save-dir` 会写入公共 `club-<id>.save.json`、私有的同屏轮流（hot-seat）`club-<id>.seal`（在成功导出回放后删除）、经过验证的 `club-<id>.replay.json` 以及可选的 `--log-file` 元数据诊断信息（绝不会记录 PIN、保险库笔记、任务、暂存订单或提交盐值，并且会在所有四个日志级别中隐去 API/XRPL 凭据和密封的 JSON 键名），所有这些都写入您自己的机器，没有任何网络调用。 在游戏模式（尚未构建）中，玩家的 Testnet 密钥保留在其自己的机器上，位于 git 忽略的 `.league/` 文件夹中，并且绝不会被记录。 纸质测试中继仅从 `OPENROUTER_API_KEY` 环境变量读取其 OpenRouter 密钥，并且在没有 `--live` 和信用上限的情况下不会进行任何 OpenRouter 调用。 它的本地席位拒绝任何 API 密钥，仅访问环回地址或您允许的 VM 地址（通过 `--allow-vm-host`），并且需要 GPU 秒数上限。 它将其记录保存在您提供的游戏文件夹中。
+- **它会访问什么。** 在离线俱乐部模式（`league-tui`）中，`--save-dir` 会写入公共 `club-<id>.save.json`、私有的同屏轮流（hot-seat）`club-<id>.seal`（在成功导出回放后删除）、经过验证的 `club-<id>.replay.json` 以及可选的 `--log-file` 元数据诊断信息（绝不会记录 PIN、保险库笔记、任务、暂存订单或提交盐值，并且会在所有四个日志级别中隐去 API/XRPL 凭据和密封的 JSON 键），所有这些都写入您自己的机器，没有任何网络调用。 在游戏模式（尚未构建）中，玩家的 Testnet 密钥保留在其自己的机器上，位于 git 忽略的 `.league/` 文件夹中，并且绝不会被记录。 纸质测试中继仅从 `OPENROUTER_API_KEY` 环境变量读取其 OpenRouter 密钥，并且在没有 `--live` 和信用上限的情况下不会进行任何 OpenRouter 调用。 它的本地席位拒绝任何 API 密钥，仅访问环回地址或您允许的 VM 地址（通过 `--allow-vm-host`），并且需要 GPU 秒数上限。 它将其记录保存在您提供的游戏文件夹中。
 - **它不会访问什么。** 没有真实货币，没有主网，也没有任何超出上述文件夹之外的内容。 **没有遥测数据**：除了模式所需的调用（Testnet、公共随机数信标以及中继的 OpenRouter 或您允许的本地模型服务器）之外，没有任何内容会被发送到任何地方。
 - **权限。** 在游戏模式下，需要访问 Testnet 的网络。 运行本地俱乐部模式容器时，需要 Docker 具有 `--network=none --user "$(id -u):$(id -g)" -v "$(pwd)/saves:/saves"`（或命名卷 `-v merchant-league-saves:/saves`）（仅访问 `/saves`），或者 Docker 的端口绑定到 `127.0.0.1`，仅用于独立的测试套件。
 - **保护措施。** 每个 Testnet 连接都必须报告 Testnet 的网络 ID。 只要代码库中第三方引入（vendored）代码以外的地方写有任何主网主机名，一项 CI 检查就会失败；另一项检查会在文案把游戏描述为收入来源时失败。 审查涵盖了词表无法看到的内容。

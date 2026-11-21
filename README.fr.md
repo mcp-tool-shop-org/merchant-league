@@ -14,7 +14,7 @@
 
 Un jeu de commerce et de politique au rythme lent, pour quatre à six joueurs, qui se déroule sur le **Testnet** XRP Ledger. Les joueurs peuvent être des personnes ou des joueurs IA, assis à la même table et soumis aux mêmes règles.
 
-**État : prototype, en cours de développement.** Le mode **Club hors ligne** dans `league-tui` est jouable à partir du code source sur un terminal partagé (4 à 6 sièges humains et `ClubBot`, depuis le lobby jusqu’au tableau des scores de fin de saison et l’exportation des replays ; les messages privés sont différés après `v0.1.0`). Le mode de jeu Public-Testnet et l’image conteneur ne sont pas encore créés, et il n’y a **pas encore de version publiée**. Uniquement sur le Testnet : pas d’argent réel, et pas de possibilité de passer au Mainnet.
+**État : prototype, en cours de développement.** Le mode **Club hors ligne** dans `league-tui` est jouable à partir du code source sur un terminal partagé (4 à 6 sièges humains et `ClubBot`, depuis le lobby jusqu’au tableau des scores de fin de saison et l’exportation des replays ; les messages privés sont différés après `v0.1.0`). Le mode de jeu sur le Testnet public et l’image conteneur ne sont pas encore créés, et il n’y a **pas encore de version publiée**. Uniquement sur le Testnet : pas d’argent réel, et pas de possibilité de passer au Mainnet.
 
 ## Le jeu
 
@@ -45,12 +45,12 @@ Les deux modes partagent le même moteur de règles. Un jeu est rejoué exacteme
 | `league-ledger` | Le client XRPL Testnet. Il refuse tout réseau qui n’est pas le Testnet |
 | `league-standalone` | Le module `xrpld` autonome pour le mode d’entraînement, dans un conteneur à version figée et aux ressources limitées |
 | `league-season` | Les dates de réinitialisation annoncées du Testnet, et une vérification qui détecte une réinitialisation non annoncée |
-| `league-relay` | L’outil qui a permis de réaliser les tests de jeu avec des joueurs IA |
-| `league-tui` | L’hôte du terminal du mode Club hors ligne : configuration du lobby, tours en mode « hot-seat » à quatre voies, rideau de confidentialité avec codes PIN facultatifs, accès chronométrés, sauvegarde/reprise en milieu de tour, tableau de bord de fin de saison et exportation des replays |
+| `league-relay` | L’outil qui a exécuté les tests de jeu sur papier avec des sièges IA |
+| `league-tui` | L’hôte du terminal du mode Club hors ligne : configuration du lobby, tours en mode « hot-seat » à quatre zones, rideau de confidentialité avec codes PIN facultatifs, passages chronométrés, sauvegarde/reprise en milieu de tour, tableau des scores de fin de saison et exportation des replays |
 
 ## Jouer une saison
 
-Le mode **Club hors ligne** exécute une saison complète de `24..=32` tours en mode « hot-seat » sur votre terminal (`4–6` joueurs humains ou `ClubBot` joueurs sur une seule machine) :
+Le mode **Club hors ligne** exécute une saison complète de `24..=32` tours en mode « hot-seat » sur votre terminal (`4–6` sièges humains ou `ClubBot` sur une seule machine) :
 
 ```bash
 cargo run -p league-tui --locked -- --save-dir ./saves

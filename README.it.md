@@ -14,13 +14,13 @@
 
 Un gioco di commercio e politica a turni lenti, per quattro-sei giocatori, ambientato sulla **Testnet** di XRP Ledger. I giocatori possono essere persone o avversari controllati dall'IA, seduti allo stesso tavolo e soggetti alle stesse regole.
 
-**Stato: prototipo, in fase di sviluppo attivo.** La **modalità Club** offline in `league-tui` è giocabile partendo dal codice sorgente su un terminale condiviso (da 4 a 6 posti umani e `ClubBot`, dalla lobby fino alla classifica di fine stagione e all'esportazione delle partite; le comunicazioni private sono posticipate dopo `v0.1.0`). La modalità di gioco Public-Testnet e l'immagine del container non sono ancora stati creati e **non c'è ancora nessuna versione rilasciata**. Solo Testnet: niente denaro reale e nessun percorso verso la Mainnet.
+**Stato: prototipo, in fase di sviluppo attivo.** La **modalità Club** offline in `league-tui` è giocabile partendo dal codice sorgente su un terminale condiviso (da 4 a 6 posti umani e `ClubBot`, dalla lobby fino alla classifica di fine stagione e all'esportazione delle partite; le comunicazioni private sono posticipate dopo `v0.1.0`). La modalità di gioco sulla Testnet pubblica e l'immagine del container non sono ancora state create e **non c'è ancora nessuna versione rilasciata**. Solo Testnet: niente denaro reale e nessun percorso verso la Mainnet.
 
 ## Il gioco
 
 - **Un anello di mercanti.** Ogni giocatore produce le proprie materie prime e ha bisogno di beni dagli altri giocatori per coprire le spese, gestire le proprie attività e fornire beni per progetti condivisi. Nessuno può prosperare da solo, e nemmeno un piccolo gruppo.
 - **Turni simultanei.** Ogni turno è suddiviso in tre fasi. I giocatori parlano e commerciano nel mercato aperto; quindi, ogni giocatore inserisce segretamente i propri ordini; infine, gli ordini di ogni giocatore vengono elaborati contemporaneamente, secondo le stesse regole per tutti.
-- **Politica.** I consigli stabiliscono le tariffe, i cartelli possono aprire mercati privati e le cariche ruotano tra i giocatori durante la stagione.
+- **Politica.** I consigli stabiliscono le tariffe, i cartelli possono aprire mercati privati e le concessioni (charter) ruotano tra i posti durante la stagione.
 - **Una stagione di 24-32 turni.** Gli eventi imprevisti (un blocco delle forniture, una sospensione delle tariffe, un aumento della domanda o un picco di deterioramento) vengono annunciati pubblicamente un turno prima che si verifichino, e il turno finale viene estratto a sorte, in modo che nessuno possa pianificare una mossa finale perfetta.
 - **Punteggio.** Un giocatore ottiene un punteggio in base al proprio patrimonio netto alla fine della stagione, più una carta obiettivo segreta distribuita all'inizio. Ogni giocatore ha un motivo per continuare a giocare fino all'ultimo turno.
 - **Tavoli controllati.** Ogni tavolo viene generato da un seme e controllato prima di essere utilizzato. Il valore iniziale di ogni giocatore deve rientrare nel 3% della media del tavolo e nel 7% della media quando il valore di un giocatore è determinato in base a ciò che aggiunge a ogni gruppo di giocatori.
@@ -50,7 +50,7 @@ Entrambe le modalità condividono lo stesso motore di gioco. Una partita viene r
 
 ## Gioca una stagione
 
-La modalità Club offline esegue una stagione completa di `24..=32` turni sul tuo terminale (`4–6` giocatori umani o `ClubBot` giocatori su una singola macchina):
+La modalità Club offline esegue una stagione hot-seat completa di `24..=32` turni sul tuo terminale (`4–6` posti umani o `ClubBot` su una singola macchina):
 
 ```bash
 cargo run -p league-tui --locked -- --save-dir ./saves
