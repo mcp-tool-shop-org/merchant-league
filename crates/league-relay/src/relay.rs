@@ -12,8 +12,9 @@ use crate::seats::{
 };
 use crate::secret::{
     ApiKey, LogLevel, MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, REDACTED_MARKER,
-    is_sealed_secret_field_key, redact_secrets, redact_secrets_multi_with_limit,
-    redact_secrets_multi_with_limit_and_paths, truncate_after_redaction,
+    is_credential_secret_field_key, redact_credentials_multi_with_limit, redact_secrets,
+    redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+    truncate_after_redaction,
 };
 use crate::transport::{
     OPENROUTER_CHAT_COMPLETIONS_URL, RawHttpResponse, Transport, TransportError,
@@ -2414,8 +2415,10 @@ pub struct CallLogEntry {
     pub charged_credits: f64,
     /// Wall-clock call duration in milliseconds (`0` when refused or reserved pre-call).
     pub latency_ms: u64,
-    /// Call outcome: `"OK"`, `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`, `"RESERVED"`,
-    /// `"CAP_REACHED"`, `"COST_UNKNOWN"`, `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
+    /// Call outcome: `"OK"`, `"TOOL_CALL"`, `"TOOL_ROUND_STORE_WRITE_FAILED"`,
+    /// `"SEAT_OUTPUT_WRITE_FAILED"`, `"TOKENIZE_UNAVAILABLE"`, `"harness"`, `"NO_REPLY"`,
+    /// `"LATE_DISCARDED"`, `"RESERVED"`, `"CAP_REACHED"`, `"COST_UNKNOWN"`,
+    /// `"COST_OVER_ESTIMATE"`, or `"LEDGER_ERROR"`.
     pub outcome: String,
     /// Redacted failure or refusal reason when `outcome != "OK"`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2666,7 +2669,7 @@ pub struct SavedToolRoundRecord {
     pub reasoning: Option<String>,
     /// Lowercase hex SHA-256 of the canonical assistant reply JSON (`assistant_content` + received `tool_calls`).
     pub assistant_reply_sha256: String,
-    /// Whether full-body secret/key redaction changed any stored field of this record.
+    /// Whether credential-only redaction changed any stored field of this record (game values kept as written).
     #[serde(default)]
     pub body_redacted: bool,
     /// Received tool calls and explicit sent/unsent wire tool results in order.
@@ -2710,7 +2713,7 @@ pub struct SavedDiscardedReplyRecord {
     /// Raw `tool_calls` JSON value as decoded from the message when present (e.g. `round == talk`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_tool_calls: Option<serde_json::Value>,
-    /// Whether full-body secret/key redaction changed any stored field of this record.
+    /// Whether credential-only redaction changed any stored field of this record (game values kept as written).
     #[serde(default)]
     pub body_redacted: bool,
 }
@@ -2749,10 +2752,10 @@ pub fn discarded_reply_file_path(
 /// at a single boundary before parsing, status inspection, branching, or evaluation
 /// (`<game-dir>/relay/seats/<Guild>.day-<DD>-<round>.http-reply-round-<round_index>-attempt-<attempt>.json`).
 ///
-/// The `body` field stores the received HTTP body after full-body secret redaction
-/// (`redact_secrets_multi_with_limit` across `body.len()`) and nothing else: no trimming,
-/// no truncation, no `<think>` stripping, no transcript rule, and no re-serialization of JSON.
-/// Never replayed into any model prompt or shown to any seat.
+/// The `body` field stores the received HTTP body after credential-only redaction
+/// (`redact_secrets_multi_with_limit_and_paths` across `body.len()`, preserving game values)
+/// and nothing else: no trimming, no truncation, no `<think>` stripping, no transcript rule,
+/// and no re-serialization of JSON. Never replayed into any model prompt or shown to any seat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedHttpReplyRecord {
     /// Two-digit game day (`"01"`..=`"99"`).
@@ -2775,14 +2778,14 @@ pub struct SavedHttpReplyRecord {
     pub status: u16,
     /// Whether this HTTP reply arrived after the seat wall timeout (`Late`).
     pub is_late: bool,
-    /// Whether full-body secret redaction changed any byte of `body`.
+    /// Whether credential-only redaction changed any byte of `body`.
     pub body_redacted: bool,
-    /// RFC 6901 JSON Pointer paths of secret-named fields whose values were blanked (paths only, never values).
+    /// RFC 6901 JSON Pointer paths of credential-named fields whose values were blanked (paths only, never values).
     #[serde(default)]
     pub redacted_secret_field_paths: Vec<String>,
     /// Lowercase hex SHA-256 of `body.as_bytes()` as stored in this record.
     pub body_sha256: String,
-    /// Raw HTTP response body text as received (secret-redacted only, verbatim otherwise).
+    /// Raw HTTP response body text as received (credential-redacted only, verbatim otherwise).
     pub body: String,
 }
 
@@ -4732,13 +4735,18 @@ impl<'a> CallLedger<'a> {
                 Ok(())
             }
             Err(e) => {
+                let mut pending_entry = effective_entry.clone();
                 if let Some(p) = rollback_on_append_err {
                     let _ = fs::remove_file(p);
+                    pending_entry.reply_sha256 = None;
+                    if pending_entry.outcome == "OK" {
+                        pending_entry.outcome = "LEDGER_ERROR".to_owned();
+                        pending_entry.error = Some(e.to_string());
+                    }
                 }
                 self.reserved_in_flight = (self.reserved_in_flight - reserved_amount).max(0.0);
-                let held_charge = effective_entry.charged_credits.max(reserved_amount);
-                self.pending_unwritten
-                    .push((held_charge, effective_entry.clone()));
+                let held_charge = pending_entry.charged_credits.max(reserved_amount);
+                self.pending_unwritten.push((held_charge, pending_entry));
                 self.ledger_write_failed_in_turn = true;
                 self.check_lock_identity(redaction_key);
                 let pending_snapshot: Vec<CallLogEntry> = self
@@ -7531,7 +7539,7 @@ fn build_discarded_reply(
 }
 
 fn scrub_string_full(raw: &str, all_keys: &[ApiKey]) -> (String, bool) {
-    let scrubbed = redact_secrets_multi_with_limit(raw, all_keys, raw.len());
+    let scrubbed = redact_credentials_multi_with_limit(raw, all_keys, raw.len());
     let changed = scrubbed != raw;
     (scrubbed, changed)
 }
@@ -7568,7 +7576,7 @@ fn scrub_json_value_full(val: serde_json::Value, all_keys: &[ApiKey]) -> (serde_
             for (k, v) in map {
                 let (sk, ck) = scrub_string_full(&k, all_keys);
                 changed |= ck;
-                if is_sealed_secret_field_key(&k) {
+                if is_credential_secret_field_key(&k) {
                     let keep_as_is = match &v {
                         serde_json::Value::String(s) => s.is_empty() || s == REDACTED_MARKER,
                         _ => false,

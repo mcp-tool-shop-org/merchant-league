@@ -82,6 +82,21 @@ const SEALED_SECRET_FIELD_KEYS: &[&str] = &[
     "authorization",
 ];
 
+const CREDENTIAL_SECRET_FIELD_KEYS: &[&str] = &[
+    "xrpl_seed",
+    "wallet_seed",
+    "family_seed",
+    "secret_seed",
+    "api_key",
+    "authorization",
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SecretScrubScope {
+    AllSecrets,
+    CredentialsOnly,
+}
+
 /// Placeholder substituted whenever a key or authorization credential is scrubbed.
 pub const REDACTED_MARKER: &str = "<REDACTED_API_KEY>";
 
@@ -466,6 +481,19 @@ pub(crate) fn is_sealed_secret_field_key(key: &str) -> bool {
         .any(|cand| cand.eq_ignore_ascii_case(key))
 }
 
+pub(crate) fn is_credential_secret_field_key(key: &str) -> bool {
+    CREDENTIAL_SECRET_FIELD_KEYS
+        .iter()
+        .any(|cand| cand.eq_ignore_ascii_case(key))
+}
+
+fn matches_secret_field_key(key: &str, scope: SecretScrubScope) -> bool {
+    match scope {
+        SecretScrubScope::AllSecrets => is_sealed_secret_field_key(key),
+        SecretScrubScope::CredentialsOnly => is_credential_secret_field_key(key),
+    }
+}
+
 fn escape_json_pointer_token(token: &str) -> String {
     if !token.contains('~') && !token.contains('/') {
         return token.to_owned();
@@ -496,13 +524,14 @@ fn collect_secret_field_json_paths(
     val: &serde_json::Value,
     prefix: &str,
     string_depth: usize,
+    scope: SecretScrubScope,
     out: &mut Vec<String>,
 ) {
     match val {
         serde_json::Value::Object(map) => {
             for (k, v) in map {
                 let path = format!("{prefix}/{}", escape_json_pointer_token(k));
-                if is_sealed_secret_field_key(k) {
+                if matches_secret_field_key(k, scope) {
                     if json_secret_value_would_be_blanked(v) {
                         out.push(path);
                     }
@@ -510,13 +539,13 @@ fn collect_secret_field_json_paths(
                     // inner keys separately, so do not descend into a blanked secret value.
                     continue;
                 }
-                collect_secret_field_json_paths(v, &path, string_depth, out);
+                collect_secret_field_json_paths(v, &path, string_depth, scope, out);
             }
         }
         serde_json::Value::Array(items) => {
             for (idx, item) in items.iter().enumerate() {
                 let path = format!("{prefix}/{idx}");
-                collect_secret_field_json_paths(item, &path, string_depth, out);
+                collect_secret_field_json_paths(item, &path, string_depth, scope, out);
             }
         }
         serde_json::Value::String(s) if string_depth < MAX_JSON_POINTER_STRING_DEPTH => {
@@ -528,7 +557,7 @@ fn collect_secret_field_json_paths(
                     serde_json::Value::Object(_) | serde_json::Value::Array(_)
                 )
             {
-                collect_secret_field_json_paths(&nested, prefix, string_depth + 1, out);
+                collect_secret_field_json_paths(&nested, prefix, string_depth + 1, scope, out);
             }
         }
         _ => {}
@@ -540,6 +569,7 @@ fn redact_secrets_multi_core(
     keys: &[ApiKey],
     max_bytes: usize,
     collect_paths: bool,
+    scope: SecretScrubScope,
 ) -> (String, Vec<String>) {
     let bounded = cap_utf8_with_secret_lookahead(input, max_bytes);
     let mut raw_paths: Vec<String> = Vec::new();
@@ -549,7 +579,7 @@ fn redact_secrets_multi_core(
         None
     };
     if let Some(Ok(ref val)) = parsed_bounded {
-        collect_secret_field_json_paths(val, "", 0, &mut raw_paths);
+        collect_secret_field_json_paths(val, "", 0, scope, &mut raw_paths);
     }
 
     let mut scrubbed = bounded.to_owned();
@@ -557,7 +587,8 @@ fn redact_secrets_multi_core(
         scrubbed = redact_key_substrings(&scrubbed, k.secret_str());
     }
     scrubbed = league_error::scrub_secret_text_with_marker(&scrubbed, REDACTED_MARKER);
-    let (final_scrubbed, branch1_keys) = redact_sealed_and_unrevealed_secrets_inner(&scrubbed);
+    let (final_scrubbed, branch1_keys) =
+        redact_sealed_and_unrevealed_secrets_inner(&scrubbed, scope);
     if !collect_paths {
         return (final_scrubbed, Vec::new());
     }
@@ -574,7 +605,7 @@ fn redact_secrets_multi_core(
     let mut deduped = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for p in candidate_paths {
-        let safe_path = redact_secrets_multi_with_limit(&p, keys, p.len());
+        let safe_path = redact_secrets_multi_core(&p, keys, p.len(), false, scope).0;
         if seen.insert(safe_path.clone()) {
             deduped.push(safe_path);
         }
@@ -582,15 +613,40 @@ fn redact_secrets_multi_core(
     (final_scrubbed, deduped)
 }
 
-/// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`), scrub
-/// secrets as in [`redact_secrets_multi_with_limit`], and also return deduplicated RFC 6901 JSON
-/// Pointer paths of any `SEALED_SECRET_FIELD_KEYS` fields whose non-empty values were blanked.
+/// Cap `input` at `max_bytes` (with secret lookahead for straddling tokens, `B2`), scrub
+/// credentials ONLY (`ApiKey` substrings, env-var/Bearer/`sk-*`/XRPL-seed credential patterns, and
+/// [`CREDENTIAL_SECRET_FIELD_KEYS`]) while preserving game values, and return deduplicated
+/// RFC 6901 JSON Pointer paths of credential-named fields whose non-empty values were blanked.
 pub fn redact_secrets_multi_with_limit_and_paths(
     input: &str,
     keys: &[ApiKey],
     max_bytes: usize,
 ) -> (String, Vec<String>) {
-    redact_secrets_multi_core(input, keys, max_bytes, true)
+    redact_secrets_multi_core(
+        input,
+        keys,
+        max_bytes,
+        true,
+        SecretScrubScope::CredentialsOnly,
+    )
+}
+
+/// Cap `input` at `max_bytes` (with secret lookahead for straddling tokens, `B2`) and scrub
+/// credentials ONLY (`ApiKey` substrings, env-var/Bearer/`sk-*`/XRPL-seed credential patterns, and
+/// [`CREDENTIAL_SECRET_FIELD_KEYS`]) while leaving game values as written.
+pub(crate) fn redact_credentials_multi_with_limit(
+    input: &str,
+    keys: &[ApiKey],
+    max_bytes: usize,
+) -> String {
+    redact_secrets_multi_core(
+        input,
+        keys,
+        max_bytes,
+        false,
+        SecretScrubScope::CredentialsOnly,
+    )
+    .0
 }
 
 /// Cap `input` at `max_bytes` (with secret lookahead for straddling seeds/tokens, `B2`) and scrub
@@ -598,7 +654,7 @@ pub fn redact_secrets_multi_with_limit_and_paths(
 /// `Bearer\t<token>` (`C1`), `sk-*` API keys, XRPL seeds (via [`league_error`]), and
 /// sealed/unrevealed game secrets including JSON-escaped fields (`B1`, `C-7`, `SHIP_GATE.md` `:40`).
 pub fn redact_secrets_multi_with_limit(input: &str, keys: &[ApiKey], max_bytes: usize) -> String {
-    redact_secrets_multi_core(input, keys, max_bytes, false).0
+    redact_secrets_multi_core(input, keys, max_bytes, false, SecretScrubScope::AllSecrets).0
 }
 
 /// Cap `input` at `max_bytes` and scrub any occurrence of `key` (including any
@@ -914,7 +970,10 @@ fn find_json_string_end(bytes: &[u8], quote_start: usize) -> Option<usize> {
     None
 }
 
-fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<String>) {
+fn redact_sealed_and_unrevealed_secrets_inner(
+    input: &str,
+    scope: SecretScrubScope,
+) -> (String, Vec<String>) {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
     let mut blanked_keys = Vec::new();
@@ -935,7 +994,7 @@ fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<Strin
             };
             if let Some(key_end) = key_close_opt
                 && let key = &input[key_start..key_end]
-                && is_sealed_secret_field_key(key)
+                && matches_secret_field_key(key, scope)
             {
                 let mut j = key_end + quote_len;
                 while j < bytes.len() && bytes[j].is_ascii_whitespace() {
@@ -1050,7 +1109,7 @@ fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<Strin
         }
 
         // 2. Rust struct debug/display payloads for sealed types (`SealedEvalSeed(...)`, etc.).
-        if at_word_boundary {
+        if scope == SecretScrubScope::AllSecrets && at_word_boundary {
             let matched_struct = SEALED_STRUCT_PREFIXES
                 .iter()
                 .find(|prefix| input[i..].starts_with(**prefix));
@@ -1088,7 +1147,11 @@ fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<Strin
 
         // 3. `key=value` secret fields (non-env).
         if at_word_boundary {
-            let matched_field = SEALED_SECRET_FIELD_KEYS.iter().find(|key| {
+            let field_keys = match scope {
+                SecretScrubScope::AllSecrets => SEALED_SECRET_FIELD_KEYS,
+                SecretScrubScope::CredentialsOnly => CREDENTIAL_SECRET_FIELD_KEYS,
+            };
+            let matched_field = field_keys.iter().find(|key| {
                 bytes.len() - i > key.len()
                     && bytes[i..i + key.len()].eq_ignore_ascii_case(key.as_bytes())
                     && bytes[i + key.len()] == b'='
@@ -1116,7 +1179,8 @@ fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<Strin
         }
 
         // 4. Clear sealed-pool `u64` layout seeds (`>= 2^63`), decimal or `0x`-prefixed 64-bit hex.
-        if at_word_boundary
+        if scope == SecretScrubScope::AllSecrets
+            && at_word_boundary
             && bytes[i] == b'0'
             && i + 2 < bytes.len()
             && matches!(bytes[i + 1], b'x' | b'X')
@@ -1140,7 +1204,7 @@ fn redact_sealed_and_unrevealed_secrets_inner(input: &str) -> (String, Vec<Strin
                 continue;
             }
         }
-        if at_word_boundary && bytes[i].is_ascii_digit() {
+        if scope == SecretScrubScope::AllSecrets && at_word_boundary && bytes[i].is_ascii_digit() {
             let mut end = i;
             while end < bytes.len() && bytes[end].is_ascii_digit() {
                 end += 1;
@@ -1369,11 +1433,11 @@ mod tests {
         let payload = serde_json::json!({
             "choices": [{
                 "message": {
-                    "content": "hello",
+                    "content": "SealedEvalSeed(99) 0x8000000000000001",
                     "tool_calls": [{
                         "function": {
                             "name": "preview_turn_orders",
-                            "arguments": "{\"preimage\":\"0xsecret_preimage_val\",\"salt\":\"\",\"nested\":{\"xrpl_seed\":\"sEdSecretSeedValue\"}}"
+                            "arguments": "{\"preimage\":\"0xsecret_preimage_val\",\"salt\":\"GameSaltKeep\",\"nested\":{\"xrpl_seed\":\"sEdSecretSeedValue\"}}"
                         }
                     }]
                 }
@@ -1392,7 +1456,11 @@ mod tests {
             payload.len(),
         );
         assert_eq!(
-            redact_secrets_multi_with_limit(&payload, std::slice::from_ref(&key), payload.len()),
+            redact_credentials_multi_with_limit(
+                &payload,
+                std::slice::from_ref(&key),
+                payload.len(),
+            ),
             scrubbed
         );
         assert_eq!(
@@ -1400,28 +1468,55 @@ mod tests {
             vec![
                 "/api_key",
                 "/choices/0/message/tool_calls/0/function/arguments/nested/xrpl_seed",
-                "/choices/0/message/tool_calls/0/function/arguments/preimage",
             ]
         );
-        for secret in ["0xsecret_preimage_val", "sEdSecretSeedValue", "987654"] {
-            assert!(!scrubbed.contains(secret));
+        // Credentials blanked and omitted from paths.
+        for cred in ["sEdSecretSeedValue", "987654"] {
+            assert!(!scrubbed.contains(cred));
             for p in &paths {
-                assert!(!p.contains(secret), "path leaked value: {p}");
+                assert!(!p.contains(cred), "path leaked value: {p}");
             }
         }
+        // Game values remain intact in credential-only kept-model-output scrubbing.
+        for game_val in [
+            "0xsecret_preimage_val",
+            "GameSaltKeep",
+            "SealedEvalSeed(99)",
+            "0x8000000000000001",
+        ] {
+            assert!(
+                scrubbed.contains(game_val),
+                "credential-only scrubber must keep game value `{game_val}`: {scrubbed}"
+            );
+        }
 
-        // Empty or already-redacted secret fields produce zero paths.
-        let clean_only = format!(r#"{{"salt":"","preimage":"{REDACTED_MARKER}"}}"#);
+        // Full log/error redaction STILL blanks all `SEALED_SECRET_FIELD_KEYS` & sealed types.
+        let full_scrubbed =
+            redact_secrets_multi_with_limit(&payload, std::slice::from_ref(&key), payload.len());
+        assert!(!full_scrubbed.contains("0xsecret_preimage_val"));
+        assert!(!full_scrubbed.contains("GameSaltKeep"));
+        assert!(!full_scrubbed.contains("0x8000000000000001"));
+
+        // Empty, already-redacted credential fields, and game-only fields produce zero paths.
+        let clean_only = format!(
+            r#"{{"salt":"keep","preimage":"0xabc","authorization":"","api_key":"{REDACTED_MARKER}"}}"#
+        );
         let (clean_scrubbed, clean_paths) =
             redact_secrets_multi_with_limit_and_paths(&clean_only, &[], clean_only.len());
         assert_eq!(clean_scrubbed, clean_only);
         assert!(clean_paths.is_empty());
 
-        // Malformed / truncated JSON falls back to Branch-1 blanked key paths.
-        let truncated = r#"{"outer":{"reveal_salt":"unterminated_secret_val"#;
-        let (trunc_scrubbed, trunc_paths) =
-            redact_secrets_multi_with_limit_and_paths(truncated, &[], truncated.len());
-        assert!(!trunc_scrubbed.contains("unterminated_secret_val"));
-        assert_eq!(trunc_paths, vec!["/reveal_salt"]);
+        // Malformed / truncated JSON falls back to Branch-1 blanked credential key paths only.
+        let truncated_cred = r#"{"outer":{"secret_seed":"unterminated_cred_val"#;
+        let (trunc_cred_scrubbed, trunc_cred_paths) =
+            redact_secrets_multi_with_limit_and_paths(truncated_cred, &[], truncated_cred.len());
+        assert!(!trunc_cred_scrubbed.contains("unterminated_cred_val"));
+        assert_eq!(trunc_cred_paths, vec!["/secret_seed"]);
+
+        let truncated_game = r#"{"outer":{"reveal_salt":"unterminated_game_val"#;
+        let (trunc_game_scrubbed, trunc_game_paths) =
+            redact_secrets_multi_with_limit_and_paths(truncated_game, &[], truncated_game.len());
+        assert_eq!(trunc_game_scrubbed, truncated_game);
+        assert!(trunc_game_paths.is_empty());
     }
 }

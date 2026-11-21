@@ -3665,7 +3665,15 @@ fn b5_held_charge_persists_across_runs_flushes_migrates_and_reports_unwritable()
     );
     let rerun_ledger = read_calls_log(&rerun_game)?;
     assert_eq!(rerun_ledger.len(), 2);
-    assert_eq!(rerun_ledger[0].outcome, "OK");
+    assert!(
+        !rerun_game
+            .join("from-seat")
+            .join("day-01-talk-Saltworks.md")
+            .exists(),
+        "failed OK append must roll back the from-seat file before writing pending"
+    );
+    assert_eq!(rerun_ledger[0].outcome, "LEDGER_ERROR");
+    assert_eq!(rerun_ledger[0].reply_sha256, None);
     assert!((rerun_ledger[0].charged_credits - 0.01).abs() < 1e-9);
     assert_eq!(rerun_ledger[1].outcome, "CAP_REACHED");
     assert!((rerun_ledger[1].charged_credits - 0.0).abs() < 1e-9);
@@ -7422,11 +7430,11 @@ fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reserv
     // 2. Reviewer's `px_` sequence across 3 real-process iterations (cap = 0.02, read-only calls.jsonl):
     //    (a) Run A starts `day 01 talk` for Saltworks and is hard-killed mid-call -> 1 reservation (0.01).
     //    (b) Run B re-runs the SAME turn (`day 01 talk`, Saltworks, identical request body) -> counts A's 0.01
-    //        + B's 0.01 <= 0.02, sends 1 call, writes B's final OK to `calls.pending.jsonl`, leaves A's
-    //        reservation in `calls.reserved.jsonl`.
+    //        + B's 0.01 <= 0.02, sends 1 call, rolls back from-seat/ and writes B's final LEDGER_ERROR
+    //        (reply_sha256: null) to `calls.pending.jsonl`, leaves A's reservation in `calls.reserved.jsonl`.
     //    (c) Run C runs `day 01 act` at cap = 0.02 -> B's final line carries B's `reservation_id`, NOT A's,
     //        so A's 0.01 orphan is NOT superseded! C sums 0.01 (B) + 0.01 (A) = 0.02, refuses pre-call (0 calls).
-    //    (d) Make `calls.jsonl` writable; Run D runs `day 01 act` at cap = 0.02 -> migrates B's OK (0.01) +
+    //    (d) Make `calls.jsonl` writable; Run D runs `day 01 act` at cap = 0.02 -> migrates B's LEDGER_ERROR (0.01) +
     //        A's RESERVED (0.01) into `calls.jsonl`, refuses with CAP_REACHED (0 calls).
     //        Final charged == 0.02 and true spend == 0.02 <= cap 0.02!
     for iter in 0..3 {
@@ -7582,7 +7590,8 @@ fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reserv
             1,
             "iter {iter}: B must send 1 call (0.01 + A's 0.01 <= 0.02) and record to calls.pending.jsonl"
         );
-        assert_eq!(pending_after_b[0].outcome, "OK");
+        assert_eq!(pending_after_b[0].outcome, "LEDGER_ERROR");
+        assert_eq!(pending_after_b[0].reply_sha256, None);
         assert!(pending_after_b[0].reservation_id.is_some());
         assert_eq!(
             fs::read_to_string(&reserved_path)?
@@ -7681,7 +7690,10 @@ fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reserv
         }
 
         let final_entries = read_calls_log(&game)?;
-        let ok_count = final_entries.iter().filter(|e| e.outcome == "OK").count();
+        let ledger_err_count = final_entries
+            .iter()
+            .filter(|e| e.outcome == "LEDGER_ERROR" && e.reply_sha256.is_none())
+            .count();
         let reserved_count = final_entries
             .iter()
             .filter(|e| e.outcome == "RESERVED")
@@ -7690,7 +7702,10 @@ fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reserv
             .iter()
             .filter(|e| e.outcome == "CAP_REACHED")
             .count();
-        assert_eq!(ok_count, 1, "iter {iter}: expected 1 OK line (B)");
+        assert_eq!(
+            ledger_err_count, 1,
+            "iter {iter}: expected 1 rolled-back LEDGER_ERROR line (B)"
+        );
         assert_eq!(
             reserved_count, 1,
             "iter {iter}: expected 1 reconciled RESERVED line (crashed A)"
@@ -7706,7 +7721,7 @@ fn a1_fix7_px_same_seat_rerun_on_readonly_ledger_never_supersedes_crashed_reserv
             .filter(|e| {
                 matches!(
                     e.outcome.as_str(),
-                    "OK" | "harness" | "NO_REPLY" | "LATE_DISCARDED"
+                    "OK" | "LEDGER_ERROR" | "harness" | "NO_REPLY" | "LATE_DISCARDED"
                 )
             })
             .count();
@@ -24339,7 +24354,8 @@ fn find_and_mutate_whole_json_string_token(
 }
 
 #[test]
-fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() -> TestResult {
+fn card7_active_preview_arm_row7_and_row6_seals_and_every_entry_one_char_mutation_fails()
+-> TestResult {
     let live_paths = render_all_preview_arm_guard_paths()?;
     assert_eq!(PREVIEW_ARM_WORDING.len(), 250);
     assert_eq!(ARM_RENDER_PATH_HISTORY[6].arm, PREVIEW_WORDING_ARM_R1);
@@ -24370,7 +24386,7 @@ fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() ->
 
     // Every entry in `PREVIEW_ARM_WORDING` must appear as a whole JSON string token (key or string
     // value, with `preview_call_budget_sentence` checked as the system prompt suffix), and a
-    // one-character mutation of that exact occurrence must break Row 6 verification.
+    // one-character mutation of that exact occurrence must break Row 7 verification.
     for entry in PREVIEW_ARM_WORDING {
         let needle = preview_wording_slot(entry.slot);
         let mut mutated_char = if needle.ends_with('X') { 'Y' } else { 'X' };
@@ -24426,7 +24442,7 @@ fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() ->
 
         let Some((path_idx, path_name, mutated_body)) = found else {
             return Err(format!(
-                "PREVIEW_ARM_WORDING slot '{}' ('{}') was not rendered as a whole JSON token in any Row 6 preview path",
+                "PREVIEW_ARM_WORDING slot '{}' ('{}') was not rendered as a whole JSON token in any Row 7 preview path",
                 entry.slot, needle
             )
             .into());
@@ -24441,7 +24457,7 @@ fn card7_preview_arm_row6_is_sealed_and_every_entry_one_char_mutation_fails() ->
             &cloned,
         ) else {
             return Err(format!(
-                "mutating slot '{}' in path '{path_name}' must fail Row 6 seal",
+                "mutating slot '{}' in path '{path_name}' must fail Row 7 seal",
                 entry.slot
             )
             .into());
@@ -26784,7 +26800,16 @@ fn card8_saved_tool_rounds_rebuild_every_followup_request_byte_for_byte_from_dis
     })
     .to_string();
     let malformed_args_2 = r#"{"market_actions":[],"bundle":{},"assumptions":{}}"#.to_owned();
-    let good_args_3 = json!({ "market_actions": [], "bundle": {} }).to_string();
+    let good_args_3 = json!({
+        "market_actions": [],
+        "bundle": {
+            "escrow_finishes": [{
+                "escrow_id": 1,
+                "preimage": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+            }]
+        }
+    })
+    .to_string();
     let over_limit_args_4 = json!({ "market_actions": [], "bundle": {} }).to_string();
 
     let tool_round_body = |id: &str, content: Option<&str>, reasoning: Option<&str>, args: &str| {
@@ -26965,6 +26990,7 @@ fn card8_saved_tool_rounds_rebuild_every_followup_request_byte_for_byte_from_dis
         );
         let (exp_id, exp_content, exp_args) = expected_round_inputs[r_idx];
         let rec: SavedToolRoundRecord = serde_json::from_slice(&raw_bytes)?;
+        assert!(!rec.body_redacted);
         assert_eq!(rec.outcome, "TOOL_CALL");
         assert!(!rec.run_id.is_empty());
         assert_eq!(
@@ -30613,13 +30639,15 @@ fn card9_should8_and_9_raw_paths_and_sidecar_full_body_key_redaction_preserve_fr
     )?;
     let state = card7_standard_preview_state(0)?;
 
-    // Case A: tool round with secret-named nested field (`preimage`) + echoed API key beyond 4 KiB
-    // in assistant_content + discarded round with key beyond 4 KiB + verbatim `from-seat/` reply!
+    // Case A: tool round carrying game field (`preimage`) + credential field (`api_key`) +
+    // echoed API key beyond 4 KiB in assistant_content + discarded round carrying game field
+    // (`salt`), credential field (`secret_seed`), and echoed key beyond 4 KiB + verbatim `from-seat/`!
     let pad = "Z".repeat(MAX_REDACTION_SCAN_BYTES + 1200);
     let tool_args_with_secret = json!({
         "market_actions": [],
         "bundle": {},
-        "preimage": "0xSuperSecretPreimageVal"
+        "preimage": "0xSuperSecretPreimageVal",
+        "api_key": "ToolApiKeyCredSecret77"
     })
     .to_string();
     let echoed_tool_body = json!({
@@ -30665,7 +30693,10 @@ fn card9_should8_and_9_raw_paths_and_sidecar_full_body_key_redaction_preserve_fr
                 "tool_calls": [{
                     "id": "call_disc_1",
                     "type": "function",
-                    "function": { "name": "preview_turn_orders", "arguments": "{\"salt\":\"SaltySecret\"}" }
+                    "function": {
+                        "name": "preview_turn_orders",
+                        "arguments": "{\"salt\":\"SaltySecret\",\"secret_seed\":\"SeedCredSecret99\"}"
+                    }
                 }]
             }
         }],
@@ -30713,25 +30744,29 @@ fn card9_should8_and_9_raw_paths_and_sidecar_full_body_key_redaction_preserve_fr
     let from_seat_talk = fs::read_to_string(g.join("from-seat/day-01-talk-Saltworks.md"))?;
     assert_eq!(from_seat_talk, delivered_with_echo);
 
-    // Raw file for discarded attempt lists `/choices/0/message/tool_calls/0/function/arguments/salt` (no value!).
+    // Raw file for discarded attempt blanks credentials & lists credential JSON Pointer path only,
+    // keeping game values (`SaltySecret`) untouched.
     let raw_disc_path = http_reply_file_path(&g, "Saltworks", "01", Round::Talk, 0, 1);
     let raw_disc: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(&raw_disc_path)?)?;
     assert!(raw_disc.body_redacted);
     assert_eq!(
         raw_disc.redacted_secret_field_paths,
-        vec!["/choices/0/message/tool_calls/0/function/arguments/salt"]
+        vec!["/choices/0/message/tool_calls/0/function/arguments/secret_seed"]
     );
-    assert!(!format!("{:?}", raw_disc.redacted_secret_field_paths).contains("SaltySecret"));
+    assert!(raw_disc.body.contains("SaltySecret"));
+    assert!(!raw_disc.body.contains("SeedCredSecret99"));
+    assert!(!format!("{:?}", raw_disc.redacted_secret_field_paths).contains("SeedCredSecret99"));
 
-    // Discarded sidecar redacts key beyond 4 KiB and secret-named field cleanly + sets body_redacted=true.
+    // Discarded sidecar redacts key beyond 4 KiB and credential field while keeping game value + sets body_redacted=true.
     let disc_path = discarded_reply_file_path(&g, "Saltworks", "01", Round::Talk, 0, 1);
     let disc_text = fs::read_to_string(&disc_path)?;
     assert_no_8char_key_piece(&disc_text, CUSTOM_KEY, "discarded-round sidecar (>4KiB)");
-    assert!(!disc_text.contains("SaltySecret"));
+    assert!(!disc_text.contains("SeedCredSecret99"));
+    assert!(disc_text.contains("SaltySecret"));
     let disc_rec: SavedDiscardedReplyRecord = serde_json::from_str(&disc_text)?;
     assert!(disc_rec.body_redacted);
 
-    // Run `act` turn: round 0 tool call with key > 4 KiB & `preimage` secret field; round 1 final OK.
+    // Run `act` turn: round 0 tool call with key > 4 KiB, `api_key` credential, and `preimage` game field; round 1 final OK.
     write_to_seat(&g, "01", "act", "Saltworks", "ACT")?;
     write_card7_preview_state(&g, "01", "Saltworks", &state)?;
     let tx_act = ScriptedTransport::new(vec![
@@ -30767,16 +30802,19 @@ fn card9_should8_and_9_raw_paths_and_sidecar_full_body_key_redaction_preserve_fr
     assert!(raw_tool.body_redacted);
     assert_eq!(
         raw_tool.redacted_secret_field_paths,
-        vec!["/choices/0/message/tool_calls/0/function/arguments/preimage"]
+        vec!["/choices/0/message/tool_calls/0/function/arguments/api_key"]
     );
+    assert!(raw_tool.body.contains("0xSuperSecretPreimageVal"));
+    assert!(!raw_tool.body.contains("ToolApiKeyCredSecret77"));
     assert!(
-        !format!("{:?}", raw_tool.redacted_secret_field_paths).contains("0xSuperSecretPreimageVal")
+        !format!("{:?}", raw_tool.redacted_secret_field_paths).contains("ToolApiKeyCredSecret77")
     );
 
     let tr_path = tool_round_file_path(&g, "Saltworks", "01", Round::Act, 0);
     let tr_text = fs::read_to_string(&tr_path)?;
     assert_no_8char_key_piece(&tr_text, CUSTOM_KEY, "tool-round sidecar (>4KiB)");
-    assert!(!tr_text.contains("0xSuperSecretPreimageVal"));
+    assert!(!tr_text.contains("ToolApiKeyCredSecret77"));
+    assert!(tr_text.contains("0xSuperSecretPreimageVal"));
     let tr_rec: SavedToolRoundRecord = serde_json::from_str(&tr_text)?;
     assert!(tr_rec.body_redacted);
     assert_eq!(
@@ -30959,5 +30997,373 @@ fn card9_should11_delivered_from_seat_file_is_written_before_ok_ledger_line() ->
     assert_eq!(calls_b.len(), 1);
     assert_eq!(calls_b[0].outcome, "SEAT_OUTPUT_WRITE_FAILED");
     assert_eq!(calls_b[0].reply_sha256, None);
+    Ok(())
+}
+
+#[test]
+fn card9_fix1_b2_b3_kept_records_preserve_preimage_redact_credentials_and_keep_wire_followup_unscrubbed()
+-> TestResult {
+    const CUSTOM_KEY: &str = "OrKeyFix1B2B3WireSecretKey987654";
+    let key = ApiKey::from_env_reader(|_| Some(CUSTOM_KEY.to_owned()))?;
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "FIX1_B2_B3_WRAPPER")?;
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.2,
+                    "max_output_tokens": 256,
+                    "timeout_secs": 3.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let state = card7_standard_preview_state(0)?;
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["orders"],
+            "properties": { "orders": { "type": "string" } }
+        })
+        .to_string(),
+        None,
+    )?;
+
+    // (i) Clean discarded reply on `talk` carrying `preimage` & `salt` (no credentials):
+    // kept `discarded-round` & `http-reply-round` keep game values verbatim with body_redacted=false.
+    let g_disc = tmp.path().join("g_fix1_disc_clean");
+    write_to_seat(&g_disc, "01", "talk", "Saltworks", "TALK_DISC_CLEAN")?;
+    let clean_disc_args = "{\"preimage\":\"1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff\",\"salt\":\"TalkGameSalt\"}";
+    let disc_body = json!({
+        "id": "disc-clean-1",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "{\"wrong\":\"bad\"}",
+                "tool_calls": [{
+                    "id": "call_disc_clean",
+                    "type": "function",
+                    "function": { "name": "preview_turn_orders", "arguments": clean_disc_args }
+                }]
+            }
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
+    })
+    .to_string();
+    let tx_disc = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: disc_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "{\"orders\":\"OK_TALK\"}",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_disc = run_turn(
+        &TurnConfig::new(
+            g_disc.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.50),
+        )
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_disc,
+        Some(&key),
+    )?;
+    assert!(s_disc.all_clean());
+    let disc_rec: SavedDiscardedReplyRecord = serde_json::from_str(&fs::read_to_string(
+        discarded_reply_file_path(&g_disc, "Saltworks", "01", Round::Talk, 0, 1),
+    )?)?;
+    assert!(!disc_rec.body_redacted);
+    assert_eq!(
+        disc_rec.raw_tool_calls.as_ref().ok_or("raw_tool_calls")?[0]["function"]["arguments"]
+            .as_str(),
+        Some(clean_disc_args)
+    );
+    let raw_disc: SavedHttpReplyRecord = serde_json::from_str(&fs::read_to_string(
+        http_reply_file_path(&g_disc, "Saltworks", "01", Round::Talk, 0, 1),
+    )?)?;
+    assert!(!raw_disc.body_redacted);
+    assert!(raw_disc.redacted_secret_field_paths.is_empty());
+
+    // (ii) Clean `act` tool round carrying `"preimage":"<hex>"` (no credentials):
+    // keeps `arguments` & `raw_received_call` byte-for-byte with body_redacted=false.
+    let preimage_hex = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+    let clean_tool_args = format!(
+        r#"{{"market_actions":[],"bundle":{{"escrow_finishes":[{{"escrow_id":1,"preimage":"{preimage_hex}"}}]}}}}"#
+    );
+    let g_clean = tmp.path().join("g_fix1_tool_clean");
+    write_to_seat(&g_clean, "01", "act", "Saltworks", "ACT_CLEAN_PREIMAGE")?;
+    write_card7_preview_state(&g_clean, "01", "Saltworks", &state)?;
+    let clean_tool_body = json!({
+        "id": "tr-clean-1",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_clean_preimage",
+                    "type": "function",
+                    "function": { "name": "preview_turn_orders", "arguments": clean_tool_args }
+                }]
+            }
+        }],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20, "cost": 0.01}
+    })
+    .to_string();
+    let tx_clean = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: clean_tool_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "{\"orders\":\"OK_ACT_CLEAN\"}",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_clean = run_turn(
+        &TurnConfig::new(
+            g_clean.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats.clone(),
+            Some(wrapper.clone()),
+            true,
+            Some(0.50),
+        )
+        .with_response_format(Some(rf.clone()))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_clean,
+        Some(&key),
+    )?;
+    assert!(s_clean.all_clean());
+    let tr_clean: SavedToolRoundRecord = serde_json::from_str(&fs::read_to_string(
+        tool_round_file_path(&g_clean, "Saltworks", "01", Round::Act, 0),
+    )?)?;
+    assert!(!tr_clean.body_redacted);
+    assert_eq!(tr_clean.calls[0].arguments, clean_tool_args);
+    assert_eq!(
+        tr_clean.calls[0].raw_received_call["function"]["arguments"].as_str(),
+        Some(clean_tool_args.as_str())
+    );
+    let raw_clean: SavedHttpReplyRecord = serde_json::from_str(&fs::read_to_string(
+        http_reply_file_path(&g_clean, "Saltworks", "01", Round::Act, 0, 1),
+    )?)?;
+    assert!(!raw_clean.body_redacted);
+    assert!(raw_clean.redacted_secret_field_paths.is_empty());
+
+    // (iii) Same `act` tool-round shape additionally carrying an `api_key` echo inside `arguments`:
+    // kept records blank the `api_key` and set body_redacted=true while preserving `preimage`, AND
+    // the follow-up HTTP request on the wire (`ScriptedTransport::bodies`) keeps the unscrubbed arguments!
+    let cred_tool_args = format!(
+        r#"{{"market_actions":[],"bundle":{{"escrow_finishes":[{{"escrow_id":1,"preimage":"{preimage_hex}"}}]}},"api_key":"{CUSTOM_KEY}"}}"#
+    );
+    let g_cred = tmp.path().join("g_fix1_tool_cred");
+    write_to_seat(&g_cred, "01", "act", "Saltworks", "ACT_CRED_ECHO")?;
+    write_card7_preview_state(&g_cred, "01", "Saltworks", &state)?;
+    let cred_tool_body = json!({
+        "id": "tr-cred-1",
+        "model": "google/gemini-2.5-pro-06-05",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_cred_echo",
+                    "type": "function",
+                    "function": { "name": "preview_turn_orders", "arguments": cred_tool_args }
+                }]
+            }
+        }],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20, "cost": 0.01}
+    })
+    .to_string();
+    let tx_cred = ScriptedTransport::new(vec![
+        ScriptStep::Respond(RawHttpResponse {
+            status: 200,
+            body: cred_tool_body,
+        }),
+        ScriptStep::Respond(ok_completion_json(
+            "{\"orders\":\"OK_ACT_CRED\"}",
+            "google/gemini-2.5-pro-06-05",
+            Some(0.01),
+        )),
+    ]);
+    let s_cred = run_turn(
+        &TurnConfig::new(
+            g_cred.clone(),
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            true,
+            Some(0.50),
+        )
+        .with_response_format(Some(rf))
+        .with_preview_tool(PreviewToolMode::On),
+        &tx_cred,
+        Some(&key),
+    )?;
+    assert!(s_cred.all_clean());
+
+    let tr_cred_raw = fs::read_to_string(tool_round_file_path(
+        &g_cred,
+        "Saltworks",
+        "01",
+        Round::Act,
+        0,
+    ))?;
+    assert_no_8char_key_piece(&tr_cred_raw, CUSTOM_KEY, "tool-round api_key echo");
+    let tr_cred: SavedToolRoundRecord = serde_json::from_str(&tr_cred_raw)?;
+    assert!(tr_cred.body_redacted);
+    assert!(tr_cred.calls[0].arguments.contains(preimage_hex));
+    assert!(tr_cred.calls[0].arguments.contains(REDACTED_MARKER));
+
+    let raw_cred: SavedHttpReplyRecord = serde_json::from_str(&fs::read_to_string(
+        http_reply_file_path(&g_cred, "Saltworks", "01", Round::Act, 0, 1),
+    )?)?;
+    assert!(raw_cred.body_redacted);
+    assert_eq!(
+        raw_cred.redacted_secret_field_paths,
+        vec!["/choices/0/message/tool_calls/0/function/arguments/api_key"]
+    );
+    assert!(raw_cred.body.contains(preimage_hex));
+    assert!(!raw_cred.body.contains(CUSTOM_KEY));
+
+    // Verify B3: follow-up request on the wire (`recorded_bodies`) preserves unscrubbed arguments.
+    let wire_bodies = tx_cred.bodies()?;
+    assert_eq!(wire_bodies.len(), 2);
+    let followup_req: Json = serde_json::from_str(&wire_bodies[1])?;
+    let wire_echoed_args = followup_req["messages"][2]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .ok_or("missing assistant echoed tool_calls arguments on wire")?;
+    assert_eq!(wire_echoed_args, cred_tool_args);
+    Ok(())
+}
+
+#[test]
+fn card9_fix1_b2_condition1_diag_log_and_error_text_still_blank_preimage() -> TestResult {
+    const PREIMAGE_HEX: &str = "f0e1d2c3b4a5968778695a4b3c2d1e0ff0e1d2c3b4a5968778695a4b3c2d1e0f";
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "CONDITION1_WRAPPER")?;
+
+    let err_500_body =
+        format!(r#"{{"error":{{"message":"upstream","preimage":"{PREIMAGE_HEX}"}}}}"#);
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 500,
+                delay: Duration::from_millis(1),
+                body: err_500_body,
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("RECOVERED_OK", "Qwen/Qwen3-14B", 20, 6, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let seats_path = tmp.path().join("seats.json");
+    fs::write(
+        &seats_path,
+        serde_json::to_string_pretty(&json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.2,
+                    "max_output_tokens": 128,
+                    "timeout_secs": 2.0,
+                    "max_gpu_secs_per_call": 5.0
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        }))?,
+    )?;
+
+    // Place `preimage=<hex>` in its own path segment (`.../preimage=<hex>`) so `--debug` diagnostic
+    // log lines (`lock=acquired path=...`, `ledger=opened ...`, `lock=released ...`) carry it at a
+    // clean boundary and must blank it, while `http-reply-round-0-attempt-1.json` keeps `"preimage":"<hex>"` verbatim!
+    let game_dir = tmp.path().join(format!("preimage={PREIMAGE_HEX}"));
+    write_to_seat(&game_dir, "01", "talk", "Saltworks", "TALK_COND1")?;
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli(
+        [
+            "turn",
+            "--debug",
+            "--game-dir",
+            game_dir.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--preview-tool",
+            "on",
+            "--cap-gpu-secs",
+            "20.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+
+    let diag_stderr = String::from_utf8(err)?;
+    assert!(diag_stderr.contains("[debug] lock=acquired path="));
+    assert!(diag_stderr.contains("preimage=<REDACTED_API_KEY>"));
+    assert!(
+        !diag_stderr.contains(PREIMAGE_HEX),
+        "diagnostic log leaked preimage value: {diag_stderr}"
+    );
+    let stdout_s = String::from_utf8(out)?;
+    assert!(!stdout_s.contains(PREIMAGE_HEX));
+
+    // Ledger error string also keeps full `SEALED_SECRET_FIELD_KEYS` redaction on `preimage`:
+    let calls = read_calls_log(&game_dir)?;
+    assert_eq!(calls.len(), 2);
+    let call0_err = calls[0].error.as_deref().ok_or("expected http 500 error")?;
+    assert!(call0_err.contains("\"preimage\":\"<REDACTED_API_KEY>\""));
+    assert!(!call0_err.contains(PREIMAGE_HEX));
+
+    // Contrasted with kept raw HTTP reply file, which preserves `"preimage":"<hex>"` untouched:
+    let raw_reply: SavedHttpReplyRecord = serde_json::from_str(&fs::read_to_string(
+        http_reply_file_path(&game_dir, "Saltworks", "01", Round::Talk, 0, 1),
+    )?)?;
+    assert!(!raw_reply.body_redacted);
+    assert!(raw_reply.redacted_secret_field_paths.is_empty());
+    assert!(raw_reply.body.contains(PREIMAGE_HEX));
     Ok(())
 }
