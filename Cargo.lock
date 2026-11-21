@@ -1396,7 +1396,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "league-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "hex",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "league-error"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "league-gen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "league-core",
  "league-seat-types",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "league-ledger"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "league-error",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "league-relay"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "hex",
  "icu_normalizer",
@@ -1466,11 +1466,11 @@ dependencies = [
 
 [[package]]
 name = "league-season"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "league-seat-types"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "league-error",
  "serde",
@@ -1479,14 +1479,14 @@ dependencies = [
 
 [[package]]
 name = "league-seat-ui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "league-seat-types",
 ]
 
 [[package]]
 name = "league-standalone"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "league-core",
  "league-error",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "league-tui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "crossterm",
  "league-core",

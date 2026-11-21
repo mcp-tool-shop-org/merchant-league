@@ -3,7 +3,7 @@ import type { SiteConfig } from '@mcptoolshop/site-theme';
 export const config: SiteConfig = {
   title: 'Merchant League',
   description:
-    'A slow-turn trading and politics game for four to six seats, people or AI players, on the XRP Ledger Testnet. Offline Club Mode in league-tui is playable from source; not released yet.',
+    'A slow-turn trading and politics game for four to six seats, people or AI players, on the XRP Ledger Testnet. Offline Club Mode in league-tui is playable from source; v0.1.0 is a source-only prototype release.',
   logoBadge: 'ML',
   brandName: 'merchant-league',
   repoUrl: 'https://github.com/mcp-tool-shop-org/merchant-league',
@@ -11,11 +11,11 @@ export const config: SiteConfig = {
     'MIT Licensed — built by <a href="https://mcp-tool-shop.github.io/" style="color:var(--color-muted);text-decoration:underline">MCP Tool Shop</a>',
 
   hero: {
-    badge: 'Prototype · not released',
+    badge: 'Prototype · v0.1.0',
     headline: 'Merchant League',
     headlineAccent: 'trade, bargain and vote on the XRPL Testnet.',
     description:
-      'A slow-turn game for four to six seats. Each seat makes what its neighbours need, so every deal matters and nobody wins alone. Offline <strong>Club Mode</strong> in <code>league-tui</code> is playable from source on one terminal (people and <code>ClubBot</code> seats through season close and replay export; private whispers deferred past v0.1.0). Public-Testnet Game mode and container images are not built yet, and <strong>not released</strong> yet. Testnet only, with no real money.',
+      'A slow-turn game for four to six seats. Each seat makes what its neighbours need, so every deal matters and nobody wins alone. Offline <strong>Club Mode</strong> in <code>league-tui</code> is playable from source on one terminal (people and <code>ClubBot</code> seats through season close and replay export; private whispers deferred past v0.1.0). Public-Testnet Game mode is not built yet. <strong>v0.1.0</strong> is a source-only prototype release, with no published binaries or container image. Testnet only, with no real money.',
     primaryCta: { href: 'https://github.com/mcp-tool-shop-org/merchant-league', label: 'View on GitHub' },
     secondaryCta: { href: 'handbook/', label: 'Read the Handbook' },
     previews: [
@@ -77,7 +77,7 @@ export const config: SiteConfig = {
       kind: 'data-table',
       id: 'built',
       title: 'What is built',
-      subtitle: 'A Rust workspace: the engine, table generator, offline Club Mode host, and Testnet tools (not released yet).',
+      subtitle: 'A Rust workspace: the engine, table generator, offline Club Mode host, and Testnet tools (v0.1.0 prototype, source only).',
       columns: ['Crate', 'What it does'],
       rows: [
         ['league-core', 'The rules engine: turn phases, contracts, scoring, the season close, replay and state predicates'],
