@@ -5,8 +5,8 @@ sidebar:
   order: 7
 ---
 
-:::caution[Prototype — not released]
-Prototype — not released. Offline **Club Mode** in `league-tui` is playable from source across a full 24–32 turn season (public-Testnet Game mode and the release container image are not released yet). `4: Diplomatic Desk` seat-to-seat whispers remain deferred past `v0.1.0`.
+:::caution[Prototype — v0.1.0]
+Prototype — v0.1.0, source only. Offline **Club Mode** in `league-tui` is playable from source across a full 24–32 turn season (public-Testnet Game mode is not built yet, and no container image is published). `4: Diplomatic Desk` seat-to-seat whispers remain deferred past `v0.1.0`.
 :::
 
 ## Launching and setting up a table (Lobby)

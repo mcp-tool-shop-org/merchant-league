@@ -994,7 +994,7 @@ where
         CliAction::Help => {
             let _ = writeln!(
                 out,
-                "league-tui {} - Merchant League offline Club Mode host (prototype, not released)",
+                "league-tui {} - Merchant League offline Club Mode host (source-only prototype)",
                 env!("CARGO_PKG_VERSION")
             );
             let _ = writeln!(

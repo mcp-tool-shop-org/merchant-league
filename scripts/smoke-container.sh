@@ -257,7 +257,9 @@ run_check 0 docker run --rm --network=none "$IMAGE_TAG" --help
 printf '%s' "$LAST_OUTPUT" | grep -q "Usage: league-tui"
 
 run_check 0 docker run --rm --network=none "$IMAGE_TAG" --version
-printf '%s' "$LAST_OUTPUT" | grep -q "^league-tui 0\.0\.0$"
+WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+[ -n "$WORKSPACE_VERSION" ]
+printf '%s' "$LAST_OUTPUT" | grep -qxF "league-tui ${WORKSPACE_VERSION}"
 
 run_check 1 docker run --rm --network=none "$IMAGE_TAG"
 printf '%s' "$LAST_OUTPUT" | grep -q "TTY_REQUIRED"

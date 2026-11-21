@@ -21,7 +21,7 @@ The Testnet is wiped from time to time (next on 2026-11-25), which deletes every
 
 ## `league-tui`
 
-The offline hot-seat host binary runs full Club Mode seasons in a terminal without network calls or Testnet credentials (prototype — not released yet).
+The offline hot-seat host binary runs full Club Mode seasons in a terminal without network calls or Testnet credentials (prototype, v0.1.0, source only).
 
 ```text
 league-tui [options]
