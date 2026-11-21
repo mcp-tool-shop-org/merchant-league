@@ -23,9 +23,9 @@ use league_eval::{
     run_branch_with_transport, run_play_with_transport, validate_eval_seats_file,
 };
 use league_relay::{
-    MemoryMode, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round, SeatFile,
-    Transport, TransportError, build_preview_turn_orders_tool_definition, preview_wording_slot,
-    sha256_hex, wording_slot,
+    CallLogEntry, MemoryMode, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
+    SeatFile, Transport, TransportError, build_preview_turn_orders_tool_definition,
+    preview_wording_slot, sha256_hex, wording_slot,
 };
 use serde_json::json;
 
@@ -1607,10 +1607,10 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
     }
 
     // 2. End-to-end across BOTH `play` and `branch`, under BOTH `off` and `on`:
-    //    Because `validate_eval_seats_file` forbids `exclude_from_transcript: true` (`A1.3`),
-    //    `league-relay` leaves `<think>` unstripped, so all 3 non-JSON/wrapped shapes
-    //    (fenced, `<think>`-wrapped, trailing-text) fail `validate_structured_reply` twice,
-    //    return `NO_REPLY`, get `REPLY_SCHEMA_INVALID`, and keep raw sidecars on disk in `on` only.
+    //    Because `validate_eval_seats_file` forbids `exclude_from_transcript: true` (`A1.3`) and
+    //    `league-eval` enables `eval_mode` in `league-relay`, `league-relay` leaves `<think>`
+    //    unstripped, runs attempt 1 only (no re-send), returns `NO_REPLY`, and persists both raw
+    //    HTTP sidecars and discarded-reply sidecars in BOTH `off` and `on` arms.
     let valid_clean = "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}".to_owned();
     let fenced_reply = format!("```json\n{valid_clean}\n```");
     let think_reply = format!("<think>internal plan</think>{valid_clean}");
@@ -1620,21 +1620,21 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
         (
             "fenced",
             fenced_reply,
-            2_usize,
+            1_usize,
             true,
             Some("REPLY_SCHEMA_INVALID"),
         ),
         (
             "think",
             think_reply,
-            2_usize,
+            1_usize,
             true,
             Some("REPLY_SCHEMA_INVALID"),
         ),
         (
             "trailing",
             trailing_reply,
-            2_usize,
+            1_usize,
             true,
             Some("REPLY_SCHEMA_INVALID"),
         ),
@@ -1647,10 +1647,9 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             let (wrapper_path, _) = write_wrapper(&tmp);
             let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
 
-            let mut play_queue = vec![valid_clean.clone()];
-            for _ in 0..expect_calls {
-                play_queue.push(raw_reply.clone());
-            }
+            // Queue an extra clean reply behind the malformed reply to prove `eval_mode` never
+            // triggers a second HTTP call for that round.
+            let play_queue = vec![valid_clean.clone(), raw_reply.clone(), valid_clean.clone()];
             let play_transport = MockTransport::from_contents(play_queue);
             let manifest = must_ok(
                 run_play_with_transport(
@@ -1691,12 +1690,40 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             assert_eq!(act_dec.attempts, expect_calls as u32);
             assert_eq!(act_dec.no_reply, expect_no_reply);
             assert_eq!(act_dec.refusal_code.as_deref(), expect_code);
+            let play_calls_raw = must_ok(
+                fs::read_to_string(play_dir.join("relay/calls.jsonl")),
+                "read calls",
+            );
+            let play_act_call: CallLogEntry = must_some(
+                play_calls_raw
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str::<CallLogEntry>(l).ok())
+                    .find(|e| e.guild == "Foundry" && e.round == Round::Act),
+                "Foundry Day 1 Act call log row",
+            );
+            assert_eq!(play_act_call.attempt, 1);
+            assert_eq!(play_act_call.outcome, "NO_REPLY");
             if expect_no_reply {
                 assert_eq!(act_dec.failed_attempts.len(), expect_calls);
                 assert_eq!(act_dec.failed_attempts[0].attempt, 1);
-                assert_eq!(act_dec.failed_attempts[0].outcome, "harness");
-                assert_eq!(act_dec.failed_attempts[1].attempt, 2);
-                assert_eq!(act_dec.failed_attempts[1].outcome, "NO_REPLY");
+                assert_eq!(act_dec.failed_attempts[0].outcome, "NO_REPLY");
+                let disc_rel = must_some(
+                    act_dec.discarded_reply_path.as_deref(),
+                    "play discarded_reply_path",
+                );
+                let disc_sha = must_some(
+                    act_dec.discarded_reply_sha256.as_deref(),
+                    "play discarded_reply_sha256",
+                );
+                assert_eq!(
+                    disc_rel,
+                    "relay/seats/Foundry.day-01-act.discarded-round-0-attempt-1.json"
+                );
+                let disc_bytes = must_ok(fs::read(play_dir.join(disc_rel)), "read play discarded");
+                assert_eq!(sha256_hex(&disc_bytes), disc_sha);
+                assert_eq!(play_act_call.reply_sha256.as_deref(), Some(disc_sha));
+                assert!(play_act_call.http_reply_sha256.is_some());
                 assert_eq!(
                     manifest.refusal_counts_by_seat["Foundry"].reply_schema_invalid,
                     1
@@ -1725,21 +1752,16 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                 n.contains("day-01-act.discarded-round-")
                     && discarded_reply_file_has_content(p, &raw_reply)
             });
-            if arm == EvalArm::On {
+            assert!(
+                has_act_http_raw,
+                "play --arm {} must persist raw HTTP reply for `{shape_name}`",
+                arm.as_str()
+            );
+            if expect_no_reply {
                 assert!(
-                    has_act_http_raw,
-                    "play --arm on must persist raw HTTP reply for `{shape_name}`"
-                );
-                if expect_no_reply {
-                    assert!(
-                        has_discarded_raw,
-                        "play --arm on must persist discarded sidecars for `{shape_name}`"
-                    );
-                }
-            } else {
-                assert!(
-                    !has_act_http_raw && !has_discarded_raw,
-                    "play --arm off keeps no raw HTTP/discarded sidecars before relay follow-up card"
+                    has_discarded_raw,
+                    "play --arm {} must persist discarded sidecar for `{shape_name}`",
+                    arm.as_str()
                 );
             }
 
@@ -1771,7 +1793,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             );
 
             let branch_out = tmp.join("branch_out");
-            let branch_queue = vec![raw_reply.clone(); expect_calls];
+            let branch_queue = vec![raw_reply.clone(), valid_clean.clone()];
             let branch_transport = MockTransport::from_contents(branch_queue);
             let outcomes = must_ok(
                 run_branch_with_transport(
@@ -1800,6 +1822,36 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             assert_eq!(b_dec.attempts, expect_calls as u32);
             assert_eq!(b_dec.no_reply, expect_no_reply);
             assert_eq!(b_dec.refusal_code.as_deref(), expect_code);
+            let b_calls_raw = must_ok(
+                fs::read_to_string(branch_out.join(arm.as_str()).join("relay/calls.jsonl")),
+                "read branch calls",
+            );
+            let b_call: CallLogEntry = must_some(
+                b_calls_raw
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str::<CallLogEntry>(l).ok())
+                    .next(),
+                "branch call log row",
+            );
+            assert_eq!(b_call.attempt, 1);
+            assert_eq!(b_call.outcome, "NO_REPLY");
+            if expect_no_reply {
+                let b_disc_rel = must_some(
+                    b_dec.discarded_reply_path.as_deref(),
+                    "branch discarded_reply_path",
+                );
+                let b_disc_sha = must_some(
+                    b_dec.discarded_reply_sha256.as_deref(),
+                    "branch discarded_reply_sha256",
+                );
+                let b_disc_bytes = must_ok(
+                    fs::read(branch_out.join(arm.as_str()).join(b_disc_rel)),
+                    "read branch discarded",
+                );
+                assert_eq!(sha256_hex(&b_disc_bytes), b_disc_sha);
+                assert_eq!(b_call.reply_sha256.as_deref(), Some(b_disc_sha));
+            }
 
             let summary: BranchSummary = must_ok(
                 serde_json::from_str(&must_ok(
@@ -1834,16 +1886,17 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                 let n = p.file_name().and_then(|s| s.to_str()).unwrap_or_default();
                 n.contains("discarded-round-") && discarded_reply_file_has_content(p, &raw_reply)
             });
-            if arm == EvalArm::On {
-                assert!(b_has_http, "branch --arm on must persist raw HTTP reply");
-                if expect_no_reply {
-                    assert!(
-                        b_has_disc,
-                        "branch --arm on must persist discarded sidecars"
-                    );
-                }
-            } else {
-                assert!(!b_has_http && !b_has_disc);
+            assert!(
+                b_has_http,
+                "branch --arm {} must persist raw HTTP reply",
+                arm.as_str()
+            );
+            if expect_no_reply {
+                assert!(
+                    b_has_disc,
+                    "branch --arm {} must persist discarded sidecars",
+                    arm.as_str()
+                );
             }
 
             let _ = fs::remove_dir_all(&tmp);
@@ -1862,7 +1915,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     //   -> `TALK_REPLY_HAS_ORDERS` wins over order-parse failure (`is_wrong_part=true`).
     // Turn 1 act: clean empty reply.
     // Turn 2 talk: duplicate JSON key (empty orders -> `TALK_REPLY_INVALID`).
-    // Turn 2 act: malformed fenced JSON (2 failed relay attempts -> NO_REPLY -> `REPLY_SCHEMA_INVALID`).
+    // Turn 2 act: malformed fenced JSON (1 failed relay attempt in eval_mode -> NO_REPLY -> `REPLY_SCHEMA_INVALID`).
     let incomplete_post_offer_talk = json!({
         "messages": [],
         "market_actions": [{ "action_kind": "post_offer" }],
@@ -1876,9 +1929,8 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
 
     let transport = MockTransport::from_contents(vec![
         incomplete_post_offer_talk,
-        clean.clone(),
+        clean,
         dup_key_talk,
-        bad_fenced_act.clone(),
         bad_fenced_act.clone(),
     ]);
     let manifest = must_ok(
@@ -1933,7 +1985,10 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
         "parse d2 act",
     );
     assert!(d2_act.no_reply);
+    assert_eq!(d2_act.attempts, 1);
     assert_eq!(d2_act.refusal_code.as_deref(), Some("REPLY_SCHEMA_INVALID"));
+    assert!(d2_act.discarded_reply_path.is_some());
+    assert!(d2_act.discarded_reply_sha256.is_some());
 
     // 4 evaluated rounds, 3 delivered, 1 no_reply, 1 wrong-part refusal:
     assert_eq!(manifest.wrong_part_refusals.talk_reply_has_orders, 1);
@@ -1955,7 +2010,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     );
 
     // Branch across [Off, On]: Off gets ACT_REPLY_HAS_MESSAGES (`post_offer` missing fields + message),
-    // On gets NO_REPLY (`REPLY_SCHEMA_INVALID` after 2 attempts) -> `branch_summary.json` tracks BOTH!
+    // On gets NO_REPLY (`REPLY_SCHEMA_INVALID` after 1 attempt in eval_mode) -> `branch_summary.json` tracks BOTH!
     let wrong_act_with_bad_orders = json!({
         "messages": [{ "to_guild": "Quarry", "body": "in act" }],
         "market_actions": [{ "action_kind": "post_offer" }],
@@ -1963,11 +2018,8 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     })
     .to_string();
     let branch_out = tmp.join("branch_out");
-    let branch_transport = MockTransport::from_contents(vec![
-        wrong_act_with_bad_orders,
-        bad_fenced_act.clone(),
-        bad_fenced_act,
-    ]);
+    let branch_transport =
+        MockTransport::from_contents(vec![wrong_act_with_bad_orders, bad_fenced_act]);
     let outcomes = must_ok(
         run_branch_with_transport(
             &BranchOptions {
@@ -1994,10 +2046,13 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
         outcomes[0].decision.refusal_code.as_deref(),
         Some("ACT_REPLY_HAS_MESSAGES")
     );
+    assert_eq!(outcomes[1].decision.attempts, 1);
     assert_eq!(
         outcomes[1].decision.refusal_code.as_deref(),
         Some("REPLY_SCHEMA_INVALID")
     );
+    assert!(outcomes[1].decision.discarded_reply_path.is_some());
+    assert!(outcomes[1].decision.discarded_reply_sha256.is_some());
 
     let summary: BranchSummary = must_ok(
         serde_json::from_str(&must_ok(
@@ -2017,4 +2072,324 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     assert_eq!(summary.refusal_counts_by_arm["on"].reply_schema_invalid, 1);
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
+    let clean = json!({ "messages": [], "market_actions": [], "bundle": {} }).to_string();
+    let talk_orders_with_unknown_bundle_key = json!({
+        "messages": [],
+        "market_actions": [],
+        "bundle": { "debt_repayment_cred": 5, "unknown_field": 1 }
+    })
+    .to_string();
+    let act_messages_with_unknown_key = json!({
+        "messages": [{ "to_guild": "Quarry", "body": "hi" }],
+        "market_actions": [],
+        "bundle": {},
+        "unknown_key": 1
+    })
+    .to_string();
+    let non_json = "not valid json at all".to_owned();
+
+    for arm in [EvalArm::Off, EvalArm::On] {
+        let tmp = fresh_tmp_dir(&format!("relay1_1a_{}", arm.as_str()));
+        let (wrapper_path, _) = write_wrapper(&tmp);
+        let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+
+        // 1. Talk reply with orders + unknown bundle key -> TALK_REPLY_HAS_ORDERS (1 call),
+        //    counts toward 5% stop-line, keeps discarded sidecar & sha256.
+        let play_talk_dir = tmp.join("play_talk");
+        let talk_transport = MockTransport::from_contents(vec![
+            talk_orders_with_unknown_bundle_key.clone(),
+            clean.clone(),
+            clean.clone(),
+        ]);
+        let talk_manifest = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: play_talk_dir.clone(),
+                    seats_path: seats_path.clone(),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    arm,
+                    table_id: 93,
+                    seed: 7,
+                    turns: 1,
+                    memory_mode: MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &talk_transport,
+                None,
+            ),
+            "1a talk play",
+        );
+        // 1 call for Talk (single attempt, unconsumed spare stays unused) + 1 call for Act = 2.
+        assert_eq!(talk_transport.recorded_requests().len(), 2);
+
+        let d1_talk: EvalDecisionRecord = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(play_talk_dir.join("decisions/day-01-talk-Foundry.json")),
+                "read d1 talk",
+            )),
+            "parse d1 talk",
+        );
+        assert!(d1_talk.no_reply);
+        assert_eq!(d1_talk.attempts, 1);
+        assert_eq!(
+            d1_talk.refusal_code.as_deref(),
+            Some("TALK_REPLY_HAS_ORDERS")
+        );
+        assert_eq!(
+            d1_talk.raw_reply.as_deref(),
+            Some(talk_orders_with_unknown_bundle_key.as_str())
+        );
+        let talk_disc_rel = must_some(
+            d1_talk.discarded_reply_path.as_deref(),
+            "talk discarded_reply_path",
+        );
+        let talk_disc_sha = must_some(
+            d1_talk.discarded_reply_sha256.as_deref(),
+            "talk discarded_reply_sha256",
+        );
+        assert_eq!(
+            sha256_hex(&must_ok(
+                fs::read(play_talk_dir.join(talk_disc_rel)),
+                "read talk discarded file"
+            )),
+            talk_disc_sha
+        );
+        assert_eq!(talk_manifest.wrong_part_refusals.talk_reply_has_orders, 1);
+        assert_eq!(
+            talk_manifest.wrong_part_refusals.total_wrong_part_refusals,
+            1
+        );
+        assert_eq!(talk_manifest.wrong_part_refusals.delivered_model_replies, 1);
+        assert_eq!(talk_manifest.wrong_part_refusals.total_model_rounds, 2);
+        assert!(
+            talk_manifest
+                .wrong_part_refusals
+                .exceeds_five_percent_preflight_stop_line_delivered
+        );
+        assert!(
+            talk_manifest
+                .wrong_part_refusals
+                .exceeds_five_percent_preflight_stop_line_all_rounds
+        );
+        assert_eq!(
+            talk_manifest.refusal_counts_by_seat["Foundry"].talk_reply_has_orders,
+            1
+        );
+        assert_eq!(
+            talk_manifest.refusal_counts_by_seat["Foundry"].reply_schema_invalid,
+            0
+        );
+
+        // 2. Act reply with messages + unknown key -> ACT_REPLY_HAS_MESSAGES (1 call), in play & branch.
+        let play_act_dir = tmp.join("play_act");
+        let act_transport = MockTransport::from_contents(vec![
+            clean.clone(),
+            act_messages_with_unknown_key.clone(),
+            clean.clone(),
+        ]);
+        let act_manifest = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: play_act_dir.clone(),
+                    seats_path: seats_path.clone(),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    arm,
+                    table_id: 94,
+                    seed: 7,
+                    turns: 1,
+                    memory_mode: MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &act_transport,
+                None,
+            ),
+            "1a act play",
+        );
+        assert_eq!(act_transport.recorded_requests().len(), 2);
+
+        let d1_act: EvalDecisionRecord = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(play_act_dir.join("decisions/day-01-act-Foundry.json")),
+                "read d1 act",
+            )),
+            "parse d1 act",
+        );
+        assert!(d1_act.no_reply);
+        assert_eq!(d1_act.attempts, 1);
+        assert_eq!(
+            d1_act.refusal_code.as_deref(),
+            Some("ACT_REPLY_HAS_MESSAGES")
+        );
+        assert!(d1_act.discarded_reply_path.is_some());
+        assert!(d1_act.discarded_reply_sha256.is_some());
+        assert_eq!(act_manifest.wrong_part_refusals.act_reply_has_messages, 1);
+        assert!(
+            act_manifest
+                .wrong_part_refusals
+                .exceeds_five_percent_preflight_stop_line_delivered
+        );
+        assert!(
+            act_manifest
+                .wrong_part_refusals
+                .exceeds_five_percent_preflight_stop_line_all_rounds
+        );
+
+        let branch_act_out = tmp.join("branch_act");
+        let branch_act_transport = MockTransport::from_contents(vec![
+            act_messages_with_unknown_key.clone(),
+            clean.clone(),
+        ]);
+        let branch_act_outcomes = must_ok(
+            run_branch_with_transport(
+                &BranchOptions {
+                    checkpoint_prefix: Some(play_act_dir.join("checkpoints/day-01-pre-act")),
+                    list_path: None,
+                    focal_seat: Some("Foundry".to_owned()),
+                    seats_path: seats_path.clone(),
+                    wrapper_path: wrapper_path.clone(),
+                    arms: vec![arm],
+                    out_dir: branch_act_out.clone(),
+                    memory_mode: MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &branch_act_transport,
+                None,
+            ),
+            "1a act branch",
+        );
+        assert_eq!(branch_act_transport.recorded_requests().len(), 1);
+        assert_eq!(
+            branch_act_outcomes[0].decision.refusal_code.as_deref(),
+            Some("ACT_REPLY_HAS_MESSAGES")
+        );
+        assert_eq!(branch_act_outcomes[0].decision.attempts, 1);
+        let branch_act_summary: BranchSummary = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(branch_act_out.join("branch_summary.json")),
+                "read branch act summary",
+            )),
+            "parse branch act summary",
+        );
+        assert_eq!(
+            branch_act_summary
+                .wrong_part_refusals
+                .act_reply_has_messages,
+            1
+        );
+        assert!(
+            branch_act_summary
+                .wrong_part_refusals
+                .exceeds_five_percent_preflight_stop_line_all_rounds
+        );
+
+        // 3. Non-JSON reply -> REPLY_SCHEMA_INVALID (1 call, not wrong-round), in play & branch.
+        let play_nonjson_dir = tmp.join("play_nonjson");
+        let nonjson_transport =
+            MockTransport::from_contents(vec![clean.clone(), non_json.clone(), clean.clone()]);
+        let nonjson_manifest = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: play_nonjson_dir.clone(),
+                    seats_path: seats_path.clone(),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    arm,
+                    table_id: 95,
+                    seed: 7,
+                    turns: 1,
+                    memory_mode: MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &nonjson_transport,
+                None,
+            ),
+            "1a non-json play",
+        );
+        assert_eq!(nonjson_transport.recorded_requests().len(), 2);
+        let d1_nonjson: EvalDecisionRecord = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(play_nonjson_dir.join("decisions/day-01-act-Foundry.json")),
+                "read non-json decision",
+            )),
+            "parse non-json decision",
+        );
+        assert!(d1_nonjson.no_reply);
+        assert_eq!(d1_nonjson.attempts, 1);
+        assert_eq!(
+            d1_nonjson.refusal_code.as_deref(),
+            Some("REPLY_SCHEMA_INVALID")
+        );
+        assert!(d1_nonjson.discarded_reply_path.is_some());
+        assert!(d1_nonjson.discarded_reply_sha256.is_some());
+        assert_eq!(
+            nonjson_manifest
+                .wrong_part_refusals
+                .total_wrong_part_refusals,
+            0
+        );
+
+        let branch_nonjson_out = tmp.join("branch_nonjson");
+        let branch_nonjson_transport =
+            MockTransport::from_contents(vec![non_json.clone(), clean.clone()]);
+        let branch_nonjson_outcomes = must_ok(
+            run_branch_with_transport(
+                &BranchOptions {
+                    checkpoint_prefix: Some(play_nonjson_dir.join("checkpoints/day-01-pre-act")),
+                    list_path: None,
+                    focal_seat: Some("Foundry".to_owned()),
+                    seats_path,
+                    wrapper_path,
+                    arms: vec![arm],
+                    out_dir: branch_nonjson_out.clone(),
+                    memory_mode: MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &branch_nonjson_transport,
+                None,
+            ),
+            "1a non-json branch",
+        );
+        assert_eq!(branch_nonjson_transport.recorded_requests().len(), 1);
+        assert_eq!(
+            branch_nonjson_outcomes[0].decision.refusal_code.as_deref(),
+            Some("REPLY_SCHEMA_INVALID")
+        );
+        assert_eq!(branch_nonjson_outcomes[0].decision.attempts, 1);
+        let branch_nonjson_summary: BranchSummary = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(branch_nonjson_out.join("branch_summary.json")),
+                "read branch non-json summary",
+            )),
+            "parse branch non-json summary",
+        );
+        assert_eq!(
+            branch_nonjson_summary
+                .wrong_part_refusals
+                .total_wrong_part_refusals,
+            0
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

@@ -31367,3 +31367,494 @@ fn card9_fix1_b2_condition1_diag_log_and_error_text_still_blank_preimage() -> Te
     assert!(raw_reply.body.contains(PREIMAGE_HEX));
     Ok(())
 }
+
+fn collect_relative_files_sorted(root: &Path, dir: &Path, out: &mut Vec<String>) -> TestResult {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_relative_files_sorted(root, &path, out)?;
+        } else if path.is_file() {
+            let rel = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(rel);
+        }
+    }
+    out.sort();
+    Ok(())
+}
+
+fn run_play_mode_golden_3turn_fixture(tmp_root: &Path, game_dir: &Path) -> TestResult {
+    let wrapper = tmp_root.join("golden_wrapper.md");
+    fs::write(&wrapper, "GOLDEN_PARITY_WRAPPER\n")?;
+    let seats_path = tmp_root.join("golden_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp_root.join("golden_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "GOLDEN_TURN1_TALK_OK",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-1",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "GOLDEN_TALK_REPLY_OK" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                            "total_tokens": 18,
+                            "cost": 0.02
+                        }
+                    }
+                },
+                {
+                    "when_contains": "GOLDEN_TURN2_ACT_EMPTY",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-2",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 13,
+                            "completion_tokens": 0,
+                            "total_tokens": 13,
+                            "cost": 0.015
+                        }
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "talk",
+        "Saltworks",
+        "GOLDEN_TURN1_TALK_OK\n",
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "act",
+        "Saltworks",
+        "GOLDEN_TURN2_ACT_EMPTY\n",
+    )?;
+    write_to_seat(game_dir, "02", "talk", "Saltworks", "GOLDEN_TURN3_CAP\n")?;
+    for (day, round, expected_exit) in [("01", "talk", 0), ("01", "act", 3), ("02", "talk", 3)] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                game_dir.to_str().ok_or("utf8")?,
+                "--day",
+                day,
+                "--round",
+                round,
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "off",
+                "--cap-credits",
+                "0.09",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            expected_exit,
+            "day {day} {round} stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+    Ok(())
+}
+
+fn verify_game_dir_matches_play_mode_golden(game_dir: &Path, golden_root: &Path) -> TestResult {
+    let mut actual_files = Vec::new();
+    collect_relative_files_sorted(game_dir, game_dir, &mut actual_files)?;
+    let mut expected_files = Vec::new();
+    collect_relative_files_sorted(golden_root, golden_root, &mut expected_files)?;
+    assert_eq!(
+        actual_files, expected_files,
+        "Play-mode file tree must match committed golden set"
+    );
+
+    for rel in &expected_files {
+        assert!(!rel.contains('\\'), "unexpected backslash in {rel}");
+        let actual_bytes = fs::read(game_dir.join(rel))?;
+        let golden_bytes = fs::read(golden_root.join(rel))?;
+        if rel == "relay/calls.jsonl" {
+            let actual_str = std::str::from_utf8(&actual_bytes)?;
+            let golden_str = std::str::from_utf8(&golden_bytes)?;
+            assert!(
+                !actual_str.contains('\r'),
+                "Play-mode calls.jsonl must use LF"
+            );
+            let actual_lines: Vec<&str> = actual_str.lines().collect();
+            let golden_lines: Vec<&str> = golden_str.lines().collect();
+            assert_eq!(actual_lines.len(), golden_lines.len());
+            for (idx, (a_line, g_line)) in actual_lines.iter().zip(golden_lines.iter()).enumerate()
+            {
+                let a_masked = canonicalize_b2d77ce8_call_line(a_line)?;
+                assert_eq!(
+                    a_masked, *g_line,
+                    "Play-mode calls.jsonl line {idx} diverged after masking time_utc, wall_secs, latency_ms, reservation_id"
+                );
+            }
+        } else {
+            assert_eq!(
+                actual_bytes, golden_bytes,
+                "Play-mode unmasked file `{rel}` diverged byte-for-byte from golden fixture"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn relay1_play_mode_eval_false_reproduces_committed_golden_set_byte_for_byte() -> TestResult {
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("play_golden_game");
+    run_play_mode_golden_3turn_fixture(tmp.path(), &game_dir)?;
+
+    let golden_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/play_mode_golden");
+    if std::env::var_os("GENERATE_PLAY_MODE_GOLDEN").is_some() {
+        if golden_root.exists() {
+            fs::remove_dir_all(&golden_root)?;
+        }
+        let mut actual_files = Vec::new();
+        collect_relative_files_sorted(&game_dir, &game_dir, &mut actual_files)?;
+        for rel in &actual_files {
+            let dst = golden_root.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let src_bytes = fs::read(game_dir.join(rel))?;
+            if rel == "relay/calls.jsonl" {
+                let src_str = std::str::from_utf8(&src_bytes)?;
+                let mut masked_out = String::new();
+                for line in src_str.lines().filter(|l| !l.trim().is_empty()) {
+                    masked_out.push_str(&canonicalize_b2d77ce8_call_line(line)?);
+                    masked_out.push('\n');
+                }
+                fs::write(&dst, masked_out.as_bytes())?;
+            } else {
+                fs::write(&dst, &src_bytes)?;
+            }
+        }
+    }
+
+    verify_game_dir_matches_play_mode_golden(&game_dir, &golden_root)?;
+
+    // Negative control: altering one byte in an unmasked Play-mode output must panic.
+    let copy_dir = tmp.path().join("play_golden_mutated");
+    let mut actual_files = Vec::new();
+    collect_relative_files_sorted(&game_dir, &game_dir, &mut actual_files)?;
+    for rel in &actual_files {
+        let dst = copy_dir.join(rel);
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(game_dir.join(rel), &dst)?;
+    }
+    let talk_path = copy_dir.join("from-seat/day-01-talk-Saltworks.md");
+    let mut bytes = fs::read(&talk_path)?;
+    bytes[0] ^= 0x01;
+    fs::write(&talk_path, bytes)?;
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = verify_game_dir_matches_play_mode_golden(&copy_dir, &golden_root);
+        }))
+        .is_err(),
+        "mutating 1 byte of a Play-mode output must fail golden byte parity"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn relay1_eval_mode_single_attempt_and_discarded_sidecar_in_both_arms() -> TestResult {
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "eval_test_reply",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["messages"],
+                    "properties": {
+                        "messages": { "type": "array" }
+                    }
+                }
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    let clean_reply = "{\"messages\":[]}";
+    let shapes = [
+        ("fenced", format!("```json\n{clean_reply}\n```")),
+        (
+            "think_block",
+            format!("<think>private plan</think>{clean_reply}"),
+        ),
+        ("trailing_text", format!("{clean_reply} trailing_tokens")),
+    ];
+
+    for (label, bad_reply) in shapes {
+        for preview_tool in [PreviewToolMode::Off, PreviewToolMode::On] {
+            let tmp = TempDir::new()?;
+            let wrapper = tmp.path().join("wrapper.md");
+            fs::write(&wrapper, "EVAL_MODE_RELAY_WRAPPER\n")?;
+            let seats = SeatFile::from_json_str(
+                &json!({
+                    "seats": [
+                        {
+                            "guild": "Saltworks",
+                            "backend": "openrouter",
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "temperature": 0.0,
+                            "max_output_tokens": 256,
+                            "timeout_secs": 5.0,
+                            "max_cost_per_call": 0.05
+                        },
+                        { "guild": "Weavers", "backend": "file" },
+                        { "guild": "Smiths", "backend": "file" },
+                        { "guild": "Dyers", "backend": "file" }
+                    ]
+                })
+                .to_string(),
+                None,
+            )?;
+
+            let game_dir = tmp
+                .path()
+                .join(format!("eval_{label}_{}", preview_tool.as_str()));
+            write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY_01_TALK\n")?;
+
+            // Queue two responses: if Eval mode ever retried attempt 2, it would consume `clean_reply`
+            // and return Delivered instead of NoReply!
+            let transport = ScriptedTransport::new(vec![
+                ScriptStep::Respond(ok_completion_json(
+                    &bad_reply,
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                )),
+                ScriptStep::Respond(ok_completion_json(
+                    clean_reply,
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                )),
+            ]);
+            let cfg = TurnConfig::new(
+                game_dir.clone(),
+                "01".to_owned(),
+                Round::Talk,
+                seats,
+                Some(wrapper),
+                false,
+                Some(1.0),
+            )
+            .with_response_format(Some(rf.clone()))
+            .with_preview_tool(preview_tool)
+            .with_eval_mode(true);
+
+            let summary = run_turn(&cfg, &transport, None)?;
+            assert_eq!(
+                transport.call_count(),
+                1,
+                "eval_mode must send exactly 1 HTTP attempt for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert!(
+                matches!(summary.reports[0].outcome, SeatOutcome::NoReply { .. }),
+                "eval_mode failed attempt must end as NoReply refusal, got {:?}",
+                summary.reports[0].outcome
+            );
+            assert!(!game_dir.join("from-seat/day-01-talk-Saltworks.md").exists());
+
+            let calls = read_calls_log(&game_dir)?;
+            assert_eq!(calls.len(), 1);
+            let row = &calls[0];
+            assert_eq!(row.attempt, 1);
+            assert_eq!(row.trigger, "turn");
+            assert_eq!(row.outcome, "NO_REPLY");
+            assert!(row.error.is_some());
+
+            let http_path = http_reply_file_path(&game_dir, "Saltworks", "01", Round::Talk, 0, 1);
+            let disc_path =
+                discarded_reply_file_path(&game_dir, "Saltworks", "01", Round::Talk, 0, 1);
+            assert!(
+                http_path.is_file(),
+                "http-reply sidecar missing for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert!(
+                disc_path.is_file(),
+                "discarded sidecar missing for `{label}` ({})",
+                preview_tool.as_str()
+            );
+
+            let http_sha = sha256_hex(&fs::read(&http_path)?);
+            let disc_bytes = fs::read(&disc_path)?;
+            let disc_sha = sha256_hex(&disc_bytes);
+            assert_eq!(
+                row.http_reply_sha256,
+                Some(Some(http_sha)),
+                "calls.jsonl http_reply_sha256 must match disk file for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert_eq!(
+                row.reply_sha256.as_deref(),
+                Some(disc_sha.as_str()),
+                "calls.jsonl reply_sha256 must match discarded sidecar on disk for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            let disc_rec: SavedDiscardedReplyRecord = serde_json::from_slice(&disc_bytes)?;
+            assert_eq!(disc_rec.attempt, 1);
+            assert_eq!(disc_rec.outcome, "NO_REPLY");
+            assert_eq!(
+                disc_rec.assistant_content.as_deref(),
+                Some(bad_reply.as_str())
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn relay1_eval_mode_refuses_think_stripping_seat_at_setup() -> TestResult {
+    for bad_seat in [
+        json!({
+            "guild": "Saltworks",
+            "backend": "local",
+            "base_url": "http://127.0.0.1:18080/v1",
+            "model": "Qwen/Qwen3-32B",
+            "temperature": 0.0,
+            "max_output_tokens": 256,
+            "timeout_secs": 5.0,
+            "max_gpu_secs_per_call": 10.0,
+            "reasoning": { "effort": "low", "exclude_from_transcript": true }
+        }),
+        json!({
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "qwen/qwen3-32b",
+            "temperature": 0.0,
+            "max_output_tokens": 256,
+            "timeout_secs": 5.0,
+            "max_cost_per_call": 0.05,
+            "reasoning": { "effort": "medium", "exclude_from_transcript": true }
+        }),
+    ] {
+        let tmp = TempDir::new()?;
+        let wrapper = tmp.path().join("wrapper.md");
+        fs::write(&wrapper, "EVAL_MODE_THINK_WRAPPER\n")?;
+        let seats = SeatFile::from_json_str(
+            &json!({
+                "seats": [
+                    bad_seat,
+                    { "guild": "Weavers", "backend": "file" },
+                    { "guild": "Smiths", "backend": "file" },
+                    { "guild": "Dyers", "backend": "file" }
+                ]
+            })
+            .to_string(),
+            None,
+        )?;
+        let game_dir = tmp.path().join("think_seat_game");
+        write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY_01_TALK\n")?;
+
+        let eval_cfg = TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_eval_mode(true);
+
+        let Err(setup_err) = validate_scratchpad_setup(&eval_cfg) else {
+            return Err(
+                "validate_scratchpad_setup must refuse exclude_from_transcript=true in eval_mode"
+                    .into(),
+            );
+        };
+        assert!(matches!(
+            setup_err,
+            RelayError::EvalThinkStrippingForbidden(_)
+        ));
+        assert_eq!(setup_err.code(), "EVAL_THINK_STRIPPING_FORBIDDEN");
+        assert_eq!(setup_err.exit_code(), 1);
+
+        let transport = ScriptedTransport::new(vec![]);
+        let Err(turn_err) = run_turn(&eval_cfg, &transport, None) else {
+            return Err("run_turn must refuse exclude_from_transcript=true before any call".into());
+        };
+        assert!(matches!(
+            turn_err,
+            RelayError::EvalThinkStrippingForbidden(_)
+        ));
+        assert_eq!(turn_err.code(), "EVAL_THINK_STRIPPING_FORBIDDEN");
+        assert_eq!(transport.call_count(), 0);
+        assert!(!game_dir.join("relay").exists());
+
+        // Control: Play mode (`eval_mode == false`) still accepts `exclude_from_transcript: true`.
+        let play_cfg = TurnConfig::new(
+            game_dir,
+            "01".to_owned(),
+            Round::Talk,
+            seats,
+            Some(wrapper),
+            false,
+            None,
+        );
+        validate_scratchpad_setup(&play_cfg)?;
+    }
+    Ok(())
+}

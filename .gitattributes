@@ -1,2 +1,4 @@
 # Shell scripts keep LF endings on every checkout, so bash runs them on Windows too.
 *.sh text eol=lf
+# Preserve exact bytes of committed golden test fixtures across OS checkouts.
+crates/league-relay/tests/fixtures/play_mode_golden/** -text

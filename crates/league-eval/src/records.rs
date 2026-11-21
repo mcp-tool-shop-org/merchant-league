@@ -146,8 +146,27 @@ impl WrongPartCounter {
         self.recompute_rate();
     }
 
-    /// Record one evaluated model round that yielded no delivered reply (`no_reply == true`).
+    /// Record one evaluated model round that yielded no delivered reply (`no_reply == true`,
+    /// optionally carrying a wrong-round refusal detected from discarded raw JSON).
     pub fn record_no_reply(&mut self) {
+        self.total_model_rounds += 1;
+        self.recompute_rate();
+    }
+
+    /// Record one evaluated model round with `no_reply == true` whose discarded raw JSON
+    /// held a wrong-round payload (`TALK_REPLY_HAS_ORDERS` or `ACT_REPLY_HAS_MESSAGES`).
+    pub fn record_wrong_part_no_reply(&mut self, wrong_part_code: ReplyRefusalCode) {
+        match wrong_part_code {
+            ReplyRefusalCode::TalkReplyHasOrders => {
+                self.talk_reply_has_orders += 1;
+                self.total_wrong_part_refusals += 1;
+            }
+            ReplyRefusalCode::ActReplyHasMessages => {
+                self.act_reply_has_messages += 1;
+                self.total_wrong_part_refusals += 1;
+            }
+            _ => {}
+        }
         self.total_model_rounds += 1;
         self.recompute_rate();
     }
@@ -171,7 +190,8 @@ impl WrongPartCounter {
         self.wrong_part_rate_delivered = if self.delivered_model_replies == 0 {
             0.0
         } else {
-            (self.total_wrong_part_refusals as f64) / (self.delivered_model_replies as f64)
+            ((self.total_wrong_part_refusals as f64) / (self.delivered_model_replies as f64))
+                .min(1.0)
         };
         self.wrong_part_rate_all_rounds = if self.total_model_rounds == 0 {
             0.0
@@ -230,9 +250,15 @@ pub struct EvalDecisionRecord {
     pub keeps_notes: bool,
     /// `true` iff `keeps_notes` is true and a string `"notes"` key appeared in the raw reply (`1.4`).
     pub notes_present: bool,
-    /// Raw delivered `from-seat/` text (kept verbatim even on refusal; `None` if no reply / ClubBot).
+    /// Raw delivered `from-seat/` text (or discarded reply `assistant_content` when refused; `None` if timeout/transport failure or ClubBot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_reply: Option<String>,
+    /// Relative path (`relay/seats/...`) to the discarded-reply sidecar when `league-relay` discarded the reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discarded_reply_path: Option<String>,
+    /// Lowercase hex SHA-256 of the discarded-reply sidecar file (`CallLogEntry::reply_sha256`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discarded_reply_sha256: Option<String>,
     /// Total attempts recorded in `relay/calls.jsonl` for this seat-round (`A1.1`).
     #[serde(default)]
     pub attempts: u32,
@@ -406,20 +432,26 @@ pub fn summarize_branch_outcomes(outcomes: &[BranchArmOutcome]) -> BranchSummary
             arm_counts.refused_bundles += 1;
         }
         if dec.seat_kind == "Model" {
+            let wrong_part = dec
+                .refusal_code
+                .as_deref()
+                .and_then(ReplyRefusalCode::from_code_str)
+                .filter(|&c| {
+                    matches!(
+                        c,
+                        ReplyRefusalCode::TalkReplyHasOrders
+                            | ReplyRefusalCode::ActReplyHasMessages
+                    )
+                });
             if dec.no_reply {
-                summary.wrong_part_refusals.record_no_reply();
+                if let Some(wp_code) = wrong_part {
+                    summary
+                        .wrong_part_refusals
+                        .record_wrong_part_no_reply(wp_code);
+                } else {
+                    summary.wrong_part_refusals.record_no_reply();
+                }
             } else {
-                let wrong_part = dec
-                    .refusal_code
-                    .as_deref()
-                    .and_then(ReplyRefusalCode::from_code_str)
-                    .filter(|&c| {
-                        matches!(
-                            c,
-                            ReplyRefusalCode::TalkReplyHasOrders
-                                | ReplyRefusalCode::ActReplyHasMessages
-                        )
-                    });
                 summary
                     .wrong_part_refusals
                     .record_delivered_reply(wrong_part);
