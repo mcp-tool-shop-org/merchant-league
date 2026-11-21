@@ -12,6 +12,7 @@ pub mod commit;
 pub mod contracts;
 pub mod engine;
 pub mod error;
+pub mod eval;
 pub mod observation;
 pub mod predicates;
 pub mod replay;
@@ -22,6 +23,10 @@ pub use bot::{ClubBot, ClubBotDecision};
 pub use club::{
     CLUB_SAVE_FORMAT_VERSION, CLUB_SEAL_FORMAT_VERSION, ClubHost, ClubSaveSnapshot,
     DEFAULT_CLUB_HUMAN_REGENT_DOCTRINE,
+};
+pub use eval::{
+    EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActApplyOutcome, EvalActSubmission,
+    EvalHost, EvalSaveSnapshot, EvalSeatApplyReport,
 };
 
 pub use commit::{

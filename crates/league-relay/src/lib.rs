@@ -42,7 +42,7 @@ pub use secret::{
     MAX_REDACTION_SCAN_BYTES, MAX_UNRECORDED_CHARGE_SCAN_BYTES, OPENROUTER_API_KEY_ENV,
     REDACTED_MARKER, cap_utf8_bytes, collect_env_redaction_keys, install_redacting_panic_hook,
     install_redacting_panic_hook_with_level, panic_hook_log_level, redact_and_truncate,
-    redact_secrets, redact_secrets_multi_with_limit, redact_secrets_multi_with_limit_and_paths,
+    redact_credentials_multi_with_limit_and_paths, redact_secrets, redact_secrets_multi_with_limit,
     redact_secrets_with_limit, set_panic_hook_log_level, truncate_after_redaction,
 };
 pub use transport::{

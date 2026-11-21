@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Wave 2 Card 10 PR 1 (`league-relay`, `league-core`, docs):
+  - **Public API rename (Card 9 review C1):** renamed `league_relay::redact_secrets_multi_with_limit_and_paths` (`secret.rs`, `lib.rs`, `relay.rs`, `docs/paper-test/relay.md`) to `league_relay::redact_credentials_multi_with_limit_and_paths` with no behaviour change so callers cannot mistake the credential-only scrubber for full log/error redaction.
+  - **Evaluation host (`league-core` `eval::host::EvalHost`):** added `EvalHost`, `EvalSaveSnapshot`, `EvalActSubmission`, `EvalSeatApplyReport`, `EvalActApplyOutcome`, `EVAL_SAVE_FORMAT_VERSION`, and `EVAL_SEAL_FORMAT_VERSION` strictly for `TableMode::Eval` (`Club` and `Game` refused), pre-deriving all `32` `EvalVrf` proofs and per-turn OS reveal salts and dropping `SealedEvalSeed` in memory; added atomic `eval-<id>.save.json` / `.seal`, `checkpoints/day-DD-pre-act.{save.json,seal}`, `checkpoints/day-DD-act-recorded.seal`, `EvalHost::fork_from_checkpoint`, `EvalHost::apply_act_submissions` / `apply_recorded_act_submissions_from_seal`, `EvalHost::finalize_eval_season` / `export_replay_log` (`SeasonReplayLog::from_eval_json_slice`), and matching `raw_api_backdoor_guard.rs` host allow-list rules (`ClubHost` unchanged); added `docs/eval-harness.md` and updated `docs/club-mode-design.md`; CI (`44873406696` at `179dca6`) workspace lines coverage `92.11%` against the `92%` floor (`2026-11-21`).
+
 ## [0.1.0] - 2026-11-20
 
 First tagged prototype release: offline Club Mode in `league-tui`, playable from source on one shared terminal (4–6 human and `ClubBot` seats, Lobby to end-of-season scoreboard and replay export). Source only: no published binaries and no published container image. Testnet only. Everything below was built on the way.
