@@ -40,10 +40,18 @@ pub enum EvalError {
     UnknownFocalSeat(String),
     /// A configured model seat sets `reasoning.exclude_from_transcript: true`, forbidden in Eval (`exit 1`).
     EvalThinkStrippingForbidden(String),
+    /// A `relay/seats/` transcript file required by `branch` is missing when prior model rounds exist (`exit 1`).
+    MissingBranchTranscript(String),
+    /// A `checkpoints/` pre-act scratchpad file required by `branch` is missing (`exit 1`).
+    MissingBranchScratchpad(String),
     /// Required pre-act `<game_dir>/to-seat/day-DD-act-<Guild>.negotiation.json` missing for `branch` (`exit 1`).
     MissingBranchNegotiation(String),
     /// Branch arm output directory already exists and is non-empty (`exit 1`).
     BranchArmDirNotEmpty(String),
+    /// Branch `--out` directory already contains `branch_summary.json` (`exit 1`).
+    BranchSummaryExists(String),
+    /// Computed wrong-part refusal rate exceeded `[0.0, 1.0]` (`exit 2`).
+    InvalidWrongPartRate(String),
     /// Required source `<game_dir>/setup.json` missing for `play` resume or `branch` check (`exit 1`).
     MissingSourceSetup(String),
     /// Wrapper, seats file digest, memory mode, arm, table, or seed disagrees with source `setup.json` (`exit 1`).
@@ -76,8 +84,12 @@ impl EvalError {
             Self::InvalidStrata(_) => "INVALID_STRATA",
             Self::UnknownFocalSeat(_) => "UNKNOWN_FOCAL_SEAT",
             Self::EvalThinkStrippingForbidden(_) => "EVAL_THINK_STRIPPING_FORBIDDEN",
+            Self::MissingBranchTranscript(_) => "MISSING_BRANCH_TRANSCRIPT",
+            Self::MissingBranchScratchpad(_) => "MISSING_BRANCH_SCRATCHPAD",
             Self::MissingBranchNegotiation(_) => "MISSING_BRANCH_NEGOTIATION",
             Self::BranchArmDirNotEmpty(_) => "BRANCH_ARM_DIR_NOT_EMPTY",
+            Self::BranchSummaryExists(_) => "BRANCH_SUMMARY_EXISTS",
+            Self::InvalidWrongPartRate(_) => "INVALID_WRONG_PART_RATE",
             Self::MissingSourceSetup(_) => "MISSING_SOURCE_SETUP",
             Self::IncompatibleEvalSetup(_) => "INCOMPATIBLE_EVAL_SETUP",
             Self::PartialTurnFromSeatExists(_) => "PARTIAL_TURN_FROM_SEAT_EXISTS",
@@ -102,14 +114,20 @@ impl EvalError {
             | Self::InvalidStrata(_)
             | Self::UnknownFocalSeat(_)
             | Self::EvalThinkStrippingForbidden(_)
+            | Self::MissingBranchTranscript(_)
+            | Self::MissingBranchScratchpad(_)
             | Self::MissingBranchNegotiation(_)
             | Self::BranchArmDirNotEmpty(_)
+            | Self::BranchSummaryExists(_)
             | Self::MissingSourceSetup(_)
             | Self::IncompatibleEvalSetup(_)
             | Self::PartialTurnFromSeatExists(_)
             | Self::NoModelSeatsForSelect(_) => EXIT_USER_ERROR,
             Self::Relay(err) => err.exit_code(),
-            Self::SchemaValidation(_) | Self::Engine(_) | Self::Io(_) => EXIT_RUNTIME_ERROR,
+            Self::InvalidWrongPartRate(_)
+            | Self::SchemaValidation(_)
+            | Self::Engine(_)
+            | Self::Io(_) => EXIT_RUNTIME_ERROR,
         }
     }
 }
@@ -157,11 +175,23 @@ impl fmt::Display for EvalError {
                     scrub_secret_text(msg)
                 )
             }
+            Self::MissingBranchTranscript(msg) => {
+                write!(f, "MISSING_BRANCH_TRANSCRIPT: {}", scrub_secret_text(msg))
+            }
+            Self::MissingBranchScratchpad(msg) => {
+                write!(f, "MISSING_BRANCH_SCRATCHPAD: {}", scrub_secret_text(msg))
+            }
             Self::MissingBranchNegotiation(msg) => {
                 write!(f, "MISSING_BRANCH_NEGOTIATION: {}", scrub_secret_text(msg))
             }
             Self::BranchArmDirNotEmpty(msg) => {
                 write!(f, "BRANCH_ARM_DIR_NOT_EMPTY: {}", scrub_secret_text(msg))
+            }
+            Self::BranchSummaryExists(msg) => {
+                write!(f, "BRANCH_SUMMARY_EXISTS: {}", scrub_secret_text(msg))
+            }
+            Self::InvalidWrongPartRate(msg) => {
+                write!(f, "INVALID_WRONG_PART_RATE: {}", scrub_secret_text(msg))
             }
             Self::MissingSourceSetup(msg) => {
                 write!(f, "MISSING_SOURCE_SETUP: {}", scrub_secret_text(msg))
@@ -263,6 +293,18 @@ impl ToStructuredError for EvalError {
                 "set `reasoning.exclude_from_transcript: false` (or omit it) for every seat in Evaluation Mode",
                 false,
             ),
+            Self::MissingBranchTranscript(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure `relay/seats/<Guild>.jsonl` exists in the source game directory before branching",
+                false,
+            ),
+            Self::MissingBranchScratchpad(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure `checkpoints/day-DD-pre-act.<Guild>.scratchpad.md` exists before branching note-keeping seats",
+                false,
+            ),
             Self::MissingBranchNegotiation(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
@@ -273,6 +315,18 @@ impl ToStructuredError for EvalError {
                 self.code(),
                 self.to_string(),
                 "pass a fresh empty `--out` directory for `league-eval branch`",
+                false,
+            ),
+            Self::BranchSummaryExists(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass a fresh `--out` directory that does not already contain `branch_summary.json`",
+                false,
+            ),
+            Self::InvalidWrongPartRate(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "verify decision refusal counters do not exceed evaluated model round denominators",
                 false,
             ),
             Self::MissingSourceSetup(_) => StructuredError::new(

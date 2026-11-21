@@ -1990,8 +1990,13 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     assert!(d2_act.discarded_reply_path.is_some());
     assert!(d2_act.discarded_reply_sha256.is_some());
 
-    // 4 evaluated rounds, 3 delivered, 1 no_reply, 1 wrong-part refusal:
+    // 4 evaluated rounds, 3 delivered, 1 no_reply, 1 delivered wrong-part refusal:
     assert_eq!(manifest.wrong_part_refusals.talk_reply_has_orders, 1);
+    assert_eq!(
+        manifest.wrong_part_refusals.delivered_wrong_part_refusals,
+        1
+    );
+    assert_eq!(manifest.wrong_part_refusals.no_reply_wrong_part_refusals, 0);
     assert_eq!(manifest.wrong_part_refusals.delivered_model_replies, 3);
     assert_eq!(manifest.wrong_part_refusals.total_model_rounds, 4);
     assert!((manifest.wrong_part_refusals.wrong_part_rate_delivered - (1.0 / 3.0)).abs() < 1e-12);
@@ -2164,13 +2169,30 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
         );
         assert_eq!(talk_manifest.wrong_part_refusals.talk_reply_has_orders, 1);
         assert_eq!(
+            talk_manifest
+                .wrong_part_refusals
+                .delivered_wrong_part_refusals,
+            0
+        );
+        assert_eq!(
+            talk_manifest
+                .wrong_part_refusals
+                .no_reply_wrong_part_refusals,
+            1
+        );
+        assert_eq!(
             talk_manifest.wrong_part_refusals.total_wrong_part_refusals,
             1
         );
         assert_eq!(talk_manifest.wrong_part_refusals.delivered_model_replies, 1);
         assert_eq!(talk_manifest.wrong_part_refusals.total_model_rounds, 2);
+        assert_eq!(
+            talk_manifest.wrong_part_refusals.wrong_part_rate_delivered,
+            0.0
+        );
+        assert!((talk_manifest.wrong_part_refusals.wrong_part_rate_all_rounds - 0.5).abs() < 1e-12);
         assert!(
-            talk_manifest
+            !talk_manifest
                 .wrong_part_refusals
                 .exceeds_five_percent_preflight_stop_line_delivered
         );
@@ -2235,8 +2257,25 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
         assert!(d1_act.discarded_reply_path.is_some());
         assert!(d1_act.discarded_reply_sha256.is_some());
         assert_eq!(act_manifest.wrong_part_refusals.act_reply_has_messages, 1);
-        assert!(
+        assert_eq!(
             act_manifest
+                .wrong_part_refusals
+                .delivered_wrong_part_refusals,
+            0
+        );
+        assert_eq!(
+            act_manifest
+                .wrong_part_refusals
+                .no_reply_wrong_part_refusals,
+            1
+        );
+        assert_eq!(
+            act_manifest.wrong_part_refusals.wrong_part_rate_delivered,
+            0.0
+        );
+        assert!((act_manifest.wrong_part_refusals.wrong_part_rate_all_rounds - 0.5).abs() < 1e-12);
+        assert!(
+            !act_manifest
                 .wrong_part_refusals
                 .exceeds_five_percent_preflight_stop_line_delivered
         );

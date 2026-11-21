@@ -29261,9 +29261,27 @@ fn card8_fix2_e_raw_file_write_failure_stops_with_named_code_exit_2_and_zero_fur
     Ok(())
 }
 
-fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Error>> {
-    assert!(!raw_line.contains("http_reply_sha256"));
-    let parsed: Json = serde_json::from_str(raw_line)?;
+fn replace_json_string_field_preserving_layout(
+    s: &str,
+    pat: &str,
+    replacement: &str,
+) -> Result<String, String> {
+    let Some(start) = s.find(pat) else {
+        return Ok(s.to_owned());
+    };
+    let val_start = start + pat.len();
+    let rest = &s[val_start..];
+    let Some(rel_end) = rest.find('"') else {
+        return Err(format!("unterminated string value for {pat}"));
+    };
+    let mut out = String::with_capacity(s.len());
+    out.push_str(&s[..val_start]);
+    out.push_str(replacement);
+    out.push_str(&rest[rel_end..]);
+    Ok(out)
+}
+
+fn mask_common_call_log_fields(raw_line: &str, parsed: &Json) -> Result<String, Box<dyn Error>> {
     let time_utc = parsed["time_utc"].as_str().ok_or("missing time_utc")?;
     assert!(
         time_utc.ends_with('Z') && time_utc.len() >= 20,
@@ -29279,22 +29297,6 @@ fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Err
         assert!(!r.is_empty());
     }
 
-    let replace_string_field = |s: &str, key: &str, replacement: &str| -> Result<String, String> {
-        let pat = format!("\"{key}\":\"");
-        let Some(start) = s.find(&pat) else {
-            return Ok(s.to_owned());
-        };
-        let val_start = start + pat.len();
-        let rest = &s[val_start..];
-        let Some(rel_end) = rest.find('"') else {
-            return Err(format!("unterminated string value for {key}"));
-        };
-        let mut out = String::with_capacity(s.len());
-        out.push_str(&s[..val_start]);
-        out.push_str(replacement);
-        out.push_str(&rest[rel_end..]);
-        Ok(out)
-    };
     let replace_number_field = |s: &str, key: &str, replacement: &str| -> String {
         let pat = format!("\"{key}\":");
         let Some(start) = s.find(&pat) else {
@@ -29310,11 +29312,21 @@ fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Err
         out
     };
 
-    let s = replace_string_field(raw_line, "time_utc", "<TIME_UTC>")?;
+    let s = replace_json_string_field_preserving_layout(raw_line, "\"time_utc\":\"", "<TIME_UTC>")?;
     let s = replace_number_field(&s, "wall_secs", "<WALL_SECS>");
     let s = replace_number_field(&s, "latency_ms", "<LATENCY_MS>");
-    let s = replace_string_field(&s, "reservation_id", "<RESERVATION_ID>")?;
+    let s = replace_json_string_field_preserving_layout(
+        &s,
+        "\"reservation_id\":\"",
+        "<RESERVATION_ID>",
+    )?;
     Ok(s)
+}
+
+fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Error>> {
+    assert!(!raw_line.contains("http_reply_sha256"));
+    let parsed: Json = serde_json::from_str(raw_line)?;
+    mask_common_call_log_fields(raw_line, &parsed)
 }
 
 #[test]
@@ -31510,6 +31522,32 @@ fn run_play_mode_golden_3turn_fixture(tmp_root: &Path, game_dir: &Path) -> TestR
     Ok(())
 }
 
+fn mask_calls_jsonl_whole_file_with(
+    raw_bytes: &[u8],
+    mask_line: fn(&str) -> Result<String, Box<dyn Error>>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let text = std::str::from_utf8(raw_bytes)?;
+    assert!(!text.contains('\r'), "Play-mode calls.jsonl must use LF");
+    assert!(
+        text.ends_with('\n'),
+        "Play-mode calls.jsonl must end with a single LF"
+    );
+    let segments: Vec<&str> = text.split('\n').collect();
+    let mut masked_segments = Vec::with_capacity(segments.len());
+    for (idx, seg) in segments.iter().enumerate() {
+        if idx + 1 == segments.len() && seg.is_empty() {
+            masked_segments.push(String::new());
+        } else {
+            assert!(
+                !seg.is_empty(),
+                "unexpected blank line or extra trailing newline at segment {idx} in calls.jsonl"
+            );
+            masked_segments.push(mask_line(seg)?);
+        }
+    }
+    Ok(masked_segments.join("\n").into_bytes())
+}
+
 fn verify_game_dir_matches_play_mode_golden(game_dir: &Path, golden_root: &Path) -> TestResult {
     let mut actual_files = Vec::new();
     collect_relative_files_sorted(game_dir, game_dir, &mut actual_files)?;
@@ -31525,23 +31563,12 @@ fn verify_game_dir_matches_play_mode_golden(game_dir: &Path, golden_root: &Path)
         let actual_bytes = fs::read(game_dir.join(rel))?;
         let golden_bytes = fs::read(golden_root.join(rel))?;
         if rel == "relay/calls.jsonl" {
-            let actual_str = std::str::from_utf8(&actual_bytes)?;
-            let golden_str = std::str::from_utf8(&golden_bytes)?;
-            assert!(
-                !actual_str.contains('\r'),
-                "Play-mode calls.jsonl must use LF"
+            let masked_bytes =
+                mask_calls_jsonl_whole_file_with(&actual_bytes, canonicalize_b2d77ce8_call_line)?;
+            assert_eq!(
+                masked_bytes, golden_bytes,
+                "Play-mode calls.jsonl whole-file bytes diverged after masking time_utc, wall_secs, latency_ms, reservation_id"
             );
-            let actual_lines: Vec<&str> = actual_str.lines().collect();
-            let golden_lines: Vec<&str> = golden_str.lines().collect();
-            assert_eq!(actual_lines.len(), golden_lines.len());
-            for (idx, (a_line, g_line)) in actual_lines.iter().zip(golden_lines.iter()).enumerate()
-            {
-                let a_masked = canonicalize_b2d77ce8_call_line(a_line)?;
-                assert_eq!(
-                    a_masked, *g_line,
-                    "Play-mode calls.jsonl line {idx} diverged after masking time_utc, wall_secs, latency_ms, reservation_id"
-                );
-            }
         } else {
             assert_eq!(
                 actual_bytes, golden_bytes,
@@ -31572,13 +31599,9 @@ fn relay1_play_mode_eval_false_reproduces_committed_golden_set_byte_for_byte() -
             }
             let src_bytes = fs::read(game_dir.join(rel))?;
             if rel == "relay/calls.jsonl" {
-                let src_str = std::str::from_utf8(&src_bytes)?;
-                let mut masked_out = String::new();
-                for line in src_str.lines().filter(|l| !l.trim().is_empty()) {
-                    masked_out.push_str(&canonicalize_b2d77ce8_call_line(line)?);
-                    masked_out.push('\n');
-                }
-                fs::write(&dst, masked_out.as_bytes())?;
+                let masked =
+                    mask_calls_jsonl_whole_file_with(&src_bytes, canonicalize_b2d77ce8_call_line)?;
+                fs::write(&dst, &masked)?;
             } else {
                 fs::write(&dst, &src_bytes)?;
             }
@@ -31856,5 +31879,317 @@ fn relay1_eval_mode_refuses_think_stripping_seat_at_setup() -> TestResult {
         );
         validate_scratchpad_setup(&play_cfg)?;
     }
+    Ok(())
+}
+
+fn mask_play_on_calls_line(raw_line: &str) -> Result<String, Box<dyn Error>> {
+    let parsed: Json = serde_json::from_str(raw_line)?;
+    let s = mask_common_call_log_fields(raw_line, &parsed)?;
+    let s = if parsed
+        .get("http_reply_sha256")
+        .and_then(|v| v.as_str())
+        .is_some()
+    {
+        replace_json_string_field_preserving_layout(
+            &s,
+            "\"http_reply_sha256\":\"",
+            "<HTTP_REPLY_SHA256>",
+        )?
+    } else {
+        assert_eq!(parsed["http_reply_sha256"], Json::Null);
+        s
+    };
+    let is_ok_row = parsed["outcome"].as_str() == Some("OK");
+    if !is_ok_row
+        && parsed
+            .get("reply_sha256")
+            .and_then(|v| v.as_str())
+            .is_some()
+    {
+        Ok(replace_json_string_field_preserving_layout(
+            &s,
+            "\"reply_sha256\":\"",
+            "<DISCARDED_REPLY_SHA256>",
+        )?)
+    } else {
+        Ok(s)
+    }
+}
+
+fn mask_play_on_sidecar_whole_file(rel: &str, raw_bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let text = std::str::from_utf8(raw_bytes)?;
+    assert!(!text.contains('\r'), "sidecar `{rel}` must use LF");
+    if rel.contains(".http-reply-round-") {
+        let _: SavedHttpReplyRecord = serde_json::from_str(text)?;
+    } else {
+        let _: SavedDiscardedReplyRecord = serde_json::from_str(text)?;
+    }
+    let masked = replace_json_string_field_preserving_layout(text, "\"run_id\": \"", "<RUN_ID>")?;
+    let masked = replace_json_string_field_preserving_layout(
+        &masked,
+        "\"reservation_id\": \"",
+        "<RESERVATION_ID>",
+    )?;
+    Ok(masked.into_bytes())
+}
+
+fn run_play_mode_on_arm_golden_3turn_fixture(tmp_root: &Path, game_dir: &Path) -> TestResult {
+    let wrapper = tmp_root.join("on_golden_wrapper.md");
+    fs::write(&wrapper, "ON_GOLDEN_PARITY_WRAPPER\n")?;
+    let schema_path = tmp_root.join("on_golden_schema.json");
+    fs::write(
+        &schema_path,
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "on_golden_reply",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["reply"],
+                    "properties": {
+                        "reply": { "type": "string" }
+                    }
+                }
+            }
+        })
+        .to_string(),
+    )?;
+    let seats_path = tmp_root.join("on_golden_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp_root.join("on_golden_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "ON_GOLDEN_TURN1_TALK_OK",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-on-golden-1",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "{\"reply\":\"ON_GOLDEN_TALK_OK\"}" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                            "total_tokens": 18,
+                            "cost": 0.02
+                        }
+                    }
+                },
+                {
+                    "when_contains": "ON_GOLDEN_TURN2_ACT_BAD",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-on-golden-2",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "{\"wrong_key\":1}" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 13,
+                            "completion_tokens": 4,
+                            "total_tokens": 17,
+                            "cost": 0.015
+                        }
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "talk",
+        "Saltworks",
+        "ON_GOLDEN_TURN1_TALK_OK\n",
+    )?;
+    write_card7_preview_state(
+        game_dir,
+        "01",
+        "Saltworks",
+        &card7_standard_preview_state(0)?,
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "act",
+        "Saltworks",
+        "ON_GOLDEN_TURN2_ACT_BAD\n",
+    )?;
+    write_to_seat(game_dir, "02", "talk", "Saltworks", "ON_GOLDEN_TURN3_CAP\n")?;
+    for (day, round, expected_exit) in [("01", "talk", 0), ("01", "act", 3), ("02", "talk", 3)] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                game_dir.to_str().ok_or("utf8")?,
+                "--day",
+                day,
+                "--round",
+                round,
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema_path.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "on",
+                "--cap-credits",
+                "0.09",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            expected_exit,
+            "on-arm day {day} {round} stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+    Ok(())
+}
+
+fn verify_game_dir_matches_play_on_golden(game_dir: &Path, golden_root: &Path) -> TestResult {
+    let calls = read_calls_log(game_dir)?;
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[0].outcome, "OK");
+    let talk_from_sha = sha256_hex(&fs::read(
+        game_dir.join("from-seat/day-01-talk-Saltworks.md"),
+    )?);
+    assert_eq!(
+        calls[0].reply_sha256.as_deref(),
+        Some(talk_from_sha.as_str())
+    );
+    for row in &calls[0..3] {
+        let h_path =
+            http_reply_file_path(game_dir, &row.guild, &row.day, row.round, 0, row.attempt);
+        let h_sha = sha256_hex(&fs::read(&h_path)?);
+        assert_eq!(row.http_reply_sha256, Some(Some(h_sha)));
+        if row.outcome != "OK" {
+            let d_path = discarded_reply_file_path(
+                game_dir,
+                &row.guild,
+                &row.day,
+                row.round,
+                0,
+                row.attempt,
+            );
+            let d_sha = sha256_hex(&fs::read(&d_path)?);
+            assert_eq!(row.reply_sha256.as_deref(), Some(d_sha.as_str()));
+        }
+    }
+    assert_eq!(calls[3].outcome, "CAP_REACHED");
+    assert_eq!(calls[3].http_reply_sha256, Some(None));
+    assert_eq!(calls[3].reply_sha256, None);
+
+    let mut actual_files = Vec::new();
+    collect_relative_files_sorted(game_dir, game_dir, &mut actual_files)?;
+    let mut expected_files = Vec::new();
+    collect_relative_files_sorted(golden_root, golden_root, &mut expected_files)?;
+    assert_eq!(
+        actual_files, expected_files,
+        "Play-mode on-arm file tree must match committed golden set"
+    );
+
+    for rel in &expected_files {
+        assert!(!rel.contains('\\'), "unexpected backslash in {rel}");
+        let actual_bytes = fs::read(game_dir.join(rel))?;
+        let golden_bytes = fs::read(golden_root.join(rel))?;
+        if rel == "relay/calls.jsonl" {
+            let masked_bytes =
+                mask_calls_jsonl_whole_file_with(&actual_bytes, mask_play_on_calls_line)?;
+            assert_eq!(
+                masked_bytes, golden_bytes,
+                "Play-mode on-arm calls.jsonl whole-file bytes diverged after masking time_utc, wall_secs, latency_ms, reservation_id, http_reply_sha256, discarded reply_sha256"
+            );
+        } else if rel.starts_with("relay/seats/")
+            && (rel.contains(".http-reply-round-") || rel.contains(".discarded-round-"))
+        {
+            let masked_bytes = mask_play_on_sidecar_whole_file(rel, &actual_bytes)?;
+            assert_eq!(
+                masked_bytes, golden_bytes,
+                "Play-mode on-arm sidecar `{rel}` diverged after masking run_id and reservation_id"
+            );
+        } else {
+            assert_eq!(
+                actual_bytes, golden_bytes,
+                "Play-mode on-arm unmasked file `{rel}` diverged byte-for-byte from golden fixture"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn play_mode_on_arm_reproduces_committed_golden_set_byte_for_byte() -> TestResult {
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("play_on_golden_game");
+    run_play_mode_on_arm_golden_3turn_fixture(tmp.path(), &game_dir)?;
+
+    let golden_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/play_mode_on_golden");
+    if std::env::var_os("GENERATE_PLAY_MODE_ON_GOLDEN").is_some() {
+        if golden_root.exists() {
+            fs::remove_dir_all(&golden_root)?;
+        }
+        let mut actual_files = Vec::new();
+        collect_relative_files_sorted(&game_dir, &game_dir, &mut actual_files)?;
+        for rel in &actual_files {
+            let dst = golden_root.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let src_bytes = fs::read(game_dir.join(rel))?;
+            if rel == "relay/calls.jsonl" {
+                let masked = mask_calls_jsonl_whole_file_with(&src_bytes, mask_play_on_calls_line)?;
+                fs::write(&dst, &masked)?;
+            } else if rel.starts_with("relay/seats/")
+                && (rel.contains(".http-reply-round-") || rel.contains(".discarded-round-"))
+            {
+                let masked = mask_play_on_sidecar_whole_file(rel, &src_bytes)?;
+                fs::write(&dst, &masked)?;
+            } else {
+                fs::write(&dst, &src_bytes)?;
+            }
+        }
+    }
+
+    verify_game_dir_matches_play_on_golden(&game_dir, &golden_root)?;
     Ok(())
 }

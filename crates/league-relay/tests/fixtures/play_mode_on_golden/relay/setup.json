@@ -1,0 +1,46 @@
+{
+  "memory_mode": "snapshot",
+  "scratchpad": "none (no tokenizer)",
+  "cost_unit": "credits",
+  "wording_arm": "v2_preview_2026_11_20_r2",
+  "preview_tool": "on",
+  "response_schema_name": "on_golden_reply",
+  "response_schema_sha256": "5034db3cf7abfdd16669a06ca55bd25528cfa7055a045007111473a8d966a91e",
+  "non_pinned_model_facing_strings": [
+    {
+      "source": "system_wrapper",
+      "text": "ON_GOLDEN_PARITY_WRAPPER\n"
+    },
+    {
+      "source": "response_format.json_schema.name",
+      "text": "on_golden_reply"
+    },
+    {
+      "source": "response_format.json_schema.schema.properties.reply",
+      "text": "reply"
+    }
+  ],
+  "seats": [
+    {
+      "guild": "Saltworks",
+      "backend": "openrouter",
+      "model": "google/gemini-2.5-pro-06-05",
+      "scratchpad": "none (no tokenizer)"
+    },
+    {
+      "guild": "Weavers",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    },
+    {
+      "guild": "Smiths",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    },
+    {
+      "guild": "Dyers",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    }
+  ]
+}

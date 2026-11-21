@@ -1,0 +1,16 @@
+{
+  "day": "01",
+  "round": "act",
+  "guild": "Saltworks",
+  "run_id": "<RUN_ID>",
+  "reservation_id": "<RESERVATION_ID>",
+  "request_body_sha256": "120ab647616da56b3abbc861121c8a1a792fc2eed6776f5c78801532f9adb1a9",
+  "round_index": 0,
+  "attempt": 1,
+  "status": 200,
+  "is_late": false,
+  "body_redacted": false,
+  "redacted_secret_field_paths": [],
+  "body_sha256": "aef35ce1b800b6cd48b6963e575dda7b78a2a057f04329769c611ce68bc7eb95",
+  "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"{\\\"wrong_key\\\":1}\",\"role\":\"assistant\"}}],\"id\":\"gen-on-golden-2\",\"model\":\"google/gemini-2.5-pro-06-05\",\"usage\":{\"completion_tokens\":4,\"cost\":0.015,\"prompt_tokens\":13,\"total_tokens\":17}}"
+}

@@ -6,6 +6,7 @@ use league_core::{EvalActSubmission, EvalSeatApplyReport, PublicSweepReceipt, Se
 use league_relay::{Round, sha256_hex};
 use serde::{Deserialize, Serialize};
 
+use crate::error::EvalError;
 use crate::reply::ReplyRefusalCode;
 
 /// Stated limit included in every Evaluation manifest (`Item 9` addendum 1.10).
@@ -97,15 +98,23 @@ impl RefusalCodeCounts {
 }
 
 /// Cumulative counter of wrong-part refusals (`TALK_REPLY_HAS_ORDERS` + `ACT_REPLY_HAS_MESSAGES`)
-/// reporting both denominators: delivered replies only (`delivered_model_replies`) and all evaluated
-/// model rounds including `no_reply` (`total_model_rounds`) (`Item 9` 1.8, `B1`).
+/// tracking delivered wrong-part replies separately from `no_reply` wrong-round refusals and
+/// reporting both rates: `wrong_part_rate_delivered` (delivered wrong-part replies over
+/// `delivered_model_replies`) and `wrong_part_rate_all_rounds` (all wrong-round refusals over
+/// `total_model_rounds`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WrongPartCounter {
     /// Count of `TALK_REPLY_HAS_ORDERS`.
     pub talk_reply_has_orders: u64,
     /// Count of `ACT_REPLY_HAS_MESSAGES`.
     pub act_reply_has_messages: u64,
-    /// Sum `talk_reply_has_orders + act_reply_has_messages`.
+    /// Count of wrong-part refusals across delivered replies (`delivered_model_replies`).
+    #[serde(default)]
+    pub delivered_wrong_part_refusals: u64,
+    /// Count of wrong-round refusals across `no_reply` rounds whose discarded raw JSON carried wrong-round content.
+    #[serde(default)]
+    pub no_reply_wrong_part_refusals: u64,
+    /// Sum of delivered and no-reply wrong-round refusals (`talk_reply_has_orders + act_reply_has_messages`).
     pub total_wrong_part_refusals: u64,
     /// Total delivered model replies evaluated (both rounds, any seat, any arm).
     #[serde(alias = "total_model_replies")]
@@ -113,10 +122,10 @@ pub struct WrongPartCounter {
     /// Total evaluated model rounds including `no_reply` rounds.
     #[serde(default)]
     pub total_model_rounds: u64,
-    /// Wrong-part rate over `delivered_model_replies` in `[0.0, 1.0]`.
+    /// True delivered wrong-part rate (`delivered_wrong_part_refusals / delivered_model_replies`, `0.0` when `delivered_model_replies == 0`). Never clamped.
     #[serde(alias = "wrong_part_rate")]
     pub wrong_part_rate_delivered: f64,
-    /// Wrong-part rate over `total_model_rounds` in `[0.0, 1.0]`.
+    /// All-rounds wrong-part rate (`(delivered_wrong_part_refusals + no_reply_wrong_part_refusals) / total_model_rounds`, `0.0` when `total_model_rounds == 0`). Never clamped.
     #[serde(default)]
     pub wrong_part_rate_all_rounds: f64,
     /// `true` iff `wrong_part_rate_delivered > 0.05` (`1.8` stop line).
@@ -135,10 +144,12 @@ impl WrongPartCounter {
         match wrong_part_code {
             Some(ReplyRefusalCode::TalkReplyHasOrders) => {
                 self.talk_reply_has_orders += 1;
+                self.delivered_wrong_part_refusals += 1;
                 self.total_wrong_part_refusals += 1;
             }
             Some(ReplyRefusalCode::ActReplyHasMessages) => {
                 self.act_reply_has_messages += 1;
+                self.delivered_wrong_part_refusals += 1;
                 self.total_wrong_part_refusals += 1;
             }
             _ => {}
@@ -147,7 +158,7 @@ impl WrongPartCounter {
     }
 
     /// Record one evaluated model round that yielded no delivered reply (`no_reply == true`,
-    /// optionally carrying a wrong-round refusal detected from discarded raw JSON).
+    /// without wrong-round content).
     pub fn record_no_reply(&mut self) {
         self.total_model_rounds += 1;
         self.recompute_rate();
@@ -159,10 +170,12 @@ impl WrongPartCounter {
         match wrong_part_code {
             ReplyRefusalCode::TalkReplyHasOrders => {
                 self.talk_reply_has_orders += 1;
+                self.no_reply_wrong_part_refusals += 1;
                 self.total_wrong_part_refusals += 1;
             }
             ReplyRefusalCode::ActReplyHasMessages => {
                 self.act_reply_has_messages += 1;
+                self.no_reply_wrong_part_refusals += 1;
                 self.total_wrong_part_refusals += 1;
             }
             _ => {}
@@ -180,23 +193,62 @@ impl WrongPartCounter {
     pub fn merge_from(&mut self, other: &Self) {
         self.talk_reply_has_orders += other.talk_reply_has_orders;
         self.act_reply_has_messages += other.act_reply_has_messages;
+        self.delivered_wrong_part_refusals += other.delivered_wrong_part_refusals;
+        self.no_reply_wrong_part_refusals += other.no_reply_wrong_part_refusals;
         self.total_wrong_part_refusals += other.total_wrong_part_refusals;
         self.delivered_model_replies += other.delivered_model_replies;
         self.total_model_rounds += other.total_model_rounds;
         self.recompute_rate();
     }
 
+    /// Validate that computed rates and numerators remain within `[0.0, 1.0]` without clamping.
+    pub fn validate_rates(&self) -> Result<(), EvalError> {
+        let all_wrong_part = self
+            .delivered_wrong_part_refusals
+            .saturating_add(self.no_reply_wrong_part_refusals);
+        if self.delivered_wrong_part_refusals > self.delivered_model_replies
+            || !self.wrong_part_rate_delivered.is_finite()
+            || !(0.0..=1.0).contains(&self.wrong_part_rate_delivered)
+        {
+            return Err(EvalError::InvalidWrongPartRate(format!(
+                "wrong_part_rate_delivered={} out of bounds for {}/{} delivered replies",
+                self.wrong_part_rate_delivered,
+                self.delivered_wrong_part_refusals,
+                self.delivered_model_replies
+            )));
+        }
+        if all_wrong_part > self.total_model_rounds
+            || !self.wrong_part_rate_all_rounds.is_finite()
+            || !(0.0..=1.0).contains(&self.wrong_part_rate_all_rounds)
+        {
+            return Err(EvalError::InvalidWrongPartRate(format!(
+                "wrong_part_rate_all_rounds={} out of bounds for {}/{} total model rounds",
+                self.wrong_part_rate_all_rounds, all_wrong_part, self.total_model_rounds
+            )));
+        }
+        Ok(())
+    }
+
+    /// Recompute both wrong-part rates and refuse if any computed rate falls outside `[0.0, 1.0]`.
+    pub fn try_recompute_rates(&mut self) -> Result<(), EvalError> {
+        self.recompute_rate();
+        self.validate_rates()
+    }
+
     fn recompute_rate(&mut self) {
         self.wrong_part_rate_delivered = if self.delivered_model_replies == 0 {
             0.0
         } else {
-            ((self.total_wrong_part_refusals as f64) / (self.delivered_model_replies as f64))
-                .min(1.0)
+            (self.delivered_wrong_part_refusals as f64) / (self.delivered_model_replies as f64)
         };
+        let all_wrong_part = self
+            .delivered_wrong_part_refusals
+            .saturating_add(self.no_reply_wrong_part_refusals);
+        self.total_wrong_part_refusals = all_wrong_part;
         self.wrong_part_rate_all_rounds = if self.total_model_rounds == 0 {
             0.0
         } else {
-            (self.total_wrong_part_refusals as f64) / (self.total_model_rounds as f64)
+            (all_wrong_part as f64) / (self.total_model_rounds as f64)
         };
         self.exceeds_five_percent_preflight_stop_line_delivered =
             self.wrong_part_rate_delivered > PREFLIGHT_WRONG_PART_STOP_THRESHOLD;
