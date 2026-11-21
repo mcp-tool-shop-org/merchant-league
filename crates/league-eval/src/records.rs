@@ -50,11 +50,17 @@ impl EvalArm {
     }
 }
 
-/// Cumulative counts of the four named Item 9 reply refusal codes and refused bundles (`1.9`, `R7`).
+/// Cumulative counts of structured-reply refusal codes and refused bundles (`1.9`, `R7`, `A1`, `B1`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefusalCodeCounts {
     /// Count of `ACT_REPLY_INVALID` refusals.
     pub act_reply_invalid: u64,
+    /// Count of `TALK_REPLY_INVALID` refusals (`B1`).
+    #[serde(default)]
+    pub talk_reply_invalid: u64,
+    /// Count of `REPLY_SCHEMA_INVALID` no-reply failures (`A1.2`).
+    #[serde(default)]
+    pub reply_schema_invalid: u64,
     /// Count of `TALK_REPLY_HAS_ORDERS` refusals.
     pub talk_reply_has_orders: u64,
     /// Count of `ACT_REPLY_HAS_MESSAGES` refusals.
@@ -70,6 +76,8 @@ impl RefusalCodeCounts {
     pub fn record(&mut self, code: ReplyRefusalCode) {
         match code {
             ReplyRefusalCode::ActReplyInvalid => self.act_reply_invalid += 1,
+            ReplyRefusalCode::TalkReplyInvalid => self.talk_reply_invalid += 1,
+            ReplyRefusalCode::ReplySchemaInvalid => self.reply_schema_invalid += 1,
             ReplyRefusalCode::TalkReplyHasOrders => self.talk_reply_has_orders += 1,
             ReplyRefusalCode::ActReplyHasMessages => self.act_reply_has_messages += 1,
             ReplyRefusalCode::MessageRecipientInvalid => self.message_recipient_invalid += 1,
@@ -79,6 +87,8 @@ impl RefusalCodeCounts {
     /// Increment counts for all entries in `other`.
     pub fn merge_from(&mut self, other: &Self) {
         self.act_reply_invalid += other.act_reply_invalid;
+        self.talk_reply_invalid += other.talk_reply_invalid;
+        self.reply_schema_invalid += other.reply_schema_invalid;
         self.talk_reply_has_orders += other.talk_reply_has_orders;
         self.act_reply_has_messages += other.act_reply_has_messages;
         self.message_recipient_invalid += other.message_recipient_invalid;
@@ -87,7 +97,8 @@ impl RefusalCodeCounts {
 }
 
 /// Cumulative counter of wrong-part refusals (`TALK_REPLY_HAS_ORDERS` + `ACT_REPLY_HAS_MESSAGES`)
-/// over all model replies across seats and arms (`Item 9` addendum 1.8).
+/// reporting both denominators: delivered replies only (`delivered_model_replies`) and all evaluated
+/// model rounds including `no_reply` (`total_model_rounds`) (`Item 9` 1.8, `B1`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WrongPartCounter {
     /// Count of `TALK_REPLY_HAS_ORDERS`.
@@ -96,18 +107,31 @@ pub struct WrongPartCounter {
     pub act_reply_has_messages: u64,
     /// Sum `talk_reply_has_orders + act_reply_has_messages`.
     pub total_wrong_part_refusals: u64,
-    /// Total model replies evaluated (both rounds, any seat, any arm).
-    pub total_model_replies: u64,
-    /// Wrong-part rate in `[0.0, 1.0]`.
-    pub wrong_part_rate: f64,
-    /// `true` iff `wrong_part_rate > 0.05` (`1.8` stop line).
-    pub exceeds_five_percent_preflight_stop_line: bool,
+    /// Total delivered model replies evaluated (both rounds, any seat, any arm).
+    #[serde(alias = "total_model_replies")]
+    pub delivered_model_replies: u64,
+    /// Total evaluated model rounds including `no_reply` rounds.
+    #[serde(default)]
+    pub total_model_rounds: u64,
+    /// Wrong-part rate over `delivered_model_replies` in `[0.0, 1.0]`.
+    #[serde(alias = "wrong_part_rate")]
+    pub wrong_part_rate_delivered: f64,
+    /// Wrong-part rate over `total_model_rounds` in `[0.0, 1.0]`.
+    #[serde(default)]
+    pub wrong_part_rate_all_rounds: f64,
+    /// `true` iff `wrong_part_rate_delivered > 0.05` (`1.8` stop line).
+    #[serde(alias = "exceeds_five_percent_preflight_stop_line")]
+    pub exceeds_five_percent_preflight_stop_line_delivered: bool,
+    /// `true` iff `wrong_part_rate_all_rounds > 0.05` (`1.8` stop line).
+    #[serde(default)]
+    pub exceeds_five_percent_preflight_stop_line_all_rounds: bool,
 }
 
 impl WrongPartCounter {
-    /// Record one evaluated model reply (`wrong_part_code` if wrong-part refusal occurred).
-    pub fn record_reply(&mut self, wrong_part_code: Option<ReplyRefusalCode>) {
-        self.total_model_replies += 1;
+    /// Record one delivered model reply (`wrong_part_code` if wrong-part refusal occurred).
+    pub fn record_delivered_reply(&mut self, wrong_part_code: Option<ReplyRefusalCode>) {
+        self.delivered_model_replies += 1;
+        self.total_model_rounds += 1;
         match wrong_part_code {
             Some(ReplyRefusalCode::TalkReplyHasOrders) => {
                 self.talk_reply_has_orders += 1;
@@ -122,26 +146,54 @@ impl WrongPartCounter {
         self.recompute_rate();
     }
 
+    /// Record one evaluated model round that yielded no delivered reply (`no_reply == true`).
+    pub fn record_no_reply(&mut self) {
+        self.total_model_rounds += 1;
+        self.recompute_rate();
+    }
+
+    /// Backwards-compatible alias for [`Self::record_delivered_reply`].
+    pub fn record_reply(&mut self, wrong_part_code: Option<ReplyRefusalCode>) {
+        self.record_delivered_reply(wrong_part_code);
+    }
+
     /// Merge counts from another counter (e.g., from a branch run).
     pub fn merge_from(&mut self, other: &Self) {
         self.talk_reply_has_orders += other.talk_reply_has_orders;
         self.act_reply_has_messages += other.act_reply_has_messages;
         self.total_wrong_part_refusals += other.total_wrong_part_refusals;
-        self.total_model_replies += other.total_model_replies;
+        self.delivered_model_replies += other.delivered_model_replies;
+        self.total_model_rounds += other.total_model_rounds;
         self.recompute_rate();
     }
 
     fn recompute_rate(&mut self) {
-        if self.total_model_replies == 0 {
-            self.wrong_part_rate = 0.0;
-            self.exceeds_five_percent_preflight_stop_line = false;
+        self.wrong_part_rate_delivered = if self.delivered_model_replies == 0 {
+            0.0
         } else {
-            self.wrong_part_rate =
-                (self.total_wrong_part_refusals as f64) / (self.total_model_replies as f64);
-            self.exceeds_five_percent_preflight_stop_line =
-                self.wrong_part_rate > PREFLIGHT_WRONG_PART_STOP_THRESHOLD;
-        }
+            (self.total_wrong_part_refusals as f64) / (self.delivered_model_replies as f64)
+        };
+        self.wrong_part_rate_all_rounds = if self.total_model_rounds == 0 {
+            0.0
+        } else {
+            (self.total_wrong_part_refusals as f64) / (self.total_model_rounds as f64)
+        };
+        self.exceeds_five_percent_preflight_stop_line_delivered =
+            self.wrong_part_rate_delivered > PREFLIGHT_WRONG_PART_STOP_THRESHOLD;
+        self.exceeds_five_percent_preflight_stop_line_all_rounds =
+            self.wrong_part_rate_all_rounds > PREFLIGHT_WRONG_PART_STOP_THRESHOLD;
     }
+}
+
+/// Diagnostic for one failed attempt recorded by `league-relay` in `relay/calls.jsonl` (`A1.1`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedRelayAttempt {
+    /// 1-based attempt number (`CallLogEntry::attempt`).
+    pub attempt: u8,
+    /// Outcome string written by `league-relay` (e.g. `"harness"`, `"NO_REPLY"`, `"LATE_DISCARDED"`).
+    pub outcome: String,
+    /// Error or failure reason recorded by `league-relay`.
+    pub reason: String,
 }
 
 /// Whole refused bundle record required by `R7` and `Item 9` addendum 1.11.
@@ -181,6 +233,15 @@ pub struct EvalDecisionRecord {
     /// Raw delivered `from-seat/` text (kept verbatim even on refusal; `None` if no reply / ClubBot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_reply: Option<String>,
+    /// Total attempts recorded in `relay/calls.jsonl` for this seat-round (`A1.1`).
+    #[serde(default)]
+    pub attempts: u32,
+    /// Per-attempt failure diagnostics extracted from `relay/calls.jsonl` (`A1.1`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_attempts: Vec<FailedRelayAttempt>,
+    /// Source history file SHA-256 digests loaded when reconstructing a frozen `branch` prompt (`B4`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub loaded_history_sha256: BTreeMap<String, String>,
     /// Reply-level refusal code, if refused (`1.3`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal_code: Option<String>,
@@ -226,6 +287,10 @@ pub struct EvalSetupFile {
     pub wrapper_version: String,
     /// SHA-256 hex digest of wrapper file bytes (`1.7`).
     pub wrapper_sha256: String,
+    /// Prompt memory mode (`"snapshot"`, `"emc"`, or `"full"`, `C11`).
+    pub memory_mode: String,
+    /// SHA-256 hex digest of raw `seats.json` bytes (`C11`).
+    pub seats_sha256: String,
     /// SHA-256 hex digest of the unified `ResponseFormatConfig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_sha256: Option<String>,
@@ -298,6 +363,70 @@ pub struct BranchArmOutcome {
     pub decision: EvalDecisionRecord,
     /// Public sweep receipt produced when replaying this arm from the pre-act checkpoint.
     pub receipt: PublicSweepReceipt,
+}
+
+/// Aggregated refusal and wrong-part summary written by `league-eval branch` to `<out_dir>/branch_summary.json` (`B1`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BranchSummary {
+    /// Total arm outcomes summarized.
+    pub evaluated_arms: usize,
+    /// Refusal code counts keyed by focal seat guild (`1.9`, `A1.2`).
+    pub refusal_counts_by_seat: BTreeMap<String, RefusalCodeCounts>,
+    /// Refusal code counts keyed by evaluated arm (`off`, `control`, `on`).
+    pub refusal_counts_by_arm: BTreeMap<String, RefusalCodeCounts>,
+    /// Pre-flight wrong-part counter across all `Model` branch decisions (`B1`).
+    pub wrong_part_refusals: WrongPartCounter,
+}
+
+/// Summarize refusal and wrong-part counts across all `Model` outcomes in `outcomes` (`B1`).
+#[must_use]
+pub fn summarize_branch_outcomes(outcomes: &[BranchArmOutcome]) -> BranchSummary {
+    let mut summary = BranchSummary {
+        evaluated_arms: outcomes.len(),
+        ..BranchSummary::default()
+    };
+    for outcome in outcomes {
+        let dec = &outcome.decision;
+        let seat_counts = summary
+            .refusal_counts_by_seat
+            .entry(outcome.focal_guild.clone())
+            .or_default();
+        let arm_counts = summary
+            .refusal_counts_by_arm
+            .entry(outcome.arm.as_str().to_owned())
+            .or_default();
+        if let Some(code_str) = dec.refusal_code.as_deref()
+            && let Some(code) = ReplyRefusalCode::from_code_str(code_str)
+        {
+            seat_counts.record(code);
+            arm_counts.record(code);
+        }
+        if dec.refused_bundle.is_some() {
+            seat_counts.refused_bundles += 1;
+            arm_counts.refused_bundles += 1;
+        }
+        if dec.seat_kind == "Model" {
+            if dec.no_reply {
+                summary.wrong_part_refusals.record_no_reply();
+            } else {
+                let wrong_part = dec
+                    .refusal_code
+                    .as_deref()
+                    .and_then(ReplyRefusalCode::from_code_str)
+                    .filter(|&c| {
+                        matches!(
+                            c,
+                            ReplyRefusalCode::TalkReplyHasOrders
+                                | ReplyRefusalCode::ActReplyHasMessages
+                        )
+                    });
+                summary
+                    .wrong_part_refusals
+                    .record_delivered_reply(wrong_part);
+            }
+        }
+    }
+    summary
 }
 
 /// Extract deterministic wrapper brief version and SHA-256 digest from raw wrapper bytes (`1.7`).

@@ -87,6 +87,10 @@ mod tests {
     #[test]
     fn eval_wording_table_and_internal_slot_names_resolve_cleanly() {
         assert_eq!(eval_wording_slot("eval_messages_key"), "messages");
+        assert_eq!(
+            eval_wording_slot("eval_messages_max_items"),
+            EVAL_MESSAGES_MAX_ITEMS.to_string()
+        );
         assert_eq!(eval_internal_slot_names().len(), EVAL_REPLY_WORDING.len());
     }
 

@@ -97,100 +97,41 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 14,
-      "changed": 9,
+      "added": 1,
+      "changed": 20,
       "moved": 0,
-      "parts": 5,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
-        "kind": "import-added",
-        "sentence": "league-eval now imports league-core.",
-        "subjects": [
-          "league-eval",
-          "league-core"
-        ]
-      },
-      {
-        "kind": "import-added",
-        "sentence": "league-eval now imports league-relay.",
-        "subjects": [
-          "league-eval",
-          "league-relay"
-        ]
-      },
-      {
         "kind": "door",
-        "sentence": "CI now also runs crates/league-eval/src/schema.rs and crates/league-eval/tests/.",
+        "sentence": "CI now also runs crates/league-eval/src/reply.rs, crates/league-eval/src/view.rs and crates/league-eval/src/wording.rs.",
         "subjects": [
           ".github/workflows/ci.yml",
-          "crates/league-eval/src/schema.rs",
-          "crates/league-eval/tests/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "CI now also checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-eval/src/lib.rs",
-          "crates/league-eval/src/main.rs"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "league-eval (crates/league-eval/Cargo.toml) is a new command. It runs crates/league-eval/src/main.rs.",
-        "subjects": [
-          "crates/league-eval/Cargo.toml",
-          "crates/league-eval/src/main.rs"
+          "crates/league-eval/src/reply.rs",
+          "crates/league-eval/src/view.rs",
+          "crates/league-eval/src/wording.rs"
         ]
       },
       {
         "kind": "landing",
-        "sentence": "crates/league-core/ is now also read by crates/league-eval/Cargo.toml.",
+        "sentence": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md is now read by crates/league-eval/src/view.rs and crates/league-eval/tests/addendum_item9.rs.",
         "subjects": [
-          "crates/league-core/",
-          "crates/league-eval/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-error/ is now also read by crates/league-eval/Cargo.toml.",
-        "subjects": [
-          "crates/league-error/",
-          "crates/league-eval/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-eval/ is now read by Cargo.toml.",
-        "subjects": [
-          "crates/league-eval/",
-          "Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 3 more new writers and readers of places.",
-        "subjects": []
-      },
-      {
-        "kind": "part",
-        "sentence": "league-eval is a new part, drawn from `crates/league-eval/**`.",
-        "subjects": [
-          "league-eval"
+          "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md",
+          "crates/league-eval/src/view.rs",
+          "crates/league-eval/tests/addendum_item9.rs"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "14 files added and 9 changed content, across 5 parts.",
+        "sentence": "1 file added and 20 changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "29a708eccc325e55944d0ba3873a6f7b8ec2a182",
-      "generatedAt": "2026-11-21T05:57:14.296Z"
+      "commit": "afe18414c24ee18aa37649867423cf51a0798d96",
+      "generatedAt": "2026-11-21T09:21:00.126Z"
     },
     "unchanged": false
   },
@@ -276,7 +217,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 9 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "afe18414c24ee18aa37649867423cf51a0798d96",
+  "commit": "d211b7a5e4e1c1fc24c6c3208eee2e2372f60f2a",
   "defaultBranch": "main",
   "derived": "15 parts, mostly Rust (389 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -373,7 +314,10 @@
         "crates/league-core/src/replay.rs",
         "crates/league-core/tests/",
         "crates/league-error/",
+        "crates/league-eval/src/reply.rs",
         "crates/league-eval/src/schema.rs",
+        "crates/league-eval/src/view.rs",
+        "crates/league-eval/src/wording.rs",
         "crates/league-eval/tests/",
         "crates/league-gen/src/empirical.rs",
         "crates/league-gen/src/feasibility.rs",
@@ -399,8 +343,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 40,
-      "runsMore": 60,
+      "runsCount": 43,
+      "runsMore": 63,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -757,12 +701,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-21T09:21:00.126Z",
+  "generatedAt": "2026-11-21T15:02:57.615Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "37 writes and 26 reads use paths built at run time and are not named here.",
+    "37 writes and 28 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "18 writes and 36 reads go to a path their caller passes, not to this repository.",
+    "18 writes and 40 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -802,11 +746,11 @@
   "startReason": "This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 68,
+  "testFiles": 72,
   "testedBy": {
     "league-core": 23,
     "league-error": 7,
-    "league-eval": 3,
+    "league-eval": 6,
     "league-gen": 10,
     "league-ledger": 8,
     "league-relay": 6,

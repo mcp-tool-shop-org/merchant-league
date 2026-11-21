@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-21 from commit afe1841 by Atlas 1.26.0.
+Mapped at 2026-11-21 from commit d211b7a by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,23 +8,15 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 15 parts, mostly Rust (389 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-21 (29a708e)
+## What changed since 2026-11-21 (afe1841)
 
-- league-eval now imports league-core.
-- league-eval now imports league-relay.
-- CI now also runs crates/league-eval/src/schema.rs and crates/league-eval/tests/.
-- CI now also checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs.
-- league-eval (crates/league-eval/Cargo.toml) is a new command. It runs crates/league-eval/src/main.rs.
-- crates/league-core/ is now also read by crates/league-eval/Cargo.toml.
-- crates/league-error/ is now also read by crates/league-eval/Cargo.toml.
-- crates/league-eval/ is now read by Cargo.toml.
-- And 3 more new writers and readers of places.
-- league-eval is a new part, drawn from `crates/league-eval/**`.
-- 14 files added and 9 changed content, across 5 parts.
+- CI now also runs crates/league-eval/src/reply.rs, crates/league-eval/src/view.rs and crates/league-eval/src/wording.rs.
+- crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md is now read by crates/league-eval/src/view.rs and crates/league-eval/tests/addendum_item9.rs.
+- 1 file added and 20 changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 60 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 2 more.
+1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 63 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 2 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
 4. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
@@ -36,7 +28,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 17 files in league-core, crates/league-error/ in league-error, crates/league-eval/src/schema.rs and crates/league-eval/tests/ in league-eval, 10 files in league-gen, and 25 files in 9 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, and crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay.
+1. The workflow runs 6 files in scripts, 17 files in league-core, crates/league-error/ in league-error, 6 files in league-eval, 10 files in league-gen, and 25 files in 9 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, and crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results
@@ -119,9 +111,9 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 37 writes and 26 reads use paths built at run time and are not named here.
+- 37 writes and 28 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
-- 18 writes and 36 reads go to a path their caller passes, not to this repository.
+- 18 writes and 40 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.
 - There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.
 - 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.

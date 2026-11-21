@@ -73,10 +73,22 @@ pub fn build_eval_response_format_value() -> Result<serde_json::Value, EvalError
         add_props_key.as_str(): false,
     });
 
+    let max_items_slot = eval_wording_slot("eval_messages_max_items");
+    let max_items_parsed = max_items_slot.parse::<usize>().map_err(|e| {
+        EvalError::SchemaValidation(format!(
+            "eval_messages_max_items slot '{max_items_slot}' is not a valid integer: {e}"
+        ))
+    })?;
+    if max_items_parsed != EVAL_MESSAGES_MAX_ITEMS {
+        return Err(EvalError::SchemaValidation(format!(
+            "eval_messages_max_items slot ({max_items_parsed}) diverges from EVAL_MESSAGES_MAX_ITEMS ({EVAL_MESSAGES_MAX_ITEMS})"
+        )));
+    }
+
     let messages_subtree = serde_json::json!({
         type_key.as_str(): ty_arr.as_str(),
         desc_key.as_str(): eval_wording_slot("eval_messages_description"),
-        "maxItems": EVAL_MESSAGES_MAX_ITEMS,
+        "maxItems": max_items_parsed,
         items_key.as_str(): message_item,
     });
 

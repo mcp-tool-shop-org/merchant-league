@@ -941,6 +941,32 @@ fn r3_seal_load_vrf_proof_verification_failure_refused() {
         Err(err) => err,
     };
     assert_eq!(err.code(), "INVALID_ORDER");
+    assert!(
+        err.to_string()
+            .contains("malformed or non-canonical Eval VRF proof"),
+        "expected canonical-decoding failure detail, got: {err}"
+    );
+
+    let wrong_seed = must_ok(SealedEvalSeed::try_from_bytes([0xBB; 32]), "wrong_seed");
+    let (_, wrong_proof) = must_ok(
+        wrong_seed.prove_turn(TableId(920_008), league_core::Turn(1)),
+        "prove wrong turn 1",
+    );
+    let wrong_key_seal =
+        write_mutated_eval_seal(&tmp, "wrong-key-vrf-verify.seal", &seal_bytes, |v| {
+            v["vrf_proofs"][0] = serde_json::json!(wrong_proof.to_vec());
+        });
+    let wrong_key_err = match EvalHost::read_save_and_seal(&save_p, &wrong_key_seal) {
+        Ok(_) => panic!("must refuse canonical wrong-key VRF proof"),
+        Err(err) => err,
+    };
+    assert_eq!(wrong_key_err.code(), "INVALID_ORDER");
+    assert!(
+        wrong_key_err
+            .to_string()
+            .contains("turn 1 Eval VRF proof failed verification against eval_vrf_pubkey"),
+        "expected wrong-key verification failure detail, got: {wrong_key_err}"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 

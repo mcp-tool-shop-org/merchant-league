@@ -10,14 +10,15 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use league_core::{EvalHost, HARD_TURN_CAP, PublicSweepReceipt, TableId, replay_eval_season};
+use league_core::{EvalHost, HARD_TURN_CAP, PublicSweepReceipt, Seat, TableId, replay_eval_season};
 use league_eval::{
-    BranchOptions, EVAL_REPLY_WORDING_ARM, EvalArm, EvalDecisionRecord, EvalError, EvalManifest,
-    NoopTransport, PlayOptions, RefusalCodeCounts, SelectOptions, SelectedPreActState,
-    SelectionList, TurnStratum, WrongPartCounter, execute_cli, persist_eval_game_state,
-    run_branch_with_transport, run_play_with_transport, run_select,
+    BranchOptions, BranchSummary, EVAL_REPLY_WORDING_ARM, EvalArm, EvalDecisionRecord, EvalError,
+    EvalManifest, NoopTransport, PlayOptions, RefusalCodeCounts, SelectOptions,
+    SelectedPreActState, SelectionList, TurnStratum, WrongPartCounter, execute_cli,
+    expand_home_path_with_home, persist_eval_game_state, run_branch_with_transport,
+    run_play_with_transport, run_select, sanitize_home_path_with_homes,
 };
-use league_relay::{RawHttpResponse, Transport, TransportError};
+use league_relay::{RawHttpResponse, Transport, TransportError, sha256_hex};
 use serde_json::{Value, json};
 
 fn must_ok<T, E: Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -97,6 +98,8 @@ struct DeterministicMockTransport {
     recorded_chat_bodies: Mutex<Vec<String>>,
     /// Maps `"day_u8:round"` (`"1:talk"`, `"2:act"`, ...) to reply content JSON.
     script_by_turn: Mutex<BTreeMap<String, String>>,
+    /// Optional checkpoints dir verified on every `act` request (`C1` pre-act timing check).
+    pre_act_ckpts_dir: Option<PathBuf>,
 }
 
 impl DeterministicMockTransport {
@@ -108,7 +111,14 @@ impl DeterministicMockTransport {
         Self {
             recorded_chat_bodies: Mutex::new(Vec::new()),
             script_by_turn: Mutex::new(map),
+            pre_act_ckpts_dir: None,
         }
+    }
+
+    fn with_pre_act_check(items: Vec<(&str, String)>, checkpoints_dir: PathBuf) -> Self {
+        let mut s = Self::new(items);
+        s.pre_act_ckpts_dir = Some(checkpoints_dir);
+        s
     }
 
     fn recorded_bodies(&self) -> Vec<String> {
@@ -142,13 +152,23 @@ impl Transport for DeterministicMockTransport {
             .and_then(|m| m["content"].as_str())
             .unwrap_or_default();
         let is_talk = user_msg.contains("This is the talk round.");
-        let day = if user_msg.contains("\"turn\": 3") {
+        let day: u8 = if user_msg.contains("\"turn\": 3") {
             3
         } else if user_msg.contains("\"turn\": 2") {
             2
         } else {
             1
         };
+        if !is_talk && let Some(ref ckpts) = self.pre_act_ckpts_dir {
+            let pre_save = ckpts.join(format!("day-{day:02}-pre-act.save.json"));
+            let pre_seal = ckpts.join(format!("day-{day:02}-pre-act.seal"));
+            assert!(
+                pre_save.exists() && pre_seal.exists(),
+                "C1: pre-act checkpoint must exist on disk before day {day} act HTTP request ({}, {})",
+                pre_save.display(),
+                pre_seal.display()
+            );
+        }
         let key = format!("{day}:{}", if is_talk { "talk" } else { "act" });
         let map = self
             .script_by_turn
@@ -366,8 +386,10 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
         ),
     ];
 
-    let transport_a = DeterministicMockTransport::new(script.clone());
-    let transport_b = DeterministicMockTransport::new(script);
+    let transport_a =
+        DeterministicMockTransport::with_pre_act_check(script.clone(), game_a.join("checkpoints"));
+    let transport_b =
+        DeterministicMockTransport::with_pre_act_check(script, game_b.join("checkpoints"));
 
     let opts_a = PlayOptions {
         game_dir: game_a.clone(),
@@ -489,6 +511,97 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
 
     // Identical wire chat-completion request bodies across dup_a & dup_b!
     assert_eq!(transport_a.recorded_bodies(), transport_b.recorded_bodies());
+
+    // C3: Whole-tree recursive diff across `game_a` and `game_b`, masking ONLY:
+    //   1. `game_id` in main `.seal`, checkpoint `.seal`s, `decisions/*.json`, `setup.json`, `manifest.json`
+    //   2. `pre_act_checkpoint_sha256` in `day-DD-act-recorded.seal`
+    //   3. 6 per-call timing/id keys in `relay/calls.jsonl`:
+    //      `reservation_id`, `cost`, `charged_credits`, `wall_secs`, `latency_ms`, `time_utc`
+    // Notice `EvalSaveSnapshot` (`.save.json`) contains NO `game_id` and must match byte-for-byte unmasked!
+    let mut files_a = Vec::new();
+    let mut files_b = Vec::new();
+    collect_all_files(&game_a, &mut files_a);
+    collect_all_files(&game_b, &mut files_b);
+    let rels_a: Vec<String> = files_a
+        .iter()
+        .map(|p| {
+            must_ok(p.strip_prefix(&game_a), "strip a")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    let rels_b: Vec<String> = files_b
+        .iter()
+        .map(|p| {
+            must_ok(p.strip_prefix(&game_b), "strip b")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(
+        rels_a, rels_b,
+        "duplicate game directory trees must contain identical file sets"
+    );
+    assert!(!rels_a.is_empty());
+
+    for rel in &rels_a {
+        let pa = game_a.join(rel);
+        let pb = game_b.join(rel);
+        let raw_a = must_ok(fs::read(&pa), &format!("read game_a/{rel}"));
+        let raw_b = must_ok(fs::read(&pb), &format!("read game_b/{rel}"));
+
+        if rel.ends_with(".save.json") {
+            assert_eq!(
+                raw_a, raw_b,
+                "C3: EvalSaveSnapshot `{rel}` has no game_id and must be byte-identical without masking"
+            );
+        } else if rel == "relay/calls.jsonl" {
+            let ta = String::from_utf8_lossy(&raw_a);
+            let tb = String::from_utf8_lossy(&raw_b);
+            let lines_a: Vec<&str> = ta.lines().collect();
+            let lines_b: Vec<&str> = tb.lines().collect();
+            assert_eq!(lines_a.len(), lines_b.len());
+            for (la, lb) in lines_a.iter().zip(lines_b.iter()) {
+                let mut va: Value = must_ok(serde_json::from_str(la), "parse calls a");
+                let mut vb: Value = must_ok(serde_json::from_str(lb), "parse calls b");
+                for key in [
+                    "reservation_id",
+                    "cost",
+                    "charged_credits",
+                    "wall_secs",
+                    "latency_ms",
+                    "time_utc",
+                ] {
+                    va[key] = Value::Null;
+                    vb[key] = Value::Null;
+                }
+                assert_eq!(va, vb, "calls.jsonl normalized row diverged");
+            }
+        } else if rel == "setup.json"
+            || rel == "manifest.json"
+            || rel.starts_with("decisions/")
+            || rel.ends_with(".seal")
+        {
+            let mut va: Value = must_ok(serde_json::from_slice(&raw_a), "parse json a");
+            let mut vb: Value = must_ok(serde_json::from_slice(&raw_b), "parse json b");
+            assert_ne!(
+                va["game_id"], vb["game_id"],
+                "expected distinct game_id in `{rel}`"
+            );
+            va["game_id"] = Value::Null;
+            vb["game_id"] = Value::Null;
+            if rel.ends_with("-act-recorded.seal") {
+                va["pre_act_checkpoint_sha256"] = Value::Null;
+                vb["pre_act_checkpoint_sha256"] = Value::Null;
+            }
+            assert_eq!(va, vb, "normalized `{rel}` diverged across duplicate runs");
+        } else {
+            assert_eq!(
+                raw_a, raw_b,
+                "C3: unmasked file `{rel}` must be byte-identical across duplicate runs"
+            );
+        }
+    }
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -794,6 +907,46 @@ fn items_12_and_13_branch_prompt_parity_off_and_on_single_diff() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+fn encode_byte_needles(label: &str, hex_str: &str) -> Vec<(String, String)> {
+    let bytes = must_ok(hex::decode(hex_str), &format!("decode hex `{label}`"));
+    let dec_compact = bytes
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let dec_spaced = bytes
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let json_arr_compact = format!("[{dec_compact}]");
+    let json_arr_spaced = format!("[{dec_spaced}]");
+    vec![
+        (format!("{label}:hex"), hex_str.to_owned()),
+        (format!("{label}:json_compact"), json_arr_compact),
+        (format!("{label}:json_spaced"), json_arr_spaced),
+        (format!("{label}:dec_compact"), dec_compact),
+        (format!("{label}:dec_spaced"), dec_spaced),
+    ]
+}
+
+fn collect_u8_array_needles(label: &str, val: &Value) -> Vec<(String, String)> {
+    let Some(arr) = val.as_array() else {
+        return Vec::new();
+    };
+    let mut bytes = Vec::with_capacity(arr.len());
+    for item in arr {
+        let Some(b) = item.as_u64().and_then(|u| u8::try_from(u).ok()) else {
+            return Vec::new();
+        };
+        bytes.push(b);
+    }
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    encode_byte_needles(label, &hex::encode(&bytes))
+}
+
 #[test]
 fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out() {
     let tmp = fresh_tmp_dir("item15_canary");
@@ -801,6 +954,44 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
     let branch_out = tmp.join("branch_out");
     let wrapper_path = write_wrapper(&tmp);
     let seats_path = write_seats(&tmp, "seats.json", focal_local_three_clubbot_seats());
+
+    // Build turn-0 state from fixed explicit entropy (`B6`) so peer vs focal mandates are distinct
+    // and every secret material byte array is known structurally.
+    let deal_seed = [0xA1_u8; 32];
+    let seat_salts = [[0xB1_u8; 32], [0xB2_u8; 32], [0xB3_u8; 32], [0xB4_u8; 32]];
+    let eval_seed = [0xC5_u8; 32];
+    let turn0 = must_ok(
+        EvalHost::from_explicit_entropy(
+            TableId(15),
+            4,
+            7,
+            deal_seed,
+            &seat_salts,
+            eval_seed,
+            0x777,
+        ),
+        "from_explicit_entropy item15",
+    );
+    must_ok(
+        persist_eval_game_state(&turn0, &src_game),
+        "persist explicit turn0",
+    );
+    let focal_mandate_json = must_ok(
+        serde_json::to_value(must_ok(turn0.mandate_for_seat(Seat(0)), "m0")),
+        "ser m0",
+    );
+    let peer_mandate_jsons: Vec<Value> = (1..=3_u8)
+        .map(|s| {
+            let m = must_ok(turn0.mandate_for_seat(Seat(s)), "peer mandate");
+            must_ok(serde_json::to_value(m), "ser peer mandate")
+        })
+        .collect();
+    for peer_m in &peer_mandate_jsons {
+        assert_ne!(
+            peer_m, &focal_mandate_json,
+            "fixed deal must give distinct mandates to focal and peer seats"
+        );
+    }
 
     let d2_act_content = json!({
         "messages": [],
@@ -859,7 +1050,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
         "parse play receipt",
     );
 
-    // Null branch on focal seat `Foundry`: replays exact recorded turn-2 action -> byte-exact receipt match!
+    // Null branch on focal seat `Foundry`: replays exact recorded turn-2 action across `Off` & `On`.
     let branch_transport = DeterministicMockTransport::new(vec![("2:act", d2_act_content)]);
     let outcomes = must_ok(
         run_branch_with_transport(
@@ -868,8 +1059,8 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 list_path: None,
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path,
-                wrapper_path,
-                arms: vec![EvalArm::Off],
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
                 live: false,
@@ -882,27 +1073,33 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
         ),
         "null branch",
     );
-    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes.len(), 2);
     assert_eq!(outcomes[0].receipt, play_d2_receipt);
+    assert_eq!(outcomes[1].receipt, play_d2_receipt);
 
-    // Extract REAL cryptographic secrets & peer private mandates from source `.seal` JSON:
-    //   - `sealed_mandate_deal.deal_seed` (64-hex string)
-    //   - `sealed_mandate_deal.seat_reveals[1..4].salt` (64-hex strings for all non-focal seats)
-    //   - `eval_vrf` `vrf_proofs[1]` hex representation / array
-    //   - `turn_salts[0]` hex strings
+    // Collect EVERY cryptographic secret needle from `.seal` in hex, JSON array, and decimal list encodings (`B6`):
+    //   - `deal_seed`, `eval_seed` (raw entropy)
+    //   - all `seat_reveals[*].salt`
+    //   - `turn_salts[*]`
+    //   - `vrf_proofs[*]`
     let seal_text = must_ok(
         fs::read_to_string(src_game.join("checkpoints/day-02-pre-act.seal")),
         "read pre-act seal",
     );
     let seal_val: Value = must_ok(serde_json::from_str(&seal_text), "parse pre-act seal");
-    let mut secret_needles: Vec<String> = Vec::new();
+    let mut secret_needles: Vec<(String, String)> = Vec::new();
+    let mut positive_in_seal: Vec<String> = Vec::new();
+
     if let Some(ds) = seal_val["sealed_mandate_deal"]["deal_seed"].as_str() {
-        secret_needles.push(ds.to_owned());
+        positive_in_seal.push(ds.to_owned());
+        secret_needles.extend(encode_byte_needles("deal_seed", ds));
     }
+    secret_needles.extend(encode_byte_needles("eval_seed", &hex::encode(eval_seed)));
     if let Some(reveals) = seal_val["sealed_mandate_deal"]["seat_reveals"].as_array() {
-        for rev in reveals {
+        for (idx, rev) in reveals.iter().enumerate() {
             if let Some(s) = rev["salt"].as_str() {
-                secret_needles.push(s.to_owned());
+                positive_in_seal.push(s.to_owned());
+                secret_needles.extend(encode_byte_needles(&format!("seat_salt_{idx}"), s));
             }
         }
     }
@@ -910,23 +1107,38 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
         && let Some(row) = ts.first().and_then(Value::as_array)
         && let Some(salt_hex) = row.first().and_then(Value::as_str)
     {
-        secret_needles.push(salt_hex.to_owned());
+        positive_in_seal.push(salt_hex.to_owned());
+        secret_needles.extend(encode_byte_needles("turn_salt_0_0", salt_hex));
+    }
+    if let Some(vrf_0) = seal_val["vrf_proofs"].as_array().and_then(|a| a.first()) {
+        if let Some(s) = vrf_0.as_str() {
+            positive_in_seal.push(s.to_owned());
+            secret_needles.extend(encode_byte_needles("vrf_proof_0", s));
+        } else {
+            let vrf_needles = collect_u8_array_needles("vrf_proof_0", vrf_0);
+            if let Some((_, compact_arr)) = vrf_needles
+                .iter()
+                .find(|(tag, _)| tag.ends_with(":json_compact"))
+            {
+                positive_in_seal.push(compact_arr.clone());
+            }
+            secret_needles.extend(vrf_needles);
+        }
     }
     assert!(
-        secret_needles.len() >= 5,
-        "expected >= 5 real secret needles from .seal; got {:?}",
-        secret_needles
+        positive_in_seal.len() >= 6,
+        "expected >= 6 real secret needles in .seal; got {:?}",
+        positive_in_seal
     );
-
-    // Negative control: every needle DOES exist in `seal_text` itself!
-    for needle in &secret_needles {
+    let seal_compact = seal_text.replace([' ', '\n', '\r'], "");
+    for p in &positive_in_seal {
         assert!(
-            seal_text.contains(needle),
-            "negative control failed: secret `{needle}` missing from .seal"
+            seal_text.contains(p) || seal_compact.contains(p),
+            "negative control failed: secret `{p}` missing from .seal"
         );
     }
 
-    // Verify ZERO `.seal` files and ZERO occurrences of any secret needle anywhere under `--out`.
+    // Verify ZERO `.seal` files, ZERO encoded secret needles, and ZERO peer mandates anywhere under `--out`.
     let mut branch_files = Vec::new();
     collect_all_files(&branch_out, &mut branch_files);
     assert!(!branch_files.is_empty());
@@ -941,13 +1153,204 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
             file.display()
         );
         let content = must_ok(fs::read_to_string(&file), "read branch out file");
-        for needle in &secret_needles {
+        for (tag, needle) in &secret_needles {
             assert!(
                 !content.contains(needle),
-                "secret `{needle}` leaked into {}",
+                "secret `{tag}` (`{needle}`) leaked into {}",
                 file.display()
             );
         }
+        // Check structural peer mandate equality inside focal `to-seat/*.md` (`SeatObservation.own_mandate`),
+        // and confirm NO mandate field appears inside public `receipt.json` / `branch_summary.json`.
+        if name.ends_with(".md")
+            && name.starts_with("day-")
+            && let Some(json_part) = content.split("\n\n").nth(2)
+        {
+            let obs_val: Value = must_ok(serde_json::from_str(json_part), "parse view JSON");
+            assert_eq!(obs_val["own_mandate"], focal_mandate_json);
+            for (peer_idx, peer_m) in peer_mandate_jsons.iter().enumerate() {
+                assert_ne!(
+                    &obs_val["own_mandate"],
+                    peer_m,
+                    "peer seat {} mandate leaked into focal own_mandate",
+                    peer_idx + 1
+                );
+            }
+        }
+        if name == "receipt.json" || name == "branch_summary.json" {
+            let pretty_focal = must_ok(
+                serde_json::to_string_pretty(&focal_mandate_json),
+                "pretty focal mandate",
+            );
+            assert!(!content.contains(&pretty_focal));
+            for peer_m in &peer_mandate_jsons {
+                let pretty_peer =
+                    must_ok(serde_json::to_string_pretty(peer_m), "pretty peer mandate");
+                assert!(!content.contains(&pretty_peer));
+            }
+        }
+    }
+
+    // 2. B6 recorded peer `act` submission isolation scan:
+    //    Play a 2-model-seat game (`Foundry` + peer `Quarry`) where Quarry submits unique distinguishable
+    //    orders (`price_per_unit_cred: 9876, amount: 4321`) stored in `day-01-act-recorded.seal`,
+    //    then branch focal `Foundry` across [Off, On] and assert focal HTTP request bodies never contain `"9876"` or `"4321"`.
+    struct RoleAwareTransport {
+        bodies: Mutex<Vec<String>>,
+    }
+    impl Transport for RoleAwareTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            {
+                let mut g = match self.bodies.lock() {
+                    Ok(g) => g,
+                    Err(e) => panic!("lock: {e}"),
+                };
+                g.push(body.to_owned());
+            }
+            let v: Value =
+                serde_json::from_str(body).map_err(|e| TransportError::Network(e.to_string()))?;
+            let user_msg = v["messages"]
+                .as_array()
+                .and_then(|a| a.last())
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or_default();
+            let header = user_msg.split("\"phase\"").next().unwrap_or(user_msg);
+            let is_talk = header.contains("This is the talk round.");
+            let is_quarry = header.contains("\"seat\": 1,");
+            let content = if !is_talk && is_quarry {
+                json!({
+                    "messages": [],
+                    "market_actions": [{
+                        "action_kind": "post_offer",
+                        "side": "buy",
+                        "good": { "asset_kind": "raw", "good_index": 0 },
+                        "amount": 4321,
+                        "price_per_unit_cred": 9876,
+                        "domain_id": null,
+                        "is_hybrid": false
+                    }],
+                    "bundle": {}
+                })
+                .to_string()
+            } else {
+                json!({ "messages": [], "market_actions": [], "bundle": {} }).to_string()
+            };
+            Ok(RawHttpResponse {
+                status: 200,
+                body: json!({
+                    "id": "b6-role",
+                    "model": "qwen/qwen3-32b",
+                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
+                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.001 }
+                })
+                .to_string(),
+            })
+        }
+    }
+
+    let two_model_seats = write_seats(
+        &tmp,
+        "two_model_seats.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                {
+                    "guild": "Quarry",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+    let b6_src = tmp.join("b6_peer_orders_src");
+    let b6_play_t = RoleAwareTransport {
+        bodies: Mutex::new(Vec::new()),
+    };
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: b6_src.clone(),
+                seats_path: two_model_seats.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 16,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &b6_play_t,
+            None,
+        ),
+        "b6 2-model play",
+    );
+    let rec_seal = must_ok(
+        fs::read_to_string(b6_src.join("checkpoints/day-01-act-recorded.seal")),
+        "read recorded seal",
+    );
+    assert!(
+        rec_seal.contains("9876") && rec_seal.contains("4321"),
+        "positive control failed: peer recorded act submission missing from recorded seal"
+    );
+
+    let b6_branch_out = tmp.join("b6_peer_orders_branch");
+    let b6_branch_t = RoleAwareTransport {
+        bodies: Mutex::new(Vec::new()),
+    };
+    let _ = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(b6_src.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: two_model_seats,
+                wrapper_path,
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: b6_branch_out,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &b6_branch_t,
+            None,
+        ),
+        "b6 focal branch",
+    );
+    let focal_bodies = match b6_branch_t.bodies.lock() {
+        Ok(g) => g.clone(),
+        Err(e) => panic!("lock: {e}"),
+    };
+    assert_eq!(focal_bodies.len(), 2);
+    for body in &focal_bodies {
+        assert!(
+            !body.contains("9876") && !body.contains("4321"),
+            "peer recorded act submission leaked into focal HTTP request body: {body}"
+        );
     }
 
     let _ = fs::remove_dir_all(&tmp);
@@ -955,18 +1358,77 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
 
 #[test]
 fn item14_select_determinism_strata_and_branch_list_end_to_end() {
+    struct AlwaysEmptyModelTransport;
+    impl Transport for AlwaysEmptyModelTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            Ok(RawHttpResponse {
+                status: 200,
+                body: json!({
+                    "id": "m-empty",
+                    "model": "qwen/qwen3-32b",
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}"
+                        },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
+                })
+                .to_string(),
+            })
+        }
+    }
+
     let tmp = fresh_tmp_dir("item14_select");
     let game_a = tmp.join("game_a");
     let game_b = tmp.join("game_b");
     let wrapper_path = write_wrapper(&tmp);
-    let seats_path = write_seats(&tmp, "seats.json", all_clubbot_seats());
 
+    // Mixed 2-Model + 2-ClubBot table (`C8`): `Foundry` (seat 0) and `Harbor` (seat 2) are Model seats,
+    // `Quarry` (seat 1) and `Mint` (seat 3) are `ClubBot` seats.
+    let mixed_seats_path = write_seats(
+        &tmp,
+        "seats.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                {
+                    "guild": "Harbor",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+
+    let empty_t = AlwaysEmptyModelTransport;
     for (tid, gd) in [(21_u64, &game_a), (22_u64, &game_b)] {
         let _ = must_ok(
             run_play_with_transport(
                 &PlayOptions {
                     game_dir: gd.clone(),
-                    seats_path: seats_path.clone(),
+                    seats_path: mixed_seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
                     arm: EvalArm::Off,
@@ -979,7 +1441,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                     cap_gpu_secs: None,
                     allowed_vm_hosts: Vec::new(),
                 },
-                &NoopTransport,
+                &empty_t,
                 None,
             ),
             "play 9 turns for select",
@@ -1017,10 +1479,100 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
     );
     assert_eq!(sel_1.states.len(), 12);
 
+    // C8: select NEVER picks ClubBot seats (`Quarry`, `Mint`); every state must be `Foundry` or `Harbor`.
+    for s in &sel_1.states {
+        assert!(
+            matches!(s.seat_guild.as_str(), "Foundry" | "Harbor"),
+            "C8: select picked ClubBot seat {} (index {})",
+            s.seat_guild,
+            s.seat_index
+        );
+        assert!(matches!(s.seat_index, 0 | 2));
+    }
+
+    // C8 negative control: an all-ClubBot game is refused with NO_MODEL_SEATS_FOR_SELECT.
+    let all_bot_seats = write_seats(&tmp, "all_bot_seats.json", all_clubbot_seats());
+    let bot_only_game = tmp.join("bot_only_game");
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: bot_only_game.clone(),
+                seats_path: all_bot_seats,
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 24,
+                seed: 24,
+                turns: 3,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        ),
+        "all-ClubBot play for select refusal",
+    );
+    let no_model_err = run_select(&SelectOptions {
+        game_dirs: vec![bot_only_game],
+        per_game: 1,
+        strata: [1, 0, 0],
+        selection_seed: 1,
+        out_path: tmp.join("no_model_sel.json"),
+    });
+    assert!(matches!(
+        no_model_err,
+        Err(EvalError::NoModelSeatsForSelect(_))
+    ));
+
+    // C12: verify `<home>` path sanitization & expansion (`sanitize_home_path*` & `expand_home_path*`).
+    let sample_home = PathBuf::from("/home/evaluator");
+    let sub_path = PathBuf::from("/home/evaluator/runs/g1/checkpoints/day-01-pre-act");
+    let sanitized = sanitize_home_path_with_homes(&sub_path, std::slice::from_ref(&sample_home));
+    assert_eq!(
+        sanitized.to_string_lossy().replace('\\', "/"),
+        "<home>/runs/g1/checkpoints/day-01-pre-act"
+    );
+    assert_eq!(
+        expand_home_path_with_home(&sanitized, Some(&sample_home)),
+        sub_path
+    );
+    assert_eq!(
+        sanitize_home_path_with_homes(&sample_home, std::slice::from_ref(&sample_home)),
+        PathBuf::from("<home>")
+    );
+    assert_eq!(
+        expand_home_path_with_home(Path::new("<home>"), Some(&sample_home)),
+        sample_home
+    );
+    assert_eq!(
+        sanitize_home_path_with_homes(Path::new("/opt/other"), std::slice::from_ref(&sample_home)),
+        PathBuf::from("/opt/other")
+    );
+    if let Some(env_home) = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()))
+    {
+        let home_pb = PathBuf::from(env_home);
+        let inside = home_pb.join("eval_runs").join("g1");
+        let clean = league_eval::sanitize_home_path(&inside);
+        assert_eq!(
+            clean.to_string_lossy().replace('\\', "/"),
+            "<home>/eval_runs/g1"
+        );
+        assert_eq!(league_eval::expand_home_path(&clean), inside);
+    }
+
     // Verify exact [2, 2, 2] early/mid/late counts per game (`early = 1..=3`, `mid = 4..=6`, `late = 7..=9`).
     for gd in [&game_a, &game_b] {
-        let game_states: Vec<&SelectedPreActState> =
-            sel_1.states.iter().filter(|s| &s.game_dir == gd).collect();
+        let san_gd = league_eval::sanitize_home_path(gd);
+        let game_states: Vec<&SelectedPreActState> = sel_1
+            .states
+            .iter()
+            .filter(|s| s.game_dir == san_gd || &s.game_dir == gd)
+            .collect();
         assert_eq!(game_states.len(), 6);
         let early: Vec<u8> = game_states
             .iter()
@@ -1045,7 +1597,30 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
         assert!(late.iter().all(|&d| (7..=9).contains(&d)));
     }
 
-    // Exercise `select` + `branch --list` via CLI!
+    // Exercise `select` + `branch --list` via CLI with offline `--mock-dir`.
+    let mock_dir = tmp.join("select_mock_dir");
+    must_ok(fs::create_dir_all(&mock_dir), "mkdir select_mock_dir");
+    let mock_resp = json!({
+        "rules": [{
+            "when_contains": "This is the act round.",
+            "status": 200,
+            "response": {
+                "id": "m-act",
+                "model": "qwen/qwen3-32b",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}" },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
+            }
+        }]
+    });
+    must_ok(
+        fs::write(mock_dir.join("responses.json"), mock_resp.to_string()),
+        "write select mock responses",
+    );
+
     let list_cli_path = tmp.join("cli_list.json");
     let mut out = Vec::new();
     let mut err = Vec::new();
@@ -1102,13 +1677,15 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
             "--list".into(),
             subset_path.into_os_string(),
             "--seats".into(),
-            seats_path.into_os_string(),
+            mixed_seats_path.clone().into_os_string(),
             "--wrapper".into(),
-            wrapper_path.into_os_string(),
+            wrapper_path.clone().into_os_string(),
             "--arms".into(),
             "off,on".into(),
             "--out".into(),
             list_branch_out.clone().into_os_string(),
+            "--mock-dir".into(),
+            mock_dir.into_os_string(),
         ],
         &mut out,
         &mut err,
@@ -1120,6 +1697,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
         String::from_utf8_lossy(&err)
     );
     assert!(String::from_utf8_lossy(&out).contains("branched_outcomes=4"));
+    assert!(list_branch_out.join("branch_summary.json").exists());
 
     // Error paths on `select`: insufficient turns and strata sum mismatch.
     let short_game = tmp.join("short_game");
@@ -1127,8 +1705,8 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
         run_play_with_transport(
             &PlayOptions {
                 game_dir: short_game.clone(),
-                seats_path: tmp.join("seats.json"),
-                wrapper_path: tmp.join("wrapper.md"),
+                seats_path: mixed_seats_path,
+                wrapper_path,
                 wrapper_version: None,
                 arm: EvalArm::Off,
                 table_id: 23,
@@ -1140,7 +1718,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                 cap_gpu_secs: None,
                 allowed_vm_hosts: Vec::new(),
             },
-            &NoopTransport,
+            &empty_t,
             None,
         ),
         "short game",
@@ -1379,8 +1957,8 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
     use league_eval::{BranchArmOutcome, ReplyRefusalCode, extract_wrapper_metadata};
     use league_relay::RelayError;
 
-    // Note: cover all 13 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
-    let all_errors: [EvalError; 13] = [
+    // Cover all 20 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
+    let all_errors: [EvalError; 20] = [
         EvalError::Usage("bad flag OPENROUTER_API_KEY=sk-or-secret123".to_owned()),
         EvalError::InvalidSeatCount { actual: 3 },
         EvalError::UnsupportedFileSeatModel {
@@ -1394,6 +1972,13 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
         EvalError::InsufficientTurnsForStrata("too short".to_owned()),
         EvalError::InvalidStrata("bad strata".to_owned()),
         EvalError::UnknownFocalSeat("Phantom".to_owned()),
+        EvalError::EvalThinkStrippingForbidden("exclude true".to_owned()),
+        EvalError::MissingBranchNegotiation("missing neg".to_owned()),
+        EvalError::BranchArmDirNotEmpty("dir non empty".to_owned()),
+        EvalError::MissingSourceSetup("missing setup".to_owned()),
+        EvalError::IncompatibleEvalSetup("incompatible setup".to_owned()),
+        EvalError::PartialTurnFromSeatExists("partial day reply".to_owned()),
+        EvalError::NoModelSeatsForSelect("no model seats".to_owned()),
         EvalError::Engine(EngineError::InvalidConfig("bad config".to_owned())),
         EvalError::Relay(RelayError::Usage("bad relay".to_owned())),
         EvalError::Io("io error".to_owned()),
@@ -1592,7 +2177,10 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
         &NoopTransport,
         None,
     );
-    assert!(matches!(mismatch_err, Err(EvalError::Usage(_))));
+    assert!(matches!(
+        mismatch_err,
+        Err(EvalError::IncompatibleEvalSetup(_))
+    ));
 
     // Branch unknown focal seat & missing checkpoint prefix -> clean named error codes.
     let unk = run_branch_with_transport(
@@ -2073,8 +2661,10 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     );
     assert!(bad_branch[0].decision.refused_bundle.is_some());
 
-    // Copy checkpoints to a standalone directory (no `to-seat/*.negotiation.json`) so branch exercises fallback negotiation synthesis!
-    let standalone_ckpts = tmp.join("standalone/checkpoints");
+    // Copy checkpoints to a standalone directory (no `setup.json` or `to-seat/*.negotiation.json`):
+    // B4 forbids silent fallbacks and refuses with MISSING_SOURCE_SETUP then MISSING_BRANCH_NEGOTIATION.
+    let standalone_root = tmp.join("standalone");
+    let standalone_ckpts = standalone_root.join("checkpoints");
     must_ok(fs::create_dir_all(&standalone_ckpts), "mkdir standalone");
     for fname in [
         "day-01-pre-act.save.json",
@@ -2089,28 +2679,59 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             fname,
         );
     }
-    let standalone_branch = must_ok(
-        run_branch_with_transport(
-            &BranchOptions {
-                checkpoint_prefix: Some(standalone_ckpts.join("day-01-pre-act")),
-                list_path: None,
-                focal_seat: Some("Foundry".to_owned()),
-                seats_path: seats_path.clone(),
-                wrapper_path: wrapper_path.clone(),
-                arms: vec![EvalArm::Off],
-                out_dir: tmp.join("standalone_branch_out"),
-                memory_mode: league_relay::MemoryMode::Snapshot,
-                live: false,
-                cap_credits: None,
-                cap_gpu_secs: None,
-                allowed_vm_hosts: Vec::new(),
-            },
-            &NoopTransport,
-            None,
-        ),
-        "standalone branch without negotiation.json",
+    let missing_setup_err = run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(standalone_ckpts.join("day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("standalone_branch_out"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
     );
-    assert_eq!(standalone_branch.len(), 1);
+    assert!(matches!(
+        missing_setup_err,
+        Err(EvalError::MissingSourceSetup(_))
+    ));
+
+    // Add matching setup.json without negotiation.json -> MISSING_BRANCH_NEGOTIATION (`B4`).
+    must_ok(
+        fs::copy(
+            play_with_extra_flags.join("setup.json"),
+            standalone_root.join("setup.json"),
+        ),
+        "copy setup.json into standalone",
+    );
+    let missing_neg_err = run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(standalone_ckpts.join("day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("standalone_branch_out_neg"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    );
+    assert!(matches!(
+        missing_neg_err,
+        Err(EvalError::MissingBranchNegotiation(_))
+    ));
 
     // Corrupt `setup.json` game_id, empty wrapper, `--turns 33`, malformed transcript, missing act-recorded seal.
     let empty_wrapper = tmp.join("empty_wrapper.md");
@@ -2165,13 +2786,11 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
         assert!(run_play_with_transport(&opts_err, &NoopTransport, None).is_err());
     }
 
-    let mut bad_setup: Value = must_ok(
-        serde_json::from_str(&must_ok(
-            fs::read_to_string(play_with_extra_flags.join("setup.json")),
-            "read setup",
-        )),
-        "parse setup",
+    let orig_setup_raw = must_ok(
+        fs::read_to_string(play_with_extra_flags.join("setup.json")),
+        "read setup",
     );
+    let mut bad_setup: Value = must_ok(serde_json::from_str(&orig_setup_raw), "parse setup");
     bad_setup["game_id"] = json!("wrong-game-id");
     must_ok(
         fs::write(
@@ -2201,6 +2820,10 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             None,
         )
         .is_err()
+    );
+    must_ok(
+        fs::write(play_with_extra_flags.join("setup.json"), &orig_setup_raw),
+        "restore setup",
     );
 
     // Branch validation errors & malformed transcript JSONL.
@@ -2362,7 +2985,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
                 list_path: None,
                 focal_seat: Some("Foundry".to_owned()),
-                seats_path,
+                seats_path: local_seats_path,
                 wrapper_path,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_bad_jsonl"),
@@ -2465,7 +3088,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     );
     assert!(
         run_select(&SelectOptions {
-            game_dirs: vec![fail_game],
+            game_dirs: vec![fail_game.clone()],
             per_game: 1,
             strata: [0, 1, 0],
             selection_seed: 1,
@@ -2547,7 +3170,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     must_ok(fs::write(&sel_overwrite, b"{}"), "write prior target");
     assert!(
         run_select(&SelectOptions {
-            game_dirs: vec![play_with_extra_flags],
+            game_dirs: vec![fail_game],
             per_game: 1,
             strata: [1, 0, 0],
             selection_seed: 7,
@@ -2555,6 +3178,619 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
         })
         .is_ok()
     );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn b4_b5_c2_c7_c11_end_to_end_contracts() {
+    let tmp = fresh_tmp_dir("fix1_contracts");
+    let game_dir = tmp.join("game");
+    let wrapper_path = write_wrapper(&tmp);
+    let alt_wrapper = tmp.join("alt_wrapper.md");
+    must_ok(
+        fs::write(&alt_wrapper, "# Alt Wrapper\nDifferent instructions.\n"),
+        "write alt wrapper",
+    );
+    let seats_path = write_seats(&tmp, "seats.json", focal_local_three_clubbot_seats());
+    let alt_seats_path = write_seats(
+        &tmp,
+        "alt_seats.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.25,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+
+    // Build a 2-model-seat table (`Foundry` + `Quarry` Model, `Harbor` + `Mint` ClubBot) so `Quarry`
+    // can deliver a real whisper to `Foundry` on Day 2 talk (`B4` whisper prompt reconstruction!),
+    // AND `Foundry` can trigger `MESSAGE_RECIPIENT_INVALID` + wrong-part refusal for `B5` manifest recount!
+    let two_model_path = write_seats(
+        &tmp,
+        "two_model_seats.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                {
+                    "guild": "Quarry",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18081/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+
+    struct ContractTransport {
+        bodies: Mutex<Vec<String>>,
+    }
+    impl Transport for ContractTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            {
+                let mut g = match self.bodies.lock() {
+                    Ok(g) => g,
+                    Err(e) => panic!("lock: {e}"),
+                };
+                g.push(body.to_owned());
+            }
+            let v: Value =
+                serde_json::from_str(body).map_err(|e| TransportError::Network(e.to_string()))?;
+            let user_msg = v["messages"]
+                .as_array()
+                .and_then(|a| a.last())
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or_default();
+            let header = user_msg.split("\"phase\"").next().unwrap_or(user_msg);
+            let is_talk = header.contains("This is the talk round.");
+            let is_turn_1 = header.contains("\"turn\": 1,");
+            let is_turn_2 = header.contains("\"turn\": 2,");
+            let is_foundry = header.contains("\"seat\": 0,");
+            let content = match (is_foundry, is_turn_1, is_turn_2, is_talk) {
+                (true, true, false, true) => json!({
+                    "messages": [{ "to_guild": "Phantom", "body": "bad recp d1" }],
+                    "market_actions": [],
+                    "bundle": {},
+                    "notes": "f d1 talk"
+                })
+                .to_string(),
+                (false, _, true, true) => json!({
+                    "messages": [{ "to_guild": "Foundry", "body": "WHISPER_TOKEN_B4_D2" }],
+                    "market_actions": [],
+                    "bundle": {},
+                    "notes": "q d2 whisper"
+                })
+                .to_string(),
+                (true, false, true, true) => json!({
+                    "messages": [],
+                    "market_actions": [{ "action_kind": "town_import", "good": { "asset_kind": "raw", "good_index": 0 }, "amount": 5 }],
+                    "bundle": {},
+                    "notes": "f d2 talk wrong part"
+                })
+                .to_string(),
+                (true, _, _, false) => json!({
+                    "messages": [],
+                    "market_actions": [],
+                    "bundle": {},
+                    "notes": "f act clean"
+                })
+                .to_string(),
+                _ => json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "clean" }).to_string(),
+            };
+            Ok(RawHttpResponse {
+                status: 200,
+                body: json!({
+                    "id": "ct-1",
+                    "model": "Qwen/Qwen3-32B",
+                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
+                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.001 }
+                })
+                .to_string(),
+            })
+        }
+
+        fn count_tokens(
+            &self,
+            _tokenize_url: &str,
+            _model: &str,
+            text: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(text.split_whitespace().count())
+        }
+    }
+
+    // 1. B5 per-turn manifest: play turn 1 -> manifest.json exists after turn 1; play turn 2 -> remove manifest.json ->
+    //    resume turn 3 -> manifest.json recovers exact turn 1–2 counts (`MESSAGE_RECIPIENT_INVALID`, `TALK_REPLY_HAS_ORDERS`, replies).
+    let play_t = ContractTransport {
+        bodies: Mutex::new(Vec::new()),
+    };
+    let m1 = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: two_model_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 120,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &play_t,
+            None,
+        ),
+        "b5 turn 1",
+    );
+    assert_eq!(m1.played_turns, 1);
+    assert_eq!(
+        m1.refusal_counts_by_seat["Foundry"].message_recipient_invalid,
+        1
+    );
+    assert!(game_dir.join("manifest.json").exists());
+
+    // Continue through turn 2.
+    let m2 = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: two_model_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 120,
+                seed: 7,
+                turns: 2,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &play_t,
+            None,
+        ),
+        "b5 turn 2",
+    );
+    assert_eq!(m2.played_turns, 2);
+    assert_eq!(
+        m2.refusal_counts_by_seat["Foundry"].talk_reply_has_orders,
+        1
+    );
+    assert_eq!(
+        m2.refusal_counts_by_seat["Foundry"].message_recipient_invalid,
+        1
+    );
+    assert_eq!(m2.wrong_part_refusals.delivered_model_replies, 8);
+
+    // Simulate crash right before final manifest write on turn 2 by deleting `manifest.json`,
+    // then resume turn 3 and verify recounted `manifest.json` loses zero counts!
+    must_ok(
+        fs::remove_file(game_dir.join("manifest.json")),
+        "delete manifest",
+    );
+    let m3 = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: two_model_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 120,
+                seed: 7,
+                turns: 3,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &play_t,
+            None,
+        ),
+        "b5 turn 3 after deleted manifest",
+    );
+    assert_eq!(m3.played_turns, 3);
+    assert_eq!(
+        m3.refusal_counts_by_seat["Foundry"].talk_reply_has_orders,
+        1
+    );
+    assert_eq!(
+        m3.refusal_counts_by_seat["Foundry"].message_recipient_invalid,
+        1
+    );
+    assert_eq!(m3.wrong_part_refusals.delivered_model_replies, 12);
+
+    // 2. B5 partial-turn resume refusal (`PARTIAL_TURN_FROM_SEAT_EXISTS`) when day-04 `from-seat` file already exists.
+    must_ok(
+        fs::write(
+            game_dir.join("from-seat/day-04-talk-Foundry.md"),
+            b"{\"messages\":[],\"market_actions\":[],\"bundle\":{},\"notes\":\"x\"}",
+        ),
+        "plant partial day-04 reply",
+    );
+    let partial_err = run_play_with_transport(
+        &PlayOptions {
+            game_dir: game_dir.clone(),
+            seats_path: two_model_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            arm: EvalArm::Off,
+            table_id: 120,
+            seed: 7,
+            turns: 4,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &play_t,
+        None,
+    );
+    assert!(
+        matches!(partial_err, Err(EvalError::PartialTurnFromSeatExists(_))),
+        "expected PARTIAL_TURN_FROM_SEAT_EXISTS, got {partial_err:?}"
+    );
+
+    // 3. C11 resume & branch checks for mismatched `--memory-mode`, `--seats`, and `--wrapper`.
+    for (label, bad_wrap, bad_seats, bad_mem) in [
+        (
+            "resume_bad_wrapper",
+            alt_wrapper.clone(),
+            two_model_path.clone(),
+            league_relay::MemoryMode::Snapshot,
+        ),
+        (
+            "resume_bad_seats",
+            wrapper_path.clone(),
+            alt_seats_path.clone(),
+            league_relay::MemoryMode::Snapshot,
+        ),
+        (
+            "resume_bad_mem",
+            wrapper_path.clone(),
+            two_model_path.clone(),
+            league_relay::MemoryMode::Emc,
+        ),
+    ] {
+        let e = run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: bad_seats,
+                wrapper_path: bad_wrap,
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 120,
+                seed: 7,
+                turns: 4,
+                memory_mode: bad_mem,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        );
+        assert!(
+            matches!(e, Err(EvalError::IncompatibleEvalSetup(_))),
+            "{label}: expected INCOMPATIBLE_EVAL_SETUP, got {e:?}"
+        );
+    }
+    for (label, bad_wrap, bad_seats, bad_mem) in [
+        (
+            "branch_bad_wrapper",
+            alt_wrapper,
+            two_model_path.clone(),
+            league_relay::MemoryMode::Snapshot,
+        ),
+        (
+            "branch_bad_seats",
+            wrapper_path.clone(),
+            alt_seats_path,
+            league_relay::MemoryMode::Snapshot,
+        ),
+        (
+            "branch_bad_mem",
+            wrapper_path.clone(),
+            two_model_path.clone(),
+            league_relay::MemoryMode::Full,
+        ),
+    ] {
+        let e = run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(game_dir.join("checkpoints/day-02-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: bad_seats,
+                wrapper_path: bad_wrap,
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join(format!("out_{label}")),
+                memory_mode: bad_mem,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        );
+        assert!(
+            matches!(e, Err(EvalError::IncompatibleEvalSetup(_))),
+            "{label}: expected INCOMPATIBLE_EVAL_SETUP, got {e:?}"
+        );
+    }
+
+    // 4. B4 + C2: branch Day 2 (`Foundry` received `"WHISPER_TOKEN_B4_D2"` from `Quarry`) with TWO DISTINCT
+    //    valid orders across `off` (`amount: 10`) and `on` (`amount: 45`) (different from recorded `0`!):
+    //    - Verify whisper token `"WHISPER_TOKEN_B4_D2"` appears in both focal HTTP request bodies (`B4` + Answer 1).
+    //    - Verify `loaded_history_sha256` records exact SHA-256 of negotiation, transcript, and scratchpad (`B4`).
+    //    - Verify `off`, `on`, and recorded play receipts all differ (`C2`).
+    //    - Verify re-running `branch` into the SAME non-empty `--out` is refused with `BRANCH_ARM_DIR_NOT_EMPTY` (`B4`).
+    let branch_out = tmp.join("b4_c2_branch");
+    struct DistinctOrderBranchTransport {
+        calls: Mutex<Vec<String>>,
+    }
+    impl Transport for DistinctOrderBranchTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let call_idx = {
+                let mut g = match self.calls.lock() {
+                    Ok(g) => g,
+                    Err(e) => panic!("lock: {e}"),
+                };
+                g.push(body.to_owned());
+                g.len()
+            };
+            let amount = if call_idx == 1 { 10 } else { 45 };
+            let content = json!({
+                "messages": [],
+                "market_actions": [{
+                    "action_kind": "town_import",
+                    "good": { "asset_kind": "raw", "good_index": 0 },
+                    "amount": amount
+                }],
+                "bundle": {},
+                "notes": format!("branch arm call {call_idx}")
+            })
+            .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: json!({
+                    "id": format!("b-{call_idx}"),
+                    "model": "Qwen/Qwen3-32B",
+                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
+                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30 }
+                })
+                .to_string(),
+            })
+        }
+
+        fn count_tokens(
+            &self,
+            _tokenize_url: &str,
+            _model: &str,
+            text: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(text.split_whitespace().count())
+        }
+    }
+
+    let c2_transport = DistinctOrderBranchTransport {
+        calls: Mutex::new(Vec::new()),
+    };
+    let outcomes = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(game_dir.join("checkpoints/day-02-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: two_model_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: branch_out.clone(),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &c2_transport,
+            None,
+        ),
+        "b4+c2 distinct branch",
+    );
+    assert_eq!(outcomes.len(), 2);
+
+    let recorded_d2_receipt: PublicSweepReceipt = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(game_dir.join("receipts/day-02.receipt.json")),
+            "read recorded d2 receipt",
+        )),
+        "parse d2 receipt",
+    );
+    assert_ne!(outcomes[0].receipt, recorded_d2_receipt);
+    assert_ne!(outcomes[1].receipt, recorded_d2_receipt);
+    assert_ne!(outcomes[0].receipt, outcomes[1].receipt);
+
+    // Check focal HTTP request bodies carry Quarry's whisper.
+    let branch_reqs = match c2_transport.calls.lock() {
+        Ok(g) => g.clone(),
+        Err(e) => panic!("lock: {e}"),
+    };
+    assert_eq!(branch_reqs.len(), 2);
+    for req in &branch_reqs {
+        assert!(
+            req.contains("WHISPER_TOKEN_B4_D2"),
+            "focal branch HTTP request must deliver Peer's day-2 talk whisper"
+        );
+    }
+
+    // Check `loaded_history_sha256` exact digests in decision.json (`B4`).
+    let expected_neg_sha = sha256_hex(&must_ok(
+        fs::read(game_dir.join("to-seat/day-02-act-Foundry.negotiation.json")),
+        "read neg",
+    ));
+    let expected_tx_sha = sha256_hex(&must_ok(
+        fs::read(game_dir.join("relay/seats/Foundry.jsonl")),
+        "read tx",
+    ));
+    let expected_pad_sha = sha256_hex(&must_ok(
+        fs::read(game_dir.join("checkpoints/day-02-pre-act.Foundry.scratchpad.md")),
+        "read pad",
+    ));
+    for o in &outcomes {
+        assert_eq!(
+            o.decision
+                .loaded_history_sha256
+                .get("to-seat/day-02-act-Foundry.negotiation.json")
+                .map(String::as_str),
+            Some(expected_neg_sha.as_str())
+        );
+        assert_eq!(
+            o.decision
+                .loaded_history_sha256
+                .get("relay/seats/Foundry.jsonl")
+                .map(String::as_str),
+            Some(expected_tx_sha.as_str())
+        );
+        assert_eq!(
+            o.decision
+                .loaded_history_sha256
+                .get("checkpoints/day-02-pre-act.Foundry.scratchpad.md")
+                .map(String::as_str),
+            Some(expected_pad_sha.as_str())
+        );
+    }
+
+    // Check Summary JSON (`branch_summary.json`) exists with delivered = 2, total_rounds = 2.
+    let summary: BranchSummary = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(branch_out.join("branch_summary.json")),
+            "read branch_summary",
+        )),
+        "parse branch_summary",
+    );
+    assert_eq!(summary.evaluated_arms, 2);
+    assert_eq!(summary.wrong_part_refusals.delivered_model_replies, 2);
+    assert_eq!(summary.wrong_part_refusals.total_model_rounds, 2);
+
+    // B4: Re-running `branch` into non-empty `branch_out` must fail loudly with BRANCH_ARM_DIR_NOT_EMPTY.
+    let reuse_err = run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(game_dir.join("checkpoints/day-02-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: two_model_path,
+            wrapper_path: wrapper_path.clone(),
+            arms: vec![EvalArm::Off, EvalArm::On],
+            out_dir: branch_out,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    );
+    assert!(matches!(reuse_err, Err(EvalError::BranchArmDirNotEmpty(_))));
+
+    // 5. C7: two fresh games with identical `(seed, table_id)` draw independent non-zero OS `bot_tie_seed`s!
+    let c7_a = tmp.join("c7_a");
+    let c7_b = tmp.join("c7_b");
+    let all_bot = write_seats(&tmp, "c7_bot_seats.json", all_clubbot_seats());
+    for g in [&c7_a, &c7_b] {
+        let _ = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: g.clone(),
+                    seats_path: all_bot.clone(),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    arm: EvalArm::Off,
+                    table_id: 777,
+                    seed: 42,
+                    turns: 1,
+                    memory_mode: league_relay::MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &NoopTransport,
+                None,
+            ),
+            "c7 fresh game",
+        );
+    }
+    let seal_a: Value = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(c7_a.join("eval-777.seal")),
+            "read c7 seal a",
+        )),
+        "parse c7 seal a",
+    );
+    let seal_b: Value = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(c7_b.join("eval-777.seal")),
+            "read c7 seal b",
+        )),
+        "parse c7 seal b",
+    );
+    let tie_a = seal_a["bot_tie_seed"].as_u64();
+    let tie_b = seal_b["bot_tie_seed"].as_u64();
+    assert!(tie_a.is_some_and(|v| v != 0));
+    assert!(tie_b.is_some_and(|v| v != 0));
+    assert_ne!(
+        tie_a, tie_b,
+        "C7: fresh games must draw distinct OS CSPRNG bot_tie_seed"
+    );
+    let _unused_seats = seats_path;
 
     let _ = fs::remove_dir_all(&tmp);
 }

@@ -23,16 +23,20 @@ pub use driver::{
 };
 pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
 pub use records::{
-    BranchArmOutcome, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat, EvalSetupFile,
-    PASS_B_LIMIT_STATEMENT, PREFLIGHT_WRONG_PART_STOP_THRESHOLD, RefusalCodeCounts,
-    RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata,
+    BranchArmOutcome, BranchSummary, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
+    EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, PREFLIGHT_WRONG_PART_STOP_THRESHOLD,
+    RefusalCodeCounts, RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata,
+    summarize_branch_outcomes,
 };
 pub use reply::{
     InvalidRecipientDiagnostic, ParsedActReply, ParsedEvalMessage, ParsedTalkReply,
     ReplyRefusalCode, parse_eval_act_reply, parse_eval_talk_reply,
 };
 pub use schema::{build_eval_response_format_config, build_eval_response_format_value};
-pub use select::{SelectOptions, SelectedPreActState, SelectionList, TurnStratum, run_select};
+pub use select::{
+    SelectOptions, SelectedPreActState, SelectionList, TurnStratum, expand_home_path,
+    expand_home_path_with_home, run_select, sanitize_home_path, sanitize_home_path_with_homes,
+};
 pub use view::{
     EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,

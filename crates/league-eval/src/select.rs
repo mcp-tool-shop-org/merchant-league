@@ -11,6 +11,88 @@ use crate::driver::write_json_pretty_atomic;
 use crate::error::EvalError;
 use crate::records::EvalManifest;
 
+const HOME_PLACEHOLDER: &str = "<home>";
+
+/// Replace any leading OS user home-directory prefix in `path` with `<home>` (`C12`).
+#[must_use]
+pub fn sanitize_home_path(path: &Path) -> PathBuf {
+    let mut homes = Vec::new();
+    for var in ["HOME", "USERPROFILE"] {
+        if let Some(val) = std::env::var_os(var)
+            && !val.is_empty()
+        {
+            homes.push(PathBuf::from(val));
+        }
+    }
+    sanitize_home_path_with_homes(path, &homes)
+}
+
+/// Deterministic helper for [`sanitize_home_path`] given explicit candidate home roots (`C12`).
+#[must_use]
+pub fn sanitize_home_path_with_homes(path: &Path, homes: &[PathBuf]) -> PathBuf {
+    let raw = path.to_string_lossy();
+    let norm = raw.replace('\\', "/");
+    for home in homes {
+        let h_raw = home.to_string_lossy();
+        let h_norm = h_raw.replace('\\', "/");
+        let h_trimmed = h_norm.trim_end_matches('/');
+        if h_trimmed.is_empty() {
+            continue;
+        }
+        let matches_prefix = norm == h_trimmed
+            || norm
+                .strip_prefix(h_trimmed)
+                .is_some_and(|rest| rest.starts_with('/'));
+        #[cfg(windows)]
+        let matches_prefix = matches_prefix
+            || norm.eq_ignore_ascii_case(h_trimmed)
+            || (norm.len() > h_trimmed.len()
+                && norm
+                    .get(..h_trimmed.len())
+                    .is_some_and(|p| p.eq_ignore_ascii_case(h_trimmed))
+                && norm[h_trimmed.len()..].starts_with('/'));
+        if matches_prefix {
+            let suffix = &norm[h_trimmed.len()..];
+            if suffix.is_empty() {
+                return PathBuf::from(HOME_PLACEHOLDER);
+            }
+            return PathBuf::from(format!("{HOME_PLACEHOLDER}{suffix}"));
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Expand a leading `<home>` placeholder back into an actual filesystem path (`C12`).
+#[must_use]
+pub fn expand_home_path(path: &Path) -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()))
+        .map(PathBuf::from);
+    expand_home_path_with_home(path, home.as_deref())
+}
+
+/// Deterministic helper for [`expand_home_path`] given an explicit optional home root (`C12`).
+#[must_use]
+pub fn expand_home_path_with_home(path: &Path, home: Option<&Path>) -> PathBuf {
+    let Some(home_dir) = home else {
+        return path.to_path_buf();
+    };
+    let raw = path.to_string_lossy();
+    let norm = raw.replace('\\', "/");
+    if norm == HOME_PLACEHOLDER {
+        return home_dir.to_path_buf();
+    }
+    if let Some(rest) = norm.strip_prefix("<home>/") {
+        let mut out = home_dir.to_path_buf();
+        for seg in rest.split('/').filter(|s| !s.is_empty()) {
+            out.push(seg);
+        }
+        return out;
+    }
+    path.to_path_buf()
+}
+
 /// Stratum bucket (`early`, `mid`, `late`) corresponding to thirds of a game's played turns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +189,17 @@ pub fn run_select(opts: &SelectOptions) -> Result<SelectionList, EvalError> {
                 actual: manifest.seats.len(),
             });
         }
+        let model_seats: Vec<&crate::records::EvalManifestSeat> = manifest
+            .seats
+            .iter()
+            .filter(|s| s.backend != "file")
+            .collect();
+        if model_seats.is_empty() {
+            return Err(EvalError::NoModelSeatsForSelect(format!(
+                "game {} has zero automated Model seats in manifest.json",
+                game_dir.display()
+            )));
+        }
 
         let ckpts_dir = game_dir.join("checkpoints");
         let played_days = discover_playable_days(&ckpts_dir)?;
@@ -126,6 +219,7 @@ pub fn run_select(opts: &SelectOptions) -> Result<SelectionList, EvalError> {
             (TurnStratum::Late, late_days, opts.strata[2]),
         ];
 
+        let sanitized_game_dir = sanitize_home_path(game_dir);
         for (stratum_idx, (stratum, pool, need)) in buckets.into_iter().enumerate() {
             if pool.len() < need {
                 return Err(EvalError::InsufficientTurnsForStrata(format!(
@@ -145,21 +239,23 @@ pub fn run_select(opts: &SelectOptions) -> Result<SelectionList, EvalError> {
             let mut picked_days: Vec<u8> = picked_indices.into_iter().map(|i| pool[i]).collect();
             picked_days.sort_unstable();
             for (pick_rank, day) in picked_days.into_iter().enumerate() {
-                let seat_index = deterministic_pick_seat(
+                let model_pick = deterministic_pick_seat(
                     opts.selection_seed,
                     game_ordinal,
                     stratum_idx,
                     pick_rank,
                     day,
+                    model_seats.len(),
                 );
-                let seat = &manifest.seats[usize::from(seat_index)];
-                let checkpoint_prefix = ckpts_dir.join(format!("day-{day:02}-pre-act"));
+                let seat = model_seats[model_pick];
+                let checkpoint_prefix =
+                    sanitize_home_path(&ckpts_dir.join(format!("day-{day:02}-pre-act")));
                 states.push(SelectedPreActState {
-                    game_dir: game_dir.clone(),
+                    game_dir: sanitized_game_dir.clone(),
                     game_id: manifest.game_id.clone(),
                     day,
                     stratum,
-                    seat_index,
+                    seat_index: seat.seat,
                     seat_guild: seat.guild.clone(),
                     checkpoint_prefix,
                 });
@@ -267,7 +363,8 @@ fn deterministic_pick_seat(
     stratum_idx: usize,
     pick_rank: usize,
     day: u8,
-) -> u8 {
+    model_seat_count: usize,
+) -> usize {
     let roll = hash_u64(
         seed,
         b"league-eval/select-seat/v1",
@@ -278,5 +375,5 @@ fn deterministic_pick_seat(
             u64::from(day),
         ],
     );
-    (roll % 4) as u8
+    (roll as usize) % model_seat_count
 }

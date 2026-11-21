@@ -17,13 +17,20 @@ use serde_json::{Map, Value};
 
 use crate::wording::{EVAL_MESSAGES_MAX_ITEMS, eval_wording_slot};
 
-/// Named refusal codes defined by the Item 9 reply contract (`1.3`).
+/// Named refusal codes defined by the Item 9 reply contract (`1.3`, `A1`, `B1`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ReplyRefusalCode {
-    /// An `act` (or malformed `talk`) reply is not one schema-valid unique-key JSON object, or its
+    /// An `act` reply is not one schema-valid unique-key JSON object, or its
     /// `market_actions` / `bundle` failed parsing.
     #[serde(rename = "ACT_REPLY_INVALID")]
     ActReplyInvalid,
+    /// A `talk` reply with no orders is not one schema-valid unique-key JSON object, or its
+    /// `messages` / `market_actions` / `bundle` shape failed parsing (`B1`).
+    #[serde(rename = "TALK_REPLY_INVALID")]
+    TalkReplyInvalid,
+    /// `league-relay` returned `NoReply` after exhausting schema / JSON retries (`A1.2`).
+    #[serde(rename = "REPLY_SCHEMA_INVALID")]
+    ReplySchemaInvalid,
     /// A `talk` reply contained non-empty `market_actions` or a non-empty `bundle`.
     #[serde(rename = "TALK_REPLY_HAS_ORDERS")]
     TalkReplyHasOrders,
@@ -41,9 +48,25 @@ impl ReplyRefusalCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ActReplyInvalid => "ACT_REPLY_INVALID",
+            Self::TalkReplyInvalid => "TALK_REPLY_INVALID",
+            Self::ReplySchemaInvalid => "REPLY_SCHEMA_INVALID",
             Self::TalkReplyHasOrders => "TALK_REPLY_HAS_ORDERS",
             Self::ActReplyHasMessages => "ACT_REPLY_HAS_MESSAGES",
             Self::MessageRecipientInvalid => "MESSAGE_RECIPIENT_INVALID",
+        }
+    }
+
+    /// Parse a serialized `SCREAMING_SNAKE_CASE` refusal code (`B5` recount / branch summary).
+    #[must_use]
+    pub fn from_code_str(raw: &str) -> Option<Self> {
+        match raw {
+            "ACT_REPLY_INVALID" => Some(Self::ActReplyInvalid),
+            "TALK_REPLY_INVALID" => Some(Self::TalkReplyInvalid),
+            "REPLY_SCHEMA_INVALID" => Some(Self::ReplySchemaInvalid),
+            "TALK_REPLY_HAS_ORDERS" => Some(Self::TalkReplyHasOrders),
+            "ACT_REPLY_HAS_MESSAGES" => Some(Self::ActReplyHasMessages),
+            "MESSAGE_RECIPIENT_INVALID" => Some(Self::MessageRecipientInvalid),
+            _ => None,
         }
     }
 }
@@ -90,7 +113,7 @@ pub struct ParsedActReply {
 pub struct ParsedTalkReply {
     /// Accepted whispers ready to route to `(recipient_guild, whisper)`.
     pub accepted_whispers: Vec<(String, UntrustedWhisper)>,
-    /// Whole-reply refusal code (`TALK_REPLY_HAS_ORDERS` or `ACT_REPLY_INVALID` on malformed JSON).
+    /// Whole-reply refusal code (`TALK_REPLY_HAS_ORDERS` or `TALK_REPLY_INVALID` on malformed JSON).
     pub refusal_code: Option<ReplyRefusalCode>,
     /// Per-message invalid-recipient diagnostics (`MESSAGE_RECIPIENT_INVALID`, `1.3`).
     pub invalid_recipients: Vec<InvalidRecipientDiagnostic>,
@@ -206,16 +229,42 @@ struct CommonReplyEnvelope {
     notes_present: bool,
 }
 
-fn validate_common_reply_envelope(
-    raw: &str,
+fn raw_bundle_map_is_empty(b: &Map<String, Value>) -> bool {
+    const EMPTY_ARRAY_KEYS: [&str; 8] = [
+        "converter_runs",
+        "project_deliveries",
+        "atomic_swaps",
+        "contract_deliveries",
+        "dual_escrows",
+        "escrow_finishes",
+        "check_cashes",
+        "charter_bids",
+    ];
+    for (k, v) in b {
+        if k == "debt_repayment_cred" {
+            if v.as_u64() != Some(0) {
+                return false;
+            }
+        } else if k == "council_vote" {
+            if !v.is_null() {
+                return false;
+            }
+        } else if EMPTY_ARRAY_KEYS.contains(&k.as_str()) {
+            if !v.as_array().is_some_and(Vec::is_empty) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn validate_common_reply_envelope_obj(
+    obj: &Map<String, Value>,
     asking_seat: u8,
     keeps_notes: bool,
 ) -> (Option<CommonReplyEnvelope>, Option<String>, bool) {
-    let obj = match parse_strict_json_object(raw) {
-        Ok(o) => o,
-        Err(reason) => return (None, Some(reason), false),
-    };
-
     let k_notes = wording_slot("scratchpad_schema_key");
     let k_messages = eval_wording_slot("eval_messages_key");
     let k_to_guild = eval_wording_slot("eval_to_guild_key");
@@ -399,37 +448,55 @@ trait PipeExt: Sized {
 }
 impl<T> PipeExt for T {}
 
-/// Strictly parse a delivered `act` reply (`from-seat/day-DD-act-<Guild>.md`, `1.3`, `1.4`).
+/// Strictly parse a delivered `act` reply (`from-seat/day-DD-act-<Guild>.md`, `1.3`, `1.4`, `B1`).
 ///
-/// Refused act replies always yield [`EvalActSubmission::default()`] with empty `pass_b_actions`
-/// (`1.1`, `1.3`). Valid model-seat act replies always leave `pass_b_actions` empty (`1.1`).
+/// Wrong-round detection (`ACT_REPLY_HAS_MESSAGES`) runs on the raw JSON object before order or
+/// message validation (`B1`). Refused act replies always yield [`EvalActSubmission::default()`]
+/// with empty `pass_b_actions` (`1.1`, `1.3`). Valid model-seat act replies always leave
+/// `pass_b_actions` empty (`1.1`).
 #[must_use]
 pub fn parse_eval_act_reply(raw: &str, asking_seat: u8, keeps_notes: bool) -> ParsedActReply {
-    let (env_opt, err_opt, notes_present) =
-        validate_common_reply_envelope(raw, asking_seat, keeps_notes);
+    let obj = match parse_strict_json_object(raw) {
+        Ok(o) => o,
+        Err(reason) => {
+            return ParsedActReply {
+                submission: EvalActSubmission::default(),
+                refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
+                refusal_reason: Some(reason),
+                notes_present: false,
+                is_wrong_part: false,
+            };
+        }
+    };
+    let k_notes = wording_slot("scratchpad_schema_key");
+    let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
+    let k_messages = eval_wording_slot("eval_messages_key");
+    if let Some(msg_arr) = obj.get(k_messages).and_then(Value::as_array)
+        && !msg_arr.is_empty()
+    {
+        return ParsedActReply {
+            submission: EvalActSubmission::default(),
+            refusal_code: Some(ReplyRefusalCode::ActReplyHasMessages),
+            refusal_reason: Some(format!(
+                "act reply must leave '{k_messages}' empty; got {} message(s)",
+                msg_arr.len()
+            )),
+            notes_present,
+            is_wrong_part: true,
+        };
+    }
+
+    let (env_opt, err_opt, env_notes_present) =
+        validate_common_reply_envelope_obj(&obj, asking_seat, keeps_notes);
     let Some(env) = env_opt else {
         return ParsedActReply {
             submission: EvalActSubmission::default(),
             refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
             refusal_reason: err_opt,
-            notes_present,
+            notes_present: env_notes_present,
             is_wrong_part: false,
         };
     };
-
-    if !env.messages.is_empty() {
-        return ParsedActReply {
-            submission: EvalActSubmission::default(),
-            refusal_code: Some(ReplyRefusalCode::ActReplyHasMessages),
-            refusal_reason: Some(format!(
-                "act reply must leave '{}' empty; got {} message(s)",
-                eval_wording_slot("eval_messages_key"),
-                env.messages.len()
-            )),
-            notes_present: env.notes_present,
-            is_wrong_part: true,
-        };
-    }
 
     ParsedActReply {
         submission: EvalActSubmission {
@@ -444,13 +511,14 @@ pub fn parse_eval_act_reply(raw: &str, asking_seat: u8, keeps_notes: bool) -> Pa
     }
 }
 
-/// Strictly parse a delivered `talk` reply (`from-seat/day-DD-talk-<Guild>.md`, `1.3`–`1.5`).
+/// Strictly parse a delivered `talk` reply (`from-seat/day-DD-talk-<Guild>.md`, `1.3`–`1.5`, `B1`).
 ///
-/// Refuses the entire `talk` reply when `market_actions` or `bundle` is non-empty
-/// (`TALK_REPLY_HAS_ORDERS`, `0` messages sent), or when JSON/schema validation fails
-/// (`ACT_REPLY_INVALID`, `0` messages sent). When one message addresses an unknown guild or the
-/// sender itself, records `MESSAGE_RECIPIENT_INVALID` for that message alone and delivers the seat's
-/// other valid messages.
+/// Wrong-round detection (`TALK_REPLY_HAS_ORDERS`) runs on the raw JSON object before order or
+/// message validation (`B1`). Refuses the entire `talk` reply when `market_actions` or `bundle`
+/// is non-empty (`TALK_REPLY_HAS_ORDERS`, `0` messages sent), or when JSON/schema validation fails
+/// with no wrong-round orders (`TALK_REPLY_INVALID`, `0` messages sent). When one message addresses
+/// an unknown guild or the sender itself, records `MESSAGE_RECIPIENT_INVALID` for that message alone
+/// and delivers the seat's other valid messages.
 #[must_use]
 pub fn parse_eval_talk_reply(
     raw: &str,
@@ -459,15 +527,53 @@ pub fn parse_eval_talk_reply(
     seated_guilds: &[String],
     keeps_notes: bool,
 ) -> ParsedTalkReply {
-    let (env_opt, err_opt, notes_present) =
-        validate_common_reply_envelope(raw, sender_seat, keeps_notes);
+    let obj = match parse_strict_json_object(raw) {
+        Ok(o) => o,
+        Err(reason) => {
+            return ParsedTalkReply {
+                accepted_whispers: Vec::new(),
+                refusal_code: Some(ReplyRefusalCode::TalkReplyInvalid),
+                invalid_recipients: Vec::new(),
+                refusal_reason: Some(reason),
+                notes_present: false,
+                is_wrong_part: false,
+            };
+        }
+    };
+    let k_notes = wording_slot("scratchpad_schema_key");
+    let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
+    let k_ma = preview_wording_slot("key_market_actions");
+    let k_bundle = preview_wording_slot("key_bundle");
+    let has_non_empty_ma = obj
+        .get(&k_ma)
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty());
+    let has_non_empty_bundle = obj
+        .get(&k_bundle)
+        .and_then(Value::as_object)
+        .is_some_and(|b| !raw_bundle_map_is_empty(b));
+    if has_non_empty_ma || has_non_empty_bundle {
+        return ParsedTalkReply {
+            accepted_whispers: Vec::new(),
+            refusal_code: Some(ReplyRefusalCode::TalkReplyHasOrders),
+            invalid_recipients: Vec::new(),
+            refusal_reason: Some(format!(
+                "talk reply must leave '{k_ma}' and '{k_bundle}' empty"
+            )),
+            notes_present,
+            is_wrong_part: true,
+        };
+    }
+
+    let (env_opt, err_opt, env_notes_present) =
+        validate_common_reply_envelope_obj(&obj, sender_seat, keeps_notes);
     let Some(env) = env_opt else {
         return ParsedTalkReply {
             accepted_whispers: Vec::new(),
-            refusal_code: Some(ReplyRefusalCode::ActReplyInvalid),
+            refusal_code: Some(ReplyRefusalCode::TalkReplyInvalid),
             invalid_recipients: Vec::new(),
             refusal_reason: err_opt,
-            notes_present,
+            notes_present: env_notes_present,
             is_wrong_part: false,
         };
     };
@@ -478,9 +584,7 @@ pub fn parse_eval_talk_reply(
             refusal_code: Some(ReplyRefusalCode::TalkReplyHasOrders),
             invalid_recipients: Vec::new(),
             refusal_reason: Some(format!(
-                "talk reply must leave '{}' and '{}' empty",
-                preview_wording_slot("key_market_actions"),
-                preview_wording_slot("key_bundle")
+                "talk reply must leave '{k_ma}' and '{k_bundle}' empty"
             )),
             notes_present: env.notes_present,
             is_wrong_part: true,
@@ -547,7 +651,7 @@ mod tests {
         );
         assert_eq!(
             parse_eval_talk_reply("<think>x</think>{}", 0, "Foundry", &[], false).refusal_code,
-            Some(ReplyRefusalCode::ActReplyInvalid)
+            Some(ReplyRefusalCode::TalkReplyInvalid)
         );
 
         let seated = vec![
@@ -556,30 +660,68 @@ mod tests {
             "Harbor".to_owned(),
             "Mint".to_owned(),
         ];
+        // Pure malformed envelopes with no wrong-round content (`ACT_REPLY_INVALID` vs `TALK_REPLY_INVALID`):
         for bad in [
             r#"{bad"#,
             r#"{"messages":"not-arr","market_actions":[],"bundle":{}}"#,
-            r#"{"messages":[42],"market_actions":[],"bundle":{}}"#,
-            r#"{"messages":[{"to_guild":"Quarry","body":"hi","extra":1}],"market_actions":[],"bundle":{}}"#,
-            r#"{"messages":[{"body":"missing guild"}],"market_actions":[],"bundle":{}}"#,
             r#"{"messages":[],"market_actions":"not-arr","bundle":{}}"#,
             r#"{"messages":[],"market_actions":[],"bundle":[]}"#,
         ] {
             let act = parse_eval_act_reply(bad, 0, false);
             assert_eq!(act.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
+            assert!(!act.is_wrong_part);
             let talk = parse_eval_talk_reply(bad, 0, "Foundry", &seated, false);
-            assert_eq!(talk.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
+            assert_eq!(talk.refusal_code, Some(ReplyRefusalCode::TalkReplyInvalid));
+            assert!(!talk.is_wrong_part);
         }
-        let talk_bundle = parse_eval_talk_reply(
+
+        // Malformed message items in `talk` -> `TALK_REPLY_INVALID`:
+        for malformed_talk_msg in [
+            r#"{"messages":[42],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"to_guild":"Quarry","body":"hi","extra":1}],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"body":"missing guild"}],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"to_guild":"Quarry"}],"market_actions":[],"bundle":{}}"#,
+        ] {
+            let talk = parse_eval_talk_reply(malformed_talk_msg, 0, "Foundry", &seated, false);
+            assert_eq!(talk.refusal_code, Some(ReplyRefusalCode::TalkReplyInvalid));
+            assert!(!talk.is_wrong_part);
+        }
+
+        // B1 wrong-round priority over malformed orders / messages:
+        for wrong_talk in [
+            r#"{"messages":[],"market_actions":[{"action_kind":"bogus"}],"bundle":{}}"#,
+            r#"{"messages":[],"market_actions":[{"action_kind":"post_offer"}],"bundle":{}}"#,
+            r#"{"messages":[],"market_actions":[],"bundle":{"unknown_field":1}}"#,
             r#"{"messages":[],"market_actions":[],"bundle":{"debt_repayment_cred":10}}"#,
+            r#"{"messages":[],"market_actions":[],"bundle":{"converter_runs":["bad"]}}"#,
+        ] {
+            let res = parse_eval_talk_reply(wrong_talk, 0, "Foundry", &seated, false);
+            assert_eq!(res.refusal_code, Some(ReplyRefusalCode::TalkReplyHasOrders));
+            assert!(res.is_wrong_part);
+            assert!(res.accepted_whispers.is_empty());
+        }
+        for wrong_act in [
+            r#"{"messages":[42],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"to_guild":"Quarry"}],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"to_guild":"Quarry","body":"hi","extra":1}],"market_actions":[],"bundle":{}}"#,
+        ] {
+            let res = parse_eval_act_reply(wrong_act, 0, false);
+            assert_eq!(
+                res.refusal_code,
+                Some(ReplyRefusalCode::ActReplyHasMessages)
+            );
+            assert!(res.is_wrong_part);
+            assert_eq!(res.submission, EvalActSubmission::default());
+        }
+
+        // Explicit all-empty r2 bundle fields in talk pass as non-wrong-round:
+        let ok_talk = parse_eval_talk_reply(
+            r#"{"messages":[],"market_actions":[],"bundle":{"converter_runs":[],"project_deliveries":[],"atomic_swaps":[],"contract_deliveries":[],"dual_escrows":[],"debt_repayment_cred":0,"escrow_finishes":[],"check_cashes":[],"council_vote":null,"charter_bids":[]}}"#,
             0,
             "Foundry",
             &seated,
             false,
         );
-        assert_eq!(
-            talk_bundle.refusal_code,
-            Some(ReplyRefusalCode::TalkReplyHasOrders)
-        );
+        assert_eq!(ok_talk.refusal_code, None);
     }
 }

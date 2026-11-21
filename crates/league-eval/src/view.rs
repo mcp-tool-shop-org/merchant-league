@@ -61,9 +61,20 @@ mod tests {
     #[test]
     fn render_views_and_preview_state_from_eval_observation()
     -> Result<(), Box<dyn std::error::Error>> {
-        let host = EvalHost::from_standard_setup(TableId(95_001), 4, 7, 1)?;
+        let host = EvalHost::from_explicit_entropy(
+            TableId(96_001),
+            4,
+            7,
+            [0x41; 32],
+            &[[0x11; 32], [0x22; 32], [0x33; 32], [0x44; 32]],
+            [0x55; 32],
+            0x66,
+        )?;
         let obs = host.observe_seat(Seat(0))?;
         let talk_md = render_seat_view_markdown(Round::Talk, &obs)?;
+        let expected =
+            include_str!("../tests/fixtures/day-01-talk-Foundry.expected.md").replace("\r\n", "\n");
+        assert_eq!(talk_md, expected);
         let act_md = render_seat_view_markdown(Round::Act, &obs)?;
         let preview = render_preview_state_json(&obs)?;
         assert!(talk_md.starts_with(eval_wording_slot("eval_talk_instruction")));

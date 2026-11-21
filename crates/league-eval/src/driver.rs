@@ -14,22 +14,21 @@ use league_core::{
     ReplayOutcome, Seat, TableId, TurnPhase, replay_eval_season,
 };
 use league_relay::{
-    ApiKey, MemoryMode, PreviewToolMode, RawHttpResponse, Round, SeatBackend, SeatFile,
-    SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError, TurnConfig, TurnSummary,
-    UntrustedWhisper, run_turn,
+    ApiKey, CallLogEntry, MemoryMode, PreviewToolMode, RawHttpResponse, Round, SeatBackend,
+    SeatFile, SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError, TurnConfig,
+    TurnSummary, UntrustedWhisper, run_turn, sha256_hex,
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::EvalError;
 use crate::records::{
-    BranchArmOutcome, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat, EvalSetupFile,
-    PASS_B_LIMIT_STATEMENT, RefusalCodeCounts, RefusedBundleRecord, WrongPartCounter,
-    extract_wrapper_metadata,
+    BranchArmOutcome, BranchSummary, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
+    EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, RefusalCodeCounts,
+    RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata, summarize_branch_outcomes,
 };
 use crate::reply::{ReplyRefusalCode, parse_eval_act_reply, parse_eval_talk_reply};
 use crate::schema::build_eval_response_format_config;
-use crate::select::SelectionList;
+use crate::select::{SelectionList, expand_home_path};
 use crate::view::{
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
 };
@@ -183,7 +182,8 @@ pub(crate) fn write_text_atomic(path: &Path, text: &str) -> Result<(), EvalError
     Ok(())
 }
 
-/// Validate Evaluation Mode seat count (`D6` = 4 seats) and `"file"` backend policy (`1.7`, Test 6).
+/// Validate Evaluation Mode seat count (`D6` = 4 seats), `"file"` backend policy (`1.7`, Test 6),
+/// and ban `reasoning.exclude_from_transcript: true` (`A1.3`).
 pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> {
     if seats_file.seats.len() != 4 {
         return Err(EvalError::InvalidSeatCount {
@@ -191,13 +191,30 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
         });
     }
     for seat in &seats_file.seats {
-        if let SeatBackend::File { model } = &seat.backend
-            && model.as_deref() != Some("ClubBot")
-        {
-            return Err(EvalError::UnsupportedFileSeatModel {
-                guild: seat.guild.clone(),
-                model: model.clone(),
-            });
+        let exclude_from_transcript = match &seat.backend {
+            SeatBackend::File { model } => {
+                if model.as_deref() != Some("ClubBot") {
+                    return Err(EvalError::UnsupportedFileSeatModel {
+                        guild: seat.guild.clone(),
+                        model: model.clone(),
+                    });
+                }
+                false
+            }
+            SeatBackend::Local(l) => l
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.exclude_from_transcript),
+            SeatBackend::Openrouter(o) => o
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.exclude_from_transcript),
+        };
+        if exclude_from_transcript {
+            return Err(EvalError::EvalThinkStrippingForbidden(format!(
+                "seat '{}' sets reasoning.exclude_from_transcript=true, which is forbidden in Evaluation Mode",
+                seat.guild
+            )));
         }
     }
     Ok(())
@@ -223,16 +240,331 @@ fn arm_to_preview_mode(arm: EvalArm) -> Result<PreviewToolMode, EvalError> {
     }
 }
 
-fn derive_bot_tie_seed(layout_seed: u64, table_id: u64) -> u64 {
-    let mut hasher = Sha256::new();
-    hasher.update(b"league-eval/bot-tie-seed/v1");
-    hasher.update(layout_seed.to_le_bytes());
-    hasher.update(table_id.to_le_bytes());
-    let digest: [u8; 32] = hasher.finalize().into();
-    let mut arr = [0_u8; 8];
-    arr.copy_from_slice(&digest[..8]);
-    let val = u64::from_le_bytes(arr);
-    if val == 0 { 1 } else { val }
+fn memory_mode_str(mode: MemoryMode) -> &'static str {
+    match mode {
+        MemoryMode::Snapshot => "snapshot",
+        MemoryMode::Emc => "emc",
+        MemoryMode::Full => "full",
+    }
+}
+
+fn draw_os_bot_tie_seed() -> Result<u64, EvalError> {
+    let mut buf = [0_u8; 8];
+    for _ in 0..8 {
+        getrandom::fill(&mut buf)
+            .map_err(|e| EvalError::Io(format!("OS CSPRNG failure drawing bot_tie_seed: {e}")))?;
+        let val = u64::from_le_bytes(buf);
+        if val != 0 {
+            return Ok(val);
+        }
+    }
+    Err(EvalError::Io(
+        "OS CSPRNG repeatedly yielded all-zero bot_tie_seed".to_owned(),
+    ))
+}
+
+fn hash_file_sha256(path: &Path, label: &str) -> Result<String, EvalError> {
+    let bytes = fs::read(path)
+        .map_err(|e| EvalError::Io(format!("read {label} {}: {e}", path.display())))?;
+    Ok(sha256_hex(&bytes))
+}
+
+#[derive(Debug, Default)]
+struct RoundAttemptDiagnostics {
+    attempts: u32,
+    failed_attempts: Vec<FailedRelayAttempt>,
+    schema_failure_reason: Option<String>,
+}
+
+fn count_calls_lines(calls_path: &Path) -> Result<usize, EvalError> {
+    if !calls_path.exists() {
+        return Ok(0);
+    }
+    let raw = fs::read_to_string(calls_path)
+        .map_err(|e| EvalError::Io(format!("read {}: {e}", calls_path.display())))?;
+    Ok(raw.lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+fn is_relay_schema_or_json_error(reason: &str) -> bool {
+    reason.starts_with("structured output invalid JSON")
+        || reason.starts_with("structured output failed schema")
+}
+
+fn read_round_attempt_diagnostics(
+    calls_path: &Path,
+    start_line: usize,
+    day_str: &str,
+    round: Round,
+    guild: &str,
+) -> Result<RoundAttemptDiagnostics, EvalError> {
+    if !calls_path.exists() {
+        return Ok(RoundAttemptDiagnostics::default());
+    }
+    let raw = fs::read_to_string(calls_path)
+        .map_err(|e| EvalError::Io(format!("read {}: {e}", calls_path.display())))?;
+    let mut out = RoundAttemptDiagnostics::default();
+    for (idx, line) in raw
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .enumerate()
+        .skip(start_line)
+    {
+        let entry: CallLogEntry = serde_json::from_str(line).map_err(|e| {
+            EvalError::Io(format!(
+                "parse {} line {}: {e}",
+                calls_path.display(),
+                idx + 1
+            ))
+        })?;
+        if entry.day != day_str || entry.round != round || !entry.guild.eq_ignore_ascii_case(guild)
+        {
+            continue;
+        }
+        if entry.outcome != "RESERVED" && entry.outcome != "CAP_REACHED" {
+            out.attempts = out.attempts.saturating_add(1);
+        }
+        let is_success =
+            entry.error.is_none() && matches!(entry.outcome.as_str(), "OK" | "TOOL_CALL");
+        if !is_success {
+            let reason = entry.error.clone().unwrap_or_else(|| entry.outcome.clone());
+            if is_relay_schema_or_json_error(&reason) {
+                out.schema_failure_reason = Some(reason.clone());
+            }
+            out.failed_attempts.push(FailedRelayAttempt {
+                attempt: entry.attempt,
+                outcome: entry.outcome,
+                reason,
+            });
+        }
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_no_reply_record(
+    game_id: &str,
+    table_id: u64,
+    day: u8,
+    round: Round,
+    seat: u8,
+    guild: &str,
+    arm: EvalArm,
+    keeps_notes: bool,
+    diag: RoundAttemptDiagnostics,
+    loaded_history_sha256: BTreeMap<String, String>,
+    club_bot_baseline: Option<EvalActSubmission>,
+    refusal_by_seat: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
+    refusal_by_arm: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
+    wrong_part_refusals: Option<&mut WrongPartCounter>,
+) -> EvalDecisionRecord {
+    let refusal_code = diag
+        .schema_failure_reason
+        .as_ref()
+        .map(|_| ReplyRefusalCode::ReplySchemaInvalid);
+    if let Some(code) = refusal_code {
+        if let Some(by_seat) = refusal_by_seat {
+            by_seat.entry(guild.to_owned()).or_default().record(code);
+        }
+        if let Some(by_arm) = refusal_by_arm {
+            by_arm
+                .entry(arm.as_str().to_owned())
+                .or_default()
+                .record(code);
+        }
+    }
+    if let Some(wp) = wrong_part_refusals {
+        wp.record_no_reply();
+    }
+    EvalDecisionRecord {
+        game_id: game_id.to_owned(),
+        table_id,
+        day,
+        round,
+        seat,
+        guild: guild.to_owned(),
+        arm,
+        seat_kind: "Model".to_owned(),
+        keeps_notes,
+        notes_present: false,
+        raw_reply: None,
+        attempts: diag.attempts,
+        failed_attempts: diag.failed_attempts,
+        loaded_history_sha256,
+        refusal_code: refusal_code.map(|c| c.as_str().to_owned()),
+        refusal_reason: diag.schema_failure_reason,
+        invalid_recipients: Vec::new(),
+        no_reply: true,
+        apply_report: None,
+        refused_bundle: None,
+        club_bot_baseline,
+    }
+}
+
+fn ensure_no_partial_from_seat_for_day(game_dir: &Path, active_day: u8) -> Result<(), EvalError> {
+    let from_seat_dir = game_dir.join("from-seat");
+    if !from_seat_dir.exists() {
+        return Ok(());
+    }
+    let entries = fs::read_dir(&from_seat_dir).map_err(|e| {
+        EvalError::Io(format!(
+            "read from-seat dir {}: {e}",
+            from_seat_dir.display()
+        ))
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|e| EvalError::Io(format!("scan from-seat dir: {e}")))?;
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if let Some(rest) = name_str.strip_prefix("day-")
+            && rest.len() >= 2
+            && let Ok(file_day) = rest[..2].parse::<u8>()
+            && file_day >= active_day
+        {
+            return Err(EvalError::PartialTurnFromSeatExists(format!(
+                "cannot resume at day {active_day}: found existing partial-turn reply {}",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn init_refusal_maps(
+    seats_file: &SeatFile,
+    arm: EvalArm,
+) -> (
+    BTreeMap<String, RefusalCodeCounts>,
+    BTreeMap<String, RefusalCodeCounts>,
+) {
+    let mut by_seat = BTreeMap::new();
+    for s in &seats_file.seats {
+        by_seat.insert(s.guild.clone(), RefusalCodeCounts::default());
+    }
+    let by_arm = BTreeMap::from([(arm.as_str().to_owned(), RefusalCodeCounts::default())]);
+    (by_seat, by_arm)
+}
+
+struct RecountedManifestCounters {
+    by_seat: BTreeMap<String, RefusalCodeCounts>,
+    by_arm: BTreeMap<String, RefusalCodeCounts>,
+    wrong_part: WrongPartCounter,
+}
+
+fn recount_manifest_counters_from_decisions(
+    decisions_dir: &Path,
+    played_turns: u8,
+    seats_file: &SeatFile,
+    active_arm: EvalArm,
+) -> Result<RecountedManifestCounters, EvalError> {
+    let (mut by_seat, mut by_arm) = init_refusal_maps(seats_file, active_arm);
+    let mut wp = WrongPartCounter::default();
+    for day in 1..=played_turns {
+        for round in [Round::Talk, Round::Act] {
+            for seat in &seats_file.seats {
+                let dec_path =
+                    decisions_dir.join(format!("day-{day:02}-{round}-{}.json", seat.guild));
+                let raw = fs::read_to_string(&dec_path).map_err(|e| {
+                    EvalError::Io(format!(
+                        "cannot recount manifest from missing decision {}: {e}",
+                        dec_path.display()
+                    ))
+                })?;
+                let rec: EvalDecisionRecord = serde_json::from_str(&raw)
+                    .map_err(|e| EvalError::Io(format!("parse {}: {e}", dec_path.display())))?;
+                let seat_counts = by_seat.entry(rec.guild.clone()).or_default();
+                let arm_counts = by_arm.entry(rec.arm.as_str().to_owned()).or_default();
+                if let Some(code_str) = rec.refusal_code.as_deref()
+                    && let Some(code) = ReplyRefusalCode::from_code_str(code_str)
+                {
+                    seat_counts.record(code);
+                    arm_counts.record(code);
+                }
+                for _ in &rec.invalid_recipients {
+                    seat_counts.record(ReplyRefusalCode::MessageRecipientInvalid);
+                    arm_counts.record(ReplyRefusalCode::MessageRecipientInvalid);
+                }
+                if rec.refused_bundle.is_some() {
+                    seat_counts.refused_bundles += 1;
+                    arm_counts.refused_bundles += 1;
+                }
+                if rec.seat_kind == "Model" {
+                    if rec.no_reply {
+                        wp.record_no_reply();
+                    } else {
+                        let wrong_part = rec
+                            .refusal_code
+                            .as_deref()
+                            .and_then(ReplyRefusalCode::from_code_str)
+                            .filter(|&c| {
+                                matches!(
+                                    c,
+                                    ReplyRefusalCode::TalkReplyHasOrders
+                                        | ReplyRefusalCode::ActReplyHasMessages
+                                )
+                            });
+                        wp.record_delivered_reply(wrong_part);
+                    }
+                }
+            }
+        }
+    }
+    Ok(RecountedManifestCounters {
+        by_seat,
+        by_arm,
+        wrong_part: wp,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_eval_manifest(
+    game_id: &str,
+    table_id: u64,
+    seed: u64,
+    arm: EvalArm,
+    relay_wording_arm: &str,
+    wrapper_version: &str,
+    wrapper_sha256: &str,
+    played_turns: u8,
+    seats_file: &SeatFile,
+    memory_mode: MemoryMode,
+    refusal_by_seat: &BTreeMap<String, RefusalCodeCounts>,
+    refusal_by_arm: &BTreeMap<String, RefusalCodeCounts>,
+    wrong_part_refusals: &WrongPartCounter,
+) -> EvalManifest {
+    let manifest_seats: Vec<EvalManifestSeat> = seats_file
+        .seats
+        .iter()
+        .enumerate()
+        .map(|(idx, seat)| {
+            let (backend, model) = seat_backend_and_model(seat);
+            EvalManifestSeat {
+                seat: idx as u8,
+                guild: seat.guild.clone(),
+                backend: backend.to_owned(),
+                model,
+                keeps_notes: seat_keeps_notes(seat, seats_file, memory_mode),
+            }
+        })
+        .collect();
+
+    EvalManifest {
+        game_id: game_id.to_owned(),
+        table_id,
+        seed,
+        arm,
+        eval_reply_wording_arm: EVAL_REPLY_WORDING_ARM.to_owned(),
+        relay_wording_arm: relay_wording_arm.to_owned(),
+        wrapper_version: wrapper_version.to_owned(),
+        wrapper_sha256: wrapper_sha256.to_owned(),
+        pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
+        played_turns,
+        seats: manifest_seats,
+        refusal_counts_by_seat: refusal_by_seat.clone(),
+        refusal_counts_by_arm: refusal_by_arm.clone(),
+        wrong_part_refusals: wrong_part_refusals.clone(),
+    }
 }
 
 fn dir_has_eval_save_or_seal(dir: &Path) -> Result<bool, EvalError> {
@@ -320,6 +652,8 @@ pub fn run_play_with_transport(
     let preview_mode = arm_to_preview_mode(opts.arm)?;
     let (wrapper_version, wrapper_sha256) =
         validate_wrapper_and_extract(&opts.wrapper_path, opts.wrapper_version.as_deref())?;
+    let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
+    let mem_mode = memory_mode_str(opts.memory_mode).to_owned();
     let seats_file =
         SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
     validate_eval_seats_file(&seats_file)?;
@@ -341,7 +675,7 @@ pub fn run_play_with_transport(
             .map_err(|e| EvalError::Io(format!("parse {}: {e}", setup_path.display())))?;
         let host = EvalHost::read_game_save_and_seal(&opts.game_dir, TableId(opts.table_id))?;
         if existing_setup.game_id != host.game_id() {
-            return Err(EvalError::Usage(format!(
+            return Err(EvalError::IncompatibleEvalSetup(format!(
                 "setup.json game_id '{}' does not match seal game_id '{}'",
                 existing_setup.game_id,
                 host.game_id()
@@ -351,9 +685,11 @@ pub fn run_play_with_transport(
             || existing_setup.table_id != opts.table_id
             || existing_setup.seed != opts.seed
             || existing_setup.wrapper_sha256 != wrapper_sha256
+            || existing_setup.memory_mode != mem_mode
+            || existing_setup.seats_sha256 != seats_sha256
         {
-            return Err(EvalError::Usage(
-                "cannot resume game_dir with mismatched --arm, --table-id, --seed, or --wrapper"
+            return Err(EvalError::IncompatibleEvalSetup(
+                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, or --seats"
                     .to_owned(),
             ));
         }
@@ -363,7 +699,7 @@ pub fn run_play_with_transport(
         persist_eval_game_state(&host, &opts.game_dir)?;
         host
     } else {
-        let bot_tie_seed = derive_bot_tie_seed(opts.seed, opts.table_id);
+        let bot_tie_seed = draw_os_bot_tie_seed()?;
         let host =
             EvalHost::from_standard_setup(TableId(opts.table_id), 4, opts.seed, bot_tie_seed)?;
         persist_eval_game_state(&host, &opts.game_dir)?;
@@ -381,41 +717,38 @@ pub fn run_play_with_transport(
         relay_wording_arm: relay_wording_arm.clone(),
         wrapper_version: wrapper_version.clone(),
         wrapper_sha256: wrapper_sha256.clone(),
+        memory_mode: mem_mode,
+        seats_sha256,
         response_schema_sha256: Some(response_schema_sha256),
     };
     write_json_pretty_atomic(&setup_path, &setup_record)?;
 
-    let (mut refusal_by_seat, mut refusal_by_arm, mut wrong_part_refusals) = if manifest_path
-        .exists()
-    {
-        let raw_m = fs::read_to_string(&manifest_path)
-            .map_err(|e| EvalError::Io(format!("read {}: {e}", manifest_path.display())))?;
-        let prev: EvalManifest = serde_json::from_str(&raw_m)
-            .map_err(|e| EvalError::Io(format!("parse {}: {e}", manifest_path.display())))?;
-        (
-            prev.refusal_counts_by_seat,
-            prev.refusal_counts_by_arm,
-            prev.wrong_part_refusals,
-        )
+    let to_seat_dir = opts.game_dir.join("to-seat");
+    let decisions_dir = opts.game_dir.join("decisions");
+    let receipts_dir = opts.game_dir.join("receipts");
+    let checkpoints_dir = opts.game_dir.join("checkpoints");
+    let calls_path = opts.game_dir.join("relay").join("calls.jsonl");
+
+    let mut played_turns = u8::try_from(host.public_receipts().len()).unwrap_or(u8::MAX);
+    let (mut refusal_by_seat, mut refusal_by_arm, mut wrong_part_refusals) = if played_turns > 0 {
+        let recounted = recount_manifest_counters_from_decisions(
+            &decisions_dir,
+            played_turns,
+            &seats_file,
+            opts.arm,
+        )?;
+        (recounted.by_seat, recounted.by_arm, recounted.wrong_part)
     } else {
-        let mut by_seat = BTreeMap::new();
-        for s in &seats_file.seats {
-            by_seat.insert(s.guild.clone(), RefusalCodeCounts::default());
-        }
-        let by_arm = BTreeMap::from([(opts.arm.as_str().to_owned(), RefusalCodeCounts::default())]);
+        let (by_seat, by_arm) = init_refusal_maps(&seats_file, opts.arm);
         (by_seat, by_arm, WrongPartCounter::default())
     };
 
     let seated_guilds: Vec<String> = seats_file.seats.iter().map(|s| s.guild.clone()).collect();
     let bot = ClubBot::new(host.bot_tie_seed());
-    let to_seat_dir = opts.game_dir.join("to-seat");
-    let decisions_dir = opts.game_dir.join("decisions");
-    let receipts_dir = opts.game_dir.join("receipts");
-    let checkpoints_dir = opts.game_dir.join("checkpoints");
 
-    let mut played_turns = u8::try_from(host.public_receipts().len()).unwrap_or(u8::MAX);
     while played_turns < opts.turns && host.phase() == TurnPhase::TalkAndMarket {
         let day = host.turn();
+        ensure_no_partial_from_seat_for_day(&opts.game_dir, day)?;
         let day_str = format!("{day:02}");
 
         // --- TALK ROUND ---
@@ -448,6 +781,7 @@ pub fn run_play_with_transport(
         .with_preview_tool(preview_mode)
         .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
+        let talk_calls_offset = count_calls_lines(&calls_path)?;
         let talk_summary = run_turn(&talk_cfg, transport, redaction_key)?;
         for (idx, seat) in seats_file.seats.iter().enumerate() {
             let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
@@ -464,6 +798,9 @@ pub fn run_play_with_transport(
                     keeps_notes: false,
                     notes_present: false,
                     raw_reply: None,
+                    attempts: 0,
+                    failed_attempts: Vec::new(),
+                    loaded_history_sha256: BTreeMap::new(),
                     refusal_code: None,
                     refusal_reason: None,
                     invalid_recipients: Vec::new(),
@@ -473,6 +810,13 @@ pub fn run_play_with_transport(
                     club_bot_baseline: None,
                 },
                 SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
+                    let diag = read_round_attempt_diagnostics(
+                        &calls_path,
+                        talk_calls_offset,
+                        &day_str,
+                        Round::Talk,
+                        &seat.guild,
+                    )?;
                     match find_report(&talk_summary, &seat.guild) {
                         Some(SeatOutcome::Delivered { from_seat_path, .. }) => {
                             let raw_reply = fs::read_to_string(from_seat_path).map_err(|e| {
@@ -491,7 +835,7 @@ pub fn run_play_with_transport(
                             let wrong_part = parsed
                                 .refusal_code
                                 .filter(|&c| c == ReplyRefusalCode::TalkReplyHasOrders);
-                            wrong_part_refusals.record_reply(wrong_part);
+                            wrong_part_refusals.record_delivered_reply(wrong_part);
 
                             let seat_counts =
                                 refusal_by_seat.entry(seat.guild.clone()).or_default();
@@ -502,9 +846,9 @@ pub fn run_play_with_transport(
                                 seat_counts.record(code);
                                 arm_counts.record(code);
                             }
-                            for diag in &parsed.invalid_recipients {
-                                seat_counts.record(diag.code);
-                                arm_counts.record(diag.code);
+                            for d in &parsed.invalid_recipients {
+                                seat_counts.record(d.code);
+                                arm_counts.record(d.code);
                             }
                             for (recipient_guild, whisper) in parsed.accepted_whispers {
                                 if let Some(bucket) = whispers_by_guild.get_mut(&recipient_guild) {
@@ -523,13 +867,22 @@ pub fn run_play_with_transport(
                                 keeps_notes,
                                 notes_present: parsed.notes_present,
                                 raw_reply: Some(raw_reply),
+                                attempts: diag.attempts,
+                                failed_attempts: diag.failed_attempts,
+                                loaded_history_sha256: BTreeMap::new(),
                                 refusal_code: parsed.refusal_code.map(|c| c.as_str().to_owned()),
                                 refusal_reason: parsed.refusal_reason,
                                 invalid_recipients: parsed
                                     .invalid_recipients
                                     .iter()
                                     .map(|d| {
-                                        format!("{}[{}]: {}", d.to_guild, d.message_index, d.reason)
+                                        format!(
+                                            "{}: {}[{}]: {}",
+                                            d.code.as_str(),
+                                            d.to_guild,
+                                            d.message_index,
+                                            d.reason
+                                        )
                                     })
                                     .collect(),
                                 no_reply: false,
@@ -538,29 +891,22 @@ pub fn run_play_with_transport(
                                 club_bot_baseline: None,
                             }
                         }
-                        _ => {
-                            wrong_part_refusals.record_reply(None);
-                            EvalDecisionRecord {
-                                game_id: host.game_id().to_owned(),
-                                table_id: opts.table_id,
-                                day,
-                                round: Round::Talk,
-                                seat: idx as u8,
-                                guild: seat.guild.clone(),
-                                arm: opts.arm,
-                                seat_kind: seat_kind_label(seat).to_owned(),
-                                keeps_notes,
-                                notes_present: false,
-                                raw_reply: None,
-                                refusal_code: None,
-                                refusal_reason: None,
-                                invalid_recipients: Vec::new(),
-                                no_reply: true,
-                                apply_report: None,
-                                refused_bundle: None,
-                                club_bot_baseline: None,
-                            }
-                        }
+                        _ => build_no_reply_record(
+                            host.game_id(),
+                            opts.table_id,
+                            day,
+                            Round::Talk,
+                            idx as u8,
+                            &seat.guild,
+                            opts.arm,
+                            keeps_notes,
+                            diag,
+                            BTreeMap::new(),
+                            None,
+                            Some(&mut refusal_by_seat),
+                            Some(&mut refusal_by_arm),
+                            Some(&mut wrong_part_refusals),
+                        ),
                     }
                 }
             };
@@ -621,6 +967,7 @@ pub fn run_play_with_transport(
         .with_preview_tool(preview_mode)
         .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
+        let act_calls_offset = count_calls_lines(&calls_path)?;
         let act_summary = run_turn(&act_cfg, transport, redaction_key)?;
 
         let mut submissions: BTreeMap<u8, EvalActSubmission> = BTreeMap::new();
@@ -652,6 +999,9 @@ pub fn run_play_with_transport(
                         keeps_notes: false,
                         notes_present: false,
                         raw_reply: None,
+                        attempts: 0,
+                        failed_attempts: Vec::new(),
+                        loaded_history_sha256: BTreeMap::new(),
                         refusal_code: None,
                         refusal_reason: None,
                         invalid_recipients: Vec::new(),
@@ -663,6 +1013,13 @@ pub fn run_play_with_transport(
                     (bot_sub, rec)
                 }
                 SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
+                    let diag = read_round_attempt_diagnostics(
+                        &calls_path,
+                        act_calls_offset,
+                        &day_str,
+                        Round::Act,
+                        &seat.guild,
+                    )?;
                     match find_report(&act_summary, &seat.guild) {
                         Some(SeatOutcome::Delivered { from_seat_path, .. }) => {
                             let raw_reply = fs::read_to_string(from_seat_path).map_err(|e| {
@@ -675,7 +1032,7 @@ pub fn run_play_with_transport(
                             let wrong_part = parsed
                                 .refusal_code
                                 .filter(|&c| c == ReplyRefusalCode::ActReplyHasMessages);
-                            wrong_part_refusals.record_reply(wrong_part);
+                            wrong_part_refusals.record_delivered_reply(wrong_part);
 
                             if let Some(code) = parsed.refusal_code {
                                 refusal_by_seat
@@ -700,6 +1057,9 @@ pub fn run_play_with_transport(
                                 keeps_notes,
                                 notes_present: parsed.notes_present,
                                 raw_reply: Some(raw_reply),
+                                attempts: diag.attempts,
+                                failed_attempts: diag.failed_attempts,
+                                loaded_history_sha256: BTreeMap::new(),
                                 refusal_code: parsed.refusal_code.map(|c| c.as_str().to_owned()),
                                 refusal_reason: parsed.refusal_reason,
                                 invalid_recipients: Vec::new(),
@@ -710,30 +1070,25 @@ pub fn run_play_with_transport(
                             };
                             (parsed.submission, rec)
                         }
-                        _ => {
-                            wrong_part_refusals.record_reply(None);
-                            let rec = EvalDecisionRecord {
-                                game_id: host.game_id().to_owned(),
-                                table_id: opts.table_id,
+                        _ => (
+                            EvalActSubmission::default(),
+                            build_no_reply_record(
+                                host.game_id(),
+                                opts.table_id,
                                 day,
-                                round: Round::Act,
-                                seat: idx as u8,
-                                guild: seat.guild.clone(),
-                                arm: opts.arm,
-                                seat_kind: seat_kind_label(seat).to_owned(),
+                                Round::Act,
+                                idx as u8,
+                                &seat.guild,
+                                opts.arm,
                                 keeps_notes,
-                                notes_present: false,
-                                raw_reply: None,
-                                refusal_code: None,
-                                refusal_reason: None,
-                                invalid_recipients: Vec::new(),
-                                no_reply: true,
-                                apply_report: None,
-                                refused_bundle: None,
-                                club_bot_baseline: Some(bot_sub),
-                            };
-                            (EvalActSubmission::default(), rec)
-                        }
+                                diag,
+                                BTreeMap::new(),
+                                Some(bot_sub),
+                                Some(&mut refusal_by_seat),
+                                Some(&mut refusal_by_arm),
+                                Some(&mut wrong_part_refusals),
+                            ),
+                        ),
                     }
                 }
             };
@@ -769,6 +1124,24 @@ pub fn run_play_with_transport(
         )?;
         persist_eval_game_state(&host, &opts.game_dir)?;
         played_turns = u8::try_from(host.public_receipts().len()).unwrap_or(u8::MAX);
+
+        // Write `manifest.json` after every completed turn so counts stay current on disk (`B5`).
+        let turn_manifest = build_eval_manifest(
+            host.game_id(),
+            opts.table_id,
+            opts.seed,
+            opts.arm,
+            &relay_wording_arm,
+            &wrapper_version,
+            &wrapper_sha256,
+            played_turns,
+            &seats_file,
+            opts.memory_mode,
+            &refusal_by_seat,
+            &refusal_by_arm,
+            &wrong_part_refusals,
+        );
+        write_json_pretty_atomic(&manifest_path, &turn_manifest)?;
     }
 
     if host.phase() == TurnPhase::AwaitingMandateReveal {
@@ -790,38 +1163,21 @@ pub fn run_play_with_transport(
         persist_eval_game_state(&host, &opts.game_dir)?;
     }
 
-    let manifest_seats: Vec<EvalManifestSeat> = seats_file
-        .seats
-        .iter()
-        .enumerate()
-        .map(|(idx, seat)| {
-            let (backend, model) = seat_backend_and_model(seat);
-            EvalManifestSeat {
-                seat: idx as u8,
-                guild: seat.guild.clone(),
-                backend: backend.to_owned(),
-                model,
-                keeps_notes: seat_keeps_notes(seat, &seats_file, opts.memory_mode),
-            }
-        })
-        .collect();
-
-    let manifest = EvalManifest {
-        game_id: host.game_id().to_owned(),
-        table_id: opts.table_id,
-        seed: opts.seed,
-        arm: opts.arm,
-        eval_reply_wording_arm: EVAL_REPLY_WORDING_ARM.to_owned(),
-        relay_wording_arm,
-        wrapper_version,
-        wrapper_sha256,
-        pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
+    let manifest = build_eval_manifest(
+        host.game_id(),
+        opts.table_id,
+        opts.seed,
+        opts.arm,
+        &relay_wording_arm,
+        &wrapper_version,
+        &wrapper_sha256,
         played_turns,
-        seats: manifest_seats,
-        refusal_counts_by_seat: refusal_by_seat,
-        refusal_counts_by_arm: refusal_by_arm,
-        wrong_part_refusals,
-    };
+        &seats_file,
+        opts.memory_mode,
+        &refusal_by_seat,
+        &refusal_by_arm,
+        &wrong_part_refusals,
+    );
     write_json_pretty_atomic(&manifest_path, &manifest)?;
     Ok(manifest)
 }
@@ -872,6 +1228,26 @@ fn snapshot_pre_act_scratchpads(
     Ok(())
 }
 
+fn ensure_arm_dir_empty(arm_dir: &Path) -> Result<(), EvalError> {
+    if !arm_dir.exists() {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(arm_dir)
+        .map_err(|e| EvalError::Io(format!("read branch arm dir {}: {e}", arm_dir.display())))?;
+    if entries
+        .next()
+        .transpose()
+        .map_err(|e| EvalError::Io(format!("scan branch arm dir {}: {e}", arm_dir.display())))?
+        .is_some()
+    {
+        return Err(EvalError::BranchArmDirNotEmpty(format!(
+            "branch output directory {} already exists and is non-empty",
+            arm_dir.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Evaluate one or more frozen pre-act checkpoints across independent arms (`off`, `on`; `D4`, `Item 12`–`15`).
 ///
 /// Writes only spectator/public artifacts under `opts.out_dir` (never `.seal` files or secret bytes).
@@ -889,7 +1265,10 @@ pub fn run_branch_with_transport(
         let _ = arm_to_preview_mode(arm)?;
     }
 
-    let _wrapper_meta = validate_wrapper_and_extract(&opts.wrapper_path, None)?;
+    let (_wrapper_version, wrapper_sha256) =
+        validate_wrapper_and_extract(&opts.wrapper_path, None)?;
+    let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
+    let expected_memory_mode = memory_mode_str(opts.memory_mode);
     let seats_file =
         SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
     validate_eval_seats_file(&seats_file)?;
@@ -928,7 +1307,11 @@ pub fn run_branch_with_transport(
                     let target_out = opts
                         .out_dir
                         .join(format!("item-{i:03}-day-{:02}-{}", s.day, s.seat_guild));
-                    (s.checkpoint_prefix, s.seat_guild, target_out)
+                    (
+                        expand_home_path(&s.checkpoint_prefix),
+                        s.seat_guild,
+                        target_out,
+                    )
                 })
                 .collect()
         }
@@ -947,12 +1330,18 @@ pub fn run_branch_with_transport(
             &target_out_dir,
             &seats_file,
             opts,
+            &wrapper_sha256,
+            expected_memory_mode,
+            &seats_sha256,
             &response_format,
             transport,
             redaction_key,
         )?;
         all_outcomes.extend(outcomes);
     }
+
+    let branch_summary: BranchSummary = summarize_branch_outcomes(&all_outcomes);
+    write_json_pretty_atomic(&opts.out_dir.join("branch_summary.json"), &branch_summary)?;
     Ok(all_outcomes)
 }
 
@@ -963,6 +1352,9 @@ fn branch_one_target(
     target_out_dir: &Path,
     seats_file: &SeatFile,
     opts: &BranchOptions,
+    wrapper_sha256: &str,
+    expected_memory_mode: &str,
+    expected_seats_sha256: &str,
     response_format: &league_relay::ResponseFormatConfig,
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
@@ -997,22 +1389,95 @@ fn branch_one_target(
     let focal_seat_spec = &seats_file.seats[focal_idx];
     let focal_guild = focal_seat_spec.guild.clone();
 
-    let source_game_dir = checkpoint_prefix.parent().and_then(|p| p.parent());
-    let source_negotiation_json = source_game_dir.and_then(|gd| {
-        let p = gd
-            .join("to-seat")
-            .join(format!("day-{day_str}-act-{focal_guild}.negotiation.json"));
-        fs::read_to_string(p).ok()
-    });
-    let source_transcript_entries = source_game_dir
-        .map(|gd| load_pre_act_transcript_prefix(gd, &focal_guild, day))
-        .transpose()?
-        .unwrap_or_default();
-    let source_scratchpad = checkpoint_prefix
-        .parent()
-        .map(|ckpts| ckpts.join(format!("day-{day_str}-pre-act.{focal_guild}.scratchpad.md")))
-        .filter(|p| p.exists())
-        .and_then(|p| fs::read_to_string(p).ok());
+    let Some(source_game_dir) = checkpoint_prefix.parent().and_then(|p| p.parent()) else {
+        return Err(EvalError::MissingSourceSetup(format!(
+            "cannot infer source game directory from checkpoint {}",
+            checkpoint_prefix.display()
+        )));
+    };
+    let source_setup_path = source_game_dir.join("setup.json");
+    if !source_setup_path.exists() {
+        return Err(EvalError::MissingSourceSetup(format!(
+            "missing source setup.json at {}",
+            source_setup_path.display()
+        )));
+    }
+    let raw_setup = fs::read_to_string(&source_setup_path).map_err(|e| {
+        EvalError::Io(format!(
+            "read source setup {}: {e}",
+            source_setup_path.display()
+        ))
+    })?;
+    let source_setup: EvalSetupFile = serde_json::from_str(&raw_setup).map_err(|e| {
+        EvalError::Io(format!(
+            "parse source setup {}: {e}",
+            source_setup_path.display()
+        ))
+    })?;
+    if source_setup.game_id != source_game_id
+        || source_setup.table_id != table_id
+        || source_setup.wrapper_sha256 != wrapper_sha256
+        || source_setup.memory_mode != expected_memory_mode
+        || source_setup.seats_sha256 != expected_seats_sha256
+    {
+        return Err(EvalError::IncompatibleEvalSetup(format!(
+            "branch options do not match source setup {}: check --wrapper, --memory-mode, and --seats",
+            source_setup_path.display()
+        )));
+    }
+
+    let neg_rel_path = format!("to-seat/day-{day_str}-act-{focal_guild}.negotiation.json");
+    let neg_src_path = source_game_dir.join(&neg_rel_path);
+    if !neg_src_path.exists() {
+        return Err(EvalError::MissingBranchNegotiation(format!(
+            "missing source negotiation file {}",
+            neg_src_path.display()
+        )));
+    }
+    let source_negotiation_json = fs::read_to_string(&neg_src_path).map_err(|e| {
+        EvalError::Io(format!(
+            "read source negotiation {}: {e}",
+            neg_src_path.display()
+        ))
+    })?;
+    let mut loaded_history_sha256 = BTreeMap::new();
+    loaded_history_sha256.insert(neg_rel_path, sha256_hex(source_negotiation_json.as_bytes()));
+
+    let (source_transcript_entries, tx_sha_opt) =
+        load_pre_act_transcript_prefix(source_game_dir, &focal_guild, day)?;
+    if let Some((rel, sha)) = tx_sha_opt {
+        loaded_history_sha256.insert(rel, sha);
+    }
+
+    let source_scratchpad = if let Some(ckpts) = checkpoint_prefix.parent() {
+        let pad_rel = format!("checkpoints/day-{day_str}-pre-act.{focal_guild}.scratchpad.md");
+        let pad_path = source_game_dir.join(&pad_rel);
+        let ckpt_pad_path =
+            ckpts.join(format!("day-{day_str}-pre-act.{focal_guild}.scratchpad.md"));
+        if ckpt_pad_path.exists() {
+            let txt = fs::read_to_string(&ckpt_pad_path).map_err(|e| {
+                EvalError::Io(format!(
+                    "read source scratchpad {}: {e}",
+                    ckpt_pad_path.display()
+                ))
+            })?;
+            let key = if pad_path == ckpt_pad_path {
+                pad_rel
+            } else {
+                ckpt_pad_path.to_string_lossy().into_owned()
+            };
+            loaded_history_sha256.insert(key, sha256_hex(txt.as_bytes()));
+            Some(txt)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    for &arm in &opts.arms {
+        ensure_arm_dir_empty(&target_out_dir.join(arm.as_str()))?;
+    }
 
     let bot = ClubBot::new(probe_host.bot_tie_seed());
     let mut outcomes = Vec::with_capacity(opts.arms.len());
@@ -1041,19 +1506,9 @@ fn branch_one_target(
             &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.md")),
             &act_md,
         )?;
-        let neg_text = match &source_negotiation_json {
-            Some(txt) => txt.clone(),
-            None => {
-                let neg = build_act_negotiation_inputs(Vec::new());
-                let mut s = serde_json::to_string_pretty(&neg)
-                    .map_err(|e| EvalError::Io(format!("serialize negotiation fallback: {e}")))?;
-                s.push('\n');
-                s
-            }
-        };
         write_text_atomic(
             &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
-            &neg_text,
+            &source_negotiation_json,
         )?;
 
         let (focal_sub, mut decision_rec) =
@@ -1070,6 +1525,9 @@ fn branch_one_target(
                     keeps_notes: false,
                     notes_present: false,
                     raw_reply: None,
+                    attempts: 0,
+                    failed_attempts: Vec::new(),
+                    loaded_history_sha256: loaded_history_sha256.clone(),
                     refusal_code: None,
                     refusal_reason: None,
                     invalid_recipients: Vec::new(),
@@ -1133,7 +1591,16 @@ fn branch_one_target(
                 .with_preview_tool(preview_mode)
                 .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
+                let arm_calls_path = arm_dir.join("relay").join("calls.jsonl");
+                let offset = count_calls_lines(&arm_calls_path)?;
                 let summary = run_turn(&branch_cfg, transport, redaction_key)?;
+                let diag = read_round_attempt_diagnostics(
+                    &arm_calls_path,
+                    offset,
+                    &day_str,
+                    Round::Act,
+                    &focal_guild,
+                )?;
                 match find_report(&summary, &focal_guild) {
                     Some(SeatOutcome::Delivered { from_seat_path, .. }) => {
                         let raw_reply = fs::read_to_string(from_seat_path).map_err(|e| {
@@ -1155,6 +1622,9 @@ fn branch_one_target(
                             keeps_notes,
                             notes_present: parsed.notes_present,
                             raw_reply: Some(raw_reply),
+                            attempts: diag.attempts,
+                            failed_attempts: diag.failed_attempts,
+                            loaded_history_sha256: loaded_history_sha256.clone(),
                             refusal_code: parsed.refusal_code.map(|c| c.as_str().to_owned()),
                             refusal_reason: parsed.refusal_reason,
                             invalid_recipients: Vec::new(),
@@ -1165,29 +1635,25 @@ fn branch_one_target(
                         };
                         (parsed.submission, rec)
                     }
-                    _ => {
-                        let rec = EvalDecisionRecord {
-                            game_id: source_game_id.clone(),
+                    _ => (
+                        EvalActSubmission::default(),
+                        build_no_reply_record(
+                            &source_game_id,
                             table_id,
                             day,
-                            round: Round::Act,
-                            seat: focal_idx as u8,
-                            guild: focal_guild.clone(),
+                            Round::Act,
+                            focal_idx as u8,
+                            &focal_guild,
                             arm,
-                            seat_kind: "Model".to_owned(),
                             keeps_notes,
-                            notes_present: false,
-                            raw_reply: None,
-                            refusal_code: None,
-                            refusal_reason: None,
-                            invalid_recipients: Vec::new(),
-                            no_reply: true,
-                            apply_report: None,
-                            refused_bundle: None,
-                            club_bot_baseline: Some(bot_sub),
-                        };
-                        (EvalActSubmission::default(), rec)
-                    }
+                            diag,
+                            loaded_history_sha256.clone(),
+                            Some(bot_sub),
+                            None,
+                            None,
+                            None,
+                        ),
+                    ),
                 }
             };
 
@@ -1251,20 +1717,21 @@ fn build_single_focal_seat_file(source: &SeatFile, focal_idx: usize) -> SeatFile
     }
 }
 
+type TranscriptPrefixWithDigest = (Vec<TranscriptEntry>, Option<(String, String)>);
+
 fn load_pre_act_transcript_prefix(
     source_game_dir: &Path,
     focal_guild: &str,
     branch_day: u8,
-) -> Result<Vec<TranscriptEntry>, EvalError> {
-    let path = source_game_dir
-        .join("relay")
-        .join("seats")
-        .join(format!("{focal_guild}.jsonl"));
+) -> Result<TranscriptPrefixWithDigest, EvalError> {
+    let rel_path = format!("relay/seats/{focal_guild}.jsonl");
+    let path = source_game_dir.join(&rel_path);
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let raw = fs::read_to_string(&path)
         .map_err(|e| EvalError::Io(format!("read source transcript {}: {e}", path.display())))?;
+    let file_digest = (rel_path, sha256_hex(raw.as_bytes()));
     let mut all_entries = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         if line.trim().is_empty() {
@@ -1280,7 +1747,7 @@ fn load_pre_act_transcript_prefix(
         all_entries.push(entry);
     }
     if all_entries.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Some(file_digest)));
     }
 
     let mut cursor = 0;
@@ -1305,14 +1772,14 @@ fn load_pre_act_transcript_prefix(
     }
 
     if filtered_pairs.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Some(file_digest)));
     }
     let mut result = Vec::with_capacity(filtered_pairs.len() + 1);
     if let Some(sys) = system_entry {
         result.push(sys);
     }
     result.extend(filtered_pairs);
-    Ok(result)
+    Ok((result, Some(file_digest)))
 }
 
 fn resolve_focal_seat(seats_file: &SeatFile, focal_spec: &str) -> Result<usize, EvalError> {

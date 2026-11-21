@@ -361,6 +361,31 @@ impl EvalHost {
         Self::new(spec, layout_seed, deal, eval_seed, bot_tie_seed)
     }
 
+    /// Builds a reproducible Eval table from raw `[u8; 32]` entropy arrays (`deal_seed`,
+    /// per-seat `seat_salts`, and `eval_seed`) without requiring external callers to construct
+    /// internal secret-wrapper types.
+    pub fn from_explicit_entropy(
+        table_id: TableId,
+        seat_count: u8,
+        layout_seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[[u8; 32]],
+        eval_seed: [u8; 32],
+        bot_tie_seed: u64,
+    ) -> Result<Self, EngineError> {
+        let salts: Vec<RevealSalt> = seat_salts.iter().copied().map(RevealSalt).collect();
+        let eval_seed = SealedEvalSeed::try_from_bytes(eval_seed)?;
+        Self::from_explicit_setup(
+            table_id,
+            seat_count,
+            layout_seed,
+            deal_seed,
+            &salts,
+            eval_seed,
+            bot_tie_seed,
+        )
+    }
+
     /// Returns the per-game identifier assigned when this game directory/host was initialized
     /// (different for every D2 duplicate).
     #[must_use]
@@ -1927,6 +1952,60 @@ mod tests {
                 .write_pre_act_checkpoint(&tmp.join("dirty_ckpts"))
                 .is_err()
         );
+
+        let raw_salts = [[0x11_u8; 32], [0x22_u8; 32], [0x33_u8; 32], [0x44_u8; 32]];
+        let entropy_host = EvalHost::from_explicit_entropy(
+            TableId(910_045),
+            4,
+            7,
+            [0x55_u8; 32],
+            &raw_salts,
+            [0x66_u8; 32],
+            0x20,
+        )?;
+        let typed_salts: Vec<RevealSalt> = raw_salts.iter().copied().map(RevealSalt).collect();
+        let setup_host = EvalHost::from_explicit_setup(
+            TableId(910_045),
+            4,
+            7,
+            [0x55_u8; 32],
+            &typed_salts,
+            SealedEvalSeed::try_from_bytes([0x66_u8; 32])?,
+            0x20,
+        )?;
+        assert_eq!(
+            entropy_host.mandate_for_seat(Seat(0))?,
+            setup_host.mandate_for_seat(Seat(0))?
+        );
+        assert_eq!(
+            entropy_host.observe_seat(Seat(0))?,
+            setup_host.observe_seat(Seat(0))?
+        );
+        assert!(
+            EvalHost::from_explicit_entropy(
+                TableId(910_046),
+                4,
+                7,
+                [0x55_u8; 32],
+                &raw_salts,
+                [0_u8; 32],
+                0x20,
+            )
+            .is_err()
+        );
+        assert!(
+            EvalHost::from_explicit_entropy(
+                TableId(910_047),
+                4,
+                7,
+                [0x55_u8; 32],
+                &raw_salts[..3],
+                [0x66_u8; 32],
+                0x20,
+            )
+            .is_err()
+        );
+
         let _ = fs::remove_dir_all(&tmp);
         Ok(())
     }

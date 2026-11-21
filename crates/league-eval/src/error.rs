@@ -38,6 +38,20 @@ pub enum EvalError {
     InvalidStrata(String),
     /// Unknown focal seat guild requested for `branch` (`exit 1`).
     UnknownFocalSeat(String),
+    /// A configured model seat sets `reasoning.exclude_from_transcript: true`, forbidden in Eval (`exit 1`).
+    EvalThinkStrippingForbidden(String),
+    /// Required pre-act `<game_dir>/to-seat/day-DD-act-<Guild>.negotiation.json` missing for `branch` (`exit 1`).
+    MissingBranchNegotiation(String),
+    /// Branch arm output directory already exists and is non-empty (`exit 1`).
+    BranchArmDirNotEmpty(String),
+    /// Required source `<game_dir>/setup.json` missing for `play` resume or `branch` check (`exit 1`).
+    MissingSourceSetup(String),
+    /// Wrapper, seats file digest, memory mode, arm, table, or seed disagrees with source `setup.json` (`exit 1`).
+    IncompatibleEvalSetup(String),
+    /// A `relay/from-seat/` reply file already exists for the current day on resume (`exit 1`).
+    PartialTurnFromSeatExists(String),
+    /// Game has zero automated model seats recorded in `manifest.json` for `select` (`exit 1`).
+    NoModelSeatsForSelect(String),
     /// Underlying `EvalHost` / `league-core` error.
     Engine(EngineError),
     /// Underlying `league-relay` error.
@@ -61,6 +75,13 @@ impl EvalError {
             Self::InsufficientTurnsForStrata(_) => "INSUFFICIENT_TURNS_FOR_STRATA",
             Self::InvalidStrata(_) => "INVALID_STRATA",
             Self::UnknownFocalSeat(_) => "UNKNOWN_FOCAL_SEAT",
+            Self::EvalThinkStrippingForbidden(_) => "EVAL_THINK_STRIPPING_FORBIDDEN",
+            Self::MissingBranchNegotiation(_) => "MISSING_BRANCH_NEGOTIATION",
+            Self::BranchArmDirNotEmpty(_) => "BRANCH_ARM_DIR_NOT_EMPTY",
+            Self::MissingSourceSetup(_) => "MISSING_SOURCE_SETUP",
+            Self::IncompatibleEvalSetup(_) => "INCOMPATIBLE_EVAL_SETUP",
+            Self::PartialTurnFromSeatExists(_) => "PARTIAL_TURN_FROM_SEAT_EXISTS",
+            Self::NoModelSeatsForSelect(_) => "NO_MODEL_SEATS_FOR_SELECT",
             Self::Engine(err) => err.code(),
             Self::Relay(err) => err.code(),
             Self::Io(_) => "EVAL_IO",
@@ -79,7 +100,14 @@ impl EvalError {
             | Self::CheckpointNotFound(_)
             | Self::InsufficientTurnsForStrata(_)
             | Self::InvalidStrata(_)
-            | Self::UnknownFocalSeat(_) => EXIT_USER_ERROR,
+            | Self::UnknownFocalSeat(_)
+            | Self::EvalThinkStrippingForbidden(_)
+            | Self::MissingBranchNegotiation(_)
+            | Self::BranchArmDirNotEmpty(_)
+            | Self::MissingSourceSetup(_)
+            | Self::IncompatibleEvalSetup(_)
+            | Self::PartialTurnFromSeatExists(_)
+            | Self::NoModelSeatsForSelect(_) => EXIT_USER_ERROR,
             Self::Relay(err) => err.exit_code(),
             Self::SchemaValidation(_) | Self::Engine(_) | Self::Io(_) => EXIT_RUNTIME_ERROR,
         }
@@ -121,6 +149,35 @@ impl fmt::Display for EvalError {
             }
             Self::UnknownFocalSeat(msg) => {
                 write!(f, "UNKNOWN_FOCAL_SEAT: {}", scrub_secret_text(msg))
+            }
+            Self::EvalThinkStrippingForbidden(msg) => {
+                write!(
+                    f,
+                    "EVAL_THINK_STRIPPING_FORBIDDEN: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::MissingBranchNegotiation(msg) => {
+                write!(f, "MISSING_BRANCH_NEGOTIATION: {}", scrub_secret_text(msg))
+            }
+            Self::BranchArmDirNotEmpty(msg) => {
+                write!(f, "BRANCH_ARM_DIR_NOT_EMPTY: {}", scrub_secret_text(msg))
+            }
+            Self::MissingSourceSetup(msg) => {
+                write!(f, "MISSING_SOURCE_SETUP: {}", scrub_secret_text(msg))
+            }
+            Self::IncompatibleEvalSetup(msg) => {
+                write!(f, "INCOMPATIBLE_EVAL_SETUP: {}", scrub_secret_text(msg))
+            }
+            Self::PartialTurnFromSeatExists(msg) => {
+                write!(
+                    f,
+                    "PARTIAL_TURN_FROM_SEAT_EXISTS: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::NoModelSeatsForSelect(msg) => {
+                write!(f, "NO_MODEL_SEATS_FOR_SELECT: {}", scrub_secret_text(msg))
             }
             Self::Engine(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Relay(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
@@ -198,6 +255,48 @@ impl ToStructuredError for EvalError {
                 self.code(),
                 self.to_string(),
                 "pass `--seat <guild>` matching one of the 4 guilds recorded in the game's `seats.json`",
+                false,
+            ),
+            Self::EvalThinkStrippingForbidden(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "set `reasoning.exclude_from_transcript: false` (or omit it) for every seat in Evaluation Mode",
+                false,
+            ),
+            Self::MissingBranchNegotiation(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure `to-seat/day-DD-act-<Guild>.negotiation.json` exists alongside the pre-act checkpoint",
+                false,
+            ),
+            Self::BranchArmDirNotEmpty(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass a fresh empty `--out` directory for `league-eval branch`",
+                false,
+            ),
+            Self::MissingSourceSetup(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure the source game directory contains `setup.json` written by `league-eval play`",
+                false,
+            ),
+            Self::IncompatibleEvalSetup(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass matching `--wrapper`, `--seats`, `--memory`, `--arm`, `--table-id`, and `--seed`",
+                false,
+            ),
+            Self::PartialTurnFromSeatExists(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "inspect or clear the incomplete `from-seat/day-DD-*` files before resuming, or start in a new `--game-dir`",
+                false,
+            ),
+            Self::NoModelSeatsForSelect(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "select requires at least one automated model seat (`role = \"Model\"`) in `manifest.json`",
                 false,
             ),
             Self::Engine(err) => err.to_structured_error(),

@@ -84,7 +84,7 @@ const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 22] = [
     "preview_bundle_with_context_and_mode",
 ];
 
-const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 41] = [
+const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 42] = [
     "TurnEngine",
     "EngineState",
     "engine_internals",
@@ -118,6 +118,7 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 41] = [
     "read_recorded_act_submissions",
     "apply_recorded_act_submissions_from_seal",
     "fork_from_checkpoint",
+    "from_explicit_entropy",
     "public_save_snapshot",
     "private_hints_for_auditor",
     "preview_bundle",
@@ -144,61 +145,28 @@ const NON_SEAT_WORKSPACE_CRATES: [&str; 8] = [
 const ALLOWED_LEAGUE_EVAL_CORE_ITEMS: &[&str] = &[
     "EvalHost",
     "EvalActSubmission",
-    "EvalActApplyOutcome",
     "EvalSeatApplyReport",
-    "EvalSaveSnapshot",
-    "EVAL_SAVE_FORMAT_VERSION",
-    "EVAL_SEAL_FORMAT_VERSION",
     "ClubBot",
-    "ClubBotDecision",
-    "PrivateMandate",
-    "PublicTableSpec",
     "PublicSweepReceipt",
     "SeatObservation",
     "PublicPreviewState",
-    "FinalScoreboard",
-    "SeasonReplayLog",
     "ReplayOutcome",
-    "StatePredicateSection",
-    "SeatSeasonMetrics",
     "SealedOrderBundle",
     "MarketAction",
     "AssetId",
     "OfferProposal",
     "OfferSide",
-    "CheckProposal",
-    "EscrowProposal",
-    "EscrowFinishUnlock",
-    "PreimageSecret",
-    "DualEscrowProposal",
-    "ContractDeliveryOrder",
-    "AtomicSwapProposal",
-    "ConverterRunOrder",
-    "ProjectDeliveryOrder",
-    "CouncilVoteBallot",
-    "CharterBidOrder",
-    "CharterRole",
-    "CouncilPlatform",
-    "IntentPledge",
-    "IntentTarget",
-    "BondProposal",
-    "BondSettlementMode",
-    "CommitmentHash",
-    "RevealSalt",
     "Seat",
     "TableId",
-    "Turn",
     "TurnPhase",
     "HARD_TURN_CAP",
     "replay_eval_season",
-    "replay_season_with_state_predicates",
     "EngineError",
     "StructuredError",
     "ToStructuredError",
     "scrub_secret_text",
-    "compute_order_commitment",
-    "compute_preimage_condition",
 ];
+const _: () = assert!(ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() == 22);
 
 const FORBIDDEN_EVAL_CORE_SYMBOLS: [&str; 21] = [
     "TurnEngine",
@@ -424,6 +392,12 @@ fn check_league_eval_core_isolation(files: &[(String, String)]) -> Result<(), St
             }
             i += 1;
         }
+    }
+    if ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len() != 22 {
+        return Err(format!(
+            "ALLOWED_LEAGUE_EVAL_CORE_ITEMS must contain exactly the 22 used core items, found {}",
+            ALLOWED_LEAGUE_EVAL_CORE_ITEMS.len()
+        ));
     }
     Ok(())
 }
@@ -1406,7 +1380,7 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
-const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 40] = [
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 41] = [
     "new",
     "from_standard_setup",
     "from_explicit_setup",
@@ -1447,6 +1421,7 @@ const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 40] = [
     "apply_recorded_act_submissions_from_seal",
     "fork_from_checkpoint",
     "fork_duplicate_from_turn_0",
+    "from_explicit_entropy",
 ];
 
 const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [

@@ -15,7 +15,7 @@ use crate::driver::{
     BranchOptions, NoopTransport, PlayOptions, run_branch_with_transport, run_play_with_transport,
     validate_eval_seats_file,
 };
-use crate::records::EvalArm;
+use crate::records::{EvalArm, summarize_branch_outcomes};
 use crate::select::{SelectOptions, run_select};
 use crate::{EXIT_OK, EvalError};
 
@@ -322,12 +322,14 @@ fn cmd_play(
 
     writeln!(
         stdout,
-        "game_id={} table_id={} arm={} played_turns={} wrong_part_refusals={}",
+        "game_id={} table_id={} arm={} played_turns={} wrong_part_refusals={}/{} all_rounds={}",
         manifest.game_id,
         manifest.table_id,
         manifest.arm.as_str(),
         manifest.played_turns,
-        manifest.wrong_part_refusals.total_wrong_part_refusals
+        manifest.wrong_part_refusals.total_wrong_part_refusals,
+        manifest.wrong_part_refusals.delivered_model_replies,
+        manifest.wrong_part_refusals.total_model_rounds
     )
     .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
     Ok(())
@@ -441,8 +443,16 @@ fn cmd_branch(
         },
     )?;
 
-    writeln!(stdout, "branched_outcomes={}", outcomes.len())
-        .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    let summary = summarize_branch_outcomes(&outcomes);
+    writeln!(
+        stdout,
+        "branched_outcomes={} wrong_part_refusals={}/{} all_rounds={}",
+        outcomes.len(),
+        summary.wrong_part_refusals.total_wrong_part_refusals,
+        summary.wrong_part_refusals.delivered_model_replies,
+        summary.wrong_part_refusals.total_model_rounds
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
     Ok(())
 }
 
