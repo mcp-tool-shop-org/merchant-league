@@ -4479,7 +4479,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
     // 1. Clean branch records relative scratchpad key `"checkpoints/day-01-pre-act.Foundry.scratchpad.md"`,
     //    never a local filesystem path.
     let out_clean = tmp.join("out_clean");
-    let branch_t = DeterministicMockTransport::new(vec![("1:act", act_ok)]);
+    let branch_t = DeterministicMockTransport::new(vec![("1:act", act_ok.clone())]);
     let outcomes = must_ok(
         run_branch_with_transport(
             &BranchOptions {
@@ -4520,6 +4520,68 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
                 "loaded_history_sha256 key must be relative, never local path: `{k}`"
             );
         }
+    }
+
+    // 1b. Branching from a checkpoint folder not named `checkpoints` (e.g. `ckpts`) must still
+    //     record the relative key `"checkpoints/day-01-pre-act.Foundry.scratchpad.md"` in
+    //     `decision.json`, with zero absolute local paths anywhere in `decision.json`.
+    let src_ckpts = tmp.join("src_ckpts");
+    copy_tree(&src_game, &src_ckpts);
+    must_ok(
+        fs::rename(src_ckpts.join("checkpoints"), src_ckpts.join("ckpts")),
+        "rename checkpoints to ckpts",
+    );
+    let out_ckpts = tmp.join("out_ckpts");
+    let ckpts_t = DeterministicMockTransport::new(vec![("1:act", act_ok)]);
+    let ckpts_outcomes = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(src_ckpts.join("ckpts/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: out_ckpts.clone(),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &ckpts_t,
+            None,
+        ),
+        "branch from renamed ckpts directory",
+    );
+    assert_eq!(ckpts_outcomes.len(), 2);
+    let src_ckpts_str = src_ckpts.to_string_lossy();
+    let src_ckpts_escaped = src_ckpts_str.replace('\\', "\\\\");
+    for arm_name in ["off", "on"] {
+        let dec_raw = must_ok(
+            fs::read_to_string(out_ckpts.join(arm_name).join("decision.json")),
+            "read ckpts branch decision.json",
+        );
+        let dec: EvalDecisionRecord =
+            must_ok(serde_json::from_str(&dec_raw), "parse ckpts decision.json");
+        assert_eq!(
+            dec.loaded_history_sha256.get(pad_rel_key),
+            Some(&expected_pad_sha),
+            "decision.json for renamed checkpoint dir must still key pre-act scratchpad by `{pad_rel_key}`"
+        );
+        for k in dec.loaded_history_sha256.keys() {
+            assert!(
+                !Path::new(k).is_absolute()
+                    && !k.contains(':')
+                    && !k.contains('\\')
+                    && !k.starts_with('/'),
+                "loaded_history_sha256 key in decision.json must be relative, never local path: `{k}`"
+            );
+        }
+        assert!(
+            !dec_raw.contains(src_ckpts_str.as_ref()) && !dec_raw.contains(&src_ckpts_escaped),
+            "absolute local path `{src_ckpts_str}` must never appear in decision.json"
+        );
     }
 
     // 2. Existing `branch_summary.json` must be refused with `BRANCH_SUMMARY_EXISTS` and left unchanged.
