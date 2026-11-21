@@ -51,3 +51,37 @@ pub fn build_act_negotiation_inputs(whispers: Vec<UntrustedWhisper>) -> Negotiat
         whispers,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use league_core::{EvalHost, Seat, TableId};
+
+    use super::*;
+
+    #[test]
+    fn render_views_and_preview_state_from_eval_observation() {
+        let host = match EvalHost::from_standard_setup(TableId(95_001), 4, 7, 1) {
+            Ok(h) => h,
+            Err(err) => panic!("setup failed: {err}"),
+        };
+        let obs = match host.observe_seat(Seat(0)) {
+            Ok(o) => o,
+            Err(err) => panic!("observe_seat failed: {err}"),
+        };
+        let talk_md = match render_seat_view_markdown(Round::Talk, &obs) {
+            Ok(s) => s,
+            Err(err) => panic!("talk md failed: {err}"),
+        };
+        let act_md = match render_seat_view_markdown(Round::Act, &obs) {
+            Ok(s) => s,
+            Err(err) => panic!("act md failed: {err}"),
+        };
+        let preview = match render_preview_state_json(&obs) {
+            Ok(s) => s,
+            Err(err) => panic!("preview json failed: {err}"),
+        };
+        assert!(talk_md.starts_with(eval_wording_slot("eval_talk_instruction")));
+        assert!(act_md.starts_with(eval_wording_slot("eval_act_instruction")));
+        assert!(preview.ends_with('\n'));
+    }
+}

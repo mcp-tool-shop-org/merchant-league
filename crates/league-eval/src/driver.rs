@@ -1035,33 +1035,29 @@ fn branch_one_target(
         };
 
         let keeps_notes = seat_keeps_notes(focal_seat_spec, seats_file, opts.memory_mode);
+        let to_seat_dir = arm_dir.join("to-seat");
+        let act_md = render_seat_view_markdown(Round::Act, &obs)?;
+        write_text_atomic(
+            &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.md")),
+            &act_md,
+        )?;
+        let neg_text = match &source_negotiation_json {
+            Some(txt) => txt.clone(),
+            None => {
+                let neg = build_act_negotiation_inputs(Vec::new());
+                let mut s = serde_json::to_string_pretty(&neg)
+                    .map_err(|e| EvalError::Io(format!("serialize negotiation fallback: {e}")))?;
+                s.push('\n');
+                s
+            }
+        };
+        write_text_atomic(
+            &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
+            &neg_text,
+        )?;
+
         let (focal_sub, mut decision_rec) =
             if matches!(focal_seat_spec.backend, SeatBackend::File { .. }) {
-                let act_md = render_seat_view_markdown(Round::Act, &obs)?;
-                write_text_atomic(
-                    &arm_dir
-                        .join("to-seat")
-                        .join(format!("day-{day_str}-act-{focal_guild}.md")),
-                    &act_md,
-                )?;
-                let neg_text = match &source_negotiation_json {
-                    Some(txt) => txt.clone(),
-                    None => {
-                        let neg = build_act_negotiation_inputs(Vec::new());
-                        let mut s = serde_json::to_string_pretty(&neg).map_err(|e| {
-                            EvalError::Io(format!("serialize negotiation fallback: {e}"))
-                        })?;
-                        s.push('\n');
-                        s
-                    }
-                };
-                write_text_atomic(
-                    &arm_dir
-                        .join("to-seat")
-                        .join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
-                    &neg_text,
-                )?;
-
                 let rec = EvalDecisionRecord {
                     game_id: source_game_id.clone(),
                     table_id,
@@ -1084,12 +1080,6 @@ fn branch_one_target(
                 };
                 (bot_sub, rec)
             } else {
-                let to_seat_dir = arm_dir.join("to-seat");
-                let act_md = render_seat_view_markdown(Round::Act, &obs)?;
-                write_text_atomic(
-                    &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.md")),
-                    &act_md,
-                )?;
                 if arm == EvalArm::On {
                     let preview_json = render_preview_state_json(&obs)?;
                     write_text_atomic(
@@ -1099,21 +1089,6 @@ fn branch_one_target(
                         &preview_json,
                     )?;
                 }
-                let neg_text = match &source_negotiation_json {
-                    Some(txt) => txt.clone(),
-                    None => {
-                        let neg = build_act_negotiation_inputs(Vec::new());
-                        let mut s = serde_json::to_string_pretty(&neg).map_err(|e| {
-                            EvalError::Io(format!("serialize negotiation fallback: {e}"))
-                        })?;
-                        s.push('\n');
-                        s
-                    }
-                };
-                write_text_atomic(
-                    &to_seat_dir.join(format!("day-{day_str}-act-{focal_guild}.negotiation.json")),
-                    &neg_text,
-                )?;
 
                 if !source_transcript_entries.is_empty() {
                     let mut jsonl = String::new();

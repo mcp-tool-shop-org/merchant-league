@@ -542,3 +542,47 @@ pub fn parse_eval_talk_reply(
         is_wrong_part: false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_unique_visitor_and_error_branches_are_covered() {
+        // Exercise bool, negative i64, u64, finite f64, null (`visit_unit`), and nested duplicate keys.
+        let scalar_json = r#"{"a":true,"b":-5,"c":7,"d":1.25,"e":null,"f":[false]}"#;
+        let mut de = serde_json::Deserializer::from_str(scalar_json);
+        assert!(StrictUniqueValue.deserialize(&mut de).is_ok());
+
+        let nested_dup =
+            r#"{"messages":[],"market_actions":[],"bundle":{"x":1,"nested":{"k":1,"k":2}}}"#;
+        assert_eq!(
+            parse_eval_act_reply(nested_dup, 0, false).refusal_code,
+            Some(ReplyRefusalCode::ActReplyInvalid)
+        );
+        assert_eq!(
+            parse_eval_talk_reply("<think>x</think>{}", 0, "Foundry", &[], false).refusal_code,
+            Some(ReplyRefusalCode::ActReplyInvalid)
+        );
+
+        let seated = vec![
+            "Foundry".to_owned(),
+            "Quarry".to_owned(),
+            "Harbor".to_owned(),
+            "Mint".to_owned(),
+        ];
+        for bad in [
+            r#"{"messages":"not-arr","market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[42],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"to_guild":"Quarry","body":"hi","extra":1}],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[{"body":"missing guild"}],"market_actions":[],"bundle":{}}"#,
+            r#"{"messages":[],"market_actions":"not-arr","bundle":{}}"#,
+            r#"{"messages":[],"market_actions":[],"bundle":[]}"#,
+        ] {
+            let act = parse_eval_act_reply(bad, 0, false);
+            assert_eq!(act.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
+            let talk = parse_eval_talk_reply(bad, 0, "Foundry", &seated, false);
+            assert_eq!(talk.refusal_code, Some(ReplyRefusalCode::ActReplyInvalid));
+        }
+    }
+}

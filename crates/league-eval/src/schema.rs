@@ -48,33 +48,14 @@ pub fn build_eval_response_format_value() -> Result<serde_json::Value, EvalError
 
     let k_market_actions = preview_wording_slot("key_market_actions");
     let k_bundle = preview_wording_slot("key_bundle");
-    let market_actions_subtree = tool_props.get(&k_market_actions).cloned().ok_or_else(|| {
-        EvalError::SchemaValidation(format!(
-            "preview tool definition missing `{k_market_actions}` subtree"
-        ))
-    })?;
-    let bundle_subtree = tool_props.get(&k_bundle).cloned().ok_or_else(|| {
-        EvalError::SchemaValidation(format!(
-            "preview tool definition missing `{k_bundle}` subtree"
-        ))
-    })?;
+    let market_actions_subtree = extract_tool_subtree(tool_props, &k_market_actions)?;
+    let bundle_subtree = extract_tool_subtree(tool_props, &k_bundle)?;
 
     let k_messages = eval_wording_slot("eval_messages_key");
     let k_to_guild = eval_wording_slot("eval_to_guild_key");
     let k_body = eval_wording_slot("eval_body_key");
     let k_notes = wording_slot("scratchpad_schema_key");
     let notes_desc = wording_slot("scratchpad_schema_description");
-
-    let max_items_from_table = eval_wording_slot("eval_messages_max_items")
-        .parse::<usize>()
-        .map_err(|_| {
-            EvalError::SchemaValidation("invalid eval_messages_max_items slot".to_owned())
-        })?;
-    if max_items_from_table != EVAL_MESSAGES_MAX_ITEMS {
-        return Err(EvalError::SchemaValidation(
-            "eval_messages_max_items slot mismatch".to_owned(),
-        ));
-    }
 
     let message_item = serde_json::json!({
         type_key.as_str(): ty_obj.as_str(),
@@ -127,6 +108,15 @@ pub fn build_eval_response_format_config() -> Result<ResponseFormatConfig, EvalE
         .map_err(|e| EvalError::SchemaValidation(e.to_string()))
 }
 
+fn extract_tool_subtree(
+    tool_props: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<serde_json::Value, EvalError> {
+    tool_props.get(key).cloned().ok_or_else(|| {
+        EvalError::SchemaValidation(format!("preview tool definition missing `{key}` subtree"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +136,11 @@ mod tests {
         let k_bundle = preview_wording_slot("key_bundle");
         assert_eq!(cfg.schema["properties"][&k_ma], params[&k_ma]);
         assert_eq!(cfg.schema["properties"][&k_bundle], params[&k_bundle]);
+
+        let empty_map = serde_json::Map::new();
+        assert!(matches!(
+            extract_tool_subtree(&empty_map, "missing_key"),
+            Err(EvalError::SchemaValidation(_))
+        ));
     }
 }

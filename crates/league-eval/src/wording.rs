@@ -79,3 +79,20 @@ pub fn eval_wording_slot(slot: &str) -> &'static str {
 pub fn eval_internal_slot_names() -> Vec<&'static str> {
     EVAL_REPLY_WORDING.iter().map(|e| e.slot).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_wording_table_and_internal_slot_names_resolve_cleanly() {
+        assert_eq!(eval_wording_slot("eval_messages_key"), "messages");
+        assert_eq!(eval_internal_slot_names().len(), EVAL_REPLY_WORDING.len());
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown EVAL_REPLY_WORDING slot")]
+    fn unknown_wording_slot_panics() {
+        let _ = eval_wording_slot("does_not_exist");
+    }
+}

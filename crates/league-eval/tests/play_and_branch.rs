@@ -1646,3 +1646,833 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
+    use std::process::Command;
+
+    let tmp = fresh_tmp_dir("cov_extra");
+    let wrapper_path = write_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, "seats.json", all_clubbot_seats());
+
+    // 1. Subprocess binary test covering `src/main.rs` (`CARGO_BIN_EXE_league-eval`).
+    // Do NOT `.env_clear()` so `LLVM_PROFILE_FILE` passes through cleanly during CI coverage.
+    let bin = env!("CARGO_BIN_EXE_league-eval");
+    let ver_out = must_ok(
+        Command::new(bin)
+            .arg("--version")
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("GEMINI_API_KEY")
+            .output(),
+        "run league-eval --version",
+    );
+    assert!(ver_out.status.success());
+    assert!(String::from_utf8_lossy(&ver_out.stdout).contains("league-eval"));
+
+    let err_out = must_ok(
+        Command::new(bin)
+            .args([
+                "--error-format",
+                "json",
+                "play",
+                "--game-dir",
+                &tmp.join("bin_ctrl").to_string_lossy(),
+                "--seats",
+                &seats_path.to_string_lossy(),
+                "--wrapper",
+                &wrapper_path.to_string_lossy(),
+                "--arm",
+                "control",
+                "--seed",
+                "7",
+            ])
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("GEMINI_API_KEY")
+            .output(),
+        "run league-eval binary error exit",
+    );
+    assert_eq!(err_out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&err_out.stderr).contains("CONTROL_ARM_NOT_IMPLEMENTED"));
+
+    // 2. Remaining `cli.rs` flags, help/version subcommands, and missing required options.
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    for ok_cli in [
+        vec!["--error-format", "text", "--version"],
+        vec!["--error-format=text", "--help"],
+        vec!["select", "--help"],
+        vec!["select", "-V"],
+    ] {
+        out.clear();
+        err.clear();
+        assert_eq!(
+            execute_cli(ok_cli.into_iter().map(Into::into), &mut out, &mut err),
+            0
+        );
+    }
+
+    let play_with_extra_flags = tmp.join("extra_flags_game");
+    out.clear();
+    err.clear();
+    let extra_code = execute_cli(
+        [
+            "play".into(),
+            "--error-format".into(),
+            "json".into(),
+            "--game-dir".into(),
+            play_with_extra_flags.clone().into_os_string(),
+            "--seats".into(),
+            seats_path.clone().into_os_string(),
+            "--wrapper".into(),
+            wrapper_path.clone().into_os_string(),
+            "--wrapper-version".into(),
+            "v99".into(),
+            "--arm".into(),
+            "off".into(),
+            "--table-id".into(),
+            "55".into(),
+            "--seed".into(),
+            "7".into(),
+            "--turns".into(),
+            "1".into(),
+            "--cap-credits".into(),
+            "5.0".into(),
+            "--cap-gpu-secs".into(),
+            "10.0".into(),
+        ],
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(
+        extra_code,
+        0,
+        "extra_code stderr={}",
+        String::from_utf8_lossy(&err)
+    );
+    // Unused `--allow-vm-host` with all-ClubBot seats fails cleanly (`INVALID_SEAT_CONFIG`), covering the flag parser + validator loop.
+    assert_eq!(
+        execute_cli(
+            [
+                "play".into(),
+                "--game-dir".into(),
+                tmp.join("unused_vm").into_os_string(),
+                "--seats".into(),
+                seats_path.clone().into_os_string(),
+                "--wrapper".into(),
+                wrapper_path.clone().into_os_string(),
+                "--arm".into(),
+                "off".into(),
+                "--seed".into(),
+                "7".into(),
+                "--allow-vm-host".into(),
+                "127.0.0.1".into(),
+            ],
+            &mut out,
+            &mut err,
+        ),
+        1
+    );
+
+    for bad_cli in [
+        vec!["play", "--error-format", "bogus"],
+        vec!["branch", "--error-format", "bogus"],
+        vec!["select", "--error-format", "bogus"],
+        vec![
+            "play",
+            "--seats",
+            "a",
+            "--wrapper",
+            "b",
+            "--arm",
+            "off",
+            "--seed",
+            "1",
+        ],
+        vec![
+            "play",
+            "--game-dir",
+            "g",
+            "--wrapper",
+            "b",
+            "--arm",
+            "off",
+            "--seed",
+            "1",
+        ],
+        vec![
+            "play",
+            "--game-dir",
+            "g",
+            "--seats",
+            "a",
+            "--arm",
+            "off",
+            "--seed",
+            "1",
+        ],
+        vec![
+            "play",
+            "--game-dir",
+            "g",
+            "--seats",
+            "a",
+            "--wrapper",
+            "b",
+            "--seed",
+            "1",
+        ],
+        vec![
+            "play",
+            "--game-dir",
+            "g",
+            "--seats",
+            "a",
+            "--wrapper",
+            "b",
+            "--arm",
+            "off",
+        ],
+        vec!["branch", "--wrapper", "b", "--out", "o"],
+        vec!["branch", "--seats", "a", "--out", "o"],
+        vec!["branch", "--seats", "a", "--wrapper", "b"],
+        vec!["branch", "--memory-mode", "bad"],
+        vec!["branch", "--cap-credits", "bad"],
+        vec!["branch", "--cap-gpu-secs", "bad"],
+        vec!["branch", "--table-id", "5"],
+        vec!["select", "--out", "o"],
+        vec!["select", "--selection-seed", "1"],
+    ] {
+        out.clear();
+        err.clear();
+        assert_eq!(
+            execute_cli(bad_cli.into_iter().map(Into::into), &mut out, &mut err),
+            1
+        );
+    }
+
+    // Exercise `execute_with_transport` local remote-host refusal and openrouter missing `--live` refusal (zero network).
+    let remote_local_seats = write_seats(
+        &tmp,
+        "remote_local.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "local",
+                    "base_url": "http://198.51.100.10:8080/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+    assert_ne!(
+        execute_cli(
+            [
+                "play".into(),
+                "--game-dir".into(),
+                tmp.join("g_remote").into_os_string(),
+                "--seats".into(),
+                remote_local_seats.into_os_string(),
+                "--wrapper".into(),
+                wrapper_path.clone().into_os_string(),
+                "--arm".into(),
+                "off".into(),
+                "--seed".into(),
+                "7".into(),
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    let or_seats = write_seats(
+        &tmp,
+        "or_seats.json",
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+    assert_ne!(
+        execute_cli(
+            [
+                "play".into(),
+                "--game-dir".into(),
+                tmp.join("g_or_nolive").into_os_string(),
+                "--seats".into(),
+                or_seats.clone().into_os_string(),
+                "--wrapper".into(),
+                wrapper_path.clone().into_os_string(),
+                "--arm".into(),
+                "off".into(),
+                "--seed".into(),
+                "7".into(),
+            ],
+            &mut out,
+            &mut err,
+        ),
+        0
+    );
+
+    // 3. `driver.rs` HTTP-500 (`no_reply: true` across talk, act, and branch), `EvalArm::On` preview-state,
+    //    `branch` default arms `[Off, On]`, standalone checkpoint without `negotiation.json`, refused bundle in `branch`,
+    //    empty/dir wrapper, `turns=33`, `setup.json` mismatched `game_id`, and malformed transcript.
+    struct AlwaysFailTransport;
+    impl Transport for AlwaysFailTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            Ok(RawHttpResponse {
+                status: 500,
+                body: "{\"error\":\"down\"}".to_owned(),
+            })
+        }
+    }
+
+    let local_seats_path = write_seats(&tmp, "local_seats.json", focal_local_three_clubbot_seats());
+    let fail_game = tmp.join("fail_on_game");
+    let fail_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: fail_game.clone(),
+                seats_path: local_seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::On,
+                table_id: 71,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &AlwaysFailTransport,
+            None,
+        ),
+        "run_play AlwaysFailTransport",
+    );
+    assert_eq!(fail_manifest.played_turns, 1);
+    assert!(
+        fail_game
+            .join("to-seat/day-01-act-Foundry.preview-state.json")
+            .exists()
+    );
+    let talk_fail_dec: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(fail_game.join("decisions/day-01-talk-Foundry.json")),
+            "read fail talk dec",
+        )),
+        "parse fail talk dec",
+    );
+    let act_fail_dec: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(fail_game.join("decisions/day-01-act-Foundry.json")),
+            "read fail act dec",
+        )),
+        "parse fail act dec",
+    );
+    assert!(talk_fail_dec.no_reply);
+    assert!(act_fail_dec.no_reply);
+
+    // Branch with `AlwaysFailTransport` -> `no_reply: true` in `BranchArmOutcome`, default arms `[Off, On]`.
+    let fail_branch = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: local_seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: tmp.join("fail_branch_out"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &AlwaysFailTransport,
+            None,
+        ),
+        "branch AlwaysFailTransport",
+    );
+    assert_eq!(fail_branch.len(), 2);
+    assert!(fail_branch[0].decision.no_reply);
+
+    // Branch where focal seat submits an over-capped DualEscrow bundle -> `refused_bundle` recorded in `branch`!
+    let bad_bundle_act = json!({
+        "messages": [],
+        "market_actions": [],
+        "bundle": {
+            "dual_escrows": [{
+                "proposal_id": 1,
+                "buyer_seat": 0,
+                "seller_seat": 1,
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "required_units": 10,
+                "payment_cred": 100,
+                "buyer_bond_cred": 80,
+                "seller_bond_cred": 80,
+                "deadline_turn": 3,
+                "domain_id": null
+            }]
+        },
+        "notes": "bad bundle in branch"
+    })
+    .to_string();
+    let bad_bundle_transport = DeterministicMockTransport::new(vec![("1:act", bad_bundle_act)]);
+    let bad_branch = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("0".to_owned()),
+                seats_path: local_seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("bad_bundle_branch"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &bad_bundle_transport,
+            None,
+        ),
+        "branch refused bundle",
+    );
+    assert!(bad_branch[0].decision.refused_bundle.is_some());
+
+    // Copy checkpoints to a standalone directory (no `to-seat/*.negotiation.json`) so branch exercises fallback negotiation synthesis!
+    let standalone_ckpts = tmp.join("standalone/checkpoints");
+    must_ok(fs::create_dir_all(&standalone_ckpts), "mkdir standalone");
+    for fname in [
+        "day-01-pre-act.save.json",
+        "day-01-pre-act.seal",
+        "day-01-act-recorded.seal",
+    ] {
+        must_ok(
+            fs::copy(
+                play_with_extra_flags.join("checkpoints").join(fname),
+                standalone_ckpts.join(fname),
+            ),
+            fname,
+        );
+    }
+    let standalone_branch = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(standalone_ckpts.join("day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("standalone_branch_out"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        ),
+        "standalone branch without negotiation.json",
+    );
+    assert_eq!(standalone_branch.len(), 1);
+
+    // Corrupt `setup.json` game_id, empty wrapper, `--turns 33`, malformed transcript, missing act-recorded seal.
+    let empty_wrapper = tmp.join("empty_wrapper.md");
+    must_ok(fs::write(&empty_wrapper, b""), "empty wrapper");
+    for opts_err in [
+        PlayOptions {
+            game_dir: tmp.join("g_t33"),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            arm: EvalArm::Off,
+            table_id: 1,
+            seed: 1,
+            turns: HARD_TURN_CAP + 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        PlayOptions {
+            game_dir: tmp.join("g_empty_wrap"),
+            seats_path: seats_path.clone(),
+            wrapper_path: empty_wrapper,
+            wrapper_version: None,
+            arm: EvalArm::Off,
+            table_id: 1,
+            seed: 1,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        PlayOptions {
+            game_dir: tmp.join("g_dir_wrap"),
+            seats_path: seats_path.clone(),
+            wrapper_path: tmp.clone(),
+            wrapper_version: None,
+            arm: EvalArm::Off,
+            table_id: 1,
+            seed: 1,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+    ] {
+        assert!(run_play_with_transport(&opts_err, &NoopTransport, None).is_err());
+    }
+
+    let mut bad_setup: Value = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(play_with_extra_flags.join("setup.json")),
+            "read setup",
+        )),
+        "parse setup",
+    );
+    bad_setup["game_id"] = json!("wrong-game-id");
+    must_ok(
+        fs::write(
+            play_with_extra_flags.join("setup.json"),
+            bad_setup.to_string(),
+        ),
+        "write bad setup",
+    );
+    assert!(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: play_with_extra_flags.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 55,
+                seed: 7,
+                turns: 2,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+
+    // Branch validation errors & malformed transcript JSONL.
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: None,
+                list_path: None,
+                focal_seat: None,
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![],
+                out_dir: tmp.join("b_e1"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: None,
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_e2"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: None,
+                list_path: Some(tmp.join("missing_list.json")),
+                focal_seat: None,
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_e3"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+    let empty_list = tmp.join("empty_list.json");
+    must_ok(
+        fs::write(
+            &empty_list,
+            json!({
+                "version": 1,
+                "selection_seed": 1,
+                "per_game": 0,
+                "strata": [0, 0, 0],
+                "states": []
+            })
+            .to_string(),
+        ),
+        "write empty_list",
+    );
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: None,
+                list_path: Some(empty_list.clone()),
+                focal_seat: None,
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_e4"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
+                list_path: Some(empty_list),
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_e5"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+
+    let _ = fs::remove_file(standalone_ckpts.join("day-01-act-recorded.seal"));
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(standalone_ckpts.join("day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_no_rec"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+
+    // Malformed transcript JSONL under `fail_game/relay/seats/Foundry.jsonl`.
+    must_ok(
+        fs::write(
+            fail_game.join("relay/seats/Foundry.jsonl"),
+            "\n{corrupt-jsonl\n",
+        ),
+        "write corrupt jsonl",
+    );
+    assert!(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(fail_game.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path,
+                wrapper_path,
+                arms: vec![EvalArm::Off],
+                out_dir: tmp.join("b_bad_jsonl"),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        )
+        .is_err()
+    );
+
+    // 4. `select.rs` remaining error branches (`game_dirs` empty, missing/corrupt manifest, bad seat count, missing checkpoints, stratum pool < need).
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![],
+            per_game: 6,
+            strata: [2, 2, 2],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e1.json"),
+        })
+        .is_err()
+    );
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![tmp.join("no_such_game")],
+            per_game: 6,
+            strata: [2, 2, 2],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e2.json"),
+        })
+        .is_err()
+    );
+    let corrupt_manifest_game = tmp.join("corrupt_m_game");
+    must_ok(fs::create_dir_all(&corrupt_manifest_game), "mkdir cm");
+    must_ok(
+        fs::write(corrupt_manifest_game.join("manifest.json"), b"{bad"),
+        "write bad manifest",
+    );
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![corrupt_manifest_game],
+            per_game: 6,
+            strata: [2, 2, 2],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e3.json"),
+        })
+        .is_err()
+    );
+
+    // Missing checkpoints dir & per-stratum pool exhaustion on `fail_game` (only 1 turn played).
+    let no_ckpts = tmp.join("no_ckpts_game");
+    must_ok(fs::create_dir_all(&no_ckpts), "mkdir nck");
+    let mut m_copy: EvalManifest = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(fail_game.join("manifest.json")),
+            "read fm",
+        )),
+        "parse fm",
+    );
+    let mut m_bad_seats = m_copy.clone();
+    m_bad_seats.seats.pop();
+    must_ok(
+        fs::write(
+            no_ckpts.join("manifest.json"),
+            must_ok(serde_json::to_string(&m_bad_seats), "ser bad seats"),
+        ),
+        "write bad seats manifest",
+    );
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![no_ckpts.clone()],
+            per_game: 1,
+            strata: [1, 0, 0],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e4.json"),
+        })
+        .is_err()
+    );
+    m_copy.played_turns = 1;
+    must_ok(
+        fs::write(
+            no_ckpts.join("manifest.json"),
+            must_ok(serde_json::to_string(&m_copy), "ser m_copy"),
+        ),
+        "write ok manifest",
+    );
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![no_ckpts],
+            per_game: 1,
+            strata: [1, 0, 0],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e5.json"),
+        })
+        .is_err()
+    );
+    assert!(
+        run_select(&SelectOptions {
+            game_dirs: vec![fail_game],
+            per_game: 1,
+            strata: [0, 1, 0],
+            selection_seed: 1,
+            out_path: tmp.join("sel_e6.json"),
+        })
+        .is_err()
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
