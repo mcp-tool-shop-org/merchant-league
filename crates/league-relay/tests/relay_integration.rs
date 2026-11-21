@@ -31367,3 +31367,248 @@ fn card9_fix1_b2_condition1_diag_log_and_error_text_still_blank_preimage() -> Te
     assert!(raw_reply.body.contains(PREIMAGE_HEX));
     Ok(())
 }
+
+fn collect_relative_files_sorted(root: &Path, dir: &Path, out: &mut Vec<String>) -> TestResult {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_relative_files_sorted(root, &path, out)?;
+        } else if path.is_file() {
+            let rel = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(rel);
+        }
+    }
+    out.sort();
+    Ok(())
+}
+
+fn run_play_mode_golden_3turn_fixture(tmp_root: &Path, game_dir: &Path) -> TestResult {
+    let wrapper = tmp_root.join("golden_wrapper.md");
+    fs::write(&wrapper, "GOLDEN_PARITY_WRAPPER\n")?;
+    let seats_path = tmp_root.join("golden_seats.json");
+    fs::write(
+        &seats_path,
+        json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "openrouter",
+                    "model": "google/gemini-2.5-pro-06-05",
+                    "temperature": 0.4,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+    )?;
+    let mock_dir = tmp_root.join("golden_mock");
+    fs::create_dir_all(&mock_dir)?;
+    fs::write(
+        mock_dir.join("responses.json"),
+        json!({
+            "rules": [
+                {
+                    "when_contains": "GOLDEN_TURN1_TALK_OK",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-1",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "GOLDEN_TALK_REPLY_OK" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                            "total_tokens": 18,
+                            "cost": 0.02
+                        }
+                    }
+                },
+                {
+                    "when_contains": "GOLDEN_TURN2_ACT_EMPTY",
+                    "status": 200,
+                    "response": {
+                        "id": "gen-golden-2",
+                        "model": "google/gemini-2.5-pro-06-05",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 13,
+                            "completion_tokens": 0,
+                            "total_tokens": 13,
+                            "cost": 0.015
+                        }
+                    }
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "talk",
+        "Saltworks",
+        "GOLDEN_TURN1_TALK_OK\n",
+    )?;
+    write_to_seat(
+        game_dir,
+        "01",
+        "act",
+        "Saltworks",
+        "GOLDEN_TURN2_ACT_EMPTY\n",
+    )?;
+    write_to_seat(game_dir, "02", "talk", "Saltworks", "GOLDEN_TURN3_CAP\n")?;
+    for (day, round, expected_exit) in [("01", "talk", 0), ("01", "act", 3), ("02", "talk", 3)] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                game_dir.to_str().ok_or("utf8")?,
+                "--day",
+                day,
+                "--round",
+                round,
+                "--seats",
+                seats_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--mock-dir",
+                mock_dir.to_str().ok_or("utf8")?,
+                "--preview-tool",
+                "off",
+                "--cap-credits",
+                "0.09",
+            ],
+            |_| None,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            code,
+            expected_exit,
+            "day {day} {round} stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
+    }
+    Ok(())
+}
+
+fn verify_game_dir_matches_play_mode_golden(game_dir: &Path, golden_root: &Path) -> TestResult {
+    let mut actual_files = Vec::new();
+    collect_relative_files_sorted(game_dir, game_dir, &mut actual_files)?;
+    let mut expected_files = Vec::new();
+    collect_relative_files_sorted(golden_root, golden_root, &mut expected_files)?;
+    assert_eq!(
+        actual_files, expected_files,
+        "Play-mode file tree must match committed golden set"
+    );
+
+    for rel in &expected_files {
+        assert!(!rel.contains('\\'), "unexpected backslash in {rel}");
+        let actual_bytes = fs::read(game_dir.join(rel))?;
+        let golden_bytes = fs::read(golden_root.join(rel))?;
+        if rel == "relay/calls.jsonl" {
+            let actual_str = std::str::from_utf8(&actual_bytes)?;
+            let golden_str = std::str::from_utf8(&golden_bytes)?;
+            assert!(
+                !actual_str.contains('\r'),
+                "Play-mode calls.jsonl must use LF"
+            );
+            let actual_lines: Vec<&str> = actual_str.lines().collect();
+            let golden_lines: Vec<&str> = golden_str.lines().collect();
+            assert_eq!(actual_lines.len(), golden_lines.len());
+            for (idx, (a_line, g_line)) in actual_lines.iter().zip(golden_lines.iter()).enumerate()
+            {
+                let a_masked = canonicalize_b2d77ce8_call_line(a_line)?;
+                assert_eq!(
+                    a_masked, *g_line,
+                    "Play-mode calls.jsonl line {idx} diverged after masking time_utc, wall_secs, latency_ms, reservation_id"
+                );
+            }
+        } else {
+            assert_eq!(
+                actual_bytes, golden_bytes,
+                "Play-mode unmasked file `{rel}` diverged byte-for-byte from golden fixture"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn relay1_play_mode_eval_false_reproduces_committed_golden_set_byte_for_byte() -> TestResult {
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("play_golden_game");
+    run_play_mode_golden_3turn_fixture(tmp.path(), &game_dir)?;
+
+    let golden_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/play_mode_golden");
+    if std::env::var_os("GENERATE_PLAY_MODE_GOLDEN").is_some() {
+        if golden_root.exists() {
+            fs::remove_dir_all(&golden_root)?;
+        }
+        let mut actual_files = Vec::new();
+        collect_relative_files_sorted(&game_dir, &game_dir, &mut actual_files)?;
+        for rel in &actual_files {
+            let dst = golden_root.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let src_bytes = fs::read(game_dir.join(rel))?;
+            if rel == "relay/calls.jsonl" {
+                let src_str = std::str::from_utf8(&src_bytes)?;
+                let mut masked_out = String::new();
+                for line in src_str.lines().filter(|l| !l.trim().is_empty()) {
+                    masked_out.push_str(&canonicalize_b2d77ce8_call_line(line)?);
+                    masked_out.push('\n');
+                }
+                fs::write(&dst, masked_out.as_bytes())?;
+            } else {
+                fs::write(&dst, &src_bytes)?;
+            }
+        }
+    }
+
+    verify_game_dir_matches_play_mode_golden(&game_dir, &golden_root)?;
+
+    // Negative control: altering one byte in an unmasked Play-mode output must panic.
+    let copy_dir = tmp.path().join("play_golden_mutated");
+    let mut actual_files = Vec::new();
+    collect_relative_files_sorted(&game_dir, &game_dir, &mut actual_files)?;
+    for rel in &actual_files {
+        let dst = copy_dir.join(rel);
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(game_dir.join(rel), &dst)?;
+    }
+    let talk_path = copy_dir.join("from-seat/day-01-talk-Saltworks.md");
+    let mut bytes = fs::read(&talk_path)?;
+    bytes[0] ^= 0x01;
+    fs::write(&talk_path, bytes)?;
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = verify_game_dir_matches_play_mode_golden(&copy_dir, &golden_root);
+        }))
+        .is_err(),
+        "mutating 1 byte of a Play-mode output must fail golden byte parity"
+    );
+
+    Ok(())
+}

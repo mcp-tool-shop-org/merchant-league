@@ -1,0 +1,36 @@
+{
+  "memory_mode": "snapshot",
+  "scratchpad": "none (no tokenizer)",
+  "cost_unit": "credits",
+  "wording_arm": "v2_neutral_2026_11_15_r6",
+  "preview_tool": "off",
+  "non_pinned_model_facing_strings": [
+    {
+      "source": "system_wrapper",
+      "text": "GOLDEN_PARITY_WRAPPER\n"
+    }
+  ],
+  "seats": [
+    {
+      "guild": "Saltworks",
+      "backend": "openrouter",
+      "model": "google/gemini-2.5-pro-06-05",
+      "scratchpad": "none (no tokenizer)"
+    },
+    {
+      "guild": "Weavers",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    },
+    {
+      "guild": "Smiths",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    },
+    {
+      "guild": "Dyers",
+      "backend": "file",
+      "scratchpad": "none (manual file seat)"
+    }
+  ]
+}
