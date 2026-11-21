@@ -2,3 +2,4 @@
 *.sh text eol=lf
 # Preserve exact bytes of committed golden test fixtures across OS checkouts.
 crates/league-relay/tests/fixtures/play_mode_golden/** -text
+crates/league-relay/tests/fixtures/play_mode_on_golden/** -text

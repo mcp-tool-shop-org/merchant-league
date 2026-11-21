@@ -388,8 +388,9 @@ fn read_round_attempt_diagnostics(
             entry.error.is_none() && matches!(entry.outcome.as_str(), "OK" | "TOOL_CALL");
         if !is_success {
             let reason = entry.error.clone().unwrap_or_else(|| entry.outcome.clone());
-            // Always lock the first failed attempt; later attempts never overwrite it.
-            if out.first_failure.is_none() {
+            // Always lock the first actual failed call attempt; reconciled orphaned RESERVED rows
+            // stay in `failed_attempts` with their diagnostic reason without poisoning resumed calls.
+            if entry.outcome != "RESERVED" && out.first_failure.is_none() {
                 let (discarded_reply_path, discarded_reply_sha256, discarded_raw_reply) =
                     match entry.reply_sha256.as_deref() {
                         Some(sha) => find_discarded_reply_sidecar(
@@ -852,6 +853,7 @@ fn recount_manifest_counters_from_decisions(
             }
         }
     }
+    wp.validate_rates()?;
     Ok(RecountedManifestCounters {
         by_seat,
         by_arm,
@@ -1199,7 +1201,13 @@ pub fn run_play_with_transport(
 
         // --- PRE-ACT CHECKPOINT (`R9`: BEFORE act prompt or reply collection) ---
         host.write_pre_act_checkpoint(&checkpoints_dir)?;
-        snapshot_pre_act_scratchpads(&opts.game_dir, &checkpoints_dir, day, &seated_guilds)?;
+        snapshot_pre_act_scratchpads(
+            &opts.game_dir,
+            &checkpoints_dir,
+            day,
+            &seats_file,
+            opts.memory_mode,
+        )?;
 
         // --- ACT ROUND ---
         let mut seat_observations = Vec::with_capacity(4);
@@ -1347,6 +1355,7 @@ pub fn run_play_with_transport(
         played_turns = u8::try_from(host.public_receipts().len()).unwrap_or(u8::MAX);
 
         // Write `manifest.json` after every completed turn so counts stay current on disk (`B5`).
+        wrong_part_refusals.validate_rates()?;
         let turn_manifest = build_eval_manifest(
             host.game_id(),
             opts.table_id,
@@ -1384,6 +1393,7 @@ pub fn run_play_with_transport(
         persist_eval_game_state(&host, &opts.game_dir)?;
     }
 
+    wrong_part_refusals.validate_rates()?;
     let manifest = build_eval_manifest(
         host.game_id(),
         opts.table_id,
@@ -1431,20 +1441,24 @@ fn snapshot_pre_act_scratchpads(
     game_dir: &Path,
     checkpoints_dir: &Path,
     day: u8,
-    guilds: &[String],
+    seats_file: &SeatFile,
+    memory_mode: MemoryMode,
 ) -> Result<(), EvalError> {
     let relay_seats_dir = game_dir.join("relay").join("seats");
-    if !relay_seats_dir.exists() {
-        return Ok(());
-    }
-    for guild in guilds {
-        let src = relay_seats_dir.join(format!("{guild}.scratchpad.md"));
-        if src.exists() {
-            let content = fs::read_to_string(&src)
-                .map_err(|e| EvalError::Io(format!("read scratchpad {}: {e}", src.display())))?;
-            let dst = checkpoints_dir.join(format!("day-{day:02}-pre-act.{guild}.scratchpad.md"));
-            write_text_atomic(&dst, &content)?;
+    for seat in &seats_file.seats {
+        if !seat_keeps_notes(seat, seats_file, memory_mode) {
+            continue;
         }
+        let guild = &seat.guild;
+        let src = relay_seats_dir.join(format!("{guild}.scratchpad.md"));
+        let content = if src.exists() {
+            fs::read_to_string(&src)
+                .map_err(|e| EvalError::Io(format!("read scratchpad {}: {e}", src.display())))?
+        } else {
+            String::new()
+        };
+        let dst = checkpoints_dir.join(format!("day-{day:02}-pre-act.{guild}.scratchpad.md"));
+        write_text_atomic(&dst, &content)?;
     }
     Ok(())
 }
@@ -1543,6 +1557,19 @@ pub fn run_branch_with_transport(
         }
     };
 
+    for (_, _, target_out_dir) in &targets {
+        for &arm in &opts.arms {
+            ensure_arm_dir_empty(&target_out_dir.join(arm.as_str()))?;
+        }
+    }
+    let summary_path = opts.out_dir.join("branch_summary.json");
+    if summary_path.exists() {
+        return Err(EvalError::BranchSummaryExists(format!(
+            "branch summary {} already exists; pass a fresh --out directory",
+            summary_path.display()
+        )));
+    }
+
     let mut all_outcomes = Vec::new();
     for (prefix, focal_spec, target_out_dir) in targets {
         let outcomes = branch_one_target(
@@ -1562,7 +1589,8 @@ pub fn run_branch_with_transport(
     }
 
     let branch_summary: BranchSummary = summarize_branch_outcomes(&all_outcomes);
-    write_json_pretty_atomic(&opts.out_dir.join("branch_summary.json"), &branch_summary)?;
+    branch_summary.wrong_part_refusals.validate_rates()?;
+    write_json_pretty_atomic(&summary_path, &branch_summary)?;
     Ok(all_outcomes)
 }
 
@@ -1664,34 +1692,41 @@ fn branch_one_target(
     let mut loaded_history_sha256 = BTreeMap::new();
     loaded_history_sha256.insert(neg_rel_path, sha256_hex(source_negotiation_json.as_bytes()));
 
-    let (source_transcript_entries, tx_sha_opt) =
-        load_pre_act_transcript_prefix(source_game_dir, &focal_guild, day)?;
+    let is_model_focal = !matches!(focal_seat_spec.backend, SeatBackend::File { .. });
+    let (source_transcript_entries, tx_sha_opt) = if is_model_focal {
+        load_pre_act_transcript_prefix(source_game_dir, &focal_guild, day)?
+    } else {
+        (Vec::new(), None)
+    };
     if let Some((rel, sha)) = tx_sha_opt {
         loaded_history_sha256.insert(rel, sha);
     }
 
-    let source_scratchpad = if let Some(ckpts) = checkpoint_prefix.parent() {
+    let keeps_focal_notes = seat_keeps_notes(focal_seat_spec, seats_file, opts.memory_mode);
+    let source_scratchpad = if is_model_focal && keeps_focal_notes {
         let pad_rel = format!("checkpoints/day-{day_str}-pre-act.{focal_guild}.scratchpad.md");
-        let pad_path = source_game_dir.join(&pad_rel);
+        let Some(ckpts) = checkpoint_prefix.parent() else {
+            return Err(EvalError::MissingBranchScratchpad(format!(
+                "missing checkpoint parent directory for pre-act scratchpad '{pad_rel}'"
+            )));
+        };
         let ckpt_pad_path =
             ckpts.join(format!("day-{day_str}-pre-act.{focal_guild}.scratchpad.md"));
-        if ckpt_pad_path.exists() {
-            let txt = fs::read_to_string(&ckpt_pad_path).map_err(|e| {
-                EvalError::Io(format!(
-                    "read source scratchpad {}: {e}",
-                    ckpt_pad_path.display()
-                ))
-            })?;
-            let key = if pad_path == ckpt_pad_path {
-                pad_rel
-            } else {
-                ckpt_pad_path.to_string_lossy().into_owned()
-            };
-            loaded_history_sha256.insert(key, sha256_hex(txt.as_bytes()));
-            Some(txt)
-        } else {
-            None
+        if !ckpt_pad_path.exists() {
+            return Err(EvalError::MissingBranchScratchpad(format!(
+                "missing pre-act scratchpad {} required for branch",
+                ckpt_pad_path.display()
+            )));
         }
+        let txt = fs::read_to_string(&ckpt_pad_path).map_err(|e| {
+            EvalError::Io(format!(
+                "read source scratchpad {}: {e}",
+                ckpt_pad_path.display()
+            ))
+        })?;
+        // Always record the relative checkpoint key in loaded_history_sha256, never a local path.
+        loaded_history_sha256.insert(pad_rel, sha256_hex(txt.as_bytes()));
+        Some(txt)
     } else {
         None
     };
@@ -1906,6 +1941,33 @@ fn build_single_focal_seat_file(source: &SeatFile, focal_idx: usize) -> SeatFile
 
 type TranscriptPrefixWithDigest = (Vec<TranscriptEntry>, Option<(String, String)>);
 
+fn all_prior_model_rounds_were_no_reply(
+    source_game_dir: &Path,
+    focal_guild: &str,
+    branch_day: u8,
+) -> bool {
+    let decisions_dir = source_game_dir.join("decisions");
+    let mut prior_rounds: Vec<(u8, Round)> = Vec::new();
+    for d in 1..branch_day {
+        prior_rounds.push((d, Round::Talk));
+        prior_rounds.push((d, Round::Act));
+    }
+    prior_rounds.push((branch_day, Round::Talk));
+    for (d, r) in prior_rounds {
+        let dec_path = decisions_dir.join(format!("day-{d:02}-{r}-{focal_guild}.json"));
+        let Ok(raw) = fs::read_to_string(&dec_path) else {
+            return false;
+        };
+        let Ok(rec) = serde_json::from_str::<EvalDecisionRecord>(&raw) else {
+            return false;
+        };
+        if !rec.no_reply {
+            return false;
+        }
+    }
+    true
+}
+
 fn load_pre_act_transcript_prefix(
     source_game_dir: &Path,
     focal_guild: &str,
@@ -1914,7 +1976,13 @@ fn load_pre_act_transcript_prefix(
     let rel_path = format!("relay/seats/{focal_guild}.jsonl");
     let path = source_game_dir.join(&rel_path);
     if !path.exists() {
-        return Ok((Vec::new(), None));
+        if all_prior_model_rounds_were_no_reply(source_game_dir, focal_guild, branch_day) {
+            return Ok((Vec::new(), None));
+        }
+        return Err(EvalError::MissingBranchTranscript(format!(
+            "missing pre-act transcript {} required for branch",
+            path.display()
+        )));
     }
     let raw = fs::read_to_string(&path)
         .map_err(|e| EvalError::Io(format!("read source transcript {}: {e}", path.display())))?;
@@ -2379,6 +2447,113 @@ mod tests {
             Some(act_disc_sha_1.as_str())
         );
         assert_eq!(wp.act_reply_has_messages, 1);
+
+        let _ = fs::remove_dir_all(&run_root);
+    }
+
+    #[test]
+    fn wrong_round_runs_on_any_discarded_first_failure_including_late_discarded() {
+        let run_root = std::env::temp_dir().join(format!(
+            "league_eval_late_wrong_round_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&run_root);
+        must_ok(fs::create_dir_all(&run_root), "mkdir run_root");
+
+        let late_talk_with_orders = r#"{"messages":[],"market_actions":[{"action_kind":"town_import","good":{"asset_kind":"raw","good_index":0},"amount":10}],"bundle":{}}"#;
+        let late_reason = "late HTTP reply arrived after 5.000s deadline";
+        let (disc_rel, disc_sha) = write_discarded_sidecar_for_test(
+            &run_root,
+            "Foundry",
+            "01",
+            Round::Talk,
+            1,
+            "LATE_DISCARDED",
+            late_reason,
+            "res-late-1",
+            late_talk_with_orders,
+        );
+        let calls_path = run_root.join("relay/calls.jsonl");
+        let row = call_log_row_for_test(
+            "01",
+            Round::Talk,
+            "Foundry",
+            1,
+            "LATE_DISCARDED",
+            Some(late_reason),
+            Some(disc_sha.clone()),
+            "res-late-1",
+        );
+        must_ok(
+            fs::write(&calls_path, format!("{row}\n")),
+            "write late call",
+        );
+
+        let diag = must_ok(
+            read_round_attempt_diagnostics(&run_root, &calls_path, 0, "01", Round::Talk, "Foundry"),
+            "diag late",
+        );
+        let outcome = SeatOutcome::NoReply {
+            calls_path,
+            request_body_sha256: "req".to_owned(),
+        };
+        let mut whispers = BTreeMap::new();
+        whispers.insert("Quarry".to_owned(), Vec::new());
+        let mut by_seat = BTreeMap::new();
+        let mut by_arm = BTreeMap::new();
+        let mut wp = WrongPartCounter::default();
+        let rec = must_ok(
+            resolve_talk_model_round(
+                "g-late",
+                1,
+                1,
+                0,
+                "Foundry",
+                EvalArm::Off,
+                false,
+                &["Foundry".to_owned(), "Quarry".to_owned()],
+                Some(&outcome),
+                diag,
+                &mut whispers,
+                &mut by_seat,
+                &mut by_arm,
+                &mut wp,
+            ),
+            "resolve late",
+        );
+        assert!(rec.no_reply);
+        assert_eq!(rec.refusal_code.as_deref(), Some("TALK_REPLY_HAS_ORDERS"));
+        assert_eq!(rec.discarded_reply_path.as_deref(), Some(disc_rel.as_str()));
+        assert_eq!(
+            rec.discarded_reply_sha256.as_deref(),
+            Some(disc_sha.as_str())
+        );
+        assert_eq!(wp.talk_reply_has_orders, 1);
+        assert_eq!(wp.no_reply_wrong_part_refusals, 1);
+        assert_eq!(wp.delivered_wrong_part_refusals, 0);
+        assert_eq!(wp.wrong_part_rate_delivered, 0.0);
+        assert!((wp.wrong_part_rate_all_rounds - 1.0).abs() < 1e-12);
+        must_ok(wp.validate_rates(), "validate late rates");
+
+        // Rate > 1.0 is refused cleanly by `try_recompute_rates` / `validate_rates`, never clamped.
+        let mut bad = WrongPartCounter {
+            talk_reply_has_orders: 2,
+            act_reply_has_messages: 0,
+            delivered_wrong_part_refusals: 2,
+            no_reply_wrong_part_refusals: 0,
+            total_wrong_part_refusals: 2,
+            delivered_model_replies: 1,
+            total_model_rounds: 1,
+            wrong_part_rate_delivered: 0.0,
+            wrong_part_rate_all_rounds: 0.0,
+            exceeds_five_percent_preflight_stop_line_delivered: false,
+            exceeds_five_percent_preflight_stop_line_all_rounds: false,
+        };
+        let err = match bad.try_recompute_rates() {
+            Err(e) => e,
+            Ok(()) => panic!("rate > 1.0 must be refused, never clamped"),
+        };
+        assert_eq!(err.code(), "INVALID_WRONG_PART_RATE");
 
         let _ = fs::remove_dir_all(&run_root);
     }

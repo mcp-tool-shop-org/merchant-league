@@ -97,32 +97,24 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 9,
-      "changed": 13,
+      "added": 15,
+      "changed": 10,
       "moved": 0,
       "parts": 4,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-eval/src/driver.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-eval/src/driver.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "9 files added and 13 changed content, across 4 parts.",
+        "sentence": "Nothing structural changed since 2026-11-21; 15 files added and 10 changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "d211b7a5e4e1c1fc24c6c3208eee2e2372f60f2a",
-      "generatedAt": "2026-11-21T15:02:57.615Z"
+      "commit": "a75df86c32ebc2da2c6d61ad8f8fb44df95d8909",
+      "generatedAt": "2026-11-21T17:24:45.816Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -141,6 +133,21 @@
       "shared": 5
     },
     {
+      "a": "crates/league-relay/src/relay.rs",
+      "b": "crates/league-relay/tests/relay_integration.rs",
+      "either": 27,
+      "partLabels": [
+        "league-relay",
+        "league-relay"
+      ],
+      "parts": [
+        "league-relay",
+        "league-relay"
+      ],
+      "relation": "inside",
+      "shared": 22
+    },
+    {
       "a": "crates/league-core/src/engine.rs",
       "b": "crates/league-core/tests/replay_invariants.rs",
       "either": 10,
@@ -154,21 +161,6 @@
       ],
       "relation": "inside",
       "shared": 8
-    },
-    {
-      "a": "crates/league-relay/src/relay.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 27,
-      "partLabels": [
-        "league-relay",
-        "league-relay"
-      ],
-      "parts": [
-        "league-relay",
-        "league-relay"
-      ],
-      "relation": "inside",
-      "shared": 21
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -206,7 +198,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 9 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "a75df86c32ebc2da2c6d61ad8f8fb44df95d8909",
+  "commit": "04a42f04dc14701751bf1679cfb7897db1eb636f",
   "defaultBranch": "main",
   "derived": "15 parts, mostly Rust (389 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -691,12 +683,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-21T17:24:45.816Z",
+  "generatedAt": "2026-11-21T19:10:28.558Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "37 writes and 28 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "18 writes and 41 reads go to a path their caller passes, not to this repository.",
+    "18 writes and 42 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -736,7 +728,7 @@
   "startReason": "This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 82,
+  "testFiles": 97,
   "testedBy": {
     "league-core": 23,
     "league-error": 7,

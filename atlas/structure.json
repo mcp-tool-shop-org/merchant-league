@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "9e4ac446ea5e01ec95fc1c4dd98ccd9461b093032c70e3f20099217d27b2902a",
+          "hash": "1b5ef244eeb68c265772f33afad1e56f5cc2075b2c514d7765ff502fd21c5aae",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -52,7 +52,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "d78d6dc7c4177d6a5c1b7a34f78aa24912124a7aa601f6b0fc73f421488afd42",
+          "hash": "9c0407ec24fbb727d9cb5dd5758737ffb56445be391938f2124e47451330ff7f",
           "path": "docs/eval-harness.md"
         },
         {
@@ -3757,32 +3757,32 @@
             {
               "in": "ensure_no_partial_from_seat_for_day",
               "kind": "err",
-              "line": 772
+              "line": 764
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 944
+              "line": 937
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 956
+              "line": 949
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 998
+              "line": 991
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 1029
+              "line": 1022
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 1042
+              "line": 1035
             },
             {
               "in": "run_play_with_transport",
@@ -3792,42 +3792,37 @@
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 1473
+              "line": 1478
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1490
+              "line": 1495
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1511
+              "line": 1516
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1528
+              "line": 1533
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1549
+              "line": 1554
+            },
+            {
+              "in": "run_branch_with_transport",
+              "kind": "err",
+              "line": 1567
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1595
-            },
-            {
-              "in": "branch_one_target",
-              "kind": "err",
-              "line": 1611
-            },
-            {
-              "in": "branch_one_target",
-              "kind": "err",
-              "line": 1623
+              "line": 1614
             },
             {
               "in": "branch_one_target",
@@ -3837,20 +3832,45 @@
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1653
+              "line": 1642
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1662
+              "line": 1649
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 1672
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 1681
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 1709
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 1716
+            },
+            {
+              "in": "load_pre_act_transcript_prefix",
+              "kind": "err",
+              "line": 1982
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 1994
+              "line": 2053
             }
           ],
-          "hash": "4f79b694fa16240ab722aaa6fdbec7b7fa9a60400a65aa74f5b647d1fa5485ef",
+          "hash": "1ae13f75510dd33d89b2a717c8994081d8ae4cc53c409ed95bc519971f5f10f9",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -3877,7 +3897,7 @@
           "testsInside": true
         },
         {
-          "hash": "33a05669391ef8a5636d8c9c5a1914b8a036f2d8d723d17fd7b3462160839ae7",
+          "hash": "468da9043702a8d48ffaff4922b782b17f1ac7a8b61fdc1c1d4c1813f2adf302",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs"
@@ -4064,17 +4084,29 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 36
+              "line": 37
+            },
+            {
+              "in": "validate_rates",
+              "kind": "err",
+              "line": 213
+            },
+            {
+              "in": "validate_rates",
+              "kind": "err",
+              "line": 224
             }
           ],
-          "hash": "a973d298011e93228989c3e80879e0ec2bab0bf6417d6c64709e6e89f1954cdb",
+          "hash": "0e7e47ee4808ed93b6d20a5d8957a0b0a38124d7333ad32042ea6365c9508878",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
+            "crates/league-eval/src/error.rs",
             "crates/league-eval/src/reply.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/error.rs",
             "crates/league-eval/src/reply.rs",
             "crates/league-relay/src/lib.rs"
           ],
@@ -4247,7 +4279,7 @@
           "testsInside": true
         },
         {
-          "hash": "c76b7eac45bccaf18381042e861e9049ff03bd9faec0a3fafa0618b8247b0f0e",
+          "hash": "d4f9cb9ce1413eb2b1d059025bfda144f4afb971d0c0cd0cd50b10fa243cf2f9",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4262,7 +4294,7 @@
           "path": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md"
         },
         {
-          "hash": "9a67c9ae813fedc30b8d5afb13ebbe7178917b7a86aeb70878b67ccaebf5bfdb",
+          "hash": "729e091f2c742401d55a35cc938fb7d57ed68a1277cad71c0c44e6910ee4093d",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4287,14 +4319,14 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 12,
+          "reads": 13,
           "where": [
             "caller"
           ],
           "writes": 2
         }
       ],
-      "outsideReads": 12,
+      "outsideReads": 13,
       "outsideWrites": 2,
       "role": "code",
       "testRunners": [
@@ -9126,7 +9158,67 @@
           "path": "crates/league-relay/tests/fixtures/play_mode_golden/to-seat/day-02-talk-Saltworks.md"
         },
         {
-          "hash": "0457a3a074753e9c0ff77190da92480d438c38b0b64b167f957f8b344daea07f",
+          "hash": "f310172a3d423cd9e799ce2cc084353566b11569ee7577aeb30ac0a4444ce851",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/from-seat/day-01-talk-Saltworks.md"
+        },
+        {
+          "hash": "56074ba9e802bf86c26b88bce42af0b7e3fbb3fbdbed9c8518abbeafa487d75b",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/calls.jsonl"
+        },
+        {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/calls.side.lock"
+        },
+        {
+          "hash": "da79342bca37b84d38dfbfc72b1e75a7a0bc584c9ed84edf440a991b214c655f",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.day-01-act.discarded-round-0-attempt-1.json"
+        },
+        {
+          "hash": "eccf51020c1d307b54a555234320c97478de8139d337aec28f6c4f488a048623",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.day-01-act.discarded-round-0-attempt-2.json"
+        },
+        {
+          "hash": "7d109385e66666f271391176ba3f437e384b59c9eafefaca30f6d1f3b7e11094",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.day-01-act.http-reply-round-0-attempt-1.json"
+        },
+        {
+          "hash": "1359b42afb8a52672db6f75292ffb0b3f02a71c5229bcfb942f9c59d86ceea67",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.day-01-act.http-reply-round-0-attempt-2.json"
+        },
+        {
+          "hash": "b853ba2f24ad37443ef31c85d217473a0503e3985a0a8859b079fd5d4d585970",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.day-01-talk.http-reply-round-0-attempt-1.json"
+        },
+        {
+          "hash": "c4b71127a0cb618571df15e31fbadbaccdf99e2be59ffcd7d92ec9076f199142",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/seats/Saltworks.jsonl"
+        },
+        {
+          "hash": "275858deba8096c703a31322cc9b5ac31d0935a9327d648dce30b53e746ee1c2",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/setup.json"
+        },
+        {
+          "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/relay/turn.lock"
+        },
+        {
+          "hash": "6fa045a3ba30f87ffda6f355268f72b1bacbaf4792d0f13b5c91fd05a044deb4",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-01-act-Saltworks.md"
+        },
+        {
+          "hash": "d62ff6dc15c796530a5708534235db30182b9fb9df9a51cf4f2affe65a084de7",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-01-act-Saltworks.preview-state.json"
+        },
+        {
+          "hash": "fc4cb28753a2018719ec20f25f86f704ea90123a2aa04a238f0b21f03df3ac7a",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-01-talk-Saltworks.md"
+        },
+        {
+          "hash": "fe780def0e3691326a5574035442d864b77234aa3f05a136cde8cc458609bbbe",
+          "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-02-talk-Saltworks.md"
+        },
+        {
+          "hash": "5c6f1865ab5d40b0e502f0d9bf69840c1381d08ab777874d3de035547eac3b1f",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -12678,7 +12770,7 @@
           "path": ".dockerignore"
         },
         {
-          "hash": "c301dd112435aaa9160ce646e77f974fa6ccdd6800e586a79eb2193877d9a3c7",
+          "hash": "8153c1275b23d584fd47abbda26c2623d0765f17da27c9535c555922b8ca4afc",
           "path": ".gitattributes"
         },
         {
@@ -12690,7 +12782,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "f0157c975910a56dc0e5a1ca2d16f55e706d24bd410831490a8b8de435b4128f",
+          "hash": "313712a5bbf0be3a1dad1468bd857c72c5875e2f070d2d8db94b9213c2850f77",
           "path": "CHANGELOG.md"
         },
         {
@@ -14333,8 +14425,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "a75df86c32ebc2da2c6d61ad8f8fb44df95d8909",
-    "tracked": 608
+    "commit": "04a42f04dc14701751bf1679cfb7897db1eb636f",
+    "tracked": 623
   },
   "landings": [
     {
@@ -15579,7 +15671,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 82,
+  "testFiles": 97,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",

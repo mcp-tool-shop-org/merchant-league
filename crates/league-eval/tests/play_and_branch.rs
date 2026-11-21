@@ -18,7 +18,9 @@ use league_eval::{
     expand_home_path_with_home, persist_eval_game_state, run_branch_with_transport,
     run_play_with_transport, run_select, sanitize_home_path_with_homes,
 };
-use league_relay::{RawHttpResponse, Transport, TransportError, sha256_hex};
+use league_relay::{
+    CallLogEntry, CostUnit, RawHttpResponse, Round, Transport, TransportError, sha256_hex,
+};
 use serde_json::{Value, json};
 
 fn must_ok<T, E: Display>(res: Result<T, E>, ctx: &str) -> T {
@@ -1152,6 +1154,180 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
         );
     }
 
+    fn strip_mandate_deck_array(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(pos) = rest.find("\"mandate_deck\"") {
+            let after_key = &rest[pos + "\"mandate_deck\"".len()..];
+            let trimmed = after_key.trim_start();
+            let Some(after_colon) = trimmed.strip_prefix(':') else {
+                out.push_str(&rest[..pos + "\"mandate_deck\"".len()]);
+                rest = after_key;
+                continue;
+            };
+            let after_ws = after_colon.trim_start();
+            if !after_ws.starts_with('[') {
+                out.push_str(&rest[..pos + "\"mandate_deck\"".len()]);
+                rest = after_key;
+                continue;
+            }
+            out.push_str(&rest[..pos]);
+            let mut depth = 0usize;
+            let mut in_str = false;
+            let mut escaped = false;
+            let mut end_idx = None;
+            for (idx, ch) in after_ws.char_indices() {
+                if in_str {
+                    if escaped {
+                        escaped = false;
+                    } else if ch == '\\' {
+                        escaped = true;
+                    } else if ch == '"' {
+                        in_str = false;
+                    }
+                } else {
+                    match ch {
+                        '"' => in_str = true,
+                        '[' => depth += 1,
+                        ']' => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                end_idx = Some(idx + 1);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            match end_idx {
+                Some(end) => {
+                    out.push_str("\"mandate_deck\":\"<STRIPPED>\"");
+                    rest = &after_ws[end..];
+                }
+                None => {
+                    rest = after_ws;
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn collect_peer_mandate_needles(
+        peer_mandates: &[Value],
+        focal_mandate: &Value,
+    ) -> Vec<(String, String)> {
+        let mut needles = Vec::new();
+        let focal_bonus = focal_mandate["bonus_equity"].as_u64();
+        for (idx, peer_m) in peer_mandates.iter().enumerate() {
+            let compact = must_ok(serde_json::to_string(peer_m), "compact peer mandate");
+            let pretty = must_ok(serde_json::to_string_pretty(peer_m), "pretty peer mandate");
+            needles.push((format!("peer_{idx}_compact"), compact));
+            needles.push((format!("peer_{idx}_pretty"), pretty));
+            if let Some(bonus) = peer_m["bonus_equity"].as_u64()
+                && Some(bonus) != focal_bonus
+            {
+                needles.push((
+                    format!("peer_{idx}_bonus_pretty"),
+                    format!("\"bonus_equity\": {bonus}"),
+                ));
+                needles.push((
+                    format!("peer_{idx}_bonus_compact"),
+                    format!("\"bonus_equity\":{bonus}"),
+                ));
+            }
+        }
+        needles
+    }
+
+    fn scan_single_mandate_surface(surface: &str, text: &str, peer_needles: &[(String, String)]) {
+        let no_deck = strip_mandate_deck_array(text);
+        let compact_haystack = no_deck.replace([' ', '\n', '\r', '\t'], "");
+        for (tag, needle) in peer_needles {
+            assert!(
+                !no_deck.contains(needle.as_str()),
+                "peer mandate `{tag}` leaked into {surface}"
+            );
+            if !needle.contains('\n') {
+                let compact_needle = needle.replace([' ', '\n', '\r', '\t'], "");
+                assert!(
+                    !compact_haystack.contains(&compact_needle),
+                    "peer mandate `{tag}` (whitespace-normalized) leaked into {surface}"
+                );
+            }
+        }
+    }
+
+    fn scan_http_body_for_peer_mandates(
+        origin: &str,
+        body: &str,
+        peer_needles: &[(String, String)],
+    ) {
+        let mut body_val: Value = must_ok(serde_json::from_str(body), "parse HTTP request JSON");
+        if let Some(msgs) = body_val["messages"].as_array() {
+            for (msg_idx, msg) in msgs.iter().enumerate() {
+                if let Some(content) = msg["content"].as_str() {
+                    scan_single_mandate_surface(
+                        &format!("{origin} messages[{msg_idx}].content"),
+                        content,
+                        peer_needles,
+                    );
+                }
+            }
+        }
+        if let Some(obj) = body_val.as_object_mut() {
+            obj.remove("messages");
+        }
+        let non_msg_compact = must_ok(serde_json::to_string(&body_val), "compact non-msg body");
+        scan_single_mandate_surface(
+            &format!("{origin} non-messages"),
+            &non_msg_compact,
+            peer_needles,
+        );
+    }
+
+    let peer_needles = collect_peer_mandate_needles(&peer_mandate_jsons, &focal_mandate_json);
+    assert!(
+        peer_needles.iter().any(|(tag, _)| tag.contains("_bonus_")),
+        "expected distinct peer bonus_equity needles for positive control"
+    );
+    let seal_no_deck = strip_mandate_deck_array(&seal_text);
+    let seal_no_deck_compact = seal_no_deck.replace([' ', '\n', '\r', '\t'], "");
+    for (idx, peer_m) in peer_mandate_jsons.iter().enumerate() {
+        let kind_compact = must_ok(serde_json::to_string(&peer_m["kind"]), "peer kind compact");
+        assert!(
+            seal_no_deck_compact.contains(&kind_compact),
+            "positive control failed: peer_{idx}_kind (`{kind_compact}`) missing from .seal"
+        );
+    }
+    for (tag, needle) in &peer_needles {
+        if tag.contains("_bonus_") {
+            let needle_compact = needle.replace([' ', '\n', '\r', '\t'], "");
+            assert!(
+                seal_no_deck.contains(needle.as_str())
+                    || seal_no_deck_compact.contains(&needle_compact),
+                "positive control failed: `{tag}` (`{needle}`) missing from .seal"
+            );
+        }
+    }
+
+    for (req_idx, body) in play_transport.recorded_bodies().iter().enumerate() {
+        scan_http_body_for_peer_mandates(
+            &format!("play_transport req {req_idx}"),
+            body,
+            &peer_needles,
+        );
+    }
+    for (req_idx, body) in branch_transport.recorded_bodies().iter().enumerate() {
+        scan_http_body_for_peer_mandates(
+            &format!("branch_transport req {req_idx}"),
+            body,
+            &peer_needles,
+        );
+    }
+
     // Verify ZERO `.seal` files, ZERO encoded secret needles, and ZERO peer mandates anywhere under `--out`.
     let mut branch_files = Vec::new();
     collect_all_files(&branch_out, &mut branch_files);
@@ -1174,6 +1350,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 file.display()
             );
         }
+        scan_single_mandate_surface(&file.display().to_string(), &content, &peer_needles);
         // Check structural peer mandate equality inside focal `to-seat/*.md` (`SeatObservation.own_mandate`),
         // and confirm NO mandate field appears inside public `receipt.json` / `branch_summary.json`.
         if name.ends_with(".md")
@@ -1343,7 +1520,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 seats_path: two_model_seats,
                 wrapper_path,
                 arms: vec![EvalArm::Off, EvalArm::On],
-                out_dir: b6_branch_out,
+                out_dir: b6_branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
                 live: false,
                 cap_credits: None,
@@ -1355,15 +1532,106 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
         ),
         "b6 focal branch",
     );
+    let b6_host = must_ok(
+        EvalHost::read_game_save_and_seal(&b6_src, TableId(16)),
+        "read b6 save and seal",
+    );
+    let b6_focal_mandate = must_ok(
+        serde_json::to_value(must_ok(b6_host.mandate_for_seat(Seat(0)), "b6 m0")),
+        "ser b6 m0",
+    );
+    let b6_peer_mandates: Vec<Value> = (1..=3_u8)
+        .map(|s| {
+            let m = must_ok(b6_host.mandate_for_seat(Seat(s)), "b6 peer mandate");
+            must_ok(serde_json::to_value(m), "ser b6 peer mandate")
+        })
+        .collect();
+    let b6_peer_needles = collect_peer_mandate_needles(&b6_peer_mandates, &b6_focal_mandate);
+    let b6_seal_text = must_ok(
+        fs::read_to_string(b6_src.join("checkpoints/day-01-pre-act.seal")),
+        "read b6 pre-act seal",
+    );
+    let b6_seal_no_deck = strip_mandate_deck_array(&b6_seal_text);
+    let b6_seal_compact = b6_seal_no_deck.replace([' ', '\n', '\r', '\t'], "");
+    for (idx, peer_m) in b6_peer_mandates.iter().enumerate() {
+        let kind_compact = must_ok(
+            serde_json::to_string(&peer_m["kind"]),
+            "b6 peer kind compact",
+        );
+        assert!(
+            b6_seal_compact.contains(&kind_compact),
+            "b6 positive control failed: peer_{idx}_kind (`{kind_compact}`) missing from .seal"
+        );
+    }
+    for (tag, needle) in &b6_peer_needles {
+        if tag.contains("_bonus_") {
+            let needle_compact = needle.replace([' ', '\n', '\r', '\t'], "");
+            assert!(
+                b6_seal_no_deck.contains(needle.as_str())
+                    || b6_seal_compact.contains(&needle_compact),
+                "b6 positive control failed: `{tag}` (`{needle}`) missing from .seal"
+            );
+        }
+    }
+
+    let b6_play_bodies = match b6_play_t.bodies.lock() {
+        Ok(g) => g.clone(),
+        Err(e) => panic!("lock: {e}"),
+    };
+    let mut b6_focal_play_reqs = 0usize;
+    for (idx, body) in b6_play_bodies.iter().enumerate() {
+        let v: Value = must_ok(serde_json::from_str(body), "parse b6 play body");
+        let user_msg = v["messages"]
+            .as_array()
+            .and_then(|a| a.last())
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or_default();
+        let header = user_msg.split("\"phase\"").next().unwrap_or(user_msg);
+        if header.contains("\"seat\": 0,") || header.contains("\"seat\":0,") {
+            b6_focal_play_reqs += 1;
+            scan_http_body_for_peer_mandates(
+                &format!("b6_play focal req {idx}"),
+                body,
+                &b6_peer_needles,
+            );
+        }
+    }
+    assert!(
+        b6_focal_play_reqs >= 2,
+        "expected >= 2 focal play requests in b6_play_t; got {b6_focal_play_reqs}"
+    );
+
+    let mut b6_out_files = Vec::new();
+    collect_all_files(&b6_branch_out, &mut b6_out_files);
+    assert!(!b6_out_files.is_empty());
+    for file in b6_out_files {
+        let name = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        assert!(
+            !name.ends_with(".seal"),
+            "private .seal file must never appear under --out: {}",
+            file.display()
+        );
+        let content = must_ok(fs::read_to_string(&file), "read b6 out file");
+        scan_single_mandate_surface(&file.display().to_string(), &content, &b6_peer_needles);
+    }
+
     let focal_bodies = match b6_branch_t.bodies.lock() {
         Ok(g) => g.clone(),
         Err(e) => panic!("lock: {e}"),
     };
     assert_eq!(focal_bodies.len(), 2);
-    for body in &focal_bodies {
+    for (idx, body) in focal_bodies.iter().enumerate() {
         assert!(
             !body.contains("9876") && !body.contains("4321"),
             "peer recorded act submission leaked into focal HTTP request body: {body}"
+        );
+        scan_http_body_for_peer_mandates(
+            &format!("b6_branch focal req {idx}"),
+            body,
+            &b6_peer_needles,
         );
     }
 
@@ -1971,8 +2239,8 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
     use league_eval::{BranchArmOutcome, ReplyRefusalCode, extract_wrapper_metadata};
     use league_relay::RelayError;
 
-    // Cover all 20 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
-    let all_errors: [EvalError; 20] = [
+    // Cover all 24 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
+    let all_errors: [EvalError; 24] = [
         EvalError::Usage("bad flag OPENROUTER_API_KEY=sk-or-secret123".to_owned()),
         EvalError::InvalidSeatCount { actual: 3 },
         EvalError::UnsupportedFileSeatModel {
@@ -1987,8 +2255,12 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
         EvalError::InvalidStrata("bad strata".to_owned()),
         EvalError::UnknownFocalSeat("Phantom".to_owned()),
         EvalError::EvalThinkStrippingForbidden("exclude true".to_owned()),
+        EvalError::MissingBranchTranscript("missing transcript".to_owned()),
+        EvalError::MissingBranchScratchpad("missing scratchpad".to_owned()),
         EvalError::MissingBranchNegotiation("missing neg".to_owned()),
         EvalError::BranchArmDirNotEmpty("dir non empty".to_owned()),
+        EvalError::BranchSummaryExists("summary exists".to_owned()),
+        EvalError::InvalidWrongPartRate("invalid rate".to_owned()),
         EvalError::MissingSourceSetup("missing setup".to_owned()),
         EvalError::IncompatibleEvalSetup("incompatible setup".to_owned()),
         EvalError::PartialTurnFromSeatExists("partial day reply".to_owned()),
@@ -3805,6 +4077,615 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
         "C7: fresh games must draw distinct OS CSPRNG bot_tie_seed"
     );
     let _unused_seats = seats_path;
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
+    let tmp = fresh_tmp_dir("cap_and_orphan");
+    let wrapper_path = write_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, "seats.json", focal_local_three_clubbot_seats());
+
+    // Part (a): pre-call CAP_REACHED must log to `failed_attempts` with outcome `"CAP_REACHED"`
+    // and NOT increment `attempts` (`attempts == 0`), leaving `no_reply: true`.
+    let cap_game = tmp.join("cap_game");
+    let cap_transport = DeterministicMockTransport::new(Vec::new());
+    let cap_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: cap_game.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 91,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: Some(1.0), // max_gpu_secs_per_call is 10.0 -> CAP_REACHED pre-call
+                allowed_vm_hosts: Vec::new(),
+            },
+            &cap_transport,
+            None,
+        ),
+        "capped play run",
+    );
+    assert_eq!(cap_manifest.played_turns, 1);
+    assert!(
+        cap_transport.recorded_bodies().is_empty(),
+        "pre-call CAP_REACHED must make zero HTTP requests"
+    );
+    let cap_calls = must_ok(
+        fs::read_to_string(cap_game.join("relay/calls.jsonl")),
+        "read cap calls",
+    );
+    assert!(cap_calls.contains("\"outcome\":\"CAP_REACHED\""));
+    for round_name in ["talk", "act"] {
+        let dec: EvalDecisionRecord = must_ok(
+            serde_json::from_str(&must_ok(
+                fs::read_to_string(
+                    cap_game.join(format!("decisions/day-01-{round_name}-Foundry.json")),
+                ),
+                "read cap decision",
+            )),
+            "parse cap decision",
+        );
+        assert!(
+            dec.no_reply,
+            "{round_name} should record no_reply on CAP_REACHED"
+        );
+        assert_eq!(
+            dec.attempts, 0,
+            "CAP_REACHED refusal must not increment attempts in {round_name}"
+        );
+        assert_eq!(dec.failed_attempts.len(), 1);
+        assert_eq!(dec.failed_attempts[0].outcome, "CAP_REACHED");
+    }
+
+    // Part (b1): orphaned `calls.reserved.jsonl` from an interrupted prior run reconciles into
+    // `calls.jsonl` as a `"RESERVED"` row and appears in `failed_attempts` without counting in
+    // `attempts` (`attempts == 1`) or blocking the resumed `"OK"` call.
+    fn write_orphan_reservation(game_dir: &Path, day_str: &str, round: Round) {
+        let reserved_path = game_dir.join("relay/calls.reserved.jsonl");
+        let entry = CallLogEntry {
+            time_utc: "2026-11-21T00:00:00.000Z".to_owned(),
+            day: day_str.to_owned(),
+            round,
+            guild: "Foundry".to_owned(),
+            attempt: 1,
+            trigger: "turn".to_owned(),
+            model_requested: "Qwen/Qwen3-32B".to_owned(),
+            model_returned: None,
+            request_body_sha256: "00".repeat(32),
+            http_reply_sha256: None,
+            reply_sha256: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            reasoning_tokens: None,
+            cost_unit: CostUnit::GpuSeconds,
+            wall_secs: None,
+            cost: None,
+            charged_credits: 10.0,
+            latency_ms: 0,
+            outcome: "RESERVED".to_owned(),
+            error: Some("orphaned pre-call reservation from interrupted run".to_owned()),
+            reservation_id: None,
+        };
+        let line = json!({
+            "reservation_id": "resv-orphan-1",
+            "run_id": "dead-run-1",
+            "entry": entry,
+        })
+        .to_string();
+        must_ok(
+            fs::write(reserved_path, format!("{line}\n")),
+            "write calls.reserved.jsonl",
+        );
+    }
+
+    let ok_json = json!({
+        "messages": [],
+        "market_actions": [],
+        "bundle": {},
+        "notes": "clean"
+    })
+    .to_string();
+    let orphan_ok_game = tmp.join("orphan_ok_game");
+    let t1 = DeterministicMockTransport::new(vec![
+        ("1:talk", ok_json.clone()),
+        ("1:act", ok_json.clone()),
+        ("2:talk", ok_json.clone()),
+        ("2:act", ok_json.clone()),
+    ]);
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: orphan_ok_game.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 92,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &t1,
+            None,
+        ),
+        "turn 1 before orphan",
+    );
+    write_orphan_reservation(&orphan_ok_game, "02", Round::Talk);
+    let m2 = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: orphan_ok_game.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 92,
+                seed: 7,
+                turns: 2,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &t1,
+            None,
+        ),
+        "resume turn 2 with orphan reservation",
+    );
+    assert_eq!(m2.played_turns, 2);
+    assert!(
+        !orphan_ok_game.join("relay/calls.reserved.jsonl").exists(),
+        "calls.reserved.jsonl must be removed after reconciliation"
+    );
+    let orphan_calls = must_ok(
+        fs::read_to_string(orphan_ok_game.join("relay/calls.jsonl")),
+        "read orphan calls",
+    );
+    assert!(orphan_calls.contains("\"outcome\":\"RESERVED\""));
+    assert!(orphan_calls.contains("orphaned pre-call reservation from interrupted run"));
+    let d2_talk_ok: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(orphan_ok_game.join("decisions/day-02-talk-Foundry.json")),
+            "read d2 talk ok",
+        )),
+        "parse d2 talk ok",
+    );
+    assert!(!d2_talk_ok.no_reply);
+    assert_eq!(
+        d2_talk_ok.attempts, 1,
+        "reconciled RESERVED row must not increment attempts"
+    );
+    assert_eq!(d2_talk_ok.failed_attempts.len(), 1);
+    assert_eq!(d2_talk_ok.failed_attempts[0].outcome, "RESERVED");
+    assert_eq!(
+        d2_talk_ok.failed_attempts[0].reason,
+        "orphaned pre-call reservation from interrupted run"
+    );
+
+    // Part (b2): when the resumed round also fails twice, the reconciled `"RESERVED"` row must not
+    // poison `first_failure` (attempt 1's wrong-round refusal still sets `TALK_REPLY_HAS_ORDERS`).
+    struct WrongRoundThen500Transport {
+        turn2_talk_calls: AtomicUsize,
+    }
+    impl Transport for WrongRoundThen500Transport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let v: Value =
+                serde_json::from_str(body).map_err(|e| TransportError::Network(e.to_string()))?;
+            let user_msg = v["messages"]
+                .as_array()
+                .and_then(|a| a.last())
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or_default();
+            if user_msg.contains("\"turn\": 2") && user_msg.contains("This is the talk round.") {
+                let n = self.turn2_talk_calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    let wrong_round = json!({
+                        "messages": [],
+                        "market_actions": [{ "action_kind": "town_import", "good": { "asset_kind": "raw", "good_index": 0 }, "amount": 5 }],
+                        "bundle": {},
+                    })
+                    .to_string();
+                    return Ok(RawHttpResponse {
+                        status: 200,
+                        body: json!({
+                            "id": "wrong-round-attempt-1",
+                            "model": "Qwen/Qwen3-32B",
+                            "choices": [{ "index": 0, "message": { "role": "assistant", "content": wrong_round }, "finish_reason": "stop" }],
+                            "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20 }
+                        })
+                        .to_string(),
+                    });
+                }
+                return Ok(RawHttpResponse {
+                    status: 500,
+                    body: "{\"error\":\"down\"}".to_owned(),
+                });
+            }
+            let ok = json!({
+                "messages": [],
+                "market_actions": [],
+                "bundle": {},
+                "notes": "ok"
+            })
+            .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: json!({
+                    "id": "ok-fallback",
+                    "model": "Qwen/Qwen3-32B",
+                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": ok }, "finish_reason": "stop" }],
+                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20 }
+                })
+                .to_string(),
+            })
+        }
+    }
+
+    let orphan_fail_game = tmp.join("orphan_fail_game");
+    let t2 = WrongRoundThen500Transport {
+        turn2_talk_calls: AtomicUsize::new(0),
+    };
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: orphan_fail_game.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 93,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &t2,
+            None,
+        ),
+        "turn 1 before orphan fail",
+    );
+    write_orphan_reservation(&orphan_fail_game, "02", Round::Talk);
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: orphan_fail_game.clone(),
+                seats_path,
+                wrapper_path,
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 93,
+                seed: 7,
+                turns: 2,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &t2,
+            None,
+        ),
+        "resume turn 2 orphan fail",
+    );
+    let d2_talk_fail: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(orphan_fail_game.join("decisions/day-02-talk-Foundry.json")),
+            "read d2 talk fail",
+        )),
+        "parse d2 talk fail",
+    );
+    assert!(d2_talk_fail.no_reply);
+    assert_eq!(
+        d2_talk_fail.attempts, 1,
+        "only the 1 actual attempt counts in Eval mode, not the reconciled RESERVED row"
+    );
+    assert_eq!(
+        d2_talk_fail.refusal_code.as_deref(),
+        Some("TALK_REPLY_HAS_ORDERS"),
+        "reconciled RESERVED row must not mask attempt 1 wrong-round classification"
+    );
+    assert!(
+        d2_talk_fail
+            .failed_attempts
+            .iter()
+            .any(|a| a.outcome == "RESERVED"
+                && a.reason == "orphaned pre-call reservation from interrupted run")
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
+    fn copy_tree(src: &Path, dst: &Path) {
+        must_ok(fs::create_dir_all(dst), "create copy dst");
+        for entry in must_ok(fs::read_dir(src), "read copy src").flatten() {
+            let src_p = entry.path();
+            let dst_p = dst.join(entry.file_name());
+            if src_p.is_dir() {
+                copy_tree(&src_p, &dst_p);
+            } else {
+                must_ok(fs::copy(&src_p, &dst_p), "copy tree file");
+            }
+        }
+    }
+
+    let tmp = fresh_tmp_dir("branch_history_guards");
+    let wrapper_path = write_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, "seats.json", focal_local_three_clubbot_seats());
+    let src_game = tmp.join("src_game");
+
+    let talk_ok = json!({
+        "messages": [],
+        "market_actions": [],
+        "bundle": {},
+        "notes": "keep_pre_act_note"
+    })
+    .to_string();
+    let act_ok = json!({
+        "messages": [],
+        "market_actions": [],
+        "bundle": {},
+        "notes": "act_note"
+    })
+    .to_string();
+    let play_t =
+        DeterministicMockTransport::new(vec![("1:talk", talk_ok), ("1:act", act_ok.clone())]);
+    let _ = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: src_game.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                arm: EvalArm::Off,
+                table_id: 94,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &play_t,
+            None,
+        ),
+        "play 1 turn for branch history checks",
+    );
+
+    // 1. Clean branch records relative scratchpad key `"checkpoints/day-01-pre-act.Foundry.scratchpad.md"`,
+    //    never a local filesystem path.
+    let out_clean = tmp.join("out_clean");
+    let branch_t = DeterministicMockTransport::new(vec![("1:act", act_ok.clone())]);
+    let outcomes = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(src_game.join("checkpoints/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: out_clean.clone(),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &branch_t,
+            None,
+        ),
+        "clean branch",
+    );
+    assert_eq!(outcomes.len(), 2);
+    let pad_rel_key = "checkpoints/day-01-pre-act.Foundry.scratchpad.md";
+    let pad_bytes = must_ok(
+        fs::read(src_game.join(pad_rel_key)),
+        "read source scratchpad",
+    );
+    let expected_pad_sha = sha256_hex(&pad_bytes);
+    for outcome in &outcomes {
+        assert_eq!(
+            outcome.decision.loaded_history_sha256.get(pad_rel_key),
+            Some(&expected_pad_sha),
+            "loaded_history_sha256 must key pre-act scratchpad by relative path `{pad_rel_key}`"
+        );
+        for k in outcome.decision.loaded_history_sha256.keys() {
+            assert!(
+                !k.contains(':') && !k.contains('\\') && !k.starts_with('/'),
+                "loaded_history_sha256 key must be relative, never local path: `{k}`"
+            );
+        }
+    }
+
+    // 1b. Branching from a checkpoint folder not named `checkpoints` (e.g. `ckpts`) must still
+    //     record the relative key `"checkpoints/day-01-pre-act.Foundry.scratchpad.md"` in
+    //     `decision.json`, with zero absolute local paths anywhere in `decision.json`.
+    let src_ckpts = tmp.join("src_ckpts");
+    copy_tree(&src_game, &src_ckpts);
+    must_ok(
+        fs::rename(src_ckpts.join("checkpoints"), src_ckpts.join("ckpts")),
+        "rename checkpoints to ckpts",
+    );
+    let out_ckpts = tmp.join("out_ckpts");
+    let ckpts_t = DeterministicMockTransport::new(vec![("1:act", act_ok)]);
+    let ckpts_outcomes = must_ok(
+        run_branch_with_transport(
+            &BranchOptions {
+                checkpoint_prefix: Some(src_ckpts.join("ckpts/day-01-pre-act")),
+                list_path: None,
+                focal_seat: Some("Foundry".to_owned()),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                arms: vec![EvalArm::Off, EvalArm::On],
+                out_dir: out_ckpts.clone(),
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &ckpts_t,
+            None,
+        ),
+        "branch from renamed ckpts directory",
+    );
+    assert_eq!(ckpts_outcomes.len(), 2);
+    let src_ckpts_str = src_ckpts.to_string_lossy();
+    let src_ckpts_escaped = src_ckpts_str.replace('\\', "\\\\");
+    for arm_name in ["off", "on"] {
+        let dec_raw = must_ok(
+            fs::read_to_string(out_ckpts.join(arm_name).join("decision.json")),
+            "read ckpts branch decision.json",
+        );
+        let dec: EvalDecisionRecord =
+            must_ok(serde_json::from_str(&dec_raw), "parse ckpts decision.json");
+        assert_eq!(
+            dec.loaded_history_sha256.get(pad_rel_key),
+            Some(&expected_pad_sha),
+            "decision.json for renamed checkpoint dir must still key pre-act scratchpad by `{pad_rel_key}`"
+        );
+        for k in dec.loaded_history_sha256.keys() {
+            assert!(
+                !Path::new(k).is_absolute()
+                    && !k.contains(':')
+                    && !k.contains('\\')
+                    && !k.starts_with('/'),
+                "loaded_history_sha256 key in decision.json must be relative, never local path: `{k}`"
+            );
+        }
+        assert!(
+            !dec_raw.contains(src_ckpts_str.as_ref()) && !dec_raw.contains(&src_ckpts_escaped),
+            "absolute local path `{src_ckpts_str}` must never appear in decision.json"
+        );
+    }
+
+    // 2. Existing `branch_summary.json` must be refused with `BRANCH_SUMMARY_EXISTS` and left unchanged.
+    let out_existing_summary = tmp.join("out_existing_summary");
+    must_ok(
+        fs::create_dir_all(&out_existing_summary),
+        "create existing out dir",
+    );
+    let summary_bytes = must_ok(
+        fs::read(out_clean.join("branch_summary.json")),
+        "read clean branch_summary.json",
+    );
+    let existing_summary_path = out_existing_summary.join("branch_summary.json");
+    must_ok(
+        fs::write(&existing_summary_path, &summary_bytes),
+        "seed branch_summary.json",
+    );
+    let summary_err = match run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(src_game.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            arms: vec![EvalArm::Off, EvalArm::On],
+            out_dir: out_existing_summary,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    ) {
+        Ok(_) => panic!("expected BRANCH_SUMMARY_EXISTS"),
+        Err(e) => e,
+    };
+    assert_eq!(summary_err.code(), "BRANCH_SUMMARY_EXISTS");
+    assert_eq!(
+        must_ok(fs::read(&existing_summary_path), "re-read existing summary"),
+        summary_bytes,
+        "existing branch_summary.json must remain byte-for-byte unchanged on refusal"
+    );
+
+    // 3. Missing pre-act scratchpad on a note-keeping model seat must fail with `MISSING_BRANCH_SCRATCHPAD`.
+    let src_missing_pad = tmp.join("src_missing_pad");
+    copy_tree(&src_game, &src_missing_pad);
+    must_ok(
+        fs::remove_file(src_missing_pad.join(pad_rel_key)),
+        "remove pre-act scratchpad",
+    );
+    let pad_err = match run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(src_missing_pad.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("out_missing_pad"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    ) {
+        Ok(_) => panic!("expected MISSING_BRANCH_SCRATCHPAD"),
+        Err(e) => e,
+    };
+    assert_eq!(pad_err.code(), "MISSING_BRANCH_SCRATCHPAD");
+
+    // 4. Missing pre-act transcript when a prior model round delivered must fail with `MISSING_BRANCH_TRANSCRIPT`.
+    let src_missing_tx = tmp.join("src_missing_tx");
+    copy_tree(&src_game, &src_missing_tx);
+    must_ok(
+        fs::remove_file(src_missing_tx.join("relay/seats/Foundry.jsonl")),
+        "remove seat transcript",
+    );
+    let tx_err = match run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(src_missing_tx.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("out_missing_tx"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    ) {
+        Ok(_) => panic!("expected MISSING_BRANCH_TRANSCRIPT"),
+        Err(e) => e,
+    };
+    assert_eq!(tx_err.code(), "MISSING_BRANCH_TRANSCRIPT");
 
     let _ = fs::remove_dir_all(&tmp);
 }

@@ -1,0 +1,16 @@
+{
+  "day": "01",
+  "round": "talk",
+  "guild": "Saltworks",
+  "run_id": "<RUN_ID>",
+  "reservation_id": "<RESERVATION_ID>",
+  "request_body_sha256": "b408eaf8bcc74b873fc1bedc4a94370549e0d092954459249e8b5bf9e4d24437",
+  "round_index": 0,
+  "attempt": 1,
+  "status": 200,
+  "is_late": false,
+  "body_redacted": false,
+  "redacted_secret_field_paths": [],
+  "body_sha256": "f0d45642cef724bcf833c5f29259b1f43d0e202328c79491099c63c580dcb248",
+  "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"content\":\"{\\\"reply\\\":\\\"ON_GOLDEN_TALK_OK\\\"}\",\"role\":\"assistant\"}}],\"id\":\"gen-on-golden-1\",\"model\":\"google/gemini-2.5-pro-06-05\",\"usage\":{\"completion_tokens\":7,\"cost\":0.02,\"prompt_tokens\":11,\"total_tokens\":18}}"
+}

@@ -1,0 +1,3 @@
+{"day":"01","round":"talk","role":"system","content":"ON_GOLDEN_PARITY_WRAPPER\n"}
+{"day":"01","round":"talk","role":"user","content":"ON_GOLDEN_TURN1_TALK_OK\n"}
+{"day":"01","round":"talk","role":"assistant","content":"{\"reply\":\"ON_GOLDEN_TALK_OK\"}"}

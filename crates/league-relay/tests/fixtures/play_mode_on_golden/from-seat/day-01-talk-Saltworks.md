@@ -1,0 +1,1 @@
+{"reply":"ON_GOLDEN_TALK_OK"}

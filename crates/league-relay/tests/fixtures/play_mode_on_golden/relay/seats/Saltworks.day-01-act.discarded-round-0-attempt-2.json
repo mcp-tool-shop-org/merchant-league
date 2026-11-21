@@ -1,0 +1,16 @@
+{
+  "day": "01",
+  "round": "act",
+  "guild": "Saltworks",
+  "run_id": "<RUN_ID>",
+  "reservation_id": "<RESERVATION_ID>",
+  "request_body_sha256": "120ab647616da56b3abbc861121c8a1a792fc2eed6776f5c78801532f9adb1a9",
+  "round_index": 0,
+  "attempt": 2,
+  "outcome": "NO_REPLY",
+  "discard_reason": "structured output failed schema 'on_golden_reply': '$' missing required property 'reply'",
+  "is_late": false,
+  "assistant_content": "{\"wrong_key\":1}",
+  "assistant_content_sha256": "f129febe3b326ac82b342b4191cad18613c32ee9f6919b284f5982aaf029afed",
+  "body_redacted": false
+}
