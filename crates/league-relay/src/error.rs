@@ -131,6 +131,9 @@ pub enum RelayError {
         /// Redacted I/O path and error detail.
         detail: String,
     },
+    /// In Evaluation Mode (`eval_mode == true`), a seat set `reasoning.exclude_from_transcript: true`,
+    /// which would strip `<think>` blocks prior to validation/recording.
+    EvalThinkStrippingForbidden(String),
 }
 
 impl RelayError {
@@ -152,6 +155,7 @@ impl RelayError {
             Self::TurnLocked { .. } => "TURN_LOCKED",
             Self::UnrecordedCharge { .. } => "UNRECORDED_CHARGE",
             Self::ToolRoundStoreWriteFailed { .. } => "TOOL_ROUND_STORE_WRITE_FAILED",
+            Self::EvalThinkStrippingForbidden(_) => "EVAL_THINK_STRIPPING_FORBIDDEN",
         }
     }
 
@@ -197,6 +201,9 @@ impl RelayError {
             Self::ToolRoundStoreWriteFailed { .. } => {
                 "ensure <game-dir>/relay/seats/ is a writable directory with free disk space before running with --preview-tool on"
             }
+            Self::EvalThinkStrippingForbidden(_) => {
+                "set `reasoning.exclude_from_transcript` to `false` or omit `reasoning` on every seat when `eval_mode` is enabled"
+            }
         }
     }
 
@@ -218,7 +225,8 @@ impl RelayError {
             | Self::MissingWrapper { .. }
             | Self::SeatConfig(_)
             | Self::IncompatibleSetup(_)
-            | Self::PreviewState { .. } => 1,
+            | Self::PreviewState { .. }
+            | Self::EvalThinkStrippingForbidden(_) => 1,
             Self::Io(_)
             | Self::CorruptLog(_)
             | Self::TurnLocked { .. }
@@ -321,6 +329,9 @@ impl fmt::Display for RelayError {
             }
             RelayError::ToolRoundStoreWriteFailed { detail } => {
                 write!(f, "tool-round store write failed: {detail}")
+            }
+            RelayError::EvalThinkStrippingForbidden(msg) => {
+                write!(f, "eval think-tag stripping forbidden: {msg}")
             }
         }
     }

@@ -566,6 +566,7 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
                 let mut vb: Value = must_ok(serde_json::from_str(lb), "parse calls b");
                 for key in [
                     "reservation_id",
+                    "http_reply_sha256",
                     "cost",
                     "charged_credits",
                     "wall_secs",
@@ -577,6 +578,19 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
                 }
                 assert_eq!(va, vb, "calls.jsonl normalized row diverged");
             }
+        } else if rel.starts_with("relay/seats/") && rel.contains(".http-reply-round-") {
+            let mut va: Value = must_ok(serde_json::from_slice(&raw_a), "parse http reply a");
+            let mut vb: Value = must_ok(serde_json::from_slice(&raw_b), "parse http reply b");
+            assert_eq!(va["body"], vb["body"], "raw http body diverged in `{rel}`");
+            assert_eq!(
+                va["body_sha256"], vb["body_sha256"],
+                "raw http body_sha256 diverged in `{rel}`"
+            );
+            for key in ["run_id", "reservation_id"] {
+                va[key] = Value::Null;
+                vb[key] = Value::Null;
+            }
+            assert_eq!(va, vb, "normalized `{rel}` diverged across duplicate runs");
         } else if rel == "setup.json"
             || rel == "manifest.json"
             || rel.starts_with("decisions/")

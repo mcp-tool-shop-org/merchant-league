@@ -2245,6 +2245,9 @@ pub struct TurnConfig {
     pub log_level: LogLevel,
     /// Card 7 AI what-if preview tool toggle (`PreviewToolMode::Off` by default).
     pub preview_tool: PreviewToolMode,
+    /// Evaluation Mode switch (`false` by default; `league-eval` sets `true`): single HTTP attempt
+    /// per round, raw + discarded reply sidecars kept in every arm, and `exclude_from_transcript` banned.
+    pub eval_mode: bool,
     /// Additional environment keys supplied by the CLI for defense-in-depth scrubbing.
     pub(crate) extra_redaction_keys: Vec<ApiKey>,
 }
@@ -2277,6 +2280,7 @@ impl TurnConfig {
             endpoint_url: OPENROUTER_CHAT_COMPLETIONS_URL.to_owned(),
             log_level: LogLevel::default(),
             preview_tool: PreviewToolMode::default(),
+            eval_mode: false,
             extra_redaction_keys: Vec::new(),
         }
     }
@@ -2327,6 +2331,17 @@ impl TurnConfig {
     pub fn with_preview_tool(mut self, preview_tool: PreviewToolMode) -> Self {
         self.preview_tool = preview_tool;
         self
+    }
+
+    /// Enable or disable Evaluation Mode (`false` default): runs 1 HTTP attempt per round, keeps
+    /// raw and discarded sidecars in every arm, and refuses `reasoning.exclude_from_transcript: true`.
+    pub fn with_eval_mode(mut self, eval_mode: bool) -> Self {
+        self.eval_mode = eval_mode;
+        self
+    }
+
+    const fn keeps_raw_sidecars(&self) -> bool {
+        matches!(self.preview_tool, PreviewToolMode::On) || self.eval_mode
     }
 
     pub(crate) fn with_extra_redaction_keys(mut self, keys: Vec<ApiKey>) -> Self {
@@ -3560,8 +3575,41 @@ fn resolve_table_scratchpad_plan(config: &TurnConfig) -> Result<TableScratchpadP
     })
 }
 
+fn validate_eval_mode_seats(
+    config: &TurnConfig,
+    redaction_key: Option<&ApiKey>,
+) -> Result<(), RelayError> {
+    if !config.eval_mode {
+        return Ok(());
+    }
+    for seat in &config.seats.seats {
+        let exclude = match &seat.backend {
+            SeatBackend::Openrouter(s) => s
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.exclude_from_transcript),
+            SeatBackend::Local(s) => s
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.exclude_from_transcript),
+            SeatBackend::File { .. } => false,
+        };
+        if exclude {
+            return Err(RelayError::EvalThinkStrippingForbidden(redact_secrets(
+                &format!(
+                    "seat '{}' sets reasoning.exclude_from_transcript=true, which is forbidden when eval_mode is enabled",
+                    seat.guild
+                ),
+                redaction_key,
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Validate per-seat and table-level scratchpad, schema, and mixed-arm rules (`R2-B1`, `R2-B3`).
 pub fn validate_scratchpad_setup(config: &TurnConfig) -> Result<(), RelayError> {
+    validate_eval_mode_seats(config, None)?;
     resolve_table_scratchpad_plan(config).map(|_| ())
 }
 
@@ -5321,6 +5369,7 @@ pub(crate) fn run_turn_with_diag(
 ) -> Result<TurnSummary, RelayError> {
     let turn_started = Instant::now();
     validate_day(&config.day)?;
+    validate_eval_mode_seats(config, redaction_key)?;
     let scratchpad_plan = resolve_table_scratchpad_plan(config)?;
 
     if config.cap_credits.is_some() && config.cap_gpu_secs.is_some() {
@@ -5428,7 +5477,7 @@ pub(crate) fn run_turn_with_diag(
     } else {
         None
     };
-    if config.preview_tool == PreviewToolMode::On {
+    if config.keeps_raw_sidecars() {
         probe_tool_round_store(&config.game_dir, redaction_key)?;
     }
 
@@ -5781,7 +5830,7 @@ fn run_single_automated_seat(
     let transcript_path = transcript_file_path(&config.game_dir, guild);
     let scratchpad_path = scratchpad_file_path(&config.game_dir, guild);
     let emc_path = emc_file_path(&config.game_dir, guild);
-    let seat_retry_suffix = if config.preview_tool == PreviewToolMode::On {
+    let seat_retry_suffix = if config.keeps_raw_sidecars() {
         determine_seat_retry_suffix(&config.game_dir, guild, &config.day, config.round)
     } else {
         None
@@ -6124,7 +6173,12 @@ fn run_single_automated_seat(
             });
         }
 
-        for attempt in [1_u8, 2_u8] {
+        let max_attempts: &[u8] = if config.eval_mode {
+            &[1_u8]
+        } else {
+            &[1_u8, 2_u8]
+        };
+        for &attempt in max_attempts {
             let trigger = if attempt == 1 {
                 if tool_history.is_empty() {
                     "turn"
@@ -6504,7 +6558,7 @@ fn run_single_automated_seat(
                                         "TOKENIZE_UNAVAILABLE"
                                     };
                                     let (reply_sha256_opt, final_outcome, final_err, store_failure) =
-                                        if config.preview_tool == PreviewToolMode::On {
+                                        if config.keeps_raw_sidecars() {
                                             match persist_discarded_reply_if_enabled(
                                                 config,
                                                 guild,
@@ -6797,51 +6851,52 @@ fn run_single_automated_seat(
                         wall_secs,
                         seat.max_per_call_spend,
                     );
+                    let is_final_attempt = config.eval_mode || attempt == 2;
                     let planned_outcome = if is_late_reply {
                         "LATE_DISCARDED"
                     } else if over_estimate {
                         "COST_OVER_ESTIMATE"
-                    } else if attempt == 1 {
+                    } else if !is_final_attempt {
                         "harness"
                     } else {
                         "NO_REPLY"
                     };
-                    let (reply_sha256_opt, outcome_label, err_msg, store_failure) =
-                        if config.preview_tool == PreviewToolMode::On
-                            && let Some(discarded) = discarded_reply
-                        {
-                            match persist_discarded_reply_if_enabled(
-                                config,
-                                guild,
-                                run_id,
-                                &reservation_id,
-                                &request_body_sha256,
-                                tool_round_index,
-                                attempt,
-                                planned_outcome,
-                                &reason,
-                                is_late_reply,
-                                discarded,
-                                seat_retry_suffix,
-                                &all_keys,
-                                redaction_key,
-                            ) {
-                                Ok(file_sha) => {
-                                    (Some(file_sha), planned_outcome.to_owned(), reason, None)
-                                }
-                                Err(store_err) => {
-                                    let msg = store_err.to_string();
-                                    (
-                                        None,
-                                        "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
-                                        msg,
-                                        Some(store_err),
-                                    )
-                                }
+                    let (reply_sha256_opt, outcome_label, err_msg, store_failure) = if config
+                        .keeps_raw_sidecars()
+                        && let Some(discarded) = discarded_reply
+                    {
+                        match persist_discarded_reply_if_enabled(
+                            config,
+                            guild,
+                            run_id,
+                            &reservation_id,
+                            &request_body_sha256,
+                            tool_round_index,
+                            attempt,
+                            planned_outcome,
+                            &reason,
+                            is_late_reply,
+                            discarded,
+                            seat_retry_suffix,
+                            &all_keys,
+                            redaction_key,
+                        ) {
+                            Ok(file_sha) => {
+                                (Some(file_sha), planned_outcome.to_owned(), reason, None)
                             }
-                        } else {
-                            (None, planned_outcome.to_owned(), reason, None)
-                        };
+                            Err(store_err) => {
+                                let msg = store_err.to_string();
+                                (
+                                    None,
+                                    "TOOL_ROUND_STORE_WRITE_FAILED".to_owned(),
+                                    msg,
+                                    Some(store_err),
+                                )
+                            }
+                        }
+                    } else {
+                        (None, planned_outcome.to_owned(), reason, None)
+                    };
                     let outcome_for_diag = outcome_label.clone();
                     let entry = CallLogEntry {
                         time_utc: now_utc_rfc3339(),
@@ -6896,7 +6951,7 @@ fn run_single_automated_seat(
                             detail: err.to_string(),
                         };
                     }
-                    if attempt == 2 {
+                    if is_final_attempt {
                         return SeatOutcome::NoReply {
                             calls_path: calls_path.to_path_buf(),
                             request_body_sha256,
@@ -7228,7 +7283,7 @@ fn reserved_call_entry(
         model_requested: model.to_owned(),
         model_returned: None,
         request_body_sha256: request_body_sha256.to_owned(),
-        http_reply_sha256: (config.preview_tool == PreviewToolMode::On).then_some(None),
+        http_reply_sha256: config.keeps_raw_sidecars().then_some(None),
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,
@@ -7267,7 +7322,7 @@ fn refused_call_entry(
         model_requested: model.to_owned(),
         model_returned: None,
         request_body_sha256: request_body_sha256.to_owned(),
-        http_reply_sha256: (config.preview_tool == PreviewToolMode::On).then_some(None),
+        http_reply_sha256: config.keeps_raw_sidecars().then_some(None),
         reply_sha256: None,
         prompt_tokens: None,
         completion_tokens: None,
@@ -7286,8 +7341,8 @@ fn refused_call_entry(
 
 mod raw_reply_gate {
     use super::{
-        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, PreviewToolMode,
-        RawHttpResponse, RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
+        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, RawHttpResponse,
+        RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
         apply_retry_suffix_to_json_path, catch_unwind, http_reply_file_path, mpsc, panic_message,
         redact_credentials_multi_with_limit_and_paths, redact_secrets_multi_with_limit,
         resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
@@ -7387,7 +7442,7 @@ mod raw_reply_gate {
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<(GateVerifiedHttpResponse, Option<Option<String>>), RelayError> {
-        let http_reply_sha256 = if config.preview_tool == PreviewToolMode::On {
+        let http_reply_sha256 = if config.keeps_raw_sidecars() {
             // Scan the full received body (`resp.body.len()`) so an echoed key beyond
             // `MAX_REDACTION_SCAN_BYTES` is scrubbed without altering any error/log cap.
             let (scrubbed_body, redacted_secret_field_paths) =
@@ -7459,7 +7514,7 @@ mod raw_reply_gate {
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<RecordedTransportCall, RelayError> {
-        let off_or_on_null = (config.preview_tool == PreviewToolMode::On).then_some(None);
+        let off_or_on_null = config.keeps_raw_sidecars().then_some(None);
         match call_result.0 {
             CallTransportInner::TimedOut => Ok(RecordedTransportCall {
                 outcome: PersistedTransportOutcome::TimedOut,

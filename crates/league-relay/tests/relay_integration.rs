@@ -31612,3 +31612,249 @@ fn relay1_play_mode_eval_false_reproduces_committed_golden_set_byte_for_byte() -
 
     Ok(())
 }
+
+#[test]
+fn relay1_eval_mode_single_attempt_and_discarded_sidecar_in_both_arms() -> TestResult {
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "eval_test_reply",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["messages"],
+                    "properties": {
+                        "messages": { "type": "array" }
+                    }
+                }
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+    let clean_reply = "{\"messages\":[]}";
+    let shapes = [
+        ("fenced", format!("```json\n{clean_reply}\n```")),
+        (
+            "think_block",
+            format!("<think>private plan</think>{clean_reply}"),
+        ),
+        ("trailing_text", format!("{clean_reply} trailing_tokens")),
+    ];
+
+    for (label, bad_reply) in shapes {
+        for preview_tool in [PreviewToolMode::Off, PreviewToolMode::On] {
+            let tmp = TempDir::new()?;
+            let wrapper = tmp.path().join("wrapper.md");
+            fs::write(&wrapper, "EVAL_MODE_RELAY_WRAPPER\n")?;
+            let seats = SeatFile::from_json_str(
+                &json!({
+                    "seats": [
+                        {
+                            "guild": "Saltworks",
+                            "backend": "openrouter",
+                            "model": "google/gemini-2.5-pro-06-05",
+                            "temperature": 0.0,
+                            "max_output_tokens": 256,
+                            "timeout_secs": 5.0,
+                            "max_cost_per_call": 0.05
+                        },
+                        { "guild": "Weavers", "backend": "file" },
+                        { "guild": "Smiths", "backend": "file" },
+                        { "guild": "Dyers", "backend": "file" }
+                    ]
+                })
+                .to_string(),
+                None,
+            )?;
+
+            let game_dir = tmp
+                .path()
+                .join(format!("eval_{label}_{}", preview_tool.as_str()));
+            write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY_01_TALK\n")?;
+
+            // Queue two responses: if Eval mode ever retried attempt 2, it would consume `clean_reply`
+            // and return Delivered instead of NoReply!
+            let transport = ScriptedTransport::new(vec![
+                ScriptStep::Respond(ok_completion_json(
+                    &bad_reply,
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                )),
+                ScriptStep::Respond(ok_completion_json(
+                    clean_reply,
+                    "google/gemini-2.5-pro-06-05",
+                    Some(0.01),
+                )),
+            ]);
+            let cfg = TurnConfig::new(
+                game_dir.clone(),
+                "01".to_owned(),
+                Round::Talk,
+                seats,
+                Some(wrapper),
+                false,
+                Some(1.0),
+            )
+            .with_response_format(Some(rf.clone()))
+            .with_preview_tool(preview_tool)
+            .with_eval_mode(true);
+
+            let summary = run_turn(&cfg, &transport, None)?;
+            assert_eq!(
+                transport.call_count(),
+                1,
+                "eval_mode must send exactly 1 HTTP attempt for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert!(
+                matches!(summary.reports[0].outcome, SeatOutcome::NoReply { .. }),
+                "eval_mode failed attempt must end as NoReply refusal, got {:?}",
+                summary.reports[0].outcome
+            );
+            assert!(!game_dir.join("from-seat/day-01-talk-Saltworks.md").exists());
+
+            let calls = read_calls_log(&game_dir)?;
+            assert_eq!(calls.len(), 1);
+            let row = &calls[0];
+            assert_eq!(row.attempt, 1);
+            assert_eq!(row.trigger, "turn");
+            assert_eq!(row.outcome, "NO_REPLY");
+            assert!(row.error.is_some());
+
+            let http_path = http_reply_file_path(&game_dir, "Saltworks", "01", Round::Talk, 0, 1);
+            let disc_path =
+                discarded_reply_file_path(&game_dir, "Saltworks", "01", Round::Talk, 0, 1);
+            assert!(
+                http_path.is_file(),
+                "http-reply sidecar missing for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert!(
+                disc_path.is_file(),
+                "discarded sidecar missing for `{label}` ({})",
+                preview_tool.as_str()
+            );
+
+            let http_sha = sha256_hex(&fs::read(&http_path)?);
+            let disc_bytes = fs::read(&disc_path)?;
+            let disc_sha = sha256_hex(&disc_bytes);
+            assert_eq!(
+                row.http_reply_sha256,
+                Some(Some(http_sha)),
+                "calls.jsonl http_reply_sha256 must match disk file for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            assert_eq!(
+                row.reply_sha256.as_deref(),
+                Some(disc_sha.as_str()),
+                "calls.jsonl reply_sha256 must match discarded sidecar on disk for `{label}` ({})",
+                preview_tool.as_str()
+            );
+            let disc_rec: SavedDiscardedReplyRecord = serde_json::from_slice(&disc_bytes)?;
+            assert_eq!(disc_rec.attempt, 1);
+            assert_eq!(disc_rec.outcome, "NO_REPLY");
+            assert_eq!(
+                disc_rec.assistant_content.as_deref(),
+                Some(bad_reply.as_str())
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn relay1_eval_mode_refuses_think_stripping_seat_at_setup() -> TestResult {
+    for bad_seat in [
+        json!({
+            "guild": "Saltworks",
+            "backend": "local",
+            "base_url": "http://127.0.0.1:18080/v1",
+            "model": "Qwen/Qwen3-32B",
+            "temperature": 0.0,
+            "max_output_tokens": 256,
+            "timeout_secs": 5.0,
+            "max_gpu_secs_per_call": 10.0,
+            "reasoning": { "effort": "low", "exclude_from_transcript": true }
+        }),
+        json!({
+            "guild": "Saltworks",
+            "backend": "openrouter",
+            "model": "qwen/qwen3-32b",
+            "temperature": 0.0,
+            "max_output_tokens": 256,
+            "timeout_secs": 5.0,
+            "max_cost_per_call": 0.05,
+            "reasoning": { "effort": "medium", "exclude_from_transcript": true }
+        }),
+    ] {
+        let tmp = TempDir::new()?;
+        let wrapper = tmp.path().join("wrapper.md");
+        fs::write(&wrapper, "EVAL_MODE_THINK_WRAPPER\n")?;
+        let seats = SeatFile::from_json_str(
+            &json!({
+                "seats": [
+                    bad_seat,
+                    { "guild": "Weavers", "backend": "file" },
+                    { "guild": "Smiths", "backend": "file" },
+                    { "guild": "Dyers", "backend": "file" }
+                ]
+            })
+            .to_string(),
+            None,
+        )?;
+        let game_dir = tmp.path().join("think_seat_game");
+        write_to_seat(&game_dir, "01", "talk", "Saltworks", "DAY_01_TALK\n")?;
+
+        let eval_cfg = TurnConfig::new(
+            game_dir.clone(),
+            "01".to_owned(),
+            Round::Talk,
+            seats.clone(),
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_eval_mode(true);
+
+        let Err(setup_err) = validate_scratchpad_setup(&eval_cfg) else {
+            return Err(
+                "validate_scratchpad_setup must refuse exclude_from_transcript=true in eval_mode"
+                    .into(),
+            );
+        };
+        assert!(matches!(
+            setup_err,
+            RelayError::EvalThinkStrippingForbidden(_)
+        ));
+        assert_eq!(setup_err.code(), "EVAL_THINK_STRIPPING_FORBIDDEN");
+        assert_eq!(setup_err.exit_code(), 1);
+
+        let transport = ScriptedTransport::new(vec![]);
+        let Err(turn_err) = run_turn(&eval_cfg, &transport, None) else {
+            return Err("run_turn must refuse exclude_from_transcript=true before any call".into());
+        };
+        assert!(matches!(
+            turn_err,
+            RelayError::EvalThinkStrippingForbidden(_)
+        ));
+        assert_eq!(turn_err.code(), "EVAL_THINK_STRIPPING_FORBIDDEN");
+        assert_eq!(transport.call_count(), 0);
+        assert!(!game_dir.join("relay").exists());
+
+        // Control: Play mode (`eval_mode == false`) still accepts `exclude_from_transcript: true`.
+        let play_cfg = TurnConfig::new(
+            game_dir,
+            "01".to_owned(),
+            Round::Talk,
+            seats,
+            Some(wrapper),
+            false,
+            None,
+        );
+        validate_scratchpad_setup(&play_cfg)?;
+    }
+    Ok(())
+}

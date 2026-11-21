@@ -334,6 +334,7 @@ fn relay_and_transport_errors_project_onto_shared_structured_error() -> TestResu
         RelayError::ToolRoundStoreWriteFailed {
             detail: format!("store failed {secret_blob}"),
         },
+        RelayError::EvalThinkStrippingForbidden(format!("seat {secret_blob}")),
     ];
 
     for err in &variants {
@@ -1139,6 +1140,7 @@ fn exit_code_4_is_never_returned_across_all_outcomes_and_errors() -> TestResult 
         RelayError::ToolRoundStoreWriteFailed {
             detail: "store failed".to_owned(),
         },
+        RelayError::EvalThinkStrippingForbidden("seat".to_owned()),
     ];
     for e in &errors {
         let c = e.exit_code();

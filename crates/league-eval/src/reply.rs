@@ -9,7 +9,7 @@ use std::fmt;
 
 use league_core::{EvalActSubmission, SealedOrderBundle};
 use league_relay::{
-    UntrustedWhisper, parse_preview_tool_arguments, preview_wording_slot, wording_slot,
+    Round, UntrustedWhisper, parse_preview_tool_arguments, preview_wording_slot, wording_slot,
 };
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -260,6 +260,66 @@ fn raw_bundle_map_is_empty(b: &Map<String, Value>) -> bool {
     true
 }
 
+fn detect_raw_wrong_round_obj(
+    round: Round,
+    obj: &Map<String, Value>,
+) -> Option<(ReplyRefusalCode, String)> {
+    match round {
+        Round::Talk => {
+            let k_ma = preview_wording_slot("key_market_actions");
+            let k_bundle = preview_wording_slot("key_bundle");
+            let has_non_empty_ma = obj
+                .get(&k_ma)
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty());
+            let has_non_empty_bundle = obj
+                .get(&k_bundle)
+                .and_then(Value::as_object)
+                .is_some_and(|b| !raw_bundle_map_is_empty(b));
+            if has_non_empty_ma || has_non_empty_bundle {
+                Some((
+                    ReplyRefusalCode::TalkReplyHasOrders,
+                    format!("talk reply must leave '{k_ma}' and '{k_bundle}' empty"),
+                ))
+            } else {
+                None
+            }
+        }
+        Round::Act => {
+            let k_messages = eval_wording_slot("eval_messages_key");
+            if let Some(msg_arr) = obj.get(k_messages).and_then(Value::as_array)
+                && !msg_arr.is_empty()
+            {
+                Some((
+                    ReplyRefusalCode::ActReplyHasMessages,
+                    format!(
+                        "act reply must leave '{k_messages}' empty; got {} message(s)",
+                        msg_arr.len()
+                    ),
+                ))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Inspect raw text returned from a discarded/schema-failed Eval round for wrong-round orders or
+/// messages before coding `REPLY_SCHEMA_INVALID` (`§1a` item 2). Non-JSON text returns `(None, false)`.
+#[must_use]
+pub(crate) fn classify_wrong_round_from_raw_text(
+    round: Round,
+    raw: &str,
+    keeps_notes: bool,
+) -> (Option<(ReplyRefusalCode, String)>, bool) {
+    let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(raw.trim()) else {
+        return (None, false);
+    };
+    let k_notes = wording_slot("scratchpad_schema_key");
+    let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
+    (detect_raw_wrong_round_obj(round, &obj), notes_present)
+}
+
 fn validate_common_reply_envelope_obj(
     obj: &Map<String, Value>,
     asking_seat: u8,
@@ -470,17 +530,11 @@ pub fn parse_eval_act_reply(raw: &str, asking_seat: u8, keeps_notes: bool) -> Pa
     };
     let k_notes = wording_slot("scratchpad_schema_key");
     let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
-    let k_messages = eval_wording_slot("eval_messages_key");
-    if let Some(msg_arr) = obj.get(k_messages).and_then(Value::as_array)
-        && !msg_arr.is_empty()
-    {
+    if let Some((code, reason)) = detect_raw_wrong_round_obj(Round::Act, &obj) {
         return ParsedActReply {
             submission: EvalActSubmission::default(),
-            refusal_code: Some(ReplyRefusalCode::ActReplyHasMessages),
-            refusal_reason: Some(format!(
-                "act reply must leave '{k_messages}' empty; got {} message(s)",
-                msg_arr.len()
-            )),
+            refusal_code: Some(code),
+            refusal_reason: Some(reason),
             notes_present,
             is_wrong_part: true,
         };
@@ -544,22 +598,12 @@ pub fn parse_eval_talk_reply(
     let notes_present = keeps_notes && obj.get(&k_notes).is_some_and(Value::is_string);
     let k_ma = preview_wording_slot("key_market_actions");
     let k_bundle = preview_wording_slot("key_bundle");
-    let has_non_empty_ma = obj
-        .get(&k_ma)
-        .and_then(Value::as_array)
-        .is_some_and(|a| !a.is_empty());
-    let has_non_empty_bundle = obj
-        .get(&k_bundle)
-        .and_then(Value::as_object)
-        .is_some_and(|b| !raw_bundle_map_is_empty(b));
-    if has_non_empty_ma || has_non_empty_bundle {
+    if let Some((code, reason)) = detect_raw_wrong_round_obj(Round::Talk, &obj) {
         return ParsedTalkReply {
             accepted_whispers: Vec::new(),
-            refusal_code: Some(ReplyRefusalCode::TalkReplyHasOrders),
+            refusal_code: Some(code),
             invalid_recipients: Vec::new(),
-            refusal_reason: Some(format!(
-                "talk reply must leave '{k_ma}' and '{k_bundle}' empty"
-            )),
+            refusal_reason: Some(reason),
             notes_present,
             is_wrong_part: true,
         };
