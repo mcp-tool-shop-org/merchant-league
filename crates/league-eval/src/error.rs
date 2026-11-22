@@ -587,3 +587,68 @@ impl ToStructuredError for EvalError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_and_startup_error_variants_format_codes_and_structured_hints() {
+        let cases = [
+            (
+                EvalError::DirtyGitWorktree("dirty tree".to_owned()),
+                "DIRTY_GIT_WORKTREE",
+                EXIT_RUNTIME_ERROR,
+                "commit or stash uncommitted workspace changes",
+            ),
+            (
+                EvalError::UnsupportedEvalModelBackend("openrouter seat forbidden".to_owned()),
+                "UNSUPPORTED_EVAL_MODEL_BACKEND",
+                EXIT_USER_ERROR,
+                "configure automated Eval seats with `backend = \"local\"`",
+            ),
+            (
+                EvalError::PromptTemplateFailed("status 500".to_owned()),
+                "PROMPT_TEMPLATE_FAILED",
+                EXIT_RUNTIME_ERROR,
+                "POST /apply-template",
+            ),
+            (
+                EvalError::PromptTemplateMismatch("drift".to_owned()),
+                "PROMPT_TEMPLATE_MISMATCH",
+                EXIT_RUNTIME_ERROR,
+                "byte-identical prompt text",
+            ),
+            (
+                EvalError::PromptTokenizeFailed("empty tokens".to_owned()),
+                "PROMPT_TOKENIZE_FAILED",
+                EXIT_RUNTIME_ERROR,
+                "POST /tokenize",
+            ),
+            (
+                EvalError::PromptTokenCountMismatch("10 vs 11".to_owned()),
+                "PROMPT_TOKEN_COUNT_MISMATCH",
+                EXIT_RUNTIME_ERROR,
+                "usage.prompt_tokens",
+            ),
+        ];
+
+        for (err, expected_code, expected_exit, expected_hint_substr) in cases {
+            assert_eq!(err.code(), expected_code);
+            assert_eq!(err.exit_code(), expected_exit);
+            let display = err.to_string();
+            assert!(
+                display.starts_with(&format!("{expected_code}: ")),
+                "unexpected Display '{display}'"
+            );
+            let structured = err.to_structured_error();
+            assert_eq!(structured.code, expected_code);
+            assert!(!structured.retryable);
+            assert!(
+                structured.hint.contains(expected_hint_substr),
+                "unexpected hint '{}' for {expected_code}",
+                structured.hint
+            );
+        }
+    }
+}

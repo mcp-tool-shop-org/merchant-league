@@ -541,3 +541,227 @@ impl Transport for MockDirTransport {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    struct MinimalTransport;
+
+    impl Transport for MinimalTransport {
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            Err(TransportError::Network("unused".to_owned()))
+        }
+    }
+
+    fn spawn_scripted_http(responses: Vec<(u16, String)>) -> (String, thread::JoinHandle<()>) {
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(l) => l,
+            Err(e) => panic!("bind 127.0.0.1:0: {e}"),
+        };
+        let addr = match listener.local_addr() {
+            Ok(a) => a,
+            Err(e) => panic!("local_addr: {e}"),
+        };
+        let handle = thread::spawn(move || {
+            let mut queue = VecDeque::from(responses);
+            while let Some((status, body)) = queue.pop_front() {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(e) => panic!("accept: {e}"),
+                };
+                let mut buf = Vec::new();
+                let mut tmp = [0_u8; 512];
+                let mut header_end = None;
+                while header_end.is_none() {
+                    match stream.read(&mut tmp) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            buf.extend_from_slice(&tmp[..n]);
+                            header_end =
+                                buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4);
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if let Some(hdr_end) = header_end {
+                    let hdr_str = String::from_utf8_lossy(&buf[..hdr_end]);
+                    let content_len = hdr_str
+                        .lines()
+                        .find_map(|line| {
+                            let (k, v) = line.split_once(':')?;
+                            if k.eq_ignore_ascii_case("Content-Length") {
+                                v.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    let mut remaining = (hdr_end + content_len).saturating_sub(buf.len());
+                    while remaining > 0 {
+                        let chunk = remaining.min(tmp.len());
+                        match stream.read(&mut tmp[..chunk]) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => remaining -= n,
+                        }
+                    }
+                }
+                let wire = format!(
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(wire.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://127.0.0.1:{}", addr.port()), handle)
+    }
+
+    #[test]
+    fn local_and_mock_transport_apply_template_and_tokenize_cover_ok_and_error_paths() {
+        let minimal = MinimalTransport;
+        let timeout = Duration::from_secs(2);
+        assert!(
+            minimal
+                .apply_template("http://127.0.0.1:1/apply-template", "{}", timeout)
+                .is_err()
+        );
+        assert!(
+            minimal
+                .tokenize_prompt("http://127.0.0.1:1/tokenize", "hi", true, true, timeout)
+                .is_err()
+        );
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!(
+            "ml_transport_mock_test_{}_{stamp}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            panic!("mkdir {}: {e}", dir.display());
+        }
+        assert!(MockDirTransport::load(&dir).is_err());
+
+        let resp_path = dir.join("responses.json");
+        if let Err(e) = fs::write(&resp_path, r#"{"rules":[]}"#) {
+            panic!("write empty mock: {e}");
+        }
+        let empty_mock = match MockDirTransport::load(&dir) {
+            Ok(m) => m,
+            Err(e) => panic!("load empty mock: {e}"),
+        };
+        assert!(
+            empty_mock
+                .apply_template("http://127.0.0.1:1/apply-template", "{}", timeout)
+                .is_err()
+        );
+        assert!(
+            empty_mock
+                .tokenize_prompt("http://127.0.0.1:1/tokenize", "x", true, true, timeout)
+                .is_err()
+        );
+
+        if let Err(e) = fs::write(
+            &resp_path,
+            r#"{"rules":[],"apply_template_prompt":"TPL_OK","tokenize_ids":[5,6,7]}"#,
+        ) {
+            panic!("write populated mock: {e}");
+        }
+        let pop_mock = match MockDirTransport::load(&dir) {
+            Ok(m) => m,
+            Err(e) => panic!("load populated mock: {e}"),
+        };
+        assert_eq!(
+            pop_mock
+                .apply_template("http://127.0.0.1:1/apply-template", "{}", timeout)
+                .ok()
+                .as_deref(),
+            Some("TPL_OK")
+        );
+        assert_eq!(
+            pop_mock
+                .tokenize_prompt("http://127.0.0.1:1/tokenize", "x", true, true, timeout)
+                .ok(),
+            Some(vec![5, 6, 7])
+        );
+        let _ = fs::remove_dir_all(&dir);
+
+        let gate = match LocalGate::acquire(false, None, false, &[]) {
+            Ok(g) => g,
+            Err(e) => panic!("LocalGate: {e}"),
+        };
+        let tx = LocalOpenAiTransport::new(gate);
+
+        assert!(
+            tx.apply_template("https://example.com/apply-template", "{}", timeout)
+                .is_err()
+        );
+        assert!(
+            tx.tokenize_prompt("https://example.com/tokenize", "p", true, true, timeout)
+                .is_err()
+        );
+
+        let (base, handle) = spawn_scripted_http(vec![
+            (500, "err".to_owned()),
+            (200, "not-json".to_owned()),
+            (200, r#"{"other":"x"}"#.to_owned()),
+            (200, r#"{"prompt":"RENDERED"}"#.to_owned()),
+            (500, "err".to_owned()),
+            (200, "not-json".to_owned()),
+            (200, r#"{"other":1}"#.to_owned()),
+            (200, r#"{"tokens":["bad"]}"#.to_owned()),
+            (200, r#"{"tokens":[]}"#.to_owned()),
+            (200, r#"{"tokens":[10,20,30]}"#.to_owned()),
+        ]);
+
+        let tpl_url = format!("{base}/apply-template");
+        let tok_url = format!("{base}/tokenize");
+        assert!(tx.apply_template(&tpl_url, "{}", timeout).is_err());
+        assert!(tx.apply_template(&tpl_url, "{}", timeout).is_err());
+        assert!(tx.apply_template(&tpl_url, "{}", timeout).is_err());
+        assert_eq!(
+            tx.apply_template(&tpl_url, "{}", timeout).ok().as_deref(),
+            Some("RENDERED")
+        );
+
+        assert!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .is_err()
+        );
+        assert!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .is_err()
+        );
+        assert!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .is_err()
+        );
+        assert!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .is_err()
+        );
+        assert!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .is_err()
+        );
+        assert_eq!(
+            tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
+                .ok(),
+            Some(vec![10, 20, 30])
+        );
+        let _ = handle.join();
+        assert!(tx.apply_template(&tpl_url, "{}", timeout).is_err());
+    }
+}

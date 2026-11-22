@@ -3586,4 +3586,219 @@ mod tests {
             "unexpected message: {err}"
         );
     }
+
+    #[test]
+    fn telemetry_and_prompt_prep_error_helpers_enforce_exact_five_and_metadata() {
+        assert_eq!(
+            must_ok(
+                parse_top_logprob_entries(None, 0).err().ok_or("none err"),
+                "missing top_logprobs"
+            )
+            .code(),
+            "MISSING_REPLY_TELEMETRY"
+        );
+        assert!(
+            parse_top_logprob_entries(Some(&serde_json::json!([{"token":"a","logprob":-0.1}])), 0)
+                .is_err()
+        );
+        assert!(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!([
+                    {"token":"a","logprob":-0.1},
+                    {"token":"b","logprob":-0.2},
+                    {"token":"c","logprob":-0.3},
+                    {"token":"d","logprob":-0.4},
+                    {"token":"e","logprob":"bad"}
+                ])),
+                0
+            )
+            .is_err()
+        );
+        assert!(parse_top_logprob_entries(Some(&serde_json::json!({"a": -0.1})), 0).is_err());
+        assert!(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!({"a": -0.1, "b": -0.2, "c": -0.3, "d": -0.4, "e": "bad"})),
+                0
+            )
+            .is_err()
+        );
+        let map_ok = must_ok(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!({"a": -0.5, "b": -0.1, "c": -0.3, "d": -0.4, "e": -0.2})),
+                0,
+            ),
+            "5-entry map top_logprobs",
+        );
+        assert_eq!(map_ok.len(), 5);
+        assert_eq!(map_ok[0].token, "b");
+        assert!(parse_top_logprob_entries(Some(&serde_json::json!(42)), 0).is_err());
+
+        let base_rec = SavedHttpReplyRecord {
+            day: "01".to_owned(),
+            round: Round::Talk,
+            guild: "Foundry".to_owned(),
+            run_id: "r1".to_owned(),
+            reservation_id: "res-1".to_owned(),
+            request_body_sha256: "req".to_owned(),
+            round_index: 0,
+            attempt: 1,
+            status: 200,
+            is_late: false,
+            body_redacted: false,
+            redacted_secret_field_paths: Vec::new(),
+            body_sha256: "body".to_owned(),
+            body: "{}".to_owned(),
+            prompt_token_ids_sha256: Some("abc".to_owned()),
+            prompt_token_ids_count: Some(1),
+            prompt_token_ids_source: Some("server_tokenize".to_owned()),
+            prompt_token_ids_template_check: Some("double_apply_template_byte_equal".to_owned()),
+        };
+
+        let valid_body = serde_json::json!({
+            "usage": {"prompt_tokens": 1},
+            "choices": [{
+                "logprobs": {
+                    "content": [{
+                        "id": 7,
+                        "token": "{",
+                        "logprob": -0.01,
+                        "top_logprobs": [
+                            {"token": "{", "id": 7, "logprob": -0.01},
+                            {"token": "[", "id": 8, "logprob": -1.0},
+                            {"token": "\"", "id": 9, "logprob": -2.0},
+                            {"token": " ", "id": 10, "logprob": -3.0},
+                            {"token": "\n", "id": 11, "logprob": -4.0}
+                        ]
+                    }]
+                }
+            }]
+        });
+
+        let check_err = |rec: &SavedHttpReplyRecord,
+                         body: &serde_json::Value,
+                         src: Option<&str>,
+                         chk: Option<&str>,
+                         expected_code: &str| {
+            let mut shas = Vec::new();
+            let mut s = src.map(str::to_owned);
+            let mut c = chk.map(str::to_owned);
+            let mut rids = Vec::new();
+            let mut lps = Vec::new();
+            let err = collect_http_reply_telemetry(
+                rec, body, &mut shas, &mut s, &mut c, &mut rids, &mut lps,
+            );
+            match err {
+                Err(e) => assert_eq!(e.code(), expected_code),
+                Ok(()) => panic!("expected {expected_code}"),
+            }
+        };
+
+        let mut bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_sha256 = None;
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_count = Some(0);
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_source = Some("other".to_owned());
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_template_check = Some("other".to_owned());
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+
+        check_err(
+            &base_rec,
+            &serde_json::json!({}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &valid_body,
+            Some("other_src"),
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &valid_body,
+            None,
+            Some("other_chk"),
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": []}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": [{"logprobs": {"content": []}}]}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        for bad_step in [
+            serde_json::json!(42),
+            serde_json::json!({"logprob": -0.1, "id": 1}),
+            serde_json::json!({"token": "a", "id": 1}),
+            serde_json::json!({"token": "a", "logprob": -0.1}),
+        ] {
+            check_err(
+                &base_rec,
+                &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": [{"logprobs": {"content": [bad_step]}}]}),
+                None,
+                None,
+                "MISSING_REPLY_TELEMETRY",
+            );
+        }
+
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TEMPLATE_FAILED: x")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TEMPLATE_FAILED")
+        );
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TEMPLATE_MISMATCH: y")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TEMPLATE_MISMATCH")
+        );
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TOKENIZE_FAILED: z")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TOKENIZE_FAILED")
+        );
+        assert!(map_prompt_prep_seat_error("OTHER: q").is_none());
+
+        let summary_ok = TurnSummary {
+            reports: vec![league_relay::SeatReport {
+                guild: "Foundry".to_owned(),
+                outcome: SeatOutcome::SeatError {
+                    detail: "OTHER: q".to_owned(),
+                },
+            }],
+        };
+        assert!(check_turn_summary_prompt_telemetry(&summary_ok).is_ok());
+        let summary_err = TurnSummary {
+            reports: vec![league_relay::SeatReport {
+                guild: "Foundry".to_owned(),
+                outcome: SeatOutcome::SeatError {
+                    detail: "PROMPT_TOKENIZE_FAILED: boom".to_owned(),
+                },
+            }],
+        };
+        assert_eq!(
+            check_turn_summary_prompt_telemetry(&summary_err)
+                .err()
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TOKENIZE_FAILED")
+        );
+    }
 }
