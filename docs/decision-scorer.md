@@ -2,7 +2,7 @@
 
 This document specifies the offline, CPU-only, deterministic decision scorer referenced as `D4` in [`docs/eval-harness.md`](eval-harness.md) for the first Evaluation Mode comparison (`D5`: three arms `off`, `control`, `on` branched at saved pre-act states).
 
-**Scope boundary:** This is a design specification only. It requires **no** changes to `league-core`, to what any model or `ClubBot` seat is shown, or to any persisted Evaluation Mode file (`setup.json`, `checkpoints/`, `to-seat/`, `decisions/`, `outcome.json`, `receipt.json`, `relay/`). Every input named below is already written by `league-eval` and `EvalHost`.
+**Scope boundary:** This is the design specification for the decision scorer. Stage S1 of the blind scoring kernel is implemented in [`crates/league-scorer`](../crates/league-scorer/README.md) (schema v1 validation, §5.2 `ScorerConfig`, Standard-posture undealt-mandate rollouts, §7.1/§3.2 scoring outputs, and the content-addressed CLI; S2 candidate generators/non-standard postures/talk compliance, S3 unblinded `league-eval` builder/`arm_map/`/freeze join gate, and S4 optional parallelism remain future stages). It requires **no** changes to `league-core`, to what any model or `ClubBot` seat is shown, or to any persisted Evaluation Mode file (`setup.json`, `checkpoints/`, `to-seat/`, `decisions/`, `outcome.json`, `receipt.json`, `relay/`). Every input named below is already written by `league-eval` and `EvalHost`.
 
 ---
 

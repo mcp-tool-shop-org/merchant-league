@@ -9,6 +9,7 @@ members = [
     "crates/league-gen",
     "crates/league-ledger",
     "crates/league-relay",
+    "crates/league-scorer",
     "crates/league-season",
     "crates/league-seat-types",
     "crates/league-seat-ui",

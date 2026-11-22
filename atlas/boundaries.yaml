@@ -32,6 +32,10 @@ boundaries:
     globs:
       - crates/league-relay/**
     role: code
+  - name: league-scorer
+    globs:
+      - crates/league-scorer/**
+    role: code
   - name: league-season
     globs:
       - crates/league-season/**

@@ -1,0 +1,19 @@
+[package]
+name = "league-scorer"
+description = "Arm-blind, deterministic CPU decision scorer for Merchant League v2 evaluation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+league-core = { path = "../league-core" }
+league-seat-types = { path = "../league-seat-types" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.9"
+
+[lints]
+workspace = true
