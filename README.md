@@ -14,7 +14,7 @@
 
 A slow-turn trading and politics game for four to six seats, played on the XRP Ledger **Testnet**. Seats can be people or AI players, at the same table and under the same rules.
 
-**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`), and the automated **Evaluation Mode** driver (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) runs CPU / mock-transport `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest verification (GPU model runs remain held pending pre-flight). Public-Testnet Game mode is not built yet. **v0.1.0** is the first tagged prototype release: source only, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
+**Status: prototype, under active design.** Offline **Club Mode** in `league-tui` is playable from source on one shared terminal (4–6 human and `ClubBot` seats from Lobby through end-of-season scoreboard and replay export; private whispers are deferred past `v0.1.0`), and the automated **Evaluation Mode** harness (`league-eval` over `league-relay` and `league-core`'s `EvalHost`) drives `play`, `branch`, and `select` workflows across `off`, `control`, and `on` arms with pinned seat briefs and serving-manifest checks (CI runs mock transports only, with no model calls). Public-Testnet Game mode is not built yet. **v0.1.0** is the first tagged prototype release: source only, with no published binaries and no published container image. Testnet only: no real money, and no path to Mainnet.
 
 ## The game
 
@@ -41,7 +41,7 @@ Both modes share one rules engine. A game replays exactly from its seed and its 
 | Crate | What it does |
 | --- | --- |
 | `league-core` | The rules engine: turn phases, contracts, scoring, season close, replay, state predicates, and isolated `ClubHost` / `EvalHost` session hosts |
-| `league-error` | Shared `#![no_std]` structured error types, unified `0`/`1`/`2`/`3` exit codes, and credential/secret log scrubber |
+| `league-error` | Shared `#![no_std]` structured error representation and credential/secret text scrubber |
 | `league-seat-types` | `#![no_std]` seat-safe observations, preview DTOs, turn intents, and terminal screen view models |
 | `league-seat-ui` | `#![no_std]` Club Mode lobby, composer, reveal, and end-of-season screen renderers and key state machine |
 | `league-gen` | The table generator, with its fairness checks, commodity glossary, and seed pools |
