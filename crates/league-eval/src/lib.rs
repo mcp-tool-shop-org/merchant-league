@@ -40,11 +40,12 @@ pub use select::{
     expand_home_path_with_home, run_select, sanitize_home_path, sanitize_home_path_with_homes,
 };
 pub use serving::{
-    CacheSettingsInput, CacheSettingsRecord, EffectiveSamplingRecord, EngineKind,
+    CRATE_GIT_SHA, CacheSettingsInput, CacheSettingsRecord, EffectiveSamplingRecord, EngineKind,
     MachineManifestInput, MachineManifestRecord, MetadataProvenance, ModelManifestInput,
     ModelManifestRecord, ProvenanceTagged, ServerSettingsRecord, ServingManifestInput,
     ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
     capture_serving_env_snapshot_from, load_and_validate_serving_manifest,
+    resolve_verified_crate_git_sha, validate_crate_git_sha_against,
     validate_serving_manifest_input,
 };
 pub use view::{

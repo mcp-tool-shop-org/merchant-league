@@ -404,6 +404,33 @@ impl EvalHost {
         )
     }
 
+    /// Explicit-entropy counterpart to [`EvalHost::from_standard_setup_with_model_seats`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_explicit_entropy_with_model_seats(
+        table_id: TableId,
+        seat_count: u8,
+        layout_seed: u64,
+        deal_seed: [u8; 32],
+        seat_salts: &[[u8; 32]],
+        eval_seed: [u8; 32],
+        bot_tie_seed: u64,
+        model_seats: &[bool],
+    ) -> Result<Self, EngineError> {
+        let salts: Vec<RevealSalt> = seat_salts.iter().copied().map(RevealSalt).collect();
+        let eval_seed = SealedEvalSeed::try_from_bytes(eval_seed)?;
+        let (spec, deal, eval_seed) =
+            TableSpec::standard_eval_chiral_ring_with_explicit_setup_and_model_seats(
+                table_id,
+                seat_count,
+                layout_seed,
+                deal_seed,
+                &salts,
+                eval_seed,
+                model_seats,
+            )?;
+        Self::new(spec, layout_seed, deal, eval_seed, bot_tie_seed)
+    }
+
     /// Returns the per-game identifier assigned when this game directory/host was initialized
     /// (different for every D2 duplicate).
     #[must_use]

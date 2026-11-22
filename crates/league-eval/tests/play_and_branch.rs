@@ -46,6 +46,55 @@ fn fresh_tmp_dir(label: &str) -> PathBuf {
     dir
 }
 
+fn mock_chat_response_value(
+    id: &str,
+    model: &str,
+    content: &str,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    cost: Option<f64>,
+) -> Value {
+    let top_logprobs: Vec<Value> = (0_u64..5)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 200 + k,
+                "token_id": 200 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+    let mut usage = json!({
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens
+    });
+    if let Some(c) = cost {
+        usage["cost"] = json!(c);
+    }
+    json!({
+        "id": id,
+        "model": model,
+        "prompt_token_ids": [101, 102, 103],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": content },
+            "token_ids": [11, 12],
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "token_id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_logprobs
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": usage
+    })
+}
+
 fn write_wrapper(dir: &Path) -> PathBuf {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("wrappers/v2_seat_brief_2026_11_21_r3.md");
     let bytes = must_ok(fs::read(&src), "read committed pinned r3 wrapper");
@@ -246,20 +295,9 @@ impl Transport for DeterministicMockTransport {
             json!({"messages":[],"market_actions":[],"bundle":{},"notes":"fallback"}).to_string()
         });
 
-        let resp = json!({
-            "id": "mock-det-1",
-            "model": "Qwen/Qwen3-32B",
-            "choices": [{
-                "index": 0,
-                "message": { "role": "assistant", "content": content },
-                "finish_reason": "stop"
-            }],
-            "usage": { "prompt_tokens": 40, "completion_tokens": 15, "total_tokens": 55 }
-        });
-        Ok(RawHttpResponse {
-            status: 200,
-            body: resp.to_string(),
-        })
+        let body = mock_chat_response_value("mock-det-1", "Qwen/Qwen3-32B", &content, 40, 15, None)
+            .to_string();
+        Ok(RawHttpResponse { status: 200, body })
     }
 
     fn count_tokens(
@@ -366,8 +404,14 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
 
     // Prepare turn-0 sealed source once using EvalHost + persist_eval_game_state (`R8`).
     let turn0_host = must_ok(
-        EvalHost::from_standard_setup(TableId(11), 4, 7, 12345),
-        "from_standard_setup",
+        EvalHost::from_standard_setup_with_model_seats(
+            TableId(11),
+            4,
+            7,
+            12345,
+            &[true, false, false, false],
+        ),
+        "from_standard_setup_with_model_seats",
     );
     let game_a = tmp.join("dup_a");
     let game_b = tmp.join("dup_b");
@@ -1058,7 +1102,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
     let seat_salts = [[0xB1_u8; 32], [0xB2_u8; 32], [0xB3_u8; 32], [0xB4_u8; 32]];
     let eval_seed = [0xC5_u8; 32];
     let turn0 = must_ok(
-        EvalHost::from_explicit_entropy(
+        EvalHost::from_explicit_entropy_with_model_seats(
             TableId(15),
             4,
             7,
@@ -1066,8 +1110,9 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
             &seat_salts,
             eval_seed,
             0x777,
+            &[true, false, false, false],
         ),
-        "from_explicit_entropy item15",
+        "from_explicit_entropy_with_model_seats item15",
     );
     must_ok(
         persist_eval_game_state(&turn0, &src_game),
@@ -1516,12 +1561,14 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
             };
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": "b6-role",
-                    "model": "qwen/qwen3-32b",
-                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
-                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.001 }
-                })
+                body: mock_chat_response_value(
+                    "b6-role",
+                    "qwen/qwen3-32b",
+                    &content,
+                    20,
+                    10,
+                    Some(0.001),
+                )
                 .to_string(),
             })
         }
@@ -1735,19 +1782,14 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
         ) -> Result<RawHttpResponse, TransportError> {
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": "m-empty",
-                    "model": "qwen/qwen3-32b",
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}"
-                        },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
-                })
+                body: mock_chat_response_value(
+                    "m-empty",
+                    "qwen/qwen3-32b",
+                    "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}",
+                    10,
+                    10,
+                    Some(0.001),
+                )
                 .to_string(),
             })
         }
@@ -1973,16 +2015,14 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
         "rules": [{
             "when_contains": "This is the act round.",
             "status": 200,
-            "response": {
-                "id": "m-act",
-                "model": "qwen/qwen3-32b",
-                "choices": [{
-                    "index": 0,
-                    "message": { "role": "assistant", "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}" },
-                    "finish_reason": "stop"
-                }],
-                "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
-            }
+            "response": mock_chat_response_value(
+                "m-act",
+                "qwen/qwen3-32b",
+                "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}",
+                10,
+                10,
+                Some(0.001),
+            )
         }]
     });
     must_ok(
@@ -2226,30 +2266,26 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
             {
                 "when_contains": "This is the talk round.",
                 "status": 200,
-                "response": {
-                    "id": "m1",
-                    "model": "qwen/qwen3-32b",
-                    "choices": [{
-                        "index": 0,
-                        "message": { "role": "assistant", "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}" },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
-                }
+                "response": mock_chat_response_value(
+                    "m1",
+                    "qwen/qwen3-32b",
+                    "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}",
+                    10,
+                    10,
+                    Some(0.001),
+                )
             },
             {
                 "when_contains": "This is the act round.",
                 "status": 200,
-                "response": {
-                    "id": "m2",
-                    "model": "qwen/qwen3-32b",
-                    "choices": [{
-                        "index": 0,
-                        "message": { "role": "assistant", "content": "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}" },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20, "cost": 0.001 }
-                }
+                "response": mock_chat_response_value(
+                    "m2",
+                    "qwen/qwen3-32b",
+                    "{\"messages\":[],\"market_actions\":[],\"bundle\":{}}",
+                    10,
+                    10,
+                    Some(0.001),
+                )
             }
         ]
     });
@@ -3782,12 +3818,14 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             };
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": "ct-1",
-                    "model": "Qwen/Qwen3-32B",
-                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
-                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "cost": 0.001 }
-                })
+                body: mock_chat_response_value(
+                    "ct-1",
+                    "Qwen/Qwen3-32B",
+                    &content,
+                    20,
+                    10,
+                    Some(0.001),
+                )
                 .to_string(),
             })
         }
@@ -4152,12 +4190,14 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             .to_string();
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": format!("b-{call_idx}"),
-                    "model": "Qwen/Qwen3-32B",
-                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }],
-                    "usage": { "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30 }
-                })
+                body: mock_chat_response_value(
+                    &format!("b-{call_idx}"),
+                    "Qwen/Qwen3-32B",
+                    &content,
+                    20,
+                    10,
+                    None,
+                )
                 .to_string(),
             })
         }
@@ -4579,12 +4619,14 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                     .to_string();
                     return Ok(RawHttpResponse {
                         status: 200,
-                        body: json!({
-                            "id": "wrong-round-attempt-1",
-                            "model": "Qwen/Qwen3-32B",
-                            "choices": [{ "index": 0, "message": { "role": "assistant", "content": wrong_round }, "finish_reason": "stop" }],
-                            "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20 }
-                        })
+                        body: mock_chat_response_value(
+                            "wrong-round-attempt-1",
+                            "Qwen/Qwen3-32B",
+                            &wrong_round,
+                            10,
+                            10,
+                            None,
+                        )
                         .to_string(),
                     });
                 }
@@ -4602,13 +4644,8 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
             .to_string();
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": "ok-fallback",
-                    "model": "Qwen/Qwen3-32B",
-                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": ok }, "finish_reason": "stop" }],
-                    "usage": { "prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20 }
-                })
-                .to_string(),
+                body: mock_chat_response_value("ok-fallback", "Qwen/Qwen3-32B", &ok, 10, 10, None)
+                    .to_string(),
             })
         }
     }

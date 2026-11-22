@@ -37,14 +37,12 @@ use crate::schema::build_eval_response_format_config;
 use crate::select::{SelectionList, expand_home_path};
 use crate::serving::{
     ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
-    load_and_validate_serving_manifest,
+    load_and_validate_serving_manifest, resolve_verified_crate_git_sha,
 };
 use crate::view::{
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
 };
 use crate::wording::{EVAL_REPLY_WORDING_ARM, resolve_pinned_wrapper};
-
-const CRATE_GIT_SHA: &str = env!("LEAGUE_EVAL_GIT_SHA");
 
 /// Inert mock transport for all-`ClubBot` offline runs with zero HTTP calls.
 #[derive(Debug, Default, Clone, Copy)]
@@ -429,26 +427,38 @@ fn collect_http_reply_telemetry(
     prompt_token_ids_sha256s: &mut Vec<String>,
     reply_token_ids: &mut Vec<Vec<u64>>,
     reply_top_logprobs: &mut Vec<Vec<DecisionTokenTopLogprobs>>,
-) {
-    if let Some(prompt_ids_arr) = body_val
+) -> Result<(), EvalError> {
+    let prompt_ids = body_val
         .get("prompt_token_ids")
         .and_then(serde_json::Value::as_array)
-        && let Some(prompt_ids) = prompt_ids_arr
-            .iter()
-            .map(serde_json::Value::as_u64)
-            .collect::<Option<Vec<u64>>>()
-        && let Ok(bytes) = serde_json::to_vec(&prompt_ids)
-    {
-        prompt_token_ids_sha256s.push(sha256_hex(&bytes));
-    }
+        .and_then(|arr| {
+            arr.iter()
+                .map(serde_json::Value::as_u64)
+                .collect::<Option<Vec<u64>>>()
+        })
+        .filter(|ids| !ids.is_empty())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing non-empty `prompt_token_ids` for `prompt_token_ids_sha256s`"
+                    .to_owned(),
+            )
+        })?;
+    let prompt_bytes = serde_json::to_vec(&prompt_ids)
+        .map_err(|e| EvalError::Io(format!("encode prompt_token_ids: {e}")))?;
+    prompt_token_ids_sha256s.push(sha256_hex(&prompt_bytes));
 
     let first_choice = body_val
         .get("choices")
         .and_then(serde_json::Value::as_array)
-        .and_then(|arr| arr.first());
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing `choices[0]` for reply telemetry".to_owned(),
+            )
+        })?;
 
     let explicit_reply_ids = first_choice
-        .and_then(|c| c.get("token_ids"))
+        .get("token_ids")
         .or_else(|| body_val.get("completion_token_ids"))
         .or_else(|| body_val.get("token_ids"))
         .and_then(serde_json::Value::as_array)
@@ -458,56 +468,85 @@ fn collect_http_reply_telemetry(
                 .collect::<Option<Vec<u64>>>()
         });
 
-    let mut extracted_logprobs: Vec<DecisionTokenTopLogprobs> = Vec::new();
-    let mut fallback_ids_from_logprobs: Vec<u64> = Vec::new();
-    if let Some(lp_content) = first_choice
-        .and_then(|c| c.get("logprobs"))
+    let lp_content = first_choice
+        .get("logprobs")
         .and_then(|lp| lp.get("content"))
         .and_then(serde_json::Value::as_array)
-    {
-        for step in lp_content {
-            let Some(obj) = step.as_object() else {
-                continue;
-            };
-            let Some(token) = obj.get("token").and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let Some(logprob) = obj.get("logprob").and_then(serde_json::Value::as_f64) else {
-                continue;
-            };
-            let token_id = obj
-                .get("token_id")
-                .or_else(|| obj.get("id"))
-                .and_then(serde_json::Value::as_u64);
-            if let Some(tid) = token_id {
-                fallback_ids_from_logprobs.push(tid);
-            }
-            let top_logprobs = obj
-                .get("top_logprobs")
-                .map(parse_top_logprob_entries)
-                .unwrap_or_default();
-            extracted_logprobs.push(DecisionTokenTopLogprobs {
-                token: token.to_owned(),
-                token_id,
-                logprob,
-                top_logprobs,
-            });
+        .filter(|arr| !arr.is_empty())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing non-empty `choices[0].logprobs.content` for `reply_top_logprobs`"
+                    .to_owned(),
+            )
+        })?;
+
+    let mut extracted_logprobs: Vec<DecisionTokenTopLogprobs> =
+        Vec::with_capacity(lp_content.len());
+    let mut fallback_ids_from_logprobs: Vec<u64> = Vec::with_capacity(lp_content.len());
+    for (idx, step) in lp_content.iter().enumerate() {
+        let obj = step.as_object().ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(format!(
+                "HTTP 200 reply `choices[0].logprobs.content[{idx}]` must be a JSON object"
+            ))
+        })?;
+        let token = obj
+            .get("token")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing string `token`"
+                ))
+            })?;
+        let logprob = obj
+            .get("logprob")
+            .and_then(serde_json::Value::as_f64)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing numeric `logprob`"
+                ))
+            })?;
+        let token_id = obj
+            .get("token_id")
+            .or_else(|| obj.get("id"))
+            .and_then(serde_json::Value::as_u64);
+        if let Some(tid) = token_id {
+            fallback_ids_from_logprobs.push(tid);
         }
+        let top_logprobs = obj
+            .get("top_logprobs")
+            .map(parse_top_logprob_entries)
+            .unwrap_or_default();
+        if top_logprobs.is_empty() {
+            return Err(EvalError::MissingReplyTelemetry(format!(
+                "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing non-empty `top_logprobs`"
+            )));
+        }
+        extracted_logprobs.push(DecisionTokenTopLogprobs {
+            token: token.to_owned(),
+            token_id,
+            logprob,
+            top_logprobs,
+        });
     }
 
-    if let Some(ids) = explicit_reply_ids {
-        if !ids.is_empty() {
-            reply_token_ids.push(ids);
+    let resolved_reply_ids = match explicit_reply_ids {
+        Some(ids) if !ids.is_empty() => ids,
+        _ if fallback_ids_from_logprobs.len() == extracted_logprobs.len()
+            && !fallback_ids_from_logprobs.is_empty() =>
+        {
+            fallback_ids_from_logprobs
         }
-    } else if !fallback_ids_from_logprobs.is_empty()
-        && fallback_ids_from_logprobs.len() == extracted_logprobs.len()
-    {
-        reply_token_ids.push(fallback_ids_from_logprobs);
-    }
+        _ => {
+            return Err(EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing non-empty reply token IDs (`token_ids` or `logprobs.content[].id`) for `reply_token_ids`"
+                    .to_owned(),
+            ));
+        }
+    };
 
-    if !extracted_logprobs.is_empty() {
-        reply_top_logprobs.push(extracted_logprobs);
-    }
+    reply_token_ids.push(resolved_reply_ids);
+    reply_top_logprobs.push(extracted_logprobs);
+    Ok(())
 }
 
 fn read_round_attempt_diagnostics(
@@ -660,13 +699,17 @@ fn read_round_attempt_diagnostics(
 
         http_records.sort_by_key(|r| (r.round_index, r.attempt));
         for rec in http_records {
-            if let Ok(body_val) = serde_json::from_str::<serde_json::Value>(&rec.body) {
+            if rec.status == 200
+                && !rec.is_late
+                && let Ok(body_val) = serde_json::from_str::<serde_json::Value>(&rec.body)
+                && body_val.get("error").is_none_or(serde_json::Value::is_null)
+            {
                 collect_http_reply_telemetry(
                     &body_val,
                     &mut out.prompt_token_ids_sha256s,
                     &mut out.reply_token_ids,
                     &mut out.reply_top_logprobs,
-                );
+                )?;
             }
         }
     }
@@ -1232,6 +1275,33 @@ fn find_model_seat_regent_intervention(
     }
 }
 
+fn ensure_no_model_seat_regent_at_startup(
+    host: &EvalHost,
+    model_seats: &[bool],
+    has_regents: &[bool],
+    seats_file: &SeatFile,
+) -> Result<(), EvalError> {
+    for receipt in host.public_receipts() {
+        if let Some(msg) = find_model_seat_regent_intervention(receipt, model_seats, seats_file) {
+            return Err(EvalError::ModelSeatRegentIntervention(format!(
+                "startup check refused already-voided run: {msg}"
+            )));
+        }
+    }
+    for (idx, (&is_model, &has_regent)) in model_seats.iter().zip(has_regents.iter()).enumerate() {
+        if is_model && has_regent {
+            let guild = seats_file
+                .seats
+                .get(idx)
+                .map_or("unknown", |s| s.guild.as_str());
+            return Err(EvalError::ModelSeatRegentIntervention(format!(
+                "startup check refused run: automated model seat [seat={idx},guild={guild}] has a Standing Regent configured"
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn empty_clubbot_decision(
     game_id: &str,
@@ -1290,7 +1360,7 @@ fn populate_act_apply_telemetry(
     arm: EvalArm,
     refusal_by_seat: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
     refusal_by_arm: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
-) {
+) -> Result<(), EvalError> {
     rec.refused_market_actions =
         u32::try_from(report.refused_market_actions.len()).unwrap_or(u32::MAX);
     if let Some(code) = report.refused_bundle_code.as_ref() {
@@ -1316,14 +1386,29 @@ fn populate_act_apply_telemetry(
         rec.refused_bundle_legs = 0;
         rec.refused_bundle = None;
     }
-    let accepted_market = sub
+    let accepted_market_main = sub
         .market_actions
         .len()
-        .saturating_sub(report.refused_market_actions.len())
-        + sub
-            .pass_b_actions
-            .len()
-            .saturating_sub(report.refused_pass_b_actions.len());
+        .checked_sub(report.refused_market_actions.len())
+        .ok_or_else(|| {
+            EvalError::InvalidActionCount(format!(
+                "refused_market_actions ({}) exceeded submitted market_actions ({})",
+                report.refused_market_actions.len(),
+                sub.market_actions.len()
+            ))
+        })?;
+    let accepted_pass_b = sub
+        .pass_b_actions
+        .len()
+        .checked_sub(report.refused_pass_b_actions.len())
+        .ok_or_else(|| {
+            EvalError::InvalidActionCount(format!(
+                "refused_pass_b_actions ({}) exceeded submitted pass_b_actions ({})",
+                report.refused_pass_b_actions.len(),
+                sub.pass_b_actions.len()
+            ))
+        })?;
+    let accepted_market = accepted_market_main + accepted_pass_b;
     let accepted_bundle_legs = if report.refused_bundle_code.is_some() {
         0
     } else {
@@ -1331,6 +1416,7 @@ fn populate_act_apply_telemetry(
     };
     rec.cleared_non_empty_actions = accepted_market > 0 || accepted_bundle_legs > 0;
     rec.apply_report = Some(report.clone());
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1343,6 +1429,7 @@ fn build_eval_manifest(
     wrapper_version: &str,
     wrapper_sha256: &str,
     response_schema_sha256: &str,
+    crate_git_sha: &str,
     played_turns: u8,
     seats_file: &SeatFile,
     memory_mode: MemoryMode,
@@ -1386,7 +1473,7 @@ fn build_eval_manifest(
         wrapper_sha256: wrapper_sha256.to_owned(),
         pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
         played_turns,
-        crate_git_sha: CRATE_GIT_SHA.to_owned(),
+        crate_git_sha: crate_git_sha.to_owned(),
         wording_digests: Some(WordingArmDigests::compute(
             relay_wording_arm,
             wrapper_version,
@@ -1497,9 +1584,18 @@ pub fn run_play_with_transport(
         .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
         .collect();
     let has_model_seat = model_seats.iter().any(|&is_model| is_model);
+    let crate_git_sha = resolve_verified_crate_git_sha()?;
     let serving_record =
         resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_seat)?;
-    let serving_env_snapshot = capture_serving_env_snapshot();
+    let serving_manifest_sha256 = serving_record
+        .as_ref()
+        .map(|rec| {
+            serde_json::to_vec(rec)
+                .map(|bytes| sha256_hex(&bytes))
+                .map_err(|e| EvalError::Io(format!("encode serving manifest digest: {e}")))
+        })
+        .transpose()?;
+    let serving_env_snapshot = capture_serving_env_snapshot()?;
 
     let response_format = build_eval_response_format_config()?;
     let response_schema_sha256 = response_format.canonical_sha256();
@@ -1530,9 +1626,10 @@ pub fn run_play_with_transport(
             || existing_setup.wrapper_sha256 != wrapper_sha256
             || existing_setup.memory_mode != mem_mode
             || existing_setup.seats_sha256 != seats_sha256
+            || existing_setup.serving_manifest_sha256 != serving_manifest_sha256
         {
             return Err(EvalError::IncompatibleEvalSetup(
-                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, or --seats"
+                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, --seats, or --serving-manifest"
                     .to_owned(),
             ));
         }
@@ -1555,6 +1652,7 @@ pub fn run_play_with_transport(
     };
 
     let (has_regents, seat_regents) = seat_regent_flags(&host, &seats_file);
+    ensure_no_model_seat_regent_at_startup(&host, &model_seats, &has_regents, &seats_file)?;
 
     let setup_record = EvalSetupFile {
         game_id: host.game_id().to_owned(),
@@ -1570,6 +1668,7 @@ pub fn run_play_with_transport(
         memory_mode: mem_mode,
         seats_sha256,
         response_schema_sha256: Some(response_schema_sha256.clone()),
+        serving_manifest_sha256,
     };
     write_json_pretty_atomic(&setup_path, &setup_record)?;
 
@@ -1818,7 +1917,7 @@ pub fn run_play_with_transport(
                     opts.arm,
                     Some(&mut refusal_by_seat),
                     Some(&mut refusal_by_arm),
-                );
+                )?;
             }
             write_json_pretty_atomic(
                 &decisions_dir.join(format!("day-{day_str}-act-{}.json", rec.guild)),
@@ -1854,6 +1953,7 @@ pub fn run_play_with_transport(
             &wrapper_version,
             &wrapper_sha256,
             &response_schema_sha256,
+            &crate_git_sha,
             played_turns,
             &seats_file,
             opts.memory_mode,
@@ -1915,6 +2015,7 @@ pub fn run_play_with_transport(
         &wrapper_version,
         &wrapper_sha256,
         &response_schema_sha256,
+        &crate_git_sha,
         played_turns,
         &seats_file,
         opts.memory_mode,
@@ -2065,9 +2166,10 @@ pub fn run_branch_with_transport(
             acc || !matches!(seats_file.seats[idx].backend, SeatBackend::File { .. }),
         )
     })?;
+    let crate_git_sha = resolve_verified_crate_git_sha()?;
     let serving_record =
         resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_focal)?;
-    let serving_env_snapshot = capture_serving_env_snapshot();
+    let serving_env_snapshot = capture_serving_env_snapshot()?;
 
     for (_, _, target_out_dir) in &targets {
         for &arm in &opts.arms {
@@ -2106,6 +2208,7 @@ pub fn run_branch_with_transport(
             &seats_sha256,
             &response_format,
             &response_schema_sha256,
+            &crate_git_sha,
             serving_record.as_ref(),
             &serving_env_snapshot,
             transport,
@@ -2137,7 +2240,7 @@ pub fn run_branch_with_transport(
         .as_ref()
         .map(|_| "MODEL_SEAT_REGENT_INTERVENTION".to_owned());
     let branch_manifest = BranchManifest {
-        crate_git_sha: CRATE_GIT_SHA.to_owned(),
+        crate_git_sha,
         wrapper_version: wrapper_version.clone(),
         wrapper_sha256: wrapper_sha256.clone(),
         pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
@@ -2185,6 +2288,7 @@ fn branch_one_target(
     expected_seats_sha256: &str,
     response_format: &league_relay::ResponseFormatConfig,
     response_schema_sha256: &str,
+    crate_git_sha: &str,
     serving_record: Option<&ServingManifestRecord>,
     serving_env_snapshot: &BTreeMap<String, String>,
     transport: &dyn Transport,
@@ -2211,6 +2315,7 @@ fn branch_one_target(
         .iter()
         .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
         .collect();
+    ensure_no_model_seat_regent_at_startup(&probe_host, &model_seats, &has_regents, seats_file)?;
 
     let recorded_seal_path =
         checkpoint_prefix.with_file_name(format!("day-{day_str}-act-recorded.seal"));
@@ -2463,7 +2568,7 @@ fn branch_one_target(
         spliced.insert(focal_idx as u8, focal_sub.clone());
         let apply_outcome = host.apply_act_submissions(&spliced)?;
         if let Some(report) = apply_outcome.seats.get(&(focal_idx as u8)) {
-            populate_act_apply_telemetry(&mut decision_rec, &focal_sub, report, arm, None, None);
+            populate_act_apply_telemetry(&mut decision_rec, &focal_sub, report, arm, None, None)?;
         }
         let receipt: PublicSweepReceipt = host.sweep_turn()?;
         let arm_audit = vec![TurnRegentAuditRecord {
@@ -2504,6 +2609,7 @@ fn branch_one_target(
             wrapper_version,
             wrapper_sha256,
             response_schema_sha256,
+            crate_git_sha,
             1,
             seats_file,
             opts.memory_mode,
@@ -3210,5 +3316,124 @@ mod tests {
         assert_eq!(err.code(), "INVALID_WRONG_PART_RATE");
 
         let _ = fs::remove_dir_all(&run_root);
+    }
+
+    #[test]
+    fn fix2_checked_sub_refuses_refused_exceeding_submitted() {
+        let mut rec = empty_clubbot_decision(
+            "g-count",
+            1,
+            1,
+            Round::Act,
+            0,
+            "Foundry",
+            EvalArm::Off,
+            BTreeMap::new(),
+            None,
+        );
+        let empty_sub = EvalActSubmission::default();
+        let bad_pass_a = league_core::EvalSeatApplyReport {
+            refused_market_actions: vec![(0, "BAD".to_owned())],
+            refused_pass_b_actions: Vec::new(),
+            refused_bundle_code: None,
+        };
+        let err_a = match populate_act_apply_telemetry(
+            &mut rec,
+            &empty_sub,
+            &bad_pass_a,
+            EvalArm::Off,
+            None,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(()) => panic!("refused_market_actions > market_actions must return Err"),
+        };
+        assert_eq!(err_a.code(), "INVALID_ACTION_COUNT");
+
+        let bad_pass_b = league_core::EvalSeatApplyReport {
+            refused_market_actions: Vec::new(),
+            refused_pass_b_actions: vec![(0, "BAD_B".to_owned())],
+            refused_bundle_code: None,
+        };
+        let err_b = match populate_act_apply_telemetry(
+            &mut rec,
+            &empty_sub,
+            &bad_pass_b,
+            EvalArm::Off,
+            None,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(()) => panic!("refused_pass_b_actions > pass_b_actions must return Err"),
+        };
+        assert_eq!(err_b.code(), "INVALID_ACTION_COUNT");
+    }
+
+    #[test]
+    fn fix2_s8_startup_check_refuses_prior_receipt_even_with_has_regents_false() {
+        let tmp_seats = std::env::temp_dir().join(format!(
+            "ml_driver_fix2_s8_seats_{}.json",
+            std::process::id()
+        ));
+        let seats_json = serde_json::json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        });
+        must_ok(
+            fs::write(&tmp_seats, seats_json.to_string()),
+            "write seat file",
+        );
+        let seats = must_ok(
+            SeatFile::load_with_allowed_hosts(&tmp_seats, None, &[]),
+            "load seat file",
+        );
+        let _ = fs::remove_file(&tmp_seats);
+        let mut host = must_ok(
+            EvalHost::from_standard_setup_with_model_seats(TableId(98), 4, 7, 1, &[false; 4]),
+            "create host",
+        );
+        for _ in 0..4 {
+            let _ = must_ok(
+                host.apply_act_submissions(&BTreeMap::new()),
+                "apply empty turn",
+            );
+            let _ = must_ok(host.sweep_turn(), "sweep empty turn");
+        }
+        assert!(
+            host.public_receipts()
+                .iter()
+                .any(|r| r.regent_acted_seats.contains(&0) || r.converted_to_ai.contains(&0)),
+            "expected prior turn receipt with seat 0 Regent hit"
+        );
+        let err = match ensure_no_model_seat_regent_at_startup(
+            &host,
+            &[true, false, false, false],
+            &[false; 4],
+            &seats,
+        ) {
+            Err(e) => e,
+            Ok(()) => {
+                panic!("prior Regent hit on model seat must refuse even if has_regents is false")
+            }
+        };
+        assert_eq!(err.code(), "MODEL_SEAT_REGENT_INTERVENTION");
+        assert!(
+            err.to_string()
+                .contains("startup check refused already-voided run"),
+            "unexpected message: {err}"
+        );
     }
 }

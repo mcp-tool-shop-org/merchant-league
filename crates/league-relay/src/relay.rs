@@ -2902,6 +2902,14 @@ struct ChatCompletionRequestWire<'a> {
     tools: Option<&'a [serde_json::Value]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_prompt: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_logprobs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    return_tokens: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    return_token_ids: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6159,8 +6167,12 @@ fn run_single_automated_seat(
             SeatToolMode::Control { .. } => build_control_turn_orders_tool_definition(),
         }]
     });
-    let cache_prompt_wire =
-        (config.eval_mode && seat.backend_kind == BackendKind::Local).then_some(false);
+    let eval_local = config.eval_mode && seat.backend_kind == BackendKind::Local;
+    let cache_prompt_wire = eval_local.then_some(false);
+    let logprobs_wire = eval_local.then_some(true);
+    let top_logprobs_wire = eval_local.then_some(5);
+    let return_tokens_wire = eval_local.then_some(true);
+    let return_token_ids_wire = eval_local.then_some(true);
     let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
     let mut preview_calls_used = 0usize;
     let mut tool_round_index = 0usize;
@@ -6206,6 +6218,10 @@ fn run_single_automated_seat(
             include_reasoning: local_include_reasoning,
             tools: request_tools,
             cache_prompt: cache_prompt_wire,
+            logprobs: logprobs_wire,
+            top_logprobs: top_logprobs_wire,
+            return_tokens: return_tokens_wire,
+            return_token_ids: return_token_ids_wire,
         };
         let Ok(request_body) = serde_json::to_string(&request_wire) else {
             return SeatOutcome::SeatError {
@@ -7821,18 +7837,25 @@ enum EvaluatedCall {
 fn parse_single_tool_call_item(
     elem: serde_json::Value,
     tool_mode: PreviewToolMode,
-) -> ParsedToolCallItem {
+) -> Result<ParsedToolCallItem, String> {
+    let Some(id) = elem
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+    else {
+        return Err("MALFORMED_TOOL_CALL: tool call missing non-empty id".to_owned());
+    };
+
     if let Some(obj) = elem.as_object()
-        && let Some(serde_json::Value::String(id)) = obj.get("id")
-        && !id.is_empty()
         && let Some(serde_json::Value::String(kind)) = obj.get("type")
         && let Some(serde_json::Value::Object(fobj)) = obj.get("function")
         && let Some(serde_json::Value::String(name)) = fobj.get("name")
         && let Some(serde_json::Value::String(arguments)) = fobj.get("arguments")
     {
-        return ParsedToolCallItem {
+        return Ok(ParsedToolCallItem {
             wire: ChatToolCallWire {
-                id: id.clone(),
+                id,
                 kind: kind.clone(),
                 function: ChatToolCallFunctionWire {
                     name: name.clone(),
@@ -7841,19 +7864,13 @@ fn parse_single_tool_call_item(
             },
             raw_received_call: elem,
             is_well_formed: true,
-        };
+        });
     }
 
     let slot = |name| match tool_mode {
         PreviewToolMode::Control => control_wording_slot(name),
         PreviewToolMode::Off | PreviewToolMode::On => preview_wording_slot(name),
     };
-    let id = elem
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| slot("preview_code_MALFORMED_TOOL_CALL"));
     let kind = elem
         .get("type")
         .and_then(serde_json::Value::as_str)
@@ -7872,7 +7889,7 @@ fn parse_single_tool_call_item(
         Some(other) => other.to_string(),
         None => String::new(),
     };
-    ParsedToolCallItem {
+    Ok(ParsedToolCallItem {
         wire: ChatToolCallWire {
             id,
             kind,
@@ -7880,22 +7897,22 @@ fn parse_single_tool_call_item(
         },
         raw_received_call: elem,
         is_well_formed: false,
-    }
+    })
 }
 
 fn parse_response_tool_calls(
     raw_val: serde_json::Value,
     tool_mode: PreviewToolMode,
-) -> Option<Vec<ParsedToolCallItem>> {
+) -> Result<Option<Vec<ParsedToolCallItem>>, String> {
     match raw_val {
-        serde_json::Value::Null => None,
-        serde_json::Value::Array(arr) if arr.is_empty() => None,
-        serde_json::Value::Array(arr) => Some(
-            arr.into_iter()
-                .map(|elem| parse_single_tool_call_item(elem, tool_mode))
-                .collect(),
-        ),
-        other => Some(vec![parse_single_tool_call_item(other, tool_mode)]),
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Array(arr) if arr.is_empty() => Ok(None),
+        serde_json::Value::Array(arr) => arr
+            .into_iter()
+            .map(|elem| parse_single_tool_call_item(elem, tool_mode))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        other => parse_single_tool_call_item(other, tool_mode).map(|item| Some(vec![item])),
     }
 }
 
@@ -8137,17 +8154,32 @@ fn evaluate_call_result(
         _ => None,
     };
 
-    if allow_tools
-        && let Some(raw_calls) = raw_tool_calls_opt.clone()
-        && let Some(calls) = parse_response_tool_calls(raw_calls, tool_mode)
-    {
-        return EvaluatedCall::ToolCalls {
-            calls,
-            assistant_content: raw_content_opt,
-            persisted_reasoning,
-            model_returned,
-            usage,
-        };
+    if allow_tools && let Some(raw_calls) = raw_tool_calls_opt.clone() {
+        match parse_response_tool_calls(raw_calls, tool_mode) {
+            Ok(Some(calls)) => {
+                return EvaluatedCall::ToolCalls {
+                    calls,
+                    assistant_content: raw_content_opt,
+                    persisted_reasoning,
+                    model_returned,
+                    usage,
+                };
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                return EvaluatedCall::DeliveryFailure {
+                    reason,
+                    model_returned,
+                    usage,
+                    is_late_reply: false,
+                    discarded_reply: build_discarded_reply(
+                        raw_content_opt,
+                        persisted_reasoning,
+                        raw_tool_calls_opt,
+                    ),
+                };
+            }
+        }
     }
 
     let processed_content = raw_content_opt.as_ref().map(|c| match exclude_thinking {

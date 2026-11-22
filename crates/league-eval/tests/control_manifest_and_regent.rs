@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use league_core::{EvalHost, Seat, TableId};
 use league_eval::{
-    BranchManifest, BranchOptions, BranchSummary, EvalArm, EvalDecisionRecord, EvalError,
-    EvalManifest, MetadataProvenance, NoopTransport, PINNED_WRAPPERS, PlayOptions,
-    REJECTED_WRAPPER_HASHES, WordingArmDigests, check_wrapper_digest, eval_wording_slot,
-    run_branch_with_transport, run_play_with_transport,
+    BranchManifest, BranchOptions, EvalArm, EvalDecisionRecord, EvalError, EvalManifest,
+    MetadataProvenance, NoopTransport, PINNED_WRAPPERS, PlayOptions, REJECTED_WRAPPER_HASHES,
+    WordingArmDigests, check_wrapper_digest, eval_wording_slot, run_branch_with_transport,
+    run_play_with_transport,
 };
 use league_relay::{RawHttpResponse, Transport, TransportError, sha256_hex};
 use serde_json::{Value, json};
@@ -39,6 +39,51 @@ fn fresh_tmp_dir(label: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     must_ok(fs::create_dir_all(&dir), "create temp dir");
     dir
+}
+
+fn mock_chat_with_telemetry(
+    id: &str,
+    model: &str,
+    content: &str,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+) -> String {
+    let top_logprobs: Vec<Value> = (0_u64..5)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 500 + k,
+                "token_id": 500 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+    json!({
+        "id": id,
+        "model": model,
+        "prompt_token_ids": [101, 200, 300],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": content },
+            "token_ids": [11, 12],
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "token_id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_logprobs
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
+        }
+    })
+    .to_string()
 }
 
 fn copy_pinned_r3_wrapper(dir: &Path) -> PathBuf {
@@ -758,17 +803,13 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
             };
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": format!("mix-{step}"),
-                    "model": "Qwen/Qwen3-32B",
-                    "choices": [{
-                        "index": 0,
-                        "message": { "role": "assistant", "content": content },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": { "prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60 }
-                })
-                .to_string(),
+                body: mock_chat_with_telemetry(
+                    &format!("mix-{step}"),
+                    "Qwen/Qwen3-32B",
+                    &content,
+                    50,
+                    10,
+                ),
             })
         }
     }
@@ -1048,12 +1089,18 @@ fn serving_manifest_andons_provenance_vllm_and_subprocess_env_snapshot() {
         serde_json::from_str(&sub_manifest_raw),
         "parse child manifest",
     );
+    let expected_cuda_sha = sha256_hex(b"0");
     assert_eq!(
         sub_manifest
             .serving_env_snapshot
-            .get("CUDA_VISIBLE_DEVICES")
+            .get("CUDA_VISIBLE_DEVICES_sha256")
             .map(String::as_str),
-        Some("0")
+        Some(expected_cuda_sha.as_str())
+    );
+    assert!(
+        !sub_manifest
+            .serving_env_snapshot
+            .contains_key("CUDA_VISIBLE_DEVICES")
     );
     assert_eq!(
         sub_manifest
@@ -1108,17 +1155,7 @@ impl Transport for FixedReplyTransport {
     ) -> Result<RawHttpResponse, TransportError> {
         Ok(RawHttpResponse {
             status: 200,
-            body: json!({
-                "id": "regent-mock",
-                "model": "Qwen/Qwen3-32B",
-                "choices": [{
-                    "index": 0,
-                    "message": { "role": "assistant", "content": self.content },
-                    "finish_reason": "stop"
-                }],
-                "usage": { "prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50 }
-            })
-            .to_string(),
+            body: mock_chat_with_telemetry("regent-mock", "Qwen/Qwen3-32B", &self.content, 40, 10),
         })
     }
 }
@@ -1268,17 +1305,7 @@ fn regent_valid_passive_four_turns_never_triggers_regent() {
             };
             Ok(RawHttpResponse {
                 status: 200,
-                body: json!({
-                    "id": "passive-mock",
-                    "model": "Qwen/Qwen3-32B",
-                    "choices": [{
-                        "index": 0,
-                        "message": { "role": "assistant", "content": content },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": { "prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50 }
-                })
-                .to_string(),
+                body: mock_chat_with_telemetry("passive-mock", "Qwen/Qwen3-32B", &content, 40, 10),
             })
         }
     }
@@ -1364,6 +1391,44 @@ fn regent_andon_voids_game_and_branch_and_counts_by_arm() {
         league_eval::persist_eval_game_state(&seeded_host, &seeded_dir),
         "persist seeded host",
     );
+    struct CountingRejectTransport {
+        calls: AtomicUsize,
+    }
+    impl Transport for CountingRejectTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(8)
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(RawHttpResponse {
+                status: 200,
+                body: mock_chat_with_telemetry(
+                    "regent-andon-unused",
+                    "Qwen/Qwen3-32B",
+                    "{not_valid_json",
+                    40,
+                    10,
+                ),
+            })
+        }
+    }
+
+    let play_counter = CountingRejectTransport {
+        calls: AtomicUsize::new(0),
+    };
     let andon_err = match run_play_with_transport(
         &PlayOptions {
             game_dir: seeded_dir.clone(),
@@ -1381,72 +1446,916 @@ fn regent_andon_voids_game_and_branch_and_counts_by_arm() {
             cap_gpu_secs: None,
             allowed_vm_hosts: Vec::new(),
         },
-        &FixedReplyTransport {
-            content: "{not_valid_json".to_owned(),
-        },
+        &play_counter,
         None,
     ) {
         Err(e) => e,
-        Ok(_) => panic!("table with Regent intervening on Model seat must void with Andon"),
+        Ok(_) => panic!("table with Regent on Model seat must refuse at startup"),
     };
     assert_eq!(andon_err.code(), "MODEL_SEAT_REGENT_INTERVENTION");
-    let voided_manifest: EvalManifest = must_ok(
-        serde_json::from_str(&must_ok(
-            fs::read_to_string(seeded_dir.join("manifest.json")),
-            "read voided manifest",
-        )),
-        "parse voided manifest",
-    );
-    assert!(voided_manifest.voided);
     assert_eq!(
-        voided_manifest.void_error_code.as_deref(),
-        Some("MODEL_SEAT_REGENT_INTERVENTION")
+        play_counter.calls.load(Ordering::SeqCst),
+        0,
+        "startup Regent refusal must make zero model or tokenizer calls"
     );
-    assert_eq!(voided_manifest.voided_games_by_arm.get("off"), Some(&1));
+
+    let club_source_dir = tmp.join("regent_c_club_source");
+    let club_seats_path = write_seats(&tmp.join("regent_c_club_seats"), all_clubbot_seats());
+    let _club_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: club_source_dir.clone(),
+                seats_path: club_seats_path,
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: None,
+                arm: EvalArm::Off,
+                table_id: 64,
+                seed: 7,
+                turns: 4,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        ),
+        "all-ClubBot 4-turn game to produce day-04-pre-act checkpoint with Seat 0 Regent",
+    );
 
     let branch_void_out = tmp.join("regent_c_andon_branch");
+    let branch_counter = CountingRejectTransport {
+        calls: AtomicUsize::new(0),
+    };
     let branch_void_err = match run_branch_with_transport(
         &BranchOptions {
-            checkpoint_prefix: Some(seeded_dir.join("checkpoints/day-04-pre-act")),
+            checkpoint_prefix: Some(club_source_dir.join("checkpoints/day-04-pre-act")),
             list_path: None,
             focal_seat: Some("Foundry".to_owned()),
             seats_path,
             wrapper_path,
             serving_manifest_path: Some(serving_path),
             arms: vec![EvalArm::Off],
-            out_dir: branch_void_out.clone(),
+            out_dir: branch_void_out,
             memory_mode: league_relay::MemoryMode::Snapshot,
             live: false,
             cap_credits: None,
             cap_gpu_secs: None,
             allowed_vm_hosts: Vec::new(),
         },
-        &FixedReplyTransport {
-            content: "{not_valid_json".to_owned(),
-        },
+        &branch_counter,
         None,
     ) {
         Err(e) => e,
-        Ok(_) => panic!("branch with Regent intervening on Model seat must void with Andon"),
+        Ok(_) => panic!("branch with Regent on Model seat must refuse at startup"),
     };
     assert_eq!(branch_void_err.code(), "MODEL_SEAT_REGENT_INTERVENTION");
-    let branch_summary: BranchSummary = must_ok(
-        serde_json::from_str(&must_ok(
-            fs::read_to_string(branch_void_out.join("branch_summary.json")),
-            "read voided branch_summary",
-        )),
-        "parse voided branch_summary",
+    assert_eq!(
+        branch_counter.calls.load(Ordering::SeqCst),
+        0,
+        "branch startup Regent refusal must make zero model or tokenizer calls"
     );
-    assert_eq!(branch_summary.voided_games_by_arm.get("off"), Some(&1));
-    let branch_manifest: BranchManifest = must_ok(
-        serde_json::from_str(&must_ok(
-            fs::read_to_string(branch_void_out.join("manifest.json")),
-            "read voided branch manifest",
-        )),
-        "parse voided branch manifest",
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_s1_missing_telemetry_fields_fail_closed() {
+    struct MissingFieldTransport {
+        body: String,
+    }
+    impl Transport for MissingFieldTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(8)
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            Ok(RawHttpResponse {
+                status: 200,
+                body: self.body.clone(),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("fix2_s1_missing_telemetry");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let serving_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+
+    let clean_talk =
+        json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" }).to_string();
+    let top_five: Vec<Value> = (0_u64..5)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 200 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+
+    // Case 1: missing `prompt_token_ids` fails closed with `MISSING_REPLY_TELEMETRY`.
+    let no_prompt_ids = json!({
+        "id": "s1-no-prompt-ids",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": clean_talk },
+            "token_ids": [11],
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_five
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+    })
+    .to_string();
+    // Case 2: missing both `token_ids` and `logprobs.content[].id`/`token_id`.
+    let no_reply_ids = json!({
+        "id": "s1-no-reply-ids",
+        "model": "Qwen/Qwen3-32B",
+        "prompt_token_ids": [101, 102],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": clean_talk },
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "logprob": -0.01,
+                    "top_logprobs": top_five
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+    })
+    .to_string();
+    // Case 3: missing `top_logprobs`.
+    let no_top_logprobs = json!({
+        "id": "s1-no-top-lp",
+        "model": "Qwen/Qwen3-32B",
+        "prompt_token_ids": [101, 102],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": clean_talk },
+            "token_ids": [11],
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": []
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+    })
+    .to_string();
+
+    for (idx, body) in [no_prompt_ids, no_reply_ids, no_top_logprobs]
+        .into_iter()
+        .enumerate()
+    {
+        let err = match run_play_with_transport(
+            &PlayOptions {
+                game_dir: tmp.join(format!("s1_case_{idx}")),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(serving_path.clone()),
+                arm: EvalArm::Off,
+                table_id: 210 + idx as u64,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &MissingFieldTransport { body },
+            None,
+        ) {
+            Err(e) => e,
+            Ok(_) => panic!("case {idx} lacking reply telemetry must fail closed"),
+        };
+        assert_eq!(
+            err.code(),
+            "MISSING_REPLY_TELEMETRY",
+            "case {idx} got unexpected error: {err}"
+        );
+    }
+
+    // Happy path with `llama-server` `id` inside `logprobs.content[]` (no top-level `token_ids`).
+    let llama_style = json!({
+        "id": "s1-llama-id",
+        "model": "Qwen/Qwen3-32B",
+        "prompt_token_ids": [101, 102, 103],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": clean_talk },
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_five
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+    })
+    .to_string();
+    let ok_game = tmp.join("s1_llama_id_ok");
+    let _m = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: ok_game.clone(),
+                seats_path,
+                wrapper_path,
+                wrapper_version: None,
+                serving_manifest_path: Some(serving_path),
+                arm: EvalArm::Off,
+                table_id: 215,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &MissingFieldTransport { body: llama_style },
+            None,
+        ),
+        "llama-server logprobs.content[].id style must satisfy reply_token_ids",
     );
-    assert!(branch_manifest.voided);
-    assert_eq!(branch_manifest.voided_games_by_arm.get("off"), Some(&1));
+    let rec: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(ok_game.join("decisions/day-01-talk-Foundry.json")),
+            "read s1 decision",
+        )),
+        "parse s1 decision",
+    );
+    assert_eq!(rec.reply_token_ids, vec![vec![11]]);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_s2_subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
+    fn collect_all_files(root: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                collect_all_files(&p, out);
+            } else {
+                out.push(p);
+            }
+        }
+        out.sort();
+    }
+
+    let tmp = fresh_tmp_dir("fix2_s2_sub");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let club_seats_path = write_seats(&tmp, all_clubbot_seats());
+    let llama_ok_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+    let sub_game = tmp.join("sub_gpu_mig_game");
+    let fake_home = tmp.join("sandbox_home");
+    must_ok(fs::create_dir_all(&fake_home), "create fake home");
+
+    let gpu_uuid = [
+        "GPU",
+        "-",
+        "abcd1234",
+        "-",
+        "1111",
+        "-",
+        "2222",
+        "-",
+        "3333",
+        "-",
+        "cafe4567dead",
+    ]
+    .concat();
+    let mig_uuid = ["MIG", "-", "9876fedc", "-", "4444", "-", "0", "-", "2"].concat();
+
+    let bin = env!("CARGO_BIN_EXE_league-eval");
+    let out = must_ok(
+        Command::new(bin)
+            .args([
+                "play",
+                "--game-dir",
+                &sub_game.to_string_lossy(),
+                "--seats",
+                &club_seats_path.to_string_lossy(),
+                "--wrapper",
+                &wrapper_path.to_string_lossy(),
+                "--serving-manifest",
+                &llama_ok_path.to_string_lossy(),
+                "--arm",
+                "control",
+                "--turns",
+                "1",
+                "--seed",
+                "7",
+            ])
+            .env("HOME", &fake_home)
+            .env("USERPROFILE", &fake_home)
+            .env("CUDA_VISIBLE_DEVICES", &gpu_uuid)
+            .env("VLLM_MIG_UUID", &mig_uuid)
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("GEMINI_API_KEY")
+            .output(),
+        "run child league-eval with GPU/MIG env vars",
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let sub_manifest: EvalManifest = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(sub_game.join("manifest.json")),
+            "read child manifest",
+        )),
+        "parse child manifest",
+    );
+    assert_eq!(
+        sub_manifest
+            .serving_env_snapshot
+            .get("CUDA_VISIBLE_DEVICES_sha256")
+            .map(String::as_str),
+        Some(sha256_hex(gpu_uuid.as_bytes()).as_str())
+    );
+    assert_eq!(
+        sub_manifest
+            .serving_env_snapshot
+            .get("VLLM_MIG_UUID_sha256")
+            .map(String::as_str),
+        Some(sha256_hex(mig_uuid.as_bytes()).as_str())
+    );
+    assert!(
+        !sub_manifest
+            .serving_env_snapshot
+            .contains_key("CUDA_VISIBLE_DEVICES")
+    );
+    assert!(
+        !sub_manifest
+            .serving_env_snapshot
+            .contains_key("VLLM_MIG_UUID")
+    );
+
+    let mut files = Vec::new();
+    collect_all_files(&sub_game, &mut files);
+    assert!(!files.is_empty());
+    for file in files {
+        let content = fs::read_to_string(&file).unwrap_or_default();
+        assert!(
+            !content.contains(&gpu_uuid) && !content.contains("cafe4567dead"),
+            "raw GPU UUID leaked into {}",
+            file.display()
+        );
+        assert!(
+            !content.contains(&mig_uuid) && !content.contains("9876fedc"),
+            "raw MIG ID leaked into {}",
+            file.display()
+        );
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_s4_resume_refuses_mismatched_serving_manifest() {
+    let tmp = fresh_tmp_dir("fix2_s4_resume_manifest");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let m1_path = write_serving_manifest_json(&tmp, "serving_a.json", &base_llama_serving_json());
+    let mut altered = base_llama_serving_json();
+    altered["model"]["sha256"] =
+        json!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    let m2_path = write_serving_manifest_json(&tmp, "serving_b.json", &altered);
+
+    struct CleanTurnTransport;
+    impl Transport for CleanTurnTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(8)
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let content =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: mock_chat_with_telemetry("s4-ok", "Qwen/Qwen3-32B", &content, 40, 10),
+            })
+        }
+    }
+
+    let game_dir = tmp.join("s4_game");
+    let _first = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(m1_path),
+                arm: EvalArm::Off,
+                table_id: 220,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &CleanTurnTransport,
+            None,
+        ),
+        "turn 1 play",
+    );
+
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir,
+            seats_path,
+            wrapper_path,
+            wrapper_version: None,
+            serving_manifest_path: Some(m2_path),
+            arm: EvalArm::Off,
+            table_id: 220,
+            seed: 7,
+            turns: 2,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &CleanTurnTransport,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("resuming with different --serving-manifest must refuse"),
+    };
+    assert_eq!(err.code(), "INCOMPATIBLE_EVAL_SETUP");
+    assert!(
+        err.to_string().contains("--serving-manifest"),
+        "expected --serving-manifest in error, got: {err}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_s7_manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
+    let tmp = fresh_tmp_dir("fix2_s7_scrub");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let club_seats_path = write_seats(&tmp, all_clubbot_seats());
+
+    let sk_secret = ["sk", "-", "live", "-", "0123456789abcdef"].concat();
+    let model_filename = format!("/home/probeuser/models/{sk_secret}.gguf");
+    let hf_secret = ["hf", "_", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5"].concat();
+    let os_build = format!("token={hf_secret}");
+    let ghp_secret = ["ghp", "_", "99887766554433221100aabbccddeeff"].concat();
+    let gh_pat_secret = ["github", "_", "pat", "_", "11223344556677889900aabbccdd"].concat();
+    let bearer_secret = ["Bea", "rer", " zyx9876543210token"].concat();
+    let api_key_kv = ["api", "_", "key=", "my_raw_apikey_val_111"].concat();
+    let secret_kv = ["sec", "ret=", "my_raw_secret_val_222"].concat();
+    let password_kv = ["pass", "word=", "my_raw_password_val_333"].concat();
+    let auth_kv = ["au", "th=", "my_raw_auth_val_444"].concat();
+
+    let mut manifest_val = base_llama_serving_json();
+    manifest_val["model"]["filename"] = json!(model_filename);
+    manifest_val["machine"]["os_build"] = json!(os_build);
+    manifest_val["server_version"] = json!(format!("b11433 {api_key_kv} {secret_kv}"));
+    manifest_val["server_build_commit"] = json!(format!("deadbeef {password_kv}"));
+    manifest_val["machine"]["gpu_name"] = json!(format!("NVIDIA {auth_kv} {gh_pat_secret}"));
+    let manifest_path = write_serving_manifest_json(&tmp, "scrub_manifest.json", &manifest_val);
+
+    let game_dir = tmp.join("s7_game");
+    let fake_home = tmp.join("sandbox_home");
+    must_ok(fs::create_dir_all(&fake_home), "create fake home");
+
+    let bin = env!("CARGO_BIN_EXE_league-eval");
+    let out = must_ok(
+        Command::new(bin)
+            .args([
+                "play",
+                "--game-dir",
+                &game_dir.to_string_lossy(),
+                "--seats",
+                &club_seats_path.to_string_lossy(),
+                "--wrapper",
+                &wrapper_path.to_string_lossy(),
+                "--serving-manifest",
+                &manifest_path.to_string_lossy(),
+                "--arm",
+                "control",
+                "--turns",
+                "1",
+                "--seed",
+                "7",
+            ])
+            .env("HOME", &fake_home)
+            .env("USERPROFILE", &fake_home)
+            .env("VLLM_ENV_GHP", &ghp_secret)
+            .env("VLLM_ENV_PAT", &gh_pat_secret)
+            .env("LLAMA_ENV_BEARER", &bearer_secret)
+            .env("LLAMA_ENV_KV", format!("{api_key_kv} {secret_kv}"))
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("GEMINI_API_KEY")
+            .output(),
+        "run child league-eval for manifest and env scrubbing",
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let manifest_raw = must_ok(
+        fs::read_to_string(game_dir.join("manifest.json")),
+        "read s7 manifest.json",
+    );
+    for secret in [
+        sk_secret.as_str(),
+        "0123456789abcdef",
+        hf_secret.as_str(),
+        "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5",
+        ghp_secret.as_str(),
+        "99887766554433221100aabbccddeeff",
+        gh_pat_secret.as_str(),
+        "11223344556677889900aabbccdd",
+        "zyx9876543210token",
+        "my_raw_apikey_val_111",
+        "my_raw_secret_val_222",
+        "my_raw_password_val_333",
+        "my_raw_auth_val_444",
+        "/home/probeuser",
+    ] {
+        assert!(
+            !manifest_raw.contains(secret),
+            "secret/home substring '{secret}' leaked into manifest.json: {manifest_raw}"
+        );
+    }
+
+    let parsed: EvalManifest = must_ok(serde_json::from_str(&manifest_raw), "parse s7 manifest");
+    let srv = must_some(parsed.serving, "serving record present");
+    assert!(srv.model.filename.starts_with("<home>/models/"));
+    assert!(srv.model.filename.contains("[REDACTED]"));
+    assert!(srv.machine.os_build.contains("[REDACTED]"));
+    assert!(srv.server_version.value.contains("[REDACTED]"));
+    assert!(
+        srv.server_build_commit
+            .as_ref()
+            .is_some_and(|v| v.value.contains("[REDACTED]"))
+    );
+    assert!(srv.machine.gpu_name.contains("[REDACTED]"));
+
+    // Unsafe raw GPU UUID placed inside a free-text manifest field refuses with UNSAFE_MANIFEST_VALUE.
+    let mut unsafe_val = base_llama_serving_json();
+    let leaked_gpu = [
+        "GPU",
+        "-",
+        "deadbeef",
+        "-",
+        "1234",
+        "-",
+        "5678",
+        "-",
+        "90ab",
+        "-",
+        "fedcba098765",
+    ]
+    .concat();
+    unsafe_val["machine"]["os_build"] = json!(format!("host-{leaked_gpu}"));
+    let unsafe_path = write_serving_manifest_json(&tmp, "unsafe_manifest.json", &unsafe_val);
+    let err = match league_eval::load_and_validate_serving_manifest(&unsafe_path) {
+        Err(e) => e,
+        Ok(_) => panic!("raw GPU UUID in free-text field must refuse"),
+    };
+    assert_eq!(err.code(), "UNSAFE_MANIFEST_VALUE");
+    assert!(!err.to_string().contains(&leaked_gpu));
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_s8_regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls() {
+    struct ZeroCallTransport {
+        calls: AtomicUsize,
+    }
+    impl Transport for ZeroCallTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(8)
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(RawHttpResponse {
+                status: 500,
+                body: "{\"error\":\"should not be called\"}".to_owned(),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("fix2_s8_startup");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let serving_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+
+    // Case 1: Model seat has a Standing Regent configured at startup.
+    let seeded_dir = tmp.join("s8_configured_regent");
+    must_ok(
+        fs::create_dir_all(&seeded_dir),
+        "mkdir s8_configured_regent",
+    );
+    let seeded_host = must_ok(
+        EvalHost::from_standard_setup_with_model_seats(TableId(230), 4, 7, 111, &[false; 4]),
+        "seed host with Seat 0 Regent",
+    );
+    let _ = must_ok(
+        league_eval::persist_eval_game_state(&seeded_host, &seeded_dir),
+        "persist seeded host",
+    );
+    let t1 = ZeroCallTransport {
+        calls: AtomicUsize::new(0),
+    };
+    let err1 = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: seeded_dir,
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Off,
+            table_id: 230,
+            seed: 7,
+            turns: 2,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &t1,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("Model seat with Standing Regent must refuse at startup"),
+    };
+    assert_eq!(err1.code(), "MODEL_SEAT_REGENT_INTERVENTION");
+    assert_eq!(
+        t1.calls.load(Ordering::SeqCst),
+        0,
+        "Case 1 must refuse before making any model or tokenizer calls"
+    );
+
+    // Case 2: Resumed host whose earlier receipt already records a Seat-0 Regent intervention.
+    let prior_dir = tmp.join("s8_prior_receipt");
+    must_ok(fs::create_dir_all(&prior_dir), "mkdir s8_prior_receipt");
+    let mut prior_host = must_ok(
+        EvalHost::from_standard_setup_with_model_seats(TableId(231), 4, 7, 222, &[false; 4]),
+        "seed host for prior Regent receipt",
+    );
+    for _ in 0..4 {
+        let _ = must_ok(
+            prior_host.apply_act_submissions(&std::collections::BTreeMap::new()),
+            "apply empty turn for Regent sweep",
+        );
+        let _ = must_ok(prior_host.sweep_turn(), "sweep empty turn");
+    }
+    assert!(
+        prior_host
+            .public_receipts()
+            .iter()
+            .any(|r| r.regent_acted_seats.contains(&0) || r.converted_to_ai.contains(&0)),
+        "expected prior turn receipt with seat 0 Regent hit"
+    );
+    let _ = must_ok(
+        league_eval::persist_eval_game_state(&prior_host, &prior_dir),
+        "persist host with prior Regent receipt",
+    );
+    let wrapper_sha = sha256_hex(&must_ok(fs::read(&wrapper_path), "read r3 wrapper bytes"));
+    let seats_sha = sha256_hex(&must_ok(fs::read(&seats_path), "read seats bytes"));
+    let serving_rec = must_ok(
+        league_eval::load_and_validate_serving_manifest(&serving_path),
+        "load validated serving manifest",
+    );
+    let serving_sha = sha256_hex(&must_ok(
+        serde_json::to_vec(&serving_rec),
+        "encode serving manifest record",
+    ));
+    let setup_json = json!({
+        "game_id": prior_host.game_id(),
+        "table_id": 231,
+        "seed": 7,
+        "turns": 6,
+        "seat_count": 4,
+        "arm": "off",
+        "eval_reply_wording_arm": league_eval::EVAL_REPLY_WORDING_ARM,
+        "relay_wording_arm": "v2_tool_off",
+        "wrapper_version": "v2_seat_brief_2026_11_21_r3",
+        "wrapper_sha256": wrapper_sha,
+        "memory_mode": "snapshot",
+        "seats_sha256": seats_sha,
+        "response_schema_sha256": null,
+        "serving_manifest_sha256": serving_sha
+    });
+    must_ok(
+        fs::write(
+            prior_dir.join("setup.json"),
+            must_ok(serde_json::to_string_pretty(&setup_json), "ser setup.json"),
+        ),
+        "write setup.json for resume path",
+    );
+    let t2 = ZeroCallTransport {
+        calls: AtomicUsize::new(0),
+    };
+    let err2 = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: prior_dir,
+            seats_path,
+            wrapper_path,
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path),
+            arm: EvalArm::Off,
+            table_id: 231,
+            seed: 7,
+            turns: 6,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &t2,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("resumed host with prior Regent receipt must refuse at startup"),
+    };
+    assert_eq!(err2.code(), "MODEL_SEAT_REGENT_INTERVENTION");
+    assert!(
+        err2.to_string()
+            .contains("startup check refused already-voided run"),
+        "expected already-voided startup refusal message, got: {err2}"
+    );
+    assert_eq!(
+        t2.calls.load(Ordering::SeqCst),
+        0,
+        "Case 2 must refuse before making any model or tokenizer calls"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fix2_item9_hash_and_json_errors_never_echo_raw_values() {
+    let tmp = fresh_tmp_dir("fix2_item9_no_echo");
+
+    // 1. Raw GPU UUID placed into `machine.gpu_uuid_sha256` names the field and hides the UUID.
+    let raw_gpu_uuid = [
+        "GPU",
+        "-",
+        "1234abcd",
+        "-",
+        "0000",
+        "-",
+        "1111",
+        "-",
+        "2222",
+        "-",
+        "deadbeef9999",
+    ]
+    .concat();
+    let mut bad_gpu_hash = base_llama_serving_json();
+    bad_gpu_hash["machine"]["gpu_uuid_sha256"] = json!(raw_gpu_uuid);
+    let p_gpu = write_serving_manifest_json(&tmp, "bad_gpu_hash.json", &bad_gpu_hash);
+    let err_gpu = match league_eval::load_and_validate_serving_manifest(&p_gpu) {
+        Err(e) => e,
+        Ok(_) => panic!("raw GPU UUID in gpu_uuid_sha256 must fail"),
+    };
+    assert_eq!(err_gpu.code(), "INVALID_GPU_UUID_SHA256");
+    let msg_gpu = err_gpu.to_string();
+    assert!(msg_gpu.contains("gpu_uuid_sha256"), "msg: {msg_gpu}");
+    assert!(!msg_gpu.contains(&raw_gpu_uuid), "echoed UUID: {msg_gpu}");
+    assert!(!msg_gpu.contains("deadbeef9999"), "echoed UUID: {msg_gpu}");
+
+    // 2. Invalid `model.sha256` names the field and never echoes the raw invalid value.
+    let bad_model_sha = ["nothex-model-", "sentinel-998877"].concat();
+    let mut bad_m = base_llama_serving_json();
+    bad_m["model"]["sha256"] = json!(bad_model_sha);
+    let p_m = write_serving_manifest_json(&tmp, "bad_model_sha.json", &bad_m);
+    let err_m = match league_eval::load_and_validate_serving_manifest(&p_m) {
+        Err(e) => e,
+        Ok(_) => panic!("bad model.sha256 must fail"),
+    };
+    assert_eq!(err_m.code(), "MISSING_MODEL_SHA256");
+    let msg_m = err_m.to_string();
+    assert!(msg_m.contains("model.sha256"), "msg: {msg_m}");
+    assert!(!msg_m.contains(&bad_model_sha), "echoed value: {msg_m}");
+    assert!(!msg_m.contains("sentinel-998877"), "echoed value: {msg_m}");
+
+    // 3. Invalid `model.chat_template_sha256` names the field and never echoes the raw value.
+    let bad_tpl_sha = ["nothex-tpl-", "sentinel-665544"].concat();
+    let mut bad_t = base_llama_serving_json();
+    bad_t["model"]["chat_template_sha256"] = json!(bad_tpl_sha);
+    let p_t = write_serving_manifest_json(&tmp, "bad_tpl_sha.json", &bad_t);
+    let err_t = match league_eval::load_and_validate_serving_manifest(&p_t) {
+        Err(e) => e,
+        Ok(_) => panic!("bad model.chat_template_sha256 must fail"),
+    };
+    assert_eq!(err_t.code(), "MISSING_SERVING_MANIFEST");
+    let msg_t = err_t.to_string();
+    assert!(msg_t.contains("model.chat_template_sha256"), "msg: {msg_t}");
+    assert!(!msg_t.contains(&bad_tpl_sha), "echoed value: {msg_t}");
+    assert!(!msg_t.contains("sentinel-665544"), "echoed value: {msg_t}");
+
+    // 4. Malformed JSON with secret-bearing string refuses with line/column only, never echoes text.
+    let secret_json_val = ["SENTINEL_BAD_JSON_", "SECRET_776655"].concat();
+    let bad_json_path = tmp.join("bad_json.json");
+    must_ok(
+        fs::write(
+            &bad_json_path,
+            format!("{{\"engine\": \"{secret_json_val}\"}}"),
+        ),
+        "write bad json",
+    );
+    let err_j = match league_eval::load_and_validate_serving_manifest(&bad_json_path) {
+        Err(e) => e,
+        Ok(_) => panic!("unknown engine enum string must fail"),
+    };
+    assert_eq!(err_j.code(), "MISSING_SERVING_MANIFEST");
+    let msg_j = err_j.to_string();
+    assert!(msg_j.contains("line "), "msg: {msg_j}");
+    assert!(
+        !msg_j.contains(&secret_json_val),
+        "echoed JSON string: {msg_j}"
+    );
+    assert!(
+        !msg_j.contains("SECRET_776655"),
+        "echoed JSON string: {msg_j}"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }

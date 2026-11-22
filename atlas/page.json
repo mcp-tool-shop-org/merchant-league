@@ -97,43 +97,24 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 4,
-      "changed": 24,
+      "added": 0,
+      "changed": 18,
       "moved": 0,
-      "parts": 6,
+      "parts": 5,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-eval/build.rs and crates/league-eval/src/serving.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-eval/build.rs",
-          "crates/league-eval/src/serving.rs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md is now read by crates/league-eval/tests/addendum_item9.rs, crates/league-eval/tests/control_manifest_and_regent.rs and crates/league-eval/tests/play_and_branch.rs.",
-        "subjects": [
-          "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md",
-          "crates/league-eval/tests/addendum_item9.rs",
-          "crates/league-eval/tests/control_manifest_and_regent.rs",
-          "crates/league-eval/tests/play_and_branch.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "4 files added and 24 changed content, across 6 parts.",
+        "sentence": "Nothing structural changed since 2026-11-22; 18 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "04a42f04dc14701751bf1679cfb7897db1eb636f",
-      "generatedAt": "2026-11-21T19:10:28.558Z"
+      "commit": "f318ac6c54c30a763ffa8e4a259ff761fa321773",
+      "generatedAt": "2026-11-22T02:01:25.152Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -152,24 +133,9 @@
       "shared": 5
     },
     {
-      "a": "crates/league-core/src/engine.rs",
-      "b": "crates/league-core/tests/replay_invariants.rs",
-      "either": 10,
-      "partLabels": [
-        "league-core",
-        "league-core"
-      ],
-      "parts": [
-        "league-core",
-        "league-core"
-      ],
-      "relation": "inside",
-      "shared": 8
-    },
-    {
       "a": "crates/league-relay/src/relay.rs",
       "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 28,
+      "either": 29,
       "partLabels": [
         "league-relay",
         "league-relay"
@@ -179,7 +145,7 @@
         "league-relay"
       ],
       "relation": "inside",
-      "shared": 22
+      "shared": 23
     },
     {
       "a": "crates/league-gen/src/generator.rs",
@@ -210,14 +176,29 @@
       ],
       "relation": "inside",
       "shared": 9
+    },
+    {
+      "a": "crates/league-gen/src/empirical.rs",
+      "b": "crates/league-gen/src/generator.rs",
+      "either": 8,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
+      ],
+      "relation": "inside",
+      "shared": 6
     }
   ],
   "changesTogetherNote": [
     "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
-    "Window: 180 days; a pair counts from 3 shared commits, since 9 source files reach 10 revisions; the floor rises to 10 when 25 do."
+    "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "f318ac6c54c30a763ffa8e4a259ff761fa321773",
+  "commit": "cd31764bdfbf836909602ebf5f8bd9be113fb720",
   "defaultBranch": "main",
   "derived": "15 parts, mostly Rust (392 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -704,10 +685,10 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-22T02:01:25.152Z",
+  "generatedAt": "2026-11-22T05:01:38.385Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "37 writes and 30 reads use paths built at run time and are not named here.",
+    "37 writes and 31 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
     "18 writes and 44 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",

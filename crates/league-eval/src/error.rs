@@ -40,6 +40,14 @@ pub enum EvalError {
     MissingGpuName(String),
     /// GPU UUID / SHA-256 missing or invalid in serving manifest (`exit 1`).
     InvalidGpuUuidSha256(String),
+    /// Build-time `crate_git_sha` is missing, `"unknown"`, or stale relative to git HEAD (`exit 2`).
+    InvalidCrateGitSha(String),
+    /// Operator serving manifest or env snapshot contains a secret or value that cannot be scrubbed (`exit 1`).
+    UnsafeManifestValue(String),
+    /// Server HTTP 200 reply omitted required prompt token IDs, reply token IDs, or top-k logprobs (`exit 2`).
+    MissingReplyTelemetry(String),
+    /// Reported refused actions exceed submitted actions (`exit 2`).
+    InvalidActionCount(String),
     /// A Standing Regent intervened for a model-driven seat, voiding the game (`exit 2`).
     ModelSeatRegentIntervention(String),
     /// Unified response schema construction or relay setup validation failed (`exit 2`).
@@ -98,6 +106,10 @@ impl EvalError {
             Self::MissingModelSha256(_) => "MISSING_MODEL_SHA256",
             Self::MissingGpuName(_) => "MISSING_GPU_NAME",
             Self::InvalidGpuUuidSha256(_) => "INVALID_GPU_UUID_SHA256",
+            Self::InvalidCrateGitSha(_) => "INVALID_CRATE_GIT_SHA",
+            Self::UnsafeManifestValue(_) => "UNSAFE_MANIFEST_VALUE",
+            Self::MissingReplyTelemetry(_) => "MISSING_REPLY_TELEMETRY",
+            Self::InvalidActionCount(_) => "INVALID_ACTION_COUNT",
             Self::ModelSeatRegentIntervention(_) => "MODEL_SEAT_REGENT_INTERVENTION",
             Self::SchemaValidation(_) => "SCHEMA_VALIDATION_FAILED",
             Self::CheckpointNotFound(_) => "CHECKPOINT_NOT_FOUND",
@@ -136,6 +148,7 @@ impl EvalError {
             | Self::MissingModelSha256(_)
             | Self::MissingGpuName(_)
             | Self::InvalidGpuUuidSha256(_)
+            | Self::UnsafeManifestValue(_)
             | Self::CheckpointNotFound(_)
             | Self::InsufficientTurnsForStrata(_)
             | Self::InvalidStrata(_)
@@ -152,6 +165,9 @@ impl EvalError {
             | Self::NoModelSeatsForSelect(_) => EXIT_USER_ERROR,
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
+            | Self::InvalidCrateGitSha(_)
+            | Self::MissingReplyTelemetry(_)
+            | Self::InvalidActionCount(_)
             | Self::ModelSeatRegentIntervention(_)
             | Self::SchemaValidation(_)
             | Self::Engine(_)
@@ -190,6 +206,18 @@ impl fmt::Display for EvalError {
             Self::MissingGpuName(msg) => write!(f, "MISSING_GPU_NAME: {}", scrub_secret_text(msg)),
             Self::InvalidGpuUuidSha256(msg) => {
                 write!(f, "INVALID_GPU_UUID_SHA256: {}", scrub_secret_text(msg))
+            }
+            Self::InvalidCrateGitSha(msg) => {
+                write!(f, "INVALID_CRATE_GIT_SHA: {}", scrub_secret_text(msg))
+            }
+            Self::UnsafeManifestValue(msg) => {
+                write!(f, "UNSAFE_MANIFEST_VALUE: {}", scrub_secret_text(msg))
+            }
+            Self::MissingReplyTelemetry(msg) => {
+                write!(f, "MISSING_REPLY_TELEMETRY: {}", scrub_secret_text(msg))
+            }
+            Self::InvalidActionCount(msg) => {
+                write!(f, "INVALID_ACTION_COUNT: {}", scrub_secret_text(msg))
             }
             Self::ModelSeatRegentIntervention(msg) => write!(
                 f,
@@ -344,6 +372,30 @@ impl ToStructuredError for EvalError {
                 self.code(),
                 self.to_string(),
                 "supply a non-empty `gpu_uuid` (hashed at load time) or 64-hex `gpu_uuid_sha256`",
+                false,
+            ),
+            Self::InvalidCrateGitSha(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "rebuild `league-eval` cleanly inside the checked-out git revision so `crate_git_sha` matches HEAD",
+                false,
+            ),
+            Self::UnsafeManifestValue(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "remove raw GPU/MIG identifiers, control characters, or un-scrubbable secrets from serving metadata",
+                false,
+            ),
+            Self::MissingReplyTelemetry(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure the serving backend returns `prompt_token_ids`, reply token IDs, and top-k `logprobs.content` on HTTP 200 replies",
+                false,
+            ),
+            Self::InvalidActionCount(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "inspect decision apply report counts: refused action count cannot exceed submitted action count",
                 false,
             ),
             Self::ModelSeatRegentIntervention(_) => StructuredError::new(

@@ -52,6 +52,49 @@ fn fresh_tmp_dir(label: &str) -> PathBuf {
     dir
 }
 
+fn mock_chat_completion_json(id: &str, model: &str, content: &str, include_cost: bool) -> String {
+    let top_logprobs: Vec<_> = (0_u64..5)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 20 + k,
+                "token_id": 20 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+    let mut usage = json!({
+        "prompt_tokens": 50,
+        "completion_tokens": 20,
+        "total_tokens": 70
+    });
+    if include_cost {
+        usage["cost"] = json!(0.001);
+    }
+    json!({
+        "id": id,
+        "model": model,
+        "prompt_token_ids": [101, 102, 103],
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": content },
+            "token_ids": [11, 12],
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "token_id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_logprobs
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": usage
+    })
+    .to_string()
+}
+
 struct MockTransport {
     replies: Mutex<VecDeque<String>>,
     recorded_bodies: Mutex<Vec<String>>,
@@ -96,25 +139,8 @@ impl Transport for MockTransport {
             q.pop_front()
                 .ok_or_else(|| TransportError::Network("mock reply queue empty".to_owned()))?
         };
-        let resp = json!({
-            "id": "mock-chat-1",
-            "model": "qwen/qwen3-32b",
-            "choices": [{
-                "index": 0,
-                "message": { "role": "assistant", "content": content },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 50,
-                "completion_tokens": 20,
-                "total_tokens": 70,
-                "cost": 0.001
-            }
-        });
-        Ok(RawHttpResponse {
-            status: 200,
-            body: resp.to_string(),
-        })
+        let body = mock_chat_completion_json("mock-chat-1", "qwen/qwen3-32b", &content, true);
+        Ok(RawHttpResponse { status: 200, body })
     }
 
     fn count_tokens(
@@ -886,8 +912,14 @@ fn test_5_seat_view() {
     }
 
     let host = must_ok(
-        EvalHost::from_standard_setup(TableId(5), 4, 7, 11),
-        "from_standard_setup",
+        EvalHost::from_standard_setup_with_model_seats(
+            TableId(5),
+            4,
+            7,
+            11,
+            &[true, false, false, false],
+        ),
+        "from_standard_setup_with_model_seats",
     );
     let obs = must_ok(host.observe_seat(Seat(0)), "observe_seat");
     let pretty_obs = must_ok(
@@ -1276,20 +1308,9 @@ fn test_7_records() {
                 .to_string(),
             };
 
-            let resp = json!({
-                "id": "mock-per-guild",
-                "model": "qwen/qwen3-32b",
-                "choices": [{
-                    "index": 0,
-                    "message": { "role": "assistant", "content": content },
-                    "finish_reason": "stop"
-                }],
-                "usage": { "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70, "cost": 0.001 }
-            });
-            Ok(RawHttpResponse {
-                status: 200,
-                body: resp.to_string(),
-            })
+            let body =
+                mock_chat_completion_json("mock-per-guild", "qwen/qwen3-32b", &content, true);
+            Ok(RawHttpResponse { status: 200, body })
         }
     }
 

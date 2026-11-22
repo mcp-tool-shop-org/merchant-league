@@ -84,7 +84,7 @@ const RAW_ENGINE_TYPES_FOR_HOST_MODULES: [&str; 22] = [
     "preview_bundle_with_context_and_mode",
 ];
 
-const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 42] = [
+const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 44] = [
     "TurnEngine",
     "EngineState",
     "engine_internals",
@@ -118,7 +118,9 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 42] = [
     "read_recorded_act_submissions",
     "apply_recorded_act_submissions_from_seal",
     "fork_from_checkpoint",
+    "from_standard_setup_with_model_seats",
     "from_explicit_entropy",
+    "from_explicit_entropy_with_model_seats",
     "public_save_snapshot",
     "private_hints_for_auditor",
     "preview_bundle",
@@ -1380,7 +1382,7 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
-const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 42] = [
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 43] = [
     "new",
     "from_standard_setup",
     "from_standard_setup_with_model_seats",
@@ -1423,6 +1425,7 @@ const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 42] = [
     "fork_from_checkpoint",
     "fork_duplicate_from_turn_0",
     "from_explicit_entropy",
+    "from_explicit_entropy_with_model_seats",
 ];
 
 const ALLOWED_OBSERVATION_PUB_FNS: [&str; 4] = [

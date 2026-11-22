@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-22 from commit f318ac6 by Atlas 1.26.0.
+Mapped at 2026-11-22 from commit cd31764 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,11 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 15 parts, mostly Rust (392 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-21 (04a42f0)
+## What changed since 2026-11-22 (f318ac6)
 
-- CI now also runs crates/league-eval/build.rs and crates/league-eval/src/serving.rs.
-- crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md is now read by crates/league-eval/tests/addendum_item9.rs, crates/league-eval/tests/control_manifest_and_regent.rs and crates/league-eval/tests/play_and_branch.rs.
-- 4 files added and 24 changed content, across 6 parts.
+Nothing structural changed since 2026-11-22; 18 files changed content.
 
 ## What comes in
 
@@ -67,14 +65,14 @@ CI writes only to site/audit-report.json, which is not tracked.
 ## What tends to change together
 
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
-- **crates/league-core/src/engine.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 8 of 10 commits, inside the league-core part.
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 22 of 28 commits, inside the league-relay part.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 23 of 29 commits, inside the league-relay part.
 - **crates/league-gen/src/generator.rs** and **crates/league-gen/src/lib.rs** changed together in 7 of 9 commits, inside the league-gen part.
 - **crates/league-core/src/replay.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 9 of 12 commits, inside the league-core part.
+- **crates/league-gen/src/empirical.rs** and **crates/league-gen/src/generator.rs** changed together in 6 of 8 commits, inside the league-gen part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 
-Window: 180 days; a pair counts from 3 shared commits, since 9 source files reach 10 revisions; the floor rises to 10 when 25 do.
+Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do.
 
 ## What no test touches
 
@@ -111,7 +109,7 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 37 writes and 30 reads use paths built at run time and are not named here.
+- 37 writes and 31 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
 - 18 writes and 44 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.

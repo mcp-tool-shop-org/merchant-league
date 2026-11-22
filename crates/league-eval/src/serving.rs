@@ -4,7 +4,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
+use league_core::scrub_secret_text;
 use league_relay::{
     ACTIVE_WORDING_ARM, CONTROL_ARM_WORDING, CONTROL_WORDING_ARM, MODEL_FACING_WORDING,
     PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM_R2, WordingEntry, sha256_hex,
@@ -16,8 +18,12 @@ use crate::error::EvalError;
 use crate::wording::{EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM};
 
 const HOME_PLACEHOLDER: &str = "<home>";
+const REDACTED_TOKEN: &str = "[REDACTED]";
 const SERVING_ENV_PREFIXES: [&str; 4] = ["LLAMA_", "CUDA_", "GGML_", "VLLM_"];
 const SERVING_ENV_SECRET_SUBSTRINGS: [&str; 5] = ["KEY", "TOKEN", "SECRET", "PASS", "AUTH"];
+
+/// Build-time git commit SHA compiled into `league-eval` (`build.rs`).
+pub const CRATE_GIT_SHA: &str = env!("LEAGUE_EVAL_GIT_SHA");
 
 /// Provenance tag distinguishing server-reported metadata from operator-supplied metadata.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,6 +383,10 @@ fn hash_wording_entries(entries: &[WordingEntry]) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn is_valid_hex40(raw: &str) -> bool {
+    raw.len() == 40 && raw.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn is_valid_hex64(raw: &str) -> bool {
     raw.len() == 64 && raw.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
@@ -386,11 +396,69 @@ fn normalize_hex64(raw: &str) -> Option<String> {
     is_valid_hex64(&trimmed).then_some(trimmed)
 }
 
+/// Validate `built_sha` (no `"unknown"`, must be 40 lowercase hex chars) and compare against
+/// `live_head` when running inside a git checkout (`INVALID_CRATE_GIT_SHA`).
+pub fn validate_crate_git_sha_against(
+    built_sha: &str,
+    live_head: Option<&str>,
+) -> Result<String, EvalError> {
+    let normalized = built_sha.trim().to_ascii_lowercase();
+    if normalized.is_empty() || normalized == "unknown" || !is_valid_hex40(&normalized) {
+        return Err(EvalError::InvalidCrateGitSha(
+            "build revision `LEAGUE_EVAL_GIT_SHA` is missing, unknown, or malformed; rebuild cleanly inside git checkout".to_owned(),
+        ));
+    }
+    if let Some(head_raw) = live_head {
+        let head = head_raw.trim().to_ascii_lowercase();
+        if !is_valid_hex40(&head) || head != normalized {
+            return Err(EvalError::InvalidCrateGitSha(
+                "stale `league-eval` build revision relative to current git HEAD; rebuild before running".to_owned(),
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn has_git_ancestor(dir: &Path) -> bool {
+    dir.ancestors().any(|anc| anc.join(".git").exists())
+}
+
+/// Verify compiled [`CRATE_GIT_SHA`] is valid 40-hex (never `"unknown"`) and not stale relative to
+/// the source checkout's current git `HEAD`.
+pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
+    let manifest_dir = option_env!("CARGO_MANIFEST_DIR").map(Path::new);
+    let live_head = if let Some(dir) = manifest_dir
+        && dir.is_dir()
+        && has_git_ancestor(dir)
+    {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .map_err(|e| {
+                EvalError::InvalidCrateGitSha(format!("unable to inspect git HEAD: {e}"))
+            })?;
+        if !out.status.success() {
+            return Err(EvalError::InvalidCrateGitSha(
+                "git `rev-parse HEAD` failed while verifying `crate_git_sha`".to_owned(),
+            ));
+        }
+        let head_str = String::from_utf8(out.stdout).map_err(|_| {
+            EvalError::InvalidCrateGitSha("non-UTF-8 output from git `rev-parse HEAD`".to_owned())
+        })?;
+        Some(head_str)
+    } else {
+        None
+    };
+    validate_crate_git_sha_against(CRATE_GIT_SHA, live_head.as_deref())
+}
+
 /// Validate a [`ServingManifestInput`] against all startup reproducibility Andon rules and produce a
-/// sanitized [`ServingManifestRecord`] (hashing raw `gpu_uuid` and never retaining it).
+/// sanitized [`ServingManifestRecord`] (hashing raw `gpu_uuid` and scrubbing all free-text fields).
 pub fn validate_serving_manifest_input(
     input: &ServingManifestInput,
 ) -> Result<ServingManifestRecord, EvalError> {
+    let homes = detect_process_home_roots();
     if input.server_version.trim().is_empty() {
         return Err(EvalError::MissingServingManifest(
             "serving manifest requires a non-empty `server_version`".to_owned(),
@@ -402,17 +470,17 @@ pub fn validate_serving_manifest_input(
         ));
     }
     let model_sha256 = normalize_hex64(&input.model.sha256).ok_or_else(|| {
-        EvalError::MissingModelSha256(format!(
-            "`model.sha256` must be a non-empty 64-hex SHA-256 digest, got '{}'",
-            input.model.sha256
-        ))
+        EvalError::MissingModelSha256(
+            "`model.sha256` must be a non-empty 64-hex SHA-256 digest".to_owned(),
+        )
     })?;
     let chat_template_sha256 = match &input.model.chat_template_sha256 {
         None => None,
         Some(raw) => Some(normalize_hex64(raw).ok_or_else(|| {
-            EvalError::MissingServingManifest(format!(
-                "`model.chat_template_sha256` must be 64 lowercase hex characters when set, got '{raw}'"
-            ))
+            EvalError::MissingServingManifest(
+                "`model.chat_template_sha256` must be 64 lowercase hex characters when set"
+                    .to_owned(),
+            )
         })?),
     };
 
@@ -432,16 +500,16 @@ pub fn validate_serving_manifest_input(
     ) {
         (Some(raw_uuid), None) => sha256_hex(raw_uuid.as_bytes()),
         (None, Some(prehashed)) => normalize_hex64(prehashed).ok_or_else(|| {
-            EvalError::InvalidGpuUuidSha256(format!(
-                "`machine.gpu_uuid_sha256` must be 64 hex characters, got '{prehashed}'"
-            ))
+            EvalError::InvalidGpuUuidSha256(
+                "`machine.gpu_uuid_sha256` must be 64 hex characters".to_owned(),
+            )
         })?,
         (Some(raw_uuid), Some(prehashed)) => {
             let expected = sha256_hex(raw_uuid.as_bytes());
             let supplied = normalize_hex64(prehashed).ok_or_else(|| {
-                EvalError::InvalidGpuUuidSha256(format!(
-                    "`machine.gpu_uuid_sha256` must be 64 hex characters, got '{prehashed}'"
-                ))
+                EvalError::InvalidGpuUuidSha256(
+                    "`machine.gpu_uuid_sha256` must be 64 hex characters".to_owned(),
+                )
             })?;
             if expected != supplied {
                 return Err(EvalError::InvalidGpuUuidSha256(
@@ -518,46 +586,110 @@ pub fn validate_serving_manifest_input(
         }
     };
 
+    let server_version = scrub_manifest_field("server_version", &input.server_version, &homes)?;
+    let server_build_commit = input
+        .server_build_commit
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|c| {
+            Ok::<_, EvalError>(ProvenanceTagged {
+                value: scrub_manifest_field("server_build_commit", c, &homes)?,
+                provenance: input.server_info_provenance,
+            })
+        })
+        .transpose()?;
+
+    let mut clean_server_settings = input.server_settings.clone();
+    clean_server_settings.cache_type_k = scrub_manifest_field(
+        "server_settings.cache_type_k",
+        &input.server_settings.cache_type_k,
+        &homes,
+    )?;
+    clean_server_settings.cache_type_v = scrub_manifest_field(
+        "server_settings.cache_type_v",
+        &input.server_settings.cache_type_v,
+        &homes,
+    )?;
+    clean_server_settings.speculative_decoding = input
+        .server_settings
+        .speculative_decoding
+        .as_deref()
+        .map(|s| scrub_manifest_field("server_settings.speculative_decoding", s, &homes))
+        .transpose()?;
+
+    let mut clean_sampling = input.sampling.clone();
+    clean_sampling.stop_sequences = input
+        .sampling
+        .stop_sequences
+        .iter()
+        .enumerate()
+        .map(|(i, s)| scrub_manifest_field(&format!("sampling.stop_sequences[{i}]"), s, &homes))
+        .collect::<Result<Vec<_>, _>>()?;
+    clean_sampling.sampler_order = input
+        .sampling
+        .sampler_order
+        .iter()
+        .enumerate()
+        .map(|(i, s)| scrub_manifest_field(&format!("sampling.sampler_order[{i}]"), s, &homes))
+        .collect::<Result<Vec<_>, _>>()?;
+
     Ok(ServingManifestRecord {
         engine: ProvenanceTagged {
             value: input.engine,
             provenance: input.server_info_provenance,
         },
         server_version: ProvenanceTagged {
-            value: input.server_version.clone(),
+            value: server_version,
             provenance: input.server_info_provenance,
         },
-        server_build_commit: input
-            .server_build_commit
-            .as_ref()
-            .filter(|s| !s.trim().is_empty())
-            .map(|c| ProvenanceTagged {
-                value: c.clone(),
-                provenance: input.server_info_provenance,
-            }),
+        server_build_commit,
         determinism_status,
         model: ModelManifestRecord {
-            filename: input.model.filename.clone(),
-            quant: input.model.quant.clone(),
+            filename: scrub_manifest_field("model.filename", &input.model.filename, &homes)?,
+            quant: input
+                .model
+                .quant
+                .as_deref()
+                .map(|q| scrub_manifest_field("model.quant", q, &homes))
+                .transpose()?,
             sha256: model_sha256,
             chat_template_sha256,
             provenance: input.model.provenance,
         },
         machine: MachineManifestRecord {
-            gpu_name: input.machine.gpu_name.clone(),
+            gpu_name: scrub_manifest_field("machine.gpu_name", &input.machine.gpu_name, &homes)?,
             gpu_uuid_sha256,
             sm_count: input.machine.sm_count,
-            gpu_driver: input.machine.gpu_driver.clone(),
-            cuda_runtime_version: input.machine.cuda_runtime_version.clone(),
-            rocm_version: input.machine.rocm_version.clone(),
+            gpu_driver: scrub_manifest_field(
+                "machine.gpu_driver",
+                &input.machine.gpu_driver,
+                &homes,
+            )?,
+            cuda_runtime_version: input
+                .machine
+                .cuda_runtime_version
+                .as_deref()
+                .map(|v| scrub_manifest_field("machine.cuda_runtime_version", v, &homes))
+                .transpose()?,
+            rocm_version: input
+                .machine
+                .rocm_version
+                .as_deref()
+                .map(|v| scrub_manifest_field("machine.rocm_version", v, &homes))
+                .transpose()?,
             vram_mib: input.machine.vram_mib,
-            os_build: input.machine.os_build.clone(),
-            wsl_kernel_version: input.machine.wsl_kernel_version.clone(),
+            os_build: scrub_manifest_field("machine.os_build", &input.machine.os_build, &homes)?,
+            wsl_kernel_version: input
+                .machine
+                .wsl_kernel_version
+                .as_deref()
+                .map(|v| scrub_manifest_field("machine.wsl_kernel_version", v, &homes))
+                .transpose()?,
             provenance: input.machine.provenance,
         },
-        server_settings: input.server_settings.clone(),
+        server_settings: clean_server_settings,
         cache_settings: cache_record,
-        sampling: input.sampling.clone(),
+        sampling: clean_sampling,
     })
 }
 
@@ -577,17 +709,16 @@ pub fn load_and_validate_serving_manifest(path: &Path) -> Result<ServingManifest
     })?;
     let parsed: ServingManifestInput = serde_json::from_str(&raw).map_err(|e| {
         EvalError::MissingServingManifest(format!(
-            "invalid serving manifest JSON {}: {e}",
-            path.display()
+            "invalid serving manifest JSON in {} at line {}, column {}",
+            path.display(),
+            e.line(),
+            e.column()
         ))
     })?;
     validate_serving_manifest_input(&parsed)
 }
 
-/// Capture serving-related OS environment variables (`LLAMA_*`, `CUDA_*`, `GGML_*`, `VLLM_*`),
-/// omitting secret-named variables and replacing user home directory paths with `<home>`.
-#[must_use]
-pub fn capture_serving_env_snapshot() -> BTreeMap<String, String> {
+fn detect_process_home_roots() -> Vec<PathBuf> {
     let mut homes = Vec::new();
     for var in ["HOME", "USERPROFILE"] {
         if let Some(val) = std::env::var_os(var)
@@ -596,12 +727,22 @@ pub fn capture_serving_env_snapshot() -> BTreeMap<String, String> {
             homes.push(PathBuf::from(val));
         }
     }
+    homes
+}
+
+/// Capture serving-related OS environment variables (`LLAMA_*`, `CUDA_*`, `GGML_*`, `VLLM_*`),
+/// omitting secret-named variables, hashing `CUDA_VISIBLE_DEVICES` and any GPU/MIG IDs under
+/// `<key>_sha256`, replacing home paths with `<home>`, and scrubbing any token patterns.
+pub fn capture_serving_env_snapshot() -> Result<BTreeMap<String, String>, EvalError> {
+    let homes = detect_process_home_roots();
     capture_serving_env_snapshot_from(std::env::vars(), &homes)
 }
 
 /// Pure testable core of [`capture_serving_env_snapshot`] over explicit env vars and home roots.
-#[must_use]
-pub fn capture_serving_env_snapshot_from<I>(vars: I, homes: &[PathBuf]) -> BTreeMap<String, String>
+pub fn capture_serving_env_snapshot_from<I>(
+    vars: I,
+    homes: &[PathBuf],
+) -> Result<BTreeMap<String, String>, EvalError>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -620,7 +761,400 @@ where
         {
             continue;
         }
-        out.insert(name, replace_home_paths_in_value(&value, homes));
+        if upper == "CUDA_VISIBLE_DEVICES" || contains_gpu_or_mig_id(&value) {
+            out.insert(format!("{name}_sha256"), sha256_hex(value.as_bytes()));
+            continue;
+        }
+        let cleaned = scrub_text_value(&format!("env.{name}"), &value, homes, false)?;
+        out.insert(name, cleaned);
+    }
+    Ok(out)
+}
+
+fn scrub_manifest_field(field: &str, value: &str, homes: &[PathBuf]) -> Result<String, EvalError> {
+    scrub_text_value(field, value, homes, true)
+}
+
+fn contains_unsafe_control_chars(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|b| b == 0 || (b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r')) || b == 0x7f)
+}
+
+fn contains_gpu_or_mig_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let lower = value.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let mut i = 0usize;
+    while i < lb.len() {
+        let prev_boundary = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if prev_boundary && lb[i..].starts_with(b"gpu-") {
+            let body = &bytes[i + 4..];
+            let mut end = 0usize;
+            while end < body.len() && (body[end].is_ascii_hexdigit() || body[end] == b'-') {
+                end += 1;
+            }
+            while end > 0 && body[end - 1] == b'-' {
+                end -= 1;
+            }
+            let seg = &body[..end];
+            let hex_digits = seg.iter().filter(|b| b.is_ascii_hexdigit()).count();
+            let dec_digits = seg.iter().filter(|b| b.is_ascii_digit()).count();
+            if seg.len() >= 8 && hex_digits >= 4 && dec_digits >= 1 {
+                return true;
+            }
+        } else if prev_boundary && lb[i..].starts_with(b"mig-") {
+            let body = &lb[i + 4..];
+            let raw_body = &bytes[i + 4..];
+            let scan_from = if body.starts_with(b"gpu-") { 4 } else { 0 };
+            let mut end = scan_from;
+            while end < raw_body.len()
+                && (raw_body[end].is_ascii_hexdigit() || matches!(raw_body[end], b'-' | b'/'))
+            {
+                end += 1;
+            }
+            while end > scan_from && matches!(raw_body[end - 1], b'-' | b'/') {
+                end -= 1;
+            }
+            let seg = &raw_body[scan_from..end];
+            let hex_digits = seg.iter().filter(|b| b.is_ascii_hexdigit()).count();
+            let dec_digits = seg.iter().filter(|b| b.is_ascii_digit()).count();
+            if seg.len() >= 8 && hex_digits >= 4 && dec_digits >= 1 {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn scrub_text_value(
+    field_or_key: &str,
+    value: &str,
+    homes: &[PathBuf],
+    scrub_generic_homes: bool,
+) -> Result<String, EvalError> {
+    if contains_unsafe_control_chars(value) {
+        return Err(EvalError::UnsafeManifestValue(format!(
+            "field `{field_or_key}` contains unsupported control characters"
+        )));
+    }
+    if contains_gpu_or_mig_id(value) {
+        return Err(EvalError::UnsafeManifestValue(format!(
+            "field `{field_or_key}` cannot contain a raw GPU or MIG identifier"
+        )));
+    }
+    let mut s = replace_home_paths_in_value(value, homes);
+    s = replace_wsl_users_home(&s);
+    if scrub_generic_homes {
+        s = replace_generic_user_homes(&s);
+    }
+    s = redact_token_patterns(&s);
+    if has_residual_unsafe_value(&s, scrub_generic_homes) {
+        return Err(EvalError::UnsafeManifestValue(format!(
+            "field `{field_or_key}` contains an unsafe or un-scrubbable value"
+        )));
+    }
+    Ok(s)
+}
+
+fn redact_token_patterns(input: &str) -> String {
+    let base_scrubbed = scrub_secret_text(input);
+    let mut out = String::with_capacity(base_scrubbed.len());
+    let bytes = base_scrubbed.as_bytes();
+    let lower = base_scrubbed.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let mut i = 0usize;
+
+    while i < base_scrubbed.len() {
+        let prev_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if prev_ok && lb[i..].starts_with(b"github_pat_") {
+            let mut end = i + 11;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            if end - (i + 11) >= 10 {
+                out.push_str(REDACTED_TOKEN);
+                i = end;
+                continue;
+            }
+        } else if prev_ok && (lb[i..].starts_with(b"ghp_") || lb[i..].starts_with(b"hf_")) {
+            let plen = if lb[i..].starts_with(b"ghp_") { 4 } else { 3 };
+            let mut end = i + plen;
+            while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
+                end += 1;
+            }
+            if end - (i + plen) >= 10 {
+                out.push_str(REDACTED_TOKEN);
+                i = end;
+                continue;
+            }
+        } else if prev_ok && lb[i..].starts_with(b"sk-") {
+            let mut end = i + 3;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
+            {
+                end += 1;
+            }
+            if end - (i + 3) >= 8 {
+                out.push_str(REDACTED_TOKEN);
+                i = end;
+                continue;
+            }
+        } else if prev_ok && lb[i..].starts_with(b"bearer") {
+            let after_b = i + 6;
+            if after_b < bytes.len()
+                && (bytes[after_b].is_ascii_whitespace() || matches!(bytes[after_b], b':' | b'='))
+            {
+                let mut tok_start = after_b;
+                while tok_start < bytes.len()
+                    && (bytes[tok_start].is_ascii_whitespace()
+                        || matches!(bytes[tok_start], b':' | b'='))
+                {
+                    tok_start += 1;
+                }
+                let mut tok_end = tok_start;
+                while tok_end < bytes.len()
+                    && (bytes[tok_end].is_ascii_alphanumeric()
+                        || matches!(bytes[tok_end], b'.' | b'_' | b'-' | b'+' | b'/' | b'='))
+                {
+                    tok_end += 1;
+                }
+                if tok_end > tok_start && !base_scrubbed[tok_start..tok_end].starts_with('[') {
+                    out.push_str(REDACTED_TOKEN);
+                    i = tok_end;
+                    continue;
+                }
+            }
+        } else if prev_ok
+            && let Some(eq_len) = ["api_key=", "token=", "secret=", "password=", "auth="]
+                .iter()
+                .find(|kw| lb[i..].starts_with(kw.as_bytes()))
+                .map(|kw| kw.len())
+        {
+            let val_start = i + eq_len;
+            if val_start < bytes.len() && !base_scrubbed[val_start..].starts_with(REDACTED_TOKEN) {
+                let mut val_end = val_start;
+                while val_end < bytes.len()
+                    && !matches!(
+                        bytes[val_end],
+                        b' ' | b'\t' | b'\r' | b'\n' | b',' | b';' | b'"' | b'\'' | b')' | b']'
+                    )
+                {
+                    val_end += 1;
+                }
+                if val_end > val_start {
+                    out.push_str(&base_scrubbed[i..val_start]);
+                    out.push_str(REDACTED_TOKEN);
+                    i = val_end;
+                    continue;
+                }
+            }
+        }
+
+        let Some(ch) = base_scrubbed[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn has_residual_unsafe_value(scrubbed: &str, check_generic_homes: bool) -> bool {
+    if contains_unsafe_control_chars(scrubbed) || contains_gpu_or_mig_id(scrubbed) {
+        return true;
+    }
+    let bytes = scrubbed.as_bytes();
+    let lower = scrubbed.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    for i in 0..bytes.len() {
+        let prev_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if !prev_ok {
+            continue;
+        }
+        if (lb[i..].starts_with(b"github_pat_")
+            && bytes
+                .get(i + 11..i + 13)
+                .is_some_and(|s| s.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_')))
+            || (lb[i..].starts_with(b"ghp_")
+                && bytes
+                    .get(i + 4..i + 6)
+                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
+            || (lb[i..].starts_with(b"hf_")
+                && bytes
+                    .get(i + 3..i + 5)
+                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
+            || (lb[i..].starts_with(b"sk-")
+                && bytes
+                    .get(i + 3..i + 5)
+                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
+        {
+            return true;
+        }
+        if lb[i..].starts_with(b"bearer")
+            && let Some(sep) = bytes.get(i + 6)
+            && (sep.is_ascii_whitespace() || matches!(sep, b':' | b'='))
+        {
+            let rest = scrubbed[i + 7..]
+                .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == ':' || c == '=');
+            if !rest.is_empty() && !rest.starts_with(REDACTED_TOKEN) {
+                return true;
+            }
+        }
+    }
+    let prefix_ok = |idx: usize| {
+        idx == 0
+            || scrubbed[..idx]
+                .chars()
+                .next_back()
+                .is_some_and(is_home_prefix_boundary)
+    };
+    for (idx, _) in lower.match_indices("/mnt/") {
+        if prefix_ok(idx)
+            && lb.get(idx + 5).is_some_and(u8::is_ascii_alphabetic)
+            && lb.get(idx + 6..idx + 13) == Some(b"/users/")
+        {
+            return true;
+        }
+    }
+    if check_generic_homes {
+        for (idx, _) in scrubbed.match_indices("/home/") {
+            if prefix_ok(idx)
+                && scrubbed
+                    .get(idx + 6..idx + 7)
+                    .is_some_and(|s| s.bytes().all(|b| !matches!(b, b'/' | b'\\' | b' ')))
+            {
+                return true;
+            }
+        }
+        for (idx, _) in lower.match_indices("/users/") {
+            if prefix_ok(idx) {
+                return true;
+            }
+        }
+        for (idx, _) in lower.match_indices(":\\users\\") {
+            if idx >= 1 && bytes[idx - 1].is_ascii_alphabetic() && prefix_ok(idx - 1) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_home_prefix_boundary(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '\t' | '=' | ':' | ';' | '"' | '\'' | ',' | '(' | '['
+    )
+}
+
+fn is_home_suffix_boundary(c: char) -> bool {
+    matches!(
+        c,
+        '/' | '\\' | ' ' | '\t' | ':' | ';' | '"' | '\'' | ',' | ')' | ']'
+    )
+}
+
+fn replace_wsl_users_home(haystack: &str) -> String {
+    let mut out = String::with_capacity(haystack.len());
+    let bytes = haystack.as_bytes();
+    let lower = haystack.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let mut i = 0usize;
+    while i < haystack.len() {
+        let prev_ok = i == 0
+            || haystack[..i]
+                .chars()
+                .next_back()
+                .is_some_and(is_home_prefix_boundary);
+        if prev_ok
+            && lb[i..].starts_with(b"/mnt/")
+            && bytes.get(i + 5).is_some_and(u8::is_ascii_alphabetic)
+            && lb.get(i + 6..i + 13) == Some(b"/users/")
+        {
+            let name_start = i + 13;
+            let mut name_end = name_start;
+            while name_end < haystack.len() {
+                let Some(ch) = haystack[name_end..].chars().next() else {
+                    break;
+                };
+                if is_home_suffix_boundary(ch) {
+                    break;
+                }
+                name_end += ch.len_utf8();
+            }
+            let next_ok = name_end == haystack.len()
+                || haystack[name_end..]
+                    .chars()
+                    .next()
+                    .is_some_and(is_home_suffix_boundary);
+            if name_end > name_start && next_ok {
+                out.push_str(HOME_PLACEHOLDER);
+                i = name_end;
+                continue;
+            }
+        }
+        let Some(ch) = haystack[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn match_generic_home_end(haystack: &str, lower_bytes: &[u8], i: usize) -> Option<usize> {
+    let bytes = haystack.as_bytes();
+    let name_start = if bytes[i..].starts_with(b"/home/") {
+        i + 6
+    } else if lower_bytes[i..].starts_with(b"/users/") {
+        i + 7
+    } else if bytes.get(i).is_some_and(u8::is_ascii_alphabetic)
+        && (lower_bytes.get(i + 1..i + 9) == Some(b":\\users\\")
+            || lower_bytes.get(i + 1..i + 9) == Some(b":/users/"))
+    {
+        i + 9
+    } else {
+        return None;
+    };
+    let mut name_end = name_start;
+    while name_end < haystack.len() {
+        let ch = haystack[name_end..].chars().next()?;
+        if is_home_suffix_boundary(ch) {
+            break;
+        }
+        name_end += ch.len_utf8();
+    }
+    let next_ok = name_end == haystack.len()
+        || haystack[name_end..]
+            .chars()
+            .next()
+            .is_some_and(is_home_suffix_boundary);
+    (name_end > name_start && next_ok).then_some(name_end)
+}
+
+fn replace_generic_user_homes(haystack: &str) -> String {
+    let mut out = String::with_capacity(haystack.len());
+    let lower = haystack.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let mut i = 0usize;
+    while i < haystack.len() {
+        let prev_ok = i == 0
+            || haystack[..i]
+                .chars()
+                .next_back()
+                .is_some_and(is_home_prefix_boundary);
+        if prev_ok && let Some(end) = match_generic_home_end(haystack, lb, i) {
+            out.push_str(HOME_PLACEHOLDER);
+            i = end;
+            continue;
+        }
+        let Some(ch) = haystack[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
@@ -668,12 +1202,12 @@ fn replace_substring_with_home(haystack: &str, pattern: &str) -> String {
                 || haystack[..i]
                     .chars()
                     .next_back()
-                    .is_none_or(|c| matches!(c, ' ' | '\t' | '=' | ':' | ';' | '"' | '\''));
+                    .is_some_and(is_home_prefix_boundary);
             let next_ok = i + p_len == haystack.len()
                 || haystack[i + p_len..]
                     .chars()
                     .next()
-                    .is_some_and(|c| matches!(c, '/' | '\\' | ' ' | '\t' | ':' | ';' | '"' | '\''));
+                    .is_some_and(is_home_suffix_boundary);
             if prev_ok && next_ok {
                 out.push_str(HOME_PLACEHOLDER);
                 i += p_len;
@@ -725,7 +1259,8 @@ mod tests {
             ("PATH".to_owned(), "/home/evaluator/bin:/usr/bin".to_owned()),
         ];
 
-        let snap = capture_serving_env_snapshot_from(vars, &homes);
+        let snap = capture_serving_env_snapshot_from(vars, &homes)
+            .unwrap_or_else(|e| panic!("env snapshot failed: {e}"));
         assert_eq!(snap.len(), 4);
         assert_eq!(
             snap.get("LLAMA_CACHE").map(String::as_str),
@@ -736,9 +1271,10 @@ mod tests {
             Some(r"<home>\cuda\bin")
         );
         assert_eq!(
-            snap.get("CUDA_VISIBLE_DEVICES").map(String::as_str),
-            Some("0")
+            snap.get("CUDA_VISIBLE_DEVICES_sha256").map(String::as_str),
+            Some(sha256_hex(b"0").as_str())
         );
+        assert!(!snap.contains_key("CUDA_VISIBLE_DEVICES"));
         assert_eq!(
             snap.get("VLLM_ATTENTION_BACKEND").map(String::as_str),
             Some("FLASH_ATTN")
@@ -776,5 +1312,130 @@ mod tests {
                 "unexpected leak '{forbidden_text}' in {rendered}"
             );
         }
+    }
+
+    #[test]
+    fn fix2_s2_gpu_and_mig_ids_hashed_never_verbatim() {
+        let gpu_val = [
+            "GPU",
+            "-",
+            "1a2b3c4d",
+            "-",
+            "0000",
+            "-",
+            "1111",
+            "-",
+            "2222",
+            "-",
+            "deadbeef0001",
+        ]
+        .concat();
+        let mig_val = ["MIG", "-", "a1b2c3d4", "-", "9999", "-", "0", "-", "1"].concat();
+        let vars = vec![
+            ("CUDA_VISIBLE_DEVICES".to_owned(), gpu_val.clone()),
+            ("VLLM_DEVICE_ID".to_owned(), mig_val.clone()),
+            (
+                "VLLM_WORKER_MULTIPROC_METHOD".to_owned(),
+                "spawn".to_owned(),
+            ),
+        ];
+        let snap = capture_serving_env_snapshot_from(vars, &[])
+            .unwrap_or_else(|e| panic!("unexpected snapshot error: {e}"));
+        assert_eq!(
+            snap.get("CUDA_VISIBLE_DEVICES_sha256").map(String::as_str),
+            Some(sha256_hex(gpu_val.as_bytes()).as_str())
+        );
+        assert_eq!(
+            snap.get("VLLM_DEVICE_ID_sha256").map(String::as_str),
+            Some(sha256_hex(mig_val.as_bytes()).as_str())
+        );
+        assert_eq!(
+            snap.get("VLLM_WORKER_MULTIPROC_METHOD").map(String::as_str),
+            Some("spawn")
+        );
+        assert!(!snap.contains_key("CUDA_VISIBLE_DEVICES"));
+        assert!(!snap.contains_key("VLLM_DEVICE_ID"));
+        let rendered = serde_json::to_string(&snap).unwrap_or_default();
+        assert!(!rendered.contains(&gpu_val));
+        assert!(!rendered.contains(&mig_val));
+    }
+
+    #[test]
+    fn fix2_s3_git_sha_rejects_unknown_and_stale_and_resolves_worktree() {
+        for bad in ["unknown", "", "deadbeef", &"z".repeat(40)] {
+            let err = match validate_crate_git_sha_against(bad, None) {
+                Err(e) => e,
+                Ok(v) => panic!("expected INVALID_CRATE_GIT_SHA for '{bad}', got {v}"),
+            };
+            assert_eq!(err.code(), "INVALID_CRATE_GIT_SHA");
+        }
+        let sha_a = "1".repeat(40);
+        let sha_b = "2".repeat(40);
+        let stale_err = match validate_crate_git_sha_against(&sha_a, Some(&sha_b)) {
+            Err(e) => e,
+            Ok(v) => panic!("expected INVALID_CRATE_GIT_SHA on stale head, got {v}"),
+        };
+        assert_eq!(stale_err.code(), "INVALID_CRATE_GIT_SHA");
+        let verified = validate_crate_git_sha_against(&sha_a, Some(&sha_a))
+            .unwrap_or_else(|e| panic!("matching 40-hex SHA should pass: {e}"));
+        assert_eq!(verified, sha_a);
+
+        let live = resolve_verified_crate_git_sha()
+            .unwrap_or_else(|e| panic!("worktree CRATE_GIT_SHA must match HEAD: {e}"));
+        assert_eq!(live.len(), 40);
+        assert!(live.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(live, CRATE_GIT_SHA);
+    }
+
+    #[test]
+    fn fix2_s6_home_boundaries_comma_paren_bracket_and_wsl_keep_probeuserx_untouched() {
+        let homes = vec![
+            PathBuf::from("/home/probeuser"),
+            PathBuf::from(r"X:\Profiles\probeuser"),
+        ];
+        let vars = vec![
+            (
+                "CUDA_VISIBLE_COMMA".to_owned(),
+                "/home/probeuser/cuda,other=/home/probeuser/lib".to_owned(),
+            ),
+            (
+                "VLLM_OPT_PARENS".to_owned(),
+                "(/home/probeuser/venv/bin)".to_owned(),
+            ),
+            (
+                "VLLM_OPT_BRACKETS".to_owned(),
+                r"[/home/probeuser/cache,X:\Profiles\probeuser\models]".to_owned(),
+            ),
+            (
+                "LLAMA_WSL_HOME".to_owned(),
+                "/mnt/c/Users/probeuser/models/q.gguf".to_owned(),
+            ),
+            (
+                "VLLM_SIBLING_USER".to_owned(),
+                "/home/probeuserX/y".to_owned(),
+            ),
+        ];
+        let snap = capture_serving_env_snapshot_from(vars, &homes)
+            .unwrap_or_else(|e| panic!("snapshot error: {e}"));
+        assert_eq!(
+            snap.get("CUDA_VISIBLE_COMMA").map(String::as_str),
+            Some("<home>/cuda,other=<home>/lib")
+        );
+        assert_eq!(
+            snap.get("VLLM_OPT_PARENS").map(String::as_str),
+            Some("(<home>/venv/bin)")
+        );
+        assert_eq!(
+            snap.get("VLLM_OPT_BRACKETS").map(String::as_str),
+            Some(r"[<home>/cache,<home>\models]")
+        );
+        assert_eq!(
+            snap.get("LLAMA_WSL_HOME").map(String::as_str),
+            Some("<home>/models/q.gguf")
+        );
+        assert_eq!(
+            snap.get("VLLM_SIBLING_USER").map(String::as_str),
+            Some("/home/probeuserX/y")
+        );
     }
 }

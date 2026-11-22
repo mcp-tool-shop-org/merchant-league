@@ -24695,7 +24695,11 @@ fn audit_real_tool_followup_request(
                 | "chat_template_kwargs"
                 | "include_reasoning"
                 | "tools"
-        ) || (allow_cache_prompt && key == "cache_prompt");
+        ) || (allow_cache_prompt
+            && matches!(
+                key.as_str(),
+                "cache_prompt" | "logprobs" | "top_logprobs" | "return_tokens" | "return_token_ids"
+            ));
         if !allowed_top {
             return Err(format!("unexpected top-level request framing key `{key}`"));
         }
@@ -33286,5 +33290,205 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
         serde_json::from_str::<Json>(tool_msgs_4[3])?,
         serde_json::from_str::<Json>(&render_control_call_limit_reached_wire_json())?
     );
+    Ok(())
+}
+
+#[test]
+fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "S1_TELEMETRY_WRAPPER")?;
+
+    let srv_eval = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body("EVAL_S1_OK", "Qwen/Qwen3-14B", 20, 4, None, None),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_eval_path = tmp.path().join("seats_eval.json");
+    write_card7_four_seat_local_file(&seats_eval_path, &srv_eval.base_url, 2.0)?;
+    let seats_eval = SeatFile::from_json_str(&fs::read_to_string(&seats_eval_path)?, None)?;
+    let g_eval = tmp.path().join("g_eval");
+    write_to_seat(&g_eval, "01", "talk", "Saltworks", "S1 EVAL BOARD")?;
+    let cfg_eval = TurnConfig::new(
+        g_eval,
+        "01".to_owned(),
+        Round::Talk,
+        seats_eval,
+        Some(wrapper.clone()),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::Control)
+    .with_eval_mode(true);
+    let tx_eval = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    assert!(run_turn(&cfg_eval, &tx_eval, None)?.all_clean());
+    let eval_req: Json = serde_json::from_str(&srv_eval.recorded_requests()?[0].body)?;
+    assert_eq!(eval_req.get("logprobs"), Some(&json!(true)));
+    assert_eq!(eval_req.get("top_logprobs"), Some(&json!(5)));
+    assert_eq!(eval_req.get("return_tokens"), Some(&json!(true)));
+    assert_eq!(eval_req.get("return_token_ids"), Some(&json!(true)));
+    assert_eq!(eval_req.get("cache_prompt"), Some(&json!(false)));
+
+    let srv_play = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body("PLAY_S1_OK", "Qwen/Qwen3-14B", 20, 4, None, None),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_play_path = tmp.path().join("seats_play.json");
+    write_card7_four_seat_local_file(&seats_play_path, &srv_play.base_url, 2.0)?;
+    let seats_play = SeatFile::from_json_str(&fs::read_to_string(&seats_play_path)?, None)?;
+    let g_play = tmp.path().join("g_play");
+    write_to_seat(&g_play, "01", "talk", "Saltworks", "S1 PLAY BOARD")?;
+    let cfg_play = TurnConfig::new(
+        g_play,
+        "01".to_owned(),
+        Round::Talk,
+        seats_play,
+        Some(wrapper),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::Off)
+    .with_eval_mode(false);
+    let tx_play = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    assert!(run_turn(&cfg_play, &tx_play, None)?.all_clean());
+    let play_req: Json = serde_json::from_str(&srv_play.recorded_requests()?[0].body)?;
+    for key in [
+        "logprobs",
+        "top_logprobs",
+        "return_tokens",
+        "return_token_ids",
+        "cache_prompt",
+    ] {
+        assert!(
+            play_req.get(key).is_none(),
+            "Play mode request must omit `{key}`"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn fix2_s5_tool_call_missing_id_uses_delivery_failure_without_synthetic_id() -> TestResult {
+    let tmp = TempDir::new()?;
+    let preview_state = card7_standard_preview_state(0)?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "S5_NO_ID_WRAPPER")?;
+
+    let missing_id_body = json!({
+        "id": "mock-no-id",
+        "model": "Qwen/Qwen3-14B",
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "type": "function",
+                    "function": {
+                        "name": "preview_turn_orders",
+                        "arguments": "{\"market_actions\":[],\"bundle\":{}}"
+                    }
+                }]
+            }
+        }],
+        "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 }
+    })
+    .to_string();
+
+    // 1. Play mode (`eval_mode = false`, `--preview-tool on`): routes missing-id tool call through
+    //    existing DeliveryFailure path (attempt 1 logged as `harness` with MALFORMED_TOOL_CALL,
+    //    retry attempt 2 gets exact original prompt with zero synthetic id or new model text).
+    let srv_play = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: missing_id_body.clone(),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body("PLAY_RECOVERED", "Qwen/Qwen3-14B", 18, 4, None, None),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_play_path = tmp.path().join("seats_play.json");
+    write_card7_four_seat_local_file(&seats_play_path, &srv_play.base_url, 2.0)?;
+    let seats_play = SeatFile::from_json_str(&fs::read_to_string(&seats_play_path)?, None)?;
+    let g_play = tmp.path().join("g_play");
+    write_to_seat(&g_play, "01", "act", "Saltworks", "S5 PLAY BOARD")?;
+    write_card7_preview_state(&g_play, "01", "Saltworks", &preview_state)?;
+    let cfg_play = TurnConfig::new(
+        g_play.clone(),
+        "01".to_owned(),
+        Round::Act,
+        seats_play,
+        Some(wrapper.clone()),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::On)
+    .with_eval_mode(false);
+    let tx_play = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    let summary_play = run_turn(&cfg_play, &tx_play, None)?;
+    assert!(summary_play.all_clean());
+    let play_reqs = srv_play.recorded_requests()?;
+    assert_eq!(play_reqs.len(), 2);
+    assert_eq!(
+        play_reqs[0].body, play_reqs[1].body,
+        "missing-id retry must resend identical original prompt with zero synthetic id or tool text"
+    );
+    assert!(
+        !play_reqs[1].body.contains("MALFORMED_TOOL_CALL"),
+        "synthetic MALFORMED_TOOL_CALL id must never reach the model"
+    );
+    let play_calls = fs::read_to_string(g_play.join("relay/calls.jsonl"))?;
+    assert!(play_calls.contains("\"outcome\":\"harness\""));
+    assert!(play_calls.contains("MALFORMED_TOOL_CALL"));
+
+    // 2. Eval mode (`eval_mode = true`, `--preview-tool control`): attempt 1 ends as NO_REPLY with
+    //    reason code recorded and zero follow-up requests sent.
+    let srv_eval = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: missing_id_body,
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_eval_path = tmp.path().join("seats_eval.json");
+    write_card7_four_seat_local_file(&seats_eval_path, &srv_eval.base_url, 2.0)?;
+    let seats_eval = SeatFile::from_json_str(&fs::read_to_string(&seats_eval_path)?, None)?;
+    let g_eval = tmp.path().join("g_eval");
+    write_to_seat(&g_eval, "01", "act", "Saltworks", "S5 EVAL BOARD")?;
+    let cfg_eval = TurnConfig::new(
+        g_eval.clone(),
+        "01".to_owned(),
+        Round::Act,
+        seats_eval,
+        Some(wrapper),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::Control)
+    .with_eval_mode(true);
+    let tx_eval = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    let summary_eval = run_turn(&cfg_eval, &tx_eval, None)?;
+    assert!(!summary_eval.all_clean());
+    assert_eq!(srv_eval.recorded_requests()?.len(), 1);
+    let eval_calls = fs::read_to_string(g_eval.join("relay/calls.jsonl"))?;
+    assert!(eval_calls.contains("\"outcome\":\"NO_REPLY\""));
+    assert!(eval_calls.contains("MALFORMED_TOOL_CALL"));
     Ok(())
 }
