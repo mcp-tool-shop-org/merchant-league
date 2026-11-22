@@ -697,7 +697,7 @@ mod tests {
     fn env_snapshot_keeps_prefixed_strips_secrets_and_replaces_homes() {
         let homes = vec![
             PathBuf::from("/home/evaluator"),
-            PathBuf::from(r"C:\Users\evaluator"),
+            PathBuf::from(r"X:\Profiles\evaluator"),
         ];
         let vars = vec![
             (
@@ -706,7 +706,7 @@ mod tests {
             ),
             (
                 "GGML_CUDA_PATH".to_owned(),
-                r"C:\Users\evaluator\cuda\bin".to_owned(),
+                r"X:\Profiles\evaluator\cuda\bin".to_owned(),
             ),
             ("CUDA_VISIBLE_DEVICES".to_owned(), "0".to_owned()),
             ("VLLM_ATTENTION_BACKEND".to_owned(), "FLASH_ATTN".to_owned()),
