@@ -56,6 +56,31 @@ fn run_branch_with_transport(
     run_branch_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
 }
 
+const ML_EVAL_TEST_SEAM_ARGS_FILE_ENV: &str = "ML_EVAL_TEST_SEAM_ARGS_FILE";
+
+#[test]
+fn eval_cli_seam_child_helper() {
+    use std::io::Write;
+    let Ok(args_file) = std::env::var(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV) else {
+        return;
+    };
+    let raw = must_ok(fs::read_to_string(&args_file), "read seam CLI args file");
+    let cli_args: Vec<String> = must_ok(serde_json::from_str(&raw), "parse seam CLI args JSON");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli_with_git_sha(
+        cli_args.into_iter().map(std::ffi::OsString::from),
+        &mut out,
+        &mut err,
+        &test_git_sha_source(),
+    );
+    let _ = std::io::stdout().write_all(&out);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().write_all(&err);
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
+}
+
 fn execute_cli<I>(args: I, stdout: &mut dyn std::io::Write, stderr: &mut dyn std::io::Write) -> i32
 where
     I: IntoIterator<Item = std::ffi::OsString>,
@@ -2836,31 +2861,43 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     assert!(ver_out.status.success());
     assert!(String::from_utf8_lossy(&ver_out.stdout).contains("league-eval"));
 
+    let args_path = tmp.join("ctrl_ok_seam_args.json");
+    let ctrl_args = json!([
+        "play",
+        "--game-dir",
+        tmp.join("bin_ctrl").to_string_lossy(),
+        "--seats",
+        seats_path.to_string_lossy(),
+        "--wrapper",
+        wrapper_path.to_string_lossy(),
+        "--arm",
+        "control",
+        "--turns",
+        "1",
+        "--seed",
+        "7"
+    ]);
+    must_ok(
+        fs::write(&args_path, ctrl_args.to_string()),
+        "write ctrl_ok seam args",
+    );
+    let ctrl_exe = must_ok(std::env::current_exe(), "resolve test binary path");
     let ctrl_ok = must_ok(
-        Command::new(bin)
-            .args([
-                "play",
-                "--game-dir",
-                &tmp.join("bin_ctrl").to_string_lossy(),
-                "--seats",
-                &seats_path.to_string_lossy(),
-                "--wrapper",
-                &wrapper_path.to_string_lossy(),
-                "--arm",
-                "control",
-                "--turns",
-                "1",
-                "--seed",
-                "7",
-            ])
+        Command::new(ctrl_exe)
+            .args(["--exact", "eval_cli_seam_child_helper", "--nocapture"])
+            .env(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV, &args_path)
             .env_remove("OPENROUTER_API_KEY")
             .env_remove("OPENAI_API_KEY")
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("GEMINI_API_KEY")
             .output(),
-        "run league-eval control arm binary",
+        "run league-eval control arm seam child",
     );
-    assert!(ctrl_ok.status.success());
+    assert!(
+        ctrl_ok.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&ctrl_ok.stderr)
+    );
 
     let bad_wrap_bin = tmp.join("bad_wrap_bin.md");
     must_ok(fs::write(&bad_wrap_bin, b"# wrong"), "write bad_wrap_bin");

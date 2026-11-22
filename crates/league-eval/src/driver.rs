@@ -14,10 +14,10 @@ use league_core::{
     ReplayOutcome, Seat, TableId, TurnPhase, replay_eval_season,
 };
 use league_relay::{
-    ApiKey, CallLogEntry, MemoryMode, PreviewToolMode, RawHttpResponse, ReasoningEffort, Round,
-    SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatBackend, SeatFile,
-    SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError, TurnConfig, TurnSummary,
-    UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
+    ApiKey, CallLogEntry, LocalReasoningBudgetKey, MemoryMode, PreviewToolMode, RawHttpResponse,
+    ReasoningEffort, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord,
+    SeatBackend, SeatFile, SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError,
+    TurnConfig, TurnSummary, UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
 };
 use serde::Serialize;
 
@@ -1334,10 +1334,31 @@ fn resolve_serving_manifest_opt(
     Ok(None)
 }
 
+fn local_reasoning_budget_key_for_manifest(
+    serving_record: Option<&ServingManifestRecord>,
+) -> LocalReasoningBudgetKey {
+    match serving_record.map(|m| m.engine.value) {
+        Some(EngineKind::LlamaServer) => LocalReasoningBudgetKey::ReasoningBudgetTokens,
+        _ => LocalReasoningBudgetKey::ThinkingTokenBudget,
+    }
+}
+
 fn validate_eval_reasoning_budgets(
     seats_file: &SeatFile,
     serving_record: Option<&ServingManifestRecord>,
 ) -> Result<(), EvalError> {
+    if let Some(manifest) = serving_record
+        && manifest
+            .server_settings
+            .reasoning_budget_message
+            .as_deref()
+            .is_some_and(|m| !m.is_empty())
+    {
+        return Err(EvalError::ReasoningBudgetMessageForbidden(
+            "serving manifest reports non-empty server_settings.reasoning_budget_message (--reasoning-budget-message); Evaluation Mode forbids server-injected prompt text"
+                .to_owned(),
+        ));
+    }
     for seat in &seats_file.seats {
         let SeatBackend::Local(local) = &seat.backend else {
             continue;
@@ -1358,14 +1379,14 @@ fn validate_eval_reasoning_budgets(
                     seat.guild
                 )));
             }
-            if let Some(val) = reasoning
+            let enable_thinking = reasoning
                 .chat_template_kwargs
                 .as_ref()
                 .and_then(|m| m.get("enable_thinking"))
-                && val.as_bool() != Some(true)
-            {
+                .and_then(serde_json::Value::as_bool);
+            if enable_thinking != Some(true) {
                 return Err(EvalError::UnenforceableReasoningBudget(format!(
-                    "seat '{}' sets reasoning.budget_tokens={budget} with non-true chat_template_kwargs.enable_thinking, so b11433 cannot enforce the thinking budget",
+                    "seat '{}' sets reasoning.budget_tokens={budget} without chat_template_kwargs.enable_thinking=true, so b11433 cannot guarantee thinking is enabled",
                     seat.guild
                 )));
             }
@@ -1385,6 +1406,17 @@ fn validate_eval_reasoning_budgets(
         if manifest.server_settings.jinja != Some(true) {
             return Err(EvalError::UnenforceableReasoningBudget(format!(
                 "seat '{}' sets reasoning.budget_tokens={budget} without server_settings.jinja=true",
+                seat.guild
+            )));
+        }
+        if manifest
+            .server_settings
+            .reasoning_mode
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("off") || m.eq_ignore_ascii_case("none"))
+        {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} while server_settings.reasoning_mode disables reasoning in b11433",
                 seat.guild
             )));
         }
@@ -1925,6 +1957,7 @@ pub fn run_play_with_transport_and_git_sha(
             )?;
         }
 
+        let eval_budget_key = local_reasoning_budget_key_for_manifest(serving_record.as_ref());
         let talk_cfg = TurnConfig::new(
             opts.game_dir.clone(),
             day_str.clone(),
@@ -1939,6 +1972,7 @@ pub fn run_play_with_transport_and_git_sha(
         .with_response_format(Some(response_format.clone()))
         .with_preview_tool(preview_mode)
         .with_eval_mode(true)
+        .with_local_reasoning_budget_key(eval_budget_key)
         .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
         let talk_calls_offset = count_calls_lines(&calls_path)?;
@@ -2048,6 +2082,7 @@ pub fn run_play_with_transport_and_git_sha(
         .with_response_format(Some(response_format.clone()))
         .with_preview_tool(preview_mode)
         .with_eval_mode(true)
+        .with_local_reasoning_budget_key(eval_budget_key)
         .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
         let act_calls_offset = count_calls_lines(&calls_path)?;
@@ -2787,6 +2822,9 @@ fn branch_one_target(
                 .with_response_format(Some(response_format.clone()))
                 .with_preview_tool(preview_mode)
                 .with_eval_mode(true)
+                .with_local_reasoning_budget_key(local_reasoning_budget_key_for_manifest(
+                    serving_record,
+                ))
                 .with_allowed_vm_hosts(opts.allowed_vm_hosts.clone());
 
                 let arm_calls_path = arm_dir.join("relay").join("calls.jsonl");

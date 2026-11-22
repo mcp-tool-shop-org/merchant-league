@@ -20,20 +20,21 @@ use league_relay::{
     ACTIVE_WORDING_ARM, AiPreviewWireOutput, ApiKey, BackendKind, CONTROL_ARM_WORDING,
     CONTROL_WORDING_ARM, CallLogEntry, CostUnit, DurabilityEvent, EMC_OLDER_REPLY_EXCERPT_CHARS,
     EMC_VERBATIM_TURN_WINDOW, FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS,
-    LiveGate, LocalGate, LocalOpenAiTransport, MAX_INTENT_HEADER_DEPTH, MAX_REDACTION_SCAN_BYTES,
-    MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS, MODEL_FACING_WORDING, MemoryMode,
-    NegotiationInputs, NonPinnedModelFacingString, PREVIEW_ARM_WORDING, PREVIEW_ARM_WORDING_R1,
-    PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM, PREVIEW_WORDING_ARM_R1, PREVIEW_WORDING_ARM_R2,
-    PreviewToolMode, REDACTED_MARKER, RawHttpResponse, ReasoningEffort, RelayError,
-    ResponseFormatConfig, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord,
-    SavedToolRoundRecord, SeatFile, SeatOutcome, TranscriptEntry, Transport, TransportError,
-    TurnConfig, UntrustedWhisper, UreqTransport, WordingEntry,
-    build_control_turn_orders_tool_definition, build_preview_turn_orders_tool_definition,
-    cap_utf8_bytes, cap_words_and_chars, control_wording_slot, control_wording_template,
-    discarded_reply_file_path, execute_control_tool_call, execute_preview_tool_call,
-    extract_scratchpad_update, format_negotiation_block, http_reply_file_path,
-    install_redacting_panic_hook, json_escape_untrusted_str, load_negotiation_inputs_if_present,
-    normalize_allowed_vm_hosts, parse_preview_tool_arguments, preview_r1_wording_slot,
+    LiveGate, LocalGate, LocalOpenAiTransport, LocalReasoningBudgetKey, MAX_INTENT_HEADER_DEPTH,
+    MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS,
+    MODEL_FACING_WORDING, MemoryMode, NegotiationInputs, NonPinnedModelFacingString,
+    PREVIEW_ARM_WORDING, PREVIEW_ARM_WORDING_R1, PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM,
+    PREVIEW_WORDING_ARM_R1, PREVIEW_WORDING_ARM_R2, PreviewToolMode, REDACTED_MARKER,
+    RawHttpResponse, ReasoningEffort, RelayError, ResponseFormatConfig, Round,
+    SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatFile, SeatOutcome,
+    TranscriptEntry, Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport,
+    WordingEntry, build_control_turn_orders_tool_definition,
+    build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
+    control_wording_slot, control_wording_template, discarded_reply_file_path,
+    execute_control_tool_call, execute_preview_tool_call, extract_scratchpad_update,
+    format_negotiation_block, http_reply_file_path, install_redacting_panic_hook,
+    json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
+    parse_preview_tool_arguments, preview_r1_wording_slot,
     preview_seat_bundle_executions_for_table_for_test, preview_wording_slot, redact_and_truncate,
     redact_secrets, redact_secrets_multi_with_limit, render_call_limit_reached_wire_json,
     render_control_call_limit_reached_wire_json, render_control_malformed_tool_call_wire_json,
@@ -10557,8 +10558,8 @@ fn part1_b4_3_seat_reasoning_pinning_exclusion_and_reasoning_tokens_ledger() -> 
         .find(|v| v["model"] == "Qwen/Qwen3-14B")
         .ok_or("missing Qwen request")?;
     assert_eq!(qwen_req["reasoning_effort"], "medium");
-    assert_eq!(qwen_req["reasoning_budget_tokens"], 1024);
-    assert!(qwen_req.get("thinking_token_budget").is_none());
+    assert_eq!(qwen_req["thinking_token_budget"], 1024);
+    assert!(qwen_req.get("reasoning_budget_tokens").is_none());
     assert_eq!(
         qwen_req["chat_template_kwargs"],
         json!({"enable_thinking": true})
@@ -18739,13 +18740,10 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
         .collect();
     assert_eq!(reas_local_bodies.len(), 4);
     let raw_joined = reas_local_bodies.join("\n");
-    assert!(raw_joined.contains("\"reasoning_budget_tokens\":128"));
-    assert!(raw_joined.contains("\"reasoning_budget_tokens\":256"));
-    assert!(raw_joined.contains("\"reasoning_budget_tokens\":512"));
-    assert!(!raw_joined.contains("thinking_token_budget"));
-    for body in &mut reas_local_bodies {
-        *body = body.replace("\"reasoning_budget_tokens\":", "\"thinking_token_budget\":");
-    }
+    assert!(raw_joined.contains("\"thinking_token_budget\":128"));
+    assert!(raw_joined.contains("\"thinking_token_budget\":256"));
+    assert!(raw_joined.contains("\"thinking_token_budget\":512"));
+    assert!(!raw_joined.contains("reasoning_budget_tokens"));
     reas_local_bodies.sort();
     let reasoning_wire_local_body = reas_local_bodies.join("\n");
 
@@ -24716,12 +24714,15 @@ fn audit_real_tool_followup_request(
                 | "response_format"
                 | "reasoning"
                 | "reasoning_effort"
-                | "reasoning_budget_tokens"
+                | "thinking_token_budget"
                 | "chat_template_kwargs"
                 | "include_reasoning"
                 | "tools"
         ) || (allow_cache_prompt
-            && matches!(key.as_str(), "cache_prompt" | "logprobs" | "top_logprobs"));
+            && matches!(
+                key.as_str(),
+                "cache_prompt" | "logprobs" | "top_logprobs" | "reasoning_budget_tokens"
+            ));
         if !allowed_top {
             return Err(format!("unexpected top-level request framing key `{key}`"));
         }
@@ -26895,7 +26896,7 @@ fn rebuild_followup_request_body_from_disk_only(
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        reasoning_budget_tokens: Option<u64>,
+        thinking_token_budget: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         chat_template_kwargs: Option<&'a serde_json::Map<String, Json>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -26978,7 +26979,7 @@ fn rebuild_followup_request_body_from_disk_only(
                 .ok_or("max_output_tokens u64")?,
         )?,
         reasoning_effort: r_obj.and_then(|r| r.get("effort")).and_then(Json::as_str),
-        reasoning_budget_tokens: r_obj
+        thinking_token_budget: r_obj
             .and_then(|r| r.get("budget_tokens"))
             .and_then(Json::as_u64),
         chat_template_kwargs: r_obj
@@ -33815,7 +33816,8 @@ fn eval_local_apply_template_body_matches_chat_body_without_generation_fields() 
     .with_cap_gpu_secs(Some(20.0))
     .with_preview_tool(PreviewToolMode::Control)
     .with_response_format(Some(rf))
-    .with_eval_mode(true);
+    .with_eval_mode(true)
+    .with_local_reasoning_budget_key(LocalReasoningBudgetKey::ReasoningBudgetTokens);
     let tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
     assert!(run_turn(&cfg, &tx, None)?.all_clean());
 
@@ -33854,6 +33856,7 @@ fn eval_local_apply_template_body_matches_chat_body_without_generation_fields() 
     assert!(tpl_val.get("tools").is_some());
     assert_eq!(tpl_val.get("reasoning_effort"), Some(&json!("medium")));
     assert_eq!(tpl_val.get("reasoning_budget_tokens"), Some(&json!(256)));
+    assert!(tpl_val.get("thinking_token_budget").is_none());
     assert_eq!(
         tpl_val.get("chat_template_kwargs"),
         Some(&json!({"enable_thinking": true}))
@@ -33861,5 +33864,76 @@ fn eval_local_apply_template_body_matches_chat_body_without_generation_fields() 
     assert_eq!(tpl_val.get("include_reasoning"), Some(&json!(true)));
     assert_eq!(chat_val, tpl_val);
 
+    Ok(())
+}
+
+#[test]
+fn play_local_budget_request_body_is_byte_identical_to_cf7c5a41() -> TestResult {
+    // Pinned literal bytes and SHA-256 captured directly at commit cf7c5a41 using a deterministic
+    // Play (`eval_mode: false`) local budget seat.
+    const PINNED_PLAY_BODY: &str = r#"{"model":"Qwen/Qwen3-14B","messages":[{"role":"system","content":"Fixed Play wrapper for local budget wire parity.\n"},{"role":"user","content":"Day 1 Talk state snapshot.\n"}],"temperature":0.2,"max_tokens":128,"reasoning_effort":"medium","thinking_token_budget":256,"chat_template_kwargs":{"enable_thinking":true},"include_reasoning":true}"#;
+    const PINNED_PLAY_SHA256: &str =
+        "f7dd962834d60601b2c67ceaaaae5f827a933e0679e3f2f43000bb90d5aca6dd";
+
+    let tmp = TempDir::new()?;
+    let game_dir = tmp.path().join("play_game");
+    let wrapper_path = tmp.path().join("wrapper.md");
+    fs::write(
+        &wrapper_path,
+        "Fixed Play wrapper for local budget wire parity.\n",
+    )?;
+    write_to_seat(
+        &game_dir,
+        "01",
+        "talk",
+        "Foundry",
+        "Day 1 Talk state snapshot.\n",
+    )?;
+    let seats_json = json!({
+        "seats": [
+            {
+                "guild": "Foundry",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:18080",
+                "model": "Qwen/Qwen3-14B",
+                "temperature": 0.2,
+                "max_output_tokens": 128,
+                "timeout_secs": 5.0,
+                "max_gpu_secs_per_call": 6.0,
+                "reasoning": {
+                    "effort": "medium",
+                    "budget_tokens": 256,
+                    "chat_template_kwargs": { "enable_thinking": true },
+                    "exclude_from_transcript": false
+                }
+            }
+        ]
+    })
+    .to_string();
+    let seats = SeatFile::from_json_str(&seats_json, None)?;
+    let cfg = TurnConfig::new(
+        game_dir,
+        "01".to_owned(),
+        Round::Talk,
+        seats,
+        Some(wrapper_path),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0));
+    let tx = ScriptedTransport::new(vec![ScriptStep::Respond(ok_completion_json(
+        "Foundry Play ack.",
+        "Qwen/Qwen3-14B",
+        None,
+    ))]);
+    let summary = run_turn(&cfg, &tx, None)?;
+    assert!(summary.all_clean());
+    let bodies = tx.bodies()?;
+    assert_eq!(bodies.len(), 1);
+    let body = &bodies[0];
+    assert!(body.contains("\"thinking_token_budget\":256"));
+    assert!(!body.contains("reasoning_budget_tokens"));
+    assert_eq!(body.as_str(), PINNED_PLAY_BODY);
+    assert_eq!(sha256_hex(body.as_bytes()), PINNED_PLAY_SHA256);
     Ok(())
 }

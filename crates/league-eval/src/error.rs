@@ -58,6 +58,8 @@ pub enum EvalError {
     ScratchpadTokenizeFailed(String),
     /// Configured `reasoning.budget_tokens` cannot be enforced by `llama.cpp` `b11433` (`exit 1`).
     UnenforceableReasoningBudget(String),
+    /// Server `--reasoning-budget-message` is set, which injects prompt text before the model (`exit 1`).
+    ReasoningBudgetMessageForbidden(String),
     /// Local `/tokenize` prompt token count disagreed with chat reply `usage.prompt_tokens` (`exit 2`).
     PromptTokenCountMismatch(String),
     /// Server HTTP 200 reply omitted required prompt token IDs, reply token IDs, or exact top-5 logprobs (`exit 2`).
@@ -131,6 +133,7 @@ impl EvalError {
             Self::PromptTokenizeFailed(_) => "PROMPT_TOKENIZE_FAILED",
             Self::ScratchpadTokenizeFailed(_) => "SCRATCHPAD_TOKENIZE_FAILED",
             Self::UnenforceableReasoningBudget(_) => "UNENFORCEABLE_REASONING_BUDGET",
+            Self::ReasoningBudgetMessageForbidden(_) => "REASONING_BUDGET_MESSAGE_FORBIDDEN",
             Self::PromptTokenCountMismatch(_) => "PROMPT_TOKEN_COUNT_MISMATCH",
             Self::MissingReplyTelemetry(_) => "MISSING_REPLY_TELEMETRY",
             Self::InvalidActionCount(_) => "INVALID_ACTION_COUNT",
@@ -180,6 +183,7 @@ impl EvalError {
             | Self::UnknownFocalSeat(_)
             | Self::EvalThinkStrippingForbidden(_)
             | Self::UnenforceableReasoningBudget(_)
+            | Self::ReasoningBudgetMessageForbidden(_)
             | Self::MissingBranchTranscript(_)
             | Self::MissingBranchScratchpad(_)
             | Self::MissingBranchNegotiation(_)
@@ -271,6 +275,13 @@ impl fmt::Display for EvalError {
                 write!(
                     f,
                     "UNENFORCEABLE_REASONING_BUDGET: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::ReasoningBudgetMessageForbidden(msg) => {
+                write!(
+                    f,
+                    "REASONING_BUDGET_MESSAGE_FORBIDDEN: {}",
                     scrub_secret_text(msg)
                 )
             }
@@ -489,7 +500,13 @@ impl ToStructuredError for EvalError {
             Self::UnenforceableReasoningBudget(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "ensure serving manifest specifies engine 'llama_server' with server_settings.jinja: true, non-empty model.thinking_start_tag and model.thinking_end_tags, reasoning.effort != \"none\", chat_template_kwargs.enable_thinking != false, and budget_tokens <= i32::MAX",
+                "ensure serving manifest specifies engine 'llama_server' with server_settings.jinja: true, server_settings.reasoning_mode not 'off', non-empty model.thinking_start_tag and model.thinking_end_tags, seat reasoning.effort != \"none\", chat_template_kwargs.enable_thinking: true, and budget_tokens <= i32::MAX",
+                false,
+            ),
+            Self::ReasoningBudgetMessageForbidden(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "remove --reasoning-budget-message from the inference server configuration; Evaluation Mode forbids server-injected prompt text",
                 false,
             ),
             Self::PromptTokenCountMismatch(_) => StructuredError::new(
@@ -666,6 +683,12 @@ mod tests {
                 "UNENFORCEABLE_REASONING_BUDGET",
                 EXIT_USER_ERROR,
                 "server_settings.jinja",
+            ),
+            (
+                EvalError::ReasoningBudgetMessageForbidden("budget msg set".to_owned()),
+                "REASONING_BUDGET_MESSAGE_FORBIDDEN",
+                EXIT_USER_ERROR,
+                "--reasoning-budget-message",
             ),
             (
                 EvalError::PromptTokenCountMismatch("10 vs 11".to_owned()),

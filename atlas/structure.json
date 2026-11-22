@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "0795d7233ffb4f5bfcfc199f97f1a31672cced2ca43606136def65d7a865418f",
+          "hash": "4d4ab5494c7bb6c31d1a5dbe34942b6d2cfb8d4c14f6c3ee0872c9a22bb48ffa",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -52,7 +52,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "c5bd678745e270ba7970de27c83503ab20d1619dee5cbf3a48d203ec42e05678",
+          "hash": "befb6a15849d0f9b8bb05ec8cbfa70f02c7f893a3afd041ef7e116c21a8d5a68",
           "path": "docs/eval-harness.md"
         },
         {
@@ -164,7 +164,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "a66eb69962afc429a728217185ce85c2a2d6264898659ae938c81a8fdb9eda67",
+          "hash": "62e045e8b4f5101babdf664b9b4b2328edb74d574b66a9b565c900b0db4d8079",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -4071,162 +4071,162 @@
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1349
+              "line": 1357
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1356
+              "line": 1370
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1367
+              "line": 1377
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1374
+              "line": 1388
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1380
+              "line": 1395
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1386
+              "line": 1401
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1397
+              "line": 1407
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1408
+              "line": 1418
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1429
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1440
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1482
+              "line": 1514
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1493
+              "line": 1525
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1718
+              "line": 1750
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1730
+              "line": 1762
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 1776
+              "line": 1808
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 1827
+              "line": 1859
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 1841
+              "line": 1873
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2186
+              "line": 2221
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2194
+              "line": 2229
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2248
+              "line": 2283
             },
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 2291
+              "line": 2326
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2319
+              "line": 2354
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2342
+              "line": 2377
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2359
+              "line": 2394
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2380
+              "line": 2415
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2406
+              "line": 2441
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2490
+              "line": 2525
             },
             {
               "in": "verify_branch_target_no_model_regent",
               "kind": "err",
-              "line": 2519
+              "line": 2554
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2578
+              "line": 2613
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2590
+              "line": 2625
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2597
+              "line": 2632
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2620
-            },
-            {
-              "in": "branch_one_target",
-              "kind": "err",
-              "line": 2629
-            },
-            {
-              "in": "branch_one_target",
-              "kind": "err",
-              "line": 2657
+              "line": 2655
             },
             {
               "in": "branch_one_target",
@@ -4234,17 +4234,27 @@
               "line": 2664
             },
             {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 2692
+            },
+            {
+              "in": "branch_one_target",
+              "kind": "err",
+              "line": 2699
+            },
+            {
               "in": "load_pre_act_transcript_prefix",
               "kind": "err",
-              "line": 2966
+              "line": 3004
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 3037
+              "line": 3075
             }
           ],
-          "hash": "6ed1facb2a300e6a79b935cf93eb051d1797794c367e23b7774289a27927b062",
+          "hash": "f939e4eedb028529c758c843c570910d98ff62cb4251dabc9d8cdefca60bf38a",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4273,7 +4283,7 @@
           "testsInside": true
         },
         {
-          "hash": "f39204b1dc22ee4f7a40829bc3c10c418df47f09a6907dcf5743416b5478a15e",
+          "hash": "3116d091d7a79ddbf4f7a9624a341178463b6feb8274ddb7159b06fdde3365c0",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs"
@@ -4641,100 +4651,100 @@
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 428
+              "line": 444
             },
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 435
+              "line": 451
             },
             {
               "in": "validate_crate_git_sha_and_cleanliness",
               "kind": "err",
-              "line": 441
+              "line": 457
             },
             {
               "in": "resolve_verified_crate_git_sha_in",
               "kind": "err",
-              "line": 480
+              "line": 496
             },
             {
               "in": "resolve_verified_crate_git_sha_in",
               "kind": "err",
-              "line": 495
+              "line": 511
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 556
+              "line": 582
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 561
+              "line": 587
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 581
+              "line": 607
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 608
+              "line": 634
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 616
+              "line": 642
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 624
+              "line": 650
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 633
+              "line": 659
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 638
+              "line": 664
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 644
+              "line": 670
             },
             {
               "in": "validate_serving_manifest_input",
               "kind": "err",
-              "line": 663
+              "line": 689
             },
             {
               "in": "load_and_validate_serving_manifest",
               "kind": "err",
-              "line": 815
+              "line": 853
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 954
+              "line": 992
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 959
+              "line": 997
             },
             {
               "in": "scrub_text_value",
               "kind": "err",
-              "line": 970
+              "line": 1008
             }
           ],
-          "hash": "3fb8b866f72a6fbf1f5d983e5e48c3a90fc38e5fdf2136446aceb4501f4d08b1",
+          "hash": "10faffb5dc497688b8aaa11f4d89f9fd51c484ecd136b27dd8d4ba7c00449f78",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4820,7 +4830,7 @@
           "testsInside": true
         },
         {
-          "hash": "ffd683c7200af51129969d3b0778638468f2c2ee7a0c273a09664834948cb498",
+          "hash": "4b5757bb7ca514a41db4eeb64afe945fe650d035178de9408c65fdcaa7a09421",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4828,12 +4838,6 @@
           ],
           "library": "crates/league-eval/src/lib.rs",
           "path": "crates/league-eval/tests/control_manifest_and_regent.rs",
-          "spawns": [
-            "crates/league-eval/src/main.rs"
-          ],
-          "spawnsInstalled": [
-            "crates/league-eval/src/main.rs"
-          ],
           "testsInside": true
         },
         {
@@ -4841,7 +4845,7 @@
           "path": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md"
         },
         {
-          "hash": "40dd01c0b6278e861e8628be8820bba83f590c9bab80c41156849ec93a40d1e9",
+          "hash": "49c0e1e965c68785f479294dfc88560d492ad28f44ef3d76b72aa4f8fac467e5",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -7691,7 +7695,7 @@
           "path": "crates/league-relay/src/error.rs"
         },
         {
-          "hash": "09ca7f46650c44a8b0fadfafbd5a2409128ebba8b30e795a894eebb5f9a101e9",
+          "hash": "6763c5b573fa7bf4ff34702171550de5ccd404e755f159cfcd73819d18d39ca5",
           "importsFiles": [
             "crates/league-relay/src/cli.rs",
             "crates/league-relay/src/error.rs",
@@ -8203,162 +8207,152 @@
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3070
+              "line": 3095
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3072
+              "line": 3097
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3080
+              "line": 3105
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3081
+              "line": 3106
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3114
+              "line": 3139
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3120
+              "line": 3145
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3121
+              "line": 3146
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3141
+              "line": 3166
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3143
+              "line": 3168
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3148
-            },
-            {
-              "in": "acquire",
-              "kind": "err",
-              "line": 3149
-            },
-            {
-              "in": "verify_identity",
-              "kind": "err",
               "line": 3173
             },
             {
+              "in": "acquire",
+              "kind": "err",
+              "line": 3174
+            },
+            {
+              "in": "verify_identity",
+              "kind": "err",
+              "line": 3198
+            },
+            {
               "in": "verify_identity",
               "kind": "match-err",
-              "line": 3179
+              "line": 3204
             },
             {
               "in": "verify_identity",
               "kind": "err",
-              "line": 3179
+              "line": 3204
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3468
+              "line": 3493
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3482
+              "line": 3507
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3487
+              "line": 3512
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3492
+              "line": 3517
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3503
+              "line": 3528
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3509
+              "line": 3534
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3515
+              "line": 3540
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3521
+              "line": 3546
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3600
+              "line": 3625
             },
             {
               "in": "validate_eval_mode_seats",
               "kind": "err",
-              "line": 3641
+              "line": 3666
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3787
+              "line": 3812
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3796
+              "line": 3821
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3807
+              "line": 3832
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3851
+              "line": 3876
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3861
+              "line": 3886
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3871
-            },
-            {
-              "in": "ensure_game_setup",
-              "kind": "err",
-              "line": 3881
-            },
-            {
-              "in": "ensure_game_setup",
-              "kind": "err",
-              "line": 3892
+              "line": 3896
             },
             {
               "in": "ensure_game_setup",
@@ -8368,12 +8362,12 @@
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3915
+              "line": 3917
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3927
+              "line": 3931
             },
             {
               "in": "ensure_game_setup",
@@ -8382,318 +8376,318 @@
             },
             {
               "in": "ensure_game_setup",
-              "kind": "match-err",
-              "line": 3972
+              "kind": "err",
+              "line": 3952
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3974
+              "line": 3965
             },
             {
               "in": "ensure_game_setup",
               "kind": "match-err",
-              "line": 3976
+              "line": 3997
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3978
+              "line": 3999
+            },
+            {
+              "in": "ensure_game_setup",
+              "kind": "match-err",
+              "line": 4001
+            },
+            {
+              "in": "ensure_game_setup",
+              "kind": "err",
+              "line": 4003
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4029
+              "line": 4054
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4030
+              "line": 4055
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 4039
+              "line": 4064
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4108
+              "line": 4133
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4109
+              "line": 4134
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4109
+              "line": 4134
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4120
+              "line": 4145
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4127
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "match-err",
-              "line": 4155
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "err",
-              "line": 4157
+              "line": 4152
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4161
+              "line": 4180
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4163
+              "line": 4182
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "match-err",
+              "line": 4186
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "err",
+              "line": 4188
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4185
+              "line": 4210
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4192
+              "line": 4217
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4228
+              "line": 4253
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "match-err",
-              "line": 4237
+              "line": 4262
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4239
+              "line": 4264
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "match-err",
-              "line": 4242
+              "line": 4267
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4244
+              "line": 4269
             },
             {
               "in": "open",
               "kind": "err",
-              "line": 4527
+              "line": 4552
             },
             {
               "in": "check_lock_identity",
               "kind": "match-err",
-              "line": 4584
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "match-err",
-              "line": 4609
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "err",
               "line": 4609
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "match-err",
-              "line": 4614
+              "line": 4634
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "err",
-              "line": 4614
+              "line": 4634
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "match-err",
+              "line": 4639
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "err",
+              "line": 4639
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4828
+              "line": 4853
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4858
+              "line": 4883
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "err",
-              "line": 4862
+              "line": 4887
             },
             {
               "in": "record_refusal",
               "kind": "err",
-              "line": 4874
+              "line": 4899
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4903
+              "line": 4928
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4913
+              "line": 4938
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4934
+              "line": 4959
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4975
+              "line": 5000
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4992
+              "line": 5017
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4996
+              "line": 5021
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 5051
+              "line": 5076
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5123
+              "line": 5148
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5131
+              "line": 5156
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5136
+              "line": 5161
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5186
+              "line": 5211
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5196
+              "line": 5221
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5204
+              "line": 5229
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5263
+              "line": 5288
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5264
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "match-err",
-              "line": 5274
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5275
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5312
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5323
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5341
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5362
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5373
+              "line": 5289
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5389
+              "line": 5299
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5390
+              "line": 5300
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5337
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5348
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5366
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5387
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5398
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "match-err",
+              "line": 5414
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5415
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5419
+              "line": 5444
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5426
+              "line": 5451
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5433
+              "line": 5458
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5440
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 5445
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 5450
+              "line": 5465
             },
             {
               "in": "run_turn_with_diag",
@@ -8703,17 +8697,17 @@
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5476
+              "line": 5475
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5483
+              "line": 5495
             },
             {
               "in": "run_turn_with_diag",
-              "kind": "match-err",
-              "line": 5499
+              "kind": "err",
+              "line": 5501
             },
             {
               "in": "run_turn_with_diag",
@@ -8722,63 +8716,63 @@
             },
             {
               "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 5550
+              "kind": "match-err",
+              "line": 5524
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5561
+              "line": 5533
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5780
+              "line": 5575
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5586
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5805
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5916
+              "line": 5941
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5925
+              "line": 5950
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5934
+              "line": 5959
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6011
+              "line": 6036
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6025
+              "line": 6050
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6056
+              "line": 6081
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6349
-            },
-            {
-              "in": "run_single_automated_seat",
-              "kind": "match-err",
-              "line": 6388
-            },
-            {
-              "in": "run_single_automated_seat",
-              "kind": "match-err",
-              "line": 6410
+              "line": 6381
             },
             {
               "in": "run_single_automated_seat",
@@ -8788,22 +8782,22 @@
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6440
+              "line": 6442
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6498
+              "line": 6452
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6545
+              "line": 6472
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6573
+              "line": 6530
             },
             {
               "in": "run_single_automated_seat",
@@ -8812,296 +8806,306 @@
             },
             {
               "in": "run_single_automated_seat",
+              "kind": "match-err",
+              "line": 6605
+            },
+            {
+              "in": "run_single_automated_seat",
+              "kind": "match-err",
+              "line": 6609
+            },
+            {
+              "in": "run_single_automated_seat",
               "kind": "err",
-              "line": 6652
+              "line": 6684
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6681
+              "line": 6713
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6728
+              "line": 6760
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6771
+              "line": 6803
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6873
+              "line": 6905
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6888
+              "line": 6920
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6896
+              "line": 6928
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6924
+              "line": 6956
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6946
+              "line": 6978
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6958
+              "line": 6990
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7027
+              "line": 7059
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7077
+              "line": 7109
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7294
+              "line": 7326
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7342
+              "line": 7374
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7569
+              "line": 7601
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7585
+              "line": 7617
             },
             {
               "in": "finish_eval_prompt_prep_error",
               "kind": "match-err",
-              "line": 7628
+              "line": 7660
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7674
+              "line": 7706
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7674
+              "line": 7706
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7675
+              "line": 7707
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7676
+              "line": 7708
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7682
+              "line": 7714
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7682
+              "line": 7714
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7693
+              "line": 7725
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7697
+              "line": 7729
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "match-err",
-              "line": 7830
+              "line": 7862
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "err",
-              "line": 7831
+              "line": 7863
             },
             {
               "in": "parse_single_tool_call_item",
               "kind": "err",
-              "line": 8064
+              "line": 8096
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8156
+              "line": 8188
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8162
+              "line": 8194
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8168
+              "line": 8200
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8178
+              "line": 8210
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8232
+              "line": 8264
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8241
+              "line": 8273
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8290
+              "line": 8322
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8318
+              "line": 8350
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8332
+              "line": 8364
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8386
+              "line": 8418
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8410
+              "line": 8442
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8478
-            },
-            {
-              "in": "probe_tool_round_store",
-              "kind": "err",
-              "line": 8489
-            },
-            {
-              "in": "probe_tool_round_store",
-              "kind": "match-err",
               "line": 8510
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8512
+              "line": 8521
+            },
+            {
+              "in": "probe_tool_round_store",
+              "kind": "match-err",
+              "line": 8542
+            },
+            {
+              "in": "probe_tool_round_store",
+              "kind": "err",
+              "line": 8544
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8633
+              "line": 8665
             },
             {
               "in": "write_json_record_atomic",
               "kind": "match-err",
-              "line": 8642
+              "line": 8674
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8644
+              "line": 8676
             },
             {
               "in": "write_json_record_atomic",
               "kind": "match-err",
-              "line": 8646
+              "line": 8678
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8648
+              "line": 8680
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8727
+              "line": 8759
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8736
+              "line": 8768
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8748
+              "line": 8780
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8758
+              "line": 8790
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8804
+              "line": 8836
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8813
+              "line": 8845
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8815
+              "line": 8847
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8817
+              "line": 8849
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8819
+              "line": 8851
             },
             {
               "in": "format_system_time_utc_rfc3339",
               "kind": "match-err",
-              "line": 8893
+              "line": 8925
             }
           ],
-          "hash": "7fbd5e3a67c47d3382cf18fbe0044f173d338ec30d2da4fc2697c17c964b75a9",
+          "hash": "c6f54159725f54e53dc35043c6e10dc4a97f3bbbbab2996dc26c9b6963d7599e",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -9136,290 +9140,290 @@
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 288
+              "line": 289
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 315
+              "line": 316
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 329
+              "line": 330
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 342
+              "line": 343
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 352
+              "line": 353
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 358
+              "line": 359
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 364
+              "line": 365
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 385
+              "line": 386
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 407
+              "line": 408
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 438
+              "line": 439
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 445
+              "line": 446
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 472
+              "line": 473
             },
             {
               "in": "from_json_str_with_allowed_hosts",
               "kind": "err",
-              "line": 486
+              "line": 487
             },
             {
               "in": "validate_common_sampling",
               "kind": "err",
-              "line": 533
+              "line": 534
             },
             {
               "in": "validate_common_sampling",
               "kind": "err",
-              "line": 538
+              "line": 539
             },
             {
               "in": "validate_common_sampling",
               "kind": "err",
-              "line": 543
+              "line": 544
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 560
+              "line": 561
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 566
+              "line": 567
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 571
+              "line": 572
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 580
+              "line": 581
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 585
+              "line": 586
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 591
+              "line": 592
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 596
+              "line": 597
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 602
+              "line": 603
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 608
+              "line": 609
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 613
+              "line": 614
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 621
+              "line": 622
             },
             {
               "in": "validate_seat_reasoning",
               "kind": "err",
-              "line": 629
+              "line": 630
             },
             {
               "in": "validate_local_seat_reasoning",
               "kind": "err",
-              "line": 649
+              "line": 650
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 675
+              "line": 676
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 682
+              "line": 683
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 689
+              "line": 690
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 698
+              "line": 699
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 707
+              "line": 708
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 715
+              "line": 716
             },
             {
               "in": "validate_vm_host_allowance",
               "kind": "err",
-              "line": 723
+              "line": 724
             },
             {
               "in": "validate_local_endpoints",
               "kind": "err",
-              "line": 787
+              "line": 788
             },
             {
               "in": "validate_local_tokenize_url",
               "kind": "err",
-              "line": 825
+              "line": 826
             },
             {
               "in": "validate_local_apply_template_url",
               "kind": "err",
-              "line": 849
+              "line": 850
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 868
+              "line": 869
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 874
+              "line": 875
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 885
+              "line": 886
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 890
+              "line": 891
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 897
+              "line": 898
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 915
+              "line": 916
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 922
+              "line": 923
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 939
+              "line": 940
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 945
+              "line": 946
             },
             {
               "in": "validate_guild_name",
               "kind": "err",
-              "line": 999
+              "line": 1000
             },
             {
               "in": "validate_guild_name",
               "kind": "err",
-              "line": 1006
+              "line": 1007
             },
             {
               "in": "validate_pinned_local_model",
               "kind": "err",
-              "line": 1021
+              "line": 1022
             },
             {
               "in": "validate_pinned_local_model",
               "kind": "err",
-              "line": 1030
+              "line": 1031
             },
             {
               "in": "validate_pinned_local_model",
               "kind": "err",
-              "line": 1046
+              "line": 1047
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1056
+              "line": 1057
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1061
+              "line": 1062
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1072
+              "line": 1073
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1083
+              "line": 1084
             }
           ],
-          "hash": "98b43b1bfe063dd13de1010cc3ff97f2280d40cbeeb09dff108a1d89ffbbc3c6",
+          "hash": "043c8ec003219a19462bbc88a8169d850ae2b2ef58720ec8cf6107518ae4dea3",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
@@ -9847,7 +9851,7 @@
           "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-02-talk-Saltworks.md"
         },
         {
-          "hash": "b8d86a45fd049eb427e8bbe78d38793fb82cdf7a40940569efd030e1a6fd54df",
+          "hash": "c28f8303ba69bd47041459dda5fd2a0e98d9b090c247192134a9d5d391c29ec6",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -13411,7 +13415,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "6ad892b094d13ac0657b2e09eeb8efbdb5dc1a370b2f0b05ab8a9dd1bffba2ec",
+          "hash": "582c94900c1cf1afb6b9b550f250cd80e9bbc1329c6447c392013ec485f03a2a",
           "path": "CHANGELOG.md"
         },
         {
@@ -15089,7 +15093,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "cf7c5a41a5b9b365f7984c14496dc0ce9c3b34a5",
+    "commit": "2a908a121a215a75a90bb4417d3810a850cc69fe",
     "tracked": 627
   },
   "landings": [

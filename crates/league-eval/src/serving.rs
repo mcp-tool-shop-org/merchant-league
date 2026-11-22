@@ -69,12 +69,14 @@ pub struct ModelManifestInput {
     /// Optional 64-hex SHA-256 of the active chat template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template_sha256: Option<String>,
-    /// Optional non-empty thinking start tag emitted by the active chat template (`b11433`
-    /// `common/sampling.cpp:315`).
+    /// Recorded thinking start tag emitted by the active chat template (`b11433`
+    /// `common/sampling.cpp:315`, `common/chat.cpp:1357-1364`; operator data, not proof the
+    /// server binds the reasoning budget).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_start_tag: Option<String>,
-    /// Optional non-empty thinking end tags emitted by the active chat template (`b11433`
-    /// `tools/server/server-common.cpp:1461`, `common/sampling.cpp:315`).
+    /// Recorded thinking end tags emitted by the active chat template (`b11433`
+    /// `tools/server/server-common.cpp:1461`, `common/chat.cpp:1357-1364`, `common/sampling.cpp:315`;
+    /// operator data, not proof the server binds the reasoning budget).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_end_tags: Option<Vec<String>>,
     /// Provenance of model/template fields.
@@ -95,10 +97,12 @@ pub struct ModelManifestRecord {
     /// Validated 64-hex SHA-256 of the active chat template, if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template_sha256: Option<String>,
-    /// Verified thinking start tag reported for the active template.
+    /// Recorded thinking start tag reported for the active template (operator data; not proof the
+    /// server binds the reasoning budget).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_start_tag: Option<String>,
-    /// Verified thinking end tags reported for the active template.
+    /// Recorded thinking end tags reported for the active template (operator data; not proof the
+    /// server binds the reasoning budget).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_end_tags: Option<Vec<String>>,
     /// Provenance of model/template fields.
@@ -203,6 +207,18 @@ pub struct ServerSettingsRecord {
     /// `llama.cpp` `b11433` `tools/server/server-context.cpp:1596`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jinja: Option<bool>,
+    /// Server reasoning mode flag (`--reasoning`, for example `"on"`, `"off"`, or `"auto"`;
+    /// `llama.cpp` `b11433` `tools/server/server-context.cpp:1594-1597`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_mode: Option<String>,
+    /// Server default reasoning budget (`--reasoning-budget`, `llama.cpp` `b11433`
+    /// `tools/server/server-common.cpp:1458`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_budget: Option<i32>,
+    /// Server reasoning-budget injected message (`--reasoning-budget-message`, `llama.cpp` `b11433`
+    /// `tools/server/server-common.cpp:1465`; Evaluation Mode refuses any non-empty setting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_message: Option<String>,
     /// Provenance of server execution settings.
     #[serde(default)]
     pub provenance: MetadataProvenance,
@@ -522,6 +538,13 @@ pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
 pub enum CrateGitShaSource<'a> {
     /// Inspect the live checkout at compile-time `CARGO_MANIFEST_DIR` against [`CRATE_GIT_SHA`].
     Live,
+    /// Inspect an explicit checkout directory against an explicit compiled SHA via the live git path.
+    LiveDir {
+        /// Checkout directory containing `.git`.
+        manifest_dir: &'a Path,
+        /// Compiled git commit SHA to validate against `manifest_dir`.
+        built_sha: &'a str,
+    },
     /// Test seam injecting `built_sha`, optional `live_head`, and optional `is_dirty`.
     Injected {
         /// Compiled git commit SHA to validate.
@@ -533,11 +556,14 @@ pub enum CrateGitShaSource<'a> {
     },
 }
 
-/// Resolve and verify the compiled crate git SHA from either [`CrateGitShaSource::Live`] or
-/// [`CrateGitShaSource::Injected`].
+/// Resolve and verify the compiled crate git SHA from [`CrateGitShaSource`].
 pub fn resolve_crate_git_sha_from(source: &CrateGitShaSource<'_>) -> Result<String, EvalError> {
     match source {
         CrateGitShaSource::Live => resolve_verified_crate_git_sha(),
+        CrateGitShaSource::LiveDir {
+            manifest_dir,
+            built_sha,
+        } => resolve_verified_crate_git_sha_in(Some(manifest_dir), built_sha),
         CrateGitShaSource::Injected {
             built_sha,
             live_head,
@@ -708,6 +734,18 @@ pub fn validate_serving_manifest_input(
         .speculative_decoding
         .as_deref()
         .map(|s| scrub_manifest_field("server_settings.speculative_decoding", s, &homes))
+        .transpose()?;
+    clean_server_settings.reasoning_mode = input
+        .server_settings
+        .reasoning_mode
+        .as_deref()
+        .map(|s| scrub_manifest_field("server_settings.reasoning_mode", s, &homes))
+        .transpose()?;
+    clean_server_settings.reasoning_budget_message = input
+        .server_settings
+        .reasoning_budget_message
+        .as_deref()
+        .map(|s| scrub_manifest_field("server_settings.reasoning_budget_message", s, &homes))
         .transpose()?;
 
     let mut clean_sampling = input.sampling.clone();
@@ -1736,6 +1774,9 @@ mod tests {
                 ctx_shift: false,
                 threads: Some(16),
                 jinja: Some(true),
+                reasoning_mode: Some("on".to_owned()),
+                default_reasoning_budget: Some(-1),
+                reasoning_budget_message: None,
                 provenance: MetadataProvenance::ServerReported,
             },
             cache_settings: CacheSettingsInput {

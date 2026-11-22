@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-22 from commit cf7c5a4 by Atlas 1.26.0.
+Mapped at 2026-11-22 from commit 2a908a1 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,10 +8,9 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 15 parts, mostly Rust (392 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-22 (757118f)
+## What changed since 2026-11-22 (cf7c5a4)
 
-- CI now also runs crates/league-eval/src/error.rs and crates/league-relay/src/transport.rs.
-- 17 files changed content, across 4 parts.
+Nothing structural changed since 2026-11-22; 13 files changed content.
 
 ## What comes in
 
@@ -65,11 +64,11 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 ## What tends to change together
 
+- **crates/league-eval/src/driver.rs** and **crates/league-eval/tests/addendum_item9.rs** changed together in 5 of 5 commits, inside the league-eval part.
+- **crates/league-eval/src/driver.rs** and **crates/league-eval/tests/play_and_branch.rs** changed together in 5 of 6 commits, inside the league-eval part.
+- **crates/league-eval/tests/addendum_item9.rs** and **crates/league-eval/tests/play_and_branch.rs** changed together in 5 of 6 commits, inside the league-eval part.
 - **crates/league-gen/src/empirical.rs** and **crates/league-gen/tests/properties.rs** changed together in 5 of 6 commits, inside the league-gen part.
-- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 23 of 29 commits, inside the league-relay part.
-- **crates/league-gen/src/generator.rs** and **crates/league-gen/src/lib.rs** changed together in 7 of 9 commits, inside the league-gen part.
-- **crates/league-core/src/replay.rs** and **crates/league-core/tests/replay_invariants.rs** changed together in 9 of 12 commits, inside the league-core part.
-- **crates/league-gen/src/empirical.rs** and **crates/league-gen/src/generator.rs** changed together in 6 of 8 commits, inside the league-gen part.
+- **crates/league-relay/src/relay.rs** and **crates/league-relay/tests/relay_integration.rs** changed together in 24 of 30 commits, inside the league-relay part.
 
 Confidence is low: fewer than 25 source files reach 10 revisions in the window.
 

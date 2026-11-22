@@ -1,8 +1,9 @@
 //! Tests for the inert control arm, pinned wrapper, serving manifests, telemetry, and model-seat Regent rules.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -13,13 +14,14 @@ use league_eval::{
     EvalDecisionRecord, EvalError, EvalManifest, MetadataProvenance, NoopTransport,
     PINNED_WRAPPERS, PlayOptions, REJECTED_WRAPPER_HASHES, SelectedPreActState, SelectionList,
     TurnStratum, WordingArmDigests, check_wrapper_digest, eval_wording_slot,
-    run_branch_with_transport_and_git_sha, run_play_with_transport_and_git_sha,
+    execute_cli_with_git_sha, run_branch_with_transport_and_git_sha,
+    run_play_with_transport_and_git_sha,
 };
 use league_relay::{ApiKey, RawHttpResponse, Transport, TransportError, sha256_hex};
 use serde_json::{Value, json};
 
-static LIVE_CHECKOUT_LOCK: Mutex<()> = Mutex::new(());
 const TEST_FALLBACK_GIT_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const ML_EVAL_TEST_SEAM_ARGS_FILE_ENV: &str = "ML_EVAL_TEST_SEAM_ARGS_FILE";
 
 fn test_git_sha_source() -> CrateGitShaSource<'static> {
     let built_sha =
@@ -33,6 +35,53 @@ fn test_git_sha_source() -> CrateGitShaSource<'static> {
         live_head: Some(built_sha),
         is_dirty: Some(false),
     }
+}
+
+#[test]
+fn eval_cli_seam_child_helper() {
+    let Ok(args_file) = std::env::var(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV) else {
+        return;
+    };
+    let raw = must_ok(fs::read_to_string(&args_file), "read seam CLI args file");
+    let cli_args: Vec<String> = must_ok(serde_json::from_str(&raw), "parse seam CLI args JSON");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli_with_git_sha(
+        cli_args.into_iter().map(std::ffi::OsString::from),
+        &mut out,
+        &mut err,
+        &test_git_sha_source(),
+    );
+    let _ = std::io::stdout().write_all(&out);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().write_all(&err);
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
+}
+
+fn run_cli_via_test_seam(
+    tmp: &Path,
+    tag: &str,
+    cli_args: &[&str],
+    envs: &[(&str, &str)],
+    env_removes: &[&str],
+) -> Output {
+    let args_path = tmp.join(format!("seam_args_{tag}.json"));
+    must_ok(
+        fs::write(&args_path, json!(cli_args).to_string()),
+        "write seam CLI args file",
+    );
+    let exe = must_ok(std::env::current_exe(), "resolve test binary path");
+    let mut cmd = Command::new(exe);
+    cmd.args(["--exact", "eval_cli_seam_child_helper", "--nocapture"])
+        .env(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV, &args_path);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    for k in env_removes {
+        cmd.env_remove(k);
+    }
+    must_ok(cmd.output(), tag)
 }
 
 fn run_play_with_transport(
@@ -1115,44 +1164,49 @@ fn serving_manifest_andons_provenance_vllm_and_subprocess_env_snapshot() {
         .join("llama_cache_dir")
         .to_string_lossy()
         .into_owned();
-    let bin = env!("CARGO_BIN_EXE_league-eval");
-    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let out = must_ok(
-        Command::new(bin)
-            .args([
-                "play",
-                "--game-dir",
-                &sub_game.to_string_lossy(),
-                "--seats",
-                &clubbot_dir.to_string_lossy(),
-                "--wrapper",
-                &wrapper_path.to_string_lossy(),
-                "--serving-manifest",
-                &llama_ok_path.to_string_lossy(),
-                "--arm",
-                "control",
-                "--turns",
-                "1",
-                "--seed",
-                "7",
-            ])
-            .env("HOME", &fake_home_str)
-            .env("USERPROFILE", &fake_home_str)
-            .env("LLAMA_CACHE", &cache_dir_str)
-            .env("CUDA_VISIBLE_DEVICES", "0")
-            .env("GGML_CUDA_ENABLE_UNIFIED_MEMORY", "0")
-            .env("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
-            .env("VLLM_API_KEY", "sk-secret-vllm-key")
-            .env("LLAMA_HF_TOKEN", "hf_secret_token")
-            .env("CUDA_SECRET_KEY", "cuda-secret-val")
-            .env("GGML_PASS_PHRASE", "ggml-secret-pass")
-            .env("VLLM_AUTH_HEADER", "Bearer secret-auth")
-            .env_remove("OPENROUTER_API_KEY")
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("GEMINI_API_KEY")
-            .output(),
-        "run child league-eval env snapshot",
+    let sub_game_str = sub_game.to_string_lossy().into_owned();
+    let clubbot_dir_str = clubbot_dir.to_string_lossy().into_owned();
+    let wrapper_path_str = wrapper_path.to_string_lossy().into_owned();
+    let llama_ok_path_str = llama_ok_path.to_string_lossy().into_owned();
+    let out = run_cli_via_test_seam(
+        &tmp,
+        "env_snapshot",
+        &[
+            "play",
+            "--game-dir",
+            &sub_game_str,
+            "--seats",
+            &clubbot_dir_str,
+            "--wrapper",
+            &wrapper_path_str,
+            "--serving-manifest",
+            &llama_ok_path_str,
+            "--arm",
+            "control",
+            "--turns",
+            "1",
+            "--seed",
+            "7",
+        ],
+        &[
+            ("HOME", &fake_home_str),
+            ("USERPROFILE", &fake_home_str),
+            ("LLAMA_CACHE", &cache_dir_str),
+            ("CUDA_VISIBLE_DEVICES", "0"),
+            ("GGML_CUDA_ENABLE_UNIFIED_MEMORY", "0"),
+            ("VLLM_WORKER_MULTIPROC_METHOD", "spawn"),
+            ("VLLM_API_KEY", "sk-secret-vllm-key"),
+            ("LLAMA_HF_TOKEN", "hf_secret_token"),
+            ("CUDA_SECRET_KEY", "cuda-secret-val"),
+            ("GGML_PASS_PHRASE", "ggml-secret-pass"),
+            ("VLLM_AUTH_HEADER", "Bearer secret-auth"),
+        ],
+        &[
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+        ],
     );
     assert!(
         out.status.success(),
@@ -1943,37 +1997,43 @@ fn subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
     .concat();
     let mig_uuid = ["MIG", "-", "9876fedc", "-", "4444", "-", "0", "-", "2"].concat();
 
-    let bin = env!("CARGO_BIN_EXE_league-eval");
-    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let out = must_ok(
-        Command::new(bin)
-            .args([
-                "play",
-                "--game-dir",
-                &sub_game.to_string_lossy(),
-                "--seats",
-                &club_seats_path.to_string_lossy(),
-                "--wrapper",
-                &wrapper_path.to_string_lossy(),
-                "--serving-manifest",
-                &llama_ok_path.to_string_lossy(),
-                "--arm",
-                "control",
-                "--turns",
-                "1",
-                "--seed",
-                "7",
-            ])
-            .env("HOME", &fake_home)
-            .env("USERPROFILE", &fake_home)
-            .env("CUDA_VISIBLE_DEVICES", &gpu_uuid)
-            .env("VLLM_MIG_UUID", &mig_uuid)
-            .env_remove("OPENROUTER_API_KEY")
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("GEMINI_API_KEY")
-            .output(),
-        "run child league-eval with GPU/MIG env vars",
+    let fake_home_str = fake_home.to_string_lossy().into_owned();
+    let sub_game_str = sub_game.to_string_lossy().into_owned();
+    let club_seats_str = club_seats_path.to_string_lossy().into_owned();
+    let wrapper_path_str = wrapper_path.to_string_lossy().into_owned();
+    let llama_ok_path_str = llama_ok_path.to_string_lossy().into_owned();
+    let out = run_cli_via_test_seam(
+        &tmp,
+        "gpu_mig_env",
+        &[
+            "play",
+            "--game-dir",
+            &sub_game_str,
+            "--seats",
+            &club_seats_str,
+            "--wrapper",
+            &wrapper_path_str,
+            "--serving-manifest",
+            &llama_ok_path_str,
+            "--arm",
+            "control",
+            "--turns",
+            "1",
+            "--seed",
+            "7",
+        ],
+        &[
+            ("HOME", &fake_home_str),
+            ("USERPROFILE", &fake_home_str),
+            ("CUDA_VISIBLE_DEVICES", &gpu_uuid),
+            ("VLLM_MIG_UUID", &mig_uuid),
+        ],
+        &[
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+        ],
     );
     assert!(
         out.status.success(),
@@ -2189,39 +2249,46 @@ fn manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
     let fake_home = tmp.join("sandbox_home");
     must_ok(fs::create_dir_all(&fake_home), "create fake home");
 
-    let bin = env!("CARGO_BIN_EXE_league-eval");
-    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let out = must_ok(
-        Command::new(bin)
-            .args([
-                "play",
-                "--game-dir",
-                &game_dir.to_string_lossy(),
-                "--seats",
-                &club_seats_path.to_string_lossy(),
-                "--wrapper",
-                &wrapper_path.to_string_lossy(),
-                "--serving-manifest",
-                &manifest_path.to_string_lossy(),
-                "--arm",
-                "control",
-                "--turns",
-                "1",
-                "--seed",
-                "7",
-            ])
-            .env("HOME", &fake_home)
-            .env("USERPROFILE", &fake_home)
-            .env("VLLM_ENV_GHP", &ghp_secret)
-            .env("VLLM_ENV_PAT", &gh_pat_secret)
-            .env("LLAMA_ENV_BEARER", &bearer_secret)
-            .env("LLAMA_ENV_KV", format!("{api_key_kv} {secret_kv}"))
-            .env_remove("OPENROUTER_API_KEY")
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("GEMINI_API_KEY")
-            .output(),
-        "run child league-eval for manifest and env scrubbing",
+    let fake_home_str = fake_home.to_string_lossy().into_owned();
+    let game_dir_str = game_dir.to_string_lossy().into_owned();
+    let club_seats_str = club_seats_path.to_string_lossy().into_owned();
+    let wrapper_path_str = wrapper_path.to_string_lossy().into_owned();
+    let manifest_path_str = manifest_path.to_string_lossy().into_owned();
+    let llama_env_kv = format!("{api_key_kv} {secret_kv}");
+    let out = run_cli_via_test_seam(
+        &tmp,
+        "manifest_scrub",
+        &[
+            "play",
+            "--game-dir",
+            &game_dir_str,
+            "--seats",
+            &club_seats_str,
+            "--wrapper",
+            &wrapper_path_str,
+            "--serving-manifest",
+            &manifest_path_str,
+            "--arm",
+            "control",
+            "--turns",
+            "1",
+            "--seed",
+            "7",
+        ],
+        &[
+            ("HOME", &fake_home_str),
+            ("USERPROFILE", &fake_home_str),
+            ("VLLM_ENV_GHP", &ghp_secret),
+            ("VLLM_ENV_PAT", &gh_pat_secret),
+            ("LLAMA_ENV_BEARER", &bearer_secret),
+            ("LLAMA_ENV_KV", &llama_env_kv),
+        ],
+        &[
+            "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+        ],
     );
     assert!(
         out.status.success(),
@@ -3489,6 +3556,67 @@ fn top_logprobs_with_four_entries_refuses() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+struct ZeroCallTransport {
+    calls: AtomicUsize,
+}
+
+impl ZeroCallTransport {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Transport for ZeroCallTransport {
+    fn count_tokens(
+        &self,
+        _url: &str,
+        _model: &str,
+        _content: &str,
+        _timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(TransportError::Network("should not be called".to_owned()))
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        _body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(TransportError::Network("should not be called".to_owned()))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        _add_special: bool,
+        _parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(TransportError::Network("should not be called".to_owned()))
+    }
+
+    fn post_chat_completions(
+        &self,
+        _url: &str,
+        _body: &str,
+        _timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(TransportError::Network("should not be called".to_owned()))
+    }
+}
+
 #[test]
 fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
     struct BudgetCaptureTransport {
@@ -3557,12 +3685,15 @@ fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
     seats["seats"][0]["reasoning"] = json!({
         "effort": "medium",
         "budget_tokens": 256,
+        "chat_template_kwargs": { "enable_thinking": true },
         "exclude_from_transcript": false
     });
     let mut serving = base_llama_serving_json();
     serving["model"]["thinking_start_tag"] = json!("<think>");
     serving["model"]["thinking_end_tags"] = json!(["</think>"]);
     serving["server_settings"]["jinja"] = json!(true);
+    serving["server_settings"]["reasoning_mode"] = json!("on");
+    serving["server_settings"]["default_reasoning_budget"] = json!(-1);
 
     let tx = BudgetCaptureTransport {
         tpl_reqs: Mutex::new(Vec::new()),
@@ -3606,6 +3737,15 @@ fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
         Some(vec!["</think>".to_owned()])
     );
     assert_eq!(serving_rec.server_settings.jinja, Some(true));
+    assert_eq!(
+        serving_rec.server_settings.reasoning_mode.as_deref(),
+        Some("on")
+    );
+    assert_eq!(
+        serving_rec.server_settings.default_reasoning_budget,
+        Some(-1)
+    );
+    assert_eq!(serving_rec.server_settings.reasoning_budget_message, None);
 
     let chat_reqs = must_ok(tx.chat_reqs.lock(), "chat lock");
     assert_eq!(chat_reqs.len(), 2);
@@ -3625,59 +3765,12 @@ fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
 
 #[test]
 fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
-    struct ZeroCallTransport {
-        calls: AtomicUsize,
-    }
-    impl Transport for ZeroCallTransport {
-        fn count_tokens(
-            &self,
-            _url: &str,
-            _model: &str,
-            _content: &str,
-            _timeout: Duration,
-        ) -> Result<usize, TransportError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(TransportError::Network("should not be called".to_owned()))
-        }
-
-        fn apply_template(
-            &self,
-            _apply_template_url: &str,
-            _body: &str,
-            _timeout: Duration,
-        ) -> Result<String, TransportError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(TransportError::Network("should not be called".to_owned()))
-        }
-
-        fn tokenize_prompt(
-            &self,
-            _tokenize_url: &str,
-            _content: &str,
-            _add_special: bool,
-            _parse_special: bool,
-            _timeout: Duration,
-        ) -> Result<Vec<u64>, TransportError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(TransportError::Network("should not be called".to_owned()))
-        }
-
-        fn post_chat_completions(
-            &self,
-            _url: &str,
-            _body: &str,
-            _timeout: Duration,
-        ) -> Result<RawHttpResponse, TransportError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(TransportError::Network("should not be called".to_owned()))
-        }
-    }
-
     fn valid_manifest_and_seat() -> (Value, Value) {
         let mut seats = local_foundry_three_clubbot_seats();
         seats["seats"][0]["reasoning"] = json!({
             "effort": "medium",
             "budget_tokens": 256,
+            "chat_template_kwargs": { "enable_thinking": true },
             "exclude_from_transcript": false
         });
         let mut serving = base_llama_serving_json();
@@ -3770,9 +3863,7 @@ fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
         let (mut seats, mut serving) = valid_manifest_and_seat();
         mutate(&mut seats, &mut serving);
         let case_dir = tmp.join(format!("case_{idx}_{label}"));
-        let zero_tx = ZeroCallTransport {
-            calls: AtomicUsize::new(0),
-        };
+        let zero_tx = ZeroCallTransport::new();
         let game_dir = case_dir.join("game");
         let err = match run_play_with_transport(
             &PlayOptions {
@@ -3805,7 +3896,7 @@ fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
         };
         assert_eq!(err.code(), *expected_code, "case={label}");
         assert_eq!(err.exit_code(), 1, "case={label}");
-        assert_eq!(zero_tx.calls.load(Ordering::SeqCst), 0, "case={label}");
+        assert_eq!(zero_tx.call_count(), 0, "case={label}");
         assert!(!game_dir.exists(), "case={label} must not touch game_dir");
     }
 
@@ -3813,32 +3904,263 @@ fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
 }
 
 #[test]
-fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree() {
-    struct UntrackedFileGuard(PathBuf);
-    impl Drop for UntrackedFileGuard {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-        }
-    }
-
-    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let untracked_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        ".eval_untracked_seam_check_{}.tmp",
-        std::process::id()
-    ));
-    must_ok(
-        fs::write(&untracked_path, "untracked check\n"),
-        "write temporary untracked file in checkout",
-    );
-    let _guard = UntrackedFileGuard(untracked_path);
-
-    let tmp = fresh_tmp_dir("dirty_tree_seam");
-    let seats_path = write_seats(&tmp, all_clubbot_seats());
+fn reasoning_budget_message_refuses_at_eval_startup_with_zero_calls() {
+    let tmp = fresh_tmp_dir("reasoning_budget_msg_forbidden");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
 
-    // 1. Test seam runs cleanly with an untracked file in the checkout.
-    let seam_manifest = must_ok(
+    let mut budgeted_seats = local_foundry_three_clubbot_seats();
+    budgeted_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "chat_template_kwargs": { "enable_thinking": true },
+        "exclude_from_transcript": false
+    });
+    let no_budget_seats = local_foundry_three_clubbot_seats();
+
+    let mut serving = base_llama_serving_json();
+    serving["model"]["thinking_start_tag"] = json!("<think>");
+    serving["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving["server_settings"]["jinja"] = json!(true);
+    serving["server_settings"]["reasoning_mode"] = json!("on");
+    serving["server_settings"]["default_reasoning_budget"] = json!(256);
+    serving["server_settings"]["reasoning_budget_message"] = json!("Time to conclude.");
+
+    for (idx, (label, seats)) in [
+        ("with_budget", budgeted_seats),
+        ("without_budget", no_budget_seats),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case_dir = tmp.join(label);
+        let zero_tx = ZeroCallTransport::new();
+        let game_dir = case_dir.join("game");
+        let err = match run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&case_dir, seats),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &case_dir,
+                    "serving.json",
+                    &serving,
+                )),
+                arm: EvalArm::Off,
+                table_id: 330 + idx as u64,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &zero_tx,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(_) => panic!("case '{label}' must refuse REASONING_BUDGET_MESSAGE_FORBIDDEN"),
+        };
+        assert_eq!(
+            err.code(),
+            "REASONING_BUDGET_MESSAGE_FORBIDDEN",
+            "case={label}"
+        );
+        assert_eq!(err.exit_code(), 1, "case={label}");
+        assert_eq!(zero_tx.call_count(), 0, "case={label}");
+        assert!(!game_dir.exists(), "case={label} must not touch game_dir");
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn budget_seat_without_enable_thinking_refuses_at_eval_startup_with_zero_calls() {
+    let tmp = fresh_tmp_dir("budget_without_enable_thinking");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+
+    let mut omitted_kwargs_seats = local_foundry_three_clubbot_seats();
+    omitted_kwargs_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "exclude_from_transcript": false
+    });
+    let mut empty_kwargs_seats = local_foundry_three_clubbot_seats();
+    empty_kwargs_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "chat_template_kwargs": {},
+        "exclude_from_transcript": false
+    });
+    let mut explicit_true_seats = local_foundry_three_clubbot_seats();
+    explicit_true_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "chat_template_kwargs": { "enable_thinking": true },
+        "exclude_from_transcript": false
+    });
+
+    let mut serving_on = base_llama_serving_json();
+    serving_on["model"]["thinking_start_tag"] = json!("<think>");
+    serving_on["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving_on["server_settings"]["jinja"] = json!(true);
+    serving_on["server_settings"]["reasoning_mode"] = json!("on");
+
+    let mut serving_off = serving_on.clone();
+    serving_off["server_settings"]["reasoning_mode"] = json!("off");
+
+    for (idx, (label, seats, serving)) in [
+        ("omitted_kwargs", omitted_kwargs_seats, serving_on.clone()),
+        ("empty_kwargs_no_flag", empty_kwargs_seats, serving_on),
+        ("server_reasoning_off", explicit_true_seats, serving_off),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case_dir = tmp.join(label);
+        let zero_tx = ZeroCallTransport::new();
+        let game_dir = case_dir.join("game");
+        let err = match run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&case_dir, seats),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &case_dir,
+                    "serving.json",
+                    &serving,
+                )),
+                arm: EvalArm::Off,
+                table_id: 340 + idx as u64,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &zero_tx,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(_) => panic!("case '{label}' must refuse UNENFORCEABLE_REASONING_BUDGET"),
+        };
+        assert_eq!(err.code(), "UNENFORCEABLE_REASONING_BUDGET", "case={label}");
+        assert_eq!(err.exit_code(), 1, "case={label}");
+        assert_eq!(zero_tx.call_count(), 0, "case={label}");
+        assert!(!game_dir.exists(), "case={label} must not touch game_dir");
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn serving_manifest_records_reasoning_mode_default_budget_and_empty_message() {
+    let tmp = fresh_tmp_dir("manifest_reasoning_fields");
+    let mut serving = base_llama_serving_json();
+    serving["model"]["thinking_start_tag"] = json!("<think>");
+    serving["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving["server_settings"]["jinja"] = json!(true);
+    serving["server_settings"]["reasoning_mode"] = json!("auto");
+    serving["server_settings"]["default_reasoning_budget"] = json!(1024);
+    serving["server_settings"]["reasoning_budget_message"] = json!("");
+
+    let game_dir = tmp.join("game");
+    let _manifest = must_ok(
         run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&tmp, all_clubbot_seats()),
+                wrapper_path: copy_pinned_r3_wrapper(&tmp),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &tmp,
+                    "serving.json",
+                    &serving,
+                )),
+                arm: EvalArm::Off,
+                table_id: 350,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        ),
+        "empty reasoning_budget_message manifest run should succeed",
+    );
+
+    let manifest_raw = must_ok(
+        fs::read_to_string(game_dir.join("manifest.json")),
+        "read manifest.json",
+    );
+    let manifest_json: Value = must_ok(serde_json::from_str(&manifest_raw), "parse manifest.json");
+    let ss = &manifest_json["serving"]["server_settings"];
+    assert_eq!(ss.get("reasoning_mode"), Some(&json!("auto")));
+    assert_eq!(ss.get("default_reasoning_budget"), Some(&json!(1024)));
+    assert_eq!(ss.get("reasoning_budget_message"), Some(&json!("")));
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree() {
+    let tmp = fresh_tmp_dir("dirty_tree_seam");
+    let repo_dir = tmp.join("isolated_repo");
+    must_ok(fs::create_dir_all(&repo_dir), "create isolated temp repo");
+    let run_git = |args: &[&str]| {
+        let out = must_ok(
+            Command::new("git")
+                .current_dir(&repo_dir)
+                .args(args)
+                .output(),
+            "run git in temp repo",
+        );
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    run_git(&["init", "-q"]);
+    run_git(&["config", "user.name", "Eval Test"]);
+    run_git(&["config", "user.email", "eval-test@example.invalid"]);
+    must_ok(
+        fs::write(repo_dir.join("tracked.txt"), "clean\n"),
+        "write tracked file",
+    );
+    run_git(&["add", "tracked.txt"]);
+    run_git(&["commit", "-q", "-m", "init"]);
+    let head_sha = run_git(&["rev-parse", "HEAD"]);
+    must_ok(
+        fs::write(repo_dir.join("untracked.tmp"), "dirty\n"),
+        "write untracked file inside temp repo",
+    );
+
+    let seats_path = write_seats(&tmp, all_clubbot_seats());
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seam_source = CrateGitShaSource::Injected {
+        built_sha: &head_sha,
+        live_head: Some(&head_sha),
+        is_dirty: Some(false),
+    };
+    let live_dir_source = CrateGitShaSource::LiveDir {
+        manifest_dir: &repo_dir,
+        built_sha: &head_sha,
+    };
+
+    // 1. Test seam runs cleanly when the repo reports a clean injected state.
+    let seam_manifest = must_ok(
+        run_play_with_transport_and_git_sha(
             &PlayOptions {
                 game_dir: tmp.join("seam_game"),
                 seats_path: seats_path.clone(),
@@ -3857,17 +4179,18 @@ fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree(
             },
             &NoopTransport,
             None,
+            &seam_source,
         ),
         "seam must allow dirty checkout tests",
     );
     assert_eq!(seam_manifest.played_turns, 1);
 
-    // 2. Real production path refuses the untracked file at startup with DIRTY_GIT_WORKTREE.
-    let real_err = match league_eval::run_play_with_transport(
+    // 2. Real git-dir check refuses the untracked file at startup with DIRTY_GIT_WORKTREE.
+    let real_err = match run_play_with_transport_and_git_sha(
         &PlayOptions {
             game_dir: tmp.join("real_game"),
-            seats_path,
-            wrapper_path,
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
             wrapper_version: None,
             serving_manifest_path: None,
             arm: EvalArm::Off,
@@ -3882,11 +4205,45 @@ fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree(
         },
         &NoopTransport,
         None,
+        &live_dir_source,
     ) {
         Err(e) => e,
-        Ok(_) => panic!("real run_play_with_transport must refuse dirty checkout"),
+        Ok(_) => panic!("live git check must refuse dirty temp checkout"),
     };
     assert_eq!(real_err.code(), "DIRTY_GIT_WORKTREE");
+    assert_eq!(real_err.exit_code(), 2);
+
+    // 3. Real CLI path (`execute_cli_with_git_sha` with LiveDir) also refuses dirty tree with exit 2.
+    let mut cli_out = Vec::new();
+    let mut cli_err = Vec::new();
+    let cli_game = tmp.join("cli_dirty_game");
+    let cli_code = execute_cli_with_git_sha(
+        [
+            "play".into(),
+            "--game-dir".into(),
+            cli_game.clone().into_os_string(),
+            "--seats".into(),
+            seats_path.into_os_string(),
+            "--wrapper".into(),
+            wrapper_path.into_os_string(),
+            "--arm".into(),
+            "off".into(),
+            "--turns".into(),
+            "1".into(),
+            "--seed".into(),
+            "7".into(),
+        ],
+        &mut cli_out,
+        &mut cli_err,
+        &live_dir_source,
+    );
+    assert_eq!(cli_code, 2);
+    assert!(
+        String::from_utf8_lossy(&cli_err).contains("DIRTY_GIT_WORKTREE"),
+        "expected DIRTY_GIT_WORKTREE on stderr, got: {}",
+        String::from_utf8_lossy(&cli_err)
+    );
+    assert!(!cli_game.exists());
 
     let _ = fs::remove_dir_all(&tmp);
 }
