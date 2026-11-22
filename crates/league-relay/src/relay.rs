@@ -2807,6 +2807,19 @@ pub struct SavedHttpReplyRecord {
     pub body_sha256: String,
     /// Raw HTTP response body text as received (credential-redacted only, verbatim otherwise).
     pub body: String,
+    /// Lowercase hex SHA-256 of the canonical JSON token ID array returned by `POST /tokenize`
+    /// (`eval_mode` Local calls only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_sha256: Option<String>,
+    /// Count of prompt token IDs returned by `POST /tokenize` (`eval_mode` Local calls only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_count: Option<usize>,
+    /// Source tag identifying where `prompt_token_ids_sha256` came from (`"server_tokenize"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_source: Option<String>,
+    /// Prompt template consistency check recorded prior to tokenizing (`"double_apply_template_byte_equal"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_template_check: Option<String>,
 }
 
 /// Path to an immutable per-attempt raw HTTP reply sidecar beside `<game-dir>/relay/seats/<Guild>.jsonl`.
@@ -2856,7 +2869,7 @@ struct ChatMessageWire<'a> {
     tool_call_id: Option<&'a str>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct JsonSchemaInnerWire<'a> {
     name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2864,7 +2877,7 @@ struct JsonSchemaInnerWire<'a> {
     schema: &'a serde_json::Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct ResponseFormatWire<'a> {
     #[serde(rename = "type")]
     kind: &'static str,
@@ -2878,6 +2891,25 @@ struct OpenRouterReasoningWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     exclude: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ApplyTemplateRequestWire<'a> {
+    messages: &'a [ChatMessageWire<'a>],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormatWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<OpenRouterReasoningWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_token_budget: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a [serde_json::Value]>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2906,10 +2938,6 @@ struct ChatCompletionRequestWire<'a> {
     logprobs: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_logprobs: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    return_tokens: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    return_token_ids: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6171,8 +6199,6 @@ fn run_single_automated_seat(
     let cache_prompt_wire = eval_local.then_some(false);
     let logprobs_wire = eval_local.then_some(true);
     let top_logprobs_wire = eval_local.then_some(5);
-    let return_tokens_wire = eval_local.then_some(true);
-    let return_token_ids_wire = eval_local.then_some(true);
     let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
     let mut preview_calls_used = 0usize;
     let mut tool_round_index = 0usize;
@@ -6205,6 +6231,26 @@ fn run_single_automated_seat(
             } else {
                 tools_storage.as_deref()
             };
+        let apply_template_body = if eval_local {
+            let tpl_wire = ApplyTemplateRequestWire {
+                messages: &messages,
+                response_format: response_format_wire,
+                reasoning: or_reasoning,
+                reasoning_effort: local_effort,
+                thinking_token_budget: local_budget,
+                chat_template_kwargs: local_kwargs,
+                include_reasoning: local_include_reasoning,
+                tools: request_tools,
+            };
+            let Ok(encoded) = serde_json::to_string(&tpl_wire) else {
+                return SeatOutcome::SeatError {
+                    detail: "failed to encode apply-template request".to_owned(),
+                };
+            };
+            Some(encoded)
+        } else {
+            None
+        };
         let request_wire = ChatCompletionRequestWire {
             model: seat.model,
             messages,
@@ -6220,8 +6266,6 @@ fn run_single_automated_seat(
             cache_prompt: cache_prompt_wire,
             logprobs: logprobs_wire,
             top_logprobs: top_logprobs_wire,
-            return_tokens: return_tokens_wire,
-            return_token_ids: return_token_ids_wire,
         };
         let Ok(request_body) = serde_json::to_string(&request_wire) else {
             return SeatOutcome::SeatError {
@@ -6383,6 +6427,35 @@ fn run_single_automated_seat(
 
             let all_keys = merged_redaction_keys(redaction_key, &config.extra_redaction_keys);
 
+            let prompt_token_meta = if let Some(ref tpl_body) = apply_template_body {
+                match prepare_eval_local_prompt_telemetry(
+                    transport,
+                    seat.endpoint_url,
+                    seat.tokenize_url,
+                    tpl_body,
+                    seat.timeout,
+                    &all_keys,
+                ) {
+                    Ok(meta) => Some(meta),
+                    Err(detail) => {
+                        return finish_eval_prompt_prep_error(
+                            ledger,
+                            config,
+                            guild,
+                            seat,
+                            attempt,
+                            trigger,
+                            &request_body_sha256,
+                            &reservation_id,
+                            detail,
+                            redaction_key,
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+
             diag_log(diag_sink, LogLevel::Debug, || {
                 format!(
                     "transport=dispatch seat={guild} backend={} endpoint={} attempt={attempt} trigger={trigger} timeout_ms={} reservation_id={reservation_id}",
@@ -6417,6 +6490,7 @@ fn run_single_automated_seat(
                 tool_round_index,
                 attempt,
                 seat_retry_suffix,
+                prompt_token_meta.as_ref(),
                 &all_keys,
                 redaction_key,
             ) {
@@ -7431,10 +7505,144 @@ fn refused_call_entry(
     }
 }
 
+const PROMPT_TOKEN_IDS_SOURCE_SERVER_TOKENIZE: &str = "server_tokenize";
+const PROMPT_TEMPLATE_CHECK_DOUBLE_APPLY_EQUAL: &str = "double_apply_template_byte_equal";
+
+#[derive(Debug, Clone)]
+struct PromptTokenizeMeta {
+    sha256: String,
+    count: usize,
+    source: &'static str,
+    template_check: &'static str,
+}
+
+fn derive_apply_template_url(
+    endpoint_url: &str,
+    tokenize_url: Option<&str>,
+) -> Result<String, String> {
+    if let Some(tok_url) = tokenize_url
+        && let Some(origin) = tok_url.strip_suffix("/tokenize")
+    {
+        return Ok(format!("{origin}/apply-template"));
+    }
+    let origin = endpoint_url
+        .strip_suffix("/v1/chat/completions")
+        .or_else(|| endpoint_url.strip_suffix("/chat/completions"))
+        .ok_or_else(|| {
+            "PROMPT_TEMPLATE_FAILED: cannot derive /apply-template URL from endpoint".to_owned()
+        })?;
+    Ok(format!("{origin}/apply-template"))
+}
+
+fn prepare_eval_local_prompt_telemetry(
+    transport: &dyn Transport,
+    endpoint_url: &str,
+    tokenize_url: Option<&str>,
+    apply_template_body: &str,
+    timeout: Duration,
+    redaction_keys: &[ApiKey],
+) -> Result<PromptTokenizeMeta, String> {
+    let tok_url = tokenize_url
+        .ok_or_else(|| "PROMPT_TOKENIZE_FAILED: local seat missing /tokenize URL".to_owned())?;
+    let tpl_url = derive_apply_template_url(endpoint_url, Some(tok_url))?;
+    let rendered_1 = transport
+        .apply_template(&tpl_url, apply_template_body, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TEMPLATE_FAILED: first /apply-template call failed: {safe}")
+        })?;
+    let rendered_2 = transport
+        .apply_template(&tpl_url, apply_template_body, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TEMPLATE_FAILED: second /apply-template call failed: {safe}")
+        })?;
+    if rendered_1 != rendered_2 {
+        return Err(
+            "PROMPT_TEMPLATE_MISMATCH: repeated /apply-template calls returned non-identical prompt text"
+                .to_owned(),
+        );
+    }
+    let token_ids = transport
+        .tokenize_prompt(tok_url, &rendered_1, true, true, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TOKENIZE_FAILED: /tokenize call failed: {safe}")
+        })?;
+    if token_ids.is_empty() {
+        return Err("PROMPT_TOKENIZE_FAILED: /tokenize returned empty token list".to_owned());
+    }
+    let token_bytes = serde_json::to_vec(&token_ids)
+        .map_err(|e| format!("PROMPT_TOKENIZE_FAILED: failed to serialize token IDs: {e}"))?;
+    Ok(PromptTokenizeMeta {
+        sha256: sha256_hex(&token_bytes),
+        count: token_ids.len(),
+        source: PROMPT_TOKEN_IDS_SOURCE_SERVER_TOKENIZE,
+        template_check: PROMPT_TEMPLATE_CHECK_DOUBLE_APPLY_EQUAL,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_eval_prompt_prep_error(
+    ledger: &Mutex<CallLedger<'_>>,
+    config: &TurnConfig,
+    guild: &str,
+    seat: &AutomatedSeatView<'_>,
+    attempt: u8,
+    trigger: &str,
+    request_body_sha256: &str,
+    reservation_id: &str,
+    detail: String,
+    redaction_key: Option<&ApiKey>,
+) -> SeatOutcome {
+    let (valid_cost, charged_credits, over_estimate, _) =
+        compute_call_accounting(seat.cost_unit, None, 0.0, seat.max_per_call_spend);
+    let mut entry = refused_call_entry(
+        config,
+        guild,
+        attempt,
+        trigger,
+        seat.model,
+        request_body_sha256,
+        seat.cost_unit,
+        "harness",
+        detail.clone(),
+    );
+    entry.wall_secs = Some(0.0);
+    entry.cost = valid_cost;
+    entry.charged_credits = charged_credits;
+    entry.reservation_id = Some(reservation_id.to_owned());
+    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+    if let Err(e) = guard.finish_call_and_record(
+        reservation_id,
+        seat.max_per_call_spend,
+        &entry,
+        over_estimate,
+        redaction_key,
+    ) {
+        return SeatOutcome::SeatError {
+            detail: e.to_string(),
+        };
+    }
+    SeatOutcome::SeatError { detail }
+}
+
 mod raw_reply_gate {
     use super::{
-        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, RawHttpResponse,
-        RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
+        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, PromptTokenizeMeta,
+        RawHttpResponse, RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
         apply_retry_suffix_to_json_path, catch_unwind, http_reply_file_path, mpsc, panic_message,
         redact_credentials_multi_with_limit_and_paths, redact_secrets_multi_with_limit,
         resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
@@ -7531,6 +7739,7 @@ mod raw_reply_gate {
         round_index: usize,
         attempt: u8,
         seat_retry_suffix: Option<usize>,
+        prompt_token_meta: Option<&PromptTokenizeMeta>,
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<(GateVerifiedHttpResponse, Option<Option<String>>), RelayError> {
@@ -7571,6 +7780,11 @@ mod raw_reply_gate {
                 redacted_secret_field_paths,
                 body_sha256,
                 body: scrubbed_body,
+                prompt_token_ids_sha256: prompt_token_meta.map(|m| m.sha256.clone()),
+                prompt_token_ids_count: prompt_token_meta.map(|m| m.count),
+                prompt_token_ids_source: prompt_token_meta.map(|m| m.source.to_owned()),
+                prompt_token_ids_template_check: prompt_token_meta
+                    .map(|m| m.template_check.to_owned()),
             };
             let file_sha256 = write_json_record_atomic(
                 &base_sidecar_path,
@@ -7603,6 +7817,7 @@ mod raw_reply_gate {
         round_index: usize,
         attempt: u8,
         seat_retry_suffix: Option<usize>,
+        prompt_token_meta: Option<&PromptTokenizeMeta>,
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<RecordedTransportCall, RelayError> {
@@ -7628,6 +7843,7 @@ mod raw_reply_gate {
                     round_index,
                     attempt,
                     seat_retry_suffix,
+                    prompt_token_meta,
                     all_keys,
                     redaction_key,
                 )?;
@@ -7648,6 +7864,7 @@ mod raw_reply_gate {
                     round_index,
                     attempt,
                     seat_retry_suffix,
+                    prompt_token_meta,
                     all_keys,
                     redaction_key,
                 )?;

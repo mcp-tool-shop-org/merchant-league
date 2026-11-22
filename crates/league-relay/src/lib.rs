@@ -34,8 +34,9 @@ pub use relay::{
 pub use seats::{
     BackendKind, CostUnit, LOCAL_TIMEOUT_MARGIN_SECS, LocalSeat, OpenRouterSeat, ReasoningEffort,
     SeatBackend, SeatFile, SeatReasoningConfig, SeatSpec, normalize_allowed_vm_hosts,
-    validate_local_base_url, validate_local_endpoints, validate_local_tokenize_url,
-    validate_pinned_local_model, validate_pinned_openrouter_slug, validate_vm_host_allowance,
+    validate_local_apply_template_url, validate_local_base_url, validate_local_endpoints,
+    validate_local_tokenize_url, validate_pinned_local_model, validate_pinned_openrouter_slug,
+    validate_vm_host_allowance,
 };
 pub use secret::{
     ApiKey, FORBIDDEN_LOCAL_KEY_ENVS, LEAGUE_LOG_LEVEL_ENV, LiveGate, LocalGate, LogLevel,

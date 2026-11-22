@@ -11,8 +11,8 @@ use league_core::{EvalHost, Seat, TableId};
 use league_eval::{
     BranchManifest, BranchOptions, EvalArm, EvalDecisionRecord, EvalError, EvalManifest,
     MetadataProvenance, NoopTransport, PINNED_WRAPPERS, PlayOptions, REJECTED_WRAPPER_HASHES,
-    WordingArmDigests, check_wrapper_digest, eval_wording_slot, run_branch_with_transport,
-    run_play_with_transport,
+    SelectedPreActState, SelectionList, TurnStratum, WordingArmDigests, check_wrapper_digest,
+    eval_wording_slot, run_branch_with_transport, run_play_with_transport,
 };
 use league_relay::{RawHttpResponse, Transport, TransportError, sha256_hex};
 use serde_json::{Value, json};
@@ -61,16 +61,13 @@ fn mock_chat_with_telemetry(
     json!({
         "id": id,
         "model": model,
-        "prompt_token_ids": [101, 200, 300],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": content },
-            "token_ids": [11, 12],
             "logprobs": {
                 "content": [{
                     "token": "{",
                     "id": 11,
-                    "token_id": 11,
                     "logprob": -0.01,
                     "top_logprobs": top_logprobs
                 }]
@@ -444,14 +441,12 @@ impl Transport for TelemetryThreeArmTransport {
             });
         }
 
-        let step = self.script_step.fetch_add(1, Ordering::SeqCst);
-        let prompt_ids = vec![100_u64 + step as u64, 200, 300];
-        let reply_ids = vec![11_u64, 12, 13];
-        let logprob_cands: Vec<Value> = (0..7)
+        let _step = self.script_step.fetch_add(1, Ordering::SeqCst);
+        let logprob_cands: Vec<Value> = (0..5)
             .map(|k| {
                 json!({
                     "token": format!("t{k}"),
-                    "token_id": 500 + k,
+                    "id": 500 + k,
                     "logprob": -0.05 * f64::from(k + 1)
                 })
             })
@@ -510,17 +505,15 @@ impl Transport for TelemetryThreeArmTransport {
         };
 
         let resp = json!({
-            "id": format!("mock-resp-{step}"),
+            "id": "mock-resp",
             "model": "Qwen/Qwen3-32B",
-            "prompt_token_ids": prompt_ids,
             "choices": [{
                 "index": 0,
                 "message": message_obj,
-                "token_ids": reply_ids,
                 "logprobs": {
                     "content": [{
                         "token": "{",
-                        "token_id": 11,
+                        "id": 11,
                         "logprob": -0.01,
                         "top_logprobs": logprob_cands
                     }]
@@ -538,6 +531,27 @@ impl Transport for TelemetryThreeArmTransport {
             status: 200,
             body: resp.to_string(),
         })
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        Ok(format!("TEMPLATED:{body}"))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        add_special: bool,
+        parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        assert!(add_special && parse_special);
+        Ok((100_u64..220).collect())
     }
 }
 
@@ -593,9 +607,17 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
     );
     assert!(act_dec.club_bot_baseline.is_some());
     assert!(!act_dec.prompt_token_ids_sha256s.is_empty());
+    assert_eq!(
+        act_dec.prompt_token_ids_source.as_deref(),
+        Some("server_tokenize")
+    );
+    assert_eq!(
+        act_dec.prompt_token_ids_template_check.as_deref(),
+        Some("double_apply_template_byte_equal")
+    );
     assert!(!act_dec.reply_token_ids.is_empty());
     assert!(!act_dec.reply_top_logprobs.is_empty());
-    // Capped at top-5 even though mock returned 7 candidates!
+    // Exact top-5 logprob entries per generated token.
     assert_eq!(act_dec.reply_top_logprobs[0][0].top_logprobs.len(), 5);
 
     // 3-arm branch: Off, Control, On.
@@ -811,6 +833,27 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
                     10,
                 ),
             })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..150).collect())
         }
     }
 
@@ -1147,6 +1190,16 @@ struct FixedReplyTransport {
 }
 
 impl Transport for FixedReplyTransport {
+    fn count_tokens(
+        &self,
+        _url: &str,
+        _model: &str,
+        _content: &str,
+        _timeout: Duration,
+    ) -> Result<usize, TransportError> {
+        Ok(8)
+    }
+
     fn post_chat_completions(
         &self,
         _url: &str,
@@ -1157,6 +1210,27 @@ impl Transport for FixedReplyTransport {
             status: 200,
             body: mock_chat_with_telemetry("regent-mock", "Qwen/Qwen3-32B", &self.content, 40, 10),
         })
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        Ok(format!("TEMPLATED:{body}"))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        add_special: bool,
+        parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        assert!(add_special && parse_special);
+        Ok((100_u64..140).collect())
     }
 }
 
@@ -1308,6 +1382,27 @@ fn regent_valid_passive_four_turns_never_triggers_regent() {
                 body: mock_chat_with_telemetry("passive-mock", "Qwen/Qwen3-32B", &content, 40, 10),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..140).collect())
+        }
     }
 
     let passive_dir = tmp.join("regent_b_valid_passive");
@@ -1424,6 +1519,29 @@ fn regent_andon_voids_game_and_branch_and_counts_by_arm() {
                 ),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert!(add_special && parse_special);
+            Ok((100_u64..140).collect())
+        }
     }
 
     let play_counter = CountingRejectTransport {
@@ -1522,7 +1640,7 @@ fn regent_andon_voids_game_and_branch_and_counts_by_arm() {
 }
 
 #[test]
-fn fix2_s1_missing_telemetry_fields_fail_closed() {
+fn missing_reply_telemetry_fields_fail_closed() {
     struct MissingFieldTransport {
         body: String,
     }
@@ -1548,9 +1666,30 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
                 body: self.body.clone(),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..110).collect())
+        }
     }
 
-    let tmp = fresh_tmp_dir("fix2_s1_missing_telemetry");
+    let tmp = fresh_tmp_dir("missing_telemetry");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
     let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
     let serving_path =
@@ -1568,35 +1707,14 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
         })
         .collect();
 
-    // Case 1: missing `prompt_token_ids` fails closed with `MISSING_REPLY_TELEMETRY`.
-    let no_prompt_ids = json!({
-        "id": "s1-no-prompt-ids",
-        "model": "Qwen/Qwen3-32B",
-        "choices": [{
-            "index": 0,
-            "message": { "role": "assistant", "content": clean_talk },
-            "token_ids": [11],
-            "logprobs": {
-                "content": [{
-                    "token": "{",
-                    "id": 11,
-                    "logprob": -0.01,
-                    "top_logprobs": top_five
-                }]
-            },
-            "finish_reason": "stop"
-        }],
-        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
-    })
-    .to_string();
-    // Case 2: missing both `token_ids` and `logprobs.content[].id`/`token_id`.
+    // Case 0: missing `choices[0].logprobs.content[].id` fails closed even if top-level `token_ids` exists.
     let no_reply_ids = json!({
-        "id": "s1-no-reply-ids",
+        "id": "telem-no-reply-ids",
         "model": "Qwen/Qwen3-32B",
-        "prompt_token_ids": [101, 102],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": clean_talk },
+            "token_ids": [11],
             "logprobs": {
                 "content": [{
                     "token": "{",
@@ -1609,15 +1727,13 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
         "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
     })
     .to_string();
-    // Case 3: missing `top_logprobs`.
+    // Case 1: empty `top_logprobs`.
     let no_top_logprobs = json!({
-        "id": "s1-no-top-lp",
+        "id": "telem-no-top-lp",
         "model": "Qwen/Qwen3-32B",
-        "prompt_token_ids": [101, 102],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": clean_talk },
-            "token_ids": [11],
             "logprobs": {
                 "content": [{
                     "token": "{",
@@ -1631,14 +1747,34 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
         "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
     })
     .to_string();
+    // Case 2: missing `usage.prompt_tokens`.
+    let no_usage_prompt = json!({
+        "id": "telem-no-usage-prompt",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": clean_talk },
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_five
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": { "completion_tokens": 5, "total_tokens": 15 }
+    })
+    .to_string();
 
-    for (idx, body) in [no_prompt_ids, no_reply_ids, no_top_logprobs]
+    for (idx, body) in [no_reply_ids, no_top_logprobs, no_usage_prompt]
         .into_iter()
         .enumerate()
     {
         let err = match run_play_with_transport(
             &PlayOptions {
-                game_dir: tmp.join(format!("s1_case_{idx}")),
+                game_dir: tmp.join(format!("telem_case_{idx}")),
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
@@ -1666,11 +1802,10 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
         );
     }
 
-    // Happy path with `llama-server` `id` inside `logprobs.content[]` (no top-level `token_ids`).
+    // Happy path with real `llama-server` shape (`id` inside `logprobs.content[]`, no `prompt_token_ids`, no top-level `token_ids`).
     let llama_style = json!({
-        "id": "s1-llama-id",
+        "id": "telem-llama-id",
         "model": "Qwen/Qwen3-32B",
-        "prompt_token_ids": [101, 102, 103],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": clean_talk },
@@ -1687,7 +1822,7 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
         "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
     })
     .to_string();
-    let ok_game = tmp.join("s1_llama_id_ok");
+    let ok_game = tmp.join("telem_llama_id_ok");
     let _m = must_ok(
         run_play_with_transport(
             &PlayOptions {
@@ -1714,17 +1849,25 @@ fn fix2_s1_missing_telemetry_fields_fail_closed() {
     let rec: EvalDecisionRecord = must_ok(
         serde_json::from_str(&must_ok(
             fs::read_to_string(ok_game.join("decisions/day-01-talk-Foundry.json")),
-            "read s1 decision",
+            "read telemetry decision",
         )),
-        "parse s1 decision",
+        "parse telemetry decision",
     );
     assert_eq!(rec.reply_token_ids, vec![vec![11]]);
+    assert_eq!(
+        rec.prompt_token_ids_source.as_deref(),
+        Some("server_tokenize")
+    );
+    assert_eq!(
+        rec.prompt_token_ids_template_check.as_deref(),
+        Some("double_apply_template_byte_equal")
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
 
 #[test]
-fn fix2_s2_subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
+fn subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
     fn collect_all_files(root: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = fs::read_dir(root) else {
             return;
@@ -1740,7 +1883,7 @@ fn fix2_s2_subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
         out.sort();
     }
 
-    let tmp = fresh_tmp_dir("fix2_s2_sub");
+    let tmp = fresh_tmp_dir("sub_cuda_mig");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
     let club_seats_path = write_seats(&tmp, all_clubbot_seats());
     let llama_ok_path =
@@ -1855,8 +1998,8 @@ fn fix2_s2_subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
 }
 
 #[test]
-fn fix2_s4_resume_refuses_mismatched_serving_manifest() {
-    let tmp = fresh_tmp_dir("fix2_s4_resume_manifest");
+fn resume_refuses_mismatched_serving_manifest() {
+    let tmp = fresh_tmp_dir("resume_manifest");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
     let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
     let m1_path = write_serving_manifest_json(&tmp, "serving_a.json", &base_llama_serving_json());
@@ -1890,6 +2033,27 @@ fn fix2_s4_resume_refuses_mismatched_serving_manifest() {
                 status: 200,
                 body: mock_chat_with_telemetry("s4-ok", "Qwen/Qwen3-32B", &content, 40, 10),
             })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..140).collect())
         }
     }
 
@@ -1951,17 +2115,26 @@ fn fix2_s4_resume_refuses_mismatched_serving_manifest() {
 }
 
 #[test]
-fn fix2_s7_manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
-    let tmp = fresh_tmp_dir("fix2_s7_scrub");
+fn manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
+    let tmp = fresh_tmp_dir("manifest_env_scrub");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
     let club_seats_path = write_seats(&tmp, all_clubbot_seats());
 
     let sk_secret = ["sk", "-", "live", "-", "0123456789abcdef"].concat();
     let model_filename = format!("/home/probeuser/models/{sk_secret}.gguf");
-    let hf_secret = ["hf", "_", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5"].concat();
+    let hf_secret = ["hf", "_", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7"].concat();
     let os_build = format!("token={hf_secret}");
-    let ghp_secret = ["ghp", "_", "99887766554433221100aabbccddeeff"].concat();
-    let gh_pat_secret = ["github", "_", "pat", "_", "11223344556677889900aabbccdd"].concat();
+    let ghp_secret = ["ghp", "_", "99887766554433221100aabbccddeeff0011"].concat();
+    let gh_pat_secret = [
+        "github",
+        "_",
+        "pat",
+        "_",
+        "11A2B3C4D5E6F7G8H9I0J1",
+        "_",
+        "KLMNOPQRSTUVWXYZ0123456789ab",
+    ]
+    .concat();
     let bearer_secret = ["Bea", "rer", " zyx9876543210token"].concat();
     let api_key_kv = ["api", "_", "key=", "my_raw_apikey_val_111"].concat();
     let secret_kv = ["sec", "ret=", "my_raw_secret_val_222"].concat();
@@ -2027,11 +2200,11 @@ fn fix2_s7_manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
         sk_secret.as_str(),
         "0123456789abcdef",
         hf_secret.as_str(),
-        "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5",
+        "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7",
         ghp_secret.as_str(),
-        "99887766554433221100aabbccddeeff",
+        "99887766554433221100aabbccddeeff0011",
         gh_pat_secret.as_str(),
-        "11223344556677889900aabbccdd",
+        "11A2B3C4D5E6F7G8H9I0J1_KLMNOPQRSTUVWXYZ0123456789ab",
         "zyx9876543210token",
         "my_raw_apikey_val_111",
         "my_raw_secret_val_222",
@@ -2087,7 +2260,7 @@ fn fix2_s7_manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
 }
 
 #[test]
-fn fix2_s8_regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls() {
+fn regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls() {
     struct ZeroCallTransport {
         calls: AtomicUsize,
     }
@@ -2115,9 +2288,31 @@ fn fix2_s8_regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls()
                 body: "{\"error\":\"should not be called\"}".to_owned(),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
     }
 
-    let tmp = fresh_tmp_dir("fix2_s8_startup");
+    let tmp = fresh_tmp_dir("regent_startup");
     let wrapper_path = copy_pinned_r3_wrapper(&tmp);
     let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
     let serving_path =
@@ -2270,8 +2465,8 @@ fn fix2_s8_regent_on_model_seat_or_prior_receipt_refuses_at_startup_zero_calls()
 }
 
 #[test]
-fn fix2_item9_hash_and_json_errors_never_echo_raw_values() {
-    let tmp = fresh_tmp_dir("fix2_item9_no_echo");
+fn manifest_hash_and_json_errors_never_echo_raw_values() {
+    let tmp = fresh_tmp_dir("hash_json_no_echo");
 
     // 1. Raw GPU UUID placed into `machine.gpu_uuid_sha256` names the field and hides the UUID.
     let raw_gpu_uuid = [
@@ -2356,6 +2551,898 @@ fn fix2_item9_hash_and_json_errors_never_echo_raw_values() {
         !msg_j.contains("SECRET_776655"),
         "echoed JSON string: {msg_j}"
     );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+fn real_b11433_shaped_body(content: &str, prompt_tokens: u64, top_logprob_count: u64) -> String {
+    let top_entries: Vec<Value> = (0_u64..top_logprob_count)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 500 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+    json!({
+        "id": "b11433-real-1",
+        "model": "Qwen/Qwen3-32B",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": content },
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_entries
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": 5,
+            "total_tokens": prompt_tokens + 5
+        }
+    })
+    .to_string()
+}
+
+#[test]
+fn real_server_shaped_reply_records_tokenize_hash_and_source() {
+    struct RealServerShapedTransport {
+        tpl_calls: AtomicUsize,
+        tok_calls: AtomicUsize,
+        chat_reqs: Mutex<Vec<Value>>,
+        token_ids: Vec<u64>,
+    }
+    impl Transport for RealServerShapedTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.tpl_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(format!("RENDERED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.tok_calls.fetch_add(1, Ordering::SeqCst);
+            assert!(add_special && parse_special);
+            assert!(content.starts_with("RENDERED:"));
+            Ok(self.token_ids.clone())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let parsed: Value = serde_json::from_str(body)
+                .map_err(|e| TransportError::Network(format!("parse chat body: {e}")))?;
+            assert!(parsed.get("return_tokens").is_none());
+            assert!(parsed.get("return_token_ids").is_none());
+            assert_eq!(parsed.get("cache_prompt"), Some(&json!(false)));
+            assert_eq!(parsed.get("logprobs"), Some(&json!(true)));
+            assert_eq!(parsed.get("top_logprobs"), Some(&json!(5)));
+            if let Ok(mut g) = self.chat_reqs.lock() {
+                g.push(parsed);
+            }
+            let clean =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: real_b11433_shaped_body(&clean, self.token_ids.len() as u64, 5),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("real_b11433_ok");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let serving_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+    let expected_ids: Vec<u64> = (1001..1013).collect();
+    let expected_sha = sha256_hex(&must_ok(serde_json::to_vec(&expected_ids), "encode ids"));
+    let t = RealServerShapedTransport {
+        tpl_calls: AtomicUsize::new(0),
+        tok_calls: AtomicUsize::new(0),
+        chat_reqs: Mutex::new(Vec::new()),
+        token_ids: expected_ids,
+    };
+    let game_dir = tmp.join("game");
+    let _m = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path,
+                wrapper_path,
+                wrapper_version: None,
+                serving_manifest_path: Some(serving_path),
+                arm: EvalArm::Off,
+                table_id: 301,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &t,
+            None,
+        ),
+        "real b11433 shaped reply must pass",
+    );
+    assert_eq!(t.tpl_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(t.tok_calls.load(Ordering::SeqCst), 2);
+    let talk_dec: EvalDecisionRecord = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(game_dir.join("decisions/day-01-talk-Foundry.json")),
+            "read talk decision",
+        )),
+        "parse talk decision",
+    );
+    assert_eq!(talk_dec.prompt_token_ids_sha256s, vec![expected_sha]);
+    assert_eq!(
+        talk_dec.prompt_token_ids_source.as_deref(),
+        Some("server_tokenize")
+    );
+    assert_eq!(
+        talk_dec.prompt_token_ids_template_check.as_deref(),
+        Some("double_apply_template_byte_equal")
+    );
+    assert_eq!(talk_dec.reply_token_ids, vec![vec![11]]);
+    assert_eq!(talk_dec.reply_top_logprobs[0][0].top_logprobs.len(), 5);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn prompt_token_count_mismatch_refuses() {
+    struct MismatchCountTransport;
+    impl Transport for MismatchCountTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("RENDERED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            Ok((100_u64..111).collect())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let clean =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: real_b11433_shaped_body(&clean, 10, 5),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("prompt_count_mismatch");
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("game"),
+            seats_path: write_seats(&tmp, local_foundry_three_clubbot_seats()),
+            wrapper_path: copy_pinned_r3_wrapper(&tmp),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_serving_manifest_json(
+                &tmp,
+                "serving.json",
+                &base_llama_serving_json(),
+            )),
+            arm: EvalArm::Off,
+            table_id: 302,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &MismatchCountTransport,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("mismatched tokenize vs usage.prompt_tokens count must refuse"),
+    };
+    assert_eq!(err.code(), "PROMPT_TOKEN_COUNT_MISMATCH");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn missing_or_failing_template_and_tokenize_endpoints_refuse() {
+    struct FailingEndpointsTransport {
+        fail_template: bool,
+        tok_calls: AtomicUsize,
+        chat_calls: AtomicUsize,
+    }
+    impl Transport for FailingEndpointsTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            if self.fail_template {
+                Err(TransportError::Network(
+                    "POST /apply-template returned HTTP 404".to_owned(),
+                ))
+            } else {
+                Ok(format!("RENDERED:{body}"))
+            }
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.tok_calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network(
+                "POST /tokenize returned HTTP 404".to_owned(),
+            ))
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.chat_calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network(
+                "chat must not be called".to_owned(),
+            ))
+        }
+    }
+
+    let tmp = fresh_tmp_dir("missing_endpoints");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let serving_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+
+    let t_tpl = FailingEndpointsTransport {
+        fail_template: true,
+        tok_calls: AtomicUsize::new(0),
+        chat_calls: AtomicUsize::new(0),
+    };
+    let err_tpl = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("fail_tpl"),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Off,
+            table_id: 303,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &t_tpl,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("missing /apply-template must refuse"),
+    };
+    assert_eq!(err_tpl.code(), "PROMPT_TEMPLATE_FAILED");
+    assert_eq!(t_tpl.tok_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(t_tpl.chat_calls.load(Ordering::SeqCst), 0);
+
+    let t_tok = FailingEndpointsTransport {
+        fail_template: false,
+        tok_calls: AtomicUsize::new(0),
+        chat_calls: AtomicUsize::new(0),
+    };
+    let err_tok = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("fail_tok"),
+            seats_path,
+            wrapper_path,
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path),
+            arm: EvalArm::Off,
+            table_id: 304,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &t_tok,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("missing /tokenize must refuse"),
+    };
+    assert_eq!(err_tok.code(), "PROMPT_TOKENIZE_FAILED");
+    assert_eq!(t_tok.tok_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(t_tok.chat_calls.load(Ordering::SeqCst), 0);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn apply_template_non_identical_second_call_refuses() {
+    struct DriftingTemplateTransport {
+        tpl_step: AtomicUsize,
+        tok_calls: AtomicUsize,
+        chat_calls: AtomicUsize,
+    }
+    impl Transport for DriftingTemplateTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            let n = self.tpl_step.fetch_add(1, Ordering::SeqCst);
+            Ok(format!("TEMPLATED_{n}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.tok_calls.fetch_add(1, Ordering::SeqCst);
+            Ok((100_u64..110).collect())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.chat_calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network(
+                "chat must not be called".to_owned(),
+            ))
+        }
+    }
+
+    let tmp = fresh_tmp_dir("template_mismatch");
+    let t = DriftingTemplateTransport {
+        tpl_step: AtomicUsize::new(0),
+        tok_calls: AtomicUsize::new(0),
+        chat_calls: AtomicUsize::new(0),
+    };
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("game"),
+            seats_path: write_seats(&tmp, local_foundry_three_clubbot_seats()),
+            wrapper_path: copy_pinned_r3_wrapper(&tmp),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_serving_manifest_json(
+                &tmp,
+                "serving.json",
+                &base_llama_serving_json(),
+            )),
+            arm: EvalArm::Off,
+            table_id: 305,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &t,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("non-identical /apply-template responses must refuse"),
+    };
+    assert_eq!(err.code(), "PROMPT_TEMPLATE_MISMATCH");
+    assert_eq!(t.tpl_step.load(Ordering::SeqCst), 2);
+    assert_eq!(t.tok_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(t.chat_calls.load(Ordering::SeqCst), 0);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn branch_list_refuses_later_target_regent_before_any_model_call() {
+    struct LocalOkTransport;
+    impl Transport for LocalOkTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            Ok((100_u64..110).collect())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let clean =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: real_b11433_shaped_body(&clean, 10, 5),
+            })
+        }
+    }
+
+    struct BranchZeroCallTransport {
+        calls: AtomicUsize,
+    }
+    impl Transport for BranchZeroCallTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+    }
+
+    let tmp = fresh_tmp_dir("branch_list_preflight_regent");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let model_seats_path = write_seats(&tmp, local_foundry_three_clubbot_seats());
+    let club_seats_path = tmp.join("club_seats.json");
+    must_ok(
+        fs::write(
+            &club_seats_path,
+            must_ok(serde_json::to_string_pretty(&all_clubbot_seats()), "ser"),
+        ),
+        "write club_seats",
+    );
+    let serving_path =
+        write_serving_manifest_json(&tmp, "serving.json", &base_llama_serving_json());
+
+    let clean_game = tmp.join("clean_target_0");
+    let clean_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: clean_game.clone(),
+                seats_path: model_seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(serving_path.clone()),
+                arm: EvalArm::Off,
+                table_id: 306,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &LocalOkTransport,
+            None,
+        ),
+        "create clean target 0",
+    );
+
+    let regent_game = tmp.join("regent_target_1");
+    let regent_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: regent_game.clone(),
+                seats_path: club_seats_path,
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(serving_path.clone()),
+                arm: EvalArm::Off,
+                table_id: 307,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &LocalOkTransport,
+            None,
+        ),
+        "create regent target 1",
+    );
+
+    let sel_list = SelectionList {
+        version: 1,
+        selection_seed: 7,
+        per_game: 1,
+        strata: [1, 0, 0],
+        states: vec![
+            SelectedPreActState {
+                game_dir: clean_game.clone(),
+                game_id: clean_manifest.game_id,
+                day: 1,
+                stratum: TurnStratum::Early,
+                seat_index: 0,
+                seat_guild: "Foundry".to_owned(),
+                checkpoint_prefix: clean_game.join("checkpoints/day-01-pre-act"),
+            },
+            SelectedPreActState {
+                game_dir: regent_game.clone(),
+                game_id: regent_manifest.game_id,
+                day: 1,
+                stratum: TurnStratum::Early,
+                seat_index: 0,
+                seat_guild: "Foundry".to_owned(),
+                checkpoint_prefix: regent_game.join("checkpoints/day-01-pre-act"),
+            },
+        ],
+    };
+    let list_path = tmp.join("list.json");
+    must_ok(
+        fs::write(
+            &list_path,
+            must_ok(serde_json::to_string_pretty(&sel_list), "ser list"),
+        ),
+        "write list.json",
+    );
+
+    let zero_tx = BranchZeroCallTransport {
+        calls: AtomicUsize::new(0),
+    };
+    let err = match run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: None,
+            list_path: Some(list_path),
+            focal_seat: None,
+            seats_path: model_seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("branch_out"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &zero_tx,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("later target with model-seat Regent must refuse before any model call"),
+    };
+    assert_eq!(err.code(), "MODEL_SEAT_REGENT_INTERVENTION");
+    assert_eq!(zero_tx.calls.load(Ordering::SeqCst), 0);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn non_local_openrouter_seat_refuses_at_eval_startup_with_zero_calls() {
+    struct ZeroCallTransport {
+        calls: AtomicUsize,
+    }
+    impl Transport for ZeroCallTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+    }
+
+    let tmp = fresh_tmp_dir("non_local_openrouter_refuse");
+    let openrouter_seats = write_seats(
+        &tmp,
+        json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "openrouter",
+                    "model": "qwen/qwen3-32b",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_cost_per_call": 0.05
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        }),
+    );
+    let zero_tx = ZeroCallTransport {
+        calls: AtomicUsize::new(0),
+    };
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("game"),
+            seats_path: openrouter_seats,
+            wrapper_path: copy_pinned_r3_wrapper(&tmp),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_serving_manifest_json(
+                &tmp,
+                "serving.json",
+                &base_llama_serving_json(),
+            )),
+            arm: EvalArm::Off,
+            table_id: 308,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &zero_tx,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("openrouter model seat in Eval mode must refuse at startup"),
+    };
+    assert_eq!(err.code(), "UNSUPPORTED_EVAL_MODEL_BACKEND");
+    assert_eq!(zero_tx.calls.load(Ordering::SeqCst), 0);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn top_logprobs_with_four_entries_refuses() {
+    struct FourTopLogprobsTransport;
+    impl Transport for FourTopLogprobsTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("RENDERED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            Ok((100_u64..110).collect())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let clean =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: real_b11433_shaped_body(&clean, 10, 4),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("top_logprobs_four");
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("game"),
+            seats_path: write_seats(&tmp, local_foundry_three_clubbot_seats()),
+            wrapper_path: copy_pinned_r3_wrapper(&tmp),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_serving_manifest_json(
+                &tmp,
+                "serving.json",
+                &base_llama_serving_json(),
+            )),
+            arm: EvalArm::Off,
+            table_id: 309,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &FourTopLogprobsTransport,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("4 top_logprobs entries instead of 5 must refuse"),
+    };
+    assert_eq!(err.code(), "MISSING_REPLY_TELEMETRY");
 
     let _ = fs::remove_dir_all(&tmp);
 }

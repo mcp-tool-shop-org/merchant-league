@@ -75,16 +75,13 @@ fn mock_chat_response_value(
     json!({
         "id": id,
         "model": model,
-        "prompt_token_ids": [101, 102, 103],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": content },
-            "token_ids": [11, 12],
             "logprobs": {
                 "content": [{
                     "token": "{",
                     "id": 11,
-                    "token_id": 11,
                     "logprob": -0.01,
                     "top_logprobs": top_logprobs
                 }]
@@ -308,6 +305,27 @@ impl Transport for DeterministicMockTransport {
         _timeout: Duration,
     ) -> Result<usize, TransportError> {
         Ok(text.split_whitespace().count())
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        Ok(format!("TEMPLATED:{body}"))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        add_special: bool,
+        parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        assert!(add_special && parse_special);
+        Ok((100_u64..140).collect())
     }
 }
 
@@ -1572,6 +1590,27 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 .to_string(),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..120).collect())
+        }
     }
 
     let two_model_seats = write_seats(
@@ -1581,21 +1620,25 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
             "seats": [
                 {
                     "guild": "Foundry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 {
                     "guild": "Quarry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
                 { "guild": "Mint", "backend": "file", "model": "ClubBot" }
@@ -1793,6 +1836,27 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                 .to_string(),
             })
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..110).collect())
+        }
     }
 
     let tmp = fresh_tmp_dir("item14_select");
@@ -1809,22 +1873,26 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
             "seats": [
                 {
                     "guild": "Foundry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
                 {
                     "guild": "Harbor",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Mint", "backend": "file", "model": "ClubBot" }
             ]
@@ -2012,6 +2080,8 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
     let mock_dir = tmp.join("select_mock_dir");
     must_ok(fs::create_dir_all(&mock_dir), "mkdir select_mock_dir");
     let mock_resp = json!({
+        "apply_template_prompt": "TEMPLATED MOCK PROMPT",
+        "tokenize_ids": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
         "rules": [{
             "when_contains": "This is the act round.",
             "status": 200,
@@ -2258,10 +2328,12 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
     assert_eq!(miss_code, 1);
     assert!(String::from_utf8_lossy(&err).contains("MISSING_WRAPPER"));
 
-    // `--mock-dir` CLI execution on `play` & `branch` with an openrouter seat!
+    // `--mock-dir` CLI execution on `play` & `branch` with a Local seat without notes!
     let mock_dir = tmp.join("mock_dir");
     must_ok(fs::create_dir_all(&mock_dir), "mkdir mock_dir");
     let mock_resp = json!({
+        "apply_template_prompt": "TEMPLATED MOCK PROMPT",
+        "tokenize_ids": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
         "rules": [
             {
                 "when_contains": "This is the talk round.",
@@ -2300,12 +2372,14 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
             "seats": [
                 {
                     "guild": "Foundry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
                 { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
@@ -3032,6 +3106,27 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 status: 500,
                 body: "{\"error\":\"down\"}".to_owned(),
             })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..110).collect())
         }
     }
 
@@ -3839,6 +3934,27 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
         ) -> Result<usize, TransportError> {
             Ok(text.split_whitespace().count())
         }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..120).collect())
+        }
     }
 
     // 1. B5 per-turn manifest: play turn 1 -> manifest.json exists after turn 1; play turn 2 -> remove manifest.json ->
@@ -4210,6 +4326,27 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             _timeout: Duration,
         ) -> Result<usize, TransportError> {
             Ok(text.split_whitespace().count())
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..120).collect())
         }
     }
 
@@ -4647,6 +4784,27 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 body: mock_chat_response_value("ok-fallback", "Qwen/Qwen3-32B", &ok, 10, 10, None)
                     .to_string(),
             })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..110).collect())
         }
     }
 

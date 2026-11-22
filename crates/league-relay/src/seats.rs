@@ -830,6 +830,30 @@ pub fn validate_local_tokenize_url(
     Ok((format!("{origin}/tokenize"), canonical_host))
 }
 
+/// Validate a `local` seat's `/apply-template` URL and normalize it to `<origin>/apply-template`.
+pub fn validate_local_apply_template_url(
+    guild: &str,
+    url: &str,
+    normalized_allowed: &[String],
+) -> Result<(String, String), RelayError> {
+    let (origin, canonical_host, clean_path) =
+        parse_and_validate_local_origin(guild, url, normalized_allowed)?;
+    match clean_path {
+        ""
+        | "/v1"
+        | "/tokenize"
+        | "/chat/completions"
+        | "/v1/chat/completions"
+        | "/apply-template" => {}
+        _ => {
+            return Err(RelayError::SeatConfig(format!(
+                "local seat '{guild}' apply-template URL path must be '/apply-template'"
+            )));
+        }
+    }
+    Ok((format!("{origin}/apply-template"), canonical_host))
+}
+
 fn parse_and_validate_local_origin<'a>(
     guild: &str,
     raw_url: &'a str,

@@ -8899,6 +8899,7 @@ enum TokenizeBehavior {
 struct LoopbackOpenAiServer {
     base_url: String,
     requests: Arc<Mutex<Vec<RecordedHttpRequest>>>,
+    apply_template_requests: Arc<Mutex<Vec<RecordedHttpRequest>>>,
     tokenize_requests: Arc<Mutex<Vec<RecordedHttpRequest>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     addr: std::net::SocketAddr,
@@ -8924,11 +8925,13 @@ impl LoopbackOpenAiServer {
 
         let queue = Arc::new(Mutex::new(VecDeque::from(steps)));
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let apply_template_requests = Arc::new(Mutex::new(Vec::new()));
         let tokenize_requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
 
         let q_clone = Arc::clone(&queue);
         let r_clone = Arc::clone(&requests);
+        let tpl_clone = Arc::clone(&apply_template_requests);
         let tok_clone = Arc::clone(&tokenize_requests);
         let s_clone = Arc::clone(&stop);
 
@@ -8942,6 +8945,7 @@ impl LoopbackOpenAiServer {
                         }
                         let q_conn = Arc::clone(&q_clone);
                         let r_conn = Arc::clone(&r_clone);
+                        let tpl_conn = Arc::clone(&tpl_clone);
                         let tok_conn = Arc::clone(&tok_clone);
                         let tok_mode = tokenize_behavior.clone();
                         conn_threads.push(thread::spawn(move || {
@@ -9001,18 +9005,60 @@ impl LoopbackOpenAiServer {
                             let body =
                                 String::from_utf8_lossy(&buf[hdr_end..body_slice_end]).into_owned();
 
+                            if request_line.starts_with("POST /apply-template ") {
+                                let rendered = format!("TEMPLATED:{body}");
+                                let tpl_body = json!({ "prompt": rendered }).to_string();
+                                if let Ok(mut guard) = tpl_conn.lock() {
+                                    guard.push(RecordedHttpRequest {
+                                        request_line,
+                                        headers_lower,
+                                        body,
+                                    });
+                                }
+                                let raw_resp = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{tpl_body}",
+                                    tpl_body.len()
+                                );
+                                let _ = stream.write_all(raw_resp.as_bytes());
+                                let _ = stream.flush();
+                                return;
+                            }
+
                             if request_line.starts_with("POST /tokenize ") {
-                                let (tok_status, tok_body) = match &tok_mode {
-                                    TokenizeBehavior::WordCount => {
-                                        let parsed_prompt = serde_json::from_str::<Json>(&body)
-                                            .ok()
-                                            .and_then(|v| {
-                                                v.get("prompt")
-                                                    .and_then(Json::as_str)
-                                                    .map(str::to_owned)
-                                            })
-                                            .unwrap_or_default();
-                                        let n = parsed_prompt.split_whitespace().count();
+                                let parsed_req = serde_json::from_str::<Json>(&body).ok();
+                                let content_field = parsed_req
+                                    .as_ref()
+                                    .and_then(|v| v.get("content"))
+                                    .and_then(Json::as_str)
+                                    .map(str::to_owned);
+                                let prompt_field = parsed_req
+                                    .as_ref()
+                                    .and_then(|v| v.get("prompt"))
+                                    .and_then(Json::as_str)
+                                    .map(str::to_owned)
+                                    .unwrap_or_default();
+                                let (tok_status, tok_body) = match (&tok_mode, content_field) {
+                                    (TokenizeBehavior::HttpStatus(st, b), _) => (*st, b.clone()),
+                                    (TokenizeBehavior::RawBody(raw), _) => (200_u16, raw.clone()),
+                                    (TokenizeBehavior::WordCount, Some(c)) => {
+                                        let n = c.split_whitespace().count().max(1);
+                                        let ids: Vec<u64> =
+                                            (100_u64..100_u64 + n as u64).collect();
+                                        (200_u16, json!({ "tokens": ids }).to_string())
+                                    }
+                                    (TokenizeBehavior::CharsDivBy(div), Some(c)) => {
+                                        let n = (c.chars().count() / (*div).max(1)).max(1);
+                                        let ids: Vec<u64> =
+                                            (100_u64..100_u64 + n as u64).collect();
+                                        (200_u16, json!({ "tokens": ids }).to_string())
+                                    }
+                                    (TokenizeBehavior::FixedCount(n), Some(_)) => {
+                                        let ids: Vec<u64> =
+                                            (100_u64..100_u64 + (*n).max(1) as u64).collect();
+                                        (200_u16, json!({ "tokens": ids }).to_string())
+                                    }
+                                    (TokenizeBehavior::WordCount, None) => {
+                                        let n = prompt_field.split_whitespace().count();
                                         (
                                             200_u16,
                                             json!({
@@ -9023,16 +9069,8 @@ impl LoopbackOpenAiServer {
                                             .to_string(),
                                         )
                                     }
-                                    TokenizeBehavior::CharsDivBy(div) => {
-                                        let parsed_prompt = serde_json::from_str::<Json>(&body)
-                                            .ok()
-                                            .and_then(|v| {
-                                                v.get("prompt")
-                                                    .and_then(Json::as_str)
-                                                    .map(str::to_owned)
-                                            })
-                                            .unwrap_or_default();
-                                        let n = parsed_prompt.chars().count() / (*div).max(1);
+                                    (TokenizeBehavior::CharsDivBy(div), None) => {
+                                        let n = prompt_field.chars().count() / (*div).max(1);
                                         (
                                             200_u16,
                                             json!({
@@ -9043,7 +9081,7 @@ impl LoopbackOpenAiServer {
                                             .to_string(),
                                         )
                                     }
-                                    TokenizeBehavior::FixedCount(n) => (
+                                    (TokenizeBehavior::FixedCount(n), None) => (
                                         200_u16,
                                         json!({
                                             "count": *n,
@@ -9052,8 +9090,6 @@ impl LoopbackOpenAiServer {
                                         })
                                         .to_string(),
                                     ),
-                                    TokenizeBehavior::HttpStatus(st, b) => (*st, b.clone()),
-                                    TokenizeBehavior::RawBody(raw) => (200_u16, raw.clone()),
                                 };
                                 if let Ok(mut guard) = tok_conn.lock() {
                                     guard.push(RecordedHttpRequest {
@@ -9139,6 +9175,7 @@ impl LoopbackOpenAiServer {
         Ok(Self {
             base_url: format!("http://127.0.0.1:{}/v1", addr.port()),
             requests,
+            apply_template_requests,
             tokenize_requests,
             stop,
             addr,
@@ -9151,6 +9188,14 @@ impl LoopbackOpenAiServer {
             .requests
             .lock()
             .map_err(|_| "mock server request mutex poisoned")?;
+        Ok(guard.clone())
+    }
+
+    fn apply_template_requests(&self) -> Result<Vec<RecordedHttpRequest>, Box<dyn Error>> {
+        let guard = self
+            .apply_template_requests
+            .lock()
+            .map_err(|_| "mock server apply_template_requests mutex poisoned")?;
         Ok(guard.clone())
     }
 
@@ -24696,10 +24741,7 @@ fn audit_real_tool_followup_request(
                 | "include_reasoning"
                 | "tools"
         ) || (allow_cache_prompt
-            && matches!(
-                key.as_str(),
-                "cache_prompt" | "logprobs" | "top_logprobs" | "return_tokens" | "return_token_ids"
-            ));
+            && matches!(key.as_str(), "cache_prompt" | "logprobs" | "top_logprobs"));
         if !allowed_top {
             return Err(format!("unexpected top-level request framing key `{key}`"));
         }
@@ -33294,10 +33336,10 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
 }
 
 #[test]
-fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() -> TestResult {
+fn eval_mode_local_prepares_template_and_tokenize_while_play_omits() -> TestResult {
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
-    fs::write(&wrapper, "S1_TELEMETRY_WRAPPER")?;
+    fs::write(&wrapper, "EVAL_TELEMETRY_WRAPPER")?;
 
     let srv_eval = LoopbackOpenAiServer::start_with_tokenizer(
         vec![MockHttpStep::Json {
@@ -33313,7 +33355,7 @@ fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() ->
     let g_eval = tmp.path().join("g_eval");
     write_to_seat(&g_eval, "01", "talk", "Saltworks", "S1 EVAL BOARD")?;
     let cfg_eval = TurnConfig::new(
-        g_eval,
+        g_eval.clone(),
         "01".to_owned(),
         Round::Talk,
         seats_eval,
@@ -33326,12 +33368,52 @@ fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() ->
     .with_eval_mode(true);
     let tx_eval = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
     assert!(run_turn(&cfg_eval, &tx_eval, None)?.all_clean());
+    let tpl_reqs = srv_eval.apply_template_requests()?;
+    assert_eq!(
+        tpl_reqs.len(),
+        2,
+        "eval_mode Local must call /apply-template twice to verify deterministic rendering"
+    );
+    assert_eq!(tpl_reqs[0].body, tpl_reqs[1].body);
+    let tok_reqs = srv_eval.tokenize_requests()?;
+    assert_eq!(
+        tok_reqs.len(),
+        1,
+        "eval_mode Local must call /tokenize on rendered prompt"
+    );
+    let tok_json: Json = serde_json::from_str(&tok_reqs[0].body)?;
+    assert_eq!(tok_json.get("add_special"), Some(&json!(true)));
+    assert_eq!(tok_json.get("parse_special"), Some(&json!(true)));
+    assert_eq!(
+        tok_json.get("content").and_then(Json::as_str),
+        Some(format!("TEMPLATED:{}", tpl_reqs[0].body).as_str())
+    );
+
     let eval_req: Json = serde_json::from_str(&srv_eval.recorded_requests()?[0].body)?;
     assert_eq!(eval_req.get("logprobs"), Some(&json!(true)));
     assert_eq!(eval_req.get("top_logprobs"), Some(&json!(5)));
-    assert_eq!(eval_req.get("return_tokens"), Some(&json!(true)));
-    assert_eq!(eval_req.get("return_token_ids"), Some(&json!(true)));
     assert_eq!(eval_req.get("cache_prompt"), Some(&json!(false)));
+    assert!(eval_req.get("return_tokens").is_none());
+    assert!(eval_req.get("return_token_ids").is_none());
+
+    let raw_rec: SavedHttpReplyRecord = serde_json::from_slice(&fs::read(
+        league_relay::http_reply_file_path(&g_eval, "Saltworks", "01", Round::Talk, 0, 1),
+    )?)?;
+    assert_eq!(
+        raw_rec.prompt_token_ids_source.as_deref(),
+        Some("server_tokenize")
+    );
+    assert_eq!(
+        raw_rec.prompt_token_ids_template_check.as_deref(),
+        Some("double_apply_template_byte_equal")
+    );
+    assert!(
+        raw_rec
+            .prompt_token_ids_sha256
+            .as_ref()
+            .is_some_and(|h| h.len() == 64)
+    );
+    assert!(raw_rec.prompt_token_ids_count.is_some_and(|c| c > 0));
 
     let srv_play = LoopbackOpenAiServer::start_with_tokenizer(
         vec![MockHttpStep::Json {
@@ -33360,6 +33442,14 @@ fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() ->
     .with_eval_mode(false);
     let tx_play = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
     assert!(run_turn(&cfg_play, &tx_play, None)?.all_clean());
+    assert!(
+        srv_play.apply_template_requests()?.is_empty(),
+        "Play mode must make zero /apply-template calls"
+    );
+    assert!(
+        srv_play.tokenize_requests()?.is_empty(),
+        "Play mode must make zero /tokenize calls"
+    );
     let play_req: Json = serde_json::from_str(&srv_play.recorded_requests()?[0].body)?;
     for key in [
         "logprobs",
@@ -33377,7 +33467,7 @@ fn fix2_s1_eval_mode_local_requests_logprobs_and_token_ids_while_play_omits() ->
 }
 
 #[test]
-fn fix2_s5_tool_call_missing_id_uses_delivery_failure_without_synthetic_id() -> TestResult {
+fn malformed_tool_call_missing_id_uses_delivery_failure_without_synthetic_id() -> TestResult {
     let tmp = TempDir::new()?;
     let preview_state = card7_standard_preview_state(0)?;
     let wrapper = tmp.path().join("wrapper.md");

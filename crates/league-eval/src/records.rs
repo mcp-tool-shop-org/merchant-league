@@ -388,13 +388,22 @@ pub struct EvalDecisionRecord {
     /// Canonical SHA-256 digests of accepted intermediate `preview_turn_orders` / `draft_turn_orders` bundles in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intermediate_bundle_sha256s: Vec<String>,
-    /// SHA-256 digests of server-reported `prompt_token_ids` arrays across HTTP requests in this round.
+    /// SHA-256 digests of canonical `/tokenize` (`add_special: true`, `parse_special: true`)
+    /// prompt token ID arrays produced for HTTP rounds after `/apply-template` determinism checks
+    /// (`prompt_token_ids_source`: `"server_tokenize"`, `prompt_token_ids_template_check`:
+    /// `"double_apply_template_byte_equal"`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_token_ids_sha256s: Vec<String>,
-    /// Server-reported reply token IDs per HTTP round when present in the HTTP response body.
+    /// Source tag stating how `prompt_token_ids_sha256s` were produced (e.g., `"server_tokenize"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_source: Option<String>,
+    /// Template determinism verification method used before `/tokenize` (e.g., `"double_apply_template_byte_equal"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_template_check: Option<String>,
+    /// Chosen reply token IDs per HTTP round extracted from `choices[0].logprobs.content[].id`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reply_token_ids: Vec<Vec<u64>>,
-    /// Top-5 per-token log-probabilities per HTTP round when returned by the server.
+    /// Exact top-5 per-token log-probabilities per HTTP round returned by the server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reply_top_logprobs: Vec<Vec<DecisionTokenTopLogprobs>>,
     /// Source history file SHA-256 digests loaded when reconstructing a frozen `branch` prompt.
@@ -452,7 +461,7 @@ pub struct EvalSetupFile {
     /// SHA-256 hex digest of the unified `ResponseFormatConfig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_schema_sha256: Option<String>,
-    /// SHA-256 hex digest of the canonical validated [`ServingManifestRecord`] (`S4`), if supplied.
+    /// SHA-256 hex digest of the canonical validated [`ServingManifestRecord`], if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serving_manifest_sha256: Option<String>,
 }

@@ -397,10 +397,13 @@ fn normalize_hex64(raw: &str) -> Option<String> {
 }
 
 /// Validate `built_sha` (no `"unknown"`, must be 40 lowercase hex chars) and compare against
-/// `live_head` when running inside a git checkout (`INVALID_CRATE_GIT_SHA`).
-pub fn validate_crate_git_sha_against(
+/// Verify compiled `built_sha` is valid 40-hex (never `"unknown"`), matches `live_head` inside
+/// a git checkout (`INVALID_CRATE_GIT_SHA`), and optionally verifies a clean working tree
+/// (`DIRTY_GIT_WORKTREE`).
+pub fn validate_crate_git_sha_and_cleanliness(
     built_sha: &str,
     live_head: Option<&str>,
+    is_dirty: Option<bool>,
 ) -> Result<String, EvalError> {
     let normalized = built_sha.trim().to_ascii_lowercase();
     if normalized.is_empty() || normalized == "unknown" || !is_valid_hex40(&normalized) {
@@ -416,18 +419,35 @@ pub fn validate_crate_git_sha_against(
             ));
         }
     }
+    if is_dirty == Some(true) {
+        return Err(EvalError::DirtyGitWorktree(
+            "git working tree has uncommitted changes; commit cleanly and rebuild before running Evaluation Mode"
+                .to_owned(),
+        ));
+    }
     Ok(normalized)
+}
+
+/// Verify compiled `built_sha` is valid 40-hex (never `"unknown"`) and matches `live_head` when
+/// running inside a git checkout (`INVALID_CRATE_GIT_SHA`).
+pub fn validate_crate_git_sha_against(
+    built_sha: &str,
+    live_head: Option<&str>,
+) -> Result<String, EvalError> {
+    validate_crate_git_sha_and_cleanliness(built_sha, live_head, None)
 }
 
 fn has_git_ancestor(dir: &Path) -> bool {
     dir.ancestors().any(|anc| anc.join(".git").exists())
 }
 
-/// Verify compiled [`CRATE_GIT_SHA`] is valid 40-hex (never `"unknown"`) and not stale relative to
-/// the source checkout's current git `HEAD`.
-pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
-    let manifest_dir = option_env!("CARGO_MANIFEST_DIR").map(Path::new);
-    let live_head = if let Some(dir) = manifest_dir
+/// Verify `built_sha` against the git checkout rooted at or above `dir`, refusing dirty working
+/// trees (`DIRTY_GIT_WORKTREE`) as well as missing or stale commit SHAs (`INVALID_CRATE_GIT_SHA`).
+pub fn resolve_verified_crate_git_sha_in(
+    dir: Option<&Path>,
+    built_sha: &str,
+) -> Result<String, EvalError> {
+    let (live_head, is_dirty) = if let Some(dir) = dir
         && dir.is_dir()
         && has_git_ancestor(dir)
     {
@@ -446,11 +466,37 @@ pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
         let head_str = String::from_utf8(out.stdout).map_err(|_| {
             EvalError::InvalidCrateGitSha("non-UTF-8 output from git `rev-parse HEAD`".to_owned())
         })?;
-        Some(head_str)
+        let status_out = Command::new("git")
+            .current_dir(dir)
+            .args(["status", "--porcelain"])
+            .output()
+            .map_err(|e| {
+                EvalError::InvalidCrateGitSha(format!("unable to inspect git working tree: {e}"))
+            })?;
+        if !status_out.status.success() {
+            return Err(EvalError::InvalidCrateGitSha(
+                "git `status --porcelain` failed while verifying clean working tree".to_owned(),
+            ));
+        }
+        let status_str = String::from_utf8(status_out.stdout).map_err(|_| {
+            EvalError::InvalidCrateGitSha(
+                "non-UTF-8 output from git `status --porcelain`".to_owned(),
+            )
+        })?;
+        (Some(head_str), Some(!status_str.trim().is_empty()))
     } else {
-        None
+        (None, None)
     };
-    validate_crate_git_sha_against(CRATE_GIT_SHA, live_head.as_deref())
+    validate_crate_git_sha_and_cleanliness(built_sha, live_head.as_deref(), is_dirty)
+}
+
+/// Verify compiled [`CRATE_GIT_SHA`] is valid 40-hex (never `"unknown"`), matches the source
+/// checkout's current git `HEAD`, and sees a clean git working tree.
+pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
+    resolve_verified_crate_git_sha_in(
+        option_env!("CARGO_MANIFEST_DIR").map(Path::new),
+        CRATE_GIT_SHA,
+    )
 }
 
 /// Validate a [`ServingManifestInput`] against all startup reproducibility Andon rules and produce a
@@ -858,6 +904,99 @@ fn scrub_text_value(
     Ok(s)
 }
 
+/// Match documented provider API/PAT token shapes with their minimum length floors so
+/// benign directory or model path segments such as `/data/hf_models` or `hf_hub` are
+/// never redacted or refused:
+/// - GitHub fine-grained PAT (`github_pat_` + >=22 alnum + `_` + >=20 alnum)
+/// - GitHub classic PAT (`ghp_` + >=36 alnum)
+/// - Hugging Face user access token (`hf_` + >=30 alnum)
+/// - OpenRouter API key (`sk-or-v1-` + >=64 hex digits)
+/// - OpenAI/Stripe scoped secret key (`sk-(proj|svcacct|admin|live|test)-` + >=16 alnum/`_`/`-`)
+/// - Legacy OpenAI secret key (`sk-` + >=20 alnum)
+fn match_provider_token_len(raw: &[u8], lower: &[u8], pos: usize) -> Option<usize> {
+    let prev_ok = pos == 0 || !raw[pos - 1].is_ascii_alphanumeric();
+    if !prev_ok {
+        return None;
+    }
+    if lower[pos..].starts_with(b"github_pat_") {
+        let mut mid = pos + 11;
+        while mid < raw.len() && raw[mid].is_ascii_alphanumeric() {
+            mid += 1;
+        }
+        if mid - (pos + 11) >= 22 && raw.get(mid) == Some(&b'_') {
+            let mut end = mid + 1;
+            while end < raw.len() && raw[end].is_ascii_alphanumeric() {
+                end += 1;
+            }
+            let trailing_ok = raw
+                .get(end)
+                .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_');
+            if end - (mid + 1) >= 20 && trailing_ok {
+                return Some(end - pos);
+            }
+        }
+        return None;
+    }
+    if lower[pos..].starts_with(b"ghp_") {
+        let mut end = pos + 4;
+        while end < raw.len() && raw[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        let trailing_ok = raw
+            .get(end)
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_');
+        return (end - (pos + 4) >= 36 && trailing_ok).then_some(end - pos);
+    }
+    if lower[pos..].starts_with(b"hf_") {
+        let mut end = pos + 3;
+        while end < raw.len() && raw[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        let trailing_ok = raw
+            .get(end)
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_');
+        return (end - (pos + 3) >= 30 && trailing_ok).then_some(end - pos);
+    }
+    if lower[pos..].starts_with(b"sk-or-v1-") {
+        let mut end = pos + 9;
+        while end < raw.len() && raw[end].is_ascii_hexdigit() {
+            end += 1;
+        }
+        let trailing_ok = raw
+            .get(end)
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && !matches!(*b, b'_' | b'-'));
+        return (end - (pos + 9) >= 64 && trailing_ok).then_some(end - pos);
+    }
+    for prefix in [
+        b"sk-proj-".as_slice(),
+        b"sk-svcacct-".as_slice(),
+        b"sk-admin-".as_slice(),
+        b"sk-live-".as_slice(),
+        b"sk-test-".as_slice(),
+    ] {
+        if lower[pos..].starts_with(prefix) {
+            let mut end = pos + prefix.len();
+            while end < raw.len()
+                && (raw[end].is_ascii_alphanumeric() || matches!(raw[end], b'-' | b'_'))
+            {
+                end += 1;
+            }
+            return (end - (pos + prefix.len()) >= 16).then_some(end - pos);
+        }
+    }
+    if lower[pos..].starts_with(b"sk-") {
+        let mut end = pos + 3;
+        while end < raw.len() && raw[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        let trailing_ok = raw
+            .get(end)
+            .is_none_or(|b| !b.is_ascii_alphanumeric() && !matches!(*b, b'_' | b'-'));
+        return (end - (pos + 3) >= 20 && trailing_ok).then_some(end - pos);
+    }
+    None
+}
+
 fn redact_token_patterns(input: &str) -> String {
     let base_scrubbed = scrub_secret_text(input);
     let mut out = String::with_capacity(base_scrubbed.len());
@@ -868,39 +1007,10 @@ fn redact_token_patterns(input: &str) -> String {
 
     while i < base_scrubbed.len() {
         let prev_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if prev_ok && lb[i..].starts_with(b"github_pat_") {
-            let mut end = i + 11;
-            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-                end += 1;
-            }
-            if end - (i + 11) >= 10 {
-                out.push_str(REDACTED_TOKEN);
-                i = end;
-                continue;
-            }
-        } else if prev_ok && (lb[i..].starts_with(b"ghp_") || lb[i..].starts_with(b"hf_")) {
-            let plen = if lb[i..].starts_with(b"ghp_") { 4 } else { 3 };
-            let mut end = i + plen;
-            while end < bytes.len() && bytes[end].is_ascii_alphanumeric() {
-                end += 1;
-            }
-            if end - (i + plen) >= 10 {
-                out.push_str(REDACTED_TOKEN);
-                i = end;
-                continue;
-            }
-        } else if prev_ok && lb[i..].starts_with(b"sk-") {
-            let mut end = i + 3;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'-' | b'_'))
-            {
-                end += 1;
-            }
-            if end - (i + 3) >= 8 {
-                out.push_str(REDACTED_TOKEN);
-                i = end;
-                continue;
-            }
+        if let Some(tok_len) = match_provider_token_len(bytes, lb, i) {
+            out.push_str(REDACTED_TOKEN);
+            i += tok_len;
+            continue;
         } else if prev_ok && lb[i..].starts_with(b"bearer") {
             let after_b = i + 6;
             if after_b < bytes.len()
@@ -973,23 +1083,7 @@ fn has_residual_unsafe_value(scrubbed: &str, check_generic_homes: bool) -> bool 
         if !prev_ok {
             continue;
         }
-        if (lb[i..].starts_with(b"github_pat_")
-            && bytes
-                .get(i + 11..i + 13)
-                .is_some_and(|s| s.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_')))
-            || (lb[i..].starts_with(b"ghp_")
-                && bytes
-                    .get(i + 4..i + 6)
-                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
-            || (lb[i..].starts_with(b"hf_")
-                && bytes
-                    .get(i + 3..i + 5)
-                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
-            || (lb[i..].starts_with(b"sk-")
-                && bytes
-                    .get(i + 3..i + 5)
-                    .is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)))
-        {
+        if match_provider_token_len(bytes, lb, i).is_some() {
             return true;
         }
         if lb[i..].starts_with(b"bearer")
@@ -1315,7 +1409,7 @@ mod tests {
     }
 
     #[test]
-    fn fix2_s2_gpu_and_mig_ids_hashed_never_verbatim() {
+    fn gpu_and_mig_ids_hashed_never_verbatim() {
         let gpu_val = [
             "GPU",
             "-",
@@ -1361,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn fix2_s3_git_sha_rejects_unknown_and_stale_and_resolves_worktree() {
+    fn git_sha_rejects_unknown_and_stale_and_resolves_worktree() {
         for bad in ["unknown", "", "deadbeef", &"z".repeat(40)] {
             let err = match validate_crate_git_sha_against(bad, None) {
                 Err(e) => e,
@@ -1381,18 +1475,19 @@ mod tests {
         assert_eq!(verified, sha_a);
 
         let live = resolve_verified_crate_git_sha()
-            .unwrap_or_else(|e| panic!("worktree CRATE_GIT_SHA must match HEAD: {e}"));
+            .unwrap_or_else(|e| panic!("worktree CRATE_GIT_SHA must match HEAD and be clean: {e}"));
         assert_eq!(live.len(), 40);
         assert!(live.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(live, CRATE_GIT_SHA);
     }
 
     #[test]
-    fn fix2_s6_home_boundaries_comma_paren_bracket_and_wsl_keep_probeuserx_untouched() {
+    fn home_boundaries_comma_paren_bracket_and_wsl_keep_probeuserx_untouched() {
         let homes = vec![
             PathBuf::from("/home/probeuser"),
             PathBuf::from(r"X:\Profiles\probeuser"),
         ];
+        let wsl_home_path = ["", "mnt", "x", "Users", "probeuser", "models", "q.gguf"].join("/");
         let vars = vec![
             (
                 "CUDA_VISIBLE_COMMA".to_owned(),
@@ -1406,10 +1501,7 @@ mod tests {
                 "VLLM_OPT_BRACKETS".to_owned(),
                 r"[/home/probeuser/cache,X:\Profiles\probeuser\models]".to_owned(),
             ),
-            (
-                "LLAMA_WSL_HOME".to_owned(),
-                "/mnt/c/Users/probeuser/models/q.gguf".to_owned(),
-            ),
+            ("LLAMA_WSL_HOME".to_owned(), wsl_home_path),
             (
                 "VLLM_SIBLING_USER".to_owned(),
                 "/home/probeuserX/y".to_owned(),
@@ -1437,5 +1529,293 @@ mod tests {
             snap.get("VLLM_SIBLING_USER").map(String::as_str),
             Some("/home/probeuserX/y")
         );
+    }
+
+    #[test]
+    fn hf_models_and_hf_hub_paths_pass_through_while_real_provider_tokens_redact() {
+        let hf_token = ["hf", "_", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"].concat();
+        let ghp_token = ["ghp", "_", "0123456789abcdefghijklmnopqrstuvwxyz"].concat();
+        let gh_pat = [
+            "github",
+            "_",
+            "pat",
+            "_",
+            "11A2B3C4D5E6F7G8H9I0J1",
+            "_",
+            "KLMNOPQRSTUVWXYZ0123456789abcdefgh",
+        ]
+        .concat();
+        let sk_proj = ["sk", "-", "proj", "-", "AbCdEfGhIjKlMnOpQrSt"].concat();
+        let sk_or = ["sk", "-or-v1-", &"a".repeat(64)].concat();
+        let sk_legacy = ["sk", "-", &"Z9y8X7w6V5u4T3s2R1q0".repeat(2)].concat();
+
+        let safe_model_path = "/data/hf_models/x.gguf";
+        let safe_hub_path = "/var/cache/hf_hub/weights";
+        let scrubbed_model = redact_token_patterns(safe_model_path);
+        assert_eq!(scrubbed_model, safe_model_path);
+        assert!(!has_residual_unsafe_value(&scrubbed_model, false));
+        let scrubbed_hub = redact_token_patterns(safe_hub_path);
+        assert_eq!(scrubbed_hub, safe_hub_path);
+        assert!(!has_residual_unsafe_value(&scrubbed_hub, false));
+
+        for real_tok in [hf_token, ghp_token, gh_pat, sk_proj, sk_or, sk_legacy] {
+            let line = format!("value={real_tok} done");
+            assert!(
+                has_residual_unsafe_value(&line, false),
+                "expected residual check to flag synthetic token"
+            );
+            let redacted = redact_token_patterns(&line);
+            assert!(redacted.contains(REDACTED_TOKEN));
+            assert!(!redacted.contains(&real_tok));
+            assert!(!has_residual_unsafe_value(&redacted, false));
+        }
+
+        let parsed_input = ServingManifestInput {
+            engine: EngineKind::LlamaServer,
+            server_version: "b11433".to_owned(),
+            server_build_commit: Some("0123456789abcdef".to_owned()),
+            server_info_provenance: MetadataProvenance::ServerReported,
+            model: ModelManifestInput {
+                filename: safe_model_path.to_owned(),
+                quant: Some("Q4_K_M".to_owned()),
+                sha256: "a".repeat(64),
+                chat_template_sha256: Some("b".repeat(64)),
+                provenance: MetadataProvenance::OperatorSupplied,
+            },
+            machine: MachineManifestInput {
+                gpu_name: "NVIDIA H100".to_owned(),
+                gpu_uuid: Some("gpu-test-uuid-0".to_owned()),
+                gpu_uuid_sha256: None,
+                sm_count: None,
+                gpu_driver: "570.12".to_owned(),
+                cuda_runtime_version: None,
+                rocm_version: None,
+                vram_mib: None,
+                os_build: safe_hub_path.to_owned(),
+                wsl_kernel_version: None,
+                provenance: MetadataProvenance::OperatorSupplied,
+            },
+            server_settings: ServerSettingsRecord {
+                parallel_slots: 1,
+                batch_size: 2048,
+                ubatch_size: 512,
+                kv_unified: Some(false),
+                flash_attn: Some(true),
+                cache_type_k: "f16".to_owned(),
+                cache_type_v: "f16".to_owned(),
+                speculative_decoding: Some("none".to_owned()),
+                ctx_size: 32768,
+                ctx_shift: false,
+                threads: Some(16),
+                provenance: MetadataProvenance::ServerReported,
+            },
+            cache_settings: CacheSettingsInput {
+                per_request_cache_prompt: Some(false),
+                no_cache_prompt_flag: true,
+                cache_ram_mib: Some(0),
+                cache_idle_slots: Some(false),
+                enable_prefix_caching: None,
+                provenance: MetadataProvenance::ServerReported,
+            },
+            sampling: EffectiveSamplingRecord {
+                temperature: 0.0,
+                top_k: 0,
+                top_p: 1.0,
+                min_p: 0.0,
+                repeat_penalty: 1.0,
+                presence_penalty: 0.0,
+                frequency_penalty: 0.0,
+                seed: Some(7),
+                stop_sequences: Vec::new(),
+                max_tokens: 512,
+                sampler_order: Vec::new(),
+                provenance: MetadataProvenance::OperatorSupplied,
+            },
+        };
+        let rec = validate_serving_manifest_input(&parsed_input)
+            .unwrap_or_else(|e| panic!("hf_models/hf_hub paths must validate cleanly: {e}"));
+        assert_eq!(rec.model.filename, safe_model_path);
+        assert_eq!(rec.machine.os_build, safe_hub_path);
+    }
+
+    #[test]
+    fn dirty_git_worktree_refuses_with_named_code() {
+        let head = "a".repeat(40);
+        let dirty_err = match validate_crate_git_sha_and_cleanliness(&head, Some(&head), Some(true))
+        {
+            Err(e) => e,
+            Ok(v) => panic!("dirty worktree flag must refuse, got {v}"),
+        };
+        assert_eq!(dirty_err.code(), "DIRTY_GIT_WORKTREE");
+
+        let clean_sha = validate_crate_git_sha_and_cleanliness(&head, Some(&head), Some(false))
+            .unwrap_or_else(|e| panic!("clean flag should pass: {e}"));
+        assert_eq!(clean_sha, head);
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let repo =
+            std::env::temp_dir().join(format!("ml_dirty_git_test_{}_{stamp}", std::process::id()));
+        let _ = fs::remove_dir_all(&repo);
+        fs::create_dir_all(&repo).unwrap_or_else(|e| panic!("mkdir repo: {e}"));
+        let run_git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?}: {e}", args));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        run_git(&["init", "-b", "main"]);
+        run_git(&["config", "user.email", "test@example.com"]);
+        run_git(&["config", "user.name", "Test"]);
+        fs::write(repo.join("tracked.txt"), "v1\n").unwrap_or_else(|e| panic!("write: {e}"));
+        run_git(&["add", "tracked.txt"]);
+        run_git(&["commit", "-m", "init"]);
+        let head_sha = run_git(&["rev-parse", "HEAD"]);
+
+        let ok_sha = resolve_verified_crate_git_sha_in(Some(&repo), &head_sha)
+            .unwrap_or_else(|e| panic!("clean repo should pass: {e}"));
+        assert_eq!(ok_sha, head_sha);
+
+        fs::write(repo.join("tracked.txt"), "dirty\n").unwrap_or_else(|e| panic!("dirty: {e}"));
+        let real_dirty_err = match resolve_verified_crate_git_sha_in(Some(&repo), &head_sha) {
+            Err(e) => e,
+            Ok(v) => panic!("modified tracked file must trigger DIRTY_GIT_WORKTREE, got {v}"),
+        };
+        assert_eq!(real_dirty_err.code(), "DIRTY_GIT_WORKTREE");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn build_rs_watches_worktree_common_dir_branch_ref_and_tracks_commits() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let root = std::env::temp_dir().join(format!(
+            "ml_build_rs_worktree_test_{}_{stamp}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let main_repo = root.join("main_repo");
+        let wt_repo = root.join("wt_repo");
+        fs::create_dir_all(&main_repo).unwrap_or_else(|e| panic!("mkdir: {e}"));
+
+        let run_git = |cwd: &Path, args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?}: {e}", args));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        run_git(&main_repo, &["init", "-b", "main"]);
+        run_git(&main_repo, &["config", "user.email", "test@example.com"]);
+        run_git(&main_repo, &["config", "user.name", "Test"]);
+        fs::write(main_repo.join("f.txt"), "c1\n").unwrap_or_else(|e| panic!("write c1: {e}"));
+        run_git(&main_repo, &["add", "f.txt"]);
+        run_git(&main_repo, &["commit", "-m", "commit 1"]);
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "wt-branch",
+                &wt_repo.to_string_lossy(),
+            ],
+        );
+        let wt_head_1 = run_git(&wt_repo, &["rev-parse", "HEAD"]);
+
+        let build_rs = Path::new(env!("CARGO_MANIFEST_DIR")).join("build.rs");
+        let exe_name = if cfg!(windows) {
+            "eval_build_probe.exe"
+        } else {
+            "eval_build_probe"
+        };
+        let build_bin = root.join(exe_name);
+        let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+        let compile_out = Command::new(&rustc)
+            .arg("--edition")
+            .arg("2024")
+            .arg(&build_rs)
+            .arg("-o")
+            .arg(&build_bin)
+            .output()
+            .unwrap_or_else(|e| panic!("compile build.rs with {rustc}: {e}"));
+        assert!(
+            compile_out.status.success(),
+            "rustc build.rs failed: {}",
+            String::from_utf8_lossy(&compile_out.stderr)
+        );
+
+        let run_probe = |manifest_dir: &Path| {
+            let out = Command::new(&build_bin)
+                .env("CARGO_MANIFEST_DIR", manifest_dir)
+                .output()
+                .unwrap_or_else(|e| panic!("run build.rs probe: {e}"));
+            assert!(out.status.success());
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+
+        let out_wt_1 = run_probe(&wt_repo);
+        assert!(out_wt_1.contains(&format!("cargo:rustc-env=LEAGUE_EVAL_GIT_SHA={wt_head_1}")));
+        let watches_1: Vec<PathBuf> = out_wt_1
+            .lines()
+            .filter_map(|l| l.strip_prefix("cargo:rerun-if-changed="))
+            .map(PathBuf::from)
+            .collect();
+        let common_branch_ref = fs::canonicalize(main_repo.join(".git/refs/heads/wt-branch"))
+            .unwrap_or_else(|e| panic!("canonicalize common branch ref: {e}"));
+        assert!(
+            watches_1.iter().any(|p| {
+                fs::canonicalize(p)
+                    .map(|c| c == common_branch_ref)
+                    .unwrap_or(false)
+            }),
+            "build.rs must watch common-dir branch ref {} in worktree, got {watches_1:?}",
+            common_branch_ref.display()
+        );
+
+        let before_ref_bytes =
+            fs::read(&common_branch_ref).unwrap_or_else(|e| panic!("read ref 1: {e}"));
+        let head_file_before =
+            fs::read_to_string(run_git(&wt_repo, &["rev-parse", "--git-dir"]) + "/HEAD")
+                .unwrap_or_default();
+
+        fs::write(wt_repo.join("f.txt"), "c2\n").unwrap_or_else(|e| panic!("write c2: {e}"));
+        run_git(&wt_repo, &["add", "f.txt"]);
+        run_git(&wt_repo, &["commit", "-m", "commit 2"]);
+        let wt_head_2 = run_git(&wt_repo, &["rev-parse", "HEAD"]);
+        assert_ne!(wt_head_1, wt_head_2);
+
+        let after_ref_bytes =
+            fs::read(&common_branch_ref).unwrap_or_else(|e| panic!("read ref 2: {e}"));
+        let head_file_after =
+            fs::read_to_string(run_git(&wt_repo, &["rev-parse", "--git-dir"]) + "/HEAD")
+                .unwrap_or_default();
+        assert_eq!(head_file_before, head_file_after);
+        assert_ne!(
+            before_ref_bytes, after_ref_bytes,
+            "HEAD file stays unchanged across branch commits while watched common branch ref updates"
+        );
+
+        let out_wt_2 = run_probe(&wt_repo);
+        assert!(out_wt_2.contains(&format!("cargo:rustc-env=LEAGUE_EVAL_GIT_SHA={wt_head_2}")));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

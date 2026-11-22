@@ -74,16 +74,13 @@ fn mock_chat_completion_json(id: &str, model: &str, content: &str, include_cost:
     json!({
         "id": id,
         "model": model,
-        "prompt_token_ids": [101, 102, 103],
         "choices": [{
             "index": 0,
             "message": { "role": "assistant", "content": content },
-            "token_ids": [11, 12],
             "logprobs": {
                 "content": [{
                     "token": "{",
                     "id": 11,
-                    "token_id": 11,
                     "logprob": -0.01,
                     "top_logprobs": top_logprobs
                 }]
@@ -151,6 +148,27 @@ impl Transport for MockTransport {
         _timeout: Duration,
     ) -> Result<usize, TransportError> {
         Ok(text.split_whitespace().count())
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        Ok(format!("TEMPLATED:{body}"))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        add_special: bool,
+        parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        assert!(add_special && parse_special);
+        Ok((100_u64..150).collect())
     }
 }
 
@@ -240,17 +258,19 @@ fn write_seats_file(dir: &Path, spec: serde_json::Value) -> PathBuf {
     p
 }
 
-fn one_openrouter_three_clubbot_seats() -> serde_json::Value {
+fn one_local_no_notes_three_clubbot_seats() -> serde_json::Value {
     json!({
         "seats": [
             {
                 "guild": "Foundry",
-                "backend": "openrouter",
-                "model": "qwen/qwen3-32b",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:18080/v1",
+                "model": "Qwen/Qwen3-32B",
                 "temperature": 0.0,
                 "max_output_tokens": 512,
                 "timeout_secs": 5.0,
-                "max_cost_per_call": 0.05
+                "max_gpu_secs_per_call": 10.0,
+                "scratchpad": false
             },
             { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
             { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
@@ -528,7 +548,7 @@ fn test_2_wrong_part() {
     let tmp = fresh_tmp_dir("wrong_part");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     // Talk reply contains an order (`TALK_REPLY_HAS_ORDERS`); act reply contains a message (`ACT_REPLY_HAS_MESSAGES`).
     let talk_with_order = json!({
@@ -679,7 +699,7 @@ fn test_3_messages() {
     let tmp = fresh_tmp_dir("messages");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     let talk_reply = json!({
         "messages": [
@@ -803,13 +823,13 @@ fn test_4_schema() {
     );
     assert!(cfg.schema["properties"].get(&k_notes).is_some());
 
-    // Verify relay's setup validation accepts the schema across both `local` (`notes` kept)
-    // and `openrouter` (`notes` stripped automatically), under `off` and `on`, and locks sha256 in setup.json.
+    // Verify relay's setup validation accepts the schema across `local` (`notes` disabled)
+    // and `local` (`notes` kept), under `off` and `on`, and locks sha256 in setup.json.
     for (label, arm, seats_json, act_reply) in [
         (
-            "off_openrouter",
+            "off_local_no_notes",
             EvalArm::Off,
-            one_openrouter_three_clubbot_seats(),
+            one_local_no_notes_three_clubbot_seats(),
             json!({ "messages": [], "market_actions": [], "bundle": {} }),
         ),
         (
@@ -965,7 +985,7 @@ fn test_5_seat_view() {
         "seed turn-0 game_dir",
     );
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
     let empty_reply = json!({ "messages": [], "market_actions": [], "bundle": {} }).to_string();
     let transport = MockTransport::from_contents(vec![empty_reply.clone(), empty_reply]);
     let _ = must_ok(
@@ -1176,30 +1196,34 @@ fn test_7_records() {
     let (wrapper_path, wrapper_bytes) = write_wrapper(&tmp);
     let expected_wrapper_sha = sha256_hex(&wrapper_bytes);
 
-    // Seat 0 (`Foundry`, openrouter): triggers TALK_REPLY_HAS_ORDERS on turn 1 talk and ACT_REPLY_INVALID on turn 1 act,
+    // Seat 0 (`Foundry`, local without notes): triggers TALK_REPLY_HAS_ORDERS on turn 1 talk and ACT_REPLY_INVALID on turn 1 act,
     //   then valid recipient + invalid recipient (`MESSAGE_RECIPIENT_INVALID`) on turn 2 talk and ACT_REPLY_HAS_MESSAGES on turn 2 act.
-    // Seat 1 (`Quarry`, openrouter): sends 1 invalid recipient on turn 1 talk, valid empty act on turn 1, valid empty replies on turn 2.
+    // Seat 1 (`Quarry`, local without notes): sends 1 invalid recipient on turn 1 talk, valid empty act on turn 1, valid empty replies on turn 2.
     let seats_path = write_seats_file(
         &tmp,
         json!({
             "seats": [
                 {
                     "guild": "Foundry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 {
                     "guild": "Quarry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
                 { "guild": "Mint", "backend": "file", "model": "ClubBot" }
@@ -1311,6 +1335,27 @@ fn test_7_records() {
             let body =
                 mock_chat_completion_json("mock-per-guild", "qwen/qwen3-32b", &content, true);
             Ok(RawHttpResponse { status: 200, body })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..150).collect())
         }
     }
 
@@ -1745,7 +1790,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             let tmp = fresh_tmp_dir(&format!("a1_{shape_name}_{}", arm.as_str()));
             let play_dir = tmp.join("play_game");
             let (wrapper_path, _) = write_wrapper(&tmp);
-            let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+            let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
             // Queue an extra clean reply behind the malformed reply to prove `eval_mode` never
             // triggers a second HTTP call for that round.
@@ -2012,7 +2057,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     let tmp = fresh_tmp_dir("b1_e2e");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     // Turn 1 talk: `post_offer` missing required fields (`action_kind` only -> passes r2 relay schema!)
     //   -> `TALK_REPLY_HAS_ORDERS` wins over order-parse failure (`is_wrong_part=true`).
@@ -2205,7 +2250,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
     for arm in [EvalArm::Off, EvalArm::On] {
         let tmp = fresh_tmp_dir(&format!("relay1_1a_{}", arm.as_str()));
         let (wrapper_path, _) = write_wrapper(&tmp);
-        let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+        let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
         // 1. Talk reply with orders + unknown bundle key -> TALK_REPLY_HAS_ORDERS (1 call),
         //    counts toward 5% stop-line, keeps discarded sidecar & sha256.

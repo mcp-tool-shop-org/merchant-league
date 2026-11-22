@@ -45,7 +45,8 @@ pub use serving::{
     ModelManifestRecord, ProvenanceTagged, ServerSettingsRecord, ServingManifestInput,
     ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
     capture_serving_env_snapshot_from, load_and_validate_serving_manifest,
-    resolve_verified_crate_git_sha, validate_crate_git_sha_against,
+    resolve_verified_crate_git_sha, resolve_verified_crate_git_sha_in,
+    validate_crate_git_sha_against, validate_crate_git_sha_and_cleanliness,
     validate_serving_manifest_input,
 };
 pub use view::{

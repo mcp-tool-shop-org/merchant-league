@@ -9,7 +9,9 @@
 //! `Authorization` header).
 
 use crate::error::{RelayError, StructuredError, ToStructuredError};
-use crate::seats::{validate_local_base_url, validate_local_tokenize_url};
+use crate::seats::{
+    validate_local_apply_template_url, validate_local_base_url, validate_local_tokenize_url,
+};
 use crate::secret::{ApiKey, LiveGate, LocalGate, redact_secrets};
 use serde::Deserialize;
 use std::fmt;
@@ -108,6 +110,40 @@ pub trait Transport: Send + Sync {
             "token counting endpoint (/tokenize) is unavailable on this transport".to_owned(),
         ))
     }
+
+    /// Render chat messages, tools, and template options via `POST /apply-template`
+    /// (`tools/server/server.cpp:292`, `tools/server/server-context.cpp:5416-5426`).
+    ///
+    /// Transports without `/apply-template` support fail closed.
+    fn apply_template(
+        &self,
+        apply_template_url: &str,
+        body: &str,
+        timeout: Duration,
+    ) -> Result<String, TransportError> {
+        let _ = (apply_template_url, body, timeout);
+        Err(TransportError::Network(
+            "apply-template endpoint (/apply-template) is unavailable on this transport".to_owned(),
+        ))
+    }
+
+    /// Tokenize rendered text via `POST /tokenize` returning server token IDs
+    /// (`tools/server/server.cpp:290`, `tools/server/server-context.cpp:5440-5479`).
+    ///
+    /// Transports without `/tokenize` token ID support fail closed.
+    fn tokenize_prompt(
+        &self,
+        tokenize_url: &str,
+        content: &str,
+        add_special: bool,
+        parse_special: bool,
+        timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        let _ = (tokenize_url, content, add_special, parse_special, timeout);
+        Err(TransportError::Network(
+            "token ID endpoint (/tokenize) is unavailable on this transport".to_owned(),
+        ))
+    }
 }
 
 /// Map a `ureq::Error` into a redacted [`TransportError`].
@@ -198,6 +234,32 @@ impl LocalOpenAiTransport {
     pub fn gate(&self) -> &LocalGate {
         &self.gate
     }
+
+    fn post_local_json(
+        &self,
+        validated_url: &str,
+        body: &str,
+        timeout: Duration,
+    ) -> Result<RawHttpResponse, TransportError> {
+        let agent: Agent = Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .proxy(None)
+            .build()
+            .into();
+        let resp = agent
+            .post(validated_url)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(map_local_ureq_error)?;
+        let status = resp.status().as_u16();
+        let text = resp
+            .into_body()
+            .read_to_string()
+            .map_err(map_local_ureq_error)?;
+        Ok(RawHttpResponse { status, body: text })
+    }
 }
 
 impl Transport for LocalOpenAiTransport {
@@ -210,24 +272,7 @@ impl Transport for LocalOpenAiTransport {
         let (validated_endpoint, _) =
             validate_local_base_url("local", url, self.gate.allowed_vm_hosts())
                 .map_err(|e| TransportError::Network(e.to_string()))?;
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(timeout))
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .proxy(None)
-            .build()
-            .into();
-        let resp = agent
-            .post(&validated_endpoint)
-            .header("Content-Type", "application/json")
-            .send(body)
-            .map_err(map_local_ureq_error)?;
-        let status = resp.status().as_u16();
-        let text = resp
-            .into_body()
-            .read_to_string()
-            .map_err(map_local_ureq_error)?;
-        Ok(RawHttpResponse { status, body: text })
+        self.post_local_json(&validated_endpoint, body, timeout)
     }
 
     fn count_tokens(
@@ -246,29 +291,14 @@ impl Transport for LocalOpenAiTransport {
             "add_special_tokens": false,
         })
         .to_string();
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(timeout))
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .proxy(None)
-            .build()
-            .into();
-        let resp = agent
-            .post(&validated_url)
-            .header("Content-Type", "application/json")
-            .send(&payload)
-            .map_err(map_local_ureq_error)?;
-        let status = resp.status().as_u16();
-        let body = resp
-            .into_body()
-            .read_to_string()
-            .map_err(map_local_ureq_error)?;
-        if status != 200 {
+        let resp = self.post_local_json(&validated_url, &payload, timeout)?;
+        if resp.status != 200 {
             return Err(TransportError::Network(format!(
-                "POST /tokenize returned HTTP {status}"
+                "POST /tokenize returned HTTP {}",
+                resp.status
             )));
         }
-        let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|_| {
+        let parsed: serde_json::Value = serde_json::from_str(&resp.body).map_err(|_| {
             TransportError::Network("POST /tokenize returned invalid JSON".to_owned())
         })?;
         let Some(raw_count) = parsed.get("count").and_then(serde_json::Value::as_u64) else {
@@ -279,6 +309,85 @@ impl Transport for LocalOpenAiTransport {
         usize::try_from(raw_count).map_err(|_| {
             TransportError::Network("POST /tokenize 'count' overflowed usize".to_owned())
         })
+    }
+
+    fn apply_template(
+        &self,
+        apply_template_url: &str,
+        body: &str,
+        timeout: Duration,
+    ) -> Result<String, TransportError> {
+        let (validated_url, _) = validate_local_apply_template_url(
+            "local",
+            apply_template_url,
+            self.gate.allowed_vm_hosts(),
+        )
+        .map_err(|e| TransportError::Network(e.to_string()))?;
+        let resp = self.post_local_json(&validated_url, body, timeout)?;
+        if resp.status != 200 {
+            return Err(TransportError::Network(format!(
+                "POST /apply-template returned HTTP {}",
+                resp.status
+            )));
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&resp.body).map_err(|_| {
+            TransportError::Network("POST /apply-template returned invalid JSON".to_owned())
+        })?;
+        let Some(prompt) = parsed.get("prompt").and_then(serde_json::Value::as_str) else {
+            return Err(TransportError::Network(
+                "POST /apply-template response missing string 'prompt'".to_owned(),
+            ));
+        };
+        Ok(prompt.to_owned())
+    }
+
+    fn tokenize_prompt(
+        &self,
+        tokenize_url: &str,
+        content: &str,
+        add_special: bool,
+        parse_special: bool,
+        timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        let (validated_url, _) =
+            validate_local_tokenize_url("local", tokenize_url, self.gate.allowed_vm_hosts())
+                .map_err(|e| TransportError::Network(e.to_string()))?;
+        let payload = serde_json::json!({
+            "content": content,
+            "add_special": add_special,
+            "parse_special": parse_special,
+        })
+        .to_string();
+        let resp = self.post_local_json(&validated_url, &payload, timeout)?;
+        if resp.status != 200 {
+            return Err(TransportError::Network(format!(
+                "POST /tokenize returned HTTP {}",
+                resp.status
+            )));
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&resp.body).map_err(|_| {
+            TransportError::Network("POST /tokenize returned invalid JSON".to_owned())
+        })?;
+        let Some(arr) = parsed.get("tokens").and_then(serde_json::Value::as_array) else {
+            return Err(TransportError::Network(
+                "POST /tokenize response missing array 'tokens'".to_owned(),
+            ));
+        };
+        let ids: Vec<u64> = arr
+            .iter()
+            .map(serde_json::Value::as_u64)
+            .collect::<Option<Vec<u64>>>()
+            .ok_or_else(|| {
+                TransportError::Network(
+                    "POST /tokenize 'tokens' entries must all be non-negative integers".to_owned(),
+                )
+            })?;
+        if ids.is_empty() {
+            return Err(TransportError::Network(
+                "POST /tokenize returned empty 'tokens' array".to_owned(),
+            ));
+        }
+        Ok(ids)
     }
 }
 
@@ -306,6 +415,10 @@ fn default_ok_status() -> u16 {
 #[serde(deny_unknown_fields)]
 struct MockFileWire {
     rules: Vec<MockRuleWire>,
+    #[serde(default)]
+    apply_template_prompt: Option<String>,
+    #[serde(default)]
+    tokenize_ids: Option<Vec<u64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -323,6 +436,8 @@ struct MockRule {
 #[derive(Debug, Clone)]
 pub struct MockDirTransport {
     rules: Vec<MockRule>,
+    apply_template_prompt: Option<String>,
+    tokenize_ids: Option<Vec<u64>>,
 }
 
 impl MockDirTransport {
@@ -359,7 +474,11 @@ impl MockDirTransport {
                 sleep_ms: r.sleep_ms,
             })
             .collect();
-        Ok(Self { rules })
+        Ok(Self {
+            rules,
+            apply_template_prompt: parsed.apply_template_prompt,
+            tokenize_ids: parsed.tokenize_ids,
+        })
     }
 }
 
@@ -389,5 +508,36 @@ impl Transport for MockDirTransport {
         Err(TransportError::Network(
             "no matching rule in mock responses.json".to_owned(),
         ))
+    }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        _body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        self.apply_template_prompt.clone().ok_or_else(|| {
+            TransportError::Network(
+                "POST /apply-template is not configured in mock responses.json".to_owned(),
+            )
+        })
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        _add_special: bool,
+        _parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        self.tokenize_ids
+            .clone()
+            .filter(|ids| !ids.is_empty())
+            .ok_or_else(|| {
+                TransportError::Network(
+                    "POST /tokenize token IDs are not configured in mock responses.json".to_owned(),
+                )
+            })
     }
 }

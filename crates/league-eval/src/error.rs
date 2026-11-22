@@ -42,9 +42,21 @@ pub enum EvalError {
     InvalidGpuUuidSha256(String),
     /// Build-time `crate_git_sha` is missing, `"unknown"`, or stale relative to git HEAD (`exit 2`).
     InvalidCrateGitSha(String),
+    /// Git working tree has uncommitted changes during an Evaluation Mode run (`exit 2`).
+    DirtyGitWorktree(String),
     /// Operator serving manifest or env snapshot contains a secret or value that cannot be scrubbed (`exit 1`).
     UnsafeManifestValue(String),
-    /// Server HTTP 200 reply omitted required prompt token IDs, reply token IDs, or top-k logprobs (`exit 2`).
+    /// A model seat uses a non-Local backend, unsupported for Evaluation Mode telemetry (`exit 1`).
+    UnsupportedEvalModelBackend(String),
+    /// Local server `/apply-template` endpoint failed or returned an unexpected shape (`exit 2`).
+    PromptTemplateFailed(String),
+    /// Repeated `/apply-template` calls on identical input returned different rendered prompts (`exit 2`).
+    PromptTemplateMismatch(String),
+    /// Local server `/tokenize` endpoint failed, was absent, or returned an invalid token array (`exit 2`).
+    PromptTokenizeFailed(String),
+    /// Local `/tokenize` prompt token count disagreed with chat reply `usage.prompt_tokens` (`exit 2`).
+    PromptTokenCountMismatch(String),
+    /// Server HTTP 200 reply omitted required prompt token IDs, reply token IDs, or exact top-5 logprobs (`exit 2`).
     MissingReplyTelemetry(String),
     /// Reported refused actions exceed submitted actions (`exit 2`).
     InvalidActionCount(String),
@@ -107,7 +119,13 @@ impl EvalError {
             Self::MissingGpuName(_) => "MISSING_GPU_NAME",
             Self::InvalidGpuUuidSha256(_) => "INVALID_GPU_UUID_SHA256",
             Self::InvalidCrateGitSha(_) => "INVALID_CRATE_GIT_SHA",
+            Self::DirtyGitWorktree(_) => "DIRTY_GIT_WORKTREE",
             Self::UnsafeManifestValue(_) => "UNSAFE_MANIFEST_VALUE",
+            Self::UnsupportedEvalModelBackend(_) => "UNSUPPORTED_EVAL_MODEL_BACKEND",
+            Self::PromptTemplateFailed(_) => "PROMPT_TEMPLATE_FAILED",
+            Self::PromptTemplateMismatch(_) => "PROMPT_TEMPLATE_MISMATCH",
+            Self::PromptTokenizeFailed(_) => "PROMPT_TOKENIZE_FAILED",
+            Self::PromptTokenCountMismatch(_) => "PROMPT_TOKEN_COUNT_MISMATCH",
             Self::MissingReplyTelemetry(_) => "MISSING_REPLY_TELEMETRY",
             Self::InvalidActionCount(_) => "INVALID_ACTION_COUNT",
             Self::ModelSeatRegentIntervention(_) => "MODEL_SEAT_REGENT_INTERVENTION",
@@ -149,6 +167,7 @@ impl EvalError {
             | Self::MissingGpuName(_)
             | Self::InvalidGpuUuidSha256(_)
             | Self::UnsafeManifestValue(_)
+            | Self::UnsupportedEvalModelBackend(_)
             | Self::CheckpointNotFound(_)
             | Self::InsufficientTurnsForStrata(_)
             | Self::InvalidStrata(_)
@@ -166,6 +185,11 @@ impl EvalError {
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
             | Self::InvalidCrateGitSha(_)
+            | Self::DirtyGitWorktree(_)
+            | Self::PromptTemplateFailed(_)
+            | Self::PromptTemplateMismatch(_)
+            | Self::PromptTokenizeFailed(_)
+            | Self::PromptTokenCountMismatch(_)
             | Self::MissingReplyTelemetry(_)
             | Self::InvalidActionCount(_)
             | Self::ModelSeatRegentIntervention(_)
@@ -210,8 +234,30 @@ impl fmt::Display for EvalError {
             Self::InvalidCrateGitSha(msg) => {
                 write!(f, "INVALID_CRATE_GIT_SHA: {}", scrub_secret_text(msg))
             }
+            Self::DirtyGitWorktree(msg) => {
+                write!(f, "DIRTY_GIT_WORKTREE: {}", scrub_secret_text(msg))
+            }
             Self::UnsafeManifestValue(msg) => {
                 write!(f, "UNSAFE_MANIFEST_VALUE: {}", scrub_secret_text(msg))
+            }
+            Self::UnsupportedEvalModelBackend(msg) => {
+                write!(
+                    f,
+                    "UNSUPPORTED_EVAL_MODEL_BACKEND: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::PromptTemplateFailed(msg) => {
+                write!(f, "PROMPT_TEMPLATE_FAILED: {}", scrub_secret_text(msg))
+            }
+            Self::PromptTemplateMismatch(msg) => {
+                write!(f, "PROMPT_TEMPLATE_MISMATCH: {}", scrub_secret_text(msg))
+            }
+            Self::PromptTokenizeFailed(msg) => {
+                write!(f, "PROMPT_TOKENIZE_FAILED: {}", scrub_secret_text(msg))
+            }
+            Self::PromptTokenCountMismatch(msg) => {
+                write!(f, "PROMPT_TOKEN_COUNT_MISMATCH: {}", scrub_secret_text(msg))
             }
             Self::MissingReplyTelemetry(msg) => {
                 write!(f, "MISSING_REPLY_TELEMETRY: {}", scrub_secret_text(msg))
@@ -323,7 +369,7 @@ impl ToStructuredError for EvalError {
             Self::UnsupportedFileSeatModel { .. } => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "set `backend: \"file\", \"model\": \"ClubBot\"` for bot seats or `\"local\"` / `\"openrouter\"` for model seats",
+                "set `backend: \"file\", \"model\": \"ClubBot\"` for bot seats or `\"local\"` for Evaluation Mode model seats",
                 false,
             ),
             Self::MissingWrapper(_) => StructuredError::new(
@@ -380,16 +426,52 @@ impl ToStructuredError for EvalError {
                 "rebuild `league-eval` cleanly inside the checked-out git revision so `crate_git_sha` matches HEAD",
                 false,
             ),
+            Self::DirtyGitWorktree(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "commit or clean uncommitted changes in the repository working tree and rebuild before running Evaluation Mode",
+                false,
+            ),
             Self::UnsafeManifestValue(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
                 "remove raw GPU/MIG identifiers, control characters, or un-scrubbable secrets from serving metadata",
                 false,
             ),
+            Self::UnsupportedEvalModelBackend(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "Evaluation Mode model seats require `backend: \"local\"` so `/apply-template`, `/tokenize`, chosen-token IDs, and top-5 logprobs can be collected",
+                false,
+            ),
+            Self::PromptTemplateFailed(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure the local server exposes `POST /apply-template` and returns `{ \"prompt\": ... }`",
+                false,
+            ),
+            Self::PromptTemplateMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure `POST /apply-template` returns byte-identical prompt text on repeated identical requests",
+                false,
+            ),
+            Self::PromptTokenizeFailed(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure the local server exposes `POST /tokenize` accepting `add_special: true` and `parse_special: true` and returning `tokens`",
+                false,
+            ),
+            Self::PromptTokenCountMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "verify `/apply-template` and `/tokenize` (`add_special: true`, `parse_special: true`) match the chat call's `usage.prompt_tokens`",
+                false,
+            ),
             Self::MissingReplyTelemetry(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "ensure the serving backend returns `prompt_token_ids`, reply token IDs, and top-k `logprobs.content` on HTTP 200 replies",
+                "ensure `/apply-template`, `/tokenize`, and HTTP 200 `choices[0].logprobs.content` (`id` + 5 `top_logprobs`) telemetry are present",
                 false,
             ),
             Self::InvalidActionCount(_) => StructuredError::new(

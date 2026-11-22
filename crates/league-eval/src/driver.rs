@@ -205,7 +205,7 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
         });
     }
     for seat in &seats_file.seats {
-        let exclude_from_transcript = match &seat.backend {
+        let (exclude_from_transcript, unsupported_backend) = match &seat.backend {
             SeatBackend::File { model } => {
                 if model.as_deref() != Some("ClubBot") {
                     return Err(EvalError::UnsupportedFileSeatModel {
@@ -213,20 +213,30 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
                         model: model.clone(),
                     });
                 }
-                false
+                (false, None)
             }
-            SeatBackend::Local(l) => l
-                .reasoning
-                .as_ref()
-                .is_some_and(|r| r.exclude_from_transcript),
-            SeatBackend::Openrouter(o) => o
-                .reasoning
-                .as_ref()
-                .is_some_and(|r| r.exclude_from_transcript),
+            SeatBackend::Local(l) => (
+                l.reasoning
+                    .as_ref()
+                    .is_some_and(|r| r.exclude_from_transcript),
+                None,
+            ),
+            SeatBackend::Openrouter(o) => (
+                o.reasoning
+                    .as_ref()
+                    .is_some_and(|r| r.exclude_from_transcript),
+                Some("openrouter"),
+            ),
         };
         if exclude_from_transcript {
             return Err(EvalError::EvalThinkStrippingForbidden(format!(
                 "seat '{}' sets reasoning.exclude_from_transcript=true, which is forbidden in Evaluation Mode",
+                seat.guild
+            )));
+        }
+        if let Some(backend_name) = unsupported_backend {
+            return Err(EvalError::UnsupportedEvalModelBackend(format!(
+                "seat '{}' uses non-Local backend '{backend_name}', which is forbidden in Evaluation Mode; configure 'local' for server tokenizer and logprob telemetry",
                 seat.guild
             )));
         }
@@ -303,6 +313,8 @@ struct RoundAttemptDiagnostics {
     tool_calls_used: u32,
     intermediate_bundle_sha256s: Vec<String>,
     prompt_token_ids_sha256s: Vec<String>,
+    prompt_token_ids_source: Option<String>,
+    prompt_token_ids_template_check: Option<String>,
     reply_token_ids: Vec<Vec<u64>>,
     reply_top_logprobs: Vec<Vec<DecisionTokenTopLogprobs>>,
 }
@@ -379,27 +391,55 @@ fn is_wire_error_code(wire_json: Option<&str>, expected_code: &str) -> bool {
         .is_some_and(|c| c == expected_code)
 }
 
-fn parse_top_logprob_entries(raw: &serde_json::Value) -> Vec<DecisionTopLogprobEntry> {
-    match raw {
-        serde_json::Value::Array(arr) => arr
-            .iter()
-            .filter_map(|item| {
-                let obj = item.as_object()?;
-                let token = obj.get("token")?.as_str()?.to_owned();
-                let logprob = obj.get("logprob")?.as_f64()?;
-                let token_id = obj
-                    .get("token_id")
-                    .or_else(|| obj.get("id"))
-                    .and_then(serde_json::Value::as_u64);
-                Some(DecisionTopLogprobEntry {
-                    token,
-                    token_id,
-                    logprob,
+fn parse_top_logprob_entries(
+    raw: Option<&serde_json::Value>,
+    idx: usize,
+) -> Result<Vec<DecisionTopLogprobEntry>, EvalError> {
+    const EXPECTED_TOP_LOGPROBS: usize = 5;
+    let raw_val = raw.ok_or_else(|| {
+        EvalError::MissingReplyTelemetry(format!(
+            "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing `top_logprobs`"
+        ))
+    })?;
+    match raw_val {
+        serde_json::Value::Array(arr) => {
+            if arr.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must have exact length {EXPECTED_TOP_LOGPROBS}, found {}",
+                    arr.len()
+                )));
+            }
+            let entries: Vec<DecisionTopLogprobEntry> = arr
+                .iter()
+                .filter_map(|item| {
+                    let obj = item.as_object()?;
+                    let token = obj.get("token")?.as_str()?.to_owned();
+                    let logprob = obj.get("logprob")?.as_f64()?;
+                    let token_id = obj
+                        .get("token_id")
+                        .or_else(|| obj.get("id"))
+                        .and_then(serde_json::Value::as_u64);
+                    Some(DecisionTopLogprobEntry {
+                        token,
+                        token_id,
+                        logprob,
+                    })
                 })
-            })
-            .take(5)
-            .collect(),
+                .collect();
+            if entries.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` entries malformed (expected {EXPECTED_TOP_LOGPROBS} valid entries)"
+                )));
+            }
+            Ok(entries)
+        }
         serde_json::Value::Object(map) => {
+            if map.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must have exact length {EXPECTED_TOP_LOGPROBS}, found {}",
+                    map.len()
+                )));
+            }
             let mut entries: Vec<DecisionTopLogprobEntry> = map
                 .iter()
                 .filter_map(|(k, v)| {
@@ -410,42 +450,104 @@ fn parse_top_logprob_entries(raw: &serde_json::Value) -> Vec<DecisionTopLogprobE
                     })
                 })
                 .collect();
+            if entries.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` entries malformed (expected {EXPECTED_TOP_LOGPROBS} valid entries)"
+                )));
+            }
             entries.sort_by(|a, b| {
                 b.logprob
                     .total_cmp(&a.logprob)
                     .then_with(|| a.token.cmp(&b.token))
             });
-            entries.truncate(5);
-            entries
+            Ok(entries)
         }
-        _ => Vec::new(),
+        _ => Err(EvalError::MissingReplyTelemetry(format!(
+            "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must be an array or map of {EXPECTED_TOP_LOGPROBS} entries"
+        ))),
     }
 }
 
 fn collect_http_reply_telemetry(
+    rec: &SavedHttpReplyRecord,
     body_val: &serde_json::Value,
     prompt_token_ids_sha256s: &mut Vec<String>,
+    prompt_token_ids_source: &mut Option<String>,
+    prompt_token_ids_template_check: &mut Option<String>,
     reply_token_ids: &mut Vec<Vec<u64>>,
     reply_top_logprobs: &mut Vec<Vec<DecisionTokenTopLogprobs>>,
 ) -> Result<(), EvalError> {
-    let prompt_ids = body_val
-        .get("prompt_token_ids")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|arr| {
-            arr.iter()
-                .map(serde_json::Value::as_u64)
-                .collect::<Option<Vec<u64>>>()
-        })
-        .filter(|ids| !ids.is_empty())
+    let prompt_sha = rec
+        .prompt_token_ids_sha256
+        .as_deref()
+        .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             EvalError::MissingReplyTelemetry(
-                "HTTP 200 reply missing non-empty `prompt_token_ids` for `prompt_token_ids_sha256s`"
+                "HTTP reply record missing `prompt_token_ids_sha256` from server `/tokenize`"
                     .to_owned(),
             )
         })?;
-    let prompt_bytes = serde_json::to_vec(&prompt_ids)
-        .map_err(|e| EvalError::Io(format!("encode prompt_token_ids: {e}")))?;
-    prompt_token_ids_sha256s.push(sha256_hex(&prompt_bytes));
+    let prompt_count = rec
+        .prompt_token_ids_count
+        .filter(|&c| c > 0)
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing positive `prompt_token_ids_count` from server `/tokenize`"
+                    .to_owned(),
+            )
+        })?;
+    let source = rec
+        .prompt_token_ids_source
+        .as_deref()
+        .filter(|s| *s == "server_tokenize")
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing `prompt_token_ids_source: \"server_tokenize\"`"
+                    .to_owned(),
+            )
+        })?;
+    let template_check = rec
+        .prompt_token_ids_template_check
+        .as_deref()
+        .filter(|s| *s == "double_apply_template_byte_equal")
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing `prompt_token_ids_template_check: \"double_apply_template_byte_equal\"`"
+                    .to_owned(),
+            )
+        })?;
+    let usage_prompt_tokens = body_val
+        .get("usage")
+        .and_then(|u| u.get("prompt_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing integer `usage.prompt_tokens` for prompt count check"
+                    .to_owned(),
+            )
+        })?;
+    if usize::try_from(usage_prompt_tokens).ok() != Some(prompt_count) {
+        return Err(EvalError::PromptTokenCountMismatch(format!(
+            "server `/tokenize` returned {prompt_count} token IDs whereas chat reply `usage.prompt_tokens` reported {usage_prompt_tokens}"
+        )));
+    }
+    if let Some(prev) = prompt_token_ids_source.as_deref()
+        && prev != source
+    {
+        return Err(EvalError::MissingReplyTelemetry(format!(
+            "inconsistent `prompt_token_ids_source` within decision: '{prev}' vs '{source}'"
+        )));
+    }
+    *prompt_token_ids_source = Some(source.to_owned());
+    if let Some(prev) = prompt_token_ids_template_check.as_deref()
+        && prev != template_check
+    {
+        return Err(EvalError::MissingReplyTelemetry(format!(
+            "inconsistent `prompt_token_ids_template_check` within decision: '{prev}' vs '{template_check}'"
+        )));
+    }
+    *prompt_token_ids_template_check = Some(template_check.to_owned());
+    prompt_token_ids_sha256s.push(prompt_sha.to_owned());
 
     let first_choice = body_val
         .get("choices")
@@ -456,17 +558,6 @@ fn collect_http_reply_telemetry(
                 "HTTP 200 reply missing `choices[0]` for reply telemetry".to_owned(),
             )
         })?;
-
-    let explicit_reply_ids = first_choice
-        .get("token_ids")
-        .or_else(|| body_val.get("completion_token_ids"))
-        .or_else(|| body_val.get("token_ids"))
-        .and_then(serde_json::Value::as_array)
-        .and_then(|arr| {
-            arr.iter()
-                .map(serde_json::Value::as_u64)
-                .collect::<Option<Vec<u64>>>()
-        });
 
     let lp_content = first_choice
         .get("logprobs")
@@ -482,7 +573,7 @@ fn collect_http_reply_telemetry(
 
     let mut extracted_logprobs: Vec<DecisionTokenTopLogprobs> =
         Vec::with_capacity(lp_content.len());
-    let mut fallback_ids_from_logprobs: Vec<u64> = Vec::with_capacity(lp_content.len());
+    let mut chosen_reply_ids: Vec<u64> = Vec::with_capacity(lp_content.len());
     for (idx, step) in lp_content.iter().enumerate() {
         let obj = step.as_object().ok_or_else(|| {
             EvalError::MissingReplyTelemetry(format!(
@@ -506,45 +597,24 @@ fn collect_http_reply_telemetry(
                 ))
             })?;
         let token_id = obj
-            .get("token_id")
-            .or_else(|| obj.get("id"))
-            .and_then(serde_json::Value::as_u64);
-        if let Some(tid) = token_id {
-            fallback_ids_from_logprobs.push(tid);
-        }
-        let top_logprobs = obj
-            .get("top_logprobs")
-            .map(parse_top_logprob_entries)
-            .unwrap_or_default();
-        if top_logprobs.is_empty() {
-            return Err(EvalError::MissingReplyTelemetry(format!(
-                "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing non-empty `top_logprobs`"
-            )));
-        }
+            .get("id")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing integer `id` for `reply_token_ids`"
+                ))
+            })?;
+        chosen_reply_ids.push(token_id);
+        let top_logprobs = parse_top_logprob_entries(obj.get("top_logprobs"), idx)?;
         extracted_logprobs.push(DecisionTokenTopLogprobs {
             token: token.to_owned(),
-            token_id,
+            token_id: Some(token_id),
             logprob,
             top_logprobs,
         });
     }
 
-    let resolved_reply_ids = match explicit_reply_ids {
-        Some(ids) if !ids.is_empty() => ids,
-        _ if fallback_ids_from_logprobs.len() == extracted_logprobs.len()
-            && !fallback_ids_from_logprobs.is_empty() =>
-        {
-            fallback_ids_from_logprobs
-        }
-        _ => {
-            return Err(EvalError::MissingReplyTelemetry(
-                "HTTP 200 reply missing non-empty reply token IDs (`token_ids` or `logprobs.content[].id`) for `reply_token_ids`"
-                    .to_owned(),
-            ));
-        }
-    };
-
-    reply_token_ids.push(resolved_reply_ids);
+    reply_token_ids.push(chosen_reply_ids);
     reply_top_logprobs.push(extracted_logprobs);
     Ok(())
 }
@@ -705,8 +775,11 @@ fn read_round_attempt_diagnostics(
                 && body_val.get("error").is_none_or(serde_json::Value::is_null)
             {
                 collect_http_reply_telemetry(
+                    &rec,
                     &body_val,
                     &mut out.prompt_token_ids_sha256s,
+                    &mut out.prompt_token_ids_source,
+                    &mut out.prompt_token_ids_template_check,
                     &mut out.reply_token_ids,
                     &mut out.reply_top_logprobs,
                 )?;
@@ -808,6 +881,8 @@ fn build_no_reply_record(
         cleared_non_empty_actions: false,
         intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
         prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+        prompt_token_ids_source: diag.prompt_token_ids_source,
+        prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
         reply_token_ids: diag.reply_token_ids,
         reply_top_logprobs: diag.reply_top_logprobs,
         loaded_history_sha256,
@@ -819,6 +894,31 @@ fn build_no_reply_record(
         refused_bundle: None,
         club_bot_baseline,
     }
+}
+
+fn map_prompt_prep_seat_error(detail: &str) -> Option<EvalError> {
+    if detail.starts_with("PROMPT_TEMPLATE_FAILED:") {
+        Some(EvalError::PromptTemplateFailed(detail.to_owned()))
+    } else if detail.starts_with("PROMPT_TEMPLATE_MISMATCH:") {
+        Some(EvalError::PromptTemplateMismatch(detail.to_owned()))
+    } else if detail.starts_with("PROMPT_TOKENIZE_FAILED:") {
+        Some(EvalError::PromptTokenizeFailed(detail.to_owned()))
+    } else {
+        None
+    }
+}
+
+fn check_turn_summary_prompt_telemetry(
+    summary: &league_relay::TurnSummary,
+) -> Result<(), EvalError> {
+    for report in &summary.reports {
+        if let SeatOutcome::SeatError { detail } = &report.outcome
+            && let Some(err) = map_prompt_prep_seat_error(detail)
+        {
+            return Err(err);
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -838,6 +938,11 @@ fn resolve_talk_model_round(
     refusal_by_arm: &mut BTreeMap<String, RefusalCodeCounts>,
     wrong_part_refusals: &mut WrongPartCounter,
 ) -> Result<EvalDecisionRecord, EvalError> {
+    if let Some(SeatOutcome::SeatError { detail }) = outcome
+        && let Some(err) = map_prompt_prep_seat_error(detail)
+    {
+        return Err(err);
+    }
     if diag.first_failure.is_some() {
         return Ok(build_no_reply_record(
             game_id,
@@ -912,6 +1017,8 @@ fn resolve_talk_model_round(
                 cleared_non_empty_actions: false,
                 intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
                 prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+                prompt_token_ids_source: diag.prompt_token_ids_source,
+                prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
                 reply_token_ids: diag.reply_token_ids,
                 reply_top_logprobs: diag.reply_top_logprobs,
                 loaded_history_sha256: BTreeMap::new(),
@@ -972,6 +1079,11 @@ fn resolve_act_model_round(
     refusal_by_arm: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
     wrong_part_refusals: Option<&mut WrongPartCounter>,
 ) -> Result<(EvalActSubmission, EvalDecisionRecord), EvalError> {
+    if let Some(SeatOutcome::SeatError { detail }) = outcome
+        && let Some(err) = map_prompt_prep_seat_error(detail)
+    {
+        return Err(err);
+    }
     if diag.first_failure.is_some() {
         return Ok((
             EvalActSubmission::default(),
@@ -1046,6 +1158,8 @@ fn resolve_act_model_round(
                 cleared_non_empty_actions: false,
                 intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
                 prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+                prompt_token_ids_source: diag.prompt_token_ids_source,
+                prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
                 reply_token_ids: diag.reply_token_ids,
                 reply_top_logprobs: diag.reply_top_logprobs,
                 loaded_history_sha256,
@@ -1340,6 +1454,8 @@ fn empty_clubbot_decision(
         cleared_non_empty_actions: false,
         intermediate_bundle_sha256s: Vec::new(),
         prompt_token_ids_sha256s: Vec::new(),
+        prompt_token_ids_source: None,
+        prompt_token_ids_template_check: None,
         reply_token_ids: Vec::new(),
         reply_top_logprobs: Vec::new(),
         loaded_history_sha256,
@@ -1733,6 +1849,7 @@ pub fn run_play_with_transport(
 
         let talk_calls_offset = count_calls_lines(&calls_path)?;
         let talk_summary = run_turn(&talk_cfg, transport, redaction_key)?;
+        check_turn_summary_prompt_telemetry(&talk_summary)?;
         for (idx, seat) in seats_file.seats.iter().enumerate() {
             let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
             let record = match seat.backend {
@@ -1841,6 +1958,7 @@ pub fn run_play_with_transport(
 
         let act_calls_offset = count_calls_lines(&calls_path)?;
         let act_summary = run_turn(&act_cfg, transport, redaction_key)?;
+        check_turn_summary_prompt_telemetry(&act_summary)?;
 
         let mut submissions: BTreeMap<u8, EvalActSubmission> = BTreeMap::new();
         let mut baselines: Vec<EvalActSubmission> = Vec::with_capacity(4);
@@ -2171,7 +2289,8 @@ pub fn run_branch_with_transport(
         resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_focal)?;
     let serving_env_snapshot = capture_serving_env_snapshot()?;
 
-    for (_, _, target_out_dir) in &targets {
+    for (prefix, _, target_out_dir) in &targets {
+        verify_branch_target_no_model_regent(prefix, &seats_file)?;
         for &arm in &opts.arms {
             ensure_arm_dir_empty(&target_out_dir.join(arm.as_str()))?;
         }
@@ -2275,6 +2394,46 @@ struct BranchTargetResult {
     first_void_error: Option<String>,
 }
 
+struct VerifiedBranchTargetProbe {
+    probe_host: EvalHost,
+    save_path: PathBuf,
+    seal_path: PathBuf,
+    has_regents: Vec<bool>,
+    model_seats: Vec<bool>,
+    seat_regents: BTreeMap<String, bool>,
+}
+
+fn verify_branch_target_no_model_regent(
+    checkpoint_prefix: &Path,
+    seats_file: &SeatFile,
+) -> Result<VerifiedBranchTargetProbe, EvalError> {
+    let save_path = append_extension(checkpoint_prefix, "save.json");
+    let seal_path = append_extension(checkpoint_prefix, "seal");
+    if !save_path.exists() || !seal_path.exists() {
+        return Err(EvalError::CheckpointNotFound(format!(
+            "missing pre-act checkpoint files {} / {}",
+            save_path.display(),
+            seal_path.display()
+        )));
+    }
+    let probe_host = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
+    let (has_regents, seat_regents) = seat_regent_flags(&probe_host, seats_file);
+    let model_seats: Vec<bool> = seats_file
+        .seats
+        .iter()
+        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
+        .collect();
+    ensure_no_model_seat_regent_at_startup(&probe_host, &model_seats, &has_regents, seats_file)?;
+    Ok(VerifiedBranchTargetProbe {
+        probe_host,
+        save_path,
+        seal_path,
+        has_regents,
+        model_seats,
+        seat_regents,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn branch_one_target(
     checkpoint_prefix: &Path,
@@ -2294,28 +2453,18 @@ fn branch_one_target(
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
 ) -> Result<BranchTargetResult, EvalError> {
-    let save_path = append_extension(checkpoint_prefix, "save.json");
-    let seal_path = append_extension(checkpoint_prefix, "seal");
-    if !save_path.exists() || !seal_path.exists() {
-        return Err(EvalError::CheckpointNotFound(format!(
-            "missing pre-act checkpoint files {} / {}",
-            save_path.display(),
-            seal_path.display()
-        )));
-    }
-
-    let probe_host = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
+    let VerifiedBranchTargetProbe {
+        probe_host,
+        save_path,
+        seal_path,
+        has_regents,
+        model_seats,
+        seat_regents,
+    } = verify_branch_target_no_model_regent(checkpoint_prefix, seats_file)?;
     let day = probe_host.turn();
     let day_str = format!("{day:02}");
     let table_id = probe_host.table_id().0;
     let source_game_id = probe_host.game_id().to_owned();
-    let (has_regents, seat_regents) = seat_regent_flags(&probe_host, seats_file);
-    let model_seats: Vec<bool> = seats_file
-        .seats
-        .iter()
-        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
-        .collect();
-    ensure_no_model_seat_regent_at_startup(&probe_host, &model_seats, &has_regents, seats_file)?;
 
     let recorded_seal_path =
         checkpoint_prefix.with_file_name(format!("day-{day_str}-act-recorded.seal"));
@@ -2537,6 +2686,7 @@ fn branch_one_target(
                 let arm_calls_path = arm_dir.join("relay").join("calls.jsonl");
                 let offset = count_calls_lines(&arm_calls_path)?;
                 let summary = run_turn(&branch_cfg, transport, redaction_key)?;
+                check_turn_summary_prompt_telemetry(&summary)?;
                 let diag = read_round_attempt_diagnostics(
                     &arm_dir,
                     &arm_calls_path,
@@ -3319,7 +3469,7 @@ mod tests {
     }
 
     #[test]
-    fn fix2_checked_sub_refuses_refused_exceeding_submitted() {
+    fn checked_sub_refuses_refused_exceeding_submitted() {
         let mut rec = empty_clubbot_decision(
             "g-count",
             1,
@@ -3370,9 +3520,9 @@ mod tests {
     }
 
     #[test]
-    fn fix2_s8_startup_check_refuses_prior_receipt_even_with_has_regents_false() {
+    fn startup_check_refuses_prior_receipt_even_with_has_regents_false() {
         let tmp_seats = std::env::temp_dir().join(format!(
-            "ml_driver_fix2_s8_seats_{}.json",
+            "ml_driver_regent_startup_seats_{}.json",
             std::process::id()
         ));
         let seats_json = serde_json::json!({
