@@ -16562,7 +16562,7 @@ struct ArmRenderHistoryRow {
     path_digests: &'static [(&'static str, u128)],
 }
 
-const MIN_COMMITTED_HISTORY_ROWS: usize = 9;
+const MIN_COMMITTED_HISTORY_ROWS: usize = 10;
 const GENESIS_HISTORY_ARM: &str = "v2_neutral_2026_11_15_r4";
 
 fn compute_history_row_seal_parts(arm: &str, path_digests: &[(&str, u128)]) -> u128 {
