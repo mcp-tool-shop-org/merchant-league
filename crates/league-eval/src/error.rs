@@ -24,10 +24,24 @@ pub enum EvalError {
         /// Configured `model` field, if any.
         model: Option<String>,
     },
-    /// The `control` arm is not implemented until Card 10 PR 3 (`exit 1`).
-    ControlArmNotImplemented,
     /// Required `--wrapper` file missing or unreadable (`exit 1`).
     MissingWrapper(String),
+    /// Wrapper bytes are not in the pinned wrapper allow-list or `--wrapper-version` disagrees (`exit 1`).
+    UnpinnedWrapper(String),
+    /// Required `--serving-manifest <path>` missing when model seats are evaluated (`exit 1`).
+    MissingServingManifest(String),
+    /// Prefix caching is not proven disabled for all server cache layers (`exit 1`).
+    PrefixCacheEnabled(String),
+    /// Serving `parallel_slots` is not equal to `1` (`exit 1`).
+    ParallelSlotsExceeded(String),
+    /// Model file SHA-256 missing or invalid in serving manifest (`exit 1`).
+    MissingModelSha256(String),
+    /// GPU name missing in serving manifest (`exit 1`).
+    MissingGpuName(String),
+    /// GPU UUID / SHA-256 missing or invalid in serving manifest (`exit 1`).
+    InvalidGpuUuidSha256(String),
+    /// A Standing Regent intervened for a model-driven seat, voiding the game (`exit 2`).
+    ModelSeatRegentIntervention(String),
     /// Unified response schema construction or relay setup validation failed (`exit 2`).
     SchemaValidation(String),
     /// Checkpoint files missing or invalid for branching (`exit 1`).
@@ -76,8 +90,15 @@ impl EvalError {
             Self::Usage(_) => "INVALID_USAGE",
             Self::InvalidSeatCount { .. } => "INVALID_EVAL_SEAT_COUNT",
             Self::UnsupportedFileSeatModel { .. } => "UNSUPPORTED_FILE_SEAT_MODEL",
-            Self::ControlArmNotImplemented => "CONTROL_ARM_NOT_IMPLEMENTED",
             Self::MissingWrapper(_) => "MISSING_WRAPPER",
+            Self::UnpinnedWrapper(_) => "UNPINNED_WRAPPER",
+            Self::MissingServingManifest(_) => "MISSING_SERVING_MANIFEST",
+            Self::PrefixCacheEnabled(_) => "PREFIX_CACHE_ENABLED",
+            Self::ParallelSlotsExceeded(_) => "PARALLEL_SLOTS_EXCEEDED",
+            Self::MissingModelSha256(_) => "MISSING_MODEL_SHA256",
+            Self::MissingGpuName(_) => "MISSING_GPU_NAME",
+            Self::InvalidGpuUuidSha256(_) => "INVALID_GPU_UUID_SHA256",
+            Self::ModelSeatRegentIntervention(_) => "MODEL_SEAT_REGENT_INTERVENTION",
             Self::SchemaValidation(_) => "SCHEMA_VALIDATION_FAILED",
             Self::CheckpointNotFound(_) => "CHECKPOINT_NOT_FOUND",
             Self::InsufficientTurnsForStrata(_) => "INSUFFICIENT_TURNS_FOR_STRATA",
@@ -107,8 +128,14 @@ impl EvalError {
             Self::Usage(_)
             | Self::InvalidSeatCount { .. }
             | Self::UnsupportedFileSeatModel { .. }
-            | Self::ControlArmNotImplemented
             | Self::MissingWrapper(_)
+            | Self::UnpinnedWrapper(_)
+            | Self::MissingServingManifest(_)
+            | Self::PrefixCacheEnabled(_)
+            | Self::ParallelSlotsExceeded(_)
+            | Self::MissingModelSha256(_)
+            | Self::MissingGpuName(_)
+            | Self::InvalidGpuUuidSha256(_)
             | Self::CheckpointNotFound(_)
             | Self::InsufficientTurnsForStrata(_)
             | Self::InvalidStrata(_)
@@ -125,6 +152,7 @@ impl EvalError {
             | Self::NoModelSeatsForSelect(_) => EXIT_USER_ERROR,
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
+            | Self::ModelSeatRegentIntervention(_)
             | Self::SchemaValidation(_)
             | Self::Engine(_)
             | Self::Io(_) => EXIT_RUNTIME_ERROR,
@@ -145,12 +173,27 @@ impl fmt::Display for EvalError {
                 "UNSUPPORTED_FILE_SEAT_MODEL: file seat '{guild}' has model {:?}; only \"ClubBot\" is permitted under league-eval",
                 model
             ),
-            Self::ControlArmNotImplemented => f.write_str(
-                "CONTROL_ARM_NOT_IMPLEMENTED: the control arm (v2_control_2026_11_21_r1) lands in PR 3",
-            ),
-            Self::MissingWrapper(msg) => write!(
+            Self::MissingWrapper(msg) => write!(f, "MISSING_WRAPPER: {}", scrub_secret_text(msg)),
+            Self::UnpinnedWrapper(msg) => write!(f, "UNPINNED_WRAPPER: {}", scrub_secret_text(msg)),
+            Self::MissingServingManifest(msg) => {
+                write!(f, "MISSING_SERVING_MANIFEST: {}", scrub_secret_text(msg))
+            }
+            Self::PrefixCacheEnabled(msg) => {
+                write!(f, "PREFIX_CACHE_ENABLED: {}", scrub_secret_text(msg))
+            }
+            Self::ParallelSlotsExceeded(msg) => {
+                write!(f, "PARALLEL_SLOTS_EXCEEDED: {}", scrub_secret_text(msg))
+            }
+            Self::MissingModelSha256(msg) => {
+                write!(f, "MISSING_MODEL_SHA256: {}", scrub_secret_text(msg))
+            }
+            Self::MissingGpuName(msg) => write!(f, "MISSING_GPU_NAME: {}", scrub_secret_text(msg)),
+            Self::InvalidGpuUuidSha256(msg) => {
+                write!(f, "INVALID_GPU_UUID_SHA256: {}", scrub_secret_text(msg))
+            }
+            Self::ModelSeatRegentIntervention(msg) => write!(
                 f,
-                "MISSING_WRAPPER: {}",
+                "MODEL_SEAT_REGENT_INTERVENTION: {}",
                 scrub_secret_text(msg)
             ),
             Self::SchemaValidation(msg) => {
@@ -160,7 +203,11 @@ impl fmt::Display for EvalError {
                 write!(f, "CHECKPOINT_NOT_FOUND: {}", scrub_secret_text(msg))
             }
             Self::InsufficientTurnsForStrata(msg) => {
-                write!(f, "INSUFFICIENT_TURNS_FOR_STRATA: {}", scrub_secret_text(msg))
+                write!(
+                    f,
+                    "INSUFFICIENT_TURNS_FOR_STRATA: {}",
+                    scrub_secret_text(msg)
+                )
             }
             Self::InvalidStrata(msg) => {
                 write!(f, "INVALID_STRATA: {}", scrub_secret_text(msg))
@@ -242,7 +289,7 @@ impl ToStructuredError for EvalError {
             Self::InvalidSeatCount { .. } => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "supply a seats.json with exactly 4 seats for Card 10 Evaluation runs (D6)",
+                "supply a seats.json with exactly 4 seats for Evaluation Mode runs (D6)",
                 false,
             ),
             Self::UnsupportedFileSeatModel { .. } => StructuredError::new(
@@ -251,16 +298,58 @@ impl ToStructuredError for EvalError {
                 "set `backend: \"file\", \"model\": \"ClubBot\"` for bot seats or `\"local\"` / `\"openrouter\"` for model seats",
                 false,
             ),
-            Self::ControlArmNotImplemented => StructuredError::new(
-                self.code(),
-                self.to_string(),
-                "use `off` or `on` in PR 2; `control` is implemented in PR 3",
-                false,
-            ),
             Self::MissingWrapper(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
                 "pass `--wrapper <path>` pointing to a readable seat brief markdown file",
+                false,
+            ),
+            Self::UnpinnedWrapper(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass the pinned `v2_seat_brief_2026_11_21_r3.md` wrapper and matching `--wrapper-version`",
+                false,
+            ),
+            Self::MissingServingManifest(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "pass `--serving-manifest <path>` describing server, cache, GPU, and sampling settings",
+                false,
+            ),
+            Self::PrefixCacheEnabled(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "disable per-request `cache_prompt`, host-RAM `--cache-ram 0`, and idle-slot caching `--no-cache-idle-slots` (or vLLM APC)",
+                false,
+            ),
+            Self::ParallelSlotsExceeded(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "restart the inference server with `parallel_slots == 1`",
+                false,
+            ),
+            Self::MissingModelSha256(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "record the 64-hex SHA-256 digest of the GGUF/weights file in `--serving-manifest`",
+                false,
+            ),
+            Self::MissingGpuName(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "record the non-empty GPU device name in `--serving-manifest`",
+                false,
+            ),
+            Self::InvalidGpuUuidSha256(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "supply a non-empty `gpu_uuid` (hashed at load time) or 64-hex `gpu_uuid_sha256`",
+                false,
+            ),
+            Self::ModelSeatRegentIntervention(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "this run is voided because a Standing Regent intervened on an automated model seat",
                 false,
             ),
             Self::SchemaValidation(_) => StructuredError::new(

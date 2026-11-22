@@ -1380,9 +1380,10 @@ const ALLOWED_CLUB_HOST_PUB_FNS: [&str; 29] = [
     "wipe_seal_file",
 ];
 
-const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 41] = [
+const ALLOWED_EVAL_HOST_PUB_FNS: [&str; 42] = [
     "new",
     "from_standard_setup",
+    "from_standard_setup_with_model_seats",
     "from_explicit_setup",
     "game_id",
     "layout_seed",

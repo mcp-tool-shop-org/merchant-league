@@ -1,5 +1,5 @@
 //! Merchant League Evaluation Mode (`league-eval`) driver, frozen-state branch runner, and
-//! deterministic state selector (`Card 10`).
+//! deterministic state selector.
 //!
 //! All state transitions run exclusively through [`league_core::EvalHost`] (with
 //! [`league_core::ClubBot`] for manual `file` seats) and prompt delivery runs through `league-relay`.
@@ -13,6 +13,7 @@ pub mod records;
 pub mod reply;
 pub mod schema;
 pub mod select;
+pub mod serving;
 pub mod view;
 pub mod wording;
 
@@ -23,10 +24,11 @@ pub use driver::{
 };
 pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
 pub use records::{
-    BranchArmOutcome, BranchSummary, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
+    BranchArmOutcome, BranchManifest, BranchSummary, DecisionTokenTopLogprobs,
+    DecisionTopLogprobEntry, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
     EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, PREFLIGHT_WRONG_PART_STOP_THRESHOLD,
-    RefusalCodeCounts, RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata,
-    summarize_branch_outcomes,
+    RefusalCodeCounts, RefusedBundleRecord, TurnRegentAuditRecord, WrongPartCounter,
+    count_bundle_legs, extract_wrapper_metadata, summarize_branch_outcomes,
 };
 pub use reply::{
     InvalidRecipientDiagnostic, ParsedActReply, ParsedEvalMessage, ParsedTalkReply,
@@ -37,11 +39,20 @@ pub use select::{
     SelectOptions, SelectedPreActState, SelectionList, TurnStratum, expand_home_path,
     expand_home_path_with_home, run_select, sanitize_home_path, sanitize_home_path_with_homes,
 };
+pub use serving::{
+    CacheSettingsInput, CacheSettingsRecord, EffectiveSamplingRecord, EngineKind,
+    MachineManifestInput, MachineManifestRecord, MetadataProvenance, ModelManifestInput,
+    ModelManifestRecord, ProvenanceTagged, ServerSettingsRecord, ServingManifestInput,
+    ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
+    capture_serving_env_snapshot_from, load_and_validate_serving_manifest,
+    validate_serving_manifest_input,
+};
 pub use view::{
     EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
 };
 pub use wording::{
-    EVAL_MESSAGES_MAX_ITEMS, EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM, eval_internal_slot_names,
-    eval_wording_slot,
+    EVAL_MESSAGES_MAX_ITEMS, EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM, PINNED_WRAPPERS,
+    REJECTED_WRAPPER_HASHES, check_wrapper_digest, eval_internal_slot_names, eval_wording_slot,
+    resolve_pinned_wrapper,
 };

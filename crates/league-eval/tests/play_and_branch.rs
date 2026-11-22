@@ -47,13 +47,79 @@ fn fresh_tmp_dir(label: &str) -> PathBuf {
 }
 
 fn write_wrapper(dir: &Path) -> PathBuf {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("wrappers/v2_seat_brief_2026_11_21_r3.md");
+    let bytes = must_ok(fs::read(&src), "read committed pinned r3 wrapper");
     let p = dir.join("wrapper.md");
+    must_ok(fs::write(&p, bytes), "write wrapper");
+    p
+}
+
+fn write_valid_serving_manifest(dir: &Path) -> PathBuf {
+    let p = dir.join("serving-manifest.json");
+    let manifest = json!({
+        "engine": "llama_server",
+        "server_version": "b11433",
+        "server_build_commit": "deadbeef",
+        "server_info_provenance": "operator_supplied",
+        "model": {
+            "filename": "qwen3-32b-q4.gguf",
+            "quant": "Q4_K_M",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "chat_template_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "provenance": "operator_supplied"
+        },
+        "machine": {
+            "gpu_name": "NVIDIA RTX Test",
+            "gpu_uuid": "GPU-test-0001",
+            "sm_count": 128,
+            "gpu_driver": "570.00",
+            "cuda_runtime_version": "12.8",
+            "vram_mib": 24576,
+            "os_build": "Linux 6.8",
+            "provenance": "operator_supplied"
+        },
+        "server_settings": {
+            "parallel_slots": 1,
+            "batch_size": 2048,
+            "ubatch_size": 512,
+            "kv_unified": false,
+            "flash_attn": true,
+            "cache_type_k": "f16",
+            "cache_type_v": "f16",
+            "speculative_decoding": "none",
+            "ctx_size": 32768,
+            "ctx_shift": false,
+            "threads": 16,
+            "provenance": "operator_supplied"
+        },
+        "cache_settings": {
+            "per_request_cache_prompt": false,
+            "no_cache_prompt_flag": true,
+            "cache_ram_mib": 0,
+            "cache_idle_slots": false,
+            "provenance": "operator_supplied"
+        },
+        "sampling": {
+            "temperature": 0.2,
+            "top_k": 40,
+            "top_p": 0.95,
+            "min_p": 0.05,
+            "repeat_penalty": 1.0,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 7,
+            "stop_sequences": [],
+            "max_tokens": 2048,
+            "sampler_order": ["top_k", "top_p", "min_p", "temperature"],
+            "provenance": "operator_supplied"
+        }
+    });
     must_ok(
         fs::write(
             &p,
-            "# Wrapper v1\nParticipate honestly under Merchant League v2 rules.\n",
+            must_ok(serde_json::to_string_pretty(&manifest), "ser serving"),
         ),
-        "write wrapper",
+        "write serving manifest",
     );
     p
 }
@@ -398,6 +464,7 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
         seats_path: seats_path.clone(),
         wrapper_path: wrapper_path.clone(),
         wrapper_version: None,
+        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
         arm: EvalArm::Off,
         table_id: 11,
         seed: 7,
@@ -506,6 +573,12 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
                 assert_eq!(dec_b.game_id, manifest_b.game_id);
                 dec_a.game_id.clear();
                 dec_b.game_id.clear();
+                if dec_a.seat_kind == "Model" {
+                    assert!(dec_a.wall_secs.is_some());
+                    assert!(dec_b.wall_secs.is_some());
+                }
+                dec_a.wall_secs = None;
+                dec_b.wall_secs = None;
                 assert_eq!(dec_a, dec_b, "normalized decision diverged at {rel_dec}");
             }
         }
@@ -606,6 +679,10 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
             );
             va["game_id"] = Value::Null;
             vb["game_id"] = Value::Null;
+            if rel.starts_with("decisions/") {
+                va["wall_secs"] = Value::Null;
+                vb["wall_secs"] = Value::Null;
+            }
             if rel.ends_with("-act-recorded.seal") {
                 va["pre_act_checkpoint_sha256"] = Value::Null;
                 vb["pre_act_checkpoint_sha256"] = Value::Null;
@@ -670,6 +747,7 @@ fn r7_refused_bundle_records_all_legs_and_leg_not_named() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 77,
                 seed: 7,
@@ -734,6 +812,7 @@ fn r9_d6_seat_count_must_be_four() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 9,
                 seed: 7,
@@ -816,6 +895,7 @@ fn items_12_and_13_branch_prompt_parity_off_and_on_single_diff() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 12,
                 seed: 7,
@@ -856,6 +936,7 @@ fn items_12_and_13_branch_prompt_parity_off_and_on_single_diff() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path,
                 wrapper_path,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -1042,6 +1123,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 15,
                 seed: 7,
@@ -1076,6 +1158,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path,
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -1483,6 +1566,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 seats_path: two_model_seats.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 16,
                 seed: 7,
@@ -1519,6 +1603,7 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: two_model_seats,
                 wrapper_path,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: b6_branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -1713,6 +1798,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                     seats_path: mixed_seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm: EvalArm::Off,
                     table_id: tid,
                     seed: tid,
@@ -1782,6 +1868,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                 seats_path: all_bot_seats,
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 24,
                 seed: 24,
@@ -1962,6 +2049,8 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
             mixed_seats_path.clone().into_os_string(),
             "--wrapper".into(),
             wrapper_path.clone().into_os_string(),
+            "--serving-manifest".into(),
+            write_valid_serving_manifest(&tmp).into_os_string(),
             "--arms".into(),
             "off,on".into(),
             "--out".into(),
@@ -1990,6 +2079,7 @@ fn item14_select_determinism_strata_and_branch_list_end_to_end() {
                 seats_path: mixed_seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 23,
                 seed: 23,
@@ -2042,21 +2132,58 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
     assert_eq!(execute_cli(["--version".into()], &mut out, &mut err), 0);
     assert!(String::from_utf8_lossy(&out).contains("league-eval"));
 
-    // Control arm refusal formatted as JSON (`--error-format json`) with secret redaction.
+    // Control arm runs cleanly on all-ClubBot tables and unpinned wrapper refuses with UNPINNED_WRAPPER (`--error-format json`).
     let wrapper_path = write_wrapper(&tmp);
     let seats_path = write_seats(&tmp, "seats.json", all_clubbot_seats());
+    out.clear();
     err.clear();
+    let ctrl_dir = tmp.join("ctrl_game");
     let ctrl_code = execute_cli(
         [
             "--error-format".into(),
             "json".into(),
             "play".into(),
             "--game-dir".into(),
-            tmp.join("ctrl_game").into_os_string(),
+            ctrl_dir.clone().into_os_string(),
             "--seats".into(),
             seats_path.clone().into_os_string(),
             "--wrapper".into(),
             wrapper_path.clone().into_os_string(),
+            "--arm".into(),
+            "control".into(),
+            "--turns".into(),
+            "1".into(),
+            "--seed".into(),
+            "7".into(),
+        ],
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(ctrl_code, 0, "stderr: {}", String::from_utf8_lossy(&err));
+    let ctrl_manifest: EvalManifest = must_ok(
+        serde_json::from_str(&must_ok(
+            fs::read_to_string(ctrl_dir.join("manifest.json")),
+            "read ctrl manifest",
+        )),
+        "parse ctrl manifest",
+    );
+    assert_eq!(ctrl_manifest.arm, EvalArm::Control);
+    assert_eq!(ctrl_manifest.relay_wording_arm, "v2_control_2026_11_21_r1");
+
+    let unpinned_wrap = tmp.join("unpinned_cli.md");
+    must_ok(fs::write(&unpinned_wrap, b"# unpinned"), "write unpinned");
+    err.clear();
+    let bad_wrap_code = execute_cli(
+        [
+            "--error-format".into(),
+            "json".into(),
+            "play".into(),
+            "--game-dir".into(),
+            tmp.join("unpinned_game").into_os_string(),
+            "--seats".into(),
+            seats_path.clone().into_os_string(),
+            "--wrapper".into(),
+            unpinned_wrap.into_os_string(),
             "--arm".into(),
             "control".into(),
             "--seed".into(),
@@ -2065,9 +2192,9 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
         &mut out,
         &mut err,
     );
-    assert_eq!(ctrl_code, 1);
+    assert_eq!(bad_wrap_code, 1);
     let err_json: Value = must_ok(serde_json::from_slice(&err), "parse JSON error on stderr");
-    assert_eq!(err_json["code"], json!("CONTROL_ARM_NOT_IMPLEMENTED"));
+    assert_eq!(err_json["code"], json!("UNPINNED_WRAPPER"));
 
     // Missing wrapper refused with MISSING_WRAPPER.
     err.clear();
@@ -2162,6 +2289,8 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
             or_seats_path.clone().into_os_string(),
             "--wrapper".into(),
             wrapper_path.clone().into_os_string(),
+            "--serving-manifest".into(),
+            write_valid_serving_manifest(&tmp).into_os_string(),
             "--arm".into(),
             "off".into(),
             "--seed".into(),
@@ -2198,6 +2327,8 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
             or_seats_path.into_os_string(),
             "--wrapper".into(),
             wrapper_path.into_os_string(),
+            "--serving-manifest".into(),
+            write_valid_serving_manifest(&tmp).into_os_string(),
             "--arms".into(),
             "off".into(),
             "--out".into(),
@@ -2239,15 +2370,22 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
     use league_eval::{BranchArmOutcome, ReplyRefusalCode, extract_wrapper_metadata};
     use league_relay::RelayError;
 
-    // Cover all 24 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
-    let all_errors: [EvalError; 24] = [
+    // Cover all 31 `EvalError` variants across `code()`, `exit_code()`, `Display`, and `to_structured_error()`.
+    let all_errors: [EvalError; 31] = [
         EvalError::Usage("bad flag OPENROUTER_API_KEY=sk-or-secret123".to_owned()),
         EvalError::InvalidSeatCount { actual: 3 },
         EvalError::UnsupportedFileSeatModel {
             guild: "Foundry".to_owned(),
             model: Some("Other".to_owned()),
         },
-        EvalError::ControlArmNotImplemented,
+        EvalError::UnpinnedWrapper("unpinned wrapper".to_owned()),
+        EvalError::MissingServingManifest("missing serving manifest".to_owned()),
+        EvalError::PrefixCacheEnabled("prefix cache enabled".to_owned()),
+        EvalError::ParallelSlotsExceeded("parallel slots 2".to_owned()),
+        EvalError::MissingModelSha256("missing model sha".to_owned()),
+        EvalError::MissingGpuName("missing gpu".to_owned()),
+        EvalError::InvalidGpuUuidSha256("bad gpu uuid sha".to_owned()),
+        EvalError::ModelSeatRegentIntervention("regent acted on model seat".to_owned()),
         EvalError::MissingWrapper("missing wrapper".to_owned()),
         EvalError::SchemaValidation("bad schema".to_owned()),
         EvalError::CheckpointNotFound("missing ckpt".to_owned()),
@@ -2450,6 +2588,7 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
             wrapper_version: None,
+            serving_manifest_path: None,
             arm: EvalArm::On,
             table_id: 1,
             seed: 7,
@@ -2476,6 +2615,7 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
             focal_seat: Some("NoSuchGuild".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: None,
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("b_unk"),
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -2496,6 +2636,7 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: None,
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("b_miss"),
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -2545,11 +2686,9 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     assert!(ver_out.status.success());
     assert!(String::from_utf8_lossy(&ver_out.stdout).contains("league-eval"));
 
-    let err_out = must_ok(
+    let ctrl_ok = must_ok(
         Command::new(bin)
             .args([
-                "--error-format",
-                "json",
                 "play",
                 "--game-dir",
                 &tmp.join("bin_ctrl").to_string_lossy(),
@@ -2557,6 +2696,36 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 &seats_path.to_string_lossy(),
                 "--wrapper",
                 &wrapper_path.to_string_lossy(),
+                "--arm",
+                "control",
+                "--turns",
+                "1",
+                "--seed",
+                "7",
+            ])
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("ANTHROPIC_API_KEY")
+            .env_remove("GEMINI_API_KEY")
+            .output(),
+        "run league-eval control arm binary",
+    );
+    assert!(ctrl_ok.status.success());
+
+    let bad_wrap_bin = tmp.join("bad_wrap_bin.md");
+    must_ok(fs::write(&bad_wrap_bin, b"# wrong"), "write bad_wrap_bin");
+    let err_out = must_ok(
+        Command::new(bin)
+            .args([
+                "--error-format",
+                "json",
+                "play",
+                "--game-dir",
+                &tmp.join("bin_bad_wrap").to_string_lossy(),
+                "--seats",
+                &seats_path.to_string_lossy(),
+                "--wrapper",
+                &bad_wrap_bin.to_string_lossy(),
                 "--arm",
                 "control",
                 "--seed",
@@ -2570,7 +2739,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
         "run league-eval binary error exit",
     );
     assert_eq!(err_out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&err_out.stderr).contains("CONTROL_ARM_NOT_IMPLEMENTED"));
+    assert!(String::from_utf8_lossy(&err_out.stderr).contains("UNPINNED_WRAPPER"));
 
     // 2. Remaining `cli.rs` flags, help/version subcommands, and missing required options.
     let mut out = Vec::new();
@@ -2604,7 +2773,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             "--wrapper".into(),
             wrapper_path.clone().into_os_string(),
             "--wrapper-version".into(),
-            "v99".into(),
+            "v2_seat_brief_2026_11_21_r3".into(),
             "--arm".into(),
             "off".into(),
             "--table-id".into(),
@@ -2839,6 +3008,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 seats_path: local_seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::On,
                 table_id: 71,
                 seed: 7,
@@ -2886,6 +3056,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: local_seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: tmp.join("fail_branch_out"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -2932,6 +3103,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: Some("0".to_owned()),
                 seats_path: local_seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("bad_bundle_branch"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -2972,6 +3144,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: None,
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("standalone_branch_out"),
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3003,6 +3176,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: None,
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("standalone_branch_out_neg"),
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3028,6 +3202,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
             wrapper_version: None,
+            serving_manifest_path: None,
             arm: EvalArm::Off,
             table_id: 1,
             seed: 1,
@@ -3043,6 +3218,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             seats_path: seats_path.clone(),
             wrapper_path: empty_wrapper,
             wrapper_version: None,
+            serving_manifest_path: None,
             arm: EvalArm::Off,
             table_id: 1,
             seed: 1,
@@ -3058,6 +3234,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
             seats_path: seats_path.clone(),
             wrapper_path: tmp.clone(),
             wrapper_version: None,
+            serving_manifest_path: None,
             arm: EvalArm::Off,
             table_id: 1,
             seed: 1,
@@ -3092,6 +3269,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 55,
                 seed: 7,
@@ -3121,6 +3299,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: None,
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![],
                 out_dir: tmp.join("b_e1"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3142,6 +3321,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: None,
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_e2"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3163,6 +3343,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: None,
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_e3"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3199,6 +3380,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: None,
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_e4"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3220,6 +3402,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_e5"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3243,6 +3426,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: None,
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_no_rec"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3273,6 +3457,7 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: local_seats_path,
                 wrapper_path,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join("b_bad_jsonl"),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -3630,6 +3815,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
                 seats_path: two_model_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 120,
                 seed: 7,
@@ -3660,6 +3846,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
                 seats_path: two_model_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 120,
                 seed: 7,
@@ -3699,6 +3886,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
                 seats_path: two_model_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 120,
                 seed: 7,
@@ -3739,6 +3927,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             seats_path: two_model_path.clone(),
             wrapper_path: wrapper_path.clone(),
             wrapper_version: None,
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
             arm: EvalArm::Off,
             table_id: 120,
             seed: 7,
@@ -3758,32 +3947,93 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
     );
 
     // 3. C11 resume & branch checks for mismatched `--memory-mode`, `--seats`, and `--wrapper`.
-    for (label, bad_wrap, bad_seats, bad_mem) in [
+    // First confirm unpinned `alt_wrapper` is refused cleanly with `UNPINNED_WRAPPER`, then test
+    // `INCOMPATIBLE_EVAL_SETUP` when `setup.json` records a different `wrapper_sha256`.
+    let unpinned_resume = run_play_with_transport(
+        &PlayOptions {
+            game_dir: game_dir.clone(),
+            seats_path: two_model_path.clone(),
+            wrapper_path: alt_wrapper.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
+            arm: EvalArm::Off,
+            table_id: 120,
+            seed: 7,
+            turns: 4,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    );
+    assert!(matches!(
+        unpinned_resume,
+        Err(EvalError::UnpinnedWrapper(_))
+    ));
+    let unpinned_branch = run_branch_with_transport(
+        &BranchOptions {
+            checkpoint_prefix: Some(game_dir.join("checkpoints/day-02-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: two_model_path.clone(),
+            wrapper_path: alt_wrapper,
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
+            arms: vec![EvalArm::Off],
+            out_dir: tmp.join("out_unpinned_branch"),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    );
+    assert!(matches!(
+        unpinned_branch,
+        Err(EvalError::UnpinnedWrapper(_))
+    ));
+
+    let setup_file_path = game_dir.join("setup.json");
+    let orig_setup_bytes = must_ok(fs::read(&setup_file_path), "read original setup.json");
+    for (label, tamper_wrapper_sha, bad_seats, bad_mem) in [
         (
             "resume_bad_wrapper",
-            alt_wrapper.clone(),
+            true,
             two_model_path.clone(),
             league_relay::MemoryMode::Snapshot,
         ),
         (
             "resume_bad_seats",
-            wrapper_path.clone(),
+            false,
             alt_seats_path.clone(),
             league_relay::MemoryMode::Snapshot,
         ),
         (
             "resume_bad_mem",
-            wrapper_path.clone(),
+            false,
             two_model_path.clone(),
             league_relay::MemoryMode::Emc,
         ),
     ] {
+        if tamper_wrapper_sha {
+            let mut v: Value = must_ok(serde_json::from_slice(&orig_setup_bytes), "parse setup");
+            v["wrapper_sha256"] = json!("0".repeat(64));
+            must_ok(
+                fs::write(&setup_file_path, v.to_string()),
+                "tamper setup.json",
+            );
+        }
         let e = run_play_with_transport(
             &PlayOptions {
                 game_dir: game_dir.clone(),
                 seats_path: bad_seats,
-                wrapper_path: bad_wrap,
+                wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 120,
                 seed: 7,
@@ -3797,38 +4047,51 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             &NoopTransport,
             None,
         );
+        must_ok(
+            fs::write(&setup_file_path, &orig_setup_bytes),
+            "restore setup.json",
+        );
         assert!(
             matches!(e, Err(EvalError::IncompatibleEvalSetup(_))),
             "{label}: expected INCOMPATIBLE_EVAL_SETUP, got {e:?}"
         );
     }
-    for (label, bad_wrap, bad_seats, bad_mem) in [
+    for (label, tamper_wrapper_sha, bad_seats, bad_mem) in [
         (
             "branch_bad_wrapper",
-            alt_wrapper,
+            true,
             two_model_path.clone(),
             league_relay::MemoryMode::Snapshot,
         ),
         (
             "branch_bad_seats",
-            wrapper_path.clone(),
+            false,
             alt_seats_path,
             league_relay::MemoryMode::Snapshot,
         ),
         (
             "branch_bad_mem",
-            wrapper_path.clone(),
+            false,
             two_model_path.clone(),
             league_relay::MemoryMode::Full,
         ),
     ] {
+        if tamper_wrapper_sha {
+            let mut v: Value = must_ok(serde_json::from_slice(&orig_setup_bytes), "parse setup");
+            v["wrapper_sha256"] = json!("0".repeat(64));
+            must_ok(
+                fs::write(&setup_file_path, v.to_string()),
+                "tamper setup.json",
+            );
+        }
         let e = run_branch_with_transport(
             &BranchOptions {
                 checkpoint_prefix: Some(game_dir.join("checkpoints/day-02-pre-act")),
                 list_path: None,
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: bad_seats,
-                wrapper_path: bad_wrap,
+                wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off],
                 out_dir: tmp.join(format!("out_{label}")),
                 memory_mode: bad_mem,
@@ -3839,6 +4102,10 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             },
             &NoopTransport,
             None,
+        );
+        must_ok(
+            fs::write(&setup_file_path, &orig_setup_bytes),
+            "restore setup.json",
         );
         assert!(
             matches!(e, Err(EvalError::IncompatibleEvalSetup(_))),
@@ -3917,6 +4184,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: two_model_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4013,6 +4281,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: two_model_path,
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
             arms: vec![EvalArm::Off, EvalArm::On],
             out_dir: branch_out,
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4038,6 +4307,7 @@ fn b4_b5_c2_c7_c11_end_to_end_contracts() {
                     seats_path: all_bot.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: None,
                     arm: EvalArm::Off,
                     table_id: 777,
                     seed: 42,
@@ -4098,6 +4368,7 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 91,
                 seed: 7,
@@ -4208,6 +4479,7 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 92,
                 seed: 7,
@@ -4231,6 +4503,7 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 92,
                 seed: 7,
@@ -4351,6 +4624,7 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 93,
                 seed: 7,
@@ -4374,6 +4648,7 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 93,
                 seed: 7,
@@ -4460,6 +4735,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 94,
                 seed: 7,
@@ -4488,6 +4764,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: out_clean.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4541,6 +4818,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: out_ckpts.clone(),
                 memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4606,6 +4884,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
             arms: vec![EvalArm::Off, EvalArm::On],
             out_dir: out_existing_summary,
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4641,6 +4920,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path: seats_path.clone(),
             wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("out_missing_pad"),
             memory_mode: league_relay::MemoryMode::Snapshot,
@@ -4671,6 +4951,7 @@ fn branch_refuses_missing_history_uses_relative_pad_key_and_protects_summary() {
             focal_seat: Some("Foundry".to_owned()),
             seats_path,
             wrapper_path,
+            serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
             arms: vec![EvalArm::Off],
             out_dir: tmp.join("out_missing_tx"),
             memory_mode: league_relay::MemoryMode::Snapshot,

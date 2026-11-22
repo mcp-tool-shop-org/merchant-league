@@ -21,11 +21,13 @@ use crate::transport::{
 };
 use crate::wording::{
     EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
-    MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_preview_turn_orders_tool_definition,
-    escape_default_ignorable_code_points, execute_preview_tool_call, extract_scratchpad_update,
-    format_sanitized_scratchpad_section, json_escape_untrusted_str,
+    MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_control_turn_orders_tool_definition,
+    build_preview_turn_orders_tool_definition, control_wording_slot, control_wording_template,
+    escape_default_ignorable_code_points, execute_control_tool_call, execute_preview_tool_call,
+    extract_scratchpad_update, format_sanitized_scratchpad_section, json_escape_untrusted_str,
     load_negotiation_inputs_if_present, preview_wording_slot, preview_wording_template,
-    render_call_limit_reached_wire_json, render_malformed_tool_call_wire_json,
+    render_call_limit_reached_wire_json, render_control_call_limit_reached_wire_json,
+    render_control_malformed_tool_call_wire_json, render_malformed_tool_call_wire_json,
     sanitize_scratchpad_for_prompt, split_negotiation_sections, strip_thinking_tags, wording_slot,
 };
 use league_core::{
@@ -2327,7 +2329,7 @@ impl TurnConfig {
         self
     }
 
-    /// Configure the Card 7 what-if preview tool toggle (`off` default, `on` enables `preview_turn_orders` on `act`).
+    /// Configure the act-round order drafting or what-if preview tool toggle (`off` default).
     pub fn with_preview_tool(mut self, preview_tool: PreviewToolMode) -> Self {
         self.preview_tool = preview_tool;
         self
@@ -2341,7 +2343,10 @@ impl TurnConfig {
     }
 
     const fn keeps_raw_sidecars(&self) -> bool {
-        matches!(self.preview_tool, PreviewToolMode::On) || self.eval_mode
+        matches!(
+            self.preview_tool,
+            PreviewToolMode::On | PreviewToolMode::Control
+        ) || self.eval_mode
     }
 
     pub(crate) fn with_extra_redaction_keys(mut self, keys: Vec<ApiKey>) -> Self {
@@ -2895,6 +2900,8 @@ struct ChatCompletionRequestWire<'a> {
     include_reasoning: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a [serde_json::Value]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_prompt: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -5628,10 +5635,17 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let preview_state_ref = preview_states
-                        .as_deref()
-                        .and_then(|v| v.get(idx))
-                        .and_then(Option::as_ref);
+                    let seat_tool_mode = match (config.preview_tool, config.round) {
+                        (PreviewToolMode::On, Round::Act) => preview_states
+                            .as_deref()
+                            .and_then(|v| v.get(idx))
+                            .and_then(Option::as_ref)
+                            .map(SeatToolMode::Preview),
+                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
+                            asking_seat: idx as u8,
+                        }),
+                        _ => None,
+                    };
                     handles.push(scope.spawn(move || {
                         let view =
                             view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
@@ -5640,7 +5654,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
-                            preview_state_ref,
+                            seat_tool_mode,
                             run_id_ref,
                             transport,
                             ledger_ref,
@@ -5656,10 +5670,17 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let preview_state_ref = preview_states
-                        .as_deref()
-                        .and_then(|v| v.get(idx))
-                        .and_then(Option::as_ref);
+                    let seat_tool_mode = match (config.preview_tool, config.round) {
+                        (PreviewToolMode::On, Round::Act) => preview_states
+                            .as_deref()
+                            .and_then(|v| v.get(idx))
+                            .and_then(Option::as_ref)
+                            .map(SeatToolMode::Preview),
+                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
+                            asking_seat: idx as u8,
+                        }),
+                        _ => None,
+                    };
                     handles.push(scope.spawn(move || {
                         let view = view_local_seat(local_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
@@ -5667,7 +5688,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
-                            preview_state_ref,
+                            seat_tool_mode,
                             run_id_ref,
                             transport,
                             ledger_ref,
@@ -5805,13 +5826,19 @@ struct OwnedToolHistoryMessage {
     tool_call_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum SeatToolMode<'a> {
+    Preview(&'a PublicPreviewState),
+    Control { asking_seat: u8 },
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_single_automated_seat(
     config: &TurnConfig,
     guild: &str,
     seat: &AutomatedSeatView<'_>,
     wrapper_text: Option<&str>,
-    preview_state_opt: Option<&PublicPreviewState>,
+    seat_tool_mode: Option<SeatToolMode<'_>>,
     run_id: &str,
     transport: &dyn Transport,
     ledger: &Mutex<CallLedger<'_>>,
@@ -5886,15 +5913,24 @@ fn run_single_automated_seat(
 
     let base_system_wire =
         build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
-    let system_wire = if preview_state_opt.is_some() {
-        let budget_sentence = preview_wording_slot("preview_call_budget_sentence");
-        if base_system_wire.is_empty() {
-            budget_sentence
-        } else {
-            format!("{base_system_wire}\n\n{budget_sentence}")
+    let system_wire = match seat_tool_mode {
+        Some(SeatToolMode::Preview(_)) => {
+            let budget_sentence = preview_wording_slot("preview_call_budget_sentence");
+            if base_system_wire.is_empty() {
+                budget_sentence
+            } else {
+                format!("{base_system_wire}\n\n{budget_sentence}")
+            }
         }
-    } else {
-        base_system_wire
+        Some(SeatToolMode::Control { .. }) => {
+            let budget_sentence = control_wording_slot("preview_call_budget_sentence");
+            if base_system_wire.is_empty() {
+                budget_sentence
+            } else {
+                format!("{base_system_wire}\n\n{budget_sentence}")
+            }
+        }
+        None => base_system_wire,
     };
 
     let older_replies_sec =
@@ -6117,8 +6153,14 @@ fn run_single_automated_seat(
         CostUnit::GpuSeconds => "max_gpu_secs_per_call",
     };
 
-    let tools_storage =
-        preview_state_opt.map(|_| vec![build_preview_turn_orders_tool_definition()]);
+    let tools_storage = seat_tool_mode.map(|mode| {
+        vec![match mode {
+            SeatToolMode::Preview(_) => build_preview_turn_orders_tool_definition(),
+            SeatToolMode::Control { .. } => build_control_turn_orders_tool_definition(),
+        }]
+    });
+    let cache_prompt_wire =
+        (config.eval_mode && seat.backend_kind == BackendKind::Local).then_some(false);
     let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
     let mut preview_calls_used = 0usize;
     let mut tool_round_index = 0usize;
@@ -6145,6 +6187,12 @@ fn run_single_automated_seat(
                         schema: &rf.schema,
                     },
                 });
+        let request_tools =
+            if config.eval_mode && preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
+                None
+            } else {
+                tools_storage.as_deref()
+            };
         let request_wire = ChatCompletionRequestWire {
             model: seat.model,
             messages,
@@ -6156,7 +6204,8 @@ fn run_single_automated_seat(
             thinking_token_budget: local_budget,
             chat_template_kwargs: local_kwargs,
             include_reasoning: local_include_reasoning,
-            tools: tools_storage.as_deref(),
+            tools: request_tools,
+            cache_prompt: cache_prompt_wire,
         };
         let Ok(request_body) = serde_json::to_string(&request_wire) else {
             return SeatOutcome::SeatError {
@@ -6460,7 +6509,8 @@ fn run_single_automated_seat(
                 persisted_outcome,
                 exclude_thinking,
                 effective_response_format.as_ref(),
-                preview_state_opt.is_some(),
+                seat_tool_mode.is_some(),
+                config.preview_tool,
                 &all_keys,
             );
 
@@ -6975,13 +7025,17 @@ fn run_single_automated_seat(
                     let mut echoed_calls: Vec<ChatToolCallWire> = Vec::new();
                     let was_already_limit_refused = limit_refusal_sent;
                     let is_terminal_round = over_estimate || was_already_limit_refused;
-                    if !is_terminal_round && preview_state_opt.is_none() {
+                    if !is_terminal_round && seat_tool_mode.is_none() {
                         return SeatOutcome::SeatError {
-                            detail: "internal error: missing preview state on tool round"
-                                .to_owned(),
+                            detail: "internal error: missing tool mode on tool round".to_owned(),
                         };
                     }
-                    let expected_tool_name = preview_wording_template("preview_tool_name");
+                    let expected_tool_name = match config.preview_tool {
+                        PreviewToolMode::Control => control_wording_template("preview_tool_name"),
+                        PreviewToolMode::Off | PreviewToolMode::On => {
+                            preview_wording_template("preview_tool_name")
+                        }
+                    };
                     let mut saved_calls: Vec<SavedToolRoundCall> = Vec::with_capacity(calls.len());
                     let mut received_wire_vals: Vec<serde_json::Value> =
                         Vec::with_capacity(calls.len());
@@ -6997,20 +7051,42 @@ fn run_single_automated_seat(
                             let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN
                             {
                                 limit_refusal_sent = true;
-                                render_call_limit_reached_wire_json()
+                                match config.preview_tool {
+                                    PreviewToolMode::Control => {
+                                        render_control_call_limit_reached_wire_json()
+                                    }
+                                    PreviewToolMode::Off | PreviewToolMode::On => {
+                                        render_call_limit_reached_wire_json()
+                                    }
+                                }
                             } else {
                                 preview_calls_used += 1;
-                                if let Some(preview_state) = preview_state_opt
-                                    && parsed_call.is_well_formed
-                                    && call.kind == "function"
-                                    && call.function.name == expected_tool_name
-                                {
-                                    execute_preview_tool_call(
-                                        preview_state,
-                                        &call.function.arguments,
-                                    )
-                                } else {
-                                    render_malformed_tool_call_wire_json()
+                                match (
+                                    seat_tool_mode,
+                                    parsed_call.is_well_formed
+                                        && call.kind == "function"
+                                        && call.function.name == expected_tool_name,
+                                ) {
+                                    (Some(SeatToolMode::Preview(preview_state)), true) => {
+                                        execute_preview_tool_call(
+                                            preview_state,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    (Some(SeatToolMode::Control { asking_seat }), true) => {
+                                        execute_control_tool_call(
+                                            asking_seat,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    _ => match config.preview_tool {
+                                        PreviewToolMode::Control => {
+                                            render_control_malformed_tool_call_wire_json()
+                                        }
+                                        PreviewToolMode::Off | PreviewToolMode::On => {
+                                            render_malformed_tool_call_wire_json()
+                                        }
+                                    },
                                 }
                             };
                             (true, Some(tool_body))
@@ -7742,7 +7818,10 @@ enum EvaluatedCall {
     },
 }
 
-fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
+fn parse_single_tool_call_item(
+    elem: serde_json::Value,
+    tool_mode: PreviewToolMode,
+) -> ParsedToolCallItem {
     if let Some(obj) = elem.as_object()
         && let Some(serde_json::Value::String(id)) = obj.get("id")
         && !id.is_empty()
@@ -7765,25 +7844,29 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
         };
     }
 
+    let slot = |name| match tool_mode {
+        PreviewToolMode::Control => control_wording_slot(name),
+        PreviewToolMode::Off | PreviewToolMode::On => preview_wording_slot(name),
+    };
     let id = elem
         .get("id")
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("wire_err_malformed_tool_call"));
+        .unwrap_or_else(|| slot("preview_code_MALFORMED_TOOL_CALL"));
     let kind = elem
         .get("type")
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("schema_kw_function"));
+        .unwrap_or_else(|| slot("schema_kw_function"));
     let fn_val = elem.get("function");
     let name = fn_val
         .and_then(|f| f.get("name"))
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("preview_tool_name"));
+        .unwrap_or_else(|| slot("preview_tool_name"));
     let arguments = match fn_val.and_then(|f| f.get("arguments")) {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(other) => other.to_string(),
@@ -7800,14 +7883,19 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
     }
 }
 
-fn parse_response_tool_calls(raw_val: serde_json::Value) -> Option<Vec<ParsedToolCallItem>> {
+fn parse_response_tool_calls(
+    raw_val: serde_json::Value,
+    tool_mode: PreviewToolMode,
+) -> Option<Vec<ParsedToolCallItem>> {
     match raw_val {
         serde_json::Value::Null => None,
         serde_json::Value::Array(arr) if arr.is_empty() => None,
-        serde_json::Value::Array(arr) => {
-            Some(arr.into_iter().map(parse_single_tool_call_item).collect())
-        }
-        other => Some(vec![parse_single_tool_call_item(other)]),
+        serde_json::Value::Array(arr) => Some(
+            arr.into_iter()
+                .map(|elem| parse_single_tool_call_item(elem, tool_mode))
+                .collect(),
+        ),
+        other => Some(vec![parse_single_tool_call_item(other, tool_mode)]),
     }
 }
 
@@ -7902,6 +7990,7 @@ fn evaluate_call_result(
     exclude_thinking: Option<bool>,
     response_format: Option<&ResponseFormatConfig>,
     allow_tools: bool,
+    tool_mode: PreviewToolMode,
     redaction_keys: &[ApiKey],
 ) -> EvaluatedCall {
     let (raw_status, raw_body) = match call_result {
@@ -8050,7 +8139,7 @@ fn evaluate_call_result(
 
     if allow_tools
         && let Some(raw_calls) = raw_tool_calls_opt.clone()
-        && let Some(calls) = parse_response_tool_calls(raw_calls)
+        && let Some(calls) = parse_response_tool_calls(raw_calls, tool_mode)
     {
         return EvaluatedCall::ToolCalls {
             calls,

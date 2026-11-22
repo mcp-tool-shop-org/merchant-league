@@ -338,6 +338,24 @@ impl EvalHost {
         Self::new(spec, layout_seed, deal, eval_seed, bot_tie_seed)
     }
 
+    /// Bootstraps an [`EvalHost`] where model-driven seats (`model_seats[i] == true`) have
+    /// `regent: None` so consecutive idle or refused turns cannot hand control to a Regent.
+    pub fn from_standard_setup_with_model_seats(
+        table_id: TableId,
+        seat_count: u8,
+        layout_seed: u64,
+        bot_tie_seed: u64,
+        model_seats: &[bool],
+    ) -> Result<Self, EngineError> {
+        let (spec, deal, eval_seed) = TableSpec::standard_eval_chiral_ring_with_model_seats(
+            table_id,
+            seat_count,
+            layout_seed,
+            model_seats,
+        )?;
+        Self::new(spec, layout_seed, deal, eval_seed, bot_tie_seed)
+    }
+
     /// Bootstraps a reproducible [`EvalHost`] using
     /// [`TableSpec::standard_eval_chiral_ring_with_explicit_setup`].
     #[allow(clippy::too_many_arguments)]

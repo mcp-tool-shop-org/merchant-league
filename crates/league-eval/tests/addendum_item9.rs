@@ -129,10 +129,82 @@ impl Transport for MockTransport {
 }
 
 fn write_wrapper(dir: &Path) -> (PathBuf, Vec<u8>) {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("wrappers/v2_seat_brief_2026_11_21_r3.md");
+    let content = must_ok(fs::read(&src), "read committed pinned r3 wrapper");
     let p = dir.join("wrapper.md");
-    let content = b"# Eval Brief v2\nFollow Evaluation Mode instructions strictly.\n".to_vec();
     must_ok(fs::write(&p, &content), "write wrapper");
     (p, content)
+}
+
+fn write_valid_serving_manifest(dir: &Path) -> PathBuf {
+    let p = dir.join("serving-manifest.json");
+    let manifest = json!({
+        "engine": "llama_server",
+        "server_version": "b11433",
+        "server_build_commit": "deadbeef",
+        "server_info_provenance": "operator_supplied",
+        "model": {
+            "filename": "qwen3-32b-q4.gguf",
+            "quant": "Q4_K_M",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "chat_template_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "provenance": "operator_supplied"
+        },
+        "machine": {
+            "gpu_name": "NVIDIA RTX Test",
+            "gpu_uuid": "GPU-test-0001",
+            "sm_count": 128,
+            "gpu_driver": "570.00",
+            "cuda_runtime_version": "12.8",
+            "vram_mib": 24576,
+            "os_build": "Linux 6.8",
+            "provenance": "operator_supplied"
+        },
+        "server_settings": {
+            "parallel_slots": 1,
+            "batch_size": 2048,
+            "ubatch_size": 512,
+            "kv_unified": false,
+            "flash_attn": true,
+            "cache_type_k": "f16",
+            "cache_type_v": "f16",
+            "speculative_decoding": "none",
+            "ctx_size": 32768,
+            "ctx_shift": false,
+            "threads": 16,
+            "provenance": "operator_supplied"
+        },
+        "cache_settings": {
+            "per_request_cache_prompt": false,
+            "no_cache_prompt_flag": true,
+            "cache_ram_mib": 0,
+            "cache_idle_slots": false,
+            "provenance": "operator_supplied"
+        },
+        "sampling": {
+            "temperature": 0.2,
+            "top_k": 40,
+            "top_p": 0.95,
+            "min_p": 0.05,
+            "repeat_penalty": 1.0,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 7,
+            "stop_sequences": [],
+            "max_tokens": 2048,
+            "sampler_order": ["top_k", "top_p", "min_p", "temperature"],
+            "provenance": "operator_supplied"
+        }
+    });
+    must_ok(
+        fs::write(
+            &p,
+            must_ok(serde_json::to_string_pretty(&manifest), "ser serving"),
+        ),
+        "write serving manifest",
+    );
+    p
 }
 
 fn write_seats_file(dir: &Path, spec: serde_json::Value) -> PathBuf {
@@ -461,6 +533,7 @@ fn test_2_wrong_part() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 2,
                 seed: 7,
@@ -606,6 +679,7 @@ fn test_3_messages() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 3,
                 seed: 7,
@@ -737,6 +811,7 @@ fn test_4_schema() {
                     seats_path,
                     wrapper_path,
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 4,
                     seed: 7,
@@ -868,6 +943,7 @@ fn test_5_seat_view() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 5,
                 seed: 7,
@@ -945,6 +1021,7 @@ fn test_6_seats() {
                 seats_path: clubbot_seats,
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 6,
                 seed: 9,
@@ -1009,6 +1086,7 @@ fn test_6_seats() {
                 seats_path: bad_seats.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 60,
                 seed: 9,
@@ -1233,7 +1311,8 @@ fn test_7_records() {
                 game_dir: game_dir.clone(),
                 seats_path,
                 wrapper_path,
-                wrapper_version: Some("wrapper-v2".to_owned()),
+                wrapper_version: Some("v2_seat_brief_2026_11_21_r3".to_owned()),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::On,
                 table_id: 7,
                 seed: 7,
@@ -1260,7 +1339,7 @@ fn test_7_records() {
     assert_eq!(saved_manifest, manifest);
     assert_eq!(manifest.pass_b_limit, PASS_B_LIMIT_STATEMENT);
     assert_eq!(manifest.wrapper_sha256, expected_wrapper_sha);
-    assert_eq!(manifest.wrapper_version, "wrapper-v2");
+    assert_eq!(manifest.wrapper_version, "v2_seat_brief_2026_11_21_r3");
 
     let foundry_counts = must_some(
         manifest.refusal_counts_by_seat.get("Foundry"),
@@ -1658,6 +1737,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
                         wrapper_version: None,
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arm,
                         table_id: 90,
                         seed: 7,
@@ -1776,6 +1856,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
                         wrapper_version: None,
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arm,
                         table_id: 91,
                         seed: 7,
@@ -1803,6 +1884,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         focal_seat: Some("Foundry".to_owned()),
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arms: vec![arm],
                         out_dir: branch_out.clone(),
                         memory_mode: MemoryMode::Snapshot,
@@ -1940,6 +2022,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 92,
                 seed: 7,
@@ -2033,6 +2116,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path,
                 wrapper_path,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: MemoryMode::Snapshot,
@@ -2117,6 +2201,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 93,
                     seed: 7,
@@ -2224,6 +2309,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 94,
                     seed: 7,
@@ -2298,6 +2384,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     focal_seat: Some("Foundry".to_owned()),
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arms: vec![arm],
                     out_dir: branch_act_out.clone(),
                     memory_mode: MemoryMode::Snapshot,
@@ -2347,6 +2434,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 95,
                     seed: 7,
@@ -2396,6 +2484,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     focal_seat: Some("Foundry".to_owned()),
                     seats_path,
                     wrapper_path,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arms: vec![arm],
                     out_dir: branch_nonjson_out.clone(),
                     memory_mode: MemoryMode::Snapshot,

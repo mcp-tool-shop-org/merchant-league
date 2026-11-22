@@ -726,6 +726,41 @@ impl TableSpec {
         Ok((spec, deal, eval_seed))
     }
 
+    /// Constructs the canonical Eval-mode `TableSpec` with no Standing Regent attached to any
+    /// model-driven seat (`model_seats[i] == true` forces `regent: None`), while `ClubBot` seats
+    /// (`model_seats[i] == false`) retain the Club-mode Regent policy by seat identity.
+    pub fn standard_eval_chiral_ring_with_model_seats(
+        table_id: TableId,
+        seat_count: u8,
+        seed: u64,
+        model_seats: &[bool],
+    ) -> Result<(Self, SealedMandateDeal, SealedEvalSeed), EngineError> {
+        if model_seats.len() != usize::from(seat_count) {
+            return Err(EngineError::InvalidConfig(format!(
+                "INVALID_MODEL_SEATS_LEN: expected {seat_count} model-seat flags, got {}",
+                model_seats.len()
+            )));
+        }
+        let (mut spec, deal, eval_seed) =
+            Self::standard_eval_chiral_ring_with_setup(table_id, seat_count, seed)?;
+        for (seat_cfg, &is_model) in spec.seats.iter_mut().zip(model_seats.iter()) {
+            seat_cfg.regent = if is_model {
+                None
+            } else {
+                match seat_cfg.identity {
+                    SeatIdentity::Human => Some(RegentDoctrine {
+                        risk_tolerance_bps: 5_000,
+                        min_raw_reserve: UNIT_SCALE,
+                        auto_cash_due_claims: true,
+                    }),
+                    SeatIdentity::AiSyndicate => None,
+                }
+            };
+        }
+        spec.validate()?;
+        Ok((spec, deal, eval_seed))
+    }
+
     /// Constructs the canonical Eval-mode `TableSpec` from caller-supplied 256-bit `deal_seed`,
     /// per-seat `seat_salts`, and 256-bit `eval_seed` for reproducible Eval test fixtures.
     pub fn standard_eval_chiral_ring_with_explicit_setup(

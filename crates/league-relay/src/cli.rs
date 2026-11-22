@@ -85,7 +85,7 @@ Options:
   --live                           Permit live OpenRouter calls (requires OPENROUTER_API_KEY and --cap-credits)
   --cap-credits <n>                Cumulative credit cap checked against relay/calls.jsonl before each call
   --mock-dir <dir>                 Run against canned offline responses in <dir>/responses.json
-  --preview-tool <off|on>          Enable Card 7 what-if preview tool (off default)
+  --preview-tool <off|control|on>  Select act-round drafting or what-if preview tool (off default)
   --error-format <text|json>       Error output encoding on stderr: text (default) or json
   --log-level <level>              Log verbosity: silent, normal (default), verbose, or debug (or LEAGUE_LOG_LEVEL)
   -q, --silent                     Shorthand for --log-level silent
@@ -123,7 +123,7 @@ pub struct PrebookCheckArgs {
     pub mixed_scratchpad_arm: bool,
     /// `--allow-vm-host <host>`
     pub allowed_vm_hosts: Vec<String>,
-    /// `--preview-tool <off|on>`
+    /// `--preview-tool <off|control|on>`
     pub preview_tool: PreviewToolMode,
     /// `--error-format <text|json>`
     pub error_format: ErrorFormat,
@@ -162,7 +162,7 @@ pub struct TurnArgs {
     pub allowed_vm_hosts: Vec<String>,
     /// `--mock-dir <dir>`
     pub mock_dir: Option<PathBuf>,
-    /// `--preview-tool <off|on>`
+    /// `--preview-tool <off|control|on>`
     pub preview_tool: PreviewToolMode,
     /// `--error-format <text|json>`
     pub error_format: ErrorFormat,
