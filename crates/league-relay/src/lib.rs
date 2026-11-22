@@ -18,11 +18,12 @@ pub mod wording;
 pub use cli::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ErrorFormat};
 pub use error::{PreviewStateErrorKind, RelayError, StructuredError, ToStructuredError};
 pub use relay::{
-    CallLogEntry, GameSetupRecord, MemoryMode, NonPinnedModelFacingString, ResponseFormatConfig,
-    Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundCall,
-    SavedToolRoundRecord, SeatOutcome, SeatReport, SetupSeatRecord, TranscriptEntry, TurnConfig,
-    TurnSummary, discarded_reply_file_path, http_reply_file_path, prepend_wrapper, run_turn,
-    sha256_hex, tool_round_file_path, validate_day, validate_scratchpad_setup,
+    CallLogEntry, GameSetupRecord, LocalReasoningBudgetKey, MemoryMode, NonPinnedModelFacingString,
+    ResponseFormatConfig, Round, SavedDiscardedReplyRecord, SavedHttpReplyRecord,
+    SavedToolRoundCall, SavedToolRoundRecord, SeatOutcome, SeatReport, SetupSeatRecord,
+    TranscriptEntry, TurnConfig, TurnSummary, discarded_reply_file_path, http_reply_file_path,
+    prepend_wrapper, run_turn, sha256_hex, tool_round_file_path, validate_day,
+    validate_scratchpad_setup,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use relay::{

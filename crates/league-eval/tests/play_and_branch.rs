@@ -12,16 +12,81 @@ use std::time::Duration;
 
 use league_core::{EvalHost, HARD_TURN_CAP, PublicSweepReceipt, Seat, TableId, replay_eval_season};
 use league_eval::{
-    BranchOptions, BranchSummary, EVAL_REPLY_WORDING_ARM, EvalArm, EvalDecisionRecord, EvalError,
-    EvalManifest, NoopTransport, PlayOptions, RefusalCodeCounts, SelectOptions,
-    SelectedPreActState, SelectionList, TurnStratum, WrongPartCounter, execute_cli,
-    expand_home_path_with_home, persist_eval_game_state, run_branch_with_transport,
-    run_play_with_transport, run_select, sanitize_home_path_with_homes,
+    BranchArmOutcome, BranchOptions, BranchSummary, CRATE_GIT_SHA, CrateGitShaSource,
+    EVAL_REPLY_WORDING_ARM, EvalArm, EvalDecisionRecord, EvalError, EvalManifest, NoopTransport,
+    PlayOptions, RefusalCodeCounts, SelectOptions, SelectedPreActState, SelectionList, TurnStratum,
+    WrongPartCounter, execute_cli_with_git_sha, expand_home_path_with_home,
+    persist_eval_game_state, run_branch_with_transport_and_git_sha,
+    run_play_with_transport_and_git_sha, run_select, sanitize_home_path_with_homes,
 };
 use league_relay::{
-    CallLogEntry, CostUnit, RawHttpResponse, Round, Transport, TransportError, sha256_hex,
+    ApiKey, CallLogEntry, CostUnit, RawHttpResponse, Round, Transport, TransportError, sha256_hex,
 };
 use serde_json::{Value, json};
+
+const TEST_FALLBACK_GIT_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn test_git_sha_source() -> CrateGitShaSource<'static> {
+    let built_sha =
+        if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+            CRATE_GIT_SHA
+        } else {
+            TEST_FALLBACK_GIT_SHA
+        };
+    CrateGitShaSource::Injected {
+        built_sha,
+        live_head: Some(built_sha),
+        is_dirty: Some(false),
+    }
+}
+
+fn run_play_with_transport(
+    opts: &PlayOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<EvalManifest, EvalError> {
+    run_play_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
+
+fn run_branch_with_transport(
+    opts: &BranchOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<Vec<BranchArmOutcome>, EvalError> {
+    run_branch_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
+
+const ML_EVAL_TEST_SEAM_ARGS_FILE_ENV: &str = "ML_EVAL_TEST_SEAM_ARGS_FILE";
+
+#[test]
+fn eval_cli_seam_child_helper() {
+    use std::io::Write;
+    let Ok(args_file) = std::env::var(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV) else {
+        return;
+    };
+    let raw = must_ok(fs::read_to_string(&args_file), "read seam CLI args file");
+    let cli_args: Vec<String> = must_ok(serde_json::from_str(&raw), "parse seam CLI args JSON");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = execute_cli_with_git_sha(
+        cli_args.into_iter().map(std::ffi::OsString::from),
+        &mut out,
+        &mut err,
+        &test_git_sha_source(),
+    );
+    let _ = std::io::stdout().write_all(&out);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().write_all(&err);
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
+}
+
+fn execute_cli<I>(args: I, stdout: &mut dyn std::io::Write, stderr: &mut dyn std::io::Write) -> i32
+where
+    I: IntoIterator<Item = std::ffi::OsString>,
+{
+    execute_cli_with_git_sha(args, stdout, stderr, &test_git_sha_source())
+}
 
 fn must_ok<T, E: Display>(res: Result<T, E>, ctx: &str) -> T {
     match res {
@@ -2796,31 +2861,43 @@ fn coverage_subprocess_cli_gates_noreplies_and_select_guards() {
     assert!(ver_out.status.success());
     assert!(String::from_utf8_lossy(&ver_out.stdout).contains("league-eval"));
 
+    let args_path = tmp.join("ctrl_ok_seam_args.json");
+    let ctrl_args = json!([
+        "play",
+        "--game-dir",
+        tmp.join("bin_ctrl").to_string_lossy(),
+        "--seats",
+        seats_path.to_string_lossy(),
+        "--wrapper",
+        wrapper_path.to_string_lossy(),
+        "--arm",
+        "control",
+        "--turns",
+        "1",
+        "--seed",
+        "7"
+    ]);
+    must_ok(
+        fs::write(&args_path, ctrl_args.to_string()),
+        "write ctrl_ok seam args",
+    );
+    let ctrl_exe = must_ok(std::env::current_exe(), "resolve test binary path");
     let ctrl_ok = must_ok(
-        Command::new(bin)
-            .args([
-                "play",
-                "--game-dir",
-                &tmp.join("bin_ctrl").to_string_lossy(),
-                "--seats",
-                &seats_path.to_string_lossy(),
-                "--wrapper",
-                &wrapper_path.to_string_lossy(),
-                "--arm",
-                "control",
-                "--turns",
-                "1",
-                "--seed",
-                "7",
-            ])
+        Command::new(ctrl_exe)
+            .args(["--exact", "eval_cli_seam_child_helper", "--nocapture"])
+            .env(ML_EVAL_TEST_SEAM_ARGS_FILE_ENV, &args_path)
             .env_remove("OPENROUTER_API_KEY")
             .env_remove("OPENAI_API_KEY")
             .env_remove("ANTHROPIC_API_KEY")
             .env_remove("GEMINI_API_KEY")
             .output(),
-        "run league-eval control arm binary",
+        "run league-eval control arm seam child",
     );
-    assert!(ctrl_ok.status.success());
+    assert!(
+        ctrl_ok.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&ctrl_ok.stderr)
+    );
 
     let bad_wrap_bin = tmp.join("bad_wrap_bin.md");
     must_ok(fs::write(&bad_wrap_bin, b"# wrong"), "write bad_wrap_bin");
@@ -4784,6 +4861,16 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
                 body: mock_chat_response_value("ok-fallback", "Qwen/Qwen3-32B", &ok, 10, 10, None)
                     .to_string(),
             })
+        }
+
+        fn count_tokens(
+            &self,
+            _tokenize_url: &str,
+            _model: &str,
+            text: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(text.split_whitespace().count())
         }
 
         fn apply_template(

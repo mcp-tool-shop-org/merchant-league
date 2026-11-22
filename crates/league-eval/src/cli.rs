@@ -12,11 +12,12 @@ use league_relay::{
 };
 
 use crate::driver::{
-    BranchOptions, NoopTransport, PlayOptions, run_branch_with_transport, run_play_with_transport,
-    validate_eval_seats_file,
+    BranchOptions, NoopTransport, PlayOptions, run_branch_with_transport_and_git_sha,
+    run_play_with_transport_and_git_sha, validate_eval_seats_file,
 };
 use crate::records::{EvalArm, summarize_branch_outcomes};
 use crate::select::{SelectOptions, run_select};
+use crate::serving::CrateGitShaSource;
 use crate::{EXIT_OK, EvalError};
 
 const HELP_TEXT: &str = "\
@@ -99,10 +100,24 @@ pub fn execute_cli<I>(args: I, stdout: &mut dyn Write, stderr: &mut dyn Write) -
 where
     I: IntoIterator<Item = OsString>,
 {
+    execute_cli_with_git_sha(args, stdout, stderr, &CrateGitShaSource::Live)
+}
+
+/// Testable entry point for [`execute_cli`] allowing callers to supply a [`CrateGitShaSource`]
+/// seam instead of inspecting the live working tree.
+pub fn execute_cli_with_git_sha<I>(
+    args: I,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    git_sha: &CrateGitShaSource<'_>,
+) -> i32
+where
+    I: IntoIterator<Item = OsString>,
+{
     let args_vec: Vec<OsString> = args.into_iter().collect();
     let err_fmt = peek_error_format(&args_vec);
     let redaction_keys = collect_env_redaction_keys(|k| std::env::var(k).ok());
-    match run_cli_args(&args_vec, &redaction_keys, stdout) {
+    match run_cli_args(&args_vec, &redaction_keys, git_sha, stdout) {
         Ok(()) => EXIT_OK,
         Err(err) => {
             write_cli_error(&err, err_fmt, &redaction_keys, stderr);
@@ -140,6 +155,7 @@ fn write_cli_error(
 fn run_cli_args(
     args: &[OsString],
     redaction_keys: &[ApiKey],
+    git_sha: &CrateGitShaSource<'_>,
     stdout: &mut dyn Write,
 ) -> Result<(), EvalError> {
     let mut iter = args.iter().cloned().peekable();
@@ -189,8 +205,8 @@ fn run_cli_args(
     }
 
     match subcmd.as_ref() {
-        "play" => cmd_play(&rest, redaction_keys, stdout),
-        "branch" => cmd_branch(&rest, redaction_keys, stdout),
+        "play" => cmd_play(&rest, redaction_keys, git_sha, stdout),
+        "branch" => cmd_branch(&rest, redaction_keys, git_sha, stdout),
         "select" => cmd_select(&rest, stdout),
         other => Err(EvalError::Usage(format!(
             "unknown subcommand '{other}'; expected `play`, `branch`, or `select`"
@@ -201,6 +217,7 @@ fn run_cli_args(
 fn cmd_play(
     args: &[OsString],
     redaction_keys: &[ApiKey],
+    git_sha: &CrateGitShaSource<'_>,
     stdout: &mut dyn Write,
 ) -> Result<(), EvalError> {
     let mut game_dir: Option<PathBuf> = None;
@@ -324,7 +341,7 @@ fn cmd_play(
             run_opts.live = eff_live;
             run_opts.cap_credits = eff_credits;
             run_opts.cap_gpu_secs = eff_gpu;
-            run_play_with_transport(&run_opts, transport, key)
+            run_play_with_transport_and_git_sha(&run_opts, transport, key, git_sha)
         },
     )?;
 
@@ -346,6 +363,7 @@ fn cmd_play(
 fn cmd_branch(
     args: &[OsString],
     redaction_keys: &[ApiKey],
+    git_sha: &CrateGitShaSource<'_>,
     stdout: &mut dyn Write,
 ) -> Result<(), EvalError> {
     let mut checkpoint_prefix: Option<PathBuf> = None;
@@ -453,7 +471,7 @@ fn cmd_branch(
             run_opts.live = eff_live;
             run_opts.cap_credits = eff_credits;
             run_opts.cap_gpu_secs = eff_gpu;
-            run_branch_with_transport(&run_opts, transport, key)
+            run_branch_with_transport_and_git_sha(&run_opts, transport, key, git_sha)
         },
     )?;
 

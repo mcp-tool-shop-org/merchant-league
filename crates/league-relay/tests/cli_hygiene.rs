@@ -2100,7 +2100,7 @@ fn b2_cli_redacts_xrpl_seed_straddling_4kib_cap_across_offsets_1_to_30() -> Test
 }
 
 #[test]
-fn fix2_relay_redacts_a1_b3_c1_full_superset_corpus_and_b2_json_edge_cases() -> TestResult {
+fn relay_redacts_a1_b3_c1_full_superset_corpus_and_b2_json_edge_cases() -> TestResult {
     // 1. Full 57-entry superset corpus from `league-error` plus all 6 relay sealed-secret cases.
     let corpus_raw = include_str!("../../league-error/tests/scrubber_superset_corpus.json");
     let entries: Vec<serde_json::Value> = serde_json::from_str(corpus_raw)?;

@@ -275,40 +275,32 @@ impl Transport for LocalOpenAiTransport {
         self.post_local_json(&validated_endpoint, body, timeout)
     }
 
+    /// Count model tokens in `text` via `llama.cpp` (`b11433`) `POST /tokenize`
+    /// (`tools/server/server-context.cpp:5440-5479`).
+    ///
+    /// Sends `add_special: false` (because scratchpad text is embedded inside the `user` prompt
+    /// rather than tokenized as a full conversation with sequence BOS tokens) and
+    /// `parse_special: true` (matching chat completion prompt tokenization at
+    /// `server-context.cpp:4650`). Refuses with `SCRATCHPAD_TOKENIZE_FAILED` unless the reply
+    /// is a JSON object containing strictly an integer array `"tokens"`.
     fn count_tokens(
         &self,
         tokenize_url: &str,
-        model: &str,
+        _model: &str,
         text: &str,
         timeout: Duration,
     ) -> Result<usize, TransportError> {
-        let (validated_url, _) =
-            validate_local_tokenize_url("local", tokenize_url, self.gate.allowed_vm_hosts())
-                .map_err(|e| TransportError::Network(e.to_string()))?;
-        let payload = serde_json::json!({
-            "model": model,
-            "prompt": text,
-            "add_special_tokens": false,
-        })
-        .to_string();
-        let resp = self.post_local_json(&validated_url, &payload, timeout)?;
-        if resp.status != 200 {
-            return Err(TransportError::Network(format!(
-                "POST /tokenize returned HTTP {}",
-                resp.status
-            )));
-        }
-        let parsed: serde_json::Value = serde_json::from_str(&resp.body).map_err(|_| {
-            TransportError::Network("POST /tokenize returned invalid JSON".to_owned())
-        })?;
-        let Some(raw_count) = parsed.get("count").and_then(serde_json::Value::as_u64) else {
-            return Err(TransportError::Network(
-                "POST /tokenize response missing non-negative integer 'count'".to_owned(),
-            ));
-        };
-        usize::try_from(raw_count).map_err(|_| {
-            TransportError::Network("POST /tokenize 'count' overflowed usize".to_owned())
-        })
+        let ids = self
+            .post_tokenize_tokens(tokenize_url, text, false, true, timeout)
+            .map_err(|err| match err {
+                TransportError::Timeout => TransportError::Network(
+                    "SCRATCHPAD_TOKENIZE_FAILED: request timed out".to_owned(),
+                ),
+                TransportError::Network(msg) => {
+                    TransportError::Network(format!("SCRATCHPAD_TOKENIZE_FAILED: {msg}"))
+                }
+            })?;
+        Ok(ids.len())
     }
 
     fn apply_template(
@@ -349,6 +341,26 @@ impl Transport for LocalOpenAiTransport {
         parse_special: bool,
         timeout: Duration,
     ) -> Result<Vec<u64>, TransportError> {
+        let ids =
+            self.post_tokenize_tokens(tokenize_url, content, add_special, parse_special, timeout)?;
+        if ids.is_empty() {
+            return Err(TransportError::Network(
+                "POST /tokenize returned empty 'tokens' array".to_owned(),
+            ));
+        }
+        Ok(ids)
+    }
+}
+
+impl LocalOpenAiTransport {
+    fn post_tokenize_tokens(
+        &self,
+        tokenize_url: &str,
+        content: &str,
+        add_special: bool,
+        parse_special: bool,
+        timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
         let (validated_url, _) =
             validate_local_tokenize_url("local", tokenize_url, self.gate.allowed_vm_hosts())
                 .map_err(|e| TransportError::Network(e.to_string()))?;
@@ -368,26 +380,29 @@ impl Transport for LocalOpenAiTransport {
         let parsed: serde_json::Value = serde_json::from_str(&resp.body).map_err(|_| {
             TransportError::Network("POST /tokenize returned invalid JSON".to_owned())
         })?;
-        let Some(arr) = parsed.get("tokens").and_then(serde_json::Value::as_array) else {
+        let Some(obj) = parsed.as_object() else {
+            return Err(TransportError::Network(
+                "POST /tokenize response must be a JSON object".to_owned(),
+            ));
+        };
+        if obj.len() != 1 || !obj.contains_key("tokens") {
+            return Err(TransportError::Network(
+                "POST /tokenize response must contain only 'tokens'".to_owned(),
+            ));
+        }
+        let Some(arr) = obj.get("tokens").and_then(serde_json::Value::as_array) else {
             return Err(TransportError::Network(
                 "POST /tokenize response missing array 'tokens'".to_owned(),
             ));
         };
-        let ids: Vec<u64> = arr
-            .iter()
+        arr.iter()
             .map(serde_json::Value::as_u64)
             .collect::<Option<Vec<u64>>>()
             .ok_or_else(|| {
                 TransportError::Network(
                     "POST /tokenize 'tokens' entries must all be non-negative integers".to_owned(),
                 )
-            })?;
-        if ids.is_empty() {
-            return Err(TransportError::Network(
-                "POST /tokenize returned empty 'tokens' array".to_owned(),
-            ));
-        }
-        Ok(ids)
+            })
     }
 }
 
@@ -724,6 +739,13 @@ mod tests {
             (200, r#"{"tokens":["bad"]}"#.to_owned()),
             (200, r#"{"tokens":[]}"#.to_owned()),
             (200, r#"{"tokens":[10,20,30]}"#.to_owned()),
+            (200, r#"{"count":5}"#.to_owned()),
+            (
+                200,
+                r#"{"count":5,"max_model_len":8192,"tokens":[]}"#.to_owned(),
+            ),
+            (200, r#"{"tokens":[]}"#.to_owned()),
+            (200, r#"{"tokens":[11,22,33,44]}"#.to_owned()),
         ]);
 
         let tpl_url = format!("{base}/apply-template");
@@ -760,6 +782,29 @@ mod tests {
             tx.tokenize_prompt(&tok_url, "RENDERED", true, true, timeout)
                 .ok(),
             Some(vec![10, 20, 30])
+        );
+
+        let old_count_err = tx
+            .count_tokens(&tok_url, "Qwen/Qwen3-14B", "note text", timeout)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(old_count_err.contains("SCRATCHPAD_TOKENIZE_FAILED"));
+        let old_mixed_err = tx
+            .count_tokens(&tok_url, "Qwen/Qwen3-14B", "note text", timeout)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(old_mixed_err.contains("SCRATCHPAD_TOKENIZE_FAILED"));
+        assert_eq!(
+            tx.count_tokens(&tok_url, "Qwen/Qwen3-14B", "", timeout)
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            tx.count_tokens(&tok_url, "Qwen/Qwen3-14B", "four tokens here", timeout)
+                .ok(),
+            Some(4)
         );
         let _ = handle.join();
         assert!(tx.apply_template(&tpl_url, "{}", timeout).is_err());

@@ -122,7 +122,8 @@ pub struct SeatReasoningConfig {
     /// Optional reasoning effort (`reasoning_effort` on local vLLM; `reasoning.effort` on OpenRouter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
-    /// Optional reasoning token cap (`thinking_token_budget` on local vLLM; `reasoning.max_tokens` on OpenRouter).
+    /// Optional reasoning token cap (`thinking_token_budget` on Play local vLLM seats;
+    /// `reasoning_budget_tokens` in Eval when pinned to `llama-server`; `reasoning.max_tokens` on OpenRouter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u32>,
     /// Optional model-card chat-template flags (for example `{"enable_thinking": false}` or `{"thinking": true}`).

@@ -54,6 +54,12 @@ pub enum EvalError {
     PromptTemplateMismatch(String),
     /// Local server `/tokenize` endpoint failed, was absent, or returned an invalid token array (`exit 2`).
     PromptTokenizeFailed(String),
+    /// Local `/tokenize` scratchpad token count failed or returned a non-`b11433` shape (`exit 2`).
+    ScratchpadTokenizeFailed(String),
+    /// Configured `reasoning.budget_tokens` cannot be enforced by `llama.cpp` `b11433` (`exit 1`).
+    UnenforceableReasoningBudget(String),
+    /// Server `--reasoning-budget-message` is set, which injects prompt text before the model (`exit 1`).
+    ReasoningBudgetMessageForbidden(String),
     /// Local `/tokenize` prompt token count disagreed with chat reply `usage.prompt_tokens` (`exit 2`).
     PromptTokenCountMismatch(String),
     /// Server HTTP 200 reply omitted required prompt token IDs, reply token IDs, or exact top-5 logprobs (`exit 2`).
@@ -125,6 +131,9 @@ impl EvalError {
             Self::PromptTemplateFailed(_) => "PROMPT_TEMPLATE_FAILED",
             Self::PromptTemplateMismatch(_) => "PROMPT_TEMPLATE_MISMATCH",
             Self::PromptTokenizeFailed(_) => "PROMPT_TOKENIZE_FAILED",
+            Self::ScratchpadTokenizeFailed(_) => "SCRATCHPAD_TOKENIZE_FAILED",
+            Self::UnenforceableReasoningBudget(_) => "UNENFORCEABLE_REASONING_BUDGET",
+            Self::ReasoningBudgetMessageForbidden(_) => "REASONING_BUDGET_MESSAGE_FORBIDDEN",
             Self::PromptTokenCountMismatch(_) => "PROMPT_TOKEN_COUNT_MISMATCH",
             Self::MissingReplyTelemetry(_) => "MISSING_REPLY_TELEMETRY",
             Self::InvalidActionCount(_) => "INVALID_ACTION_COUNT",
@@ -173,6 +182,8 @@ impl EvalError {
             | Self::InvalidStrata(_)
             | Self::UnknownFocalSeat(_)
             | Self::EvalThinkStrippingForbidden(_)
+            | Self::UnenforceableReasoningBudget(_)
+            | Self::ReasoningBudgetMessageForbidden(_)
             | Self::MissingBranchTranscript(_)
             | Self::MissingBranchScratchpad(_)
             | Self::MissingBranchNegotiation(_)
@@ -189,6 +200,7 @@ impl EvalError {
             | Self::PromptTemplateFailed(_)
             | Self::PromptTemplateMismatch(_)
             | Self::PromptTokenizeFailed(_)
+            | Self::ScratchpadTokenizeFailed(_)
             | Self::PromptTokenCountMismatch(_)
             | Self::MissingReplyTelemetry(_)
             | Self::InvalidActionCount(_)
@@ -255,6 +267,23 @@ impl fmt::Display for EvalError {
             }
             Self::PromptTokenizeFailed(msg) => {
                 write!(f, "PROMPT_TOKENIZE_FAILED: {}", scrub_secret_text(msg))
+            }
+            Self::ScratchpadTokenizeFailed(msg) => {
+                write!(f, "SCRATCHPAD_TOKENIZE_FAILED: {}", scrub_secret_text(msg))
+            }
+            Self::UnenforceableReasoningBudget(msg) => {
+                write!(
+                    f,
+                    "UNENFORCEABLE_REASONING_BUDGET: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::ReasoningBudgetMessageForbidden(msg) => {
+                write!(
+                    f,
+                    "REASONING_BUDGET_MESSAGE_FORBIDDEN: {}",
+                    scrub_secret_text(msg)
+                )
             }
             Self::PromptTokenCountMismatch(msg) => {
                 write!(f, "PROMPT_TOKEN_COUNT_MISMATCH: {}", scrub_secret_text(msg))
@@ -462,6 +491,24 @@ impl ToStructuredError for EvalError {
                 "ensure the local server exposes `POST /tokenize` accepting `add_special: true` and `parse_special: true` and returning `tokens`",
                 false,
             ),
+            Self::ScratchpadTokenizeFailed(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure the local server exposes `POST /tokenize` accepting `content`, `add_special: false`, and `parse_special: true` and returning strictly `{\"tokens\": [...]}`",
+                false,
+            ),
+            Self::UnenforceableReasoningBudget(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure serving manifest specifies engine 'llama_server' with server_settings.jinja: true, present server_settings.reasoning_mode (not 'off'/'none'), server_settings.reasoning_budget_message: \"\", non-empty model.thinking_start_tag and model.thinking_end_tags, seat reasoning.effort != \"none\", chat_template_kwargs.enable_thinking: true, and budget_tokens <= i32::MAX",
+                false,
+            ),
+            Self::ReasoningBudgetMessageForbidden(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "remove --reasoning-budget-message from the inference server configuration; Evaluation Mode forbids server-injected prompt text",
+                false,
+            ),
             Self::PromptTokenCountMismatch(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
@@ -624,6 +671,24 @@ mod tests {
                 "PROMPT_TOKENIZE_FAILED",
                 EXIT_RUNTIME_ERROR,
                 "POST /tokenize",
+            ),
+            (
+                EvalError::ScratchpadTokenizeFailed("old count shape".to_owned()),
+                "SCRATCHPAD_TOKENIZE_FAILED",
+                EXIT_RUNTIME_ERROR,
+                "add_special: false",
+            ),
+            (
+                EvalError::UnenforceableReasoningBudget("missing tags".to_owned()),
+                "UNENFORCEABLE_REASONING_BUDGET",
+                EXIT_USER_ERROR,
+                "server_settings.jinja",
+            ),
+            (
+                EvalError::ReasoningBudgetMessageForbidden("budget msg set".to_owned()),
+                "REASONING_BUDGET_MESSAGE_FORBIDDEN",
+                EXIT_USER_ERROR,
+                "--reasoning-budget-message",
             ),
             (
                 EvalError::PromptTokenCountMismatch("10 vs 11".to_owned()),

@@ -2212,6 +2212,16 @@ pub fn validate_day(day: &str) -> Result<(), RelayError> {
     Ok(())
 }
 
+/// Wire field name used when forwarding `reasoning.budget_tokens` on `local` seats.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LocalReasoningBudgetKey {
+    /// Play mode (default): send `thinking_token_budget` for vLLM / OpenAI-compatible local servers.
+    #[default]
+    ThinkingTokenBudget,
+    /// Evaluation Mode pinned to `llama.cpp` `b11433` `llama-server`: send `reasoning_budget_tokens`.
+    ReasoningBudgetTokens,
+}
+
 /// Parameters for one `league-relay turn` invocation.
 #[derive(Debug, Clone)]
 pub struct TurnConfig {
@@ -2250,6 +2260,9 @@ pub struct TurnConfig {
     /// Evaluation Mode switch (`false` by default; `league-eval` sets `true`): single HTTP attempt
     /// per round, raw + discarded reply sidecars kept in every arm, and `exclude_from_transcript` banned.
     pub eval_mode: bool,
+    /// Wire key used for `reasoning.budget_tokens` on `local` seats (`thinking_token_budget` in Play
+    /// mode by default; `reasoning_budget_tokens` when Eval selects from a `llama-server` manifest).
+    pub local_reasoning_budget_key: LocalReasoningBudgetKey,
     /// Additional environment keys supplied by the CLI for defense-in-depth scrubbing.
     pub(crate) extra_redaction_keys: Vec<ApiKey>,
 }
@@ -2283,6 +2296,7 @@ impl TurnConfig {
             log_level: LogLevel::default(),
             preview_tool: PreviewToolMode::default(),
             eval_mode: false,
+            local_reasoning_budget_key: LocalReasoningBudgetKey::default(),
             extra_redaction_keys: Vec::new(),
         }
     }
@@ -2339,6 +2353,13 @@ impl TurnConfig {
     /// raw and discarded sidecars in every arm, and refuses `reasoning.exclude_from_transcript: true`.
     pub fn with_eval_mode(mut self, eval_mode: bool) -> Self {
         self.eval_mode = eval_mode;
+        self
+    }
+
+    /// Configure the wire field name used for `reasoning.budget_tokens` on `local` seats
+    /// (`ThinkingTokenBudget` default for Play; `ReasoningBudgetTokens` for Eval `llama-server`).
+    pub fn with_local_reasoning_budget_key(mut self, key: LocalReasoningBudgetKey) -> Self {
+        self.local_reasoning_budget_key = key;
         self
     }
 
@@ -2905,6 +2926,8 @@ struct ApplyTemplateRequestWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking_token_budget: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_budget_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
@@ -2926,6 +2949,8 @@ struct ChatCompletionRequestWire<'a> {
     reasoning_effort: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking_token_budget: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_budget_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6040,7 +6065,7 @@ fn run_single_automated_seat(
             let Some(tokenize_url) = seat.tokenize_url else {
                 return SeatOutcome::SeatError {
                     detail:
-                        "snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
+                        "SCRATCHPAD_TOKENIZE_FAILED: snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
                             .to_owned(),
                 };
             };
@@ -6057,7 +6082,7 @@ fn run_single_automated_seat(
                     return SeatOutcome::SeatError {
                         detail: redact_secrets(
                             &format!(
-                                "cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
+                                "SCRATCHPAD_TOKENIZE_FAILED: cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
                             ),
                             redaction_key,
                         ),
@@ -6231,13 +6256,19 @@ fn run_single_automated_seat(
             } else {
                 tools_storage.as_deref()
             };
+        let (local_thinking_budget, local_reasoning_budget) =
+            match config.local_reasoning_budget_key {
+                LocalReasoningBudgetKey::ThinkingTokenBudget => (local_budget, None),
+                LocalReasoningBudgetKey::ReasoningBudgetTokens => (None, local_budget),
+            };
         let apply_template_body = if eval_local {
             let tpl_wire = ApplyTemplateRequestWire {
                 messages: &messages,
                 response_format: response_format_wire,
                 reasoning: or_reasoning,
                 reasoning_effort: local_effort,
-                thinking_token_budget: local_budget,
+                thinking_token_budget: local_thinking_budget,
+                reasoning_budget_tokens: local_reasoning_budget,
                 chat_template_kwargs: local_kwargs,
                 include_reasoning: local_include_reasoning,
                 tools: request_tools,
@@ -6259,7 +6290,8 @@ fn run_single_automated_seat(
             response_format: response_format_wire,
             reasoning: or_reasoning,
             reasoning_effort: local_effort,
-            thinking_token_budget: local_budget,
+            thinking_token_budget: local_thinking_budget,
+            reasoning_budget_tokens: local_reasoning_budget,
             chat_template_kwargs: local_kwargs,
             include_reasoning: local_include_reasoning,
             tools: request_tools,
@@ -6681,7 +6713,7 @@ fn run_single_automated_seat(
                                 Err(tok_err) => {
                                     let detail = redact_secrets(
                                         &format!(
-                                            "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
+                                            "SCRATCHPAD_TOKENIZE_FAILED: cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
                                         ),
                                         redaction_key,
                                     );
