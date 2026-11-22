@@ -599,13 +599,13 @@ mod tests {
                 EvalError::DirtyGitWorktree("dirty tree".to_owned()),
                 "DIRTY_GIT_WORKTREE",
                 EXIT_RUNTIME_ERROR,
-                "commit or stash uncommitted workspace changes",
+                "commit or clean uncommitted changes",
             ),
             (
                 EvalError::UnsupportedEvalModelBackend("openrouter seat forbidden".to_owned()),
                 "UNSUPPORTED_EVAL_MODEL_BACKEND",
                 EXIT_USER_ERROR,
-                "configure automated Eval seats with `backend = \"local\"`",
+                "backend: \"local\"",
             ),
             (
                 EvalError::PromptTemplateFailed("status 500".to_owned()),
