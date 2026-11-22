@@ -13,9 +13,9 @@ use league_core::{
     CharterBidOrder, CharterRole, CheckProposal, CommitmentHash, ContractDeliveryOrder,
     ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CreditTier, DualEscrowProposal,
     EscrowFinishUnlock, EscrowProposal, FillKind, IntentPledge, IntentTarget, MarketAction,
-    OfferProposal, OfferSide, PreimageSecret, ProjectDeliveryOrder, PublicCheckOrderPreview,
-    PublicCheckOutcome, PublicPreviewState, PublicSwapOutcome, RefusedActionPreview,
-    SealedOrderBundle, SeatIdentity, WhatIfPreview, preview_seat_bundle,
+    OfferProposal, OfferSide, PreimageSecret, ProjectDeliveryOrder, PublicCheckOutcome,
+    PublicPreviewState, PublicSwapOutcome, SealedOrderBundle, SeatIdentity, WhatIfPreview,
+    preview_seat_bundle,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -3088,9 +3088,10 @@ pub fn render_control_engine_refusal_wire_json(error_code: &str) -> String {
 
 fn build_refused_market_action_wire_items_from(
     entries: &[WordingEntry],
-    refused_market_actions: &[RefusedActionPreview],
+    preview: &WhatIfPreview,
 ) -> Vec<serde_json::Value> {
-    refused_market_actions
+    preview
+        .refused_market_actions
         .iter()
         .map(|r| {
             let (code_slot, reason_slot) = engine_error_slots_for_code(&r.error_code);
@@ -3112,12 +3113,15 @@ fn build_refused_market_action_wire_items_from(
         .collect()
 }
 
-fn build_check_order_wire_items_from<'a>(
+fn build_check_order_wire_items_from(
     entries: &[WordingEntry],
-    check_orders: impl IntoIterator<Item = &'a PublicCheckOrderPreview>,
+    preview: &WhatIfPreview,
+    only_ineligible: bool,
 ) -> Vec<serde_json::Value> {
-    check_orders
-        .into_iter()
+    preview
+        .check_orders
+        .iter()
+        .filter(|c| !only_ineligible || c.outcome == PublicCheckOutcome::IneligibleOrIgnored)
         .map(|c| {
             let mut m = serde_json::Map::new();
             m.insert(
@@ -3137,15 +3141,8 @@ fn render_control_soft_refusal_wire_json_from(
     entries: &[WordingEntry],
     preview: &WhatIfPreview,
 ) -> Option<String> {
-    let refused =
-        build_refused_market_action_wire_items_from(entries, &preview.refused_market_actions);
-    let ineligible_checks = build_check_order_wire_items_from(
-        entries,
-        preview
-            .check_orders
-            .iter()
-            .filter(|c| c.outcome == PublicCheckOutcome::IneligibleOrIgnored),
-    );
+    let refused = build_refused_market_action_wire_items_from(entries, preview);
+    let ineligible_checks = build_check_order_wire_items_from(entries, preview, true);
     if refused.is_empty() && ineligible_checks.is_empty() {
         return None;
     }
@@ -3308,10 +3305,7 @@ impl AiPreviewWireOutput {
             )
         };
 
-        let refused = build_refused_market_action_wire_items_from(
-            PREVIEW_ARM_WORDING,
-            &preview.refused_market_actions,
-        );
+        let refused = build_refused_market_action_wire_items_from(PREVIEW_ARM_WORDING, preview);
 
         let converters: Vec<serde_json::Value> = preview
             .converter_orders
@@ -3364,7 +3358,7 @@ impl AiPreviewWireOutput {
             })
             .collect();
 
-        let checks = build_check_order_wire_items_from(PREVIEW_ARM_WORDING, &preview.check_orders);
+        let checks = build_check_order_wire_items_from(PREVIEW_ARM_WORDING, preview, false);
 
         let escrows: Vec<serde_json::Value> = preview
             .escrow_orders
