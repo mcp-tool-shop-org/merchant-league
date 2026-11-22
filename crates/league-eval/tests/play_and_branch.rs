@@ -4826,6 +4826,16 @@ fn reserved_and_cap_reached_attempt_filter_and_orphan_reconcile() {
             })
         }
 
+        fn count_tokens(
+            &self,
+            _tokenize_url: &str,
+            _model: &str,
+            text: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(text.split_whitespace().count())
+        }
+
         fn apply_template(
             &self,
             _apply_template_url: &str,
