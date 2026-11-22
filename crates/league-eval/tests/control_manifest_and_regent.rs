@@ -3443,6 +3443,11 @@ fn top_logprobs_with_four_entries_refuses() {
         Ok(_) => panic!("4 top_logprobs entries instead of 5 must refuse"),
     };
     assert_eq!(err.code(), "MISSING_REPLY_TELEMETRY");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("top_logprobs` must have exact length 5, found 4"),
+        "expected exact-5 top_logprobs refusal, got: {msg}"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
