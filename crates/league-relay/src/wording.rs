@@ -13,9 +13,9 @@ use league_core::{
     CharterBidOrder, CharterRole, CheckProposal, CommitmentHash, ContractDeliveryOrder,
     ConverterRunOrder, CouncilPlatform, CouncilVoteBallot, CreditTier, DualEscrowProposal,
     EscrowFinishUnlock, EscrowProposal, FillKind, IntentPledge, IntentTarget, MarketAction,
-    OfferProposal, OfferSide, PreimageSecret, ProjectDeliveryOrder, PublicCheckOutcome,
-    PublicPreviewState, PublicSwapOutcome, SealedOrderBundle, SeatIdentity, WhatIfPreview,
-    preview_seat_bundle,
+    OfferProposal, OfferSide, PreimageSecret, ProjectDeliveryOrder, PublicCheckOrderPreview,
+    PublicCheckOutcome, PublicPreviewState, PublicSwapOutcome, RefusedActionPreview,
+    SealedOrderBundle, SeatIdentity, WhatIfPreview, preview_seat_bundle,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -1499,7 +1499,7 @@ const CONTROL_SHARED_SLOTS_FROM_R2: &[&str] = &[
     "preview_code_CALL_LIMIT_REACHED",
 ];
 
-const CONTROL_REFUSAL_SLOTS_FROM_R2: [&str; 22] = [
+const CONTROL_REFUSAL_SLOTS_FROM_R2: [&str; 27] = [
     "preview_code_INVALID_CONFIG",
     "preview_err_INVALID_CONFIG",
     "preview_code_INVALID_PHASE",
@@ -1522,6 +1522,11 @@ const CONTROL_REFUSAL_SLOTS_FROM_R2: [&str; 22] = [
     "preview_err_CANCEL_LOCKED",
     "preview_code_UNLISTED_ENGINE_ERROR",
     "preview_err_UNLISTED_ENGINE_ERROR",
+    "wire_key_refused_market_actions",
+    "wire_key_action_index",
+    "wire_key_check_orders",
+    "wire_key_outcome",
+    "preview_check_outcome_ineligible",
 ];
 
 const CONTROL_ARM_SPECIFIC_LEN: usize = 6;
@@ -1610,10 +1615,11 @@ pub const CONTROL_ARM_WORDING_R2: &[WordingEntry] = &CONTROL_ARM_WORDING_R2_ARRA
 
 /// Active model-facing wording entries for [`CONTROL_WORDING_ARM`] (`v2_control_2026_11_22_r2`).
 ///
-/// Shares all schema/parameter keys, descriptions, and engine rule-refusal pairs with
+/// Shares all schema/parameter keys, descriptions, engine rule-refusal pairs, and soft-refusal
+/// keys (`refused_market_actions`, `check_orders` `ineligible_or_ignored`) with
 /// [`PREVIEW_ARM_WORDING_R2`], replaces only the tool name, description, budget sentence,
 /// malformed-call message, and call-limit message, adds `control_fixed_reply`, and omits all
-/// projection outcome entries.
+/// projection and simulation outcome entries.
 pub const CONTROL_ARM_WORDING: &[WordingEntry] = CONTROL_ARM_WORDING_R2;
 
 fn lookup_preview_wording_template(entries: &[WordingEntry], slot: &str) -> &'static str {
@@ -3080,6 +3086,89 @@ pub fn render_control_engine_refusal_wire_json(error_code: &str) -> String {
     render_engine_refusal_wire_json_from(CONTROL_ARM_WORDING, error_code)
 }
 
+fn build_refused_market_action_wire_items_from(
+    entries: &[WordingEntry],
+    refused_market_actions: &[RefusedActionPreview],
+) -> Vec<serde_json::Value> {
+    refused_market_actions
+        .iter()
+        .map(|r| {
+            let (code_slot, reason_slot) = engine_error_slots_for_code(&r.error_code);
+            let mut m = serde_json::Map::new();
+            m.insert(
+                jkey_from(entries, "wire_key_action_index"),
+                serde_json::json!(r.action_index),
+            );
+            m.insert(
+                jkey_from(entries, "wire_key_error_code"),
+                jstr_from(entries, code_slot),
+            );
+            m.insert(
+                jkey_from(entries, "wire_key_reason"),
+                serde_json::Value::String(render_preview_wording_slot_from(entries, reason_slot)),
+            );
+            serde_json::Value::Object(m)
+        })
+        .collect()
+}
+
+fn build_check_order_wire_items_from<'a>(
+    entries: &[WordingEntry],
+    check_orders: impl IntoIterator<Item = &'a PublicCheckOrderPreview>,
+) -> Vec<serde_json::Value> {
+    check_orders
+        .into_iter()
+        .map(|c| {
+            let mut m = serde_json::Map::new();
+            m.insert(
+                jkey_from(entries, "key_check_id"),
+                serde_json::json!(c.check_id),
+            );
+            m.insert(
+                jkey_from(entries, "wire_key_outcome"),
+                jstr_from(entries, check_outcome_slot(c.outcome)),
+            );
+            serde_json::Value::Object(m)
+        })
+        .collect()
+}
+
+fn render_control_soft_refusal_wire_json_from(
+    entries: &[WordingEntry],
+    preview: &WhatIfPreview,
+) -> Option<String> {
+    let refused =
+        build_refused_market_action_wire_items_from(entries, &preview.refused_market_actions);
+    let ineligible_checks = build_check_order_wire_items_from(
+        entries,
+        preview
+            .check_orders
+            .iter()
+            .filter(|c| c.outcome == PublicCheckOutcome::IneligibleOrIgnored),
+    );
+    if refused.is_empty() && ineligible_checks.is_empty() {
+        return None;
+    }
+    let mut root = serde_json::Map::new();
+    root.insert(
+        jkey_from(entries, "wire_key_status"),
+        jstr_from(entries, "wire_status_refused"),
+    );
+    if !refused.is_empty() {
+        root.insert(
+            jkey_from(entries, "wire_key_refused_market_actions"),
+            serde_json::Value::Array(refused),
+        );
+    }
+    if !ineligible_checks.is_empty() {
+        root.insert(
+            jkey_from(entries, "wire_key_check_orders"),
+            serde_json::Value::Array(ineligible_checks),
+        );
+    }
+    Some(serde_json::Value::Object(root).to_string())
+}
+
 /// Relay-owned wire adapter around [`WhatIfPreview`] (`Card 7`, design `B8`).
 ///
 /// Never serializes `league-core` preview structs directly onto the wire: every JSON key,
@@ -3219,24 +3308,10 @@ impl AiPreviewWireOutput {
             )
         };
 
-        let refused: Vec<serde_json::Value> = preview
-            .refused_market_actions
-            .iter()
-            .map(|r| {
-                let (code_slot, reason_slot) = engine_error_slots_for_code(&r.error_code);
-                let mut m = serde_json::Map::new();
-                m.insert(
-                    jkey("wire_key_action_index"),
-                    serde_json::json!(r.action_index),
-                );
-                m.insert(jkey("wire_key_error_code"), jstr(code_slot));
-                m.insert(
-                    jkey("wire_key_reason"),
-                    serde_json::Value::String(preview_wording_slot(reason_slot)),
-                );
-                serde_json::Value::Object(m)
-            })
-            .collect();
+        let refused = build_refused_market_action_wire_items_from(
+            PREVIEW_ARM_WORDING,
+            &preview.refused_market_actions,
+        );
 
         let converters: Vec<serde_json::Value> = preview
             .converter_orders
@@ -3289,19 +3364,7 @@ impl AiPreviewWireOutput {
             })
             .collect();
 
-        let checks: Vec<serde_json::Value> = preview
-            .check_orders
-            .iter()
-            .map(|c| {
-                let mut m = serde_json::Map::new();
-                m.insert(jkey("key_check_id"), serde_json::json!(c.check_id));
-                m.insert(
-                    jkey("wire_key_outcome"),
-                    jstr(check_outcome_slot(c.outcome)),
-                );
-                serde_json::Value::Object(m)
-            })
-            .collect();
+        let checks = build_check_order_wire_items_from(PREVIEW_ARM_WORDING, &preview.check_orders);
 
         let escrows: Vec<serde_json::Value> = preview
             .escrow_orders
@@ -3552,8 +3615,12 @@ fn execute_tool_call_with_preview(
             if return_projection {
                 AiPreviewWireOutput::from_what_if_preview(&preview).to_json_string()
             } else {
+                let reply = render_control_soft_refusal_wire_json_from(entries, &preview)
+                    .unwrap_or_else(|| {
+                        render_preview_wording_slot_from(entries, "control_fixed_reply")
+                    });
                 drop(preview);
-                render_preview_wording_slot_from(entries, "control_fixed_reply")
+                reply
             }
         }
         Err(err) => render_engine_refusal_wire_json_from(entries, err.code()),
@@ -3575,9 +3642,9 @@ pub fn execute_preview_tool_call(
     )
 }
 
-/// Evaluate `draft_turn_orders` arguments through [`preview_seat_bundle`] legality checks without
-/// exposing any simulation or projection fields: returns pinned refusal wire JSON on engine refusal,
-/// or the pinned `control_fixed_reply` string on pass.
+/// Evaluate `draft_turn_orders` arguments through [`preview_seat_bundle`], discarding all
+/// projection and simulation outcomes while reporting bundle structure errors, refused market
+/// actions, and ineligible checks, or the pinned `control_fixed_reply` string on clean pass.
 #[must_use]
 pub fn execute_control_tool_call(
     preview_state: &PublicPreviewState,

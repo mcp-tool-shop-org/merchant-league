@@ -17390,7 +17390,7 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
         ],
     },
     // Row 9 (Control arm `v2_control_2026_11_22_r2`): keeps all 24 neutral paths identical to Row 5
-    // and seals the 4 control r2 paths covering all 169 `CONTROL_ARM_WORDING` entries.
+    // and seals the 4 control r2 paths covering all 174 `CONTROL_ARM_WORDING` entries.
     ArmRenderHistoryRow {
         arm: "v2_control_2026_11_22_r2",
         path_digests: &[
@@ -17495,7 +17495,7 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
             (
                 "control_wire_all_refusal_and_limit_codes",
-                0x302bad582a2a285d9991e6478dbf2a24,
+                0x70e63c6e1bf04d6e7ac606631ccdaf86,
             ),
         ],
     },
@@ -17544,7 +17544,7 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     ),
     (
         "v2_control_2026_11_22_r2",
-        0xe65896ce1d1ad2ec19932fb80c2dc6c7,
+        0x8c24e38f15e72300348fc2b85fb5d346,
     ),
 ];
 
@@ -24441,6 +24441,40 @@ fn control_all_refusals_wire_json_array() -> Result<String, Box<dyn Error>> {
     entries.push(serde_json::from_str(
         &render_control_engine_refusal_wire_json("SEASON_ENDED"),
     )?);
+    let mut soft_refusal_state = TurnEngine::new(TableSpec::standard_chiral_ring(
+        TableId(0xC047_2026_1124),
+        4,
+        1,
+    )?)?
+    .observe_seat(Seat(0))?
+    .to_public_preview_state();
+    soft_refusal_state.checks.insert(
+        901,
+        league_core::CreditCheck {
+            check_id: 901,
+            drawer: 1,
+            payee: 1,
+            asset: AssetId::Cred,
+            send_max: 100,
+            deliver_min: 100,
+            due_turn: 1,
+            expiration_turn: 5,
+            status: league_core::CheckStatus::Open,
+        },
+    );
+    let soft_refusal_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": {
+            "check_cashes": [901]
+        }
+    })
+    .to_string();
+    let soft_refusal_reply = execute_control_tool_call(&soft_refusal_state, &soft_refusal_args);
+    entries.push(serde_json::from_str(&soft_refusal_reply)?);
     Ok(serde_json::Value::Array(entries).to_string())
 }
 
@@ -32537,10 +32571,10 @@ fn play_mode_on_arm_reproduces_committed_golden_set_byte_for_byte() -> TestResul
 // ============================================================================
 
 #[test]
-fn control_arm_row9_sealed_all_169_whole_token_mutations_fail_and_prior_rows_intact() -> TestResult
+fn control_arm_row9_sealed_all_174_whole_token_mutations_fail_and_prior_rows_intact() -> TestResult
 {
     let live_paths = render_all_control_arm_guard_paths()?;
-    assert_eq!(CONTROL_ARM_WORDING.len(), 169);
+    assert_eq!(CONTROL_ARM_WORDING.len(), 174);
 
     // Rows 5 (r6), 6 (r1), 7 (r2), and 8 (control r1) remain untouched alongside new Row 9 (control r2).
     assert_eq!(ARM_RENDER_PATH_HISTORY[5].arm, ACTIVE_WORDING_ARM);
@@ -32577,7 +32611,7 @@ fn control_arm_row9_sealed_all_169_whole_token_mutations_fail_and_prior_rows_int
         &live_paths,
     )?;
 
-    // Whole-JSON-string-token 1-char mutation failure across ALL 169 entries of CONTROL_ARM_WORDING.
+    // Whole-JSON-string-token 1-char mutation failure across ALL 174 entries of CONTROL_ARM_WORDING.
     for entry in CONTROL_ARM_WORDING {
         let needle = control_wording_slot(entry.slot);
         let last_ch = needle.chars().last().ok_or("empty control slot")?;
@@ -32621,7 +32655,7 @@ fn control_arm_row9_sealed_all_169_whole_token_mutations_fail_and_prior_rows_int
 
         let (path_idx, path_name, mutated_body) = found.ok_or_else(|| {
             format!(
-                "CONTROL_ARM_WORDING slot '{}' ('{}') not found in any Row 8 control path",
+                "CONTROL_ARM_WORDING slot '{}' ('{}') not found in any Row 9 control path",
                 entry.slot, needle
             )
         })?;
@@ -32634,7 +32668,7 @@ fn control_arm_row9_sealed_all_169_whole_token_mutations_fail_and_prior_rows_int
             &cloned,
         ) else {
             return Err(format!(
-                "1-char mutation of control slot '{}' in path '{path_name}' must fail Row 8 seal",
+                "1-char mutation of control slot '{}' in path '{path_name}' must fail Row 9 seal",
                 entry.slot
             )
             .into());
@@ -32662,7 +32696,7 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_only
 
     assert_eq!(CONTROL_WORDING_ARM, "v2_control_2026_11_22_r2");
     assert_eq!(PreviewToolMode::Control.wording_arm(), CONTROL_WORDING_ARM);
-    assert_eq!(CONTROL_ARM_WORDING.len(), 169);
+    assert_eq!(CONTROL_ARM_WORDING.len(), 174);
     assert_eq!(PREVIEW_ARM_WORDING_R2.len(), 250);
 
     let r2_map: std::collections::BTreeMap<&str, &str> = PREVIEW_ARM_WORDING_R2
@@ -32703,7 +32737,7 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_only
         ]
     );
     assert_eq!(added_control, vec!["control_fixed_reply"]);
-    assert_eq!(unchanged_shared, 163);
+    assert_eq!(unchanged_shared, 168);
 
     assert_eq!(
         control_wording_template("preview_tool_name"),
@@ -32739,7 +32773,7 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_only
         .copied()
         .filter(|s| s.starts_with("preview_code_") || s.starts_with("preview_err_"))
         .collect();
-    assert_eq!(projection_omitted.len(), 82);
+    assert_eq!(projection_omitted.len(), 77);
     assert_eq!(rule_refusal_omitted.len(), 0);
     assert_eq!(omitted_from_r2.len(), projection_omitted.len());
 
@@ -34431,5 +34465,427 @@ fn control_arm_r2_legal_draft_returns_exact_r2_fixed_reply_without_preview_field
             "control reply leaked preview field '{forbidden}': {tool_msg}"
         );
     }
+    Ok(())
+}
+
+// ============================================================================
+// Control arm (`v2_control_2026_11_22_r2`) soft-refusal parity (`control_arm_r2_fix1_*`)
+// ============================================================================
+
+const CONTROL_FIX1_FORBIDDEN_PROJECTION_KEYS: &[&str] = &[
+    "pre_seat_state",
+    "post_market_seat_state",
+    "post_sweep_seat_state",
+    "converter_orders",
+    "project_orders",
+    "swap_orders",
+    "escrow_orders",
+    "public_fills",
+    "post_sweep_predicates",
+    "step0_to_7",
+    "after_market",
+    "after_sweep",
+    "ending_cred",
+    "close_mark_caveat",
+    "seat_upkeep",
+    "spoilage",
+];
+
+fn assert_control_reply_has_no_projection_fields(raw_reply: &str) {
+    for forbidden in CONTROL_FIX1_FORBIDDEN_PROJECTION_KEYS {
+        assert!(
+            !raw_reply.contains(forbidden),
+            "control reply leaked projection/simulation key `{forbidden}`: {raw_reply}"
+        );
+    }
+}
+
+fn control_fix1_state_with_checks(table_seed: u64) -> Result<PublicPreviewState, Box<dyn Error>> {
+    let mut state = TurnEngine::new(TableSpec::standard_chiral_ring(TableId(table_seed), 4, 1)?)?
+        .observe_seat(Seat(0))?
+        .to_public_preview_state();
+    // Non-payee check (seat 1 is payee, seat 0 presents -> NotEligibleOrIgnored).
+    state.checks.insert(
+        901,
+        league_core::CreditCheck {
+            check_id: 901,
+            drawer: 2,
+            payee: 1,
+            asset: AssetId::Cred,
+            send_max: 250,
+            deliver_min: 100,
+            due_turn: 1,
+            expiration_turn: 5,
+            status: league_core::CheckStatus::Open,
+        },
+    );
+    // Premature check (due_turn = 3 > turn = 1 -> NotEligibleOrIgnored).
+    state.checks.insert(
+        902,
+        league_core::CreditCheck {
+            check_id: 902,
+            drawer: 1,
+            payee: 0,
+            asset: AssetId::Cred,
+            send_max: 250,
+            deliver_min: 100,
+            due_turn: 3,
+            expiration_turn: 5,
+            status: league_core::CheckStatus::Open,
+        },
+    );
+    // Eligible bounced check (payee = 0, due_turn = 1, deliver_min > drawer free CRED -> Bounced).
+    state.checks.insert(
+        903,
+        league_core::CreditCheck {
+            check_id: 903,
+            drawer: 1,
+            payee: 0,
+            asset: AssetId::Cred,
+            send_max: 999_999_999,
+            deliver_min: 999_999_999,
+            due_turn: 1,
+            expiration_turn: 5,
+            status: league_core::CheckStatus::Open,
+        },
+    );
+    Ok(state)
+}
+
+#[test]
+fn control_arm_r2_fix1_illegal_market_action_matches_on_bytes() -> TestResult {
+    let state = control_fix1_state_with_checks(0xC047_2026_1201)?;
+    let args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": {}
+    })
+    .to_string();
+
+    let ctrl_raw = execute_control_tool_call(&state, &args);
+    let on_raw = execute_preview_tool_call(&state, &args);
+    assert_control_reply_has_no_projection_fields(&ctrl_raw);
+
+    let ctrl_val: Json = serde_json::from_str(&ctrl_raw)?;
+    let on_val: Json = serde_json::from_str(&on_raw)?;
+    let ctrl_obj = ctrl_val
+        .as_object()
+        .ok_or("control reply must be JSON object")?;
+    assert_eq!(
+        ctrl_obj.len(),
+        2,
+        "unexpected keys in market-only control reply: {ctrl_raw}"
+    );
+    assert_eq!(ctrl_val["status"], json!("refused"));
+    assert_eq!(ctrl_val.get("check_orders"), None);
+    let ctrl_list = ctrl_val["refused_market_actions"]
+        .as_array()
+        .ok_or("missing refused_market_actions")?;
+    assert_eq!(ctrl_list.len(), 1);
+    assert_eq!(
+        ctrl_val["refused_market_actions"],
+        on_val["refused_market_actions"]
+    );
+    assert_eq!(
+        serde_json::to_string(&ctrl_val["refused_market_actions"])?,
+        serde_json::to_string(&on_val["refused_market_actions"])?
+    );
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_fix1_ineligible_checks_match_on_bytes() -> TestResult {
+    let state = control_fix1_state_with_checks(0xC047_2026_1202)?;
+    let args = json!({
+        "market_actions": [],
+        "bundle": {
+            "check_cashes": [901, 902, 903]
+        }
+    })
+    .to_string();
+
+    let ctrl_raw = execute_control_tool_call(&state, &args);
+    let on_raw = execute_preview_tool_call(&state, &args);
+    assert_control_reply_has_no_projection_fields(&ctrl_raw);
+
+    let ctrl_val: Json = serde_json::from_str(&ctrl_raw)?;
+    let on_val: Json = serde_json::from_str(&on_raw)?;
+    let ctrl_obj = ctrl_val
+        .as_object()
+        .ok_or("control reply must be JSON object")?;
+    assert_eq!(
+        ctrl_obj.len(),
+        2,
+        "unexpected keys in check-only control reply: {ctrl_raw}"
+    );
+    assert_eq!(ctrl_val["status"], json!("refused"));
+    assert_eq!(ctrl_val.get("refused_market_actions"), None);
+
+    // Control reports ONLY `ineligible_or_ignored` (901 non-payee + 902 premature), NOT bounced (903).
+    let expected_ineligible: Vec<Json> = on_val["check_orders"]
+        .as_array()
+        .ok_or("on missing check_orders")?
+        .iter()
+        .filter(|entry| entry["outcome"] == json!("ineligible_or_ignored"))
+        .cloned()
+        .collect();
+    assert_eq!(expected_ineligible.len(), 2);
+    assert_eq!(
+        ctrl_val["check_orders"],
+        Json::Array(expected_ineligible.clone())
+    );
+    assert_eq!(
+        serde_json::to_string(&ctrl_val["check_orders"])?,
+        serde_json::to_string(&expected_ineligible)?
+    );
+    assert_eq!(on_val["check_orders"][2]["check_id"], json!(903));
+    assert_eq!(on_val["check_orders"][2]["outcome"], json!("bounced"));
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_fix1_combined_soft_refusal_and_end_to_end_turn_match_on() -> TestResult {
+    let state = control_fix1_state_with_checks(0xC047_2026_1203)?;
+    let market_only_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": {}
+    })
+    .to_string();
+    let check_only_args = json!({
+        "market_actions": [],
+        "bundle": { "check_cashes": [901, 902] }
+    })
+    .to_string();
+    let both_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": { "check_cashes": [901, 902, 903] }
+    })
+    .to_string();
+
+    let ex_market = execute_control_tool_call(&state, &market_only_args);
+    let ex_check = execute_control_tool_call(&state, &check_only_args);
+    let ex_both = execute_control_tool_call(&state, &both_args);
+    eprintln!("CONTROL_FIX1_EXAMPLE_MARKET_ONLY={ex_market}");
+    eprintln!("CONTROL_FIX1_EXAMPLE_CHECK_ONLY={ex_check}");
+    eprintln!("CONTROL_FIX1_EXAMPLE_BOTH={ex_both}");
+
+    for raw in [&ex_market, &ex_check, &ex_both] {
+        assert_control_reply_has_no_projection_fields(raw);
+    }
+
+    let both_ctrl: Json = serde_json::from_str(&ex_both)?;
+    let both_on: Json = serde_json::from_str(&execute_preview_tool_call(&state, &both_args))?;
+    let both_obj = both_ctrl
+        .as_object()
+        .ok_or("both reply must be JSON object")?;
+    assert_eq!(
+        both_obj.len(),
+        3,
+        "unexpected keys in combined control reply: {ex_both}"
+    );
+    assert_eq!(both_ctrl["status"], json!("refused"));
+    assert_eq!(
+        both_ctrl["refused_market_actions"],
+        both_on["refused_market_actions"]
+    );
+    let expected_on_ineligible: Vec<Json> = both_on["check_orders"]
+        .as_array()
+        .ok_or("on check_orders")?
+        .iter()
+        .filter(|c| c["outcome"] == json!("ineligible_or_ignored"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        both_ctrl["check_orders"],
+        Json::Array(expected_on_ineligible)
+    );
+
+    // Also verify end-to-end `run_turn` with `PreviewToolMode::Control` vs `PreviewToolMode::On`.
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "CONTROL_FIX1_E2E_WRAPPER")?;
+
+    let mut tool_msgs_by_mode = Vec::new();
+    for (label, mode, tool_name) in [
+        ("control", PreviewToolMode::Control, "draft_turn_orders"),
+        ("on", PreviewToolMode::On, "preview_turn_orders"),
+    ] {
+        let srv = LoopbackOpenAiServer::start_with_tokenizer(
+            vec![
+                MockHttpStep::Json {
+                    status: 200,
+                    delay: Duration::from_millis(1),
+                    body: card7_tool_call_response_body("c_1", tool_name, &both_args, None),
+                },
+                MockHttpStep::Json {
+                    status: 200,
+                    delay: Duration::from_millis(1),
+                    body: local_completion_body(
+                        r#"{"messages":[],"market_actions":[],"bundle":{}}"#,
+                        "Qwen/Qwen3-14B",
+                        24,
+                        6,
+                        None,
+                        None,
+                    ),
+                },
+            ],
+            TokenizeBehavior::WordCount,
+        )?;
+        let seats_path = tmp.path().join(format!("seats_{label}.json"));
+        write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+        let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
+        let g = tmp.path().join(format!("g_{label}"));
+        write_to_seat(&g, "01", "act", "Saltworks", "CONTROL_FIX1_BOARD")?;
+        write_card7_preview_state(&g, "01", "Saltworks", &state)?;
+        let cfg = TurnConfig::new(
+            g,
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper.clone()),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_preview_tool(mode)
+        .with_eval_mode(true);
+        let tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+        let summary = run_turn(&cfg, &tx, None)?;
+        assert!(summary.all_clean(), "{label} turn failed");
+        let reqs = srv.recorded_requests()?;
+        assert_eq!(reqs.len(), 2);
+        let req1: Json = serde_json::from_str(&reqs[1].body)?;
+        let tool_msg = req1["messages"]
+            .as_array()
+            .ok_or("messages")?
+            .iter()
+            .find(|m| m["role"] == json!("tool"))
+            .and_then(|m| m["content"].as_str())
+            .ok_or("missing role=tool")?
+            .to_owned();
+        tool_msgs_by_mode.push(tool_msg);
+    }
+
+    assert_eq!(tool_msgs_by_mode[0], ex_both);
+    let ctrl_wire: Json = serde_json::from_str(&tool_msgs_by_mode[0])?;
+    let on_wire: Json = serde_json::from_str(&tool_msgs_by_mode[1])?;
+    assert_eq!(
+        ctrl_wire["refused_market_actions"],
+        on_wire["refused_market_actions"]
+    );
+    let on_inelig: Vec<Json> = on_wire["check_orders"]
+        .as_array()
+        .ok_or("on wire check_orders")?
+        .iter()
+        .filter(|c| c["outcome"] == json!("ineligible_or_ignored"))
+        .cloned()
+        .collect();
+    assert_eq!(ctrl_wire["check_orders"], Json::Array(on_inelig));
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_fix1_unmatched_swap_and_bounced_check_return_fixed_reply() -> TestResult {
+    let mut state = control_fix1_state_with_checks(0xC047_2026_1204)?;
+    for raw in &mut state.seats[0].raw {
+        *raw = (*raw).max(2_000);
+    }
+    let args = json!({
+        "market_actions": [],
+        "bundle": {
+            "atomic_swaps": [{
+                "swap_id": 77,
+                "maker_seat": 0,
+                "taker_seat": 1,
+                "maker_asset": { "asset_kind": "raw", "good_index": 0 },
+                "maker_amount": 10,
+                "taker_asset": { "asset_kind": "cred" },
+                "taker_amount": 50
+            }],
+            "check_cashes": [903],
+            "converter_runs": [{ "recipe_idx": 0, "runs": 50 }],
+            "escrow_finishes": [{ "escrow_id": 999, "preimage": null }]
+        }
+    })
+    .to_string();
+
+    let ctrl_raw = execute_control_tool_call(&state, &args);
+    let on_raw = execute_preview_tool_call(&state, &args);
+    assert_eq!(ctrl_raw, control_wording_slot("control_fixed_reply"));
+    assert_control_reply_has_no_projection_fields(&ctrl_raw);
+    assert!(serde_json::from_str::<Json>(&ctrl_raw).is_err());
+
+    // Confirm `on` saw the simulation-only outcomes that `control` withheld.
+    let on_val: Json = serde_json::from_str(&on_raw)?;
+    assert_eq!(
+        on_val["swap_orders"][0]["outcome"],
+        json!("unmatched_or_insufficient")
+    );
+    assert_eq!(on_val["check_orders"][0]["outcome"], json!("bounced"));
+    assert_eq!(on_val["converter_orders"][0]["clamped"], json!(true));
+    assert_eq!(on_val["escrow_orders"][0]["unlocked"], json!(false));
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_fix1_all_emitted_soft_refusal_tokens_are_pinned_and_r1_unchanged() -> TestResult {
+    let state = control_fix1_state_with_checks(0xC047_2026_1205)?;
+    let market_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": {}
+    })
+    .to_string();
+    let check_args = json!({
+        "market_actions": [],
+        "bundle": { "check_cashes": [901, 902] }
+    })
+    .to_string();
+    let both_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 9_999_999
+        }],
+        "bundle": { "check_cashes": [901, 902, 903] }
+    })
+    .to_string();
+
+    let allowed: std::collections::HashSet<String> = CONTROL_ARM_WORDING
+        .iter()
+        .map(|e| e.shown_text.to_owned())
+        .collect();
+    for args in [&market_args, &check_args, &both_args] {
+        let raw = execute_control_tool_call(&state, args);
+        assert_control_reply_has_no_projection_fields(&raw);
+        let val: Json = serde_json::from_str(&raw)?;
+        let mut tokens = Vec::new();
+        collect_all_wire_keys_and_strings(&val, &mut tokens);
+        assert!(!tokens.is_empty());
+        for tok in tokens {
+            assert!(
+                allowed.contains(&tok),
+                "unpinned control soft-refusal token `{tok}` in {raw}"
+            );
+        }
+    }
+
+    assert_eq!(CONTROL_WORDING_ARM_R1, "v2_control_2026_11_21_r1");
+    assert_eq!(CONTROL_ARM_WORDING_R1.len(), 147);
     Ok(())
 }
