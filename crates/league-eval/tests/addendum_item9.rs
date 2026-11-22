@@ -14,20 +14,61 @@ use league_core::{
     AssetId, EvalActSubmission, EvalHost, MarketAction, OfferProposal, OfferSide, Seat, TableId,
 };
 use league_eval::{
-    BranchOptions, BranchSummary, EVAL_MESSAGES_MAX_ITEMS, EVAL_REPLY_WORDING,
-    EVAL_REPLY_WORDING_ARM, EVAL_SEAT_VIEW_SERIALIZER_NAME, EvalArm, EvalDecisionRecord, EvalError,
-    EvalManifest, EvalSetupFile, PASS_B_LIMIT_STATEMENT, PlayOptions, ReplyRefusalCode,
-    WrongPartCounter, build_act_negotiation_inputs, build_eval_response_format_config,
-    eval_internal_slot_names, eval_wording_slot, execute_cli, parse_eval_act_reply,
-    parse_eval_talk_reply, persist_eval_game_state, render_seat_view_markdown,
-    run_branch_with_transport, run_play_with_transport, validate_eval_seats_file,
+    BranchOptions, BranchSummary, CRATE_GIT_SHA, CrateGitShaSource, EVAL_MESSAGES_MAX_ITEMS,
+    EVAL_REPLY_WORDING, EVAL_REPLY_WORDING_ARM, EVAL_SEAT_VIEW_SERIALIZER_NAME, EvalArm,
+    EvalDecisionRecord, EvalError, EvalManifest, EvalSetupFile, PASS_B_LIMIT_STATEMENT,
+    PlayOptions, ReplyRefusalCode, WrongPartCounter, build_act_negotiation_inputs,
+    build_eval_response_format_config, eval_internal_slot_names, eval_wording_slot,
+    execute_cli_with_git_sha, parse_eval_act_reply, parse_eval_talk_reply, persist_eval_game_state,
+    render_seat_view_markdown, run_branch_with_transport_and_git_sha,
+    run_play_with_transport_and_git_sha, validate_eval_seats_file,
 };
 use league_relay::{
-    CallLogEntry, MemoryMode, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
-    SeatFile, Transport, TransportError, build_preview_turn_orders_tool_definition,
+    ApiKey, CallLogEntry, MemoryMode, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse,
+    Round, SeatFile, Transport, TransportError, build_preview_turn_orders_tool_definition,
     preview_wording_slot, sha256_hex, wording_slot,
 };
 use serde_json::json;
+
+const TEST_FALLBACK_GIT_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn test_git_sha_source() -> CrateGitShaSource<'static> {
+    let built_sha =
+        if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+            CRATE_GIT_SHA
+        } else {
+            TEST_FALLBACK_GIT_SHA
+        };
+    CrateGitShaSource::Injected {
+        built_sha,
+        live_head: Some(built_sha),
+        is_dirty: Some(false),
+    }
+}
+
+fn run_play_with_transport(
+    opts: &PlayOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<EvalManifest, EvalError> {
+    run_play_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
+
+#[allow(dead_code)]
+fn run_branch_with_transport(
+    opts: &BranchOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<Vec<league_eval::BranchArmOutcome>, EvalError> {
+    run_branch_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
+
+fn execute_cli<I>(args: I, stdout: &mut dyn std::io::Write, stderr: &mut dyn std::io::Write) -> i32
+where
+    I: IntoIterator<Item = std::ffi::OsString>,
+{
+    execute_cli_with_git_sha(args, stdout, stderr, &test_git_sha_source())
+}
 
 fn must_ok<T, E: Display>(res: Result<T, E>, ctx: &str) -> T {
     match res {

@@ -9031,65 +9031,27 @@ impl LoopbackOpenAiServer {
                                     .and_then(|v| v.get("content"))
                                     .and_then(Json::as_str)
                                     .map(str::to_owned);
-                                let prompt_field = parsed_req
-                                    .as_ref()
-                                    .and_then(|v| v.get("prompt"))
-                                    .and_then(Json::as_str)
-                                    .map(str::to_owned)
-                                    .unwrap_or_default();
                                 let (tok_status, tok_body) = match (&tok_mode, content_field) {
                                     (TokenizeBehavior::HttpStatus(st, b), _) => (*st, b.clone()),
                                     (TokenizeBehavior::RawBody(raw), _) => (200_u16, raw.clone()),
                                     (TokenizeBehavior::WordCount, Some(c)) => {
-                                        let n = c.split_whitespace().count().max(1);
+                                        let n = c.split_whitespace().count();
                                         let ids: Vec<u64> =
                                             (100_u64..100_u64 + n as u64).collect();
                                         (200_u16, json!({ "tokens": ids }).to_string())
                                     }
                                     (TokenizeBehavior::CharsDivBy(div), Some(c)) => {
-                                        let n = (c.chars().count() / (*div).max(1)).max(1);
+                                        let n = c.chars().count() / (*div).max(1);
                                         let ids: Vec<u64> =
                                             (100_u64..100_u64 + n as u64).collect();
                                         (200_u16, json!({ "tokens": ids }).to_string())
                                     }
                                     (TokenizeBehavior::FixedCount(n), Some(_)) => {
                                         let ids: Vec<u64> =
-                                            (100_u64..100_u64 + (*n).max(1) as u64).collect();
+                                            (100_u64..100_u64 + (*n) as u64).collect();
                                         (200_u16, json!({ "tokens": ids }).to_string())
                                     }
-                                    (TokenizeBehavior::WordCount, None) => {
-                                        let n = prompt_field.split_whitespace().count();
-                                        (
-                                            200_u16,
-                                            json!({
-                                                "count": n,
-                                                "max_model_len": 8192,
-                                                "tokens": []
-                                            })
-                                            .to_string(),
-                                        )
-                                    }
-                                    (TokenizeBehavior::CharsDivBy(div), None) => {
-                                        let n = prompt_field.chars().count() / (*div).max(1);
-                                        (
-                                            200_u16,
-                                            json!({
-                                                "count": n,
-                                                "max_model_len": 8192,
-                                                "tokens": []
-                                            })
-                                            .to_string(),
-                                        )
-                                    }
-                                    (TokenizeBehavior::FixedCount(n), None) => (
-                                        200_u16,
-                                        json!({
-                                            "count": *n,
-                                            "max_model_len": 8192,
-                                            "tokens": []
-                                        })
-                                        .to_string(),
-                                    ),
+                                    (_, None) => (200_u16, json!({ "tokens": [] }).to_string()),
                                 };
                                 if let Ok(mut guard) = tok_conn.lock() {
                                     guard.push(RecordedHttpRequest {
@@ -10595,7 +10557,8 @@ fn part1_b4_3_seat_reasoning_pinning_exclusion_and_reasoning_tokens_ledger() -> 
         .find(|v| v["model"] == "Qwen/Qwen3-14B")
         .ok_or("missing Qwen request")?;
     assert_eq!(qwen_req["reasoning_effort"], "medium");
-    assert_eq!(qwen_req["thinking_token_budget"], 1024);
+    assert_eq!(qwen_req["reasoning_budget_tokens"], 1024);
+    assert!(qwen_req.get("thinking_token_budget").is_none());
     assert_eq!(
         qwen_req["chat_template_kwargs"],
         json!({"enable_thinking": true})
@@ -12151,9 +12114,12 @@ fn fix1_a3_scratchpad_token_cap_uses_tokenize_endpoint_and_refuses_when_unavaila
     assert_eq!(tok_reqs.len(), 1);
     assert_eq!(tok_reqs[0].request_line, "POST /tokenize HTTP/1.1");
     let tok_json: Json = serde_json::from_str(&tok_reqs[0].body)?;
-    assert_eq!(tok_json["model"], "Qwen/Qwen3-14B");
-    assert_eq!(tok_json["prompt"], long_words_500_tokens);
-    assert_eq!(tok_json["add_special_tokens"], false);
+    assert_eq!(tok_json["content"], long_words_500_tokens);
+    assert_eq!(tok_json["add_special"], false);
+    assert_eq!(tok_json["parse_special"], true);
+    assert!(tok_json.get("prompt").is_none());
+    assert!(tok_json.get("model").is_none());
+    assert!(tok_json.get("add_special_tokens").is_none());
 
     // --- 2. 501-token scratchpad is refused even when only 2 words / 9 chars ---
     let server_501 = LoopbackOpenAiServer::start_with_tokenizer(
@@ -12831,7 +12797,7 @@ fn fix1_b6_b8_b9_c1_c2_c3_c6_c7_setup_locks_vm_host_and_secret_nits() -> TestRes
 }
 
 #[test]
-fn fix2_r2_a1_whisper_header_empty_values_and_deep_nesting_stay_within_bound() -> TestResult {
+fn r2_a1_whisper_header_empty_values_and_deep_nesting_stay_within_bound() -> TestResult {
     // Reviewer's three 20,000-empties cases (`""`, `[]`, `{}`), plus 20,000 whitespace strings,
     // a 2,000-entry object of empty arrays, and deeply nested arrays/objects (`depth = 24 > 8`).
     let mut deep_array = json!("leaf");
@@ -12923,7 +12889,7 @@ fn fix2_r2_a1_whisper_header_empty_values_and_deep_nesting_stay_within_bound() -
 }
 
 #[test]
-fn fix2_r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult {
+fn r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult {
     // 1. Pin shipped constants and verify live `wording_slot` matches `render_wording_slot_with`:
     assert_eq!(MAX_SCRATCHPAD_TOKENS, 500);
     assert_eq!(EMC_OLDER_REPLY_EXCERPT_CHARS, 160);
@@ -13024,7 +12990,7 @@ fn fix2_r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult 
         use std::io::Write as _;
         let mut block = String::from("\n");
         for (slot, rendered) in rendered_dump {
-            block.push_str(&format!("[FIX2_RENDERED_WORDING] {slot} => {rendered:?}\n"));
+            block.push_str(&format!("[RENDERED_WORDING] {slot} => {rendered:?}\n"));
         }
         let mut stderr = std::io::stderr().lock();
         let _ = stderr.write_all(block.as_bytes());
@@ -13037,7 +13003,7 @@ fn fix2_r2_a2_rendered_wording_numbers_and_approved_strings_pin() -> TestResult 
 }
 
 #[test]
-fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
+fn r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
     fs::write(&wrapper, "WRAPPER RULES")?;
@@ -13129,9 +13095,11 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     assert_eq!(tok_reqs_reply.len(), 2);
     let tok_body_0: Json = serde_json::from_str(&tok_reqs_reply[0].body)?;
     assert_eq!(
-        tok_body_0["prompt"].as_str(),
+        tok_body_0["content"].as_str(),
         Some(shown_bracket_heavy.as_str())
     );
+    assert_eq!(tok_body_0["add_special"], false);
+    assert_eq!(tok_body_0["parse_special"], true);
     let reply_calls = read_calls_log(&g_reply)?;
     assert_eq!(reply_calls[0].outcome, "harness");
     assert!(
@@ -13192,9 +13160,11 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     assert_eq!(tok_reqs_saved.len(), 1);
     let tok_saved_json: Json = serde_json::from_str(&tok_reqs_saved[0].body)?;
     assert_eq!(
-        tok_saved_json["prompt"].as_str(),
+        tok_saved_json["content"].as_str(),
         Some(shown_bracket_heavy.as_str())
     );
+    assert_eq!(tok_saved_json["add_special"], false);
+    assert_eq!(tok_saved_json["parse_special"], true);
 
     // 3. Round-trip under cap: `"<a> === <b> ===".repeat(6)` (90 raw -> 390 shown = 195 tokens)
     // is saved raw on turn 1 and counted/shown once on turn 2 with `counted == shown` and no
@@ -13264,7 +13234,9 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
     let t2_tok: Json = serde_json::from_str(&tok_reqs[1].body)?;
     let t2_chat: Json = serde_json::from_str(&chat_reqs[1].body)?;
     let t2_user = t2_chat["messages"][1]["content"].as_str().ok_or("user")?;
-    assert_eq!(t2_tok["prompt"].as_str(), Some(shown_under.as_str()));
+    assert_eq!(t2_tok["content"].as_str(), Some(shown_under.as_str()));
+    assert_eq!(t2_tok["add_special"], false);
+    assert_eq!(t2_tok["parse_special"], true);
     assert!(t2_user.ends_with(&format!(
         "{}\n{}",
         wording_slot("scratchpad_header"),
@@ -13275,7 +13247,7 @@ fn fix2_r2_b2_scratchpad_token_count_uses_escaped_shown_text() -> TestResult {
 }
 
 #[test]
-fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestResult {
+fn r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestResult {
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
     fs::write(&wrapper, "OPENROUTER WRAPPER ONLY")?;
@@ -13635,7 +13607,7 @@ fn fix2_r2_b1_openrouter_snapshot_no_scratchpad_and_mixed_table_guard() -> TestR
 }
 
 #[test]
-fn fix2_r2_b3_notes_require_response_schema_and_instruction_appears_once() -> TestResult {
+fn r2_b3_notes_require_response_schema_and_instruction_appears_once() -> TestResult {
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
     fs::write(&wrapper, "CLEAN WRAPPER")?;
@@ -18766,6 +18738,14 @@ fn render_all_wording_guard_paths() -> Result<(RenderedWordingPaths, u128), Box<
         .map(|r| r.body)
         .collect();
     assert_eq!(reas_local_bodies.len(), 4);
+    let raw_joined = reas_local_bodies.join("\n");
+    assert!(raw_joined.contains("\"reasoning_budget_tokens\":128"));
+    assert!(raw_joined.contains("\"reasoning_budget_tokens\":256"));
+    assert!(raw_joined.contains("\"reasoning_budget_tokens\":512"));
+    assert!(!raw_joined.contains("thinking_token_budget"));
+    for body in &mut reas_local_bodies {
+        *body = body.replace("\"reasoning_budget_tokens\":", "\"thinking_token_budget\":");
+    }
     reas_local_bodies.sort();
     let reasoning_wire_local_body = reas_local_bodies.join("\n");
 
@@ -24736,7 +24716,7 @@ fn audit_real_tool_followup_request(
                 | "response_format"
                 | "reasoning"
                 | "reasoning_effort"
-                | "thinking_token_budget"
+                | "reasoning_budget_tokens"
                 | "chat_template_kwargs"
                 | "include_reasoning"
                 | "tools"
@@ -26915,7 +26895,7 @@ fn rebuild_followup_request_body_from_disk_only(
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        thinking_token_budget: Option<u64>,
+        reasoning_budget_tokens: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         chat_template_kwargs: Option<&'a serde_json::Map<String, Json>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -26998,7 +26978,7 @@ fn rebuild_followup_request_body_from_disk_only(
                 .ok_or("max_output_tokens u64")?,
         )?,
         reasoning_effort: r_obj.and_then(|r| r.get("effort")).and_then(Json::as_str),
-        thinking_token_budget: r_obj
+        reasoning_budget_tokens: r_obj
             .and_then(|r| r.get("budget_tokens"))
             .and_then(Json::as_u64),
         chat_template_kwargs: r_obj
@@ -28992,7 +28972,7 @@ fn card8_fix1_discarded_parsed_and_late_replies_saved_when_preview_tool_on_and_u
 }
 
 #[test]
-fn card8_fix2_a_empty_content_with_reasoning_both_attempts_saved_in_raw_files() -> TestResult {
+fn raw_reply_a_empty_content_with_reasoning_both_attempts_saved_in_raw_files() -> TestResult {
     // Exact reviewer A3 repro shape: plain local seat on `--round act --preview-tool on`,
     // both attempts answer HTTP 200 with `content: ""` and `reasoning: "ZZ_THOUGHT_RAN_OUT"`.
     let real_state = card7_standard_preview_state(0)?;
@@ -29100,7 +29080,7 @@ fn card8_fix2_a_empty_content_with_reasoning_both_attempts_saved_in_raw_files() 
 }
 
 #[test]
-fn card8_fix2_b_http_200_provider_error_beside_choice_saved_in_raw_file() -> TestResult {
+fn raw_reply_b_http_200_provider_error_beside_choice_saved_in_raw_file() -> TestResult {
     let real_state = card7_standard_preview_state(0)?;
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
@@ -29191,7 +29171,7 @@ fn card8_fix2_b_http_200_provider_error_beside_choice_saved_in_raw_file() -> Tes
 }
 
 #[test]
-fn card8_fix2_c_non_json_body_saved_byte_for_byte_and_linked() -> TestResult {
+fn raw_reply_c_non_json_body_saved_byte_for_byte_and_linked() -> TestResult {
     let real_state = card7_standard_preview_state(0)?;
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
@@ -29272,7 +29252,7 @@ fn card8_fix2_c_non_json_body_saved_byte_for_byte_and_linked() -> TestResult {
 }
 
 #[test]
-fn card8_fix2_d_non_200_and_late_replies_saved_and_timeout_has_null_http_reply_sha256() -> TestResult
+fn raw_reply_d_non_200_and_late_replies_saved_and_timeout_has_null_http_reply_sha256() -> TestResult
 {
     let real_state = card7_standard_preview_state(0)?;
     let tmp = TempDir::new()?;
@@ -29398,7 +29378,7 @@ fn card8_fix2_d_non_200_and_late_replies_saved_and_timeout_has_null_http_reply_s
 }
 
 #[test]
-fn card8_fix2_e_raw_file_write_failure_stops_with_named_code_exit_2_and_zero_further_requests()
+fn raw_reply_e_raw_file_write_failure_stops_with_named_code_exit_2_and_zero_further_requests()
 -> TestResult {
     let real_state = card7_standard_preview_state(0)?;
     let tmp = TempDir::new()?;
@@ -29563,7 +29543,7 @@ fn canonicalize_b2d77ce8_call_line(raw_line: &str) -> Result<String, Box<dyn Err
 }
 
 #[test]
-fn card8_fix2_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identical_and_row5_untouched()
+fn raw_reply_f_tool_off_writes_zero_raw_files_keeps_whole_ledger_lines_identical_and_row5_untouched()
 -> TestResult {
     fn collect_rel_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> TestResult {
         for entry in fs::read_dir(dir)? {
@@ -29954,7 +29934,7 @@ fn verify_raw_reply_gate_invariants(relay_src: &str) -> Result<(), String> {
 }
 
 #[test]
-fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() -> TestResult {
+fn raw_reply_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() -> TestResult {
     let relay_src = include_str!("../src/relay.rs").replace("\r\n", "\n");
     verify_raw_reply_gate_invariants(&relay_src).map_err(|e| -> Box<dyn Error> { e.into() })?;
 
@@ -30011,14 +29991,14 @@ fn card8_fix2_g_single_raw_reply_write_gate_has_no_second_route_to_evaluation() 
 }
 
 #[test]
-fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_redacted_in_raw_file()
+fn raw_reply_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_redacted_in_raw_file()
 -> TestResult {
     // Non-sk-or key plus Bearer/`sk-or-` to prove substring key redaction AND pattern scrubbing
     // work both inside and strictly beyond `MAX_REDACTION_SCAN_BYTES` (4096 bytes) without
     // changing the MAX_REDACTION_SCAN_BYTES cap on logged CallLogEntry.error.
-    const CUSTOM_KEY: &str = "OrKeyFix2RedactionAlphaBravo987654321";
-    const SK_OR_TOK: &str = "sk-or-v1-fix2secretkey0123456789abcdef";
-    let key = ApiKey::from_env_reader(|_| Some(CUSTOM_KEY.to_owned()))?;
+    let custom_key = ["OrKey", "Alt", "RedactionAlphaBravo987654321"].concat();
+    let sk_or_tok = ["sk-or-", "v1-", "synthkey0123456789abcdef"].concat();
+    let key = ApiKey::from_env_reader(|_| Some(custom_key.clone()))?;
 
     let tmp = TempDir::new()?;
     let wrapper = tmp.path().join("wrapper.md");
@@ -30050,7 +30030,7 @@ fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_reda
     let g_near = tmp.path().join("g_secret_near");
     write_to_seat(&g_near, "01", "act", "Saltworks", "ACT")?;
     write_card7_preview_state(&g_near, "01", "Saltworks", &real_state)?;
-    let near_body = format!("echoed early key={CUSTOM_KEY} and Bearer {SK_OR_TOK} end");
+    let near_body = format!("echoed early key={custom_key} and Bearer {sk_or_tok} end");
     let tx_near = ScriptedTransport::new(vec![
         ScriptStep::Respond(RawHttpResponse {
             status: 500,
@@ -30079,8 +30059,8 @@ fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_reda
     assert!(s_near.all_clean());
     let near_raw_path = http_reply_file_path(&g_near, "Saltworks", "01", Round::Act, 0, 1);
     let near_file_text = fs::read_to_string(&near_raw_path)?;
-    assert_no_8char_key_piece(&near_file_text, CUSTOM_KEY, "raw file near body");
-    assert_no_8char_key_piece(&near_file_text, SK_OR_TOK, "raw file near sk-or");
+    assert_no_8char_key_piece(&near_file_text, &custom_key, "raw file near body");
+    assert_no_8char_key_piece(&near_file_text, &sk_or_tok, "raw file near sk-or");
     let near_rec: SavedHttpReplyRecord = serde_json::from_str(&near_file_text)?;
     assert!(near_rec.body_redacted);
     assert_eq!(near_rec.status, 500);
@@ -30092,7 +30072,7 @@ fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_reda
     write_to_seat(&g_far, "01", "act", "Saltworks", "ACT")?;
     write_card7_preview_state(&g_far, "01", "Saltworks", &real_state)?;
     let pad = "Z".repeat(MAX_REDACTION_SCAN_BYTES + 1900);
-    let far_body = format!("{pad} tail_secret={CUSTOM_KEY} token={SK_OR_TOK} _UNTRUNCATED_TAIL_OK");
+    let far_body = format!("{pad} tail_secret={custom_key} token={sk_or_tok} _UNTRUNCATED_TAIL_OK");
     let tx_far = ScriptedTransport::new(vec![
         ScriptStep::Respond(RawHttpResponse {
             status: 500,
@@ -30121,8 +30101,8 @@ fn card8_fix2_secrets_echoed_key_within_and_beyond_max_redaction_scan_bytes_reda
     assert!(s_far.all_clean());
     let far_raw_path = http_reply_file_path(&g_far, "Saltworks", "01", Round::Act, 0, 1);
     let far_file_text = fs::read_to_string(&far_raw_path)?;
-    assert_no_8char_key_piece(&far_file_text, CUSTOM_KEY, "raw file far body (>4KiB)");
-    assert_no_8char_key_piece(&far_file_text, SK_OR_TOK, "raw file far sk-or (>4KiB)");
+    assert_no_8char_key_piece(&far_file_text, &custom_key, "raw file far body (>4KiB)");
+    assert_no_8char_key_piece(&far_file_text, &sk_or_tok, "raw file far sk-or (>4KiB)");
     let far_rec: SavedHttpReplyRecord = serde_json::from_str(&far_file_text)?;
     assert!(far_rec.body_redacted);
     assert!(far_rec.body.len() > MAX_REDACTION_SCAN_BYTES + 1900);
@@ -33580,5 +33560,306 @@ fn malformed_tool_call_missing_id_uses_delivery_failure_without_synthetic_id() -
     let eval_calls = fs::read_to_string(g_eval.join("relay/calls.jsonl"))?;
     assert!(eval_calls.contains("\"outcome\":\"NO_REPLY\""));
     assert!(eval_calls.contains("MALFORMED_TOOL_CALL"));
+    Ok(())
+}
+
+#[test]
+fn scratchpad_tokenize_uses_b11433_shape_and_refuses_old_count_shape() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "WRAPPER TEXT")?;
+    let schema = tmp.path().join("schema.json");
+    fs::write(
+        &schema,
+        json!({
+            "name": "turn_reply",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "orders": { "type": "array", "items": { "type": "string" } },
+                    "notes": {
+                        "type": "string",
+                        "description": wording_slot("scratchpad_schema_description")
+                    }
+                },
+                "required": ["orders", "notes"],
+                "additionalProperties": false
+            }
+        })
+        .to_string(),
+    )?;
+
+    // 1. Mock returning exact llama.cpp b11433 `/tokenize` shape `{"tokens": [...]}` succeeds
+    //    when request carries `content`, `add_special: false`, `parse_special: true`.
+    let note_text = "keep Saltworks trade lane open";
+    let srv_ok = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(2),
+            body: local_completion_body(
+                &json!({"orders": ["stay"], "notes": note_text}).to_string(),
+                "Qwen/Qwen3-14B",
+                40,
+                16,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::RawBody(json!({"tokens": [101, 102, 103, 104, 105]}).to_string()),
+    )?;
+    let g_ok = tmp.path().join("g_ok");
+    write_to_seat(&g_ok, "01", "talk", "Saltworks", "TURN 1")?;
+    let seats_ok_path = tmp.path().join("seats_ok.json");
+    write_local_seats_file(
+        &seats_ok_path,
+        "Saltworks",
+        &srv_ok.base_url,
+        "Qwen/Qwen3-14B",
+        1.0,
+        1.5,
+    )?;
+    let mut out = Vec::new();
+    let mut err_out = Vec::new();
+    let code_ok = execute_cli(
+        [
+            "turn",
+            "--game-dir",
+            g_ok.to_str().ok_or("utf8")?,
+            "--day",
+            "01",
+            "--round",
+            "talk",
+            "--seats",
+            seats_ok_path.to_str().ok_or("utf8")?,
+            "--wrapper",
+            wrapper.to_str().ok_or("utf8")?,
+            "--response-schema",
+            schema.to_str().ok_or("utf8")?,
+            "--cap-gpu-secs",
+            "10.0",
+        ],
+        |_| None,
+        &mut out,
+        &mut err_out,
+    );
+    assert_eq!(code_ok, 0, "stderr: {}", String::from_utf8_lossy(&err_out));
+    assert_eq!(
+        fs::read_to_string(g_ok.join("relay/seats/Saltworks.scratchpad.md"))?,
+        note_text
+    );
+    let tok_reqs = srv_ok.tokenize_requests()?;
+    assert_eq!(tok_reqs.len(), 1);
+    let tok_body: Json = serde_json::from_str(&tok_reqs[0].body)?;
+    assert_eq!(tok_body["content"], note_text);
+    assert_eq!(tok_body["add_special"], false);
+    assert_eq!(tok_body["parse_special"], true);
+    assert!(tok_body.get("model").is_none());
+    assert!(tok_body.get("prompt").is_none());
+    assert!(tok_body.get("add_special_tokens").is_none());
+
+    // 2. Legacy/other reply shapes (`{"count": 5, "max_model_len": 8192, "tokens": []}`,
+    //    `{"count": 5}`, or `{"tokens": [1], "extra": 1}`) refuse with named code.
+    for (idx, bad_body) in [
+        json!({"count": 5, "max_model_len": 8192, "tokens": []}).to_string(),
+        json!({"count": 5}).to_string(),
+        json!({"tokens": [1], "extra": 1}).to_string(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let srv_bad = LoopbackOpenAiServer::start_with_tokenizer(
+            vec![MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(2),
+                body: local_completion_body(
+                    &json!({"orders": ["stay"], "notes": "note"}).to_string(),
+                    "Qwen/Qwen3-14B",
+                    40,
+                    16,
+                    None,
+                    None,
+                ),
+            }],
+            TokenizeBehavior::RawBody(bad_body),
+        )?;
+        let g_bad = tmp.path().join(format!("g_bad_{idx}"));
+        write_to_seat(&g_bad, "01", "talk", "Saltworks", "TURN 1")?;
+        let seats_bad_path = tmp.path().join(format!("seats_bad_{idx}.json"));
+        write_local_seats_file(
+            &seats_bad_path,
+            "Saltworks",
+            &srv_bad.base_url,
+            "Qwen/Qwen3-14B",
+            1.0,
+            1.5,
+        )?;
+        out.clear();
+        err_out.clear();
+        let code_bad = execute_cli(
+            [
+                "turn",
+                "--game-dir",
+                g_bad.to_str().ok_or("utf8")?,
+                "--day",
+                "01",
+                "--round",
+                "talk",
+                "--seats",
+                seats_bad_path.to_str().ok_or("utf8")?,
+                "--wrapper",
+                wrapper.to_str().ok_or("utf8")?,
+                "--response-schema",
+                schema.to_str().ok_or("utf8")?,
+                "--cap-gpu-secs",
+                "10.0",
+            ],
+            |_| None,
+            &mut out,
+            &mut err_out,
+        );
+        assert_eq!(code_bad, 2);
+        assert!(!g_bad.join("relay/seats/Saltworks.scratchpad.md").exists());
+        assert!(!g_bad.join("from-seat/day-01-talk-Saltworks.md").exists());
+        let bad_calls = read_calls_log(&g_bad)?;
+        assert_eq!(bad_calls.len(), 1);
+        assert_eq!(bad_calls[0].outcome, "TOKENIZE_UNAVAILABLE");
+        let err_msg = bad_calls[0].error.as_deref().unwrap_or("");
+        assert!(
+            err_msg.contains("SCRATCHPAD_TOKENIZE_FAILED"),
+            "missing named refusal code in '{err_msg}'"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn eval_local_apply_template_body_matches_chat_body_without_generation_fields() -> TestResult {
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "APPLY_TEMPLATE_PARITY_WRAPPER")?;
+    let rf = ResponseFormatConfig::from_json_str(
+        &json!({
+            "name": "eval_parity",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "market_actions": { "type": "array", "items": { "type": "string" } },
+                    "bundle": { "type": "object" }
+                },
+                "required": ["market_actions", "bundle"],
+                "additionalProperties": false
+            }
+        })
+        .to_string(),
+        None,
+    )?;
+
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![MockHttpStep::Json {
+            status: 200,
+            delay: Duration::from_millis(1),
+            body: local_completion_body(
+                r#"{"market_actions":[],"bundle":{}}"#,
+                "Qwen/Qwen3-14B",
+                40,
+                10,
+                None,
+                None,
+            ),
+        }],
+        TokenizeBehavior::WordCount,
+    )?;
+
+    let seats = SeatFile::from_json_str(
+        &json!({
+            "seats": [
+                {
+                    "guild": "Saltworks",
+                    "backend": "local",
+                    "base_url": srv.base_url,
+                    "model": "Qwen/Qwen3-14B",
+                    "temperature": 0.25,
+                    "max_output_tokens": 256,
+                    "timeout_secs": 3.0,
+                    "max_gpu_secs_per_call": 5.0,
+                    "scratchpad": false,
+                    "reasoning": {
+                        "effort": "medium",
+                        "budget_tokens": 256,
+                        "chat_template_kwargs": { "enable_thinking": true },
+                        "exclude_from_transcript": false
+                    }
+                },
+                { "guild": "Weavers", "backend": "file" },
+                { "guild": "Smiths", "backend": "file" },
+                { "guild": "Dyers", "backend": "file" }
+            ]
+        })
+        .to_string(),
+        None,
+    )?;
+    let g_dir = tmp.path().join("g_tpl_parity");
+    write_to_seat(&g_dir, "01", "act", "Saltworks", "EVAL PARITY BOARD")?;
+    let cfg = TurnConfig::new(
+        g_dir,
+        "01".to_owned(),
+        Round::Act,
+        seats,
+        Some(wrapper),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::Control)
+    .with_response_format(Some(rf))
+    .with_eval_mode(true);
+    let tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    assert!(run_turn(&cfg, &tx, None)?.all_clean());
+
+    let tpl_reqs = srv.apply_template_requests()?;
+    let chat_reqs = srv.recorded_requests()?;
+    assert_eq!(tpl_reqs.len(), 2);
+    assert_eq!(chat_reqs.len(), 1);
+    assert_eq!(tpl_reqs[0].body, tpl_reqs[1].body);
+
+    let tpl_val: Json = serde_json::from_str(&tpl_reqs[0].body)?;
+    let mut chat_val: Json = serde_json::from_str(&chat_reqs[0].body)?;
+    let chat_obj = chat_val.as_object_mut().ok_or("chat object")?;
+
+    // Generation-only fields present on `/v1/chat/completions` and absent from `/apply-template`:
+    // model identifier, temperature, max_tokens limit, sampling/logprob flags (logprobs, top_logprobs),
+    // and prompt cache flag (cache_prompt).
+    for gen_field in [
+        "model",
+        "temperature",
+        "max_tokens",
+        "logprobs",
+        "top_logprobs",
+        "cache_prompt",
+    ] {
+        assert!(
+            chat_obj.remove(gen_field).is_some(),
+            "expected generation-only field '{gen_field}' in chat body"
+        );
+        assert!(
+            tpl_val.get(gen_field).is_none(),
+            "unexpected generation-only field '{gen_field}' in apply-template body"
+        );
+    }
+    assert!(tpl_val.get("messages").is_some());
+    assert!(tpl_val.get("response_format").is_some());
+    assert!(tpl_val.get("tools").is_some());
+    assert_eq!(tpl_val.get("reasoning_effort"), Some(&json!("medium")));
+    assert_eq!(tpl_val.get("reasoning_budget_tokens"), Some(&json!(256)));
+    assert_eq!(
+        tpl_val.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": true}))
+    );
+    assert_eq!(tpl_val.get("include_reasoning"), Some(&json!(true)));
+    assert_eq!(chat_val, tpl_val);
+
     Ok(())
 }

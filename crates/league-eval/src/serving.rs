@@ -69,6 +69,14 @@ pub struct ModelManifestInput {
     /// Optional 64-hex SHA-256 of the active chat template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template_sha256: Option<String>,
+    /// Optional non-empty thinking start tag emitted by the active chat template (`b11433`
+    /// `common/sampling.cpp:315`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_start_tag: Option<String>,
+    /// Optional non-empty thinking end tags emitted by the active chat template (`b11433`
+    /// `tools/server/server-common.cpp:1461`, `common/sampling.cpp:315`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_end_tags: Option<Vec<String>>,
     /// Provenance of model/template fields.
     #[serde(default)]
     pub provenance: MetadataProvenance,
@@ -87,6 +95,12 @@ pub struct ModelManifestRecord {
     /// Validated 64-hex SHA-256 of the active chat template, if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template_sha256: Option<String>,
+    /// Verified thinking start tag reported for the active template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_start_tag: Option<String>,
+    /// Verified thinking end tags reported for the active template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_end_tags: Option<Vec<String>>,
     /// Provenance of model/template fields.
     pub provenance: MetadataProvenance,
 }
@@ -185,6 +199,10 @@ pub struct ServerSettingsRecord {
     /// Worker CPU thread count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threads: Option<u32>,
+    /// Whether Jinja chat templating is enabled (`true` required for reasoning budget enforcement,
+    /// `llama.cpp` `b11433` `tools/server/server-context.cpp:1596`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jinja: Option<bool>,
     /// Provenance of server execution settings.
     #[serde(default)]
     pub provenance: MetadataProvenance,
@@ -499,6 +517,35 @@ pub fn resolve_verified_crate_git_sha() -> Result<String, EvalError> {
     )
 }
 
+/// Source used to resolve and verify the compiled crate git SHA (`LEAGUE_EVAL_GIT_SHA`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrateGitShaSource<'a> {
+    /// Inspect the live checkout at compile-time `CARGO_MANIFEST_DIR` against [`CRATE_GIT_SHA`].
+    Live,
+    /// Test seam injecting `built_sha`, optional `live_head`, and optional `is_dirty`.
+    Injected {
+        /// Compiled git commit SHA to validate.
+        built_sha: &'a str,
+        /// Optional live `HEAD` commit SHA to compare against.
+        live_head: Option<&'a str>,
+        /// Optional cleanliness flag (`Some(false)` clean, `Some(true)` dirty).
+        is_dirty: Option<bool>,
+    },
+}
+
+/// Resolve and verify the compiled crate git SHA from either [`CrateGitShaSource::Live`] or
+/// [`CrateGitShaSource::Injected`].
+pub fn resolve_crate_git_sha_from(source: &CrateGitShaSource<'_>) -> Result<String, EvalError> {
+    match source {
+        CrateGitShaSource::Live => resolve_verified_crate_git_sha(),
+        CrateGitShaSource::Injected {
+            built_sha,
+            live_head,
+            is_dirty,
+        } => validate_crate_git_sha_and_cleanliness(built_sha, *live_head, *is_dirty),
+    }
+}
+
 /// Validate a [`ServingManifestInput`] against all startup reproducibility Andon rules and produce a
 /// sanitized [`ServingManifestRecord`] (hashing raw `gpu_uuid` and scrubbing all free-text fields).
 pub fn validate_serving_manifest_input(
@@ -700,6 +747,29 @@ pub fn validate_serving_manifest_input(
                 .transpose()?,
             sha256: model_sha256,
             chat_template_sha256,
+            thinking_start_tag: input
+                .model
+                .thinking_start_tag
+                .as_deref()
+                .map(|t| scrub_manifest_field("model.thinking_start_tag", t, &homes))
+                .transpose()?,
+            thinking_end_tags: input
+                .model
+                .thinking_end_tags
+                .as_ref()
+                .map(|tags| {
+                    tags.iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            scrub_manifest_field(
+                                &format!("model.thinking_end_tags[{i}]"),
+                                t,
+                                &homes,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?,
             provenance: input.model.provenance,
         },
         machine: MachineManifestRecord {
@@ -1474,11 +1544,67 @@ mod tests {
             .unwrap_or_else(|e| panic!("matching 40-hex SHA should pass: {e}"));
         assert_eq!(verified, sha_a);
 
-        let live = resolve_verified_crate_git_sha()
-            .unwrap_or_else(|e| panic!("worktree CRATE_GIT_SHA must match HEAD and be clean: {e}"));
-        assert_eq!(live.len(), 40);
-        assert!(live.bytes().all(|b| b.is_ascii_hexdigit()));
-        assert_eq!(live, CRATE_GIT_SHA);
+        assert_eq!(CRATE_GIT_SHA.len(), 40);
+        assert!(CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()));
+        let injected_clean = resolve_crate_git_sha_from(&CrateGitShaSource::Injected {
+            built_sha: CRATE_GIT_SHA,
+            live_head: Some(CRATE_GIT_SHA),
+            is_dirty: Some(false),
+        })
+        .unwrap_or_else(|e| panic!("injected clean CRATE_GIT_SHA should pass: {e}"));
+        assert_eq!(injected_clean, CRATE_GIT_SHA);
+        let dirty_err = match resolve_crate_git_sha_from(&CrateGitShaSource::Injected {
+            built_sha: CRATE_GIT_SHA,
+            live_head: Some(CRATE_GIT_SHA),
+            is_dirty: Some(true),
+        }) {
+            Err(e) => e,
+            Ok(v) => panic!("expected DIRTY_GIT_WORKTREE, got {v}"),
+        };
+        assert_eq!(dirty_err.code(), "DIRTY_GIT_WORKTREE");
+
+        // Verify resolve_verified_crate_git_sha_in against an isolated clean git checkout, then
+        // with an untracked file to prove DIRTY_GIT_WORKTREE detection works.
+        let repo_tmp = std::env::temp_dir().join(format!(
+            "ml_git_sha_unit_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let _ = fs::remove_dir_all(&repo_tmp);
+        fs::create_dir_all(&repo_tmp).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let run_git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(&repo_tmp)
+                .args(args)
+                .output()
+                .unwrap_or_else(|e| panic!("git {args:?}: {e}"));
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        run_git(&["init", "-q"]);
+        run_git(&["config", "user.name", "Eval Test"]);
+        run_git(&["config", "user.email", "eval-test@example.invalid"]);
+        fs::write(repo_tmp.join("tracked.txt"), "clean\n")
+            .unwrap_or_else(|e| panic!("write tracked: {e}"));
+        run_git(&["add", "tracked.txt"]);
+        run_git(&["commit", "-q", "-m", "init"]);
+        let temp_head = run_git(&["rev-parse", "HEAD"]);
+        let resolved = resolve_verified_crate_git_sha_in(Some(&repo_tmp), &temp_head)
+            .unwrap_or_else(|e| panic!("clean temp repo must resolve: {e}"));
+        assert_eq!(resolved, temp_head);
+        fs::write(repo_tmp.join("untracked.txt"), "dirty\n")
+            .unwrap_or_else(|e| panic!("write untracked: {e}"));
+        let temp_dirty = resolve_verified_crate_git_sha_in(Some(&repo_tmp), &temp_head)
+            .err()
+            .unwrap_or_else(|| panic!("untracked file must trigger DIRTY_GIT_WORKTREE"));
+        assert_eq!(temp_dirty.code(), "DIRTY_GIT_WORKTREE");
+        let _ = fs::remove_dir_all(&repo_tmp);
     }
 
     #[test]
@@ -1580,6 +1706,8 @@ mod tests {
                 quant: Some("Q4_K_M".to_owned()),
                 sha256: "a".repeat(64),
                 chat_template_sha256: Some("b".repeat(64)),
+                thinking_start_tag: Some("<think>".to_owned()),
+                thinking_end_tags: Some(vec!["</think>".to_owned()]),
                 provenance: MetadataProvenance::OperatorSupplied,
             },
             machine: MachineManifestInput {
@@ -1607,6 +1735,7 @@ mod tests {
                 ctx_size: 32768,
                 ctx_shift: false,
                 threads: Some(16),
+                jinja: Some(true),
                 provenance: MetadataProvenance::ServerReported,
             },
             cache_settings: CacheSettingsInput {

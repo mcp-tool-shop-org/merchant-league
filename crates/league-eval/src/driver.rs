@@ -14,7 +14,7 @@ use league_core::{
     ReplayOutcome, Seat, TableId, TurnPhase, replay_eval_season,
 };
 use league_relay::{
-    ApiKey, CallLogEntry, MemoryMode, PreviewToolMode, RawHttpResponse, Round,
+    ApiKey, CallLogEntry, MemoryMode, PreviewToolMode, RawHttpResponse, ReasoningEffort, Round,
     SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatBackend, SeatFile,
     SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError, TurnConfig, TurnSummary,
     UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
@@ -36,8 +36,8 @@ use crate::reply::{
 use crate::schema::build_eval_response_format_config;
 use crate::select::{SelectionList, expand_home_path};
 use crate::serving::{
-    ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
-    load_and_validate_serving_manifest, resolve_verified_crate_git_sha,
+    CrateGitShaSource, EngineKind, ServingManifestRecord, WordingArmDigests,
+    capture_serving_env_snapshot, load_and_validate_serving_manifest, resolve_crate_git_sha_from,
 };
 use crate::view::{
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
@@ -903,6 +903,8 @@ fn map_prompt_prep_seat_error(detail: &str) -> Option<EvalError> {
         Some(EvalError::PromptTemplateMismatch(detail.to_owned()))
     } else if detail.starts_with("PROMPT_TOKENIZE_FAILED:") {
         Some(EvalError::PromptTokenizeFailed(detail.to_owned()))
+    } else if detail.starts_with("SCRATCHPAD_TOKENIZE_FAILED:") {
+        Some(EvalError::ScratchpadTokenizeFailed(detail.to_owned()))
     } else {
         None
     }
@@ -1332,6 +1334,86 @@ fn resolve_serving_manifest_opt(
     Ok(None)
 }
 
+fn validate_eval_reasoning_budgets(
+    seats_file: &SeatFile,
+    serving_record: Option<&ServingManifestRecord>,
+) -> Result<(), EvalError> {
+    for seat in &seats_file.seats {
+        let SeatBackend::Local(local) = &seat.backend else {
+            continue;
+        };
+        let Some(budget) = local.reasoning.as_ref().and_then(|r| r.budget_tokens) else {
+            continue;
+        };
+        if i32::try_from(budget).is_err() {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' reasoning.budget_tokens={budget} exceeds llama.cpp b11433 INT32_MAX limit",
+                seat.guild
+            )));
+        }
+        if let Some(reasoning) = &local.reasoning {
+            if reasoning.effort == Some(ReasoningEffort::None) {
+                return Err(EvalError::UnenforceableReasoningBudget(format!(
+                    "seat '{}' sets reasoning.budget_tokens={budget} with reasoning.effort=\"none\", which disables thinking in b11433",
+                    seat.guild
+                )));
+            }
+            if let Some(val) = reasoning
+                .chat_template_kwargs
+                .as_ref()
+                .and_then(|m| m.get("enable_thinking"))
+                && val.as_bool() != Some(true)
+            {
+                return Err(EvalError::UnenforceableReasoningBudget(format!(
+                    "seat '{}' sets reasoning.budget_tokens={budget} with non-true chat_template_kwargs.enable_thinking, so b11433 cannot enforce the thinking budget",
+                    seat.guild
+                )));
+            }
+        }
+        let Some(manifest) = serving_record else {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without a serving manifest verifying b11433 template thinking tags",
+                seat.guild
+            )));
+        };
+        if manifest.engine.value != EngineKind::LlamaServer {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} on non-llama-server engine",
+                seat.guild
+            )));
+        }
+        if manifest.server_settings.jinja != Some(true) {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without server_settings.jinja=true",
+                seat.guild
+            )));
+        }
+        if !manifest
+            .model
+            .thinking_start_tag
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without non-empty model.thinking_start_tag",
+                seat.guild
+            )));
+        }
+        if !manifest
+            .model
+            .thinking_end_tags
+            .as_ref()
+            .is_some_and(|tags| !tags.is_empty() && tags.iter().all(|t| !t.trim().is_empty()))
+        {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without non-empty model.thinking_end_tags",
+                seat.guild
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn seat_regent_flags(
     host: &EvalHost,
     seats_file: &SeatFile,
@@ -1679,6 +1761,17 @@ pub fn run_play_with_transport(
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
 ) -> Result<EvalManifest, EvalError> {
+    run_play_with_transport_and_git_sha(opts, transport, redaction_key, &CrateGitShaSource::Live)
+}
+
+/// Testable entry point for [`run_play_with_transport`] allowing callers to supply a
+/// [`CrateGitShaSource`] seam instead of inspecting the live working tree.
+pub fn run_play_with_transport_and_git_sha(
+    opts: &PlayOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<EvalManifest, EvalError> {
     if opts.turns == 0 || opts.turns > HARD_TURN_CAP {
         return Err(EvalError::Usage(format!(
             "--turns must be in 1..={HARD_TURN_CAP}, got {}",
@@ -1700,9 +1793,10 @@ pub fn run_play_with_transport(
         .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
         .collect();
     let has_model_seat = model_seats.iter().any(|&is_model| is_model);
-    let crate_git_sha = resolve_verified_crate_git_sha()?;
+    let crate_git_sha = resolve_crate_git_sha_from(git_sha)?;
     let serving_record =
         resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_seat)?;
+    validate_eval_reasoning_budgets(&seats_file, serving_record.as_ref())?;
     let serving_manifest_sha256 = serving_record
         .as_ref()
         .map(|rec| {
@@ -2210,6 +2304,17 @@ pub fn run_branch_with_transport(
     transport: &dyn Transport,
     redaction_key: Option<&ApiKey>,
 ) -> Result<Vec<BranchArmOutcome>, EvalError> {
+    run_branch_with_transport_and_git_sha(opts, transport, redaction_key, &CrateGitShaSource::Live)
+}
+
+/// Testable entry point for [`run_branch_with_transport`] allowing callers to supply a
+/// [`CrateGitShaSource`] seam instead of inspecting the live working tree.
+pub fn run_branch_with_transport_and_git_sha(
+    opts: &BranchOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+    git_sha: &CrateGitShaSource<'_>,
+) -> Result<Vec<BranchArmOutcome>, EvalError> {
     if opts.arms.is_empty() {
         return Err(EvalError::Usage(
             "branch requires at least one `--arm` / `--arms` entry".to_owned(),
@@ -2284,9 +2389,10 @@ pub fn run_branch_with_transport(
             acc || !matches!(seats_file.seats[idx].backend, SeatBackend::File { .. }),
         )
     })?;
-    let crate_git_sha = resolve_verified_crate_git_sha()?;
+    let crate_git_sha = resolve_crate_git_sha_from(git_sha)?;
     let serving_record =
         resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_focal)?;
+    validate_eval_reasoning_budgets(&seats_file, serving_record.as_ref())?;
     let serving_env_snapshot = capture_serving_env_snapshot()?;
 
     for (prefix, _, target_out_dir) in &targets {
@@ -3773,6 +3879,12 @@ mod tests {
                 .as_ref()
                 .map(EvalError::code),
             Some("PROMPT_TOKENIZE_FAILED")
+        );
+        assert_eq!(
+            map_prompt_prep_seat_error("SCRATCHPAD_TOKENIZE_FAILED: s")
+                .as_ref()
+                .map(EvalError::code),
+            Some("SCRATCHPAD_TOKENIZE_FAILED")
         );
         assert!(map_prompt_prep_seat_error("OTHER: q").is_none());
 

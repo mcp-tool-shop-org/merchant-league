@@ -17,10 +17,11 @@ pub mod serving;
 pub mod view;
 pub mod wording;
 
-pub use cli::{ErrorFormat, execute_cli, main_entry};
+pub use cli::{ErrorFormat, execute_cli, execute_cli_with_git_sha, main_entry};
 pub use driver::{
     BranchOptions, NoopTransport, PlayOptions, persist_eval_game_state, run_branch_with_transport,
-    run_play_with_transport, seat_keeps_notes, validate_eval_seats_file,
+    run_branch_with_transport_and_git_sha, run_play_with_transport,
+    run_play_with_transport_and_git_sha, seat_keeps_notes, validate_eval_seats_file,
 };
 pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
 pub use records::{
@@ -40,14 +41,14 @@ pub use select::{
     expand_home_path_with_home, run_select, sanitize_home_path, sanitize_home_path_with_homes,
 };
 pub use serving::{
-    CRATE_GIT_SHA, CacheSettingsInput, CacheSettingsRecord, EffectiveSamplingRecord, EngineKind,
-    MachineManifestInput, MachineManifestRecord, MetadataProvenance, ModelManifestInput,
-    ModelManifestRecord, ProvenanceTagged, ServerSettingsRecord, ServingManifestInput,
-    ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
-    capture_serving_env_snapshot_from, load_and_validate_serving_manifest,
-    resolve_verified_crate_git_sha, resolve_verified_crate_git_sha_in,
-    validate_crate_git_sha_against, validate_crate_git_sha_and_cleanliness,
-    validate_serving_manifest_input,
+    CRATE_GIT_SHA, CacheSettingsInput, CacheSettingsRecord, CrateGitShaSource,
+    EffectiveSamplingRecord, EngineKind, MachineManifestInput, MachineManifestRecord,
+    MetadataProvenance, ModelManifestInput, ModelManifestRecord, ProvenanceTagged,
+    ServerSettingsRecord, ServingManifestInput, ServingManifestRecord, WordingArmDigests,
+    capture_serving_env_snapshot, capture_serving_env_snapshot_from,
+    load_and_validate_serving_manifest, resolve_crate_git_sha_from, resolve_verified_crate_git_sha,
+    resolve_verified_crate_git_sha_in, validate_crate_git_sha_against,
+    validate_crate_git_sha_and_cleanliness, validate_serving_manifest_input,
 };
 pub use view::{
     EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,

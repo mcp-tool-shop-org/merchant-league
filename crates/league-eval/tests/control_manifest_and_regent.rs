@@ -9,13 +9,47 @@ use std::time::Duration;
 
 use league_core::{EvalHost, Seat, TableId};
 use league_eval::{
-    BranchManifest, BranchOptions, EvalArm, EvalDecisionRecord, EvalError, EvalManifest,
-    MetadataProvenance, NoopTransport, PINNED_WRAPPERS, PlayOptions, REJECTED_WRAPPER_HASHES,
-    SelectedPreActState, SelectionList, TurnStratum, WordingArmDigests, check_wrapper_digest,
-    eval_wording_slot, run_branch_with_transport, run_play_with_transport,
+    BranchArmOutcome, BranchManifest, BranchOptions, CRATE_GIT_SHA, CrateGitShaSource, EvalArm,
+    EvalDecisionRecord, EvalError, EvalManifest, MetadataProvenance, NoopTransport,
+    PINNED_WRAPPERS, PlayOptions, REJECTED_WRAPPER_HASHES, SelectedPreActState, SelectionList,
+    TurnStratum, WordingArmDigests, check_wrapper_digest, eval_wording_slot,
+    run_branch_with_transport_and_git_sha, run_play_with_transport_and_git_sha,
 };
-use league_relay::{RawHttpResponse, Transport, TransportError, sha256_hex};
+use league_relay::{ApiKey, RawHttpResponse, Transport, TransportError, sha256_hex};
 use serde_json::{Value, json};
+
+static LIVE_CHECKOUT_LOCK: Mutex<()> = Mutex::new(());
+const TEST_FALLBACK_GIT_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn test_git_sha_source() -> CrateGitShaSource<'static> {
+    let built_sha =
+        if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+            CRATE_GIT_SHA
+        } else {
+            TEST_FALLBACK_GIT_SHA
+        };
+    CrateGitShaSource::Injected {
+        built_sha,
+        live_head: Some(built_sha),
+        is_dirty: Some(false),
+    }
+}
+
+fn run_play_with_transport(
+    opts: &PlayOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<EvalManifest, EvalError> {
+    run_play_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
+
+fn run_branch_with_transport(
+    opts: &BranchOptions,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<Vec<BranchArmOutcome>, EvalError> {
+    run_branch_with_transport_and_git_sha(opts, transport, redaction_key, &test_git_sha_source())
+}
 
 fn must_ok<T, E: std::fmt::Display>(res: Result<T, E>, ctx: &str) -> T {
     match res {
@@ -1082,6 +1116,7 @@ fn serving_manifest_andons_provenance_vllm_and_subprocess_env_snapshot() {
         .to_string_lossy()
         .into_owned();
     let bin = env!("CARGO_BIN_EXE_league-eval");
+    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let out = must_ok(
         Command::new(bin)
             .args([
@@ -1909,6 +1944,7 @@ fn subprocess_cuda_visible_devices_gpu_and_mig_never_verbatim() {
     let mig_uuid = ["MIG", "-", "9876fedc", "-", "4444", "-", "0", "-", "2"].concat();
 
     let bin = env!("CARGO_BIN_EXE_league-eval");
+    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let out = must_ok(
         Command::new(bin)
             .args([
@@ -2154,6 +2190,7 @@ fn manifest_and_env_value_scrub_redacts_secrets_and_refuses_unsafe() {
     must_ok(fs::create_dir_all(&fake_home), "create fake home");
 
     let bin = env!("CARGO_BIN_EXE_league-eval");
+    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let out = must_ok(
         Command::new(bin)
             .args([
@@ -3448,6 +3485,408 @@ fn top_logprobs_with_four_entries_refuses() {
         msg.contains("top_logprobs` must have exact length 5, found 4"),
         "expected exact-5 top_logprobs refusal, got: {msg}"
     );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
+    struct BudgetCaptureTransport {
+        tpl_reqs: Mutex<Vec<Value>>,
+        chat_reqs: Mutex<Vec<Value>>,
+    }
+    impl Transport for BudgetCaptureTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            Ok(4)
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            let parsed: Value = serde_json::from_str(body)
+                .map_err(|e| TransportError::Network(format!("parse tpl body: {e}")))?;
+            if let Ok(mut g) = self.tpl_reqs.lock() {
+                g.push(parsed);
+            }
+            Ok(format!("RENDERED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            Ok((100_u64..110).collect())
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            let parsed: Value = serde_json::from_str(body)
+                .map_err(|e| TransportError::Network(format!("parse chat body: {e}")))?;
+            if let Ok(mut g) = self.chat_reqs.lock() {
+                g.push(parsed);
+            }
+            let clean =
+                json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+                    .to_string();
+            Ok(RawHttpResponse {
+                status: 200,
+                body: real_b11433_shaped_body(&clean, 10, 5),
+            })
+        }
+    }
+
+    let tmp = fresh_tmp_dir("reasoning_budget_ok");
+    let mut seats = local_foundry_three_clubbot_seats();
+    seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "exclude_from_transcript": false
+    });
+    let mut serving = base_llama_serving_json();
+    serving["model"]["thinking_start_tag"] = json!("<think>");
+    serving["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving["server_settings"]["jinja"] = json!(true);
+
+    let tx = BudgetCaptureTransport {
+        tpl_reqs: Mutex::new(Vec::new()),
+        chat_reqs: Mutex::new(Vec::new()),
+    };
+    let game_dir = tmp.join("game");
+    let manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&tmp, seats),
+                wrapper_path: copy_pinned_r3_wrapper(&tmp),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &tmp,
+                    "serving.json",
+                    &serving,
+                )),
+                arm: EvalArm::Off,
+                table_id: 310,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &tx,
+            None,
+        ),
+        "enforceable reasoning budget run must succeed",
+    );
+    let serving_rec = must_some(manifest.serving.as_ref(), "serving manifest");
+    assert_eq!(
+        serving_rec.model.thinking_start_tag.as_deref(),
+        Some("<think>")
+    );
+    assert_eq!(
+        serving_rec.model.thinking_end_tags,
+        Some(vec!["</think>".to_owned()])
+    );
+    assert_eq!(serving_rec.server_settings.jinja, Some(true));
+
+    let chat_reqs = must_ok(tx.chat_reqs.lock(), "chat lock");
+    assert_eq!(chat_reqs.len(), 2);
+    for req in chat_reqs.iter() {
+        assert_eq!(req.get("reasoning_budget_tokens"), Some(&json!(256)));
+        assert!(req.get("thinking_token_budget").is_none());
+    }
+    let tpl_reqs = must_ok(tx.tpl_reqs.lock(), "tpl lock");
+    assert_eq!(tpl_reqs.len(), 4);
+    for req in tpl_reqs.iter() {
+        assert_eq!(req.get("reasoning_budget_tokens"), Some(&json!(256)));
+        assert!(req.get("thinking_token_budget").is_none());
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
+    struct ZeroCallTransport {
+        calls: AtomicUsize,
+    }
+    impl Transport for ZeroCallTransport {
+        fn count_tokens(
+            &self,
+            _url: &str,
+            _model: &str,
+            _content: &str,
+            _timeout: Duration,
+        ) -> Result<usize, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            _add_special: bool,
+            _parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+
+        fn post_chat_completions(
+            &self,
+            _url: &str,
+            _body: &str,
+            _timeout: Duration,
+        ) -> Result<RawHttpResponse, TransportError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TransportError::Network("should not be called".to_owned()))
+        }
+    }
+
+    fn valid_manifest_and_seat() -> (Value, Value) {
+        let mut seats = local_foundry_three_clubbot_seats();
+        seats["seats"][0]["reasoning"] = json!({
+            "effort": "medium",
+            "budget_tokens": 256,
+            "exclude_from_transcript": false
+        });
+        let mut serving = base_llama_serving_json();
+        serving["model"]["thinking_start_tag"] = json!("<think>");
+        serving["model"]["thinking_end_tags"] = json!(["</think>"]);
+        serving["server_settings"]["jinja"] = json!(true);
+        (seats, serving)
+    }
+
+    type CaseMutator = fn(&mut Value, &mut Value);
+    let cases: [(&str, &str, CaseMutator); 9] = [
+        (
+            "missing_thinking_tags",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                if let Some(m) = srv["model"].as_object_mut() {
+                    m.remove("thinking_start_tag");
+                    m.remove("thinking_end_tags");
+                }
+            },
+        ),
+        (
+            "blank_thinking_start_tag",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                srv["model"]["thinking_start_tag"] = json!("   ");
+            },
+        ),
+        (
+            "empty_end_tags",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                srv["model"]["thinking_end_tags"] = json!([]);
+            },
+        ),
+        (
+            "jinja_disabled",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                srv["server_settings"]["jinja"] = json!(false);
+            },
+        ),
+        (
+            "jinja_unspecified",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                if let Some(m) = srv["server_settings"].as_object_mut() {
+                    m.remove("jinja");
+                }
+            },
+        ),
+        (
+            "vllm_engine",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |_seats, srv| {
+                srv["engine"] = json!("vllm");
+                srv["cache_settings"] = json!({
+                    "enable_prefix_caching": false,
+                    "provenance": "server_reported"
+                });
+            },
+        ),
+        (
+            "budget_over_i32_max",
+            "UNENFORCEABLE_REASONING_BUDGET",
+            |seats, _srv| {
+                seats["seats"][0]["reasoning"]["budget_tokens"] = json!(2_147_483_648_u64);
+            },
+        ),
+        (
+            "effort_none_disables_thinking",
+            "INVALID_SEAT_CONFIG",
+            |seats, _srv| {
+                seats["seats"][0]["reasoning"]["effort"] = json!("none");
+            },
+        ),
+        (
+            "enable_thinking_false_kwarg",
+            "INVALID_SEAT_CONFIG",
+            |seats, _srv| {
+                seats["seats"][0]["reasoning"]["chat_template_kwargs"] =
+                    json!({"enable_thinking": false});
+            },
+        ),
+    ];
+
+    let tmp = fresh_tmp_dir("unenforceable_budget");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    for (idx, (label, expected_code, mutate)) in cases.iter().enumerate() {
+        let (mut seats, mut serving) = valid_manifest_and_seat();
+        mutate(&mut seats, &mut serving);
+        let case_dir = tmp.join(format!("case_{idx}_{label}"));
+        let zero_tx = ZeroCallTransport {
+            calls: AtomicUsize::new(0),
+        };
+        let game_dir = case_dir.join("game");
+        let err = match run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&case_dir, seats),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &case_dir,
+                    "serving.json",
+                    &serving,
+                )),
+                arm: EvalArm::Off,
+                table_id: 311 + idx as u64,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &zero_tx,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(_) => {
+                panic!("case '{label}' must refuse at startup with {expected_code}")
+            }
+        };
+        assert_eq!(err.code(), *expected_code, "case={label}");
+        assert_eq!(err.exit_code(), 1, "case={label}");
+        assert_eq!(zero_tx.calls.load(Ordering::SeqCst), 0, "case={label}");
+        assert!(!game_dir.exists(), "case={label} must not touch game_dir");
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree() {
+    struct UntrackedFileGuard(PathBuf);
+    impl Drop for UntrackedFileGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    let _checkout_lock = LIVE_CHECKOUT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let untracked_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        ".eval_untracked_seam_check_{}.tmp",
+        std::process::id()
+    ));
+    must_ok(
+        fs::write(&untracked_path, "untracked check\n"),
+        "write temporary untracked file in checkout",
+    );
+    let _guard = UntrackedFileGuard(untracked_path);
+
+    let tmp = fresh_tmp_dir("dirty_tree_seam");
+    let seats_path = write_seats(&tmp, all_clubbot_seats());
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+
+    // 1. Test seam runs cleanly with an untracked file in the checkout.
+    let seam_manifest = must_ok(
+        run_play_with_transport(
+            &PlayOptions {
+                game_dir: tmp.join("seam_game"),
+                seats_path: seats_path.clone(),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: None,
+                arm: EvalArm::Off,
+                table_id: 319,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &NoopTransport,
+            None,
+        ),
+        "seam must allow dirty checkout tests",
+    );
+    assert_eq!(seam_manifest.played_turns, 1);
+
+    // 2. Real production path refuses the untracked file at startup with DIRTY_GIT_WORKTREE.
+    let real_err = match league_eval::run_play_with_transport(
+        &PlayOptions {
+            game_dir: tmp.join("real_game"),
+            seats_path,
+            wrapper_path,
+            wrapper_version: None,
+            serving_manifest_path: None,
+            arm: EvalArm::Off,
+            table_id: 320,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &NoopTransport,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("real run_play_with_transport must refuse dirty checkout"),
+    };
+    assert_eq!(real_err.code(), "DIRTY_GIT_WORKTREE");
 
     let _ = fs::remove_dir_all(&tmp);
 }

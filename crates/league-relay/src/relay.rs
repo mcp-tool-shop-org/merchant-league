@@ -2903,7 +2903,7 @@ struct ApplyTemplateRequestWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    thinking_token_budget: Option<u32>,
+    reasoning_budget_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2925,7 +2925,7 @@ struct ChatCompletionRequestWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    thinking_token_budget: Option<u32>,
+    reasoning_budget_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6040,7 +6040,7 @@ fn run_single_automated_seat(
             let Some(tokenize_url) = seat.tokenize_url else {
                 return SeatOutcome::SeatError {
                     detail:
-                        "snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
+                        "SCRATCHPAD_TOKENIZE_FAILED: snapshot scratchpad requires a local /tokenize endpoint; refusing turn rather than guessing token count"
                             .to_owned(),
                 };
             };
@@ -6057,7 +6057,7 @@ fn run_single_automated_seat(
                     return SeatOutcome::SeatError {
                         detail: redact_secrets(
                             &format!(
-                                "cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
+                                "SCRATCHPAD_TOKENIZE_FAILED: cannot count saved scratchpad tokens via /tokenize ({err}); refusing turn rather than guessing"
                             ),
                             redaction_key,
                         ),
@@ -6237,7 +6237,7 @@ fn run_single_automated_seat(
                 response_format: response_format_wire,
                 reasoning: or_reasoning,
                 reasoning_effort: local_effort,
-                thinking_token_budget: local_budget,
+                reasoning_budget_tokens: local_budget,
                 chat_template_kwargs: local_kwargs,
                 include_reasoning: local_include_reasoning,
                 tools: request_tools,
@@ -6259,7 +6259,7 @@ fn run_single_automated_seat(
             response_format: response_format_wire,
             reasoning: or_reasoning,
             reasoning_effort: local_effort,
-            thinking_token_budget: local_budget,
+            reasoning_budget_tokens: local_budget,
             chat_template_kwargs: local_kwargs,
             include_reasoning: local_include_reasoning,
             tools: request_tools,
@@ -6681,7 +6681,7 @@ fn run_single_automated_seat(
                                 Err(tok_err) => {
                                     let detail = redact_secrets(
                                         &format!(
-                                            "cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
+                                            "SCRATCHPAD_TOKENIZE_FAILED: cannot count scratchpad tokens via /tokenize ({tok_err}); refusing turn rather than guessing"
                                         ),
                                         redaction_key,
                                     );
