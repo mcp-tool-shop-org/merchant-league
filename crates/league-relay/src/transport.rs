@@ -698,7 +698,7 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&dir);
 
-        let gate = match LocalGate::acquire(false, None, false, &[]) {
+        let gate = match LocalGate::acquire(false, Some(20.0), false, &[]) {
             Ok(g) => g,
             Err(e) => panic!("LocalGate: {e}"),
         };
