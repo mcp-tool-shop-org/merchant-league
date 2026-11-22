@@ -145,9 +145,11 @@ pub struct SweepReceipt {
     pub turn: u8,
     /// Seats that missed commit or valid reveal in Step 1.
     pub non_reveal_seats: Vec<u8>,
-    /// Absent human seats for which the Standing Regent synthesized upkeep actions.
+    /// Seats for which the Standing Regent acted during Sweep (after a missed reveal or 3
+    /// consecutive zero-production turns from Turn 2 onward).
     pub regent_acted_seats: Vec<u8>,
-    /// Seats converted from `Human` to `AiSyndicate` after 3 consecutive misses.
+    /// Seats converted from `Human` to `AiSyndicate` after 3 consecutive missed reveals or 3
+    /// consecutive zero-production turns from Turn 2 onward.
     pub converted_to_ai: Vec<u8>,
     /// Escrow IDs unlocked cleanly via `EscrowFinish` or compliant bond evaluation in Step 2.
     pub escrows_finished: Vec<u64>,

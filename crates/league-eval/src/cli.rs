@@ -20,7 +20,7 @@ use crate::select::{SelectOptions, run_select};
 use crate::{EXIT_OK, EvalError};
 
 const HELP_TEXT: &str = "\
-Merchant League Evaluation Mode harness (Card 10)
+Merchant League Evaluation Mode harness
 
 USAGE:
   league-eval [--error-format text|json] <COMMAND> [OPTIONS]
@@ -28,8 +28,8 @@ USAGE:
   league-eval --version | -V
 
 COMMANDS:
-  play     Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|on>`
-  branch   Replay a frozen pre-act checkpoint across `--arms <off,on>` holding peer actions fixed
+  play     Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>`
+  branch   Replay a frozen pre-act checkpoint across `--arms <off,control,on>` holding peer actions fixed
   select   Deterministically select stratified early/mid/late pre-act checkpoints across games
 ";
 
@@ -207,6 +207,7 @@ fn cmd_play(
     let mut seats_path: Option<PathBuf> = None;
     let mut wrapper_path: Option<PathBuf> = None;
     let mut wrapper_version: Option<String> = None;
+    let mut serving_manifest_path: Option<PathBuf> = None;
     let mut arm: Option<EvalArm> = None;
     let mut table_id: u64 = 1;
     let mut seed: Option<u64> = None;
@@ -233,6 +234,10 @@ fn cmd_play(
             "--wrapper" => wrapper_path = Some(PathBuf::from(take_value(&mut iter, "--wrapper")?)),
             "--wrapper-version" => {
                 wrapper_version = Some(take_value(&mut iter, "--wrapper-version")?);
+            }
+            "--serving-manifest" => {
+                serving_manifest_path =
+                    Some(PathBuf::from(take_value(&mut iter, "--serving-manifest")?));
             }
             "--arm" => {
                 let raw = take_value(&mut iter, "--arm")?;
@@ -292,7 +297,10 @@ fn cmd_play(
         wrapper_path: wrapper_path
             .ok_or_else(|| EvalError::Usage("`play` requires `--wrapper`".to_owned()))?,
         wrapper_version,
-        arm: arm.ok_or_else(|| EvalError::Usage("`play` requires `--arm <off|on>`".to_owned()))?,
+        serving_manifest_path,
+        arm: arm.ok_or_else(|| {
+            EvalError::Usage("`play` requires `--arm <off|control|on>`".to_owned())
+        })?,
         table_id,
         seed: seed.ok_or_else(|| EvalError::Usage("`play` requires `--seed <u64>`".to_owned()))?,
         turns,
@@ -345,6 +353,7 @@ fn cmd_branch(
     let mut focal_seat: Option<String> = None;
     let mut seats_path: Option<PathBuf> = None;
     let mut wrapper_path: Option<PathBuf> = None;
+    let mut serving_manifest_path: Option<PathBuf> = None;
     let mut arms: Vec<EvalArm> = Vec::new();
     let mut out_dir: Option<PathBuf> = None;
     let mut memory_mode = MemoryMode::Snapshot;
@@ -371,6 +380,10 @@ fn cmd_branch(
             "--seat" => focal_seat = Some(take_value(&mut iter, "--seat")?),
             "--seats" => seats_path = Some(PathBuf::from(take_value(&mut iter, "--seats")?)),
             "--wrapper" => wrapper_path = Some(PathBuf::from(take_value(&mut iter, "--wrapper")?)),
+            "--serving-manifest" => {
+                serving_manifest_path =
+                    Some(PathBuf::from(take_value(&mut iter, "--serving-manifest")?));
+            }
             "--arm" | "--arms" => {
                 let raw = take_value(&mut iter, &arg)?;
                 for part in raw.split(',').filter(|p| !p.trim().is_empty()) {
@@ -406,7 +419,7 @@ fn cmd_branch(
     }
 
     if arms.is_empty() {
-        arms = vec![EvalArm::Off, EvalArm::On];
+        arms = vec![EvalArm::Off, EvalArm::Control, EvalArm::On];
     }
 
     let opts = BranchOptions {
@@ -417,6 +430,7 @@ fn cmd_branch(
             .ok_or_else(|| EvalError::Usage("`branch` requires `--seats`".to_owned()))?,
         wrapper_path: wrapper_path
             .ok_or_else(|| EvalError::Usage("`branch` requires `--wrapper`".to_owned()))?,
+        serving_manifest_path,
         arms,
         out_dir: out_dir.ok_or_else(|| EvalError::Usage("`branch` requires `--out`".to_owned()))?,
         memory_mode,

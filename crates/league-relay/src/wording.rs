@@ -862,32 +862,39 @@ pub const PREVIEW_WORDING_ARM_R1: &str = "v2_preview_2026_11_17_r1";
 /// Card 9 preview wording arm (`r2`), replacing `preview_call_budget_sentence` sentence 3 only.
 pub const PREVIEW_WORDING_ARM_R2: &str = "v2_preview_2026_11_20_r2";
 
+/// Pinned model-facing wording arm for `--preview-tool control` (`draft_turn_orders`).
+pub const CONTROL_WORDING_ARM: &str = "v2_control_2026_11_21_r1";
+
 /// Active pinned model-facing wording arm for `--preview-tool on` (coexisting with
-/// [`ACTIVE_WORDING_ARM`] for `--preview-tool off`).
+/// [`ACTIVE_WORDING_ARM`] for `--preview-tool off` and [`CONTROL_WORDING_ARM`] for
+/// `--preview-tool control`).
 pub const PREVIEW_WORDING_ARM: &str = PREVIEW_WORDING_ARM_R2;
 
 /// Maximum number of `preview_turn_orders` tool calls allowed per `act` turn (`Card 7`).
 pub const MAX_PREVIEW_TOOL_CALLS_PER_TURN: usize = 3;
 
-/// Mode for the Card 7 what-if preview tool (`--preview-tool <off|on>`).
+/// Mode for the act-round order drafting / what-if preview tool (`--preview-tool <off|control|on>`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewToolMode {
     /// Preview tool disabled (`v2_neutral_2026_11_15_r6` arm; default and pre-Card-7 lock).
     #[default]
     Off,
+    /// Control drafting tool enabled on `act` turns ([`CONTROL_WORDING_ARM`] arm).
+    Control,
     /// Preview tool enabled on `act` turns ([`PREVIEW_WORDING_ARM`] arm).
     On,
 }
 
 impl PreviewToolMode {
-    /// Parse `"off"` or `"on"` (case-insensitive CLI flag value).
+    /// Parse `"off"`, `"control"`, or `"on"` (case-insensitive CLI flag value).
     pub fn parse(raw: &str) -> Result<Self, RelayError> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "off" => Ok(Self::Off),
+            "control" => Ok(Self::Control),
             "on" => Ok(Self::On),
             _ => Err(RelayError::Usage(
-                "--preview-tool must be 'off' or 'on'".to_owned(),
+                "--preview-tool must be 'off', 'control', or 'on'".to_owned(),
             )),
         }
     }
@@ -897,6 +904,7 @@ impl PreviewToolMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Off => "off",
+            Self::Control => "control",
             Self::On => "on",
         }
     }
@@ -906,6 +914,7 @@ impl PreviewToolMode {
     pub const fn wording_arm(self) -> &'static str {
         match self {
             Self::Off => ACTIVE_WORDING_ARM,
+            Self::Control => CONTROL_WORDING_ARM,
             Self::On => PREVIEW_WORDING_ARM,
         }
     }
@@ -1311,6 +1320,234 @@ pub const PREVIEW_ARM_WORDING_R2: &[WordingEntry] = preview_arm_entries!(
 /// token-confusable filters and contain zero `Default_Ignorable_Code_Point` characters.
 pub const PREVIEW_ARM_WORDING: &[WordingEntry] = PREVIEW_ARM_WORDING_R2;
 
+const fn const_str_eq(a: &str, b: &str) -> bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < ab.len() {
+        if ab[i] != bb[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn const_lookup_r2_slot(slot: &str) -> &'static str {
+    let mut i = 0;
+    while i < PREVIEW_ARM_WORDING_R2.len() {
+        if const_str_eq(PREVIEW_ARM_WORDING_R2[i].slot, slot) {
+            return PREVIEW_ARM_WORDING_R2[i].shown_text;
+        }
+        i += 1;
+    }
+    panic!("missing slot in PREVIEW_ARM_WORDING_R2")
+}
+
+const CONTROL_SHARED_SLOTS_FROM_R2: &[&str] = &[
+    // --- OpenAI / JSON Schema structural keywords & parameter keys (identical to r2) ---
+    "schema_kw_type",
+    "schema_kw_function",
+    "schema_kw_name",
+    "schema_kw_description",
+    "schema_kw_parameters",
+    "schema_kw_properties",
+    "schema_kw_required",
+    "schema_kw_additional_properties",
+    "schema_kw_items",
+    "schema_kw_enum",
+    "schema_kw_any_of",
+    "schema_ty_object",
+    "schema_ty_array",
+    "schema_ty_integer",
+    "schema_ty_boolean",
+    "schema_ty_string",
+    "schema_ty_null",
+    "preview_param_root_desc",
+    "preview_param_market_actions_desc",
+    "preview_param_bundle_desc",
+    "key_market_actions",
+    "key_bundle",
+    "key_action_kind",
+    "key_side",
+    "key_good",
+    "key_asset",
+    "key_asset_kind",
+    "key_good_index",
+    "key_amount",
+    "key_price_per_unit_cred",
+    "key_domain_id",
+    "key_is_hybrid",
+    "key_offer_id",
+    "key_check_id",
+    "key_escrow_id",
+    "key_payee",
+    "key_send_max",
+    "key_deliver_min",
+    "key_due_turn",
+    "key_expiration_turn",
+    "key_destination",
+    "key_finish_after_turn",
+    "key_cancel_after_turn",
+    "key_condition_hash",
+    "key_bond",
+    "key_required_units",
+    "key_deadline_turn",
+    "key_mode",
+    "key_pledge_id",
+    "key_recipient_seat",
+    "key_target",
+    "key_target_kind",
+    "key_office_turn",
+    "key_candidate",
+    "key_beneficiary",
+    "key_condition",
+    "key_honor_weight",
+    "key_memo_digest",
+    "key_target_seat",
+    "key_proposed_tariffs_bps",
+    "key_raw_bps",
+    "key_refined_bps",
+    "key_cartel_admissions",
+    "key_cartel_revocations",
+    "key_converter_runs",
+    "key_recipe_idx",
+    "key_runs",
+    "key_project_deliveries",
+    "key_project_id",
+    "key_batches",
+    "key_atomic_swaps",
+    "key_swap_id",
+    "key_maker_seat",
+    "key_taker_seat",
+    "key_maker_asset",
+    "key_maker_amount",
+    "key_taker_asset",
+    "key_taker_amount",
+    "key_contract_deliveries",
+    "key_gross_amount",
+    "key_dual_escrow_id",
+    "key_dual_escrows",
+    "key_proposal_id",
+    "key_buyer_seat",
+    "key_seller_seat",
+    "key_payment_cred",
+    "key_buyer_bond_cred",
+    "key_seller_bond_cred",
+    "key_debt_repayment_cred",
+    "key_escrow_finishes",
+    "key_preimage",
+    "key_check_cashes",
+    "key_council_vote",
+    "key_trade_minister",
+    "key_cartel_chair",
+    "key_charter_bids",
+    "key_role",
+    "key_bid_cred",
+    "val_action_post_offer",
+    "val_action_cancel_offer",
+    "val_action_create_check",
+    "val_action_cancel_check",
+    "val_action_create_escrow",
+    "val_action_cancel_expired_escrow",
+    "val_action_record_intent_pledge",
+    "val_action_flag_wash_freeze",
+    "val_action_stand_for_office",
+    "val_action_town_import",
+    "val_side_buy",
+    "val_side_sell",
+    "val_asset_cred",
+    "val_asset_raw",
+    "val_asset_refined",
+    "val_bond_seller_performance",
+    "val_bond_buyer_dvp",
+    "val_target_vote_for_seat",
+    "val_target_preserve_cartel",
+    "val_target_reveal_preimage",
+    "val_charter_broker",
+    "val_charter_inspector",
+    "val_charter_auditor",
+    "desc_market_action_item",
+    "desc_asset_obj",
+    "desc_hex64",
+    "desc_converter_runs",
+    "desc_project_deliveries",
+    "desc_atomic_swaps",
+    "desc_contract_deliveries",
+    "desc_dual_escrows",
+    "desc_debt_repayment",
+    "desc_escrow_finishes",
+    "desc_check_cashes",
+    "desc_council_vote",
+    "desc_charter_bids",
+    // --- Shared seat parameter field & refusal envelope keys/codes ---
+    "wire_key_seat",
+    "wire_key_status",
+    "wire_key_error_code",
+    "wire_key_reason",
+    "wire_status_refused",
+    "preview_code_MALFORMED_TOOL_CALL",
+    "preview_code_CALL_LIMIT_REACHED",
+];
+
+const CONTROL_ARM_SPECIFIC_LEN: usize = 6;
+const CONTROL_ARM_WORDING_LEN: usize =
+    CONTROL_ARM_SPECIFIC_LEN + CONTROL_SHARED_SLOTS_FROM_R2.len();
+
+const fn build_control_arm_wording_array() -> [WordingEntry; CONTROL_ARM_WORDING_LEN] {
+    let mut out = [WordingEntry {
+        slot: "",
+        shown_text: "",
+    }; CONTROL_ARM_WORDING_LEN];
+    out[0] = WordingEntry {
+        slot: "preview_tool_name",
+        shown_text: "draft_turn_orders",
+    };
+    out[1] = WordingEntry {
+        slot: "preview_tool_description",
+        shown_text: "Record a draft of candidate own-seat market actions and a sealed order bundle for this turn without advancing the game or contacting peers. Nothing is checked against the rules or simulated, and nothing is submitted. Returns a fixed reply.",
+    };
+    out[2] = WordingEntry {
+        slot: "preview_call_budget_sentence",
+        shown_text: "You have a tool called draft_turn_orders to write down candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke draft_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The draft tool does not check your orders against the rules; it does not show what other seats will do. Finish with a single final JSON reply.",
+    };
+    out[3] = WordingEntry {
+        slot: "control_fixed_reply",
+        shown_text: "Draft recorded. Nothing was checked or submitted.",
+    };
+    out[4] = WordingEntry {
+        slot: "preview_malformed_tool_call",
+        shown_text: "Malformed draft_turn_orders arguments: provide a strict JSON object with own-seat market_actions and bundle fields matching the declared schema, with zero assumption or peer fields.",
+    };
+    out[5] = WordingEntry {
+        slot: "preview_call_limit_reached",
+        shown_text: "Draft call limit reached for this turn ({MAX_PREVIEW_TOOL_CALLS_PER_TURN} calls maximum). Submit your final JSON reply directly without calling draft_turn_orders again.",
+    };
+    let mut i = 0;
+    while i < CONTROL_SHARED_SLOTS_FROM_R2.len() {
+        let slot = CONTROL_SHARED_SLOTS_FROM_R2[i];
+        out[CONTROL_ARM_SPECIFIC_LEN + i] = WordingEntry {
+            slot,
+            shown_text: const_lookup_r2_slot(slot),
+        };
+        i += 1;
+    }
+    out
+}
+
+const CONTROL_ARM_WORDING_ARRAY: [WordingEntry; CONTROL_ARM_WORDING_LEN] =
+    build_control_arm_wording_array();
+
+/// Complete model-facing wording entries for [`CONTROL_WORDING_ARM`] (`v2_control_2026_11_21_r1`).
+///
+/// Shares all schema/parameter keys and descriptions with [`PREVIEW_ARM_WORDING_R2`], replaces
+/// only the tool name, description, budget sentence, malformed-call message, and call-limit
+/// message, adds `control_fixed_reply`, and omits all projection and engine rule-refusal entries.
+pub const CONTROL_ARM_WORDING: &[WordingEntry] = &CONTROL_ARM_WORDING_ARRAY;
+
 fn lookup_preview_wording_template(entries: &[WordingEntry], slot: &str) -> &'static str {
     for entry in entries {
         if entry.slot == slot {
@@ -1339,6 +1576,18 @@ pub fn preview_r1_wording_slot(slot: &str) -> String {
     render_preview_wording_slot_from(PREVIEW_ARM_WORDING_R1, slot)
 }
 
+/// Return the raw wording template for a slot in [`CONTROL_ARM_WORDING`].
+#[must_use]
+pub fn control_wording_template(slot: &str) -> &'static str {
+    lookup_preview_wording_template(CONTROL_ARM_WORDING, slot)
+}
+
+/// Render a slot from [`CONTROL_ARM_WORDING`], substituting pinned preview constants.
+#[must_use]
+pub fn control_wording_slot(slot: &str) -> String {
+    render_preview_wording_slot_from(CONTROL_ARM_WORDING, slot)
+}
+
 /// Return the raw wording template for a slot in [`PREVIEW_ARM_WORDING`].
 #[must_use]
 pub fn preview_wording_template(slot: &str) -> &'static str {
@@ -1351,94 +1600,142 @@ pub fn preview_wording_slot(slot: &str) -> String {
     render_preview_wording_slot_from(PREVIEW_ARM_WORDING, slot)
 }
 
+fn jkey_from(entries: &[WordingEntry], slot: &str) -> String {
+    lookup_preview_wording_template(entries, slot).to_owned()
+}
+
+fn jstr_from(entries: &[WordingEntry], slot: &str) -> serde_json::Value {
+    serde_json::Value::String(jkey_from(entries, slot))
+}
+
 fn jkey(slot: &str) -> String {
-    preview_wording_template(slot).to_owned()
+    jkey_from(PREVIEW_ARM_WORDING, slot)
 }
 
 fn jstr(slot: &str) -> serde_json::Value {
-    serde_json::Value::String(jkey(slot))
+    jstr_from(PREVIEW_ARM_WORDING, slot)
 }
 
-fn schema_obj(
+fn schema_obj_from(
+    entries: &[WordingEntry],
     props: Vec<(&str, serde_json::Value)>,
     req: &[&str],
     desc_slot: Option<&str>,
 ) -> serde_json::Value {
     let mut prop_map = serde_json::Map::new();
     for (k_slot, v) in props {
-        prop_map.insert(jkey(k_slot), v);
+        prop_map.insert(jkey_from(entries, k_slot), v);
     }
-    let req_vals: Vec<serde_json::Value> = req.iter().map(|s| jstr(s)).collect();
+    let req_vals: Vec<serde_json::Value> = req.iter().map(|s| jstr_from(entries, s)).collect();
     let mut obj = serde_json::Map::new();
-    obj.insert(jkey("schema_kw_type"), jstr("schema_ty_object"));
+    obj.insert(
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, "schema_ty_object"),
+    );
     if let Some(d) = desc_slot {
-        obj.insert(jkey("schema_kw_description"), jstr(d));
+        obj.insert(
+            jkey_from(entries, "schema_kw_description"),
+            jstr_from(entries, d),
+        );
     }
     obj.insert(
-        jkey("schema_kw_properties"),
+        jkey_from(entries, "schema_kw_properties"),
         serde_json::Value::Object(prop_map),
     );
     obj.insert(
-        jkey("schema_kw_required"),
+        jkey_from(entries, "schema_kw_required"),
         serde_json::Value::Array(req_vals),
     );
     obj.insert(
-        jkey("schema_kw_additional_properties"),
+        jkey_from(entries, "schema_kw_additional_properties"),
         serde_json::Value::Bool(false),
     );
     serde_json::Value::Object(obj)
 }
 
-fn schema_prim(ty_slot: &str, desc_slot: Option<&str>) -> serde_json::Value {
+fn schema_prim_from(
+    entries: &[WordingEntry],
+    ty_slot: &str,
+    desc_slot: Option<&str>,
+) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
-    obj.insert(jkey("schema_kw_type"), jstr(ty_slot));
+    obj.insert(
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, ty_slot),
+    );
     if let Some(d) = desc_slot {
-        obj.insert(jkey("schema_kw_description"), jstr(d));
+        obj.insert(
+            jkey_from(entries, "schema_kw_description"),
+            jstr_from(entries, d),
+        );
     }
     serde_json::Value::Object(obj)
 }
 
-fn schema_nullable(inner: serde_json::Value) -> serde_json::Value {
+fn schema_nullable_from(entries: &[WordingEntry], inner: serde_json::Value) -> serde_json::Value {
     let mut null_obj = serde_json::Map::new();
-    null_obj.insert(jkey("schema_kw_type"), jstr("schema_ty_null"));
+    null_obj.insert(
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, "schema_ty_null"),
+    );
     let mut obj = serde_json::Map::new();
     obj.insert(
-        jkey("schema_kw_any_of"),
+        jkey_from(entries, "schema_kw_any_of"),
         serde_json::Value::Array(vec![inner, serde_json::Value::Object(null_obj)]),
     );
     serde_json::Value::Object(obj)
 }
 
-fn schema_enum_str(variants: &[&str]) -> serde_json::Value {
+fn schema_enum_str_from(entries: &[WordingEntry], variants: &[&str]) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
-    obj.insert(jkey("schema_kw_type"), jstr("schema_ty_string"));
     obj.insert(
-        jkey("schema_kw_enum"),
-        serde_json::Value::Array(variants.iter().map(|s| jstr(s)).collect()),
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, "schema_ty_string"),
+    );
+    obj.insert(
+        jkey_from(entries, "schema_kw_enum"),
+        serde_json::Value::Array(variants.iter().map(|s| jstr_from(entries, s)).collect()),
     );
     serde_json::Value::Object(obj)
 }
 
-fn schema_array(items: serde_json::Value, desc_slot: Option<&str>) -> serde_json::Value {
+fn schema_array_from(
+    entries: &[WordingEntry],
+    items: serde_json::Value,
+    desc_slot: Option<&str>,
+) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
-    obj.insert(jkey("schema_kw_type"), jstr("schema_ty_array"));
+    obj.insert(
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, "schema_ty_array"),
+    );
     if let Some(d) = desc_slot {
-        obj.insert(jkey("schema_kw_description"), jstr(d));
+        obj.insert(
+            jkey_from(entries, "schema_kw_description"),
+            jstr_from(entries, d),
+        );
     }
-    obj.insert(jkey("schema_kw_items"), items);
+    obj.insert(jkey_from(entries, "schema_kw_items"), items);
     serde_json::Value::Object(obj)
 }
 
-fn schema_asset() -> serde_json::Value {
-    schema_obj(
+fn schema_asset_from(entries: &[WordingEntry]) -> serde_json::Value {
+    schema_obj_from(
+        entries,
         vec![
             (
                 "key_asset_kind",
-                schema_enum_str(&["val_asset_cred", "val_asset_raw", "val_asset_refined"]),
+                schema_enum_str_from(
+                    entries,
+                    &["val_asset_cred", "val_asset_raw", "val_asset_refined"],
+                ),
             ),
             (
                 "key_good_index",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
         ],
         &["key_asset_kind"],
@@ -1446,57 +1743,89 @@ fn schema_asset() -> serde_json::Value {
     )
 }
 
-fn schema_bond_opt() -> serde_json::Value {
-    let bond = schema_obj(
+fn schema_bond_opt_from(entries: &[WordingEntry]) -> serde_json::Value {
+    let bond = schema_obj_from(
+        entries,
         vec![
-            ("key_good", schema_asset()),
-            ("key_required_units", schema_prim("schema_ty_integer", None)),
-            ("key_deadline_turn", schema_prim("schema_ty_integer", None)),
+            ("key_good", schema_asset_from(entries)),
+            (
+                "key_required_units",
+                schema_prim_from(entries, "schema_ty_integer", None),
+            ),
+            (
+                "key_deadline_turn",
+                schema_prim_from(entries, "schema_ty_integer", None),
+            ),
             (
                 "key_mode",
-                schema_enum_str(&["val_bond_seller_performance", "val_bond_buyer_dvp"]),
+                schema_enum_str_from(
+                    entries,
+                    &["val_bond_seller_performance", "val_bond_buyer_dvp"],
+                ),
             ),
         ],
         &["key_good", "key_required_units", "key_deadline_turn"],
         None,
     );
-    schema_nullable(bond)
+    schema_nullable_from(entries, bond)
 }
 
-fn schema_intent_target() -> serde_json::Value {
-    schema_obj(
+fn schema_intent_target_from(entries: &[WordingEntry]) -> serde_json::Value {
+    schema_obj_from(
+        entries,
         vec![
             (
                 "key_target_kind",
-                schema_enum_str(&[
-                    "val_target_vote_for_seat",
-                    "val_target_preserve_cartel",
-                    "val_target_reveal_preimage",
-                ]),
+                schema_enum_str_from(
+                    entries,
+                    &[
+                        "val_target_vote_for_seat",
+                        "val_target_preserve_cartel",
+                        "val_target_reveal_preimage",
+                    ],
+                ),
             ),
             (
                 "key_office_turn",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
             (
                 "key_candidate",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
             (
                 "key_domain_id",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
             (
                 "key_beneficiary",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
             (
                 "key_escrow_id",
-                schema_nullable(schema_prim("schema_ty_integer", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_integer", None),
+                ),
             ),
             (
                 "key_condition",
-                schema_nullable(schema_prim("schema_ty_string", Some("desc_hex64"))),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_string", Some("desc_hex64")),
+                ),
             ),
         ],
         &["key_target_kind"],
@@ -1504,45 +1833,56 @@ fn schema_intent_target() -> serde_json::Value {
     )
 }
 
-/// Build the pinned OpenAI-format function tool definition for `preview_turn_orders` (`Card 7`).
-///
-/// Includes `AiPreviewRequest` own-orders fields only (`market_actions` and `bundle`), with zero
-/// `assumptions` or counterparty-assumption parameters, constructed solely from [`PREVIEW_ARM_WORDING`].
-#[must_use]
-pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
-    let hex_str = || schema_prim("schema_ty_string", Some("desc_hex64"));
-    let u_int = || schema_prim("schema_ty_integer", None);
-    let opt_int = || schema_nullable(u_int());
+fn build_turn_orders_tool_definition_from(entries: &[WordingEntry]) -> serde_json::Value {
+    let hex_str = || schema_prim_from(entries, "schema_ty_string", Some("desc_hex64"));
+    let u_int = || schema_prim_from(entries, "schema_ty_integer", None);
+    let opt_int = || schema_nullable_from(entries, u_int());
 
-    let market_action_item = schema_obj(
+    let market_action_item = schema_obj_from(
+        entries,
         vec![
             (
                 "key_action_kind",
-                schema_enum_str(&[
-                    "val_action_post_offer",
-                    "val_action_cancel_offer",
-                    "val_action_create_check",
-                    "val_action_cancel_check",
-                    "val_action_create_escrow",
-                    "val_action_cancel_expired_escrow",
-                    "val_action_record_intent_pledge",
-                    "val_action_flag_wash_freeze",
-                    "val_action_stand_for_office",
-                    "val_action_town_import",
-                ]),
+                schema_enum_str_from(
+                    entries,
+                    &[
+                        "val_action_post_offer",
+                        "val_action_cancel_offer",
+                        "val_action_create_check",
+                        "val_action_cancel_check",
+                        "val_action_create_escrow",
+                        "val_action_cancel_expired_escrow",
+                        "val_action_record_intent_pledge",
+                        "val_action_flag_wash_freeze",
+                        "val_action_stand_for_office",
+                        "val_action_town_import",
+                    ],
+                ),
             ),
             (
                 "key_side",
-                schema_nullable(schema_enum_str(&["val_side_buy", "val_side_sell"])),
+                schema_nullable_from(
+                    entries,
+                    schema_enum_str_from(entries, &["val_side_buy", "val_side_sell"]),
+                ),
             ),
-            ("key_good", schema_nullable(schema_asset())),
-            ("key_asset", schema_nullable(schema_asset())),
+            (
+                "key_good",
+                schema_nullable_from(entries, schema_asset_from(entries)),
+            ),
+            (
+                "key_asset",
+                schema_nullable_from(entries, schema_asset_from(entries)),
+            ),
             ("key_amount", opt_int()),
             ("key_price_per_unit_cred", opt_int()),
             ("key_domain_id", opt_int()),
             (
                 "key_is_hybrid",
-                schema_nullable(schema_prim("schema_ty_boolean", None)),
+                schema_nullable_from(
+                    entries,
+                    schema_prim_from(entries, "schema_ty_boolean", None),
+                ),
             ),
             ("key_offer_id", opt_int()),
             ("key_check_id", opt_int()),
@@ -1555,74 +1895,98 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
             ("key_destination", opt_int()),
             ("key_finish_after_turn", opt_int()),
             ("key_cancel_after_turn", opt_int()),
-            ("key_condition_hash", schema_nullable(hex_str())),
-            ("key_bond", schema_bond_opt()),
+            (
+                "key_condition_hash",
+                schema_nullable_from(entries, hex_str()),
+            ),
+            ("key_bond", schema_bond_opt_from(entries)),
             ("key_pledge_id", opt_int()),
             ("key_recipient_seat", opt_int()),
-            ("key_target", schema_nullable(schema_intent_target())),
+            (
+                "key_target",
+                schema_nullable_from(entries, schema_intent_target_from(entries)),
+            ),
             ("key_honor_weight", opt_int()),
-            ("key_memo_digest", schema_nullable(hex_str())),
+            ("key_memo_digest", schema_nullable_from(entries, hex_str())),
             ("key_target_seat", opt_int()),
             (
                 "key_proposed_tariffs_bps",
-                schema_nullable(schema_array(
-                    schema_obj(
-                        vec![
-                            ("wire_key_seat", u_int()),
-                            ("key_raw_bps", u_int()),
-                            ("key_refined_bps", u_int()),
-                        ],
-                        &["wire_key_seat", "key_raw_bps", "key_refined_bps"],
+                schema_nullable_from(
+                    entries,
+                    schema_array_from(
+                        entries,
+                        schema_obj_from(
+                            entries,
+                            vec![
+                                ("wire_key_seat", u_int()),
+                                ("key_raw_bps", u_int()),
+                                ("key_refined_bps", u_int()),
+                            ],
+                            &["wire_key_seat", "key_raw_bps", "key_refined_bps"],
+                            None,
+                        ),
                         None,
                     ),
-                    None,
-                )),
+                ),
             ),
             (
                 "key_cartel_admissions",
-                schema_nullable(schema_array(
-                    schema_obj(
-                        vec![("key_domain_id", u_int()), ("wire_key_seat", u_int())],
-                        &["key_domain_id", "wire_key_seat"],
+                schema_nullable_from(
+                    entries,
+                    schema_array_from(
+                        entries,
+                        schema_obj_from(
+                            entries,
+                            vec![("key_domain_id", u_int()), ("wire_key_seat", u_int())],
+                            &["key_domain_id", "wire_key_seat"],
+                            None,
+                        ),
                         None,
                     ),
-                    None,
-                )),
+                ),
             ),
             (
                 "key_cartel_revocations",
-                schema_nullable(schema_array(
-                    schema_obj(
-                        vec![("key_domain_id", u_int()), ("wire_key_seat", u_int())],
-                        &["key_domain_id", "wire_key_seat"],
+                schema_nullable_from(
+                    entries,
+                    schema_array_from(
+                        entries,
+                        schema_obj_from(
+                            entries,
+                            vec![("key_domain_id", u_int()), ("wire_key_seat", u_int())],
+                            &["key_domain_id", "wire_key_seat"],
+                            None,
+                        ),
                         None,
                     ),
-                    None,
-                )),
+                ),
             ),
         ],
         &["key_action_kind"],
         Some("desc_market_action_item"),
     );
 
-    let converter_item = schema_obj(
+    let converter_item = schema_obj_from(
+        entries,
         vec![("key_recipe_idx", u_int()), ("key_runs", u_int())],
         &["key_recipe_idx", "key_runs"],
         None,
     );
-    let project_item = schema_obj(
+    let project_item = schema_obj_from(
+        entries,
         vec![("key_project_id", u_int()), ("key_batches", u_int())],
         &["key_project_id", "key_batches"],
         None,
     );
-    let swap_item = schema_obj(
+    let swap_item = schema_obj_from(
+        entries,
         vec![
             ("key_swap_id", u_int()),
             ("key_maker_seat", u_int()),
             ("key_taker_seat", u_int()),
-            ("key_maker_asset", schema_asset()),
+            ("key_maker_asset", schema_asset_from(entries)),
             ("key_maker_amount", u_int()),
-            ("key_taker_asset", schema_asset()),
+            ("key_taker_asset", schema_asset_from(entries)),
             ("key_taker_amount", u_int()),
             ("key_domain_id", opt_int()),
         ],
@@ -1637,10 +2001,11 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
         ],
         None,
     );
-    let contract_delivery_item = schema_obj(
+    let contract_delivery_item = schema_obj_from(
+        entries,
         vec![
             ("key_recipient_seat", u_int()),
-            ("key_good", schema_asset()),
+            ("key_good", schema_asset_from(entries)),
             ("key_gross_amount", u_int()),
             ("key_domain_id", opt_int()),
             ("key_dual_escrow_id", opt_int()),
@@ -1648,12 +2013,13 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
         &["key_recipient_seat", "key_good", "key_gross_amount"],
         None,
     );
-    let dual_escrow_item = schema_obj(
+    let dual_escrow_item = schema_obj_from(
+        entries,
         vec![
             ("key_proposal_id", u_int()),
             ("key_buyer_seat", u_int()),
             ("key_seller_seat", u_int()),
-            ("key_good", schema_asset()),
+            ("key_good", schema_asset_from(entries)),
             ("key_required_units", u_int()),
             ("key_payment_cred", u_int()),
             ("key_buyer_bond_cred", u_int()),
@@ -1674,15 +2040,17 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
         ],
         None,
     );
-    let escrow_finish_item = schema_obj(
+    let escrow_finish_item = schema_obj_from(
+        entries,
         vec![
             ("key_escrow_id", u_int()),
-            ("key_preimage", schema_nullable(hex_str())),
+            ("key_preimage", schema_nullable_from(entries, hex_str())),
         ],
         &["key_escrow_id"],
         None,
     );
-    let council_vote_obj = schema_obj(
+    let council_vote_obj = schema_obj_from(
+        entries,
         vec![
             ("key_trade_minister", u_int()),
             ("key_cartel_chair", u_int()),
@@ -1690,15 +2058,19 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
         &["key_trade_minister", "key_cartel_chair"],
         Some("desc_council_vote"),
     );
-    let charter_bid_item = schema_obj(
+    let charter_bid_item = schema_obj_from(
+        entries,
         vec![
             (
                 "key_role",
-                schema_enum_str(&[
-                    "val_charter_broker",
-                    "val_charter_inspector",
-                    "val_charter_auditor",
-                ]),
+                schema_enum_str_from(
+                    entries,
+                    &[
+                        "val_charter_broker",
+                        "val_charter_inspector",
+                        "val_charter_auditor",
+                    ],
+                ),
             ),
             ("key_bid_cred", u_int()),
         ],
@@ -1706,55 +2078,65 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
         None,
     );
 
-    let bundle_schema = schema_obj(
+    let bundle_schema = schema_obj_from(
+        entries,
         vec![
             (
                 "key_converter_runs",
-                schema_array(converter_item, Some("desc_converter_runs")),
+                schema_array_from(entries, converter_item, Some("desc_converter_runs")),
             ),
             (
                 "key_project_deliveries",
-                schema_array(project_item, Some("desc_project_deliveries")),
+                schema_array_from(entries, project_item, Some("desc_project_deliveries")),
             ),
             (
                 "key_atomic_swaps",
-                schema_array(swap_item, Some("desc_atomic_swaps")),
+                schema_array_from(entries, swap_item, Some("desc_atomic_swaps")),
             ),
             (
                 "key_contract_deliveries",
-                schema_array(contract_delivery_item, Some("desc_contract_deliveries")),
+                schema_array_from(
+                    entries,
+                    contract_delivery_item,
+                    Some("desc_contract_deliveries"),
+                ),
             ),
             (
                 "key_dual_escrows",
-                schema_array(dual_escrow_item, Some("desc_dual_escrows")),
+                schema_array_from(entries, dual_escrow_item, Some("desc_dual_escrows")),
             ),
             (
                 "key_debt_repayment_cred",
-                schema_prim("schema_ty_integer", Some("desc_debt_repayment")),
+                schema_prim_from(entries, "schema_ty_integer", Some("desc_debt_repayment")),
             ),
             (
                 "key_escrow_finishes",
-                schema_array(escrow_finish_item, Some("desc_escrow_finishes")),
+                schema_array_from(entries, escrow_finish_item, Some("desc_escrow_finishes")),
             ),
             (
                 "key_check_cashes",
-                schema_array(u_int(), Some("desc_check_cashes")),
+                schema_array_from(entries, u_int(), Some("desc_check_cashes")),
             ),
-            ("key_council_vote", schema_nullable(council_vote_obj)),
+            (
+                "key_council_vote",
+                schema_nullable_from(entries, council_vote_obj),
+            ),
             (
                 "key_charter_bids",
-                schema_array(charter_bid_item, Some("desc_charter_bids")),
+                schema_array_from(entries, charter_bid_item, Some("desc_charter_bids")),
             ),
         ],
         &[],
         Some("preview_param_bundle_desc"),
     );
 
-    let parameters = schema_obj(
+    let parameters = schema_obj_from(
+        entries,
         vec![
             (
                 "key_market_actions",
-                schema_array(
+                schema_array_from(
+                    entries,
                     market_action_item,
                     Some("preview_param_market_actions_desc"),
                 ),
@@ -1766,20 +2148,44 @@ pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
     );
 
     let mut fn_map = serde_json::Map::new();
-    fn_map.insert(jkey("schema_kw_name"), jstr("preview_tool_name"));
     fn_map.insert(
-        jkey("schema_kw_description"),
-        jstr("preview_tool_description"),
+        jkey_from(entries, "schema_kw_name"),
+        jstr_from(entries, "preview_tool_name"),
     );
-    fn_map.insert(jkey("schema_kw_parameters"), parameters);
+    fn_map.insert(
+        jkey_from(entries, "schema_kw_description"),
+        jstr_from(entries, "preview_tool_description"),
+    );
+    fn_map.insert(jkey_from(entries, "schema_kw_parameters"), parameters);
 
     let mut root_map = serde_json::Map::new();
-    root_map.insert(jkey("schema_kw_type"), jstr("schema_kw_function"));
     root_map.insert(
-        jkey("schema_kw_function"),
+        jkey_from(entries, "schema_kw_type"),
+        jstr_from(entries, "schema_kw_function"),
+    );
+    root_map.insert(
+        jkey_from(entries, "schema_kw_function"),
         serde_json::Value::Object(fn_map),
     );
     serde_json::Value::Object(root_map)
+}
+
+/// Build the pinned OpenAI-format function tool definition for `preview_turn_orders`.
+///
+/// Includes `AiPreviewRequest` own-orders fields only (`market_actions` and `bundle`), with zero
+/// `assumptions` or counterparty-assumption parameters, constructed solely from [`PREVIEW_ARM_WORDING`].
+#[must_use]
+pub fn build_preview_turn_orders_tool_definition() -> serde_json::Value {
+    build_turn_orders_tool_definition_from(PREVIEW_ARM_WORDING)
+}
+
+/// Build the pinned OpenAI-format function tool definition for `draft_turn_orders`.
+///
+/// Shares the exact `market_actions` and `bundle` parameter schema as
+/// [`build_preview_turn_orders_tool_definition`], constructed solely from [`CONTROL_ARM_WORDING`].
+#[must_use]
+pub fn build_control_turn_orders_tool_definition() -> serde_json::Value {
+    build_turn_orders_tool_definition_from(CONTROL_ARM_WORDING)
 }
 
 fn reject_unknown_keys(
@@ -2504,15 +2910,29 @@ fn engine_error_slots_for_code(code: &str) -> (&'static str, &'static str) {
     }
 }
 
-fn build_refused_wire_json(code_slot: &str, reason_rendered: String) -> String {
+fn build_refused_wire_json_from(
+    entries: &[WordingEntry],
+    code_slot: &str,
+    reason_rendered: String,
+) -> String {
     let mut m = serde_json::Map::new();
-    m.insert(jkey("wire_key_status"), jstr("wire_status_refused"));
-    m.insert(jkey("wire_key_error_code"), jstr(code_slot));
     m.insert(
-        jkey("wire_key_reason"),
+        jkey_from(entries, "wire_key_status"),
+        jstr_from(entries, "wire_status_refused"),
+    );
+    m.insert(
+        jkey_from(entries, "wire_key_error_code"),
+        jstr_from(entries, code_slot),
+    );
+    m.insert(
+        jkey_from(entries, "wire_key_reason"),
         serde_json::Value::String(reason_rendered),
     );
     serde_json::Value::Object(m).to_string()
+}
+
+fn build_refused_wire_json(code_slot: &str, reason_rendered: String) -> String {
+    build_refused_wire_json_from(PREVIEW_ARM_WORDING, code_slot, reason_rendered)
 }
 
 /// Pinned tool result JSON returned when `preview_turn_orders` arguments are malformed or contain
@@ -2525,13 +2945,35 @@ pub fn render_malformed_tool_call_wire_json() -> String {
     )
 }
 
+/// Pinned tool result JSON returned when `draft_turn_orders` arguments are malformed or contain
+/// disallowed keys such as `assumptions` or counterparty fields.
+#[must_use]
+pub fn render_control_malformed_tool_call_wire_json() -> String {
+    build_refused_wire_json_from(
+        CONTROL_ARM_WORDING,
+        "preview_code_MALFORMED_TOOL_CALL",
+        control_wording_slot("preview_malformed_tool_call"),
+    )
+}
+
 /// Pinned tool result JSON returned when the per-turn limit ([`MAX_PREVIEW_TOOL_CALLS_PER_TURN`])
-/// has already been reached.
+/// has already been reached in `--preview-tool on`.
 #[must_use]
 pub fn render_call_limit_reached_wire_json() -> String {
     build_refused_wire_json(
         "preview_code_CALL_LIMIT_REACHED",
         preview_wording_slot("preview_call_limit_reached"),
+    )
+}
+
+/// Pinned tool result JSON returned when the per-turn limit ([`MAX_PREVIEW_TOOL_CALLS_PER_TURN`])
+/// has already been reached in `--preview-tool control`.
+#[must_use]
+pub fn render_control_call_limit_reached_wire_json() -> String {
+    build_refused_wire_json_from(
+        CONTROL_ARM_WORDING,
+        "preview_code_CALL_LIMIT_REACHED",
+        control_wording_slot("preview_call_limit_reached"),
     )
 }
 
@@ -3013,4 +3455,14 @@ pub fn execute_preview_tool_call(
         Ok(preview) => AiPreviewWireOutput::from_what_if_preview(&preview).to_json_string(),
         Err(err) => render_engine_refusal_wire_json(err.code()),
     }
+}
+
+/// Parse `draft_turn_orders` arguments without rule validation or simulation and return the pinned
+/// `control_fixed_reply` text (or `render_control_malformed_tool_call_wire_json` when malformed).
+#[must_use]
+pub fn execute_control_tool_call(asking_seat: u8, raw_arguments: &str) -> String {
+    if parse_preview_tool_arguments(raw_arguments, asking_seat).is_none() {
+        return render_control_malformed_tool_call_wire_json();
+    }
+    control_wording_slot("control_fixed_reply")
 }

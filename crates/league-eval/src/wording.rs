@@ -1,18 +1,80 @@
-//! Pinned model-facing wording entries for Evaluation Mode seat replies (`v2_eval_reply_2026_11_21_r1`).
+//! Pinned model-facing wording entries for Evaluation Mode (`v2_eval_reply_2026_11_21_r1`) and
+//! pinned wrapper verification.
 //!
 //! Every slot name in [`EVAL_REPLY_WORDING`] is an internal identifier and never shown to a seated
-//! model. Shown strings are copied byte-for-byte from the Director's approved text (2026-11-21)
-//! on single lines with single spaces.
+//! model. Shown strings are on single lines with single spaces.
 
-use league_relay::WordingEntry;
+use league_relay::{WordingEntry, sha256_hex};
 
-/// Named registered Evaluation Mode reply wording arm (`Item 9` addendum, Section 2).
+use crate::error::EvalError;
+
+/// Named registered Evaluation Mode reply wording arm.
 pub const EVAL_REPLY_WORDING_ARM: &str = "v2_eval_reply_2026_11_21_r1";
+
+/// Pinned Evaluation Mode wrapper allow-list `(version, sha256)` — strictly one entry (`r3`).
+pub const PINNED_WRAPPERS: &[(&str, &str)] = &[(
+    "v2_seat_brief_2026_11_21_r3",
+    "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
+)];
+
+/// Superseded historical wrapper hashes that must never be accepted.
+pub const REJECTED_WRAPPER_HASHES: &[(&str, &str)] = &[
+    (
+        "v2_seat_brief_2026_11_17_r1",
+        "53124129dc2bf06dc97c624ab2509e062b5882b058a9d56502fc28f729975f4b",
+    ),
+    (
+        "v2_seat_brief_2026_11_20_r2",
+        "1fecf981f1df39dfc552cef90c24430aff4faa0f8990d77cfafee62a7ef74268",
+    ),
+];
+
+/// Check whether a lowercase hex SHA-256 wrapper `digest` is allowed by [`PINNED_WRAPPERS`] and
+/// agrees with any supplied `explicit_version`, returning the canonical pinned wrapper version.
+pub fn check_wrapper_digest(
+    digest: &str,
+    explicit_version: Option<&str>,
+) -> Result<String, EvalError> {
+    if let Some((old_ver, _)) = REJECTED_WRAPPER_HASHES
+        .iter()
+        .find(|(_, hash)| *hash == digest)
+    {
+        return Err(EvalError::UnpinnedWrapper(format!(
+            "refused superseded wrapper '{old_ver}' (sha256 {digest}); expected '{}' ({})",
+            PINNED_WRAPPERS[0].0, PINNED_WRAPPERS[0].1
+        )));
+    }
+    let Some((pinned_version, _)) = PINNED_WRAPPERS.iter().find(|(_, hash)| *hash == digest) else {
+        return Err(EvalError::UnpinnedWrapper(format!(
+            "wrapper sha256 '{digest}' is not in PINNED_WRAPPERS; expected '{}' ({})",
+            PINNED_WRAPPERS[0].0, PINNED_WRAPPERS[0].1
+        )));
+    };
+    if let Some(v) = explicit_version {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() && trimmed != *pinned_version {
+            return Err(EvalError::UnpinnedWrapper(format!(
+                "--wrapper-version '{trimmed}' does not match pinned wrapper version '{pinned_version}'"
+            )));
+        }
+    }
+    Ok((*pinned_version).to_owned())
+}
+
+/// Validate wrapper bytes against [`PINNED_WRAPPERS`] and verify any explicit `--wrapper-version`.
+pub fn resolve_pinned_wrapper(
+    raw_bytes: &[u8],
+    explicit_version: Option<&str>,
+) -> Result<(String, String), EvalError> {
+    let digest = sha256_hex(raw_bytes);
+    let version = check_wrapper_digest(&digest, explicit_version)?;
+    Ok((version, digest))
+}
 
 /// Pinned `maxItems` limit for the top-level `messages` array in talk and act replies.
 pub const EVAL_MESSAGES_MAX_ITEMS: usize = 3;
 
-/// Complete table of model-facing strings approved by the Director on `2026-11-21`.
+/// Complete table of model-facing strings for Evaluation Mode structured replies.
 ///
 /// Order-side (`market_actions` and `bundle`) keys, descriptions, and enums continue to come
 /// solely from [`league_relay::PREVIEW_ARM_WORDING`] (`r2`).

@@ -21,11 +21,13 @@ use crate::transport::{
 };
 use crate::wording::{
     EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW, MAX_PREVIEW_TOOL_CALLS_PER_TURN,
-    MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_preview_turn_orders_tool_definition,
-    escape_default_ignorable_code_points, execute_preview_tool_call, extract_scratchpad_update,
-    format_sanitized_scratchpad_section, json_escape_untrusted_str,
+    MAX_SCRATCHPAD_TOKENS, PreviewToolMode, build_control_turn_orders_tool_definition,
+    build_preview_turn_orders_tool_definition, control_wording_slot, control_wording_template,
+    escape_default_ignorable_code_points, execute_control_tool_call, execute_preview_tool_call,
+    extract_scratchpad_update, format_sanitized_scratchpad_section, json_escape_untrusted_str,
     load_negotiation_inputs_if_present, preview_wording_slot, preview_wording_template,
-    render_call_limit_reached_wire_json, render_malformed_tool_call_wire_json,
+    render_call_limit_reached_wire_json, render_control_call_limit_reached_wire_json,
+    render_control_malformed_tool_call_wire_json, render_malformed_tool_call_wire_json,
     sanitize_scratchpad_for_prompt, split_negotiation_sections, strip_thinking_tags, wording_slot,
 };
 use league_core::{
@@ -2327,7 +2329,7 @@ impl TurnConfig {
         self
     }
 
-    /// Configure the Card 7 what-if preview tool toggle (`off` default, `on` enables `preview_turn_orders` on `act`).
+    /// Configure the act-round order drafting or what-if preview tool toggle (`off` default).
     pub fn with_preview_tool(mut self, preview_tool: PreviewToolMode) -> Self {
         self.preview_tool = preview_tool;
         self
@@ -2341,7 +2343,10 @@ impl TurnConfig {
     }
 
     const fn keeps_raw_sidecars(&self) -> bool {
-        matches!(self.preview_tool, PreviewToolMode::On) || self.eval_mode
+        matches!(
+            self.preview_tool,
+            PreviewToolMode::On | PreviewToolMode::Control
+        ) || self.eval_mode
     }
 
     pub(crate) fn with_extra_redaction_keys(mut self, keys: Vec<ApiKey>) -> Self {
@@ -2802,6 +2807,19 @@ pub struct SavedHttpReplyRecord {
     pub body_sha256: String,
     /// Raw HTTP response body text as received (credential-redacted only, verbatim otherwise).
     pub body: String,
+    /// Lowercase hex SHA-256 of the canonical JSON token ID array returned by `POST /tokenize`
+    /// (`eval_mode` Local calls only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_sha256: Option<String>,
+    /// Count of prompt token IDs returned by `POST /tokenize` (`eval_mode` Local calls only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_count: Option<usize>,
+    /// Source tag identifying where `prompt_token_ids_sha256` came from (`"server_tokenize"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_source: Option<String>,
+    /// Prompt template consistency check recorded prior to tokenizing (`"double_apply_template_byte_equal"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_token_ids_template_check: Option<String>,
 }
 
 /// Path to an immutable per-attempt raw HTTP reply sidecar beside `<game-dir>/relay/seats/<Guild>.jsonl`.
@@ -2851,7 +2869,7 @@ struct ChatMessageWire<'a> {
     tool_call_id: Option<&'a str>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct JsonSchemaInnerWire<'a> {
     name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2859,7 +2877,7 @@ struct JsonSchemaInnerWire<'a> {
     schema: &'a serde_json::Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 struct ResponseFormatWire<'a> {
     #[serde(rename = "type")]
     kind: &'static str,
@@ -2873,6 +2891,25 @@ struct OpenRouterReasoningWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     exclude: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ApplyTemplateRequestWire<'a> {
+    messages: &'a [ChatMessageWire<'a>],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormatWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<OpenRouterReasoningWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_token_budget: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a BTreeMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a [serde_json::Value]>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2895,6 +2932,12 @@ struct ChatCompletionRequestWire<'a> {
     include_reasoning: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a [serde_json::Value]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_prompt: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_logprobs: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -5628,10 +5671,17 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let preview_state_ref = preview_states
-                        .as_deref()
-                        .and_then(|v| v.get(idx))
-                        .and_then(Option::as_ref);
+                    let seat_tool_mode = match (config.preview_tool, config.round) {
+                        (PreviewToolMode::On, Round::Act) => preview_states
+                            .as_deref()
+                            .and_then(|v| v.get(idx))
+                            .and_then(Option::as_ref)
+                            .map(SeatToolMode::Preview),
+                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
+                            asking_seat: idx as u8,
+                        }),
+                        _ => None,
+                    };
                     handles.push(scope.spawn(move || {
                         let view =
                             view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
@@ -5640,7 +5690,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
-                            preview_state_ref,
+                            seat_tool_mode,
                             run_id_ref,
                             transport,
                             ledger_ref,
@@ -5656,10 +5706,17 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let preview_state_ref = preview_states
-                        .as_deref()
-                        .and_then(|v| v.get(idx))
-                        .and_then(Option::as_ref);
+                    let seat_tool_mode = match (config.preview_tool, config.round) {
+                        (PreviewToolMode::On, Round::Act) => preview_states
+                            .as_deref()
+                            .and_then(|v| v.get(idx))
+                            .and_then(Option::as_ref)
+                            .map(SeatToolMode::Preview),
+                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
+                            asking_seat: idx as u8,
+                        }),
+                        _ => None,
+                    };
                     handles.push(scope.spawn(move || {
                         let view = view_local_seat(local_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
@@ -5667,7 +5724,7 @@ pub(crate) fn run_turn_with_diag(
                             &guild,
                             &view,
                             wrapper_ref,
-                            preview_state_ref,
+                            seat_tool_mode,
                             run_id_ref,
                             transport,
                             ledger_ref,
@@ -5805,13 +5862,19 @@ struct OwnedToolHistoryMessage {
     tool_call_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum SeatToolMode<'a> {
+    Preview(&'a PublicPreviewState),
+    Control { asking_seat: u8 },
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_single_automated_seat(
     config: &TurnConfig,
     guild: &str,
     seat: &AutomatedSeatView<'_>,
     wrapper_text: Option<&str>,
-    preview_state_opt: Option<&PublicPreviewState>,
+    seat_tool_mode: Option<SeatToolMode<'_>>,
     run_id: &str,
     transport: &dyn Transport,
     ledger: &Mutex<CallLedger<'_>>,
@@ -5886,15 +5949,24 @@ fn run_single_automated_seat(
 
     let base_system_wire =
         build_system_message(base_wrapper, config.memory_mode, seat.keeps_scratchpad);
-    let system_wire = if preview_state_opt.is_some() {
-        let budget_sentence = preview_wording_slot("preview_call_budget_sentence");
-        if base_system_wire.is_empty() {
-            budget_sentence
-        } else {
-            format!("{base_system_wire}\n\n{budget_sentence}")
+    let system_wire = match seat_tool_mode {
+        Some(SeatToolMode::Preview(_)) => {
+            let budget_sentence = preview_wording_slot("preview_call_budget_sentence");
+            if base_system_wire.is_empty() {
+                budget_sentence
+            } else {
+                format!("{base_system_wire}\n\n{budget_sentence}")
+            }
         }
-    } else {
-        base_system_wire
+        Some(SeatToolMode::Control { .. }) => {
+            let budget_sentence = control_wording_slot("preview_call_budget_sentence");
+            if base_system_wire.is_empty() {
+                budget_sentence
+            } else {
+                format!("{base_system_wire}\n\n{budget_sentence}")
+            }
+        }
+        None => base_system_wire,
     };
 
     let older_replies_sec =
@@ -6117,8 +6189,16 @@ fn run_single_automated_seat(
         CostUnit::GpuSeconds => "max_gpu_secs_per_call",
     };
 
-    let tools_storage =
-        preview_state_opt.map(|_| vec![build_preview_turn_orders_tool_definition()]);
+    let tools_storage = seat_tool_mode.map(|mode| {
+        vec![match mode {
+            SeatToolMode::Preview(_) => build_preview_turn_orders_tool_definition(),
+            SeatToolMode::Control { .. } => build_control_turn_orders_tool_definition(),
+        }]
+    });
+    let eval_local = config.eval_mode && seat.backend_kind == BackendKind::Local;
+    let cache_prompt_wire = eval_local.then_some(false);
+    let logprobs_wire = eval_local.then_some(true);
+    let top_logprobs_wire = eval_local.then_some(5);
     let mut tool_history: Vec<OwnedToolHistoryMessage> = Vec::new();
     let mut preview_calls_used = 0usize;
     let mut tool_round_index = 0usize;
@@ -6145,6 +6225,32 @@ fn run_single_automated_seat(
                         schema: &rf.schema,
                     },
                 });
+        let request_tools =
+            if config.eval_mode && preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN {
+                None
+            } else {
+                tools_storage.as_deref()
+            };
+        let apply_template_body = if eval_local {
+            let tpl_wire = ApplyTemplateRequestWire {
+                messages: &messages,
+                response_format: response_format_wire,
+                reasoning: or_reasoning,
+                reasoning_effort: local_effort,
+                thinking_token_budget: local_budget,
+                chat_template_kwargs: local_kwargs,
+                include_reasoning: local_include_reasoning,
+                tools: request_tools,
+            };
+            let Ok(encoded) = serde_json::to_string(&tpl_wire) else {
+                return SeatOutcome::SeatError {
+                    detail: "failed to encode apply-template request".to_owned(),
+                };
+            };
+            Some(encoded)
+        } else {
+            None
+        };
         let request_wire = ChatCompletionRequestWire {
             model: seat.model,
             messages,
@@ -6156,7 +6262,10 @@ fn run_single_automated_seat(
             thinking_token_budget: local_budget,
             chat_template_kwargs: local_kwargs,
             include_reasoning: local_include_reasoning,
-            tools: tools_storage.as_deref(),
+            tools: request_tools,
+            cache_prompt: cache_prompt_wire,
+            logprobs: logprobs_wire,
+            top_logprobs: top_logprobs_wire,
         };
         let Ok(request_body) = serde_json::to_string(&request_wire) else {
             return SeatOutcome::SeatError {
@@ -6318,6 +6427,35 @@ fn run_single_automated_seat(
 
             let all_keys = merged_redaction_keys(redaction_key, &config.extra_redaction_keys);
 
+            let prompt_token_meta = if let Some(ref tpl_body) = apply_template_body {
+                match prepare_eval_local_prompt_telemetry(
+                    transport,
+                    seat.endpoint_url,
+                    seat.tokenize_url,
+                    tpl_body,
+                    seat.timeout,
+                    &all_keys,
+                ) {
+                    Ok(meta) => Some(meta),
+                    Err(detail) => {
+                        return finish_eval_prompt_prep_error(
+                            ledger,
+                            config,
+                            guild,
+                            seat,
+                            attempt,
+                            trigger,
+                            &request_body_sha256,
+                            &reservation_id,
+                            detail,
+                            redaction_key,
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+
             diag_log(diag_sink, LogLevel::Debug, || {
                 format!(
                     "transport=dispatch seat={guild} backend={} endpoint={} attempt={attempt} trigger={trigger} timeout_ms={} reservation_id={reservation_id}",
@@ -6352,6 +6490,7 @@ fn run_single_automated_seat(
                 tool_round_index,
                 attempt,
                 seat_retry_suffix,
+                prompt_token_meta.as_ref(),
                 &all_keys,
                 redaction_key,
             ) {
@@ -6460,7 +6599,8 @@ fn run_single_automated_seat(
                 persisted_outcome,
                 exclude_thinking,
                 effective_response_format.as_ref(),
-                preview_state_opt.is_some(),
+                seat_tool_mode.is_some(),
+                config.preview_tool,
                 &all_keys,
             );
 
@@ -6975,13 +7115,17 @@ fn run_single_automated_seat(
                     let mut echoed_calls: Vec<ChatToolCallWire> = Vec::new();
                     let was_already_limit_refused = limit_refusal_sent;
                     let is_terminal_round = over_estimate || was_already_limit_refused;
-                    if !is_terminal_round && preview_state_opt.is_none() {
+                    if !is_terminal_round && seat_tool_mode.is_none() {
                         return SeatOutcome::SeatError {
-                            detail: "internal error: missing preview state on tool round"
-                                .to_owned(),
+                            detail: "internal error: missing tool mode on tool round".to_owned(),
                         };
                     }
-                    let expected_tool_name = preview_wording_template("preview_tool_name");
+                    let expected_tool_name = match config.preview_tool {
+                        PreviewToolMode::Control => control_wording_template("preview_tool_name"),
+                        PreviewToolMode::Off | PreviewToolMode::On => {
+                            preview_wording_template("preview_tool_name")
+                        }
+                    };
                     let mut saved_calls: Vec<SavedToolRoundCall> = Vec::with_capacity(calls.len());
                     let mut received_wire_vals: Vec<serde_json::Value> =
                         Vec::with_capacity(calls.len());
@@ -6997,20 +7141,42 @@ fn run_single_automated_seat(
                             let tool_body = if preview_calls_used >= MAX_PREVIEW_TOOL_CALLS_PER_TURN
                             {
                                 limit_refusal_sent = true;
-                                render_call_limit_reached_wire_json()
+                                match config.preview_tool {
+                                    PreviewToolMode::Control => {
+                                        render_control_call_limit_reached_wire_json()
+                                    }
+                                    PreviewToolMode::Off | PreviewToolMode::On => {
+                                        render_call_limit_reached_wire_json()
+                                    }
+                                }
                             } else {
                                 preview_calls_used += 1;
-                                if let Some(preview_state) = preview_state_opt
-                                    && parsed_call.is_well_formed
-                                    && call.kind == "function"
-                                    && call.function.name == expected_tool_name
-                                {
-                                    execute_preview_tool_call(
-                                        preview_state,
-                                        &call.function.arguments,
-                                    )
-                                } else {
-                                    render_malformed_tool_call_wire_json()
+                                match (
+                                    seat_tool_mode,
+                                    parsed_call.is_well_formed
+                                        && call.kind == "function"
+                                        && call.function.name == expected_tool_name,
+                                ) {
+                                    (Some(SeatToolMode::Preview(preview_state)), true) => {
+                                        execute_preview_tool_call(
+                                            preview_state,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    (Some(SeatToolMode::Control { asking_seat }), true) => {
+                                        execute_control_tool_call(
+                                            asking_seat,
+                                            &call.function.arguments,
+                                        )
+                                    }
+                                    _ => match config.preview_tool {
+                                        PreviewToolMode::Control => {
+                                            render_control_malformed_tool_call_wire_json()
+                                        }
+                                        PreviewToolMode::Off | PreviewToolMode::On => {
+                                            render_malformed_tool_call_wire_json()
+                                        }
+                                    },
                                 }
                             };
                             (true, Some(tool_body))
@@ -7339,10 +7505,144 @@ fn refused_call_entry(
     }
 }
 
+const PROMPT_TOKEN_IDS_SOURCE_SERVER_TOKENIZE: &str = "server_tokenize";
+const PROMPT_TEMPLATE_CHECK_DOUBLE_APPLY_EQUAL: &str = "double_apply_template_byte_equal";
+
+#[derive(Debug, Clone)]
+struct PromptTokenizeMeta {
+    sha256: String,
+    count: usize,
+    source: &'static str,
+    template_check: &'static str,
+}
+
+fn derive_apply_template_url(
+    endpoint_url: &str,
+    tokenize_url: Option<&str>,
+) -> Result<String, String> {
+    if let Some(tok_url) = tokenize_url
+        && let Some(origin) = tok_url.strip_suffix("/tokenize")
+    {
+        return Ok(format!("{origin}/apply-template"));
+    }
+    let origin = endpoint_url
+        .strip_suffix("/v1/chat/completions")
+        .or_else(|| endpoint_url.strip_suffix("/chat/completions"))
+        .ok_or_else(|| {
+            "PROMPT_TEMPLATE_FAILED: cannot derive /apply-template URL from endpoint".to_owned()
+        })?;
+    Ok(format!("{origin}/apply-template"))
+}
+
+fn prepare_eval_local_prompt_telemetry(
+    transport: &dyn Transport,
+    endpoint_url: &str,
+    tokenize_url: Option<&str>,
+    apply_template_body: &str,
+    timeout: Duration,
+    redaction_keys: &[ApiKey],
+) -> Result<PromptTokenizeMeta, String> {
+    let tok_url = tokenize_url
+        .ok_or_else(|| "PROMPT_TOKENIZE_FAILED: local seat missing /tokenize URL".to_owned())?;
+    let tpl_url = derive_apply_template_url(endpoint_url, Some(tok_url))?;
+    let rendered_1 = transport
+        .apply_template(&tpl_url, apply_template_body, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TEMPLATE_FAILED: first /apply-template call failed: {safe}")
+        })?;
+    let rendered_2 = transport
+        .apply_template(&tpl_url, apply_template_body, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TEMPLATE_FAILED: second /apply-template call failed: {safe}")
+        })?;
+    if rendered_1 != rendered_2 {
+        return Err(
+            "PROMPT_TEMPLATE_MISMATCH: repeated /apply-template calls returned non-identical prompt text"
+                .to_owned(),
+        );
+    }
+    let token_ids = transport
+        .tokenize_prompt(tok_url, &rendered_1, true, true, timeout)
+        .map_err(|e| {
+            let safe = redact_secrets_multi_with_limit(
+                &e.to_string(),
+                redaction_keys,
+                MAX_REDACTION_SCAN_BYTES,
+            );
+            format!("PROMPT_TOKENIZE_FAILED: /tokenize call failed: {safe}")
+        })?;
+    if token_ids.is_empty() {
+        return Err("PROMPT_TOKENIZE_FAILED: /tokenize returned empty token list".to_owned());
+    }
+    let token_bytes = serde_json::to_vec(&token_ids)
+        .map_err(|e| format!("PROMPT_TOKENIZE_FAILED: failed to serialize token IDs: {e}"))?;
+    Ok(PromptTokenizeMeta {
+        sha256: sha256_hex(&token_bytes),
+        count: token_ids.len(),
+        source: PROMPT_TOKEN_IDS_SOURCE_SERVER_TOKENIZE,
+        template_check: PROMPT_TEMPLATE_CHECK_DOUBLE_APPLY_EQUAL,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_eval_prompt_prep_error(
+    ledger: &Mutex<CallLedger<'_>>,
+    config: &TurnConfig,
+    guild: &str,
+    seat: &AutomatedSeatView<'_>,
+    attempt: u8,
+    trigger: &str,
+    request_body_sha256: &str,
+    reservation_id: &str,
+    detail: String,
+    redaction_key: Option<&ApiKey>,
+) -> SeatOutcome {
+    let (valid_cost, charged_credits, over_estimate, _) =
+        compute_call_accounting(seat.cost_unit, None, 0.0, seat.max_per_call_spend);
+    let mut entry = refused_call_entry(
+        config,
+        guild,
+        attempt,
+        trigger,
+        seat.model,
+        request_body_sha256,
+        seat.cost_unit,
+        "harness",
+        detail.clone(),
+    );
+    entry.wall_secs = Some(0.0);
+    entry.cost = valid_cost;
+    entry.charged_credits = charged_credits;
+    entry.reservation_id = Some(reservation_id.to_owned());
+    let mut guard = ledger.lock().unwrap_or_else(|p| p.into_inner());
+    if let Err(e) = guard.finish_call_and_record(
+        reservation_id,
+        seat.max_per_call_spend,
+        &entry,
+        over_estimate,
+        redaction_key,
+    ) {
+        return SeatOutcome::SeatError {
+            detail: e.to_string(),
+        };
+    }
+    SeatOutcome::SeatError { detail }
+}
+
 mod raw_reply_gate {
     use super::{
-        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, RawHttpResponse,
-        RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
+        ApiKey, AssertUnwindSafe, Duration, Instant, MAX_REDACTION_SCAN_BYTES, PromptTokenizeMeta,
+        RawHttpResponse, RelayError, SavedHttpReplyRecord, Transport, TransportError, TurnConfig,
         apply_retry_suffix_to_json_path, catch_unwind, http_reply_file_path, mpsc, panic_message,
         redact_credentials_multi_with_limit_and_paths, redact_secrets_multi_with_limit,
         resolve_non_overwriting_tool_round_path, sha256_hex, write_json_record_atomic,
@@ -7439,6 +7739,7 @@ mod raw_reply_gate {
         round_index: usize,
         attempt: u8,
         seat_retry_suffix: Option<usize>,
+        prompt_token_meta: Option<&PromptTokenizeMeta>,
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<(GateVerifiedHttpResponse, Option<Option<String>>), RelayError> {
@@ -7479,6 +7780,11 @@ mod raw_reply_gate {
                 redacted_secret_field_paths,
                 body_sha256,
                 body: scrubbed_body,
+                prompt_token_ids_sha256: prompt_token_meta.map(|m| m.sha256.clone()),
+                prompt_token_ids_count: prompt_token_meta.map(|m| m.count),
+                prompt_token_ids_source: prompt_token_meta.map(|m| m.source.to_owned()),
+                prompt_token_ids_template_check: prompt_token_meta
+                    .map(|m| m.template_check.to_owned()),
             };
             let file_sha256 = write_json_record_atomic(
                 &base_sidecar_path,
@@ -7511,6 +7817,7 @@ mod raw_reply_gate {
         round_index: usize,
         attempt: u8,
         seat_retry_suffix: Option<usize>,
+        prompt_token_meta: Option<&PromptTokenizeMeta>,
         all_keys: &[ApiKey],
         redaction_key: Option<&ApiKey>,
     ) -> Result<RecordedTransportCall, RelayError> {
@@ -7536,6 +7843,7 @@ mod raw_reply_gate {
                     round_index,
                     attempt,
                     seat_retry_suffix,
+                    prompt_token_meta,
                     all_keys,
                     redaction_key,
                 )?;
@@ -7556,6 +7864,7 @@ mod raw_reply_gate {
                     round_index,
                     attempt,
                     seat_retry_suffix,
+                    prompt_token_meta,
                     all_keys,
                     redaction_key,
                 )?;
@@ -7742,18 +8051,28 @@ enum EvaluatedCall {
     },
 }
 
-fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
+fn parse_single_tool_call_item(
+    elem: serde_json::Value,
+    tool_mode: PreviewToolMode,
+) -> Result<ParsedToolCallItem, String> {
+    let Some(id) = elem
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+    else {
+        return Err("MALFORMED_TOOL_CALL: tool call missing non-empty id".to_owned());
+    };
+
     if let Some(obj) = elem.as_object()
-        && let Some(serde_json::Value::String(id)) = obj.get("id")
-        && !id.is_empty()
         && let Some(serde_json::Value::String(kind)) = obj.get("type")
         && let Some(serde_json::Value::Object(fobj)) = obj.get("function")
         && let Some(serde_json::Value::String(name)) = fobj.get("name")
         && let Some(serde_json::Value::String(arguments)) = fobj.get("arguments")
     {
-        return ParsedToolCallItem {
+        return Ok(ParsedToolCallItem {
             wire: ChatToolCallWire {
-                id: id.clone(),
+                id,
                 kind: kind.clone(),
                 function: ChatToolCallFunctionWire {
                     name: name.clone(),
@@ -7762,34 +8081,32 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
             },
             raw_received_call: elem,
             is_well_formed: true,
-        };
+        });
     }
 
-    let id = elem
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("wire_err_malformed_tool_call"));
+    let slot = |name| match tool_mode {
+        PreviewToolMode::Control => control_wording_slot(name),
+        PreviewToolMode::Off | PreviewToolMode::On => preview_wording_slot(name),
+    };
     let kind = elem
         .get("type")
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("schema_kw_function"));
+        .unwrap_or_else(|| slot("schema_kw_function"));
     let fn_val = elem.get("function");
     let name = fn_val
         .and_then(|f| f.get("name"))
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| preview_wording_slot("preview_tool_name"));
+        .unwrap_or_else(|| slot("preview_tool_name"));
     let arguments = match fn_val.and_then(|f| f.get("arguments")) {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(other) => other.to_string(),
         None => String::new(),
     };
-    ParsedToolCallItem {
+    Ok(ParsedToolCallItem {
         wire: ChatToolCallWire {
             id,
             kind,
@@ -7797,17 +8114,22 @@ fn parse_single_tool_call_item(elem: serde_json::Value) -> ParsedToolCallItem {
         },
         raw_received_call: elem,
         is_well_formed: false,
-    }
+    })
 }
 
-fn parse_response_tool_calls(raw_val: serde_json::Value) -> Option<Vec<ParsedToolCallItem>> {
+fn parse_response_tool_calls(
+    raw_val: serde_json::Value,
+    tool_mode: PreviewToolMode,
+) -> Result<Option<Vec<ParsedToolCallItem>>, String> {
     match raw_val {
-        serde_json::Value::Null => None,
-        serde_json::Value::Array(arr) if arr.is_empty() => None,
-        serde_json::Value::Array(arr) => {
-            Some(arr.into_iter().map(parse_single_tool_call_item).collect())
-        }
-        other => Some(vec![parse_single_tool_call_item(other)]),
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Array(arr) if arr.is_empty() => Ok(None),
+        serde_json::Value::Array(arr) => arr
+            .into_iter()
+            .map(|elem| parse_single_tool_call_item(elem, tool_mode))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        other => parse_single_tool_call_item(other, tool_mode).map(|item| Some(vec![item])),
     }
 }
 
@@ -7902,6 +8224,7 @@ fn evaluate_call_result(
     exclude_thinking: Option<bool>,
     response_format: Option<&ResponseFormatConfig>,
     allow_tools: bool,
+    tool_mode: PreviewToolMode,
     redaction_keys: &[ApiKey],
 ) -> EvaluatedCall {
     let (raw_status, raw_body) = match call_result {
@@ -8048,17 +8371,32 @@ fn evaluate_call_result(
         _ => None,
     };
 
-    if allow_tools
-        && let Some(raw_calls) = raw_tool_calls_opt.clone()
-        && let Some(calls) = parse_response_tool_calls(raw_calls)
-    {
-        return EvaluatedCall::ToolCalls {
-            calls,
-            assistant_content: raw_content_opt,
-            persisted_reasoning,
-            model_returned,
-            usage,
-        };
+    if allow_tools && let Some(raw_calls) = raw_tool_calls_opt.clone() {
+        match parse_response_tool_calls(raw_calls, tool_mode) {
+            Ok(Some(calls)) => {
+                return EvaluatedCall::ToolCalls {
+                    calls,
+                    assistant_content: raw_content_opt,
+                    persisted_reasoning,
+                    model_returned,
+                    usage,
+                };
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                return EvaluatedCall::DeliveryFailure {
+                    reason,
+                    model_returned,
+                    usage,
+                    is_late_reply: false,
+                    discarded_reply: build_discarded_reply(
+                        raw_content_opt,
+                        persisted_reasoning,
+                        raw_tool_calls_opt,
+                    ),
+                };
+            }
+        }
     }
 
     let processed_content = raw_content_opt.as_ref().map(|c| match exclude_thinking {

@@ -52,6 +52,46 @@ fn fresh_tmp_dir(label: &str) -> PathBuf {
     dir
 }
 
+fn mock_chat_completion_json(id: &str, model: &str, content: &str, include_cost: bool) -> String {
+    let top_logprobs: Vec<_> = (0_u64..5)
+        .map(|k| {
+            json!({
+                "token": format!("t{k}"),
+                "id": 20 + k,
+                "token_id": 20 + k,
+                "logprob": -0.05 * ((k + 1) as f64)
+            })
+        })
+        .collect();
+    let mut usage = json!({
+        "prompt_tokens": 50,
+        "completion_tokens": 20,
+        "total_tokens": 70
+    });
+    if include_cost {
+        usage["cost"] = json!(0.001);
+    }
+    json!({
+        "id": id,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": content },
+            "logprobs": {
+                "content": [{
+                    "token": "{",
+                    "id": 11,
+                    "logprob": -0.01,
+                    "top_logprobs": top_logprobs
+                }]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": usage
+    })
+    .to_string()
+}
+
 struct MockTransport {
     replies: Mutex<VecDeque<String>>,
     recorded_bodies: Mutex<Vec<String>>,
@@ -96,25 +136,8 @@ impl Transport for MockTransport {
             q.pop_front()
                 .ok_or_else(|| TransportError::Network("mock reply queue empty".to_owned()))?
         };
-        let resp = json!({
-            "id": "mock-chat-1",
-            "model": "qwen/qwen3-32b",
-            "choices": [{
-                "index": 0,
-                "message": { "role": "assistant", "content": content },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 50,
-                "completion_tokens": 20,
-                "total_tokens": 70,
-                "cost": 0.001
-            }
-        });
-        Ok(RawHttpResponse {
-            status: 200,
-            body: resp.to_string(),
-        })
+        let body = mock_chat_completion_json("mock-chat-1", "qwen/qwen3-32b", &content, true);
+        Ok(RawHttpResponse { status: 200, body })
     }
 
     fn count_tokens(
@@ -126,13 +149,106 @@ impl Transport for MockTransport {
     ) -> Result<usize, TransportError> {
         Ok(text.split_whitespace().count())
     }
+
+    fn apply_template(
+        &self,
+        _apply_template_url: &str,
+        body: &str,
+        _timeout: Duration,
+    ) -> Result<String, TransportError> {
+        Ok(format!("TEMPLATED:{body}"))
+    }
+
+    fn tokenize_prompt(
+        &self,
+        _tokenize_url: &str,
+        _content: &str,
+        add_special: bool,
+        parse_special: bool,
+        _timeout: Duration,
+    ) -> Result<Vec<u64>, TransportError> {
+        assert!(add_special && parse_special);
+        Ok((100_u64..150).collect())
+    }
 }
 
 fn write_wrapper(dir: &Path) -> (PathBuf, Vec<u8>) {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("wrappers/v2_seat_brief_2026_11_21_r3.md");
+    let content = must_ok(fs::read(&src), "read committed pinned r3 wrapper");
     let p = dir.join("wrapper.md");
-    let content = b"# Eval Brief v2\nFollow Evaluation Mode instructions strictly.\n".to_vec();
     must_ok(fs::write(&p, &content), "write wrapper");
     (p, content)
+}
+
+fn write_valid_serving_manifest(dir: &Path) -> PathBuf {
+    let p = dir.join("serving-manifest.json");
+    let manifest = json!({
+        "engine": "llama_server",
+        "server_version": "b11433",
+        "server_build_commit": "deadbeef",
+        "server_info_provenance": "operator_supplied",
+        "model": {
+            "filename": "qwen3-32b-q4.gguf",
+            "quant": "Q4_K_M",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "chat_template_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "provenance": "operator_supplied"
+        },
+        "machine": {
+            "gpu_name": "NVIDIA RTX Test",
+            "gpu_uuid": "GPU-test-0001",
+            "sm_count": 128,
+            "gpu_driver": "570.00",
+            "cuda_runtime_version": "12.8",
+            "vram_mib": 24576,
+            "os_build": "Linux 6.8",
+            "provenance": "operator_supplied"
+        },
+        "server_settings": {
+            "parallel_slots": 1,
+            "batch_size": 2048,
+            "ubatch_size": 512,
+            "kv_unified": false,
+            "flash_attn": true,
+            "cache_type_k": "f16",
+            "cache_type_v": "f16",
+            "speculative_decoding": "none",
+            "ctx_size": 32768,
+            "ctx_shift": false,
+            "threads": 16,
+            "provenance": "operator_supplied"
+        },
+        "cache_settings": {
+            "per_request_cache_prompt": false,
+            "no_cache_prompt_flag": true,
+            "cache_ram_mib": 0,
+            "cache_idle_slots": false,
+            "provenance": "operator_supplied"
+        },
+        "sampling": {
+            "temperature": 0.2,
+            "top_k": 40,
+            "top_p": 0.95,
+            "min_p": 0.05,
+            "repeat_penalty": 1.0,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 7,
+            "stop_sequences": [],
+            "max_tokens": 2048,
+            "sampler_order": ["top_k", "top_p", "min_p", "temperature"],
+            "provenance": "operator_supplied"
+        }
+    });
+    must_ok(
+        fs::write(
+            &p,
+            must_ok(serde_json::to_string_pretty(&manifest), "ser serving"),
+        ),
+        "write serving manifest",
+    );
+    p
 }
 
 fn write_seats_file(dir: &Path, spec: serde_json::Value) -> PathBuf {
@@ -142,17 +258,19 @@ fn write_seats_file(dir: &Path, spec: serde_json::Value) -> PathBuf {
     p
 }
 
-fn one_openrouter_three_clubbot_seats() -> serde_json::Value {
+fn one_local_no_notes_three_clubbot_seats() -> serde_json::Value {
     json!({
         "seats": [
             {
                 "guild": "Foundry",
-                "backend": "openrouter",
-                "model": "qwen/qwen3-32b",
+                "backend": "local",
+                "base_url": "http://127.0.0.1:18080/v1",
+                "model": "Qwen/Qwen3-32B",
                 "temperature": 0.0,
                 "max_output_tokens": 512,
                 "timeout_secs": 5.0,
-                "max_cost_per_call": 0.05
+                "max_gpu_secs_per_call": 10.0,
+                "scratchpad": false
             },
             { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
             { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
@@ -430,7 +548,7 @@ fn test_2_wrong_part() {
     let tmp = fresh_tmp_dir("wrong_part");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     // Talk reply contains an order (`TALK_REPLY_HAS_ORDERS`); act reply contains a message (`ACT_REPLY_HAS_MESSAGES`).
     let talk_with_order = json!({
@@ -461,6 +579,7 @@ fn test_2_wrong_part() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 2,
                 seed: 7,
@@ -580,7 +699,7 @@ fn test_3_messages() {
     let tmp = fresh_tmp_dir("messages");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     let talk_reply = json!({
         "messages": [
@@ -606,6 +725,7 @@ fn test_3_messages() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 3,
                 seed: 7,
@@ -703,13 +823,13 @@ fn test_4_schema() {
     );
     assert!(cfg.schema["properties"].get(&k_notes).is_some());
 
-    // Verify relay's setup validation accepts the schema across both `local` (`notes` kept)
-    // and `openrouter` (`notes` stripped automatically), under `off` and `on`, and locks sha256 in setup.json.
+    // Verify relay's setup validation accepts the schema across `local` (`notes` disabled)
+    // and `local` (`notes` kept), under `off` and `on`, and locks sha256 in setup.json.
     for (label, arm, seats_json, act_reply) in [
         (
-            "off_openrouter",
+            "off_local_no_notes",
             EvalArm::Off,
-            one_openrouter_three_clubbot_seats(),
+            one_local_no_notes_three_clubbot_seats(),
             json!({ "messages": [], "market_actions": [], "bundle": {} }),
         ),
         (
@@ -737,6 +857,7 @@ fn test_4_schema() {
                     seats_path,
                     wrapper_path,
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 4,
                     seed: 7,
@@ -811,8 +932,14 @@ fn test_5_seat_view() {
     }
 
     let host = must_ok(
-        EvalHost::from_standard_setup(TableId(5), 4, 7, 11),
-        "from_standard_setup",
+        EvalHost::from_standard_setup_with_model_seats(
+            TableId(5),
+            4,
+            7,
+            11,
+            &[true, false, false, false],
+        ),
+        "from_standard_setup_with_model_seats",
     );
     let obs = must_ok(host.observe_seat(Seat(0)), "observe_seat");
     let pretty_obs = must_ok(
@@ -858,7 +985,7 @@ fn test_5_seat_view() {
         "seed turn-0 game_dir",
     );
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
     let empty_reply = json!({ "messages": [], "market_actions": [], "bundle": {} }).to_string();
     let transport = MockTransport::from_contents(vec![empty_reply.clone(), empty_reply]);
     let _ = must_ok(
@@ -868,6 +995,7 @@ fn test_5_seat_view() {
                 seats_path,
                 wrapper_path,
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 5,
                 seed: 7,
@@ -945,6 +1073,7 @@ fn test_6_seats() {
                 seats_path: clubbot_seats,
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 6,
                 seed: 9,
@@ -1009,6 +1138,7 @@ fn test_6_seats() {
                 seats_path: bad_seats.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: None,
                 arm: EvalArm::Off,
                 table_id: 60,
                 seed: 9,
@@ -1066,30 +1196,34 @@ fn test_7_records() {
     let (wrapper_path, wrapper_bytes) = write_wrapper(&tmp);
     let expected_wrapper_sha = sha256_hex(&wrapper_bytes);
 
-    // Seat 0 (`Foundry`, openrouter): triggers TALK_REPLY_HAS_ORDERS on turn 1 talk and ACT_REPLY_INVALID on turn 1 act,
+    // Seat 0 (`Foundry`, local without notes): triggers TALK_REPLY_HAS_ORDERS on turn 1 talk and ACT_REPLY_INVALID on turn 1 act,
     //   then valid recipient + invalid recipient (`MESSAGE_RECIPIENT_INVALID`) on turn 2 talk and ACT_REPLY_HAS_MESSAGES on turn 2 act.
-    // Seat 1 (`Quarry`, openrouter): sends 1 invalid recipient on turn 1 talk, valid empty act on turn 1, valid empty replies on turn 2.
+    // Seat 1 (`Quarry`, local without notes): sends 1 invalid recipient on turn 1 talk, valid empty act on turn 1, valid empty replies on turn 2.
     let seats_path = write_seats_file(
         &tmp,
         json!({
             "seats": [
                 {
                     "guild": "Foundry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 {
                     "guild": "Quarry",
-                    "backend": "openrouter",
-                    "model": "qwen/qwen3-32b",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
                     "temperature": 0.0,
                     "max_output_tokens": 512,
                     "timeout_secs": 5.0,
-                    "max_cost_per_call": 0.05
+                    "max_gpu_secs_per_call": 10.0,
+                    "scratchpad": false
                 },
                 { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
                 { "guild": "Mint", "backend": "file", "model": "ClubBot" }
@@ -1198,20 +1332,30 @@ fn test_7_records() {
                 .to_string(),
             };
 
-            let resp = json!({
-                "id": "mock-per-guild",
-                "model": "qwen/qwen3-32b",
-                "choices": [{
-                    "index": 0,
-                    "message": { "role": "assistant", "content": content },
-                    "finish_reason": "stop"
-                }],
-                "usage": { "prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70, "cost": 0.001 }
-            });
-            Ok(RawHttpResponse {
-                status: 200,
-                body: resp.to_string(),
-            })
+            let body =
+                mock_chat_completion_json("mock-per-guild", "qwen/qwen3-32b", &content, true);
+            Ok(RawHttpResponse { status: 200, body })
+        }
+
+        fn apply_template(
+            &self,
+            _apply_template_url: &str,
+            body: &str,
+            _timeout: Duration,
+        ) -> Result<String, TransportError> {
+            Ok(format!("TEMPLATED:{body}"))
+        }
+
+        fn tokenize_prompt(
+            &self,
+            _tokenize_url: &str,
+            _content: &str,
+            add_special: bool,
+            parse_special: bool,
+            _timeout: Duration,
+        ) -> Result<Vec<u64>, TransportError> {
+            assert!(add_special && parse_special);
+            Ok((100_u64..150).collect())
         }
     }
 
@@ -1233,7 +1377,8 @@ fn test_7_records() {
                 game_dir: game_dir.clone(),
                 seats_path,
                 wrapper_path,
-                wrapper_version: Some("wrapper-v2".to_owned()),
+                wrapper_version: Some("v2_seat_brief_2026_11_21_r3".to_owned()),
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::On,
                 table_id: 7,
                 seed: 7,
@@ -1260,7 +1405,7 @@ fn test_7_records() {
     assert_eq!(saved_manifest, manifest);
     assert_eq!(manifest.pass_b_limit, PASS_B_LIMIT_STATEMENT);
     assert_eq!(manifest.wrapper_sha256, expected_wrapper_sha);
-    assert_eq!(manifest.wrapper_version, "wrapper-v2");
+    assert_eq!(manifest.wrapper_version, "v2_seat_brief_2026_11_21_r3");
 
     let foundry_counts = must_some(
         manifest.refusal_counts_by_seat.get("Foundry"),
@@ -1645,7 +1790,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
             let tmp = fresh_tmp_dir(&format!("a1_{shape_name}_{}", arm.as_str()));
             let play_dir = tmp.join("play_game");
             let (wrapper_path, _) = write_wrapper(&tmp);
-            let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+            let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
             // Queue an extra clean reply behind the malformed reply to prove `eval_mode` never
             // triggers a second HTTP call for that round.
@@ -1658,6 +1803,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
                         wrapper_version: None,
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arm,
                         table_id: 90,
                         seed: 7,
@@ -1776,6 +1922,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
                         wrapper_version: None,
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arm,
                         table_id: 91,
                         seed: 7,
@@ -1803,6 +1950,7 @@ fn a1_e2e_fenced_think_and_trailing_replies_across_play_and_branch() {
                         focal_seat: Some("Foundry".to_owned()),
                         seats_path: seats_path.clone(),
                         wrapper_path: wrapper_path.clone(),
+                        serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                         arms: vec![arm],
                         out_dir: branch_out.clone(),
                         memory_mode: MemoryMode::Snapshot,
@@ -1909,7 +2057,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
     let tmp = fresh_tmp_dir("b1_e2e");
     let game_dir = tmp.join("game");
     let (wrapper_path, _) = write_wrapper(&tmp);
-    let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+    let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
     // Turn 1 talk: `post_offer` missing required fields (`action_kind` only -> passes r2 relay schema!)
     //   -> `TALK_REPLY_HAS_ORDERS` wins over order-parse failure (`is_wrong_part=true`).
@@ -1940,6 +2088,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
                 seats_path: seats_path.clone(),
                 wrapper_path: wrapper_path.clone(),
                 wrapper_version: None,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arm: EvalArm::Off,
                 table_id: 92,
                 seed: 7,
@@ -2033,6 +2182,7 @@ fn b1_e2e_wrong_round_wins_over_parse_and_branch_counts_both_denominators() {
                 focal_seat: Some("Foundry".to_owned()),
                 seats_path,
                 wrapper_path,
+                serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                 arms: vec![EvalArm::Off, EvalArm::On],
                 out_dir: branch_out.clone(),
                 memory_mode: MemoryMode::Snapshot,
@@ -2100,7 +2250,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
     for arm in [EvalArm::Off, EvalArm::On] {
         let tmp = fresh_tmp_dir(&format!("relay1_1a_{}", arm.as_str()));
         let (wrapper_path, _) = write_wrapper(&tmp);
-        let seats_path = write_seats_file(&tmp, one_openrouter_three_clubbot_seats());
+        let seats_path = write_seats_file(&tmp, one_local_no_notes_three_clubbot_seats());
 
         // 1. Talk reply with orders + unknown bundle key -> TALK_REPLY_HAS_ORDERS (1 call),
         //    counts toward 5% stop-line, keeps discarded sidecar & sha256.
@@ -2117,6 +2267,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 93,
                     seed: 7,
@@ -2224,6 +2375,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 94,
                     seed: 7,
@@ -2298,6 +2450,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     focal_seat: Some("Foundry".to_owned()),
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arms: vec![arm],
                     out_dir: branch_act_out.clone(),
                     memory_mode: MemoryMode::Snapshot,
@@ -2347,6 +2500,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     seats_path: seats_path.clone(),
                     wrapper_path: wrapper_path.clone(),
                     wrapper_version: None,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arm,
                     table_id: 95,
                     seed: 7,
@@ -2396,6 +2550,7 @@ fn relay1_1a_e2e_wrong_round_precedes_schema_in_both_arms_and_single_call() {
                     focal_seat: Some("Foundry".to_owned()),
                     seats_path,
                     wrapper_path,
+                    serving_manifest_path: Some(write_valid_serving_manifest(&tmp)),
                     arms: vec![arm],
                     out_dir: branch_nonjson_out.clone(),
                     memory_mode: MemoryMode::Snapshot,

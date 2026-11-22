@@ -1,9 +1,9 @@
 //! Core Evaluation Mode driver (`play`, `branch`, `select` helper) for `league-eval`.
 //!
 //! Coordinates [`league_core::EvalHost`], [`league_core::ClubBot`], and `league-relay` without ever
-//! invoking non-eval host APIs (`ClubHost`), `write_save_and_seal` (`R8`), or `engine-internals`.
+//! invoking non-eval host APIs (`ClubHost`), `write_save_and_seal`, or `engine-internals`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,16 +15,19 @@ use league_core::{
 };
 use league_relay::{
     ApiKey, CallLogEntry, MemoryMode, PreviewToolMode, RawHttpResponse, Round,
-    SavedDiscardedReplyRecord, SeatBackend, SeatFile, SeatOutcome, SeatSpec, TranscriptEntry,
-    Transport, TransportError, TurnConfig, TurnSummary, UntrustedWhisper, run_turn, sha256_hex,
+    SavedDiscardedReplyRecord, SavedHttpReplyRecord, SavedToolRoundRecord, SeatBackend, SeatFile,
+    SeatOutcome, SeatSpec, TranscriptEntry, Transport, TransportError, TurnConfig, TurnSummary,
+    UntrustedWhisper, parse_preview_tool_arguments, run_turn, sha256_hex,
 };
 use serde::Serialize;
 
 use crate::EvalError;
 use crate::records::{
-    BranchArmOutcome, BranchSummary, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
+    BranchArmOutcome, BranchManifest, BranchSummary, DecisionTokenTopLogprobs,
+    DecisionTopLogprobEntry, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
     EvalSetupFile, FailedRelayAttempt, PASS_B_LIMIT_STATEMENT, RefusalCodeCounts,
-    RefusedBundleRecord, WrongPartCounter, extract_wrapper_metadata, summarize_branch_outcomes,
+    RefusedBundleRecord, TurnRegentAuditRecord, WrongPartCounter, count_bundle_legs,
+    summarize_branch_outcomes,
 };
 use crate::reply::{
     ReplyRefusalCode, classify_wrong_round_from_raw_text, parse_eval_act_reply,
@@ -32,10 +35,14 @@ use crate::reply::{
 };
 use crate::schema::build_eval_response_format_config;
 use crate::select::{SelectionList, expand_home_path};
+use crate::serving::{
+    ServingManifestRecord, WordingArmDigests, capture_serving_env_snapshot,
+    load_and_validate_serving_manifest, resolve_verified_crate_git_sha,
+};
 use crate::view::{
     build_act_negotiation_inputs, render_preview_state_json, render_seat_view_markdown,
 };
-use crate::wording::EVAL_REPLY_WORDING_ARM;
+use crate::wording::{EVAL_REPLY_WORDING_ARM, resolve_pinned_wrapper};
 
 /// Inert mock transport for all-`ClubBot` offline runs with zero HTTP calls.
 #[derive(Debug, Default, Clone, Copy)]
@@ -59,17 +66,19 @@ impl Transport for NoopTransport {
 pub struct PlayOptions {
     /// Target game directory (`eval-<table>.{save.json,seal}`, `setup.json`, `manifest.json`, `checkpoints/`).
     pub game_dir: PathBuf,
-    /// Path to 4-seat `seats.json` (`D6`).
+    /// Path to 4-seat `seats.json`.
     pub seats_path: PathBuf,
-    /// Path to seat wrapper markdown brief (`1.7`).
+    /// Path to pinned seat wrapper markdown brief.
     pub wrapper_path: PathBuf,
-    /// Optional explicit `--wrapper-version` string override (`1.7`).
+    /// Optional explicit `--wrapper-version` string (must match the pinned version when set).
     pub wrapper_version: Option<String>,
-    /// Evaluation arm (`off` or `on`; `control` rejected in PR 2).
+    /// Optional path to `--serving-manifest <path>` (required whenever any seat uses a `Model` backend).
+    pub serving_manifest_path: Option<PathBuf>,
+    /// Evaluation arm (`off`, `control`, or `on`).
     pub arm: EvalArm,
     /// Table identifier (`TableId`).
     pub table_id: u64,
-    /// Table layout seed passed to `EvalHost::from_standard_setup`.
+    /// Table layout seed passed to `EvalHost`.
     pub seed: u64,
     /// Maximum turns to play in this run (`1..=32`).
     pub turns: u8,
@@ -96,11 +105,13 @@ pub struct BranchOptions {
     pub focal_seat: Option<String>,
     /// Path to 4-seat `seats.json` providing the focal seat's backend/sampling config.
     pub seats_path: PathBuf,
-    /// Path to seat wrapper markdown brief (`1.7`).
+    /// Path to pinned seat wrapper markdown brief.
     pub wrapper_path: PathBuf,
-    /// Arms to evaluate from the frozen pre-act state (e.g. `[Off, On]`).
+    /// Optional path to `--serving-manifest <path>` (required when branching a `Model` seat).
+    pub serving_manifest_path: Option<PathBuf>,
+    /// Arms to evaluate from the frozen pre-act state (e.g. `[Off, Control, On]`).
     pub arms: Vec<EvalArm>,
-    /// Root output directory where only spectator/public branch artifacts are written (`Item 15`).
+    /// Root output directory where only spectator/public branch artifacts are written.
     pub out_dir: PathBuf,
     /// Prompt memory mode (`snapshot`, `emc`, or `full`).
     pub memory_mode: MemoryMode,
@@ -194,7 +205,7 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
         });
     }
     for seat in &seats_file.seats {
-        let exclude_from_transcript = match &seat.backend {
+        let (exclude_from_transcript, unsupported_backend) = match &seat.backend {
             SeatBackend::File { model } => {
                 if model.as_deref() != Some("ClubBot") {
                     return Err(EvalError::UnsupportedFileSeatModel {
@@ -202,20 +213,30 @@ pub fn validate_eval_seats_file(seats_file: &SeatFile) -> Result<(), EvalError> 
                         model: model.clone(),
                     });
                 }
-                false
+                (false, None)
             }
-            SeatBackend::Local(l) => l
-                .reasoning
-                .as_ref()
-                .is_some_and(|r| r.exclude_from_transcript),
-            SeatBackend::Openrouter(o) => o
-                .reasoning
-                .as_ref()
-                .is_some_and(|r| r.exclude_from_transcript),
+            SeatBackend::Local(l) => (
+                l.reasoning
+                    .as_ref()
+                    .is_some_and(|r| r.exclude_from_transcript),
+                None,
+            ),
+            SeatBackend::Openrouter(o) => (
+                o.reasoning
+                    .as_ref()
+                    .is_some_and(|r| r.exclude_from_transcript),
+                Some("openrouter"),
+            ),
         };
         if exclude_from_transcript {
             return Err(EvalError::EvalThinkStrippingForbidden(format!(
                 "seat '{}' sets reasoning.exclude_from_transcript=true, which is forbidden in Evaluation Mode",
+                seat.guild
+            )));
+        }
+        if let Some(backend_name) = unsupported_backend {
+            return Err(EvalError::UnsupportedEvalModelBackend(format!(
+                "seat '{}' uses non-Local backend '{backend_name}', which is forbidden in Evaluation Mode; configure 'local' for server tokenizer and logprob telemetry",
                 seat.guild
             )));
         }
@@ -238,7 +259,7 @@ pub fn seat_keeps_notes(seat: &SeatSpec, seats_file: &SeatFile, memory_mode: Mem
 fn arm_to_preview_mode(arm: EvalArm) -> Result<PreviewToolMode, EvalError> {
     match arm {
         EvalArm::Off => Ok(PreviewToolMode::Off),
-        EvalArm::Control => Err(EvalError::ControlArmNotImplemented),
+        EvalArm::Control => Ok(PreviewToolMode::Control),
         EvalArm::On => Ok(PreviewToolMode::On),
     }
 }
@@ -286,6 +307,16 @@ struct RoundAttemptDiagnostics {
     attempts: u32,
     failed_attempts: Vec<FailedRelayAttempt>,
     first_failure: Option<FirstAttemptFailure>,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    wall_secs: Option<f64>,
+    tool_calls_used: u32,
+    intermediate_bundle_sha256s: Vec<String>,
+    prompt_token_ids_sha256s: Vec<String>,
+    prompt_token_ids_source: Option<String>,
+    prompt_token_ids_template_check: Option<String>,
+    reply_token_ids: Vec<Vec<u64>>,
+    reply_top_logprobs: Vec<Vec<DecisionTokenTopLogprobs>>,
 }
 
 fn count_calls_lines(calls_path: &Path) -> Result<usize, EvalError> {
@@ -350,12 +381,251 @@ fn find_discarded_reply_sidecar(
     (None, None, None)
 }
 
+fn is_wire_error_code(wire_json: Option<&str>, expected_code: &str) -> bool {
+    let Some(raw) = wire_json else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|v| v.get("error_code")?.as_str().map(str::to_owned))
+        .is_some_and(|c| c == expected_code)
+}
+
+fn parse_top_logprob_entries(
+    raw: Option<&serde_json::Value>,
+    idx: usize,
+) -> Result<Vec<DecisionTopLogprobEntry>, EvalError> {
+    const EXPECTED_TOP_LOGPROBS: usize = 5;
+    let raw_val = raw.ok_or_else(|| {
+        EvalError::MissingReplyTelemetry(format!(
+            "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing `top_logprobs`"
+        ))
+    })?;
+    match raw_val {
+        serde_json::Value::Array(arr) => {
+            if arr.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must have exact length {EXPECTED_TOP_LOGPROBS}, found {}",
+                    arr.len()
+                )));
+            }
+            let entries: Vec<DecisionTopLogprobEntry> = arr
+                .iter()
+                .filter_map(|item| {
+                    let obj = item.as_object()?;
+                    let token = obj.get("token")?.as_str()?.to_owned();
+                    let logprob = obj.get("logprob")?.as_f64()?;
+                    let token_id = obj
+                        .get("token_id")
+                        .or_else(|| obj.get("id"))
+                        .and_then(serde_json::Value::as_u64);
+                    Some(DecisionTopLogprobEntry {
+                        token,
+                        token_id,
+                        logprob,
+                    })
+                })
+                .collect();
+            if entries.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` entries malformed (expected {EXPECTED_TOP_LOGPROBS} valid entries)"
+                )));
+            }
+            Ok(entries)
+        }
+        serde_json::Value::Object(map) => {
+            if map.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must have exact length {EXPECTED_TOP_LOGPROBS}, found {}",
+                    map.len()
+                )));
+            }
+            let mut entries: Vec<DecisionTopLogprobEntry> = map
+                .iter()
+                .filter_map(|(k, v)| {
+                    v.as_f64().map(|lp| DecisionTopLogprobEntry {
+                        token: k.clone(),
+                        token_id: None,
+                        logprob: lp,
+                    })
+                })
+                .collect();
+            if entries.len() != EXPECTED_TOP_LOGPROBS {
+                return Err(EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` entries malformed (expected {EXPECTED_TOP_LOGPROBS} valid entries)"
+                )));
+            }
+            entries.sort_by(|a, b| {
+                b.logprob
+                    .total_cmp(&a.logprob)
+                    .then_with(|| a.token.cmp(&b.token))
+            });
+            Ok(entries)
+        }
+        _ => Err(EvalError::MissingReplyTelemetry(format!(
+            "HTTP 200 reply `choices[0].logprobs.content[{idx}].top_logprobs` must be an array or map of {EXPECTED_TOP_LOGPROBS} entries"
+        ))),
+    }
+}
+
+fn collect_http_reply_telemetry(
+    rec: &SavedHttpReplyRecord,
+    body_val: &serde_json::Value,
+    prompt_token_ids_sha256s: &mut Vec<String>,
+    prompt_token_ids_source: &mut Option<String>,
+    prompt_token_ids_template_check: &mut Option<String>,
+    reply_token_ids: &mut Vec<Vec<u64>>,
+    reply_top_logprobs: &mut Vec<Vec<DecisionTokenTopLogprobs>>,
+) -> Result<(), EvalError> {
+    let prompt_sha = rec
+        .prompt_token_ids_sha256
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing `prompt_token_ids_sha256` from server `/tokenize`"
+                    .to_owned(),
+            )
+        })?;
+    let prompt_count = rec
+        .prompt_token_ids_count
+        .filter(|&c| c > 0)
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing positive `prompt_token_ids_count` from server `/tokenize`"
+                    .to_owned(),
+            )
+        })?;
+    let source = rec
+        .prompt_token_ids_source
+        .as_deref()
+        .filter(|s| *s == "server_tokenize")
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing `prompt_token_ids_source: \"server_tokenize\"`"
+                    .to_owned(),
+            )
+        })?;
+    let template_check = rec
+        .prompt_token_ids_template_check
+        .as_deref()
+        .filter(|s| *s == "double_apply_template_byte_equal")
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP reply record missing `prompt_token_ids_template_check: \"double_apply_template_byte_equal\"`"
+                    .to_owned(),
+            )
+        })?;
+    let usage_prompt_tokens = body_val
+        .get("usage")
+        .and_then(|u| u.get("prompt_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing integer `usage.prompt_tokens` for prompt count check"
+                    .to_owned(),
+            )
+        })?;
+    if usize::try_from(usage_prompt_tokens).ok() != Some(prompt_count) {
+        return Err(EvalError::PromptTokenCountMismatch(format!(
+            "server `/tokenize` returned {prompt_count} token IDs whereas chat reply `usage.prompt_tokens` reported {usage_prompt_tokens}"
+        )));
+    }
+    if let Some(prev) = prompt_token_ids_source.as_deref()
+        && prev != source
+    {
+        return Err(EvalError::MissingReplyTelemetry(format!(
+            "inconsistent `prompt_token_ids_source` within decision: '{prev}' vs '{source}'"
+        )));
+    }
+    *prompt_token_ids_source = Some(source.to_owned());
+    if let Some(prev) = prompt_token_ids_template_check.as_deref()
+        && prev != template_check
+    {
+        return Err(EvalError::MissingReplyTelemetry(format!(
+            "inconsistent `prompt_token_ids_template_check` within decision: '{prev}' vs '{template_check}'"
+        )));
+    }
+    *prompt_token_ids_template_check = Some(template_check.to_owned());
+    prompt_token_ids_sha256s.push(prompt_sha.to_owned());
+
+    let first_choice = body_val
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing `choices[0]` for reply telemetry".to_owned(),
+            )
+        })?;
+
+    let lp_content = first_choice
+        .get("logprobs")
+        .and_then(|lp| lp.get("content"))
+        .and_then(serde_json::Value::as_array)
+        .filter(|arr| !arr.is_empty())
+        .ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(
+                "HTTP 200 reply missing non-empty `choices[0].logprobs.content` for `reply_top_logprobs`"
+                    .to_owned(),
+            )
+        })?;
+
+    let mut extracted_logprobs: Vec<DecisionTokenTopLogprobs> =
+        Vec::with_capacity(lp_content.len());
+    let mut chosen_reply_ids: Vec<u64> = Vec::with_capacity(lp_content.len());
+    for (idx, step) in lp_content.iter().enumerate() {
+        let obj = step.as_object().ok_or_else(|| {
+            EvalError::MissingReplyTelemetry(format!(
+                "HTTP 200 reply `choices[0].logprobs.content[{idx}]` must be a JSON object"
+            ))
+        })?;
+        let token = obj
+            .get("token")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing string `token`"
+                ))
+            })?;
+        let logprob = obj
+            .get("logprob")
+            .and_then(serde_json::Value::as_f64)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing numeric `logprob`"
+                ))
+            })?;
+        let token_id = obj
+            .get("id")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                EvalError::MissingReplyTelemetry(format!(
+                    "HTTP 200 reply `choices[0].logprobs.content[{idx}]` missing integer `id` for `reply_token_ids`"
+                ))
+            })?;
+        chosen_reply_ids.push(token_id);
+        let top_logprobs = parse_top_logprob_entries(obj.get("top_logprobs"), idx)?;
+        extracted_logprobs.push(DecisionTokenTopLogprobs {
+            token: token.to_owned(),
+            token_id: Some(token_id),
+            logprob,
+            top_logprobs,
+        });
+    }
+
+    reply_token_ids.push(chosen_reply_ids);
+    reply_top_logprobs.push(extracted_logprobs);
+    Ok(())
+}
+
 fn read_round_attempt_diagnostics(
     run_root: &Path,
     calls_path: &Path,
     start_line: usize,
     day_str: &str,
     round: Round,
+    seat_index: u8,
     guild: &str,
 ) -> Result<RoundAttemptDiagnostics, EvalError> {
     if !calls_path.exists() {
@@ -364,6 +634,10 @@ fn read_round_attempt_diagnostics(
     let raw = fs::read_to_string(calls_path)
         .map_err(|e| EvalError::Io(format!("read {}: {e}", calls_path.display())))?;
     let mut out = RoundAttemptDiagnostics::default();
+    let mut wall_sum = 0.0_f64;
+    let mut saw_wall = false;
+    let mut round_resv_ids: BTreeSet<String> = BTreeSet::new();
+
     for (idx, line) in raw
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -381,8 +655,21 @@ fn read_round_attempt_diagnostics(
         {
             continue;
         }
+        if let Some(ref rid) = entry.reservation_id {
+            round_resv_ids.insert(rid.clone());
+        }
         if entry.outcome != "RESERVED" && entry.outcome != "CAP_REACHED" {
             out.attempts = out.attempts.saturating_add(1);
+            out.prompt_tokens = out
+                .prompt_tokens
+                .saturating_add(entry.prompt_tokens.unwrap_or(0));
+            out.completion_tokens = out
+                .completion_tokens
+                .saturating_add(entry.completion_tokens.unwrap_or(0));
+            if let Some(w) = entry.wall_secs {
+                wall_sum += w;
+                saw_wall = true;
+            }
         }
         let is_success =
             entry.error.is_none() && matches!(entry.outcome.as_str(), "OK" | "TOOL_CALL");
@@ -418,6 +705,88 @@ fn read_round_attempt_diagnostics(
             });
         }
     }
+    if saw_wall {
+        out.wall_secs = Some(wall_sum);
+    }
+
+    let seats_dir = run_root.join("relay").join("seats");
+    if seats_dir.is_dir() && !round_resv_ids.is_empty() {
+        let tool_prefix = format!("{guild}.day-{day_str}-{round}.tool-round-");
+        let http_prefix = format!("{guild}.day-{day_str}-{round}.http-reply-round-");
+        let mut tool_records: Vec<SavedToolRoundRecord> = Vec::new();
+        let mut http_records: Vec<SavedHttpReplyRecord> = Vec::new();
+        let entries = fs::read_dir(&seats_dir)
+            .map_err(|e| EvalError::Io(format!("read {}: {e}", seats_dir.display())))?;
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if !ft.is_file() {
+                continue;
+            }
+            let name_os = entry.file_name();
+            let Some(fname) = name_os.to_str() else {
+                continue;
+            };
+            if fname.starts_with(&tool_prefix) && fname.ends_with(".json") {
+                if let Ok(bytes) = fs::read(entry.path())
+                    && let Ok(rec) = serde_json::from_slice::<SavedToolRoundRecord>(&bytes)
+                    && round_resv_ids.contains(&rec.reservation_id)
+                {
+                    tool_records.push(rec);
+                }
+            } else if fname.starts_with(&http_prefix)
+                && fname.ends_with(".json")
+                && let Ok(bytes) = fs::read(entry.path())
+                && let Ok(rec) = serde_json::from_slice::<SavedHttpReplyRecord>(&bytes)
+                && round_resv_ids.contains(&rec.reservation_id)
+            {
+                http_records.push(rec);
+            }
+        }
+        tool_records.sort_by_key(|r| (r.round_index, r.attempt));
+        for rec in tool_records {
+            for call in rec.calls {
+                if !call.tool_result_sent {
+                    continue;
+                }
+                let wire = call.result_wire_json.as_deref();
+                if is_wire_error_code(wire, "CALL_LIMIT_REACHED") {
+                    continue;
+                }
+                out.tool_calls_used = out.tool_calls_used.saturating_add(1);
+                if is_wire_error_code(wire, "MALFORMED_TOOL_CALL") {
+                    continue;
+                }
+                if let Some(parsed_req) = parse_preview_tool_arguments(&call.arguments, seat_index)
+                    && let Ok(bundle_bytes) = serde_json::to_vec(&parsed_req.bundle)
+                {
+                    out.intermediate_bundle_sha256s
+                        .push(sha256_hex(&bundle_bytes));
+                }
+            }
+        }
+
+        http_records.sort_by_key(|r| (r.round_index, r.attempt));
+        for rec in http_records {
+            if rec.status == 200
+                && !rec.is_late
+                && let Ok(body_val) = serde_json::from_str::<serde_json::Value>(&rec.body)
+                && body_val.get("error").is_none_or(serde_json::Value::is_null)
+            {
+                collect_http_reply_telemetry(
+                    &rec,
+                    &body_val,
+                    &mut out.prompt_token_ids_sha256s,
+                    &mut out.prompt_token_ids_source,
+                    &mut out.prompt_token_ids_template_check,
+                    &mut out.reply_token_ids,
+                    &mut out.reply_top_logprobs,
+                )?;
+            }
+        }
+    }
+
     Ok(out)
 }
 
@@ -484,6 +853,8 @@ fn build_no_reply_record(
             wp.record_no_reply();
         }
     }
+    let parse_failure = matches!(refusal_code, Some(ReplyRefusalCode::ReplySchemaInvalid))
+        || first.as_ref().is_some_and(|f| f.is_schema_or_json);
     EvalDecisionRecord {
         game_id: game_id.to_owned(),
         table_id,
@@ -500,6 +871,20 @@ fn build_no_reply_record(
         discarded_reply_sha256,
         attempts: diag.attempts,
         failed_attempts: diag.failed_attempts,
+        prompt_tokens: diag.prompt_tokens,
+        completion_tokens: diag.completion_tokens,
+        wall_secs: diag.wall_secs,
+        tool_calls_used: diag.tool_calls_used,
+        parse_failure,
+        refused_market_actions: 0,
+        refused_bundle_legs: 0,
+        cleared_non_empty_actions: false,
+        intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
+        prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+        prompt_token_ids_source: diag.prompt_token_ids_source,
+        prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
+        reply_token_ids: diag.reply_token_ids,
+        reply_top_logprobs: diag.reply_top_logprobs,
         loaded_history_sha256,
         refusal_code: refusal_code.map(|c| c.as_str().to_owned()),
         refusal_reason,
@@ -509,6 +894,31 @@ fn build_no_reply_record(
         refused_bundle: None,
         club_bot_baseline,
     }
+}
+
+fn map_prompt_prep_seat_error(detail: &str) -> Option<EvalError> {
+    if detail.starts_with("PROMPT_TEMPLATE_FAILED:") {
+        Some(EvalError::PromptTemplateFailed(detail.to_owned()))
+    } else if detail.starts_with("PROMPT_TEMPLATE_MISMATCH:") {
+        Some(EvalError::PromptTemplateMismatch(detail.to_owned()))
+    } else if detail.starts_with("PROMPT_TOKENIZE_FAILED:") {
+        Some(EvalError::PromptTokenizeFailed(detail.to_owned()))
+    } else {
+        None
+    }
+}
+
+fn check_turn_summary_prompt_telemetry(
+    summary: &league_relay::TurnSummary,
+) -> Result<(), EvalError> {
+    for report in &summary.reports {
+        if let SeatOutcome::SeatError { detail } = &report.outcome
+            && let Some(err) = map_prompt_prep_seat_error(detail)
+        {
+            return Err(err);
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -528,6 +938,11 @@ fn resolve_talk_model_round(
     refusal_by_arm: &mut BTreeMap<String, RefusalCodeCounts>,
     wrong_part_refusals: &mut WrongPartCounter,
 ) -> Result<EvalDecisionRecord, EvalError> {
+    if let Some(SeatOutcome::SeatError { detail }) = outcome
+        && let Some(err) = map_prompt_prep_seat_error(detail)
+    {
+        return Err(err);
+    }
     if diag.first_failure.is_some() {
         return Ok(build_no_reply_record(
             game_id,
@@ -572,6 +987,10 @@ fn resolve_talk_model_round(
                     bucket.push(whisper);
                 }
             }
+            let parse_failure = matches!(
+                parsed.refusal_code,
+                Some(ReplyRefusalCode::ReplySchemaInvalid | ReplyRefusalCode::TalkReplyInvalid)
+            );
             Ok(EvalDecisionRecord {
                 game_id: game_id.to_owned(),
                 table_id,
@@ -588,6 +1007,20 @@ fn resolve_talk_model_round(
                 discarded_reply_sha256: None,
                 attempts: diag.attempts,
                 failed_attempts: diag.failed_attempts,
+                prompt_tokens: diag.prompt_tokens,
+                completion_tokens: diag.completion_tokens,
+                wall_secs: diag.wall_secs,
+                tool_calls_used: diag.tool_calls_used,
+                parse_failure,
+                refused_market_actions: 0,
+                refused_bundle_legs: 0,
+                cleared_non_empty_actions: false,
+                intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
+                prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+                prompt_token_ids_source: diag.prompt_token_ids_source,
+                prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
+                reply_token_ids: diag.reply_token_ids,
+                reply_top_logprobs: diag.reply_top_logprobs,
                 loaded_history_sha256: BTreeMap::new(),
                 refusal_code: parsed.refusal_code.map(|c| c.as_str().to_owned()),
                 refusal_reason: parsed.refusal_reason,
@@ -646,6 +1079,11 @@ fn resolve_act_model_round(
     refusal_by_arm: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
     wrong_part_refusals: Option<&mut WrongPartCounter>,
 ) -> Result<(EvalActSubmission, EvalDecisionRecord), EvalError> {
+    if let Some(SeatOutcome::SeatError { detail }) = outcome
+        && let Some(err) = map_prompt_prep_seat_error(detail)
+    {
+        return Err(err);
+    }
     if diag.first_failure.is_some() {
         return Ok((
             EvalActSubmission::default(),
@@ -690,6 +1128,10 @@ fn resolve_act_model_round(
                         .record(code);
                 }
             }
+            let parse_failure = matches!(
+                parsed.refusal_code,
+                Some(ReplyRefusalCode::ReplySchemaInvalid | ReplyRefusalCode::ActReplyInvalid)
+            );
             let rec = EvalDecisionRecord {
                 game_id: game_id.to_owned(),
                 table_id,
@@ -706,6 +1148,20 @@ fn resolve_act_model_round(
                 discarded_reply_sha256: None,
                 attempts: diag.attempts,
                 failed_attempts: diag.failed_attempts,
+                prompt_tokens: diag.prompt_tokens,
+                completion_tokens: diag.completion_tokens,
+                wall_secs: diag.wall_secs,
+                tool_calls_used: diag.tool_calls_used,
+                parse_failure,
+                refused_market_actions: 0,
+                refused_bundle_legs: 0,
+                cleared_non_empty_actions: false,
+                intermediate_bundle_sha256s: diag.intermediate_bundle_sha256s,
+                prompt_token_ids_sha256s: diag.prompt_token_ids_sha256s,
+                prompt_token_ids_source: diag.prompt_token_ids_source,
+                prompt_token_ids_template_check: diag.prompt_token_ids_template_check,
+                reply_token_ids: diag.reply_token_ids,
+                reply_top_logprobs: diag.reply_top_logprobs,
                 loaded_history_sha256,
                 refusal_code: parsed.refusal_code.map(|c| c.as_str().to_owned()),
                 refusal_reason: parsed.refusal_reason,
@@ -861,6 +1317,224 @@ fn recount_manifest_counters_from_decisions(
     })
 }
 
+fn resolve_serving_manifest_opt(
+    serving_manifest_path: Option<&Path>,
+    requires_serving_manifest: bool,
+) -> Result<Option<ServingManifestRecord>, EvalError> {
+    if let Some(path) = serving_manifest_path {
+        return load_and_validate_serving_manifest(path).map(Some);
+    }
+    if requires_serving_manifest {
+        return Err(EvalError::MissingServingManifest(
+            "automated model seat evaluation requires `--serving-manifest <path>`".to_owned(),
+        ));
+    }
+    Ok(None)
+}
+
+fn seat_regent_flags(
+    host: &EvalHost,
+    seats_file: &SeatFile,
+) -> (Vec<bool>, BTreeMap<String, bool>) {
+    let spec = host.public_spec();
+    let mut vec_flags = Vec::with_capacity(seats_file.seats.len());
+    let mut map_flags = BTreeMap::new();
+    for (idx, seat) in seats_file.seats.iter().enumerate() {
+        let has_regent = spec.seats.get(idx).is_some_and(|s| s.regent.is_some());
+        vec_flags.push(has_regent);
+        map_flags.insert(seat.guild.clone(), has_regent);
+    }
+    (vec_flags, map_flags)
+}
+
+fn build_turn_regent_audit(receipts: &[PublicSweepReceipt]) -> Vec<TurnRegentAuditRecord> {
+    receipts
+        .iter()
+        .map(|r| TurnRegentAuditRecord {
+            turn: r.turn,
+            converted_to_ai: r.converted_to_ai.clone(),
+            regent_acted_seats: r.regent_acted_seats.clone(),
+        })
+        .collect()
+}
+
+fn find_model_seat_regent_intervention(
+    receipt: &PublicSweepReceipt,
+    model_seats: &[bool],
+    seats_file: &SeatFile,
+) -> Option<String> {
+    let mut hits: Vec<String> = Vec::new();
+    for (field_label, seat_indices) in [
+        ("converted_to_ai", &receipt.converted_to_ai),
+        ("regent_acted_seats", &receipt.regent_acted_seats),
+    ] {
+        for &seat_idx in seat_indices {
+            if model_seats.get(usize::from(seat_idx)) == Some(&true) {
+                let guild = seats_file
+                    .seats
+                    .get(usize::from(seat_idx))
+                    .map_or("unknown", |s| s.guild.as_str());
+                hits.push(format!("{field_label}[seat={seat_idx},guild={guild}]"));
+            }
+        }
+    }
+    if hits.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "turn {} sweep intervened on automated model seat(s): {}",
+            receipt.turn,
+            hits.join(", ")
+        ))
+    }
+}
+
+fn ensure_no_model_seat_regent_at_startup(
+    host: &EvalHost,
+    model_seats: &[bool],
+    has_regents: &[bool],
+    seats_file: &SeatFile,
+) -> Result<(), EvalError> {
+    for receipt in host.public_receipts() {
+        if let Some(msg) = find_model_seat_regent_intervention(receipt, model_seats, seats_file) {
+            return Err(EvalError::ModelSeatRegentIntervention(format!(
+                "startup check refused already-voided run: {msg}"
+            )));
+        }
+    }
+    for (idx, (&is_model, &has_regent)) in model_seats.iter().zip(has_regents.iter()).enumerate() {
+        if is_model && has_regent {
+            let guild = seats_file
+                .seats
+                .get(idx)
+                .map_or("unknown", |s| s.guild.as_str());
+            return Err(EvalError::ModelSeatRegentIntervention(format!(
+                "startup check refused run: automated model seat [seat={idx},guild={guild}] has a Standing Regent configured"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn empty_clubbot_decision(
+    game_id: &str,
+    table_id: u64,
+    day: u8,
+    round: Round,
+    seat: u8,
+    guild: &str,
+    arm: EvalArm,
+    loaded_history_sha256: BTreeMap<String, String>,
+    club_bot_baseline: Option<EvalActSubmission>,
+) -> EvalDecisionRecord {
+    EvalDecisionRecord {
+        game_id: game_id.to_owned(),
+        table_id,
+        day,
+        round,
+        seat,
+        guild: guild.to_owned(),
+        arm,
+        seat_kind: "ClubBot".to_owned(),
+        keeps_notes: false,
+        notes_present: false,
+        raw_reply: None,
+        discarded_reply_path: None,
+        discarded_reply_sha256: None,
+        attempts: 0,
+        failed_attempts: Vec::new(),
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        wall_secs: None,
+        tool_calls_used: 0,
+        parse_failure: false,
+        refused_market_actions: 0,
+        refused_bundle_legs: 0,
+        cleared_non_empty_actions: false,
+        intermediate_bundle_sha256s: Vec::new(),
+        prompt_token_ids_sha256s: Vec::new(),
+        prompt_token_ids_source: None,
+        prompt_token_ids_template_check: None,
+        reply_token_ids: Vec::new(),
+        reply_top_logprobs: Vec::new(),
+        loaded_history_sha256,
+        refusal_code: None,
+        refusal_reason: None,
+        invalid_recipients: Vec::new(),
+        no_reply: false,
+        apply_report: None,
+        refused_bundle: None,
+        club_bot_baseline,
+    }
+}
+
+fn populate_act_apply_telemetry(
+    rec: &mut EvalDecisionRecord,
+    sub: &EvalActSubmission,
+    report: &EvalSeatApplyReport,
+    arm: EvalArm,
+    refusal_by_seat: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
+    refusal_by_arm: Option<&mut BTreeMap<String, RefusalCodeCounts>>,
+) -> Result<(), EvalError> {
+    rec.refused_market_actions =
+        u32::try_from(report.refused_market_actions.len()).unwrap_or(u32::MAX);
+    if let Some(code) = report.refused_bundle_code.as_ref() {
+        rec.refused_bundle_legs = count_bundle_legs(&sub.bundle);
+        if let Some(by_seat) = refusal_by_seat {
+            by_seat
+                .entry(rec.guild.clone())
+                .or_default()
+                .refused_bundles += 1;
+        }
+        if let Some(by_arm) = refusal_by_arm {
+            by_arm
+                .entry(arm.as_str().to_owned())
+                .or_default()
+                .refused_bundles += 1;
+        }
+        rec.refused_bundle = Some(RefusedBundleRecord {
+            submitted_bundle: sub.bundle.clone(),
+            error_code: code.clone(),
+            bad_leg_index: "leg not named".to_owned(),
+        });
+    } else {
+        rec.refused_bundle_legs = 0;
+        rec.refused_bundle = None;
+    }
+    let accepted_market_main = sub
+        .market_actions
+        .len()
+        .checked_sub(report.refused_market_actions.len())
+        .ok_or_else(|| {
+            EvalError::InvalidActionCount(format!(
+                "refused_market_actions ({}) exceeded submitted market_actions ({})",
+                report.refused_market_actions.len(),
+                sub.market_actions.len()
+            ))
+        })?;
+    let accepted_pass_b = sub
+        .pass_b_actions
+        .len()
+        .checked_sub(report.refused_pass_b_actions.len())
+        .ok_or_else(|| {
+            EvalError::InvalidActionCount(format!(
+                "refused_pass_b_actions ({}) exceeded submitted pass_b_actions ({})",
+                report.refused_pass_b_actions.len(),
+                sub.pass_b_actions.len()
+            ))
+        })?;
+    let accepted_market = accepted_market_main + accepted_pass_b;
+    let accepted_bundle_legs = if report.refused_bundle_code.is_some() {
+        0
+    } else {
+        count_bundle_legs(&sub.bundle)
+    };
+    rec.cleared_non_empty_actions = accepted_market > 0 || accepted_bundle_legs > 0;
+    rec.apply_report = Some(report.clone());
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_eval_manifest(
     game_id: &str,
@@ -870,9 +1544,19 @@ fn build_eval_manifest(
     relay_wording_arm: &str,
     wrapper_version: &str,
     wrapper_sha256: &str,
+    response_schema_sha256: &str,
+    crate_git_sha: &str,
     played_turns: u8,
     seats_file: &SeatFile,
     memory_mode: MemoryMode,
+    has_regents: &[bool],
+    seat_regents: BTreeMap<String, bool>,
+    turn_regent_audit: Vec<TurnRegentAuditRecord>,
+    voided: bool,
+    void_error_code: Option<String>,
+    voided_games_by_arm: BTreeMap<String, u64>,
+    serving: Option<ServingManifestRecord>,
+    serving_env_snapshot: BTreeMap<String, String>,
     refusal_by_seat: &BTreeMap<String, RefusalCodeCounts>,
     refusal_by_arm: &BTreeMap<String, RefusalCodeCounts>,
     wrong_part_refusals: &WrongPartCounter,
@@ -889,6 +1573,7 @@ fn build_eval_manifest(
                 backend: backend.to_owned(),
                 model,
                 keeps_notes: seat_keeps_notes(seat, seats_file, memory_mode),
+                has_regent: has_regents.get(idx).copied().unwrap_or(false),
             }
         })
         .collect();
@@ -904,7 +1589,21 @@ fn build_eval_manifest(
         wrapper_sha256: wrapper_sha256.to_owned(),
         pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
         played_turns,
+        crate_git_sha: crate_git_sha.to_owned(),
+        wording_digests: Some(WordingArmDigests::compute(
+            relay_wording_arm,
+            wrapper_version,
+            wrapper_sha256,
+            response_schema_sha256,
+        )),
+        serving,
+        serving_env_snapshot,
         seats: manifest_seats,
+        seat_regents,
+        turn_regent_audit,
+        voided,
+        void_error_code,
+        voided_games_by_arm,
         refusal_counts_by_seat: refusal_by_seat.clone(),
         refusal_counts_by_arm: refusal_by_arm.clone(),
         wrong_part_refusals: wrong_part_refusals.clone(),
@@ -951,14 +1650,7 @@ fn validate_wrapper_and_extract(
             wrapper_path.display()
         )));
     }
-    Ok(extract_wrapper_metadata(&raw_bytes, explicit_version))
-}
-
-fn seat_kind_label(seat: &SeatSpec) -> &'static str {
-    match seat.backend {
-        SeatBackend::File { .. } => "ClubBot",
-        SeatBackend::Local(_) | SeatBackend::Openrouter(_) => "Model",
-    }
+    resolve_pinned_wrapper(&raw_bytes, explicit_version)
 }
 
 fn seat_backend_and_model(seat: &SeatSpec) -> (&'static str, String) {
@@ -1002,6 +1694,25 @@ pub fn run_play_with_transport(
         SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
     validate_eval_seats_file(&seats_file)?;
 
+    let model_seats: Vec<bool> = seats_file
+        .seats
+        .iter()
+        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
+        .collect();
+    let has_model_seat = model_seats.iter().any(|&is_model| is_model);
+    let crate_git_sha = resolve_verified_crate_git_sha()?;
+    let serving_record =
+        resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_seat)?;
+    let serving_manifest_sha256 = serving_record
+        .as_ref()
+        .map(|rec| {
+            serde_json::to_vec(rec)
+                .map(|bytes| sha256_hex(&bytes))
+                .map_err(|e| EvalError::Io(format!("encode serving manifest digest: {e}")))
+        })
+        .transpose()?;
+    let serving_env_snapshot = capture_serving_env_snapshot()?;
+
     let response_format = build_eval_response_format_config()?;
     let response_schema_sha256 = response_format.canonical_sha256();
     let relay_wording_arm = preview_mode.wording_arm().to_owned();
@@ -1031,9 +1742,10 @@ pub fn run_play_with_transport(
             || existing_setup.wrapper_sha256 != wrapper_sha256
             || existing_setup.memory_mode != mem_mode
             || existing_setup.seats_sha256 != seats_sha256
+            || existing_setup.serving_manifest_sha256 != serving_manifest_sha256
         {
             return Err(EvalError::IncompatibleEvalSetup(
-                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, or --seats"
+                "cannot resume game_dir with mismatched --arm, --table-id, --seed, --wrapper, --memory-mode, --seats, or --serving-manifest"
                     .to_owned(),
             ));
         }
@@ -1044,11 +1756,19 @@ pub fn run_play_with_transport(
         host
     } else {
         let bot_tie_seed = draw_os_bot_tie_seed()?;
-        let host =
-            EvalHost::from_standard_setup(TableId(opts.table_id), 4, opts.seed, bot_tie_seed)?;
+        let host = EvalHost::from_standard_setup_with_model_seats(
+            TableId(opts.table_id),
+            4,
+            opts.seed,
+            bot_tie_seed,
+            &model_seats,
+        )?;
         persist_eval_game_state(&host, &opts.game_dir)?;
         host
     };
+
+    let (has_regents, seat_regents) = seat_regent_flags(&host, &seats_file);
+    ensure_no_model_seat_regent_at_startup(&host, &model_seats, &has_regents, &seats_file)?;
 
     let setup_record = EvalSetupFile {
         game_id: host.game_id().to_owned(),
@@ -1063,7 +1783,8 @@ pub fn run_play_with_transport(
         wrapper_sha256: wrapper_sha256.clone(),
         memory_mode: mem_mode,
         seats_sha256,
-        response_schema_sha256: Some(response_schema_sha256),
+        response_schema_sha256: Some(response_schema_sha256.clone()),
+        serving_manifest_sha256,
     };
     write_json_pretty_atomic(&setup_path, &setup_record)?;
 
@@ -1128,34 +1849,21 @@ pub fn run_play_with_transport(
 
         let talk_calls_offset = count_calls_lines(&calls_path)?;
         let talk_summary = run_turn(&talk_cfg, transport, redaction_key)?;
+        check_turn_summary_prompt_telemetry(&talk_summary)?;
         for (idx, seat) in seats_file.seats.iter().enumerate() {
             let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
             let record = match seat.backend {
-                SeatBackend::File { .. } => EvalDecisionRecord {
-                    game_id: host.game_id().to_owned(),
-                    table_id: opts.table_id,
+                SeatBackend::File { .. } => empty_clubbot_decision(
+                    host.game_id(),
+                    opts.table_id,
                     day,
-                    round: Round::Talk,
-                    seat: idx as u8,
-                    guild: seat.guild.clone(),
-                    arm: opts.arm,
-                    seat_kind: seat_kind_label(seat).to_owned(),
-                    keeps_notes: false,
-                    notes_present: false,
-                    raw_reply: None,
-                    discarded_reply_path: None,
-                    discarded_reply_sha256: None,
-                    attempts: 0,
-                    failed_attempts: Vec::new(),
-                    loaded_history_sha256: BTreeMap::new(),
-                    refusal_code: None,
-                    refusal_reason: None,
-                    invalid_recipients: Vec::new(),
-                    no_reply: false,
-                    apply_report: None,
-                    refused_bundle: None,
-                    club_bot_baseline: None,
-                },
+                    Round::Talk,
+                    idx as u8,
+                    &seat.guild,
+                    opts.arm,
+                    BTreeMap::new(),
+                    None,
+                ),
                 SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
                     let diag = read_round_attempt_diagnostics(
                         &opts.game_dir,
@@ -1163,6 +1871,7 @@ pub fn run_play_with_transport(
                         talk_calls_offset,
                         &day_str,
                         Round::Talk,
+                        idx as u8,
                         &seat.guild,
                     )?;
                     resolve_talk_model_round(
@@ -1249,6 +1958,7 @@ pub fn run_play_with_transport(
 
         let act_calls_offset = count_calls_lines(&calls_path)?;
         let act_summary = run_turn(&act_cfg, transport, redaction_key)?;
+        check_turn_summary_prompt_telemetry(&act_summary)?;
 
         let mut submissions: BTreeMap<u8, EvalActSubmission> = BTreeMap::new();
         let mut baselines: Vec<EvalActSubmission> = Vec::with_capacity(4);
@@ -1267,31 +1977,17 @@ pub fn run_play_with_transport(
             let keeps_notes = seat_keeps_notes(seat, &seats_file, opts.memory_mode);
             let (submission, record) = match seat.backend {
                 SeatBackend::File { .. } => {
-                    let rec = EvalDecisionRecord {
-                        game_id: host.game_id().to_owned(),
-                        table_id: opts.table_id,
+                    let rec = empty_clubbot_decision(
+                        host.game_id(),
+                        opts.table_id,
                         day,
-                        round: Round::Act,
-                        seat: idx as u8,
-                        guild: seat.guild.clone(),
-                        arm: opts.arm,
-                        seat_kind: seat_kind_label(seat).to_owned(),
-                        keeps_notes: false,
-                        notes_present: false,
-                        raw_reply: None,
-                        discarded_reply_path: None,
-                        discarded_reply_sha256: None,
-                        attempts: 0,
-                        failed_attempts: Vec::new(),
-                        loaded_history_sha256: BTreeMap::new(),
-                        refusal_code: None,
-                        refusal_reason: None,
-                        invalid_recipients: Vec::new(),
-                        no_reply: false,
-                        apply_report: None,
-                        refused_bundle: None,
-                        club_bot_baseline: Some(bot_sub.clone()),
-                    };
+                        Round::Act,
+                        idx as u8,
+                        &seat.guild,
+                        opts.arm,
+                        BTreeMap::new(),
+                        Some(bot_sub.clone()),
+                    );
                     (bot_sub, rec)
                 }
                 SeatBackend::Local(_) | SeatBackend::Openrouter(_) => {
@@ -1301,6 +1997,7 @@ pub fn run_play_with_transport(
                         act_calls_offset,
                         &day_str,
                         Round::Act,
+                        idx as u8,
                         &seat.guild,
                     )?;
                     resolve_act_model_round(
@@ -1329,16 +2026,16 @@ pub fn run_play_with_transport(
         host.write_act_recorded_seal(&checkpoints_dir)?;
 
         for mut rec in pending_act_records {
-            if let Some(report) = apply_outcome.seats.get(&rec.seat) {
-                rec.refused_bundle = build_refused_bundle_record(
-                    &submissions[&rec.seat],
+            let seat_idx = rec.seat;
+            if let Some(report) = apply_outcome.seats.get(&seat_idx) {
+                populate_act_apply_telemetry(
+                    &mut rec,
+                    &submissions[&seat_idx],
                     report,
                     opts.arm,
-                    &rec.guild,
-                    &mut refusal_by_seat,
-                    &mut refusal_by_arm,
-                );
-                rec.apply_report = Some(report.clone());
+                    Some(&mut refusal_by_seat),
+                    Some(&mut refusal_by_arm),
+                )?;
             }
             write_json_pretty_atomic(
                 &decisions_dir.join(format!("day-{day_str}-act-{}.json", rec.guild)),
@@ -1354,7 +2051,16 @@ pub fn run_play_with_transport(
         persist_eval_game_state(&host, &opts.game_dir)?;
         played_turns = u8::try_from(host.public_receipts().len()).unwrap_or(u8::MAX);
 
-        // Write `manifest.json` after every completed turn so counts stay current on disk (`B5`).
+        let regent_hit = find_model_seat_regent_intervention(&receipt, &model_seats, &seats_file);
+        let turn_regent_audit = build_turn_regent_audit(host.public_receipts());
+        let voided = regent_hit.is_some();
+        let void_error_code = regent_hit
+            .as_ref()
+            .map(|_| "MODEL_SEAT_REGENT_INTERVENTION".to_owned());
+        let voided_games_by_arm =
+            BTreeMap::from([(opts.arm.as_str().to_owned(), u64::from(voided))]);
+
+        // Write `manifest.json` after every completed turn so counts and Regent audit stay current on disk.
         wrong_part_refusals.validate_rates()?;
         let turn_manifest = build_eval_manifest(
             host.game_id(),
@@ -1364,14 +2070,27 @@ pub fn run_play_with_transport(
             &relay_wording_arm,
             &wrapper_version,
             &wrapper_sha256,
+            &response_schema_sha256,
+            &crate_git_sha,
             played_turns,
             &seats_file,
             opts.memory_mode,
+            &has_regents,
+            seat_regents.clone(),
+            turn_regent_audit,
+            voided,
+            void_error_code,
+            voided_games_by_arm,
+            serving_record.clone(),
+            serving_env_snapshot.clone(),
             &refusal_by_seat,
             &refusal_by_arm,
             &wrong_part_refusals,
         );
         write_json_pretty_atomic(&manifest_path, &turn_manifest)?;
+        if let Some(msg) = regent_hit {
+            return Err(EvalError::ModelSeatRegentIntervention(msg));
+        }
     }
 
     if host.phase() == TurnPhase::AwaitingMandateReveal {
@@ -1393,6 +2112,17 @@ pub fn run_play_with_transport(
         persist_eval_game_state(&host, &opts.game_dir)?;
     }
 
+    let existing_regent_hit = host
+        .public_receipts()
+        .iter()
+        .find_map(|r| find_model_seat_regent_intervention(r, &model_seats, &seats_file));
+    let turn_regent_audit = build_turn_regent_audit(host.public_receipts());
+    let voided = existing_regent_hit.is_some();
+    let void_error_code = existing_regent_hit
+        .as_ref()
+        .map(|_| "MODEL_SEAT_REGENT_INTERVENTION".to_owned());
+    let voided_games_by_arm = BTreeMap::from([(opts.arm.as_str().to_owned(), u64::from(voided))]);
+
     wrong_part_refusals.validate_rates()?;
     let manifest = build_eval_manifest(
         host.game_id(),
@@ -1402,39 +2132,28 @@ pub fn run_play_with_transport(
         &relay_wording_arm,
         &wrapper_version,
         &wrapper_sha256,
+        &response_schema_sha256,
+        &crate_git_sha,
         played_turns,
         &seats_file,
         opts.memory_mode,
+        &has_regents,
+        seat_regents,
+        turn_regent_audit,
+        voided,
+        void_error_code,
+        voided_games_by_arm,
+        serving_record,
+        serving_env_snapshot,
         &refusal_by_seat,
         &refusal_by_arm,
         &wrong_part_refusals,
     );
     write_json_pretty_atomic(&manifest_path, &manifest)?;
+    if let Some(msg) = existing_regent_hit {
+        return Err(EvalError::ModelSeatRegentIntervention(msg));
+    }
     Ok(manifest)
-}
-
-fn build_refused_bundle_record(
-    sub: &EvalActSubmission,
-    report: &EvalSeatApplyReport,
-    arm: EvalArm,
-    guild: &str,
-    refusal_by_seat: &mut BTreeMap<String, RefusalCodeCounts>,
-    refusal_by_arm: &mut BTreeMap<String, RefusalCodeCounts>,
-) -> Option<RefusedBundleRecord> {
-    let code = report.refused_bundle_code.as_ref()?;
-    refusal_by_seat
-        .entry(guild.to_owned())
-        .or_default()
-        .refused_bundles += 1;
-    refusal_by_arm
-        .entry(arm.as_str().to_owned())
-        .or_default()
-        .refused_bundles += 1;
-    Some(RefusedBundleRecord {
-        submitted_bundle: sub.bundle.clone(),
-        error_code: code.clone(),
-        bad_leg_index: "leg not named".to_owned(),
-    })
 }
 
 fn snapshot_pre_act_scratchpads(
@@ -1483,7 +2202,7 @@ fn ensure_arm_dir_empty(arm_dir: &Path) -> Result<(), EvalError> {
     Ok(())
 }
 
-/// Evaluate one or more frozen pre-act checkpoints across independent arms (`off`, `on`; `D4`, `Item 12`–`15`).
+/// Evaluate one or more frozen pre-act checkpoints across independent arms (`off`, `control`, `on`).
 ///
 /// Writes only spectator/public artifacts under `opts.out_dir` (never `.seal` files or secret bytes).
 pub fn run_branch_with_transport(
@@ -1496,18 +2215,20 @@ pub fn run_branch_with_transport(
             "branch requires at least one `--arm` / `--arms` entry".to_owned(),
         ));
     }
+    let mut active_arms_joined = Vec::with_capacity(opts.arms.len());
     for &arm in &opts.arms {
-        let _ = arm_to_preview_mode(arm)?;
+        active_arms_joined.push(arm_to_preview_mode(arm)?.wording_arm());
     }
+    let active_arms_str = active_arms_joined.join(",");
 
-    let (_wrapper_version, wrapper_sha256) =
-        validate_wrapper_and_extract(&opts.wrapper_path, None)?;
+    let (wrapper_version, wrapper_sha256) = validate_wrapper_and_extract(&opts.wrapper_path, None)?;
     let seats_sha256 = hash_file_sha256(&opts.seats_path, "seats file")?;
     let expected_memory_mode = memory_mode_str(opts.memory_mode);
     let seats_file =
         SeatFile::load_with_allowed_hosts(&opts.seats_path, redaction_key, &opts.allowed_vm_hosts)?;
     validate_eval_seats_file(&seats_file)?;
     let response_format = build_eval_response_format_config()?;
+    let response_schema_sha256 = response_format.canonical_sha256();
 
     let targets: Vec<(PathBuf, String, PathBuf)> = match (&opts.checkpoint_prefix, &opts.list_path)
     {
@@ -1557,7 +2278,19 @@ pub fn run_branch_with_transport(
         }
     };
 
-    for (_, _, target_out_dir) in &targets {
+    let has_model_focal = targets.iter().try_fold(false, |acc, (_, focal_spec, _)| {
+        let idx = resolve_focal_seat(&seats_file, focal_spec)?;
+        Ok::<bool, EvalError>(
+            acc || !matches!(seats_file.seats[idx].backend, SeatBackend::File { .. }),
+        )
+    })?;
+    let crate_git_sha = resolve_verified_crate_git_sha()?;
+    let serving_record =
+        resolve_serving_manifest_opt(opts.serving_manifest_path.as_deref(), has_model_focal)?;
+    let serving_env_snapshot = capture_serving_env_snapshot()?;
+
+    for (prefix, _, target_out_dir) in &targets {
+        verify_branch_target_no_model_regent(prefix, &seats_file)?;
         for &arm in &opts.arms {
             ensure_arm_dir_empty(&target_out_dir.join(arm.as_str()))?;
         }
@@ -1571,43 +2304,109 @@ pub fn run_branch_with_transport(
     }
 
     let mut all_outcomes = Vec::new();
+    let mut seat_regents = BTreeMap::new();
+    let mut turn_regent_audit_by_arm: BTreeMap<String, Vec<TurnRegentAuditRecord>> =
+        BTreeMap::new();
+    let mut voided_games_by_arm: BTreeMap<String, u64> = opts
+        .arms
+        .iter()
+        .map(|a| (a.as_str().to_owned(), 0))
+        .collect();
+    let mut first_void_error: Option<String> = None;
+
     for (prefix, focal_spec, target_out_dir) in targets {
-        let outcomes = branch_one_target(
+        let target_run = branch_one_target(
             &prefix,
             &focal_spec,
             &target_out_dir,
             &seats_file,
             opts,
+            &wrapper_version,
             &wrapper_sha256,
             expected_memory_mode,
             &seats_sha256,
             &response_format,
+            &response_schema_sha256,
+            &crate_git_sha,
+            serving_record.as_ref(),
+            &serving_env_snapshot,
             transport,
             redaction_key,
         )?;
-        all_outcomes.extend(outcomes);
+        all_outcomes.extend(target_run.outcomes);
+        seat_regents = target_run.seat_regents;
+        for (arm_key, records) in target_run.turn_regent_audit_by_arm {
+            turn_regent_audit_by_arm
+                .entry(arm_key)
+                .or_default()
+                .extend(records);
+        }
+        for (arm_key, count) in target_run.voided_games_by_arm {
+            *voided_games_by_arm.entry(arm_key).or_insert(0) += count;
+        }
+        if first_void_error.is_none() {
+            first_void_error = target_run.first_void_error;
+        }
     }
 
-    let branch_summary: BranchSummary = summarize_branch_outcomes(&all_outcomes);
+    let mut branch_summary: BranchSummary = summarize_branch_outcomes(&all_outcomes);
+    branch_summary.voided_games_by_arm = voided_games_by_arm.clone();
     branch_summary.wrong_part_refusals.validate_rates()?;
     write_json_pretty_atomic(&summary_path, &branch_summary)?;
+
+    let voided = first_void_error.is_some();
+    let void_error_code = first_void_error
+        .as_ref()
+        .map(|_| "MODEL_SEAT_REGENT_INTERVENTION".to_owned());
+    let branch_manifest = BranchManifest {
+        crate_git_sha,
+        wrapper_version: wrapper_version.clone(),
+        wrapper_sha256: wrapper_sha256.clone(),
+        pass_b_limit: PASS_B_LIMIT_STATEMENT.to_owned(),
+        arms: opts.arms.clone(),
+        wording_digests: Some(WordingArmDigests::compute(
+            &active_arms_str,
+            &wrapper_version,
+            &wrapper_sha256,
+            &response_schema_sha256,
+        )),
+        serving: serving_record,
+        serving_env_snapshot,
+        seat_regents,
+        turn_regent_audit_by_arm,
+        voided,
+        void_error_code,
+        voided_games_by_arm,
+        summary: branch_summary,
+    };
+    write_json_pretty_atomic(&opts.out_dir.join("manifest.json"), &branch_manifest)?;
+    if let Some(msg) = first_void_error {
+        return Err(EvalError::ModelSeatRegentIntervention(msg));
+    }
     Ok(all_outcomes)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn branch_one_target(
+struct BranchTargetResult {
+    outcomes: Vec<BranchArmOutcome>,
+    seat_regents: BTreeMap<String, bool>,
+    turn_regent_audit_by_arm: BTreeMap<String, Vec<TurnRegentAuditRecord>>,
+    voided_games_by_arm: BTreeMap<String, u64>,
+    first_void_error: Option<String>,
+}
+
+struct VerifiedBranchTargetProbe {
+    probe_host: EvalHost,
+    save_path: PathBuf,
+    seal_path: PathBuf,
+    has_regents: Vec<bool>,
+    model_seats: Vec<bool>,
+    seat_regents: BTreeMap<String, bool>,
+}
+
+fn verify_branch_target_no_model_regent(
     checkpoint_prefix: &Path,
-    focal_spec: &str,
-    target_out_dir: &Path,
     seats_file: &SeatFile,
-    opts: &BranchOptions,
-    wrapper_sha256: &str,
-    expected_memory_mode: &str,
-    expected_seats_sha256: &str,
-    response_format: &league_relay::ResponseFormatConfig,
-    transport: &dyn Transport,
-    redaction_key: Option<&ApiKey>,
-) -> Result<Vec<BranchArmOutcome>, EvalError> {
+) -> Result<VerifiedBranchTargetProbe, EvalError> {
     let save_path = append_extension(checkpoint_prefix, "save.json");
     let seal_path = append_extension(checkpoint_prefix, "seal");
     if !save_path.exists() || !seal_path.exists() {
@@ -1617,8 +2416,51 @@ fn branch_one_target(
             seal_path.display()
         )));
     }
-
     let probe_host = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
+    let (has_regents, seat_regents) = seat_regent_flags(&probe_host, seats_file);
+    let model_seats: Vec<bool> = seats_file
+        .seats
+        .iter()
+        .map(|s| !matches!(s.backend, SeatBackend::File { .. }))
+        .collect();
+    ensure_no_model_seat_regent_at_startup(&probe_host, &model_seats, &has_regents, seats_file)?;
+    Ok(VerifiedBranchTargetProbe {
+        probe_host,
+        save_path,
+        seal_path,
+        has_regents,
+        model_seats,
+        seat_regents,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn branch_one_target(
+    checkpoint_prefix: &Path,
+    focal_spec: &str,
+    target_out_dir: &Path,
+    seats_file: &SeatFile,
+    opts: &BranchOptions,
+    wrapper_version: &str,
+    wrapper_sha256: &str,
+    expected_memory_mode: &str,
+    expected_seats_sha256: &str,
+    response_format: &league_relay::ResponseFormatConfig,
+    response_schema_sha256: &str,
+    crate_git_sha: &str,
+    serving_record: Option<&ServingManifestRecord>,
+    serving_env_snapshot: &BTreeMap<String, String>,
+    transport: &dyn Transport,
+    redaction_key: Option<&ApiKey>,
+) -> Result<BranchTargetResult, EvalError> {
+    let VerifiedBranchTargetProbe {
+        probe_host,
+        save_path,
+        seal_path,
+        has_regents,
+        model_seats,
+        seat_regents,
+    } = verify_branch_target_no_model_regent(checkpoint_prefix, seats_file)?;
     let day = probe_host.turn();
     let day_str = format!("{day:02}");
     let table_id = probe_host.table_id().0;
@@ -1737,9 +2579,14 @@ fn branch_one_target(
 
     let bot = ClubBot::new(probe_host.bot_tie_seed());
     let mut outcomes = Vec::with_capacity(opts.arms.len());
+    let mut turn_regent_audit_by_arm: BTreeMap<String, Vec<TurnRegentAuditRecord>> =
+        BTreeMap::new();
+    let mut voided_games_by_arm: BTreeMap<String, u64> = BTreeMap::new();
+    let mut first_void_error: Option<String> = None;
 
     for &arm in &opts.arms {
         let preview_mode = arm_to_preview_mode(arm)?;
+        let relay_wording_arm = preview_mode.wording_arm().to_owned();
         let arm_dir = target_out_dir.join(arm.as_str());
         fs::create_dir_all(&arm_dir).map_err(|e| {
             EvalError::Io(format!("create branch arm dir {}: {e}", arm_dir.display()))
@@ -1769,31 +2616,17 @@ fn branch_one_target(
 
         let (focal_sub, mut decision_rec) =
             if matches!(focal_seat_spec.backend, SeatBackend::File { .. }) {
-                let rec = EvalDecisionRecord {
-                    game_id: source_game_id.clone(),
+                let rec = empty_clubbot_decision(
+                    &source_game_id,
                     table_id,
                     day,
-                    round: Round::Act,
-                    seat: focal_idx as u8,
-                    guild: focal_guild.clone(),
+                    Round::Act,
+                    focal_idx as u8,
+                    &focal_guild,
                     arm,
-                    seat_kind: "ClubBot".to_owned(),
-                    keeps_notes: false,
-                    notes_present: false,
-                    raw_reply: None,
-                    discarded_reply_path: None,
-                    discarded_reply_sha256: None,
-                    attempts: 0,
-                    failed_attempts: Vec::new(),
-                    loaded_history_sha256: loaded_history_sha256.clone(),
-                    refusal_code: None,
-                    refusal_reason: None,
-                    invalid_recipients: Vec::new(),
-                    no_reply: false,
-                    apply_report: None,
-                    refused_bundle: None,
-                    club_bot_baseline: Some(bot_sub.clone()),
-                };
+                    loaded_history_sha256.clone(),
+                    Some(bot_sub.clone()),
+                );
                 (bot_sub, rec)
             } else {
                 if arm == EvalArm::On {
@@ -1853,12 +2686,14 @@ fn branch_one_target(
                 let arm_calls_path = arm_dir.join("relay").join("calls.jsonl");
                 let offset = count_calls_lines(&arm_calls_path)?;
                 let summary = run_turn(&branch_cfg, transport, redaction_key)?;
+                check_turn_summary_prompt_telemetry(&summary)?;
                 let diag = read_round_attempt_diagnostics(
                     &arm_dir,
                     &arm_calls_path,
                     offset,
                     &day_str,
                     Round::Act,
+                    focal_idx as u8,
                     &focal_guild,
                 )?;
                 resolve_act_model_round(
@@ -1883,16 +2718,26 @@ fn branch_one_target(
         spliced.insert(focal_idx as u8, focal_sub.clone());
         let apply_outcome = host.apply_act_submissions(&spliced)?;
         if let Some(report) = apply_outcome.seats.get(&(focal_idx as u8)) {
-            if let Some(ref code) = report.refused_bundle_code {
-                decision_rec.refused_bundle = Some(RefusedBundleRecord {
-                    submitted_bundle: focal_sub.bundle,
-                    error_code: code.clone(),
-                    bad_leg_index: "leg not named".to_owned(),
-                });
-            }
-            decision_rec.apply_report = Some(report.clone());
+            populate_act_apply_telemetry(&mut decision_rec, &focal_sub, report, arm, None, None)?;
         }
         let receipt: PublicSweepReceipt = host.sweep_turn()?;
+        let arm_audit = vec![TurnRegentAuditRecord {
+            turn: receipt.turn,
+            converted_to_ai: receipt.converted_to_ai.clone(),
+            regent_acted_seats: receipt.regent_acted_seats.clone(),
+        }];
+        turn_regent_audit_by_arm
+            .entry(arm.as_str().to_owned())
+            .or_default()
+            .extend(arm_audit.clone());
+        let regent_hit = find_model_seat_regent_intervention(&receipt, &model_seats, seats_file);
+        let arm_voided = regent_hit.is_some();
+        *voided_games_by_arm
+            .entry(arm.as_str().to_owned())
+            .or_insert(0) += u64::from(arm_voided);
+        if first_void_error.is_none() {
+            first_void_error = regent_hit;
+        }
 
         let arm_outcome = BranchArmOutcome {
             source_game_id: source_game_id.clone(),
@@ -1904,13 +2749,46 @@ fn branch_one_target(
             decision: decision_rec.clone(),
             receipt: receipt.clone(),
         };
+        let arm_summary = summarize_branch_outcomes(std::slice::from_ref(&arm_outcome));
+        let arm_manifest = build_eval_manifest(
+            &source_game_id,
+            table_id,
+            source_setup.seed,
+            arm,
+            &relay_wording_arm,
+            wrapper_version,
+            wrapper_sha256,
+            response_schema_sha256,
+            crate_git_sha,
+            1,
+            seats_file,
+            opts.memory_mode,
+            &has_regents,
+            seat_regents.clone(),
+            arm_audit,
+            arm_voided,
+            arm_voided.then(|| "MODEL_SEAT_REGENT_INTERVENTION".to_owned()),
+            BTreeMap::from([(arm.as_str().to_owned(), u64::from(arm_voided))]),
+            serving_record.cloned(),
+            serving_env_snapshot.clone(),
+            &arm_summary.refusal_counts_by_seat,
+            &arm_summary.refusal_counts_by_arm,
+            &arm_summary.wrong_part_refusals,
+        );
         write_json_pretty_atomic(&arm_dir.join("decision.json"), &decision_rec)?;
         write_json_pretty_atomic(&arm_dir.join("receipt.json"), &receipt)?;
         write_json_pretty_atomic(&arm_dir.join("outcome.json"), &arm_outcome)?;
+        write_json_pretty_atomic(&arm_dir.join("manifest.json"), &arm_manifest)?;
         outcomes.push(arm_outcome);
     }
 
-    Ok(outcomes)
+    Ok(BranchTargetResult {
+        outcomes,
+        seat_regents,
+        turn_regent_audit_by_arm,
+        voided_games_by_arm,
+        first_void_error,
+    })
 }
 
 fn build_single_focal_seat_file(source: &SeatFile, focal_idx: usize) -> SeatFile {
@@ -2230,7 +3108,15 @@ mod tests {
         );
 
         let diag_a = must_ok(
-            read_round_attempt_diagnostics(&run_root, &calls_path, 0, "01", Round::Talk, "Foundry"),
+            read_round_attempt_diagnostics(
+                &run_root,
+                &calls_path,
+                0,
+                "01",
+                Round::Talk,
+                0,
+                "Foundry",
+            ),
             "diag A",
         );
         let clean_outcome = SeatOutcome::Delivered {
@@ -2314,7 +3200,15 @@ mod tests {
             "write calls B",
         );
         let diag_b = must_ok(
-            read_round_attempt_diagnostics(&run_root, &calls_path, 0, "01", Round::Talk, "Foundry"),
+            read_round_attempt_diagnostics(
+                &run_root,
+                &calls_path,
+                0,
+                "01",
+                Round::Talk,
+                0,
+                "Foundry",
+            ),
             "diag B",
         );
         let no_reply_outcome = SeatOutcome::NoReply {
@@ -2402,7 +3296,15 @@ mod tests {
             "write calls C",
         );
         let diag_c = must_ok(
-            read_round_attempt_diagnostics(&run_root, &calls_path, 0, "01", Round::Act, "Foundry"),
+            read_round_attempt_diagnostics(
+                &run_root,
+                &calls_path,
+                0,
+                "01",
+                Round::Act,
+                0,
+                "Foundry",
+            ),
             "diag C",
         );
         let act_clean_outcome = SeatOutcome::Delivered {
@@ -2490,7 +3392,15 @@ mod tests {
         );
 
         let diag = must_ok(
-            read_round_attempt_diagnostics(&run_root, &calls_path, 0, "01", Round::Talk, "Foundry"),
+            read_round_attempt_diagnostics(
+                &run_root,
+                &calls_path,
+                0,
+                "01",
+                Round::Talk,
+                0,
+                "Foundry",
+            ),
             "diag late",
         );
         let outcome = SeatOutcome::NoReply {
@@ -2556,5 +3466,339 @@ mod tests {
         assert_eq!(err.code(), "INVALID_WRONG_PART_RATE");
 
         let _ = fs::remove_dir_all(&run_root);
+    }
+
+    #[test]
+    fn checked_sub_refuses_refused_exceeding_submitted() {
+        let mut rec = empty_clubbot_decision(
+            "g-count",
+            1,
+            1,
+            Round::Act,
+            0,
+            "Foundry",
+            EvalArm::Off,
+            BTreeMap::new(),
+            None,
+        );
+        let empty_sub = EvalActSubmission::default();
+        let bad_pass_a = league_core::EvalSeatApplyReport {
+            refused_market_actions: vec![(0, "BAD".to_owned())],
+            refused_pass_b_actions: Vec::new(),
+            refused_bundle_code: None,
+        };
+        let err_a = match populate_act_apply_telemetry(
+            &mut rec,
+            &empty_sub,
+            &bad_pass_a,
+            EvalArm::Off,
+            None,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(()) => panic!("refused_market_actions > market_actions must return Err"),
+        };
+        assert_eq!(err_a.code(), "INVALID_ACTION_COUNT");
+
+        let bad_pass_b = league_core::EvalSeatApplyReport {
+            refused_market_actions: Vec::new(),
+            refused_pass_b_actions: vec![(0, "BAD_B".to_owned())],
+            refused_bundle_code: None,
+        };
+        let err_b = match populate_act_apply_telemetry(
+            &mut rec,
+            &empty_sub,
+            &bad_pass_b,
+            EvalArm::Off,
+            None,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(()) => panic!("refused_pass_b_actions > pass_b_actions must return Err"),
+        };
+        assert_eq!(err_b.code(), "INVALID_ACTION_COUNT");
+    }
+
+    #[test]
+    fn startup_check_refuses_prior_receipt_even_with_has_regents_false() {
+        let tmp_seats = std::env::temp_dir().join(format!(
+            "ml_driver_regent_startup_seats_{}.json",
+            std::process::id()
+        ));
+        let seats_json = serde_json::json!({
+            "seats": [
+                {
+                    "guild": "Foundry",
+                    "backend": "local",
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "Qwen/Qwen3-32B",
+                    "temperature": 0.0,
+                    "max_output_tokens": 512,
+                    "timeout_secs": 5.0,
+                    "max_gpu_secs_per_call": 10.0
+                },
+                { "guild": "Quarry", "backend": "file", "model": "ClubBot" },
+                { "guild": "Harbor", "backend": "file", "model": "ClubBot" },
+                { "guild": "Mint", "backend": "file", "model": "ClubBot" }
+            ]
+        });
+        must_ok(
+            fs::write(&tmp_seats, seats_json.to_string()),
+            "write seat file",
+        );
+        let seats = must_ok(
+            SeatFile::load_with_allowed_hosts(&tmp_seats, None, &[]),
+            "load seat file",
+        );
+        let _ = fs::remove_file(&tmp_seats);
+        let mut host = must_ok(
+            EvalHost::from_standard_setup_with_model_seats(TableId(98), 4, 7, 1, &[false; 4]),
+            "create host",
+        );
+        for _ in 0..4 {
+            let _ = must_ok(
+                host.apply_act_submissions(&BTreeMap::new()),
+                "apply empty turn",
+            );
+            let _ = must_ok(host.sweep_turn(), "sweep empty turn");
+        }
+        assert!(
+            host.public_receipts()
+                .iter()
+                .any(|r| r.regent_acted_seats.contains(&0) || r.converted_to_ai.contains(&0)),
+            "expected prior turn receipt with seat 0 Regent hit"
+        );
+        let err = match ensure_no_model_seat_regent_at_startup(
+            &host,
+            &[true, false, false, false],
+            &[false; 4],
+            &seats,
+        ) {
+            Err(e) => e,
+            Ok(()) => {
+                panic!("prior Regent hit on model seat must refuse even if has_regents is false")
+            }
+        };
+        assert_eq!(err.code(), "MODEL_SEAT_REGENT_INTERVENTION");
+        assert!(
+            err.to_string()
+                .contains("startup check refused already-voided run"),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[test]
+    fn telemetry_and_prompt_prep_error_helpers_enforce_exact_five_and_metadata() {
+        assert_eq!(
+            must_ok(
+                parse_top_logprob_entries(None, 0).err().ok_or("none err"),
+                "missing top_logprobs"
+            )
+            .code(),
+            "MISSING_REPLY_TELEMETRY"
+        );
+        assert!(
+            parse_top_logprob_entries(Some(&serde_json::json!([{"token":"a","logprob":-0.1}])), 0)
+                .is_err()
+        );
+        assert!(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!([
+                    {"token":"a","logprob":-0.1},
+                    {"token":"b","logprob":-0.2},
+                    {"token":"c","logprob":-0.3},
+                    {"token":"d","logprob":-0.4},
+                    {"token":"e","logprob":"bad"}
+                ])),
+                0
+            )
+            .is_err()
+        );
+        assert!(parse_top_logprob_entries(Some(&serde_json::json!({"a": -0.1})), 0).is_err());
+        assert!(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!({"a": -0.1, "b": -0.2, "c": -0.3, "d": -0.4, "e": "bad"})),
+                0
+            )
+            .is_err()
+        );
+        let map_ok = must_ok(
+            parse_top_logprob_entries(
+                Some(&serde_json::json!({"a": -0.5, "b": -0.1, "c": -0.3, "d": -0.4, "e": -0.2})),
+                0,
+            ),
+            "5-entry map top_logprobs",
+        );
+        assert_eq!(map_ok.len(), 5);
+        assert_eq!(map_ok[0].token, "b");
+        assert!(parse_top_logprob_entries(Some(&serde_json::json!(42)), 0).is_err());
+
+        let base_rec = SavedHttpReplyRecord {
+            day: "01".to_owned(),
+            round: Round::Talk,
+            guild: "Foundry".to_owned(),
+            run_id: "r1".to_owned(),
+            reservation_id: "res-1".to_owned(),
+            request_body_sha256: "req".to_owned(),
+            round_index: 0,
+            attempt: 1,
+            status: 200,
+            is_late: false,
+            body_redacted: false,
+            redacted_secret_field_paths: Vec::new(),
+            body_sha256: "body".to_owned(),
+            body: "{}".to_owned(),
+            prompt_token_ids_sha256: Some("abc".to_owned()),
+            prompt_token_ids_count: Some(1),
+            prompt_token_ids_source: Some("server_tokenize".to_owned()),
+            prompt_token_ids_template_check: Some("double_apply_template_byte_equal".to_owned()),
+        };
+
+        let valid_body = serde_json::json!({
+            "usage": {"prompt_tokens": 1},
+            "choices": [{
+                "logprobs": {
+                    "content": [{
+                        "id": 7,
+                        "token": "{",
+                        "logprob": -0.01,
+                        "top_logprobs": [
+                            {"token": "{", "id": 7, "logprob": -0.01},
+                            {"token": "[", "id": 8, "logprob": -1.0},
+                            {"token": "\"", "id": 9, "logprob": -2.0},
+                            {"token": " ", "id": 10, "logprob": -3.0},
+                            {"token": "\n", "id": 11, "logprob": -4.0}
+                        ]
+                    }]
+                }
+            }]
+        });
+
+        let check_err = |rec: &SavedHttpReplyRecord,
+                         body: &serde_json::Value,
+                         src: Option<&str>,
+                         chk: Option<&str>,
+                         expected_code: &str| {
+            let mut shas = Vec::new();
+            let mut s = src.map(str::to_owned);
+            let mut c = chk.map(str::to_owned);
+            let mut rids = Vec::new();
+            let mut lps = Vec::new();
+            let err = collect_http_reply_telemetry(
+                rec, body, &mut shas, &mut s, &mut c, &mut rids, &mut lps,
+            );
+            match err {
+                Err(e) => assert_eq!(e.code(), expected_code),
+                Ok(()) => panic!("expected {expected_code}"),
+            }
+        };
+
+        let mut bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_sha256 = None;
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_count = Some(0);
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_source = Some("other".to_owned());
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+        bad_rec = base_rec.clone();
+        bad_rec.prompt_token_ids_template_check = Some("other".to_owned());
+        check_err(&bad_rec, &valid_body, None, None, "MISSING_REPLY_TELEMETRY");
+
+        check_err(
+            &base_rec,
+            &serde_json::json!({}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &valid_body,
+            Some("other_src"),
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &valid_body,
+            None,
+            Some("other_chk"),
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": []}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        check_err(
+            &base_rec,
+            &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": [{"logprobs": {"content": []}}]}),
+            None,
+            None,
+            "MISSING_REPLY_TELEMETRY",
+        );
+        for bad_step in [
+            serde_json::json!(42),
+            serde_json::json!({"logprob": -0.1, "id": 1}),
+            serde_json::json!({"token": "a", "id": 1}),
+            serde_json::json!({"token": "a", "logprob": -0.1}),
+        ] {
+            check_err(
+                &base_rec,
+                &serde_json::json!({"usage": {"prompt_tokens": 1}, "choices": [{"logprobs": {"content": [bad_step]}}]}),
+                None,
+                None,
+                "MISSING_REPLY_TELEMETRY",
+            );
+        }
+
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TEMPLATE_FAILED: x")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TEMPLATE_FAILED")
+        );
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TEMPLATE_MISMATCH: y")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TEMPLATE_MISMATCH")
+        );
+        assert_eq!(
+            map_prompt_prep_seat_error("PROMPT_TOKENIZE_FAILED: z")
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TOKENIZE_FAILED")
+        );
+        assert!(map_prompt_prep_seat_error("OTHER: q").is_none());
+
+        let summary_ok = TurnSummary {
+            reports: vec![league_relay::SeatReport {
+                guild: "Foundry".to_owned(),
+                outcome: SeatOutcome::SeatError {
+                    detail: "OTHER: q".to_owned(),
+                },
+            }],
+        };
+        assert!(check_turn_summary_prompt_telemetry(&summary_ok).is_ok());
+        let summary_err = TurnSummary {
+            reports: vec![league_relay::SeatReport {
+                guild: "Foundry".to_owned(),
+                outcome: SeatOutcome::SeatError {
+                    detail: "PROMPT_TOKENIZE_FAILED: boom".to_owned(),
+                },
+            }],
+        };
+        assert_eq!(
+            check_turn_summary_prompt_telemetry(&summary_err)
+                .err()
+                .as_ref()
+                .map(EvalError::code),
+            Some("PROMPT_TOKENIZE_FAILED")
+        );
     }
 }

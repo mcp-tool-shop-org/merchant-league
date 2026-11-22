@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "1b5ef244eeb68c265772f33afad1e56f5cc2075b2c514d7765ff502fd21c5aae",
+          "hash": "f2abbe19782ace56d68468dd52f88c92ff66222021f93a6e0c3bbc7ae0bac94d",
           "path": "docs/club-mode-design.md"
         },
         {
@@ -52,7 +52,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "9c0407ec24fbb727d9cb5dd5758737ffb56445be391938f2124e47451330ff7f",
+          "hash": "5603470d82cfc815edf5febbb66250db506fd6e1f50f79f5b29211b04a654747",
           "path": "docs/eval-harness.md"
         },
         {
@@ -164,7 +164,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "687dcd97cd42ee5a3ed88ba4be7c8f504ff371fdd76a6bd1b4d2ae3c4a91a4cc",
+          "hash": "959f84c8ad19878e826e8fea31449e57a52ff2896f2edeae1c5a0c6377efd195",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -832,385 +832,385 @@
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 550
+              "line": 552
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 560
+              "line": 562
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 566
+              "line": 568
             },
             {
               "in": "submit_mandate_commitment",
               "kind": "err",
-              "line": 569
+              "line": 571
             },
             {
               "in": "begin_cancel_lock",
               "kind": "err",
-              "line": 582
+              "line": 584
             },
             {
               "in": "apply_market_action",
               "kind": "err",
-              "line": 595
+              "line": 597
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 613
+              "line": 615
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 628
+              "line": 630
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 658
+              "line": 660
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 663
+              "line": 665
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 682
+              "line": 684
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 696
+              "line": 698
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 711
+              "line": 713
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 718
+              "line": 720
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 725
+              "line": 727
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 740
+              "line": 742
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 745
+              "line": 747
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 752
+              "line": 754
             },
             {
               "in": "apply_market_action_inner",
               "kind": "err",
-              "line": 780
+              "line": 782
             },
             {
               "in": "advance_to_commit",
               "kind": "err",
-              "line": 799
+              "line": 801
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 815
+              "line": 817
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 821
+              "line": 823
             },
             {
               "in": "submit_order_commitment",
               "kind": "err",
-              "line": 826
+              "line": 828
             },
             {
               "in": "advance_to_reveal",
               "kind": "err",
-              "line": 835
+              "line": 837
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 854
+              "line": 856
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 860
+              "line": 862
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 869
+              "line": 871
             },
             {
               "in": "submit_order_reveal",
               "kind": "err",
-              "line": 872
+              "line": 874
             },
             {
               "in": "preview_regent_bundle_for_seat",
               "kind": "err",
-              "line": 889
+              "line": 891
             },
             {
               "in": "preview_regent_bundle_after_step0",
               "kind": "err",
-              "line": 917
+              "line": 919
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "err",
-              "line": 1038
+              "line": 1040
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "match-err",
-              "line": 1071
+              "line": 1073
             },
             {
               "in": "preview_bundle_with_context_internal",
               "kind": "err",
-              "line": 1088
+              "line": 1090
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1203
+              "line": 1205
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1209
+              "line": 1211
             },
             {
               "in": "sweep_turn",
               "kind": "err",
-              "line": 1216
+              "line": 1218
             },
             {
               "in": "sweep_turn_seeded",
               "kind": "err",
-              "line": 1227
+              "line": 1229
             },
             {
               "in": "sweep_turn_seeded",
               "kind": "err",
-              "line": 1232
+              "line": 1234
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1256
+              "line": 1258
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1261
+              "line": 1263
             },
             {
               "in": "sweep_turn_with_eval_vrf_detailed",
               "kind": "err",
-              "line": 1266
+              "line": 1268
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1302
+              "line": 1304
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1307
+              "line": 1309
             },
             {
               "in": "sweep_turn_with_drand_detailed",
               "kind": "err",
-              "line": 1312
+              "line": 1314
             },
             {
               "in": "sweep_turn_detailed_with_mode",
               "kind": "err",
-              "line": 1340
+              "line": 1342
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1536
+              "line": 1538
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1549
+              "line": 1551
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1556
+              "line": 1558
             },
             {
               "in": "submit_mandate_reveal",
               "kind": "err",
-              "line": 1565
+              "line": 1567
             },
             {
               "in": "finalize_season",
               "kind": "err",
-              "line": 1577
+              "line": 1579
             },
             {
               "in": "ensure_seat",
               "kind": "err",
-              "line": 1590
+              "line": 1592
             },
             {
               "in": "ensure_valid_asset",
               "kind": "err",
-              "line": 1599
+              "line": 1601
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1606
+              "line": 1608
             },
             {
               "in": "ensure_valid_good",
               "kind": "err",
-              "line": 1610
+              "line": 1612
             },
             {
               "in": "validate_bundle_orders",
               "kind": "err",
-              "line": 1627
+              "line": 1629
             },
             {
               "in": "validate_bundle_orders",
               "kind": "err",
-              "line": 1649
+              "line": 1651
             },
             {
               "in": "adjust_free_balance",
               "kind": "err",
-              "line": 1711
+              "line": 1713
             },
             {
               "in": "handle_town_import",
               "kind": "err",
-              "line": 1758
+              "line": 1760
             },
             {
               "in": "handle_town_import",
               "kind": "match-err",
-              "line": 1765
+              "line": 1767
             },
             {
               "in": "handle_town_import",
               "kind": "err",
-              "line": 1767
+              "line": 1769
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1791
+              "line": 1793
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1796
+              "line": 1798
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1814
+              "line": 1816
             },
             {
               "in": "handle_post_offer",
               "kind": "err",
-              "line": 1823
+              "line": 1825
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 2122
+              "line": 2124
             },
             {
               "in": "handle_cancel_offer",
               "kind": "err",
-              "line": 2126
+              "line": 2128
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2144
+              "line": 2146
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2154
+              "line": 2156
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2161
+              "line": 2163
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2168
+              "line": 2170
             },
             {
               "in": "handle_create_escrow",
               "kind": "err",
-              "line": 2179
+              "line": 2181
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2233
+              "line": 2235
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2239
+              "line": 2241
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2244
+              "line": 2246
             },
             {
               "in": "refund_expired_escrow",
               "kind": "err",
-              "line": 2249
+              "line": 2251
             },
             {
               "in": "step2_settle_atomic_swaps",
               "kind": "err",
-              "line": 2995
+              "line": 2997
             }
           ],
-          "hash": "c7490434a4bc19ae30429b4068f1e917df58b755986dd4313912ef7cb797cd3d",
+          "hash": "2f770b4900b66cddfee0c446c71d2e7dc1f6e349cbb6825aae1082048eb2afc0",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/commit.rs",
@@ -1276,222 +1276,202 @@
             {
               "in": "mandate_for_seat",
               "kind": "err",
-              "line": 479
+              "line": 524
             },
             {
               "in": "apply_act_submissions",
               "kind": "err",
-              "line": 594
-            },
-            {
-              "in": "apply_act_submissions",
-              "kind": "match-err",
-              "line": 614
+              "line": 639
             },
             {
               "in": "apply_act_submissions",
               "kind": "match-err",
-              "line": 636
+              "line": 659
             },
             {
               "in": "apply_act_submissions",
               "kind": "match-err",
-              "line": 673
+              "line": 681
+            },
+            {
+              "in": "apply_act_submissions",
+              "kind": "match-err",
+              "line": 718
             },
             {
               "in": "finalize_eval_season",
               "kind": "err",
-              "line": 750
+              "line": 795
             },
             {
               "in": "finalize_eval_season",
               "kind": "err",
-              "line": 769
+              "line": 814
             },
             {
               "in": "finalize_eval_season",
               "kind": "err",
-              "line": 774
+              "line": 819
             },
             {
               "in": "finalize_eval_season",
               "kind": "err",
-              "line": 787
+              "line": 832
             },
             {
               "in": "export_replay_log",
               "kind": "err",
-              "line": 801
+              "line": 846
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 921
+              "line": 966
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 932
+              "line": 977
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 941
+              "line": 986
             },
             {
               "in": "from_save_and_seal_bytes",
               "kind": "err",
-              "line": 967
+              "line": 1012
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 1008
+              "line": 1053
             },
             {
               "in": "wipe_seal_file",
               "kind": "match-err",
-              "line": 1009
+              "line": 1054
             },
             {
               "in": "wipe_seal_file",
               "kind": "err",
-              "line": 1009
+              "line": 1054
             },
             {
               "in": "write_act_recorded_seal",
               "kind": "err",
-              "line": 1070
+              "line": 1115
             },
             {
               "in": "write_act_recorded_seal",
               "kind": "err",
-              "line": 1077
+              "line": 1122
             },
             {
               "in": "write_act_recorded_seal",
               "kind": "err",
-              "line": 1108
+              "line": 1153
             },
             {
               "in": "fork_duplicate_from_turn_0",
               "kind": "err",
-              "line": 1178
+              "line": 1223
             },
             {
               "in": "read_and_verify_recorded_seal_for_host",
-              "kind": "err",
-              "line": 1212
-            },
-            {
-              "in": "read_and_verify_recorded_seal_for_host",
-              "kind": "err",
-              "line": 1219
-            },
-            {
-              "in": "read_and_verify_recorded_seal_for_host",
-              "kind": "err",
-              "line": 1229
-            },
-            {
-              "in": "read_and_verify_recorded_seal_for_host",
-              "kind": "err",
-              "line": 1235
-            },
-            {
-              "in": "read_and_verify_recorded_seal_for_host",
-              "kind": "err",
-              "line": 1241
-            },
-            {
-              "in": "ensure_pre_act_state",
-              "kind": "err",
-              "line": 1251
-            },
-            {
-              "in": "ensure_pre_act_state",
               "kind": "err",
               "line": 1257
             },
             {
-              "in": "ensure_pre_act_state",
+              "in": "read_and_verify_recorded_seal_for_host",
               "kind": "err",
-              "line": 1262
+              "line": 1264
+            },
+            {
+              "in": "read_and_verify_recorded_seal_for_host",
+              "kind": "err",
+              "line": 1274
+            },
+            {
+              "in": "read_and_verify_recorded_seal_for_host",
+              "kind": "err",
+              "line": 1280
+            },
+            {
+              "in": "read_and_verify_recorded_seal_for_host",
+              "kind": "err",
+              "line": 1286
             },
             {
               "in": "ensure_pre_act_state",
-              "kind": "err",
-              "line": 1267
-            },
-            {
-              "in": "read_verified_act_recorded_seal",
               "kind": "err",
               "line": 1296
             },
             {
-              "in": "read_verified_act_recorded_seal",
+              "in": "ensure_pre_act_state",
               "kind": "err",
-              "line": 1303
+              "line": 1302
+            },
+            {
+              "in": "ensure_pre_act_state",
+              "kind": "err",
+              "line": 1307
+            },
+            {
+              "in": "ensure_pre_act_state",
+              "kind": "err",
+              "line": 1312
             },
             {
               "in": "read_verified_act_recorded_seal",
               "kind": "err",
-              "line": 1309
+              "line": 1341
+            },
+            {
+              "in": "read_verified_act_recorded_seal",
+              "kind": "err",
+              "line": 1348
+            },
+            {
+              "in": "read_verified_act_recorded_seal",
+              "kind": "err",
+              "line": 1354
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1356
+              "line": 1401
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1370
+              "line": 1415
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1376
+              "line": 1421
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1383
+              "line": 1428
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1391
+              "line": 1436
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1397
+              "line": 1442
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1410
-            },
-            {
-              "in": "validate_eval_seal_bytes",
-              "kind": "err",
-              "line": 1418
-            },
-            {
-              "in": "validate_eval_seal_bytes",
-              "kind": "err",
-              "line": 1438
-            },
-            {
-              "in": "validate_eval_seal_bytes",
-              "kind": "err",
-              "line": 1445
-            },
-            {
-              "in": "validate_eval_seal_bytes",
-              "kind": "err",
-              "line": 1451
+              "line": 1455
             },
             {
               "in": "validate_eval_seal_bytes",
@@ -1501,35 +1481,55 @@
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1469
+              "line": 1483
             },
             {
               "in": "validate_eval_seal_bytes",
               "kind": "err",
-              "line": 1476
+              "line": 1490
+            },
+            {
+              "in": "validate_eval_seal_bytes",
+              "kind": "err",
+              "line": 1496
+            },
+            {
+              "in": "validate_eval_seal_bytes",
+              "kind": "err",
+              "line": 1508
+            },
+            {
+              "in": "validate_eval_seal_bytes",
+              "kind": "err",
+              "line": 1514
+            },
+            {
+              "in": "validate_eval_seal_bytes",
+              "kind": "err",
+              "line": 1521
             },
             {
               "in": "write_atomic_bytes",
               "kind": "match-err",
-              "line": 1546
+              "line": 1591
             },
             {
               "in": "write_atomic_bytes",
               "kind": "err",
-              "line": 1553
+              "line": 1598
             },
             {
               "in": "write_atomic_bytes",
               "kind": "match-err",
-              "line": 1559
+              "line": 1604
             },
             {
               "in": "write_atomic_bytes",
               "kind": "err",
-              "line": 1561
+              "line": 1606
             }
           ],
-          "hash": "9d4b677232058003231c230bc45a538276744550a905963ad93d02f0f1805154",
+          "hash": "566ddbfacc5fcee4b2f2c7b5f5e6c6e1c90c8a1e2488e455bd7ccdbc0190bf47",
           "importsFiles": [
             "crates/league-core/src/commit.rs",
             "crates/league-core/src/contracts.rs",
@@ -2192,52 +2192,67 @@
               "line": 609
             },
             {
+              "in": "apply_eval_model_seat_regents",
+              "kind": "err",
+              "line": 734
+            },
+            {
+              "in": "standard_eval_chiral_ring_with_model_seats",
+              "kind": "err",
+              "line": 768
+            },
+            {
+              "in": "standard_eval_chiral_ring_with_explicit_setup_and_model_seats",
+              "kind": "err",
+              "line": 824
+            },
+            {
               "in": "build_chiral_ring_spec_with_deal",
               "kind": "err",
-              "line": 855
+              "line": 929
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 953
+              "line": 1027
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 963
+              "line": 1037
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 968
+              "line": 1042
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 976
+              "line": 1050
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 981
+              "line": 1055
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 992
+              "line": 1066
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 999
+              "line": 1073
             },
             {
               "in": "validate_seat_config",
               "kind": "err",
-              "line": 1004
+              "line": 1078
             }
           ],
-          "hash": "e05008f33aea5ea4823b0db487a6fec242132087934f11460247a12cf866258f",
+          "hash": "1dca86db973601087257d00a1063d85b4e0019c31dcd357e0c2363dcc7fc34db",
           "importOrder": [
             "crates/league-seat-types/src/lib.rs",
             "crates/league-core/src/commit.rs",
@@ -2311,7 +2326,7 @@
           "testsInside": true
         },
         {
-          "hash": "a9a7abb12b035a60e6be0ad07521d0768843bf74e888931d2507de8bbc79343e",
+          "hash": "e8c01cda30fda4061d9608be5bd6fd849d529068527022ff46996726a7e24b24",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2384,7 +2399,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 23,
+      "testedBy": 24,
       "unresolvedSites": 0
     },
     {
@@ -2446,7 +2461,7 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 9,
+      "dynamicReads": 12,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 4,
@@ -2459,6 +2474,11 @@
         {
           "hash": "8c7648aa39409eaf249b7397fb9d213e739cd7b6b4858205afa36271f794cc23",
           "path": "crates/league-eval/Cargo.toml"
+        },
+        {
+          "buildScript": true,
+          "hash": "b7f4f44d09a2ef82c8803d4813cd66754ceac19f1ff6ed1ad2b725a146cccac6",
+          "path": "crates/league-eval/build.rs"
         },
         {
           "entry": "main_entry",
@@ -2491,30 +2511,30 @@
             {
               "in": "cmd_play",
               "kind": "err",
-              "line": 282
+              "line": 287
             },
             {
               "in": "cmd_branch",
               "kind": "err",
-              "line": 403
+              "line": 416
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 492
+              "line": 506
             },
             {
               "in": "cmd_select",
               "kind": "err",
-              "line": 513
+              "line": 527
             },
             {
               "in": "parse_memory_mode",
               "kind": "err",
-              "line": 544
+              "line": 558
             }
           ],
-          "hash": "9530649efa900977214823dc36ef99a641d12c012ac1a8bc70f7590ab2ffa207",
+          "hash": "7f3e9daaffc95a63e8e813423633c4e7715694eb4ea3145bf62e46bd83304720",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/driver.rs",
@@ -2601,7 +2621,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 225,
+                  "line": 226,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2610,7 +2630,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 239,
+                  "line": 244,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -2619,7 +2639,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 245,
+                  "line": 250,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2628,7 +2648,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -2637,7 +2657,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -2645,7 +2665,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -2654,7 +2674,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -2662,7 +2682,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -2671,7 +2691,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -2680,7 +2700,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -2689,7 +2709,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -2698,7 +2718,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -2707,7 +2727,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -2716,7 +2736,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 319,
+                  "line": 327,
                   "name": "run_play_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -2724,7 +2744,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 334,
+                  "line": 342,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -2733,7 +2753,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2742,7 +2762,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 377,
+                  "line": 390,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -2751,7 +2771,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 390,
+                  "line": 403,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2825,7 +2845,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 225,
+                  "line": 226,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2834,7 +2854,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 239,
+                  "line": 244,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -2843,7 +2863,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 245,
+                  "line": 250,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2852,7 +2872,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -2861,7 +2881,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -2869,7 +2889,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -2878,7 +2898,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -2886,7 +2906,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -2895,7 +2915,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -2904,7 +2924,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -2913,7 +2933,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -2922,7 +2942,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -2931,7 +2951,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -2940,7 +2960,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 319,
+                  "line": 327,
                   "name": "run_play_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -2948,7 +2968,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 334,
+                  "line": 342,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -2957,7 +2977,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -2966,7 +2986,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 377,
+                  "line": 390,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -2975,7 +2995,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 390,
+                  "line": 403,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3082,7 +3102,7 @@
                   }
                 },
                 {
-                  "line": 225,
+                  "line": 226,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3091,7 +3111,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 239,
+                  "line": 244,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3100,7 +3120,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 245,
+                  "line": 250,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3109,7 +3129,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3118,7 +3138,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3126,7 +3146,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3135,7 +3155,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3143,7 +3163,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3152,7 +3172,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3161,7 +3181,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3170,7 +3190,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3179,7 +3199,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3188,7 +3208,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3197,7 +3217,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 319,
+                  "line": 327,
                   "name": "run_play_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3205,7 +3225,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 334,
+                  "line": 342,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3214,7 +3234,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3223,7 +3243,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 377,
+                  "line": 390,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3232,7 +3252,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 390,
+                  "line": 403,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3241,7 +3261,7 @@
                   "via": "cmd_branch"
                 },
                 {
-                  "line": 442,
+                  "line": 456,
                   "name": "run_branch_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3258,7 +3278,7 @@
             {
               "calls": [
                 {
-                  "line": 225,
+                  "line": 226,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3266,7 +3286,7 @@
                   }
                 },
                 {
-                  "line": 239,
+                  "line": 244,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3274,7 +3294,7 @@
                   }
                 },
                 {
-                  "line": 245,
+                  "line": 250,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3282,7 +3302,7 @@
                   }
                 },
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3291,7 +3311,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3299,7 +3319,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3308,7 +3328,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3316,7 +3336,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3325,7 +3345,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3334,7 +3354,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3343,7 +3363,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3352,7 +3372,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3361,7 +3381,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3370,14 +3390,14 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 319,
+                  "line": 327,
                   "name": "run_play_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 334,
+                  "line": 342,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3393,7 +3413,7 @@
             {
               "calls": [
                 {
-                  "line": 361,
+                  "line": 370,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3401,7 +3421,7 @@
                   }
                 },
                 {
-                  "line": 377,
+                  "line": 390,
                   "name": "parse",
                   "receiver": "EvalArm",
                   "target": {
@@ -3409,7 +3429,7 @@
                   }
                 },
                 {
-                  "line": 544,
+                  "line": 558,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3418,7 +3438,7 @@
                   "via": "parse_memory_mode"
                 },
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3427,7 +3447,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3435,7 +3455,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3444,7 +3464,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3452,7 +3472,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3461,7 +3481,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3470,7 +3490,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3479,7 +3499,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3488,7 +3508,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3497,7 +3517,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3506,21 +3526,21 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 442,
+                  "line": 456,
                   "name": "run_branch_with_transport",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 446,
+                  "line": 460,
                   "name": "summarize_branch_outcomes",
                   "target": {
                     "file": "crates/league-eval/src/records.rs"
                   }
                 },
                 {
-                  "line": 455,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3536,7 +3556,7 @@
             {
               "calls": [
                 {
-                  "line": 470,
+                  "line": 484,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3545,7 +3565,7 @@
                 },
                 {
                   "branch": "parts.len() != 3",
-                  "line": 492,
+                  "line": 506,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -3553,7 +3573,7 @@
                   }
                 },
                 {
-                  "line": 498,
+                  "line": 512,
                   "name": "InvalidStrata",
                   "receiver": "EvalError",
                   "target": {
@@ -3561,7 +3581,7 @@
                   }
                 },
                 {
-                  "line": 508,
+                  "line": 522,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3569,14 +3589,14 @@
                   }
                 },
                 {
-                  "line": 528,
+                  "line": 542,
                   "name": "run_select",
                   "target": {
                     "file": "crates/league-eval/src/select.rs"
                   }
                 },
                 {
-                  "line": 535,
+                  "line": 549,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -3592,7 +3612,7 @@
             {
               "calls": [
                 {
-                  "line": 544,
+                  "line": 558,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3608,7 +3628,7 @@
             {
               "calls": [
                 {
-                  "line": 570,
+                  "line": 584,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3616,14 +3636,14 @@
                   }
                 },
                 {
-                  "line": 576,
+                  "line": 590,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
                   }
                 },
                 {
-                  "line": 579,
+                  "line": 593,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3631,14 +3651,14 @@
                   }
                 },
                 {
-                  "line": 580,
+                  "line": 594,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 583,
+                  "line": 597,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3646,7 +3666,7 @@
                   }
                 },
                 {
-                  "line": 586,
+                  "line": 600,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3654,7 +3674,7 @@
                   }
                 },
                 {
-                  "line": 593,
+                  "line": 607,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3662,7 +3682,7 @@
                   }
                 },
                 {
-                  "line": 596,
+                  "line": 610,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3670,7 +3690,7 @@
                   }
                 },
                 {
-                  "line": 603,
+                  "line": 617,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3678,7 +3698,7 @@
                   }
                 },
                 {
-                  "line": 605,
+                  "line": 619,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3707,170 +3727,255 @@
             {
               "in": "post_chat_completions",
               "kind": "err",
-              "line": 51
+              "line": 58
             },
             {
               "in": "write_text_atomic",
               "kind": "match-err",
-              "line": 164
+              "line": 175
             },
             {
               "in": "write_text_atomic",
               "kind": "err",
-              "line": 167
+              "line": 178
             },
             {
               "in": "write_text_atomic",
               "kind": "match-err",
-              "line": 177
+              "line": 188
             },
             {
               "in": "write_text_atomic",
               "kind": "err",
-              "line": 179
+              "line": 190
             },
             {
               "in": "validate_eval_seats_file",
               "kind": "err",
-              "line": 192
+              "line": 203
             },
             {
               "in": "validate_eval_seats_file",
               "kind": "err",
-              "line": 200
+              "line": 211
             },
             {
               "in": "validate_eval_seats_file",
               "kind": "err",
-              "line": 217
+              "line": 232
             },
             {
-              "in": "arm_to_preview_mode",
+              "in": "validate_eval_seats_file",
               "kind": "err",
-              "line": 241
+              "line": 238
             },
             {
               "in": "draw_os_bot_tie_seed",
               "kind": "err",
-              "line": 264
+              "line": 285
+            },
+            {
+              "in": "parse_top_logprob_entries",
+              "kind": "err",
+              "line": 407
+            },
+            {
+              "in": "parse_top_logprob_entries",
+              "kind": "err",
+              "line": 430
+            },
+            {
+              "in": "parse_top_logprob_entries",
+              "kind": "err",
+              "line": 438
+            },
+            {
+              "in": "parse_top_logprob_entries",
+              "kind": "err",
+              "line": 454
+            },
+            {
+              "in": "parse_top_logprob_entries",
+              "kind": "err",
+              "line": 465
+            },
+            {
+              "in": "collect_http_reply_telemetry",
+              "kind": "err",
+              "line": 530
+            },
+            {
+              "in": "collect_http_reply_telemetry",
+              "kind": "err",
+              "line": 537
+            },
+            {
+              "in": "collect_http_reply_telemetry",
+              "kind": "err",
+              "line": 545
+            },
+            {
+              "in": "check_turn_summary_prompt_telemetry",
+              "kind": "err",
+              "line": 918
+            },
+            {
+              "in": "resolve_talk_model_round",
+              "kind": "err",
+              "line": 944
+            },
+            {
+              "in": "resolve_act_model_round",
+              "kind": "err",
+              "line": 1085
             },
             {
               "in": "ensure_no_partial_from_seat_for_day",
               "kind": "err",
-              "line": 764
+              "line": 1220
+            },
+            {
+              "in": "resolve_serving_manifest_opt",
+              "kind": "err",
+              "line": 1328
+            },
+            {
+              "in": "ensure_no_model_seat_regent_at_startup",
+              "kind": "err",
+              "line": 1400
+            },
+            {
+              "in": "ensure_no_model_seat_regent_at_startup",
+              "kind": "err",
+              "line": 1411
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 937
+              "line": 1636
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 949
+              "line": 1648
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 991
+              "line": 1683
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 1022
+              "line": 1733
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 1035
+              "line": 1747
             },
             {
               "in": "run_play_with_transport",
               "kind": "err",
-              "line": 1381
+              "line": 2092
+            },
+            {
+              "in": "run_play_with_transport",
+              "kind": "err",
+              "line": 2100
+            },
+            {
+              "in": "run_play_with_transport",
+              "kind": "err",
+              "line": 2154
             },
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 1478
+              "line": 2197
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1495
+              "line": 2214
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1516
+              "line": 2237
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1533
+              "line": 2254
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1554
+              "line": 2275
             },
             {
               "in": "run_branch_with_transport",
               "kind": "err",
-              "line": 1567
+              "line": 2300
+            },
+            {
+              "in": "run_branch_with_transport",
+              "kind": "err",
+              "line": 2384
+            },
+            {
+              "in": "verify_branch_target_no_model_regent",
+              "kind": "err",
+              "line": 2413
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1614
+              "line": 2472
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1630
+              "line": 2484
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1642
+              "line": 2491
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1649
+              "line": 2514
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1672
+              "line": 2523
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1681
+              "line": 2551
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 1709
-            },
-            {
-              "in": "branch_one_target",
-              "kind": "err",
-              "line": 1716
+              "line": 2558
             },
             {
               "in": "load_pre_act_transcript_prefix",
               "kind": "err",
-              "line": 1982
+              "line": 2860
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 2053
+              "line": 2931
             }
           ],
-          "hash": "1ae13f75510dd33d89b2a717c8994081d8ae4cc53c409ed95bc519971f5f10f9",
+          "hash": "beccb23b3e6347ef9580c28033d1ad2754f080fecaa27b2b00091b5588565b60",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -3879,6 +3984,7 @@
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/schema.rs",
             "crates/league-eval/src/select.rs",
+            "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/view.rs",
             "crates/league-eval/src/wording.rs"
           ],
@@ -3889,6 +3995,7 @@
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/schema.rs",
             "crates/league-eval/src/select.rs",
+            "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/view.rs",
             "crates/league-eval/src/wording.rs",
             "crates/league-relay/src/lib.rs"
@@ -3897,7 +4004,7 @@
           "testsInside": true
         },
         {
-          "hash": "468da9043702a8d48ffaff4922b782b17f1ac7a8b61fdc1c1d4c1813f2adf302",
+          "hash": "237dbdc8eed343961b1ee8a55cef283e571a01cbc70a7971cadf6fa087f2f068",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs"
@@ -3905,7 +4012,7 @@
           "path": "crates/league-eval/src/error.rs"
         },
         {
-          "hash": "ccafab8f7557002e00b656109e260a460ca46f0d24ebf507865a9b88a945c312",
+          "hash": "fa2613edc93eeafc42cb054f3506214fc556b9f7d49913199e989bbb97d0d2f4",
           "importsFiles": [
             "crates/league-eval/src/cli.rs",
             "crates/league-eval/src/driver.rs",
@@ -3914,6 +4021,7 @@
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/schema.rs",
             "crates/league-eval/src/select.rs",
+            "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/view.rs",
             "crates/league-eval/src/wording.rs"
           ],
@@ -4007,7 +4115,7 @@
                       "via": "run_cli_args"
                     },
                     {
-                      "line": 225,
+                      "line": 226,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -4016,7 +4124,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 239,
+                      "line": 244,
                       "name": "parse",
                       "receiver": "EvalArm",
                       "target": {
@@ -4025,7 +4133,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 245,
+                      "line": 250,
                       "name": "Usage",
                       "receiver": "EvalError",
                       "target": {
@@ -4034,7 +4142,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 570,
+                      "line": 584,
                       "name": "from_env",
                       "receiver": "ApiKey",
                       "target": {
@@ -4043,7 +4151,7 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 576,
+                      "line": 590,
                       "name": "validate_vm_host_allowance",
                       "target": {
                         "file": "crates/league-relay/src/lib.rs"
@@ -4051,7 +4159,7 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 579,
+                      "line": 593,
                       "name": "load_with_allowed_hosts",
                       "receiver": "SeatFile",
                       "target": {
@@ -4077,6 +4185,7 @@
         },
         {
           "exports": [
+            "count_bundle_legs",
             "extract_wrapper_metadata",
             "summarize_branch_outcomes"
           ],
@@ -4084,30 +4193,32 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 37
+              "line": 38
             },
             {
               "in": "validate_rates",
               "kind": "err",
-              "line": 213
+              "line": 214
             },
             {
               "in": "validate_rates",
               "kind": "err",
-              "line": 224
+              "line": 225
             }
           ],
-          "hash": "0e7e47ee4808ed93b6d20a5d8957a0b0a38124d7333ad32042ea6365c9508878",
+          "hash": "6444b6f03ba4e3e1d46f80411598acc1d7ed51d163e510329e4a17043e4c1580",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
             "crates/league-eval/src/error.rs",
-            "crates/league-eval/src/reply.rs"
+            "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/serving.rs"
           ],
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/error.rs",
             "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/serving.rs",
             "crates/league-relay/src/lib.rs"
           ],
           "path": "crates/league-eval/src/records.rs"
@@ -4246,6 +4357,130 @@
         },
         {
           "exports": [
+            "capture_serving_env_snapshot",
+            "capture_serving_env_snapshot_from",
+            "load_and_validate_serving_manifest",
+            "resolve_verified_crate_git_sha",
+            "resolve_verified_crate_git_sha_in",
+            "validate_crate_git_sha_against",
+            "validate_crate_git_sha_and_cleanliness",
+            "validate_serving_manifest_input"
+          ],
+          "failurePaths": [
+            {
+              "in": "validate_crate_git_sha_and_cleanliness",
+              "kind": "err",
+              "line": 410
+            },
+            {
+              "in": "validate_crate_git_sha_and_cleanliness",
+              "kind": "err",
+              "line": 417
+            },
+            {
+              "in": "validate_crate_git_sha_and_cleanliness",
+              "kind": "err",
+              "line": 423
+            },
+            {
+              "in": "resolve_verified_crate_git_sha_in",
+              "kind": "err",
+              "line": 462
+            },
+            {
+              "in": "resolve_verified_crate_git_sha_in",
+              "kind": "err",
+              "line": 477
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 509
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 514
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 534
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 561
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 569
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 577
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 586
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 591
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 597
+            },
+            {
+              "in": "validate_serving_manifest_input",
+              "kind": "err",
+              "line": 616
+            },
+            {
+              "in": "load_and_validate_serving_manifest",
+              "kind": "err",
+              "line": 745
+            },
+            {
+              "in": "scrub_text_value",
+              "kind": "err",
+              "line": 884
+            },
+            {
+              "in": "scrub_text_value",
+              "kind": "err",
+              "line": 889
+            },
+            {
+              "in": "scrub_text_value",
+              "kind": "err",
+              "line": 900
+            }
+          ],
+          "hash": "f6f435d3a3973177170d60e22da13487aad047de723d0c077950eb72f40b8e44",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/wording.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/wording.rs",
+            "crates/league-relay/src/lib.rs"
+          ],
+          "path": "crates/league-eval/src/serving.rs",
+          "testsInside": true
+        },
+        {
+          "exports": [
             "build_act_negotiation_inputs",
             "render_preview_state_json",
             "render_seat_view_markdown"
@@ -4268,18 +4503,42 @@
         },
         {
           "exports": [
+            "check_wrapper_digest",
             "eval_internal_slot_names",
-            "eval_wording_slot"
+            "eval_wording_slot",
+            "resolve_pinned_wrapper"
           ],
-          "hash": "07e3a8853bc0175fd5cfb4bcb1dfd48d90ffe847c68423bb0c6dde4f4cee8ab8",
+          "failurePaths": [
+            {
+              "in": "check_wrapper_digest",
+              "kind": "err",
+              "line": 42
+            },
+            {
+              "in": "check_wrapper_digest",
+              "kind": "err",
+              "line": 48
+            },
+            {
+              "in": "check_wrapper_digest",
+              "kind": "err",
+              "line": 56
+            }
+          ],
+          "hash": "aa97f10f7e502e6b73b2751387d80bea8574f8fd7f5c35f9aeaf2b22de095d2d",
+          "importOrder": [
+            "crates/league-relay/src/lib.rs",
+            "crates/league-eval/src/error.rs"
+          ],
           "importsFiles": [
+            "crates/league-eval/src/error.rs",
             "crates/league-relay/src/lib.rs"
           ],
           "path": "crates/league-eval/src/wording.rs",
           "testsInside": true
         },
         {
-          "hash": "d4f9cb9ce1413eb2b1d059025bfda144f4afb971d0c0cd0cd50b10fa243cf2f9",
+          "hash": "f92814fdae5cf6632b9f2dde86c0db7317e60133d4f3bbfae76ba0add77a5a21",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4290,11 +4549,28 @@
           "testsInside": true
         },
         {
+          "hash": "cd4f6001598137c64184dfe5ee8ab59613657e50d9ed1336e86d06c1754f6546",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/lib.rs",
+            "crates/league-relay/src/lib.rs"
+          ],
+          "library": "crates/league-eval/src/lib.rs",
+          "path": "crates/league-eval/tests/control_manifest_and_regent.rs",
+          "spawns": [
+            "crates/league-eval/src/main.rs"
+          ],
+          "spawnsInstalled": [
+            "crates/league-eval/src/main.rs"
+          ],
+          "testsInside": true
+        },
+        {
           "hash": "5727faa205f05a87e05309cb878e0dbf16137e4a73be4271e6b732482f7fd3f4",
           "path": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md"
         },
         {
-          "hash": "729e091f2c742401d55a35cc938fb7d57ed68a1277cad71c0c44e6910ee4093d",
+          "hash": "3306533e5f8aac98ffd89db2d87ada520c6929c19906723fc885cc0248ae0580",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4309,6 +4585,10 @@
             "crates/league-eval/src/main.rs"
           ],
           "testsInside": true
+        },
+        {
+          "hash": "66d5665950b2ef9bad177dbcfbe132912fa99f09c328a40866502dbf16d6a06d",
+          "path": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md"
         }
       ],
       "globs": [
@@ -4319,20 +4599,20 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 13,
+          "reads": 15,
           "where": [
             "caller"
           ],
           "writes": 2
         }
       ],
-      "outsideReads": 13,
+      "outsideReads": 15,
       "outsideWrites": 2,
       "role": "code",
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 7,
+      "testedBy": 9,
       "unresolvedSites": 0
     },
     {
@@ -5649,7 +5929,7 @@
               "line": 1498
             }
           ],
-          "hash": "c7a9cb8f23d948e4ae56ecfb08c642c8a045257b978c33c255758789eadb9c66",
+          "hash": "798b1f68aeeca8f6503c140b17149632a727b8b1ba38bab0f80431511c07db3f",
           "importsFiles": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/relay.rs",
@@ -7140,7 +7420,7 @@
           "path": "crates/league-relay/src/error.rs"
         },
         {
-          "hash": "91f98a8aa86f8626140a53ea41462f6da58b510c6f6d7b3fcea5364cd02babc7",
+          "hash": "09ca7f46650c44a8b0fadfafbd5a2409128ebba8b30e795a894eebb5f9a101e9",
           "importsFiles": [
             "crates/league-relay/src/cli.rs",
             "crates/league-relay/src/error.rs",
@@ -7352,557 +7632,532 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 121
+              "line": 123
             },
             {
               "in": "parse",
               "kind": "err",
-              "line": 162
+              "line": 164
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 218
+              "line": 220
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 228
+              "line": 230
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 234
+              "line": 236
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 241
+              "line": 243
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 256
+              "line": 258
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 270
+              "line": 272
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 279
+              "line": 281
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 290
+              "line": 292
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 315
+              "line": 317
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 320
+              "line": 322
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 337
+              "line": 339
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 347
+              "line": 349
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 364
+              "line": 366
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 378
+              "line": 380
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 390
+              "line": 392
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 407
+              "line": 409
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 412
+              "line": 414
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 422
+              "line": 424
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 429
+              "line": 431
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 441
+              "line": 443
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 454
+              "line": 456
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 460
+              "line": 462
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 467
+              "line": 469
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 492
+              "line": 494
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 543
+              "line": 545
             },
             {
               "in": "from_json_str",
               "kind": "err",
-              "line": 560
+              "line": 562
             },
             {
               "in": "reject_forbidden_ref_or_anchor_keyword",
               "kind": "err",
-              "line": 693
+              "line": 695
             },
             {
               "in": "reject_default_ignorable_code_point",
               "kind": "err",
-              "line": 726
+              "line": 728
             },
             {
               "in": "validate_model_visible_schema_text",
               "kind": "err",
-              "line": 1050
+              "line": 1052
             },
             {
               "in": "validate_model_visible_schema_text",
               "kind": "err",
-              "line": 1055
+              "line": 1057
             },
             {
               "in": "validate_property_key",
               "kind": "err",
-              "line": 1071
+              "line": 1073
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1087
+              "line": 1089
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1095
+              "line": 1097
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1100
+              "line": 1102
             },
             {
               "in": "check_schema_identifier",
               "kind": "err",
-              "line": 1105
+              "line": 1107
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1140
+              "line": 1142
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1146
+              "line": 1148
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1151
+              "line": 1153
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1161
+              "line": 1163
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1167
+              "line": 1169
             },
             {
               "in": "validate_ref_value",
               "kind": "err",
-              "line": 1179
+              "line": 1181
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1226
+              "line": 1228
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1241
+              "line": 1243
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1246
+              "line": 1248
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1253
+              "line": 1255
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1267
+              "line": 1269
             },
             {
               "in": "validate_dependent_required",
               "kind": "err",
-              "line": 1272
+              "line": 1274
             },
             {
               "in": "validate_pattern_properties",
               "kind": "err",
-              "line": 1641
+              "line": 1643
             },
             {
               "in": "validate_pattern_properties",
               "kind": "err",
-              "line": 1653
+              "line": 1655
             },
             {
               "in": "validate_property_names",
               "kind": "err",
-              "line": 1694
+              "line": 1696
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1741
+              "line": 1743
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1762
+              "line": 1764
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1769
+              "line": 1771
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1781
+              "line": 1783
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1786
+              "line": 1788
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1794
+              "line": 1796
             },
             {
               "in": "validate_subschema",
               "kind": "err",
-              "line": 1815
+              "line": 1817
             },
             {
               "in": "validate_day",
               "kind": "err",
-              "line": 2206
+              "line": 2208
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3027
+              "line": 3070
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3029
+              "line": 3072
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3037
+              "line": 3080
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3038
+              "line": 3081
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3071
+              "line": 3114
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3077
+              "line": 3120
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3078
+              "line": 3121
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3098
+              "line": 3141
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3100
+              "line": 3143
             },
             {
               "in": "acquire",
               "kind": "match-err",
-              "line": 3105
+              "line": 3148
             },
             {
               "in": "acquire",
               "kind": "err",
-              "line": 3106
+              "line": 3149
             },
             {
               "in": "verify_identity",
               "kind": "err",
-              "line": 3130
+              "line": 3173
             },
             {
               "in": "verify_identity",
               "kind": "match-err",
-              "line": 3136
+              "line": 3179
             },
             {
               "in": "verify_identity",
               "kind": "err",
-              "line": 3136
+              "line": 3179
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3425
+              "line": 3468
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3439
+              "line": 3482
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3444
+              "line": 3487
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3449
+              "line": 3492
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3460
+              "line": 3503
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3466
+              "line": 3509
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3472
+              "line": 3515
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3478
+              "line": 3521
             },
             {
               "in": "resolve_table_scratchpad_plan",
               "kind": "err",
-              "line": 3557
+              "line": 3600
             },
             {
               "in": "validate_eval_mode_seats",
               "kind": "err",
-              "line": 3598
+              "line": 3641
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3744
+              "line": 3787
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3753
+              "line": 3796
             },
             {
               "in": "load_compatible_setup_if_exists",
               "kind": "err",
-              "line": 3764
+              "line": 3807
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3808
+              "line": 3851
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3818
+              "line": 3861
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3828
+              "line": 3871
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3838
+              "line": 3881
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3849
+              "line": 3892
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3863
+              "line": 3906
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3872
+              "line": 3915
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3884
+              "line": 3927
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3897
+              "line": 3940
             },
             {
               "in": "ensure_game_setup",
               "kind": "match-err",
-              "line": 3929
+              "line": 3972
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3931
+              "line": 3974
             },
             {
               "in": "ensure_game_setup",
               "kind": "match-err",
-              "line": 3933
+              "line": 3976
             },
             {
               "in": "ensure_game_setup",
               "kind": "err",
-              "line": 3935
+              "line": 3978
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 3986
+              "line": 4029
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 3987
+              "line": 4030
             },
             {
               "in": "is_run_reservation_lock_live",
               "kind": "match-err",
-              "line": 3996
+              "line": 4039
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4065
+              "line": 4108
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "match-err",
-              "line": 4066
+              "line": 4109
             },
             {
               "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4066
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "err",
-              "line": 4077
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "err",
-              "line": 4084
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "match-err",
-              "line": 4112
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "err",
-              "line": 4114
-            },
-            {
-              "in": "write_reserved_entries_unlocked",
-              "kind": "match-err",
-              "line": 4118
+              "line": 4109
             },
             {
               "in": "write_reserved_entries_unlocked",
@@ -7910,14 +8165,29 @@
               "line": 4120
             },
             {
-              "in": "write_pending_side_file_unlocked",
+              "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4142
+              "line": 4127
             },
             {
-              "in": "write_pending_side_file_unlocked",
+              "in": "write_reserved_entries_unlocked",
+              "kind": "match-err",
+              "line": 4155
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
               "kind": "err",
-              "line": 4149
+              "line": 4157
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "match-err",
+              "line": 4161
+            },
+            {
+              "in": "write_reserved_entries_unlocked",
+              "kind": "err",
+              "line": 4163
             },
             {
               "in": "write_pending_side_file_unlocked",
@@ -7926,228 +8196,213 @@
             },
             {
               "in": "write_pending_side_file_unlocked",
-              "kind": "match-err",
-              "line": 4194
+              "kind": "err",
+              "line": 4192
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4196
+              "line": 4228
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "match-err",
-              "line": 4199
+              "line": 4237
             },
             {
               "in": "write_pending_side_file_unlocked",
               "kind": "err",
-              "line": 4201
+              "line": 4239
+            },
+            {
+              "in": "write_pending_side_file_unlocked",
+              "kind": "match-err",
+              "line": 4242
+            },
+            {
+              "in": "write_pending_side_file_unlocked",
+              "kind": "err",
+              "line": 4244
             },
             {
               "in": "open",
               "kind": "err",
-              "line": 4484
+              "line": 4527
             },
             {
               "in": "check_lock_identity",
               "kind": "match-err",
-              "line": 4541
+              "line": 4584
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "match-err",
-              "line": 4566
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "err",
-              "line": 4566
-            },
-            {
-              "in": "ensure_run_resv_lock",
-              "kind": "match-err",
-              "line": 4571
+              "line": 4609
             },
             {
               "in": "ensure_run_resv_lock",
               "kind": "err",
-              "line": 4571
+              "line": 4609
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "match-err",
+              "line": 4614
+            },
+            {
+              "in": "ensure_run_resv_lock",
+              "kind": "err",
+              "line": 4614
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4785
+              "line": 4828
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "match-err",
-              "line": 4815
+              "line": 4858
             },
             {
               "in": "finish_call_and_record_with_rollback",
               "kind": "err",
-              "line": 4819
+              "line": 4862
             },
             {
               "in": "record_refusal",
               "kind": "err",
-              "line": 4831
+              "line": 4874
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4860
+              "line": 4903
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4870
+              "line": 4913
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4891
+              "line": 4934
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4932
+              "line": 4975
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 4949
+              "line": 4992
             },
             {
               "in": "finalize_turn",
               "kind": "match-err",
-              "line": 4953
+              "line": 4996
             },
             {
               "in": "finalize_turn",
               "kind": "err",
-              "line": 5008
+              "line": 5051
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5080
+              "line": 5123
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5088
+              "line": 5131
             },
             {
               "in": "sum_charged_for_unit",
               "kind": "err",
-              "line": 5093
+              "line": 5136
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5143
+              "line": 5186
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5153
+              "line": 5196
             },
             {
               "in": "validate_wrapper_text_for_label",
               "kind": "err",
-              "line": 5161
+              "line": 5204
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5220
+              "line": 5263
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5221
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "match-err",
-              "line": 5231
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5232
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5269
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5280
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5298
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5319
-            },
-            {
-              "in": "load_preview_states_for_act_turn",
-              "kind": "err",
-              "line": 5330
+              "line": 5264
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "match-err",
-              "line": 5346
+              "line": 5274
             },
             {
               "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5347
+              "line": 5275
             },
             {
-              "in": "run_turn_with_diag",
+              "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5376
+              "line": 5312
             },
             {
-              "in": "run_turn_with_diag",
+              "in": "load_preview_states_for_act_turn",
               "kind": "err",
-              "line": 5383
+              "line": 5323
             },
             {
-              "in": "run_turn_with_diag",
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5341
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5362
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "err",
+              "line": 5373
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
+              "kind": "match-err",
+              "line": 5389
+            },
+            {
+              "in": "load_preview_states_for_act_turn",
               "kind": "err",
               "line": 5390
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5397
+              "line": 5419
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5402
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 5407
-            },
-            {
-              "in": "run_turn_with_diag",
-              "kind": "err",
-              "line": 5427
+              "line": 5426
             },
             {
               "in": "run_turn_with_diag",
@@ -8161,366 +8416,421 @@
             },
             {
               "in": "run_turn_with_diag",
-              "kind": "match-err",
-              "line": 5456
+              "kind": "err",
+              "line": 5445
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5465
+              "line": 5450
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5507
+              "line": 5470
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5518
+              "line": 5476
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5723
+              "line": 5483
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "match-err",
+              "line": 5499
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5508
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5550
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5561
+            },
+            {
+              "in": "run_turn_with_diag",
+              "kind": "err",
+              "line": 5780
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5853
+              "line": 5916
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5862
+              "line": 5925
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5871
+              "line": 5934
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5939
+              "line": 6011
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5953
+              "line": 6025
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5984
+              "line": 6056
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6240
+              "line": 6349
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6279
+              "line": 6388
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6301
+              "line": 6410
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6311
+              "line": 6420
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6359
+              "line": 6440
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6406
+              "line": 6498
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6434
+              "line": 6545
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6438
+              "line": 6573
+            },
+            {
+              "in": "run_single_automated_seat",
+              "kind": "match-err",
+              "line": 6577
             },
             {
               "in": "run_single_automated_seat",
               "kind": "err",
-              "line": 6512
+              "line": 6652
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6541
+              "line": 6681
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6588
+              "line": 6728
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6631
+              "line": 6771
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6733
+              "line": 6873
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6748
+              "line": 6888
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6756
+              "line": 6896
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6784
+              "line": 6924
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6806
+              "line": 6946
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6818
+              "line": 6958
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6887
+              "line": 7027
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6937
+              "line": 7077
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7128
+              "line": 7294
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7176
+              "line": 7342
+            },
+            {
+              "in": "prepare_eval_local_prompt_telemetry",
+              "kind": "err",
+              "line": 7569
+            },
+            {
+              "in": "prepare_eval_local_prompt_telemetry",
+              "kind": "err",
+              "line": 7585
+            },
+            {
+              "in": "finish_eval_prompt_prep_error",
+              "kind": "match-err",
+              "line": 7628
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7374
+              "line": 7674
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7374
+              "line": 7674
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7375
+              "line": 7675
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7376
+              "line": 7676
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7382
+              "line": 7682
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7382
+              "line": 7682
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7393
+              "line": 7693
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7397
+              "line": 7697
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "match-err",
-              "line": 7523
+              "line": 7830
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "err",
-              "line": 7524
+              "line": 7831
+            },
+            {
+              "in": "parse_single_tool_call_item",
+              "kind": "err",
+              "line": 8064
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 7834
+              "line": 8156
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 7840
+              "line": 8162
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 7846
+              "line": 8168
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 7856
+              "line": 8178
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 7909
+              "line": 8232
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 7918
+              "line": 8241
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 7967
+              "line": 8290
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 7995
+              "line": 8318
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8009
+              "line": 8332
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8072
+              "line": 8386
             },
             {
-              "in": "probe_tool_round_store",
-              "kind": "err",
-              "line": 8140
-            },
-            {
-              "in": "probe_tool_round_store",
-              "kind": "err",
-              "line": 8151
-            },
-            {
-              "in": "probe_tool_round_store",
+              "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8172
-            },
-            {
-              "in": "probe_tool_round_store",
-              "kind": "err",
-              "line": 8174
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "err",
-              "line": 8295
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "match-err",
-              "line": 8304
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "err",
-              "line": 8306
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "match-err",
-              "line": 8308
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "err",
-              "line": 8310
-            },
-            {
-              "in": "load_transcript",
-              "kind": "err",
-              "line": 8389
-            },
-            {
-              "in": "load_transcript",
-              "kind": "err",
-              "line": 8398
-            },
-            {
-              "in": "load_transcript",
-              "kind": "err",
               "line": 8410
             },
             {
+              "in": "probe_tool_round_store",
+              "kind": "err",
+              "line": 8478
+            },
+            {
+              "in": "probe_tool_round_store",
+              "kind": "err",
+              "line": 8489
+            },
+            {
+              "in": "probe_tool_round_store",
+              "kind": "match-err",
+              "line": 8510
+            },
+            {
+              "in": "probe_tool_round_store",
+              "kind": "err",
+              "line": 8512
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "err",
+              "line": 8633
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "match-err",
+              "line": 8642
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "err",
+              "line": 8644
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "match-err",
+              "line": 8646
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "err",
+              "line": 8648
+            },
+            {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8420
+              "line": 8727
+            },
+            {
+              "in": "load_transcript",
+              "kind": "err",
+              "line": 8736
+            },
+            {
+              "in": "load_transcript",
+              "kind": "err",
+              "line": 8748
+            },
+            {
+              "in": "load_transcript",
+              "kind": "err",
+              "line": 8758
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8466
+              "line": 8804
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8475
+              "line": 8813
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8477
+              "line": 8815
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8479
+              "line": 8817
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8481
+              "line": 8819
             },
             {
               "in": "format_system_time_utc_rfc3339",
               "kind": "match-err",
-              "line": 8555
+              "line": 8893
             }
           ],
-          "hash": "0f7ce27dbddf10fe2099c3b8658f70ddf2d4e3295b3988daec9bbdadf5e635bd",
+          "hash": "e3732165ea1d58380d3796667f72df0bccc4857c2c335afc5b44ba939243bacb",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -8543,6 +8853,7 @@
         {
           "exports": [
             "normalize_allowed_vm_hosts",
+            "validate_local_apply_template_url",
             "validate_local_base_url",
             "validate_local_endpoints",
             "validate_local_tokenize_url",
@@ -8742,39 +9053,34 @@
               "line": 825
             },
             {
-              "in": "parse_and_validate_local_origin",
+              "in": "validate_local_apply_template_url",
               "kind": "err",
-              "line": 844
+              "line": 849
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 850
+              "line": 868
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 861
+              "line": 874
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 866
+              "line": 885
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 873
+              "line": 890
             },
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 891
-            },
-            {
-              "in": "parse_and_validate_local_origin",
-              "kind": "err",
-              "line": 898
+              "line": 897
             },
             {
               "in": "parse_and_validate_local_origin",
@@ -8784,55 +9090,65 @@
             {
               "in": "parse_and_validate_local_origin",
               "kind": "err",
-              "line": 921
+              "line": 922
+            },
+            {
+              "in": "parse_and_validate_local_origin",
+              "kind": "err",
+              "line": 939
+            },
+            {
+              "in": "parse_and_validate_local_origin",
+              "kind": "err",
+              "line": 945
             },
             {
               "in": "validate_guild_name",
               "kind": "err",
-              "line": 975
+              "line": 999
             },
             {
               "in": "validate_guild_name",
-              "kind": "err",
-              "line": 982
-            },
-            {
-              "in": "validate_pinned_local_model",
-              "kind": "err",
-              "line": 997
-            },
-            {
-              "in": "validate_pinned_local_model",
               "kind": "err",
               "line": 1006
             },
             {
               "in": "validate_pinned_local_model",
               "kind": "err",
-              "line": 1022
+              "line": 1021
+            },
+            {
+              "in": "validate_pinned_local_model",
+              "kind": "err",
+              "line": 1030
+            },
+            {
+              "in": "validate_pinned_local_model",
+              "kind": "err",
+              "line": 1046
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1032
+              "line": 1056
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1037
+              "line": 1061
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1048
+              "line": 1072
             },
             {
               "in": "validate_pinned_openrouter_slug",
               "kind": "err",
-              "line": 1059
+              "line": 1083
             }
           ],
-          "hash": "f6a338e309724ba00720a8a29de49ebbfb582ce5b7f90811627c0dc5eda6f7ca",
+          "hash": "642618b4c968ca2adab0f3bb29fefe2c7b6330361cd7b84ae248d872e248ab27",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
@@ -8925,25 +9241,60 @@
             {
               "in": "count_tokens",
               "kind": "err",
-              "line": 107
+              "line": 109
+            },
+            {
+              "in": "apply_template",
+              "kind": "err",
+              "line": 125
+            },
+            {
+              "in": "tokenize_prompt",
+              "kind": "err",
+              "line": 143
             },
             {
               "in": "count_tokens",
               "kind": "err",
-              "line": 267
+              "line": 296
             },
             {
               "in": "count_tokens",
               "kind": "err",
-              "line": 275
+              "line": 305
+            },
+            {
+              "in": "apply_template",
+              "kind": "err",
+              "line": 328
+            },
+            {
+              "in": "apply_template",
+              "kind": "err",
+              "line": 337
+            },
+            {
+              "in": "tokenize_prompt",
+              "kind": "err",
+              "line": 363
+            },
+            {
+              "in": "tokenize_prompt",
+              "kind": "err",
+              "line": 372
+            },
+            {
+              "in": "tokenize_prompt",
+              "kind": "err",
+              "line": 386
             },
             {
               "in": "post_chat_completions",
               "kind": "err",
-              "line": 389
+              "line": 508
             }
           ],
-          "hash": "c54ea4e2aaa920974b96b17cb38b994d9cd467b46418318b5df22076653c1fc8",
+          "hash": "3c6a30e6afc0d4fa58d0db21bd91a866ddbc01ecd7742ade39a7b053083b6999",
           "importsFiles": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -8953,9 +9304,13 @@
         },
         {
           "exports": [
+            "build_control_turn_orders_tool_definition",
             "build_preview_turn_orders_tool_definition",
             "cap_words_and_chars",
+            "control_wording_slot",
+            "control_wording_template",
             "escape_default_ignorable_code_points",
+            "execute_control_tool_call",
             "execute_preview_tool_call",
             "extract_scratchpad_update",
             "format_negotiation_block",
@@ -8971,6 +9326,8 @@
             "preview_wording_slot",
             "preview_wording_template",
             "render_call_limit_reached_wire_json",
+            "render_control_call_limit_reached_wire_json",
+            "render_control_malformed_tool_call_wire_json",
             "render_engine_refusal_wire_json",
             "render_json_escaped_whisper_line",
             "render_malformed_tool_call_wire_json",
@@ -9029,60 +9386,60 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 889
+              "line": 896
             },
             {
               "in": "reject_unknown_keys",
               "kind": "err",
-              "line": 1794
+              "line": 2200
             },
             {
               "in": "parse_hex32",
               "kind": "err",
-              "line": 1842
+              "line": 2248
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 1872
+              "line": 2278
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 1880
+              "line": 2286
             },
             {
               "in": "parse_bond_opt",
               "kind": "err",
-              "line": 1907
+              "line": 2313
             },
             {
               "in": "parse_intent_target",
               "kind": "err",
-              "line": 1951
+              "line": 2357
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 1977
+              "line": 2383
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2159
+              "line": 2565
             },
             {
               "in": "parse_bundle_obj",
               "kind": "err",
-              "line": 2359
+              "line": 2765
             },
             {
               "in": "execute_preview_tool_call",
               "kind": "match-err",
-              "line": 3014
+              "line": 3456
             }
           ],
-          "hash": "b1e7375b062bc1c22f1ba5fabdb078ed7be0177cee52d40bae345dbf4c2a7d97",
+          "hash": "856039a0135fa191a96f35f204f52667e85abaf72bd8afc5393dfd189dbbc7d9",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
@@ -9218,7 +9575,7 @@
           "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-02-talk-Saltworks.md"
         },
         {
-          "hash": "5c6f1865ab5d40b0e502f0d9bf69840c1381d08ab777874d3de035547eac3b1f",
+          "hash": "1b30f6db6a0d72abc6816ca6cb39dc3a91fd06fb6cb585ef9bd33db55a220ca2",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -9265,7 +9622,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 6,
+      "testedBy": 7,
       "unresolvedSites": 0
     },
     {
@@ -9457,7 +9814,7 @@
           "testsInside": true
         },
         {
-          "hash": "49bc703c8c9a1e3c5429b4ddbd5e4467432d26a29e008232b822cdf13f20f4e0",
+          "hash": "02b0789ad85a8005082dccd7a4fdbd68e56e05b1cf6d4561b63dbdacf501b4fe",
           "importsFiles": [
             "crates/league-seat-types/src/commit.rs",
             "crates/league-seat-types/src/contracts.rs",
@@ -12770,7 +13127,7 @@
           "path": ".dockerignore"
         },
         {
-          "hash": "8153c1275b23d584fd47abbda26c2623d0765f17da27c9535c555922b8ca4afc",
+          "hash": "8ddd5c69b8f033a6294d6503963db19629636d44740f705fd11b0da2ef7121f0",
           "path": ".gitattributes"
         },
         {
@@ -12782,7 +13139,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "313712a5bbf0be3a1dad1468bd857c72c5875e2f070d2d8db94b9213c2850f77",
+          "hash": "3eaa5c1ee3c11c84d16235ed7b3646fcd0fe9bc461296aa1acdcbc5d7cbe6161",
           "path": "CHANGELOG.md"
         },
         {
@@ -12826,7 +13183,7 @@
           "path": "README.ja.md"
         },
         {
-          "hash": "8f8619bbaad68e4fbf21744ba2638c5e23195ff9d92615697d41083ed38ea25e",
+          "hash": "bb64fd73ca196d0de807c61307a11bde1e65651ea29ebf804b35db86d334d9e5",
           "path": "README.md"
         },
         {
@@ -13184,7 +13541,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 13
+          "files": 16
         },
         {
           "boundary": "league-gen",
@@ -13314,6 +13671,20 @@
           "via": "cargo install"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-eval/build.rs",
+          "runKind": "executes",
+          "via": "cargo audit"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-eval/build.rs",
+          "runKind": "executes",
+          "via": "cargo build"
+        },
+        {
           "job": "check",
           "matched": true,
           "path": "crates/league-eval/src/driver.rs",
@@ -13359,6 +13730,13 @@
           "job": "check",
           "matched": true,
           "path": "crates/league-eval/src/schema.rs",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-eval/src/serving.rs",
           "runKind": "executes",
           "via": "cargo test"
         },
@@ -13668,7 +14046,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 54,
+      "runsCount": 56,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -13683,14 +14061,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 58,
+          "files": 61,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 58,
+          "files": 61,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -13918,7 +14296,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 11
+          "files": 12
         },
         {
           "boundary": "league-relay",
@@ -14425,8 +14803,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "04a42f04dc14701751bf1679cfb7897db1eb636f",
-    "tracked": 623
+    "commit": "757118fc111f7ec83897323707ff59c57a706ab5",
+    "tracked": 627
   },
   "landings": [
     {
@@ -14779,6 +15157,30 @@
         }
       ],
       "target": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "crates/league-eval/tests/addendum_item9.rs",
+          "call": "read",
+          "confidence": "ast",
+          "fromTests": true
+        },
+        {
+          "by": "crates/league-eval/tests/control_manifest_and_regent.rs",
+          "call": "read",
+          "confidence": "ast",
+          "fromTests": true
+        },
+        {
+          "by": "crates/league-eval/tests/play_and_branch.rs",
+          "call": "read",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md",
       "writers": []
     },
     {
@@ -15671,7 +16073,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 97,
+  "testFiles": 99,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",
