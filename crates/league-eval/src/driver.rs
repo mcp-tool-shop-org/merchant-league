@@ -1409,11 +1409,25 @@ fn validate_eval_reasoning_budgets(
                 seat.guild
             )));
         }
-        if manifest
+        if manifest.server_settings.reasoning_budget_message.is_none() {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without server_settings.reasoning_budget_message=\"\"",
+                seat.guild
+            )));
+        }
+        let Some(reasoning_mode) = manifest
             .server_settings
             .reasoning_mode
             .as_deref()
-            .is_some_and(|m| m.eq_ignore_ascii_case("off") || m.eq_ignore_ascii_case("none"))
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        else {
+            return Err(EvalError::UnenforceableReasoningBudget(format!(
+                "seat '{}' sets reasoning.budget_tokens={budget} without server_settings.reasoning_mode",
+                seat.guild
+            )));
+        };
+        if reasoning_mode.eq_ignore_ascii_case("off") || reasoning_mode.eq_ignore_ascii_case("none")
         {
             return Err(EvalError::UnenforceableReasoningBudget(format!(
                 "seat '{}' sets reasoning.budget_tokens={budget} while server_settings.reasoning_mode disables reasoning in b11433",

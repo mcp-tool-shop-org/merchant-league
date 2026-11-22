@@ -52,7 +52,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "befb6a15849d0f9b8bb05ec8cbfa70f02c7f893a3afd041ef7e116c21a8d5a68",
+          "hash": "efd28d45017726f496b7fe748225e9ed57989eb26f8ac9a12c23039ffb8fb1d4",
           "path": "docs/eval-harness.md"
         },
         {
@@ -4106,47 +4106,52 @@
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1418
+              "line": 1413
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1429
+              "line": 1425
             },
             {
               "in": "validate_eval_reasoning_budgets",
               "kind": "err",
-              "line": 1440
+              "line": 1432
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1443
+            },
+            {
+              "in": "validate_eval_reasoning_budgets",
+              "kind": "err",
+              "line": 1454
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1514
+              "line": 1528
             },
             {
               "in": "ensure_no_model_seat_regent_at_startup",
               "kind": "err",
-              "line": 1525
+              "line": 1539
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1750
+              "line": 1764
             },
             {
               "in": "validate_wrapper_and_extract",
               "kind": "err",
-              "line": 1762
+              "line": 1776
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 1808
-            },
-            {
-              "in": "run_play_with_transport_and_git_sha",
-              "kind": "err",
-              "line": 1859
+              "line": 1822
             },
             {
               "in": "run_play_with_transport_and_git_sha",
@@ -4156,105 +4161,110 @@
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2221
+              "line": 1887
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2229
+              "line": 2235
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2283
+              "line": 2243
+            },
+            {
+              "in": "run_play_with_transport_and_git_sha",
+              "kind": "err",
+              "line": 2297
             },
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 2326
+              "line": 2340
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2354
+              "line": 2368
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2377
+              "line": 2391
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2394
+              "line": 2408
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2415
+              "line": 2429
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2441
+              "line": 2455
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2525
+              "line": 2539
             },
             {
               "in": "verify_branch_target_no_model_regent",
               "kind": "err",
-              "line": 2554
+              "line": 2568
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2613
+              "line": 2627
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2625
+              "line": 2639
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2632
+              "line": 2646
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2655
+              "line": 2669
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2664
+              "line": 2678
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2692
+              "line": 2706
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2699
+              "line": 2713
             },
             {
               "in": "load_pre_act_transcript_prefix",
               "kind": "err",
-              "line": 3004
+              "line": 3018
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 3075
+              "line": 3089
             }
           ],
-          "hash": "f939e4eedb028529c758c843c570910d98ff62cb4251dabc9d8cdefca60bf38a",
+          "hash": "7df5a32e017b6044606bc37b09af8b24a322bb4bf0b22a12f560b083cfcf8601",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4283,7 +4293,7 @@
           "testsInside": true
         },
         {
-          "hash": "3116d091d7a79ddbf4f7a9624a341178463b6feb8274ddb7159b06fdde3365c0",
+          "hash": "ed1e486ed97374ecfd83d9ab03b3d55930be222bcab8b14aeaaeb934400c2715",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs"
@@ -4830,7 +4840,7 @@
           "testsInside": true
         },
         {
-          "hash": "4b5757bb7ca514a41db4eeb64afe945fe650d035178de9408c65fdcaa7a09421",
+          "hash": "6450153ba89f8298e67350cb095eac884d867b26d519bad1bcb2d0a8036ede06",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -9851,7 +9861,7 @@
           "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-02-talk-Saltworks.md"
         },
         {
-          "hash": "c28f8303ba69bd47041459dda5fd2a0e98d9b090c247192134a9d5d391c29ec6",
+          "hash": "b564af9e762f3480bc575a6b9e884d8e4e2fe34f7f1105e24649519cb4736011",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -13415,7 +13425,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "582c94900c1cf1afb6b9b550f250cd80e9bbc1329c6447c392013ec485f03a2a",
+          "hash": "71df8493c75b103739a081ca3e3c94fb62edea423d17e6675c707ea0071be8c8",
           "path": "CHANGELOG.md"
         },
         {
@@ -13423,7 +13433,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "f7289ece65f876fb76e1c0e3c84d80b2c4445150a707db481d98da6ac769304f",
+          "hash": "801f32bcae282686f060e4a64cca3b29539242cb92891f19f1004a3132e2fcac",
           "path": "Cargo.lock"
         },
         {
@@ -15093,7 +15103,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "2a908a121a215a75a90bb4417d3810a850cc69fe",
+    "commit": "fd899c39e064ed7073ecd85da2cf53ab51391fe1",
     "tracked": 627
   },
   "landings": [

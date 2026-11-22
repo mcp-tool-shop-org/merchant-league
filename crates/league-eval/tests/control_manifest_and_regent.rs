@@ -3694,6 +3694,7 @@ fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
     serving["server_settings"]["jinja"] = json!(true);
     serving["server_settings"]["reasoning_mode"] = json!("on");
     serving["server_settings"]["default_reasoning_budget"] = json!(-1);
+    serving["server_settings"]["reasoning_budget_message"] = json!("");
 
     let tx = BudgetCaptureTransport {
         tpl_reqs: Mutex::new(Vec::new()),
@@ -3745,7 +3746,13 @@ fn reasoning_budget_sent_as_reasoning_budget_tokens_when_enforceable() {
         serving_rec.server_settings.default_reasoning_budget,
         Some(-1)
     );
-    assert_eq!(serving_rec.server_settings.reasoning_budget_message, None);
+    assert_eq!(
+        serving_rec
+            .server_settings
+            .reasoning_budget_message
+            .as_deref(),
+        Some("")
+    );
 
     let chat_reqs = must_ok(tx.chat_reqs.lock(), "chat lock");
     assert_eq!(chat_reqs.len(), 2);
@@ -3777,6 +3784,8 @@ fn unenforceable_reasoning_budget_refuses_at_eval_startup_with_zero_calls() {
         serving["model"]["thinking_start_tag"] = json!("<think>");
         serving["model"]["thinking_end_tags"] = json!(["</think>"]);
         serving["server_settings"]["jinja"] = json!(true);
+        serving["server_settings"]["reasoning_mode"] = json!("on");
+        serving["server_settings"]["reasoning_budget_message"] = json!("");
         (seats, serving)
     }
 
@@ -4006,6 +4015,7 @@ fn budget_seat_without_enable_thinking_refuses_at_eval_startup_with_zero_calls()
     serving_on["model"]["thinking_end_tags"] = json!(["</think>"]);
     serving_on["server_settings"]["jinja"] = json!(true);
     serving_on["server_settings"]["reasoning_mode"] = json!("on");
+    serving_on["server_settings"]["reasoning_budget_message"] = json!("");
 
     let mut serving_off = serving_on.clone();
     serving_off["server_settings"]["reasoning_mode"] = json!("off");
@@ -4244,6 +4254,256 @@ fn eval_test_seam_passes_with_untracked_file_while_real_path_refuses_dirty_tree(
         String::from_utf8_lossy(&cli_err)
     );
     assert!(!cli_game.exists());
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn budget_seat_with_absent_reasoning_budget_message_refuses_while_empty_passes() {
+    let tmp = fresh_tmp_dir("budget_absent_msg");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let mut budgeted_seats = local_foundry_three_clubbot_seats();
+    budgeted_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "chat_template_kwargs": { "enable_thinking": true },
+        "exclude_from_transcript": false
+    });
+    let no_budget_seats = local_foundry_three_clubbot_seats();
+
+    let mut serving_absent_msg = base_llama_serving_json();
+    serving_absent_msg["model"]["thinking_start_tag"] = json!("<think>");
+    serving_absent_msg["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving_absent_msg["server_settings"]["jinja"] = json!(true);
+    serving_absent_msg["server_settings"]["reasoning_mode"] = json!("on");
+
+    // 1. Budget seat + absent server_settings.reasoning_budget_message -> refuse zero calls.
+    let zero_tx = ZeroCallTransport::new();
+    let refuse_dir = tmp.join("refuse_absent_msg");
+    let refuse_game = refuse_dir.join("game");
+    let err = match run_play_with_transport(
+        &PlayOptions {
+            game_dir: refuse_game.clone(),
+            seats_path: write_seats(&refuse_dir, budgeted_seats.clone()),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(write_serving_manifest_json(
+                &refuse_dir,
+                "serving.json",
+                &serving_absent_msg,
+            )),
+            arm: EvalArm::Off,
+            table_id: 360,
+            seed: 7,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &zero_tx,
+        None,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!(
+            "absent server_settings.reasoning_budget_message with budget seat must refuse UNENFORCEABLE_REASONING_BUDGET"
+        ),
+    };
+    assert_eq!(err.code(), "UNENFORCEABLE_REASONING_BUDGET");
+    assert_eq!(err.exit_code(), 1);
+    assert_eq!(zero_tx.call_count(), 0);
+    assert!(!refuse_game.exists());
+
+    // 2. Budget seat + explicit "" and non-budget seat + absent message both pass.
+    let mut serving_empty_msg = serving_absent_msg.clone();
+    serving_empty_msg["server_settings"]["reasoning_budget_message"] = json!("");
+    let ok_reply = FixedReplyTransport {
+        content: json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+            .to_string(),
+    };
+    for (idx, (label, seats, srv, expected_msg)) in [
+        (
+            "budget_empty_msg",
+            budgeted_seats,
+            serving_empty_msg,
+            Some(""),
+        ),
+        (
+            "no_budget_absent_msg",
+            no_budget_seats,
+            serving_absent_msg,
+            None,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case_dir = tmp.join(label);
+        let manifest = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: case_dir.join("game"),
+                    seats_path: write_seats(&case_dir, seats),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    serving_manifest_path: Some(write_serving_manifest_json(
+                        &case_dir,
+                        "serving.json",
+                        &srv,
+                    )),
+                    arm: EvalArm::Off,
+                    table_id: 361 + idx as u64,
+                    seed: 7,
+                    turns: 1,
+                    memory_mode: league_relay::MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &ok_reply,
+                None,
+            ),
+            &format!("case {label} should pass"),
+        );
+        assert_eq!(manifest.played_turns, 1, "case={label}");
+        let rec = must_some(manifest.serving.as_ref(), "serving manifest");
+        assert_eq!(
+            rec.server_settings.reasoning_budget_message.as_deref(),
+            expected_msg,
+            "case={label}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn budget_seat_with_absent_reasoning_mode_refuses_while_no_budget_seat_unchanged() {
+    let tmp = fresh_tmp_dir("budget_absent_mode");
+    let wrapper_path = copy_pinned_r3_wrapper(&tmp);
+    let mut budgeted_seats = local_foundry_three_clubbot_seats();
+    budgeted_seats["seats"][0]["reasoning"] = json!({
+        "effort": "medium",
+        "budget_tokens": 256,
+        "chat_template_kwargs": { "enable_thinking": true },
+        "exclude_from_transcript": false
+    });
+    let no_budget_seats = local_foundry_three_clubbot_seats();
+
+    let mut serving_absent_mode = base_llama_serving_json();
+    serving_absent_mode["model"]["thinking_start_tag"] = json!("<think>");
+    serving_absent_mode["model"]["thinking_end_tags"] = json!(["</think>"]);
+    serving_absent_mode["server_settings"]["jinja"] = json!(true);
+    serving_absent_mode["server_settings"]["reasoning_budget_message"] = json!("");
+
+    let mut serving_blank_mode = serving_absent_mode.clone();
+    serving_blank_mode["server_settings"]["reasoning_mode"] = json!("   ");
+
+    // 1. Budget seat + absent/blank server_settings.reasoning_mode -> refuse zero calls.
+    for (idx, (label, srv)) in [
+        ("absent_mode", serving_absent_mode.clone()),
+        ("blank_mode", serving_blank_mode),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case_dir = tmp.join(label);
+        let zero_tx = ZeroCallTransport::new();
+        let game_dir = case_dir.join("game");
+        let err = match run_play_with_transport(
+            &PlayOptions {
+                game_dir: game_dir.clone(),
+                seats_path: write_seats(&case_dir, budgeted_seats.clone()),
+                wrapper_path: wrapper_path.clone(),
+                wrapper_version: None,
+                serving_manifest_path: Some(write_serving_manifest_json(
+                    &case_dir,
+                    "serving.json",
+                    &srv,
+                )),
+                arm: EvalArm::Off,
+                table_id: 370 + idx as u64,
+                seed: 7,
+                turns: 1,
+                memory_mode: league_relay::MemoryMode::Snapshot,
+                live: false,
+                cap_credits: None,
+                cap_gpu_secs: None,
+                allowed_vm_hosts: Vec::new(),
+            },
+            &zero_tx,
+            None,
+        ) {
+            Err(e) => e,
+            Ok(_) => {
+                panic!("case '{label}' with budget seat must refuse UNENFORCEABLE_REASONING_BUDGET")
+            }
+        };
+        assert_eq!(err.code(), "UNENFORCEABLE_REASONING_BUDGET", "case={label}");
+        assert_eq!(err.exit_code(), 1, "case={label}");
+        assert_eq!(zero_tx.call_count(), 0, "case={label}");
+        assert!(!game_dir.exists(), "case={label}");
+    }
+
+    // 2. Non-budget seat + absent reasoning_mode & absent message (and "off") stay permitted.
+    let mut serving_plain_absent = base_llama_serving_json();
+    serving_plain_absent["server_settings"]["jinja"] = json!(true);
+    let mut serving_off_absent_msg = serving_plain_absent.clone();
+    serving_off_absent_msg["server_settings"]["reasoning_mode"] = json!("off");
+
+    let ok_reply = FixedReplyTransport {
+        content: json!({ "messages": [], "market_actions": [], "bundle": {}, "notes": "ok" })
+            .to_string(),
+    };
+    for (idx, (label, srv, expected_mode)) in [
+        ("no_budget_absent_all", serving_plain_absent, None),
+        (
+            "no_budget_off_absent_msg",
+            serving_off_absent_msg,
+            Some("off"),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case_dir = tmp.join(label);
+        let manifest = must_ok(
+            run_play_with_transport(
+                &PlayOptions {
+                    game_dir: case_dir.join("game"),
+                    seats_path: write_seats(&case_dir, no_budget_seats.clone()),
+                    wrapper_path: wrapper_path.clone(),
+                    wrapper_version: None,
+                    serving_manifest_path: Some(write_serving_manifest_json(
+                        &case_dir,
+                        "serving.json",
+                        &srv,
+                    )),
+                    arm: EvalArm::Off,
+                    table_id: 375 + idx as u64,
+                    seed: 7,
+                    turns: 1,
+                    memory_mode: league_relay::MemoryMode::Snapshot,
+                    live: false,
+                    cap_credits: None,
+                    cap_gpu_secs: None,
+                    allowed_vm_hosts: Vec::new(),
+                },
+                &ok_reply,
+                None,
+            ),
+            &format!("case {label} should remain permitted without budget seats"),
+        );
+        assert_eq!(manifest.played_turns, 1, "case={label}");
+        let rec = must_some(manifest.serving.as_ref(), "serving manifest");
+        assert_eq!(
+            rec.server_settings.reasoning_mode.as_deref(),
+            expected_mode,
+            "case={label}"
+        );
+    }
 
     let _ = fs::remove_dir_all(&tmp);
 }

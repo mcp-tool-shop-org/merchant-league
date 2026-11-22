@@ -500,7 +500,7 @@ impl ToStructuredError for EvalError {
             Self::UnenforceableReasoningBudget(_) => StructuredError::new(
                 self.code(),
                 self.to_string(),
-                "ensure serving manifest specifies engine 'llama_server' with server_settings.jinja: true, server_settings.reasoning_mode not 'off', non-empty model.thinking_start_tag and model.thinking_end_tags, seat reasoning.effort != \"none\", chat_template_kwargs.enable_thinking: true, and budget_tokens <= i32::MAX",
+                "ensure serving manifest specifies engine 'llama_server' with server_settings.jinja: true, present server_settings.reasoning_mode (not 'off'/'none'), server_settings.reasoning_budget_message: \"\", non-empty model.thinking_start_tag and model.thinking_end_tags, seat reasoning.effort != \"none\", chat_template_kwargs.enable_thinking: true, and budget_tokens <= i32::MAX",
                 false,
             ),
             Self::ReasoningBudgetMessageForbidden(_) => StructuredError::new(
