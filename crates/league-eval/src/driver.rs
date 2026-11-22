@@ -2069,7 +2069,9 @@ pub fn run_play_with_transport_and_git_sha(
                 &to_seat_dir.join(format!("day-{day_str}-act-{}.md", seat.guild)),
                 &act_md,
             )?;
-            if opts.arm == EvalArm::On && !matches!(seat.backend, SeatBackend::File { .. }) {
+            if matches!(opts.arm, EvalArm::On | EvalArm::Control)
+                && !matches!(seat.backend, SeatBackend::File { .. })
+            {
                 let preview_json = render_preview_state_json(&obs)?;
                 write_text_atomic(
                     &to_seat_dir.join(format!(
@@ -2784,7 +2786,7 @@ fn branch_one_target(
                 );
                 (bot_sub, rec)
             } else {
-                if arm == EvalArm::On {
+                if matches!(arm, EvalArm::On | EvalArm::Control) {
                     let preview_json = render_preview_state_json(&obs)?;
                     write_text_atomic(
                         &to_seat_dir.join(format!(

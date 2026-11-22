@@ -22,7 +22,7 @@ pub const PREFLIGHT_WRONG_PART_STOP_THRESHOLD: f64 = 0.05;
 pub enum EvalArm {
     /// No preview or draft tool (`v2_neutral_2026_11_15_r6`).
     Off,
-    /// Matched inert draft tool (`v2_control_2026_11_21_r1`).
+    /// Matched schema + legality-checked draft tool without simulation (`v2_control_2026_11_22_r2`).
     Control,
     /// Full own-orders rules-engine preview tool (`v2_preview_2026_11_20_r2`).
     On,

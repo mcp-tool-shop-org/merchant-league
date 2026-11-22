@@ -770,7 +770,10 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
         .collect();
     assert_eq!(ctrl_tool_contents.len(), 3);
     for c in ctrl_tool_contents {
-        assert_eq!(c, "Draft recorded. Nothing was checked or submitted.");
+        assert_eq!(
+            c,
+            "Draft recorded. The orders are allowed; nothing was simulated or submitted."
+        );
     }
     for req in ctrl_reqs {
         for forbidden in [
@@ -826,7 +829,7 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
     assert!(!branch_manifest.voided);
     let digests: WordingArmDigests = must_some(branch_manifest.wording_digests, "wording_digests");
     assert_eq!(digests.neutral_arm, "v2_neutral_2026_11_15_r6");
-    assert_eq!(digests.control_arm, "v2_control_2026_11_21_r1");
+    assert_eq!(digests.control_arm, "v2_control_2026_11_22_r2");
     assert_eq!(digests.preview_arm, "v2_preview_2026_11_20_r2");
     assert_eq!(digests.eval_reply_arm, "v2_eval_reply_2026_11_21_r1");
     assert_eq!(digests.wrapper_version, "v2_seat_brief_2026_11_21_r3");
@@ -846,7 +849,7 @@ fn control_arm_branch_and_telemetry_item20_plus_token_logprobs() {
     assert_eq!(arm_ctrl_manifest.arm, EvalArm::Control);
     assert_eq!(
         arm_ctrl_manifest.relay_wording_arm,
-        "v2_control_2026_11_21_r1"
+        "v2_control_2026_11_22_r2"
     );
 
     // Test refused market actions, refused bundle legs, cleared_non_empty_actions == false, and parse_failure == true!

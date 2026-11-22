@@ -1,0 +1,5 @@
+{
+  "preview_tool_description": "Record a draft of candidate own-seat market actions and a sealed order bundle for this turn without advancing the game or contacting peers. Orders are checked against the rules but not simulated, and nothing is submitted. Returns a fixed reply, or a refusal naming the problem if an order is not allowed.",
+  "preview_call_budget_sentence": "You have a tool called draft_turn_orders to write down candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke draft_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The draft tool checks your orders against the rules but does not simulate them; it does not show what other seats will do. Finish with a single final JSON reply.",
+  "control_fixed_reply": "Draft recorded. The orders are allowed; nothing was simulated or submitted."
+}
