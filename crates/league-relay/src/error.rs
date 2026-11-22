@@ -60,7 +60,7 @@ impl PreviewStateErrorKind {
     pub const fn remediation(self) -> &'static str {
         match self {
             Self::Missing => {
-                "write the seat's per-turn `day-<DD>-act-<Guild>.preview-state.json` under `to-seat/` before running with `--preview-tool on`"
+                "write the seat's per-turn `day-<DD>-act-<Guild>.preview-state.json` under `to-seat/` before running with `--preview-tool on` or `--preview-tool control`"
             }
             Self::Malformed => {
                 "ensure the `.preview-state.json` file is exact JSON of `PublicPreviewState` from `SeatObservation::to_public_preview_state()`"
@@ -101,7 +101,8 @@ pub enum RelayError {
     CorruptLog(String),
     /// `<game-dir>/relay/setup.json` was written under an earlier relay schema or wording arm (`C-17`).
     IncompatibleSetup(String),
-    /// Per-turn `.preview-state.json` input required by `--preview-tool on` on `act` failed validation.
+    /// Per-turn `.preview-state.json` input required by `--preview-tool on` / `control` on `act`
+    /// failed validation.
     PreviewState {
         /// Specific failure class (missing, malformed, day mismatch, or seat mismatch).
         kind: PreviewStateErrorKind,

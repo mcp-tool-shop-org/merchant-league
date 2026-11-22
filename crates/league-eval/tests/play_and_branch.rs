@@ -2343,7 +2343,7 @@ fn cli_hygiene_mock_dir_and_error_surfaces_work() {
         "parse ctrl manifest",
     );
     assert_eq!(ctrl_manifest.arm, EvalArm::Control);
-    assert_eq!(ctrl_manifest.relay_wording_arm, "v2_control_2026_11_21_r1");
+    assert_eq!(ctrl_manifest.relay_wording_arm, "v2_control_2026_11_22_r2");
 
     let unpinned_wrap = tmp.join("unpinned_cli.md");
     must_ok(fs::write(&unpinned_wrap, b"# unpinned"), "write unpinned");

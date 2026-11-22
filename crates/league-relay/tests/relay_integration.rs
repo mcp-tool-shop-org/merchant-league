@@ -18,9 +18,10 @@ use league_core::{
 use league_relay::cli::{CliCommand, execute_cli, parse_args, parse_args_with_key};
 use league_relay::{
     ACTIVE_WORDING_ARM, AiPreviewWireOutput, ApiKey, BackendKind, CONTROL_ARM_WORDING,
-    CONTROL_WORDING_ARM, CallLogEntry, CostUnit, DurabilityEvent, EMC_OLDER_REPLY_EXCERPT_CHARS,
-    EMC_VERBATIM_TURN_WINDOW, FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS,
-    LiveGate, LocalGate, LocalOpenAiTransport, LocalReasoningBudgetKey, MAX_INTENT_HEADER_DEPTH,
+    CONTROL_ARM_WORDING_R1, CONTROL_WORDING_ARM, CONTROL_WORDING_ARM_R1, CallLogEntry, CostUnit,
+    DurabilityEvent, EMC_OLDER_REPLY_EXCERPT_CHARS, EMC_VERBATIM_TURN_WINDOW,
+    FORBIDDEN_LOCAL_KEY_ENVS, GameSetupRecord, LOCAL_TIMEOUT_MARGIN_SECS, LiveGate, LocalGate,
+    LocalOpenAiTransport, LocalReasoningBudgetKey, MAX_INTENT_HEADER_DEPTH,
     MAX_REDACTION_SCAN_BYTES, MAX_SCRATCHPAD_TOKENS, MAX_WHISPER_CHARS, MAX_WHISPER_WORDS,
     MODEL_FACING_WORDING, MemoryMode, NegotiationInputs, NonPinnedModelFacingString,
     PREVIEW_ARM_WORDING, PREVIEW_ARM_WORDING_R1, PREVIEW_ARM_WORDING_R2, PREVIEW_WORDING_ARM,
@@ -30,14 +31,15 @@ use league_relay::{
     TranscriptEntry, Transport, TransportError, TurnConfig, UntrustedWhisper, UreqTransport,
     WordingEntry, build_control_turn_orders_tool_definition,
     build_preview_turn_orders_tool_definition, cap_utf8_bytes, cap_words_and_chars,
-    control_wording_slot, control_wording_template, discarded_reply_file_path,
-    execute_control_tool_call, execute_preview_tool_call, extract_scratchpad_update,
-    format_negotiation_block, http_reply_file_path, install_redacting_panic_hook,
-    json_escape_untrusted_str, load_negotiation_inputs_if_present, normalize_allowed_vm_hosts,
-    parse_preview_tool_arguments, preview_r1_wording_slot,
-    preview_seat_bundle_executions_for_table_for_test, preview_wording_slot, redact_and_truncate,
-    redact_secrets, redact_secrets_multi_with_limit, render_call_limit_reached_wire_json,
-    render_control_call_limit_reached_wire_json, render_control_malformed_tool_call_wire_json,
+    control_r1_wording_slot, control_r1_wording_template, control_wording_slot,
+    control_wording_template, discarded_reply_file_path, execute_control_tool_call,
+    execute_preview_tool_call, extract_scratchpad_update, format_negotiation_block,
+    http_reply_file_path, install_redacting_panic_hook, json_escape_untrusted_str,
+    load_negotiation_inputs_if_present, normalize_allowed_vm_hosts, parse_preview_tool_arguments,
+    preview_r1_wording_slot, preview_seat_bundle_executions_for_table_for_test,
+    preview_wording_slot, redact_and_truncate, redact_secrets, redact_secrets_multi_with_limit,
+    render_call_limit_reached_wire_json, render_control_call_limit_reached_wire_json,
+    render_control_engine_refusal_wire_json, render_control_malformed_tool_call_wire_json,
     render_engine_refusal_wire_json, render_json_escaped_whisper_line,
     render_malformed_tool_call_wire_json, render_wording_slot_with,
     reset_preview_seat_bundle_executions_for_table_for_test, run_turn,
@@ -17387,6 +17389,116 @@ const ARM_RENDER_PATH_HISTORY: &[ArmRenderHistoryRow] = &[
             ),
         ],
     },
+    // Row 9 (Control arm `v2_control_2026_11_22_r2`): keeps all 24 neutral paths identical to Row 5
+    // and seals the 4 control r2 paths covering all 169 `CONTROL_ARM_WORDING` entries.
+    ArmRenderHistoryRow {
+        arm: "v2_control_2026_11_22_r2",
+        path_digests: &[
+            (
+                "fallback_batna_and_zero_whispers",
+                0xc1209255d280ba658f312bfcc119c94f,
+            ),
+            (
+                "empty_messages_omits_whispers_header",
+                0xeb794108c45af35606ebae474e904673,
+            ),
+            ("notes_section_empty", 0xb9b559ad02c8af8ebaec1dc04804d440),
+            (
+                "whisper_with_intent_header",
+                0x2585aac2cf44d5626412d1a070b5f82c,
+            ),
+            (
+                "notes_section_nonempty_hazard_escaped",
+                0xd18b69b643bc9a2e66c8cd38fcd8e29b,
+            ),
+            (
+                "whisper_without_intent_header",
+                0x52f90ca513d31b3b31f21a31eba08818,
+            ),
+            ("whisper_truncated", 0x588cd66d11b6d3ed176da984b6091128),
+            (
+                "wrapper_trailing_single_newline",
+                0x4d78849455136ada0ea3195e792753c8,
+            ),
+            (
+                "wrapper_trailing_double_newline",
+                0xf2517814e1c87a6b3293fab55eee1d0d,
+            ),
+            (
+                "wrapper_empty_with_notes",
+                0xa8b04cb17ff3f1dd0dadfbde600ed392,
+            ),
+            (
+                "seat_keeping_notes_schema",
+                0x36e106146c266c7b1afa94795e0c0685,
+            ),
+            (
+                "seat_without_notes_schema_stripped",
+                0x12f0575c512507b475b9f7a2ef87a090,
+            ),
+            (
+                "openrouter_snapshot_seat_no_notes",
+                0x7a0cc70a0d8310a36a1680d21abaf59a,
+            ),
+            (
+                "full_mode_multi_turn_replay",
+                0x66de5c2e657651e3a66a3a83a4da70bd,
+            ),
+            (
+                "emc_mode_older_reply_excerpts",
+                0x8169863ecd4da653be4613d2a9ac4b0a,
+            ),
+            (
+                "whisper_and_emc_hazard_hex_escaping",
+                0x309e2f2f1f8b8ece98eb7436909ac292,
+            ),
+            (
+                "wrapper_trailing_double_crlf",
+                0x13f528cffc0e09128059a1c4223ef92d,
+            ),
+            ("reasoning_wire_local", 0xf0202b42a4582db4e5662b2787a71388),
+            (
+                "reasoning_wire_openrouter",
+                0x0a6398bfd180caf86992f7aa781cf930,
+            ),
+            (
+                "think_tag_stripping_replay",
+                0x6af85d5d61e12171a995cbbc6a6021fc,
+            ),
+            (
+                "emc_excerpt_160_char_clip",
+                0xe7f8ace5cdc194668aeb07b653ad050f,
+            ),
+            (
+                "whisper_partial_word_truncation",
+                0x93d6b1a5a1fabbb05d2b3da069674a69,
+            ),
+            (
+                "seat_text_default_ignorable_escaped",
+                0x07d0fbd1e379a21ec5d5e547602fa5cd,
+            ),
+            (
+                "whisper_supplementary_di_budget_truncation",
+                0x8e1370adcce3bf0cdf5f7794b636bd9b,
+            ),
+            (
+                "control_act_initial_request_and_tool_schema",
+                0xf579f85349416f8131adfe2386eb8360,
+            ),
+            (
+                "control_talk_round_omits_tool_and_budget",
+                0xb7439d93c89b8f94789bc223dd1949cc,
+            ),
+            (
+                "control_tool_roundtrip_followup_request",
+                0xd317b79fc9342de0d1cd7e8522c147e6,
+            ),
+            (
+                "control_wire_all_refusal_and_limit_codes",
+                0x302bad582a2a285d9991e6478dbf2a24,
+            ),
+        ],
+    },
 ];
 
 // `P41-C4` review note: an in-tree test can verify every row against `SEALED_IMMUTABLE_HISTORY_ROWS`
@@ -17429,6 +17541,10 @@ const SEALED_IMMUTABLE_HISTORY_ROWS: &[(&str, u128)] = &[
     (
         "v2_control_2026_11_21_r1",
         0xe294ab1e01c182927fdc121a32671af1,
+    ),
+    (
+        "v2_control_2026_11_22_r2",
+        0xe65896ce1d1ad2ec19932fb80c2dc6c7,
     ),
 ];
 
@@ -24313,10 +24429,18 @@ fn render_tool_arm_requests(
 }
 
 fn control_all_refusals_wire_json_array() -> Result<String, Box<dyn Error>> {
-    let entries: Vec<serde_json::Value> = vec![
+    let mut entries: Vec<serde_json::Value> = vec![
         serde_json::from_str(&render_control_malformed_tool_call_wire_json())?,
         serde_json::from_str(&render_control_call_limit_reached_wire_json())?,
     ];
+    for code in REACHABLE_PREVIEW_ERROR_CODES {
+        entries.push(serde_json::from_str(
+            &render_control_engine_refusal_wire_json(code),
+        )?);
+    }
+    entries.push(serde_json::from_str(
+        &render_control_engine_refusal_wire_json("SEASON_ENDED"),
+    )?);
     Ok(serde_json::Value::Array(entries).to_string())
 }
 
@@ -24350,7 +24474,7 @@ fn render_all_preview_arm_guard_paths() -> Result<RenderedWordingPaths, Box<dyn 
 
 fn render_all_control_arm_guard_paths() -> Result<RenderedWordingPaths, Box<dyn Error>> {
     let (mut paths, _) = render_all_wording_guard_paths()?;
-    let (act_reqs, talk_reqs) = render_tool_arm_requests("control", "draft_turn_orders", false)?;
+    let (act_reqs, talk_reqs) = render_tool_arm_requests("control", "draft_turn_orders", true)?;
 
     paths.push((
         "control_act_initial_request_and_tool_schema",
@@ -32413,12 +32537,12 @@ fn play_mode_on_arm_reproduces_committed_golden_set_byte_for_byte() -> TestResul
 // ============================================================================
 
 #[test]
-fn control_arm_row8_sealed_all_147_whole_token_mutations_fail_and_prior_rows_intact() -> TestResult
+fn control_arm_row9_sealed_all_169_whole_token_mutations_fail_and_prior_rows_intact() -> TestResult
 {
     let live_paths = render_all_control_arm_guard_paths()?;
-    assert_eq!(CONTROL_ARM_WORDING.len(), 147);
+    assert_eq!(CONTROL_ARM_WORDING.len(), 169);
 
-    // Rows 5 (r6), 6 (r1), and 7 (r2) remain untouched alongside new Row 8 (control).
+    // Rows 5 (r6), 6 (r1), 7 (r2), and 8 (control r1) remain untouched alongside new Row 9 (control r2).
     assert_eq!(ARM_RENDER_PATH_HISTORY[5].arm, ACTIVE_WORDING_ARM);
     assert_eq!(ARM_RENDER_PATH_HISTORY[5].path_digests.len(), 24);
     assert_eq!(
@@ -32437,12 +32561,14 @@ fn control_arm_row8_sealed_all_147_whole_token_mutations_fail_and_prior_rows_int
         SEALED_IMMUTABLE_HISTORY_ROWS[7].1,
         0xab5f158925fc9edd3ea7cb768f46038b
     );
-    assert_eq!(ARM_RENDER_PATH_HISTORY[8].arm, CONTROL_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[8].arm, CONTROL_WORDING_ARM_R1);
     assert_eq!(ARM_RENDER_PATH_HISTORY[8].path_digests.len(), 28);
     assert_eq!(
         SEALED_IMMUTABLE_HISTORY_ROWS[8].1,
         0xe294ab1e01c182927fdc121a32671af1
     );
+    assert_eq!(ARM_RENDER_PATH_HISTORY[9].arm, CONTROL_WORDING_ARM);
+    assert_eq!(ARM_RENDER_PATH_HISTORY[9].path_digests.len(), 28);
 
     verify_arm_render_path_history(
         ARM_RENDER_PATH_HISTORY,
@@ -32451,7 +32577,7 @@ fn control_arm_row8_sealed_all_147_whole_token_mutations_fail_and_prior_rows_int
         &live_paths,
     )?;
 
-    // Whole-JSON-string-token 1-char mutation failure across ALL 147 entries of CONTROL_ARM_WORDING.
+    // Whole-JSON-string-token 1-char mutation failure across ALL 169 entries of CONTROL_ARM_WORDING.
     for entry in CONTROL_ARM_WORDING {
         let needle = control_wording_slot(entry.slot);
         let last_ch = needle.chars().last().ok_or("empty control slot")?;
@@ -32521,11 +32647,22 @@ fn control_arm_row8_sealed_all_147_whole_token_mutations_fail_and_prior_rows_int
 }
 
 #[test]
-fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_rule_refusals()
--> TestResult {
-    assert_eq!(CONTROL_WORDING_ARM, "v2_control_2026_11_21_r1");
+fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_only() -> TestResult {
+    // Historical r1 arm remains intact and reachable.
+    assert_eq!(CONTROL_WORDING_ARM_R1, "v2_control_2026_11_21_r1");
+    assert_eq!(CONTROL_ARM_WORDING_R1.len(), 147);
+    assert_eq!(
+        control_r1_wording_template("control_fixed_reply"),
+        "Draft recorded. Nothing was checked or submitted."
+    );
+    assert_eq!(
+        control_r1_wording_slot("control_fixed_reply"),
+        "Draft recorded. Nothing was checked or submitted."
+    );
+
+    assert_eq!(CONTROL_WORDING_ARM, "v2_control_2026_11_22_r2");
     assert_eq!(PreviewToolMode::Control.wording_arm(), CONTROL_WORDING_ARM);
-    assert_eq!(CONTROL_ARM_WORDING.len(), 147);
+    assert_eq!(CONTROL_ARM_WORDING.len(), 169);
     assert_eq!(PREVIEW_ARM_WORDING_R2.len(), 250);
 
     let r2_map: std::collections::BTreeMap<&str, &str> = PREVIEW_ARM_WORDING_R2
@@ -32566,19 +32703,15 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
         ]
     );
     assert_eq!(added_control, vec!["control_fixed_reply"]);
-    assert_eq!(unchanged_shared, 141);
+    assert_eq!(unchanged_shared, 163);
 
     assert_eq!(
         control_wording_template("preview_tool_name"),
         "draft_turn_orders"
     );
-    assert!(
-        control_wording_template("preview_tool_description").ends_with("Returns a fixed reply."),
-        "control tool description must end with 'Returns a fixed reply.'"
-    );
     assert_eq!(
         control_wording_template("control_fixed_reply"),
-        "Draft recorded. Nothing was checked or submitted."
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
 
     let mut omitted_from_r2: Vec<&str> = r2_map
@@ -32607,11 +32740,8 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
         .filter(|s| s.starts_with("preview_code_") || s.starts_with("preview_err_"))
         .collect();
     assert_eq!(projection_omitted.len(), 82);
-    assert_eq!(rule_refusal_omitted.len(), 22);
-    assert_eq!(
-        omitted_from_r2.len(),
-        projection_omitted.len() + rule_refusal_omitted.len()
-    );
+    assert_eq!(rule_refusal_omitted.len(), 0);
+    assert_eq!(omitted_from_r2.len(), projection_omitted.len());
 
     // Parameter schema object matches r2 byte-for-byte; only function name & description differ.
     let preview_tool = build_preview_turn_orders_tool_definition();
@@ -32626,19 +32756,33 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
         preview_tool["function"]["description"]
     );
 
-    // End-to-end control act turn WITHOUT `preview-state.json`: valid draft call (even with values
-    // that would fail engine validation in `on`) returns the bare fixed reply and never invokes
-    // `preview_seat_bundle`; malformed call still returns PINNED `MALFORMED_TOOL_CALL`.
-    let table_id = 880_101_u64;
+    // End-to-end control act turn WITH `preview-state.json`: legal draft runs `preview_seat_bundle`
+    // and returns the bare fixed reply with zero projection fields; engine-refused draft returns
+    // exact `on` refusal JSON; malformed call returns PINNED `MALFORMED_TOOL_CALL`.
+    let preview_state = TurnEngine::new(TableSpec::standard_chiral_ring(
+        TableId(0xC047_2026_1122),
+        4,
+        1,
+    )?)?
+    .observe_seat(Seat(0))?
+    .to_public_preview_state();
+    let table_id = preview_state.table_id.0;
     reset_preview_seat_bundle_executions_for_table_for_test(table_id);
 
-    let unvalidated_valid_shape_args = json!({
-        "market_actions": [{
-            "action_kind": "town_import",
-            "good": { "asset_kind": "raw", "good_index": 0 },
-            "amount": 9_999_999
-        }],
+    let legal_args = json!({
+        "market_actions": [],
         "bundle": { "debt_repayment_cred": 123 }
+    })
+    .to_string();
+    let invalid_order_args = json!({
+        "market_actions": [],
+        "bundle": {
+            "contract_deliveries": [{
+                "recipient_seat": 0,
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "gross_amount": 0
+            }]
+        }
     })
     .to_string();
     let malformed_args = r#"{"market_actions":[],"bundle":{},"assumptions":{}}"#.to_owned();
@@ -32651,7 +32795,7 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
                 body: card7_tool_call_response_body(
                     "ctrl_ok_1",
                     "draft_turn_orders",
-                    &unvalidated_valid_shape_args,
+                    &legal_args,
                     None,
                 ),
             },
@@ -32659,7 +32803,17 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
                 status: 200,
                 delay: Duration::from_millis(1),
                 body: card7_tool_call_response_body(
-                    "ctrl_bad_2",
+                    "ctrl_refused_2",
+                    "draft_turn_orders",
+                    &invalid_order_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "ctrl_bad_3",
                     "draft_turn_orders",
                     &malformed_args,
                     None,
@@ -32707,6 +32861,7 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
     )?;
     let g_ctrl = tmp.path().join("g_ctrl");
     write_to_seat(&g_ctrl, "01", "act", "Saltworks", "CONTROL ACT BOARD")?;
+    write_card7_preview_state(&g_ctrl, "01", "Saltworks", &preview_state)?;
     let cfg = TurnConfig::new(
         g_ctrl.clone(),
         "01".to_owned(),
@@ -32724,33 +32879,41 @@ fn control_arm_differs_from_r2_strictly_in_six_entries_and_omits_projection_and_
     assert!(summary.all_clean());
     assert_eq!(
         preview_seat_bundle_executions_for_table_for_test(table_id),
-        0
+        2
     );
 
     let reqs = srv.recorded_requests()?;
-    assert_eq!(reqs.len(), 3);
-    let req2: Json = serde_json::from_str(&reqs[2].body)?;
-    let msgs = req2["messages"].as_array().ok_or("messages")?;
+    assert_eq!(reqs.len(), 4);
+    let req3: Json = serde_json::from_str(&reqs[3].body)?;
+    let msgs = req3["messages"].as_array().ok_or("messages")?;
     let tool_contents: Vec<&str> = msgs
         .iter()
         .filter(|m| m["role"] == json!("tool"))
         .map(|m| m["content"].as_str().unwrap_or_default())
         .collect();
-    assert_eq!(tool_contents.len(), 2);
+    assert_eq!(tool_contents.len(), 3);
     assert_eq!(
         tool_contents[0],
-        "Draft recorded. Nothing was checked or submitted."
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
     assert_eq!(
-        serde_json::from_str::<Json>(tool_contents[1])?,
+        tool_contents[1],
+        render_engine_refusal_wire_json("INVALID_ORDER")
+    );
+    assert_eq!(
+        serde_json::from_str::<Json>(tool_contents[2])?,
         serde_json::from_str::<Json>(&render_control_malformed_tool_call_wire_json())?
     );
     assert_eq!(
-        execute_control_tool_call(0, &unvalidated_valid_shape_args),
-        "Draft recorded. Nothing was checked or submitted."
+        execute_control_tool_call(&preview_state, &legal_args),
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
     assert_eq!(
-        execute_control_tool_call(0, &malformed_args),
+        execute_control_tool_call(&preview_state, &invalid_order_args),
+        render_engine_refusal_wire_json("INVALID_ORDER")
+    );
+    assert_eq!(
+        execute_control_tool_call(&preview_state, &malformed_args),
         render_control_malformed_tool_call_wire_json()
     );
 
@@ -32796,10 +32959,10 @@ fn control_arm_unpinned_byte_walk_and_note_scratchpad_di_token_bans() -> TestRes
         }
     }
 
-    // Negative control proving replacing `"Returns a fixed reply."` with `"Returns a fixed note."`
+    // Negative control proving replacing `"Returns a fixed reply"` with `"Returns a fixed note"`
     // is refused by the `"note"` token ban.
     let bad_note_desc = control_wording_template("preview_tool_description")
-        .replace("Returns a fixed reply.", "Returns a fixed note.");
+        .replace("Returns a fixed reply", "Returns a fixed note");
     let bad_schema = json!({
         "type": "object",
         "additionalProperties": false,
@@ -32890,6 +33053,7 @@ fn control_arm_unpinned_byte_walk_and_note_scratchpad_di_token_bans() -> TestRes
     write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
     let g_dir = tmp.path().join("g_walk");
     write_to_seat(&g_dir, "01", "act", "Saltworks", "CTRL WALK BOARD")?;
+    write_card7_preview_state(&g_dir, "01", "Saltworks", &card7_standard_preview_state(0)?)?;
     let mut out = Vec::new();
     let mut err = Vec::new();
     assert_eq!(
@@ -33008,9 +33172,7 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
         let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
         let g = tmp.path().join(format!("g_{label}"));
         write_to_seat(&g, "01", "act", "Saltworks", "EVAL MODE TOOLS BOARD")?;
-        if mode == PreviewToolMode::On {
-            write_card7_preview_state(&g, "01", "Saltworks", &preview_state)?;
-        }
+        write_card7_preview_state(&g, "01", "Saltworks", &preview_state)?;
         let cfg = TurnConfig::new(
             g,
             "01".to_owned(),
@@ -33082,6 +33244,7 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
     let seats_play = SeatFile::from_json_str(&fs::read_to_string(&seats_play_path)?, None)?;
     let g_play = tmp.path().join("g_play_false");
     write_to_seat(&g_play, "01", "act", "Saltworks", "PLAY MODE BOARD")?;
+    write_card7_preview_state(&g_play, "01", "Saltworks", &preview_state)?;
     let cfg_play = TurnConfig::new(
         g_play,
         "01".to_owned(),
@@ -33191,6 +33354,7 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
     let seats_limit = SeatFile::from_json_str(&fs::read_to_string(&seats_limit_path)?, None)?;
     let g_limit = tmp.path().join("g_limit");
     write_to_seat(&g_limit, "01", "act", "Saltworks", "LIMIT BOARD")?;
+    write_card7_preview_state(&g_limit, "01", "Saltworks", &preview_state)?;
     let cfg_limit = TurnConfig::new(
         g_limit.clone(),
         "01".to_owned(),
@@ -33219,15 +33383,15 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
     assert_eq!(tool_msgs.len(), 4);
     assert_eq!(
         tool_msgs[0],
-        "Draft recorded. Nothing was checked or submitted."
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
     assert_eq!(
         tool_msgs[1],
-        "Draft recorded. Nothing was checked or submitted."
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
     assert_eq!(
         tool_msgs[2],
-        "Draft recorded. Nothing was checked or submitted."
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted."
     );
     assert_eq!(
         serde_json::from_str::<Json>(tool_msgs[3])?,
@@ -33278,6 +33442,7 @@ fn control_and_on_eval_mode_strip_tools_after_call_3_and_set_local_cache_prompt_
     let seats_unsol = SeatFile::from_json_str(&fs::read_to_string(&seats_unsol_path)?, None)?;
     let g_unsol = tmp.path().join("g_unsol");
     write_to_seat(&g_unsol, "01", "act", "Saltworks", "UNSOL BOARD")?;
+    write_card7_preview_state(&g_unsol, "01", "Saltworks", &preview_state)?;
     let cfg_unsol = TurnConfig::new(
         g_unsol,
         "01".to_owned(),
@@ -33542,6 +33707,12 @@ fn malformed_tool_call_missing_id_uses_delivery_failure_without_synthetic_id() -
     let seats_eval = SeatFile::from_json_str(&fs::read_to_string(&seats_eval_path)?, None)?;
     let g_eval = tmp.path().join("g_eval");
     write_to_seat(&g_eval, "01", "act", "Saltworks", "S5 EVAL BOARD")?;
+    write_card7_preview_state(
+        &g_eval,
+        "01",
+        "Saltworks",
+        &card7_standard_preview_state(0)?,
+    )?;
     let cfg_eval = TurnConfig::new(
         g_eval.clone(),
         "01".to_owned(),
@@ -33804,6 +33975,7 @@ fn eval_local_apply_template_body_matches_chat_body_without_generation_fields() 
     )?;
     let g_dir = tmp.path().join("g_tpl_parity");
     write_to_seat(&g_dir, "01", "act", "Saltworks", "EVAL PARITY BOARD")?;
+    write_card7_preview_state(&g_dir, "01", "Saltworks", &card7_standard_preview_state(0)?)?;
     let cfg = TurnConfig::new(
         g_dir,
         "01".to_owned(),
@@ -33935,5 +34107,329 @@ fn play_local_budget_request_body_is_byte_identical_to_cf7c5a41() -> TestResult 
     assert!(!body.contains("reasoning_budget_tokens"));
     assert_eq!(body.as_str(), PINNED_PLAY_BODY);
     assert_eq!(sha256_hex(body.as_bytes()), PINNED_PLAY_SHA256);
+    Ok(())
+}
+
+// ============================================================================
+// Control arm r2 (`v2_control_2026_11_22_r2`): fixture, refusal parity, & pass
+// ============================================================================
+
+#[test]
+fn control_arm_r2_three_slots_match_committed_fixture_byte_for_byte() -> TestResult {
+    let raw = include_str!("fixtures/control_arm_r2_wording.json");
+    let fx: Json = serde_json::from_str(raw)?;
+    let obj = fx.as_object().ok_or("fixture must be a JSON object")?;
+    assert_eq!(obj.len(), 3, "fixture must hold strictly three keys");
+
+    let expected_desc = fx["preview_tool_description"]
+        .as_str()
+        .ok_or("preview_tool_description")?;
+    let expected_budget = fx["preview_call_budget_sentence"]
+        .as_str()
+        .ok_or("preview_call_budget_sentence")?;
+    let expected_reply = fx["control_fixed_reply"]
+        .as_str()
+        .ok_or("control_fixed_reply")?;
+
+    assert_eq!(
+        control_wording_template("preview_tool_description"),
+        expected_desc
+    );
+    assert_eq!(
+        control_wording_template("preview_call_budget_sentence"),
+        expected_budget
+    );
+    assert!(
+        expected_budget.contains("{MAX_PREVIEW_TOOL_CALLS_PER_TURN}"),
+        "budget template placeholder must remain intact"
+    );
+    assert_eq!(
+        control_wording_slot("preview_call_budget_sentence"),
+        expected_budget.replace("{MAX_PREVIEW_TOOL_CALLS_PER_TURN}", "3")
+    );
+    assert_eq!(
+        control_wording_template("control_fixed_reply"),
+        expected_reply
+    );
+
+    let tool_def = build_control_turn_orders_tool_definition();
+    assert_eq!(
+        tool_def["function"]["description"].as_str(),
+        Some(expected_desc)
+    );
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_wording_includes_all_on_refusal_entries_byte_equal() -> TestResult {
+    assert_eq!(CONTROL_WORDING_ARM, "v2_control_2026_11_22_r2");
+
+    let r2_map: std::collections::BTreeMap<&str, &str> = PREVIEW_ARM_WORDING_R2
+        .iter()
+        .map(|e| (e.slot, e.shown_text))
+        .collect();
+    let ctrl_map: std::collections::BTreeMap<&str, &str> = CONTROL_ARM_WORDING
+        .iter()
+        .map(|e| (e.slot, e.shown_text))
+        .collect();
+
+    let mut checked = 0usize;
+    for (slot, &r2_text) in &r2_map {
+        let is_engine_refusal = (slot.starts_with("preview_code_")
+            || slot.starts_with("preview_err_"))
+            && *slot != "preview_code_MALFORMED_TOOL_CALL"
+            && *slot != "preview_code_CALL_LIMIT_REACHED";
+        let is_refusal_envelope_key = matches!(
+            *slot,
+            "wire_key_status"
+                | "wire_key_error_code"
+                | "wire_key_reason"
+                | "wire_status_refused"
+                | "preview_code_MALFORMED_TOOL_CALL"
+                | "preview_code_CALL_LIMIT_REACHED"
+        );
+        if is_engine_refusal || is_refusal_envelope_key {
+            let ctrl_text = ctrl_map.get(slot).copied().ok_or_else(|| {
+                format!("CONTROL_ARM_WORDING missing required refusal entry '{slot}'")
+            })?;
+            assert_eq!(
+                ctrl_text, r2_text,
+                "CONTROL_ARM_WORDING '{slot}' diverged from PREVIEW_ARM_WORDING_R2"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 28, "expected 22 rule-refusal + 6 envelope entries");
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_refusals_equal_on_bytes_across_reachable_codes() -> TestResult {
+    let run_one = |mode: PreviewToolMode,
+                   tool_name: &str,
+                   state: &PublicPreviewState,
+                   args: &str|
+     -> Result<String, Box<dyn Error>> {
+        let tmp = TempDir::new()?;
+        let wrapper = tmp.path().join("wrapper.md");
+        fs::write(&wrapper, "REFUSAL_PARITY_WRAPPER")?;
+        let srv = LoopbackOpenAiServer::start_with_tokenizer(
+            vec![
+                MockHttpStep::Json {
+                    status: 200,
+                    delay: Duration::from_millis(1),
+                    body: card7_tool_call_response_body("call_refuse_1", tool_name, args, None),
+                },
+                MockHttpStep::Json {
+                    status: 200,
+                    delay: Duration::from_millis(1),
+                    body: local_completion_body(
+                        r#"{"messages":[],"market_actions":[],"bundle":{}}"#,
+                        "Qwen/Qwen3-14B",
+                        20,
+                        4,
+                        None,
+                        None,
+                    ),
+                },
+            ],
+            TokenizeBehavior::WordCount,
+        )?;
+        let seats_path = tmp.path().join("seats.json");
+        write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+        let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
+        let g = tmp.path().join("game");
+        write_to_seat(&g, "01", "act", "Saltworks", "REFUSAL PARITY BOARD")?;
+        write_card7_preview_state(&g, "01", "Saltworks", state)?;
+        let cfg = TurnConfig::new(
+            g,
+            "01".to_owned(),
+            Round::Act,
+            seats,
+            Some(wrapper),
+            false,
+            None,
+        )
+        .with_cap_gpu_secs(Some(20.0))
+        .with_preview_tool(mode)
+        .with_eval_mode(true);
+        let tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+        let summary = run_turn(&cfg, &tx, None)?;
+        assert!(summary.all_clean());
+        let reqs = srv.recorded_requests()?;
+        assert_eq!(reqs.len(), 2);
+        let req1: Json = serde_json::from_str(&reqs[1].body)?;
+        let msgs = req1["messages"].as_array().ok_or("messages")?;
+        let tool_content = msgs
+            .iter()
+            .find(|m| m["role"] == json!("tool"))
+            .and_then(|m| m["content"].as_str())
+            .ok_or("missing role=tool followup message")?
+            .to_owned();
+        Ok(tool_content)
+    };
+
+    let base_state = TurnEngine::new(TableSpec::standard_chiral_ring(
+        TableId(0xC047_2026_1123),
+        4,
+        1,
+    )?)?
+    .observe_seat(Seat(0))?
+    .to_public_preview_state();
+    let mut commit_state = base_state.clone();
+    commit_state.phase = TurnPhase::Commit;
+
+    let invalid_order_args = json!({
+        "market_actions": [],
+        "bundle": {
+            "contract_deliveries": [{
+                "recipient_seat": 0,
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "gross_amount": 0
+            }]
+        }
+    })
+    .to_string();
+    let invalid_seat_args = json!({
+        "market_actions": [],
+        "bundle": {
+            "contract_deliveries": [{
+                "recipient_seat": 9,
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "gross_amount": 100
+            }]
+        }
+    })
+    .to_string();
+    let invalid_phase_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 0 },
+            "amount": 10
+        }],
+        "bundle": {}
+    })
+    .to_string();
+
+    for (code, state, args) in [
+        ("INVALID_ORDER", &base_state, &invalid_order_args),
+        ("INVALID_SEAT", &base_state, &invalid_seat_args),
+        ("INVALID_PHASE", &commit_state, &invalid_phase_args),
+    ] {
+        let expected_wire = render_engine_refusal_wire_json(code);
+        let on_reply = run_one(PreviewToolMode::On, "preview_turn_orders", state, args)?;
+        let ctrl_reply = run_one(PreviewToolMode::Control, "draft_turn_orders", state, args)?;
+        assert_eq!(on_reply, expected_wire, "on reply mismatch for {code}");
+        assert_eq!(
+            ctrl_reply, on_reply,
+            "control reply bytes must equal on reply bytes for {code}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn control_arm_r2_legal_draft_returns_exact_r2_fixed_reply_without_preview_fields() -> TestResult {
+    let fx: Json = serde_json::from_str(include_str!("fixtures/control_arm_r2_wording.json"))?;
+    let expected_reply = fx["control_fixed_reply"]
+        .as_str()
+        .ok_or("control_fixed_reply")?;
+
+    let state = TurnEngine::new(TableSpec::standard_chiral_ring(
+        TableId(0xC047_2026_1124),
+        4,
+        1,
+    )?)?
+    .observe_seat(Seat(0))?
+    .to_public_preview_state();
+    let legal_args = json!({
+        "market_actions": [{
+            "action_kind": "town_import",
+            "good": { "asset_kind": "raw", "good_index": 1 },
+            "amount": 100
+        }],
+        "bundle": {
+            "converter_runs": [{ "recipe_idx": 0, "runs": 1 }],
+            "debt_repayment_cred": 10
+        }
+    })
+    .to_string();
+
+    let tmp = TempDir::new()?;
+    let wrapper = tmp.path().join("wrapper.md");
+    fs::write(&wrapper, "LEGAL_CTRL_WRAPPER")?;
+    let srv = LoopbackOpenAiServer::start_with_tokenizer(
+        vec![
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: card7_tool_call_response_body(
+                    "call_legal_1",
+                    "draft_turn_orders",
+                    &legal_args,
+                    None,
+                ),
+            },
+            MockHttpStep::Json {
+                status: 200,
+                delay: Duration::from_millis(1),
+                body: local_completion_body(
+                    r#"{"messages":[],"market_actions":[],"bundle":{}}"#,
+                    "Qwen/Qwen3-14B",
+                    20,
+                    4,
+                    None,
+                    None,
+                ),
+            },
+        ],
+        TokenizeBehavior::WordCount,
+    )?;
+    let seats_path = tmp.path().join("seats.json");
+    write_card7_four_seat_local_file(&seats_path, &srv.base_url, 2.0)?;
+    let seats = SeatFile::from_json_str(&fs::read_to_string(&seats_path)?, None)?;
+    let g = tmp.path().join("game");
+    write_to_seat(&g, "01", "act", "Saltworks", "LEGAL CTRL BOARD")?;
+    write_card7_preview_state(&g, "01", "Saltworks", &state)?;
+    let cfg = TurnConfig::new(
+        g,
+        "01".to_owned(),
+        Round::Act,
+        seats,
+        Some(wrapper),
+        false,
+        None,
+    )
+    .with_cap_gpu_secs(Some(20.0))
+    .with_preview_tool(PreviewToolMode::Control)
+    .with_eval_mode(true);
+    let tx = LocalOpenAiTransport::new(LocalGate::acquire(false, Some(20.0), false, &[])?);
+    assert!(run_turn(&cfg, &tx, None)?.all_clean());
+
+    let reqs = srv.recorded_requests()?;
+    assert_eq!(reqs.len(), 2);
+    let req1: Json = serde_json::from_str(&reqs[1].body)?;
+    let msgs = req1["messages"].as_array().ok_or("messages")?;
+    let tool_msg = msgs
+        .iter()
+        .find(|m| m["role"] == json!("tool"))
+        .and_then(|m| m["content"].as_str())
+        .ok_or("missing role=tool message")?;
+    assert_eq!(tool_msg, expected_reply);
+    for forbidden in [
+        "after_market",
+        "after_sweep",
+        "ending_cred",
+        "converter_orders",
+        "project_orders",
+        "post_sweep_predicates",
+        "step0_to_7",
+        "status",
+    ] {
+        assert!(
+            !tool_msg.contains(forbidden),
+            "control reply leaked preview field '{forbidden}': {tool_msg}"
+        );
+    }
     Ok(())
 }

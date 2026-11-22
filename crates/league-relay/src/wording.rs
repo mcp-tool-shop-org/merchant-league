@@ -862,8 +862,14 @@ pub const PREVIEW_WORDING_ARM_R1: &str = "v2_preview_2026_11_17_r1";
 /// Card 9 preview wording arm (`r2`), replacing `preview_call_budget_sentence` sentence 3 only.
 pub const PREVIEW_WORDING_ARM_R2: &str = "v2_preview_2026_11_20_r2";
 
-/// Pinned model-facing wording arm for `--preview-tool control` (`draft_turn_orders`).
-pub const CONTROL_WORDING_ARM: &str = "v2_control_2026_11_21_r1";
+/// Historical PR 3b control wording arm (`r1`, inert `draft_turn_orders`).
+pub const CONTROL_WORDING_ARM_R1: &str = "v2_control_2026_11_21_r1";
+
+/// Control arm r2 wording (`v2_control_2026_11_22_r2`, `draft_turn_orders` with rules check).
+pub const CONTROL_WORDING_ARM_R2: &str = "v2_control_2026_11_22_r2";
+
+/// Active pinned model-facing wording arm for `--preview-tool control` (`draft_turn_orders`).
+pub const CONTROL_WORDING_ARM: &str = CONTROL_WORDING_ARM_R2;
 
 /// Active pinned model-facing wording arm for `--preview-tool on` (coexisting with
 /// [`ACTIVE_WORDING_ARM`] for `--preview-tool off` and [`CONTROL_WORDING_ARM`] for
@@ -1493,30 +1499,62 @@ const CONTROL_SHARED_SLOTS_FROM_R2: &[&str] = &[
     "preview_code_CALL_LIMIT_REACHED",
 ];
 
-const CONTROL_ARM_SPECIFIC_LEN: usize = 6;
-const CONTROL_ARM_WORDING_LEN: usize =
-    CONTROL_ARM_SPECIFIC_LEN + CONTROL_SHARED_SLOTS_FROM_R2.len();
+const CONTROL_REFUSAL_SLOTS_FROM_R2: [&str; 22] = [
+    "preview_code_INVALID_CONFIG",
+    "preview_err_INVALID_CONFIG",
+    "preview_code_INVALID_PHASE",
+    "preview_err_INVALID_PHASE",
+    "preview_code_INVALID_SEAT",
+    "preview_err_INVALID_SEAT",
+    "preview_code_INVALID_ORDER",
+    "preview_err_INVALID_ORDER",
+    "preview_code_UNKNOWN_OBJECT",
+    "preview_err_UNKNOWN_OBJECT",
+    "preview_code_UNAUTHORIZED",
+    "preview_err_UNAUTHORIZED",
+    "preview_code_PERISHABLE_ESCROW_FORBIDDEN",
+    "preview_err_PERISHABLE_ESCROW_FORBIDDEN",
+    "preview_code_INSUFFICIENT_BALANCE",
+    "preview_err_INSUFFICIENT_BALANCE",
+    "preview_code_DOMAIN_ACCESS_DENIED",
+    "preview_err_DOMAIN_ACCESS_DENIED",
+    "preview_code_CANCEL_LOCKED",
+    "preview_err_CANCEL_LOCKED",
+    "preview_code_UNLISTED_ENGINE_ERROR",
+    "preview_err_UNLISTED_ENGINE_ERROR",
+];
 
-const fn build_control_arm_wording_array() -> [WordingEntry; CONTROL_ARM_WORDING_LEN] {
+const CONTROL_ARM_SPECIFIC_LEN: usize = 6;
+const CONTROL_ARM_WORDING_R1_LEN: usize =
+    CONTROL_ARM_SPECIFIC_LEN + CONTROL_SHARED_SLOTS_FROM_R2.len();
+const CONTROL_ARM_WORDING_R2_LEN: usize =
+    CONTROL_ARM_WORDING_R1_LEN + CONTROL_REFUSAL_SLOTS_FROM_R2.len();
+
+const fn build_control_arm_wording_array<const N: usize>(
+    tool_description: &'static str,
+    call_budget_sentence: &'static str,
+    fixed_reply: &'static str,
+    extra_r2_slots: &[&'static str],
+) -> [WordingEntry; N] {
     let mut out = [WordingEntry {
         slot: "",
         shown_text: "",
-    }; CONTROL_ARM_WORDING_LEN];
+    }; N];
     out[0] = WordingEntry {
         slot: "preview_tool_name",
         shown_text: "draft_turn_orders",
     };
     out[1] = WordingEntry {
         slot: "preview_tool_description",
-        shown_text: "Record a draft of candidate own-seat market actions and a sealed order bundle for this turn without advancing the game or contacting peers. Nothing is checked against the rules or simulated, and nothing is submitted. Returns a fixed reply.",
+        shown_text: tool_description,
     };
     out[2] = WordingEntry {
         slot: "preview_call_budget_sentence",
-        shown_text: "You have a tool called draft_turn_orders to write down candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke draft_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The draft tool does not check your orders against the rules; it does not show what other seats will do. Finish with a single final JSON reply.",
+        shown_text: call_budget_sentence,
     };
     out[3] = WordingEntry {
         slot: "control_fixed_reply",
-        shown_text: "Draft recorded. Nothing was checked or submitted.",
+        shown_text: fixed_reply,
     };
     out[4] = WordingEntry {
         slot: "preview_malformed_tool_call",
@@ -1535,18 +1573,48 @@ const fn build_control_arm_wording_array() -> [WordingEntry; CONTROL_ARM_WORDING
         };
         i += 1;
     }
+    let mut j = 0;
+    while j < extra_r2_slots.len() {
+        let slot = extra_r2_slots[j];
+        out[CONTROL_ARM_WORDING_R1_LEN + j] = WordingEntry {
+            slot,
+            shown_text: const_lookup_r2_slot(slot),
+        };
+        j += 1;
+    }
     out
 }
 
-const CONTROL_ARM_WORDING_ARRAY: [WordingEntry; CONTROL_ARM_WORDING_LEN] =
-    build_control_arm_wording_array();
+const CONTROL_ARM_WORDING_R1_ARRAY: [WordingEntry; CONTROL_ARM_WORDING_R1_LEN] =
+    build_control_arm_wording_array(
+        "Record a draft of candidate own-seat market actions and a sealed order bundle for this turn without advancing the game or contacting peers. Nothing is checked against the rules or simulated, and nothing is submitted. Returns a fixed reply.",
+        "You have a tool called draft_turn_orders to write down candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke draft_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The draft tool does not check your orders against the rules; it does not show what other seats will do. Finish with a single final JSON reply.",
+        "Draft recorded. Nothing was checked or submitted.",
+        &[],
+    );
 
-/// Complete model-facing wording entries for [`CONTROL_WORDING_ARM`] (`v2_control_2026_11_21_r1`).
+/// Historical PR 3b model-facing wording entries for [`CONTROL_WORDING_ARM_R1`]
+/// (`v2_control_2026_11_21_r1`).
+pub const CONTROL_ARM_WORDING_R1: &[WordingEntry] = &CONTROL_ARM_WORDING_R1_ARRAY;
+
+const CONTROL_ARM_WORDING_R2_ARRAY: [WordingEntry; CONTROL_ARM_WORDING_R2_LEN] =
+    build_control_arm_wording_array(
+        "Record a draft of candidate own-seat market actions and a sealed order bundle for this turn without advancing the game or contacting peers. Orders are checked against the rules but not simulated, and nothing is submitted. Returns a fixed reply, or a refusal naming the problem if an order is not allowed.",
+        "You have a tool called draft_turn_orders to write down candidate own-seat market_actions and bundle inputs during this act phase before submitting your final action JSON. You may invoke draft_turn_orders at most {MAX_PREVIEW_TOOL_CALLS_PER_TURN} times on this turn; additional calls return a call-limit refusal. The draft tool checks your orders against the rules but does not simulate them; it does not show what other seats will do. Finish with a single final JSON reply.",
+        "Draft recorded. The orders are allowed; nothing was simulated or submitted.",
+        &CONTROL_REFUSAL_SLOTS_FROM_R2,
+    );
+
+/// Model-facing wording entries for [`CONTROL_WORDING_ARM_R2`] (`v2_control_2026_11_22_r2`).
+pub const CONTROL_ARM_WORDING_R2: &[WordingEntry] = &CONTROL_ARM_WORDING_R2_ARRAY;
+
+/// Active model-facing wording entries for [`CONTROL_WORDING_ARM`] (`v2_control_2026_11_22_r2`).
 ///
-/// Shares all schema/parameter keys and descriptions with [`PREVIEW_ARM_WORDING_R2`], replaces
-/// only the tool name, description, budget sentence, malformed-call message, and call-limit
-/// message, adds `control_fixed_reply`, and omits all projection and engine rule-refusal entries.
-pub const CONTROL_ARM_WORDING: &[WordingEntry] = &CONTROL_ARM_WORDING_ARRAY;
+/// Shares all schema/parameter keys, descriptions, and engine rule-refusal pairs with
+/// [`PREVIEW_ARM_WORDING_R2`], replaces only the tool name, description, budget sentence,
+/// malformed-call message, and call-limit message, adds `control_fixed_reply`, and omits all
+/// projection outcome entries.
+pub const CONTROL_ARM_WORDING: &[WordingEntry] = CONTROL_ARM_WORDING_R2;
 
 fn lookup_preview_wording_template(entries: &[WordingEntry], slot: &str) -> &'static str {
     for entry in entries {
@@ -1574,6 +1642,18 @@ pub fn preview_r1_wording_template(slot: &str) -> &'static str {
 #[must_use]
 pub fn preview_r1_wording_slot(slot: &str) -> String {
     render_preview_wording_slot_from(PREVIEW_ARM_WORDING_R1, slot)
+}
+
+/// Return the raw wording template for a slot in [`CONTROL_ARM_WORDING_R1`].
+#[must_use]
+pub fn control_r1_wording_template(slot: &str) -> &'static str {
+    lookup_preview_wording_template(CONTROL_ARM_WORDING_R1, slot)
+}
+
+/// Render a slot from [`CONTROL_ARM_WORDING_R1`], substituting pinned preview constants.
+#[must_use]
+pub fn control_r1_wording_slot(slot: &str) -> String {
+    render_preview_wording_slot_from(CONTROL_ARM_WORDING_R1, slot)
 }
 
 /// Return the raw wording template for a slot in [`CONTROL_ARM_WORDING`].
@@ -2977,12 +3057,27 @@ pub fn render_control_call_limit_reached_wire_json() -> String {
     )
 }
 
+fn render_engine_refusal_wire_json_from(entries: &[WordingEntry], error_code: &str) -> String {
+    let (code_slot, msg_slot) = engine_error_slots_for_code(error_code);
+    build_refused_wire_json_from(
+        entries,
+        code_slot,
+        render_preview_wording_slot_from(entries, msg_slot),
+    )
+}
+
 /// Pinned tool result JSON returned when [`preview_seat_bundle`] rejects a call with an
 /// [`EngineError`], mapped strictly through [`PREVIEW_ARM_WORDING`].
 #[must_use]
 pub fn render_engine_refusal_wire_json(error_code: &str) -> String {
-    let (code_slot, msg_slot) = engine_error_slots_for_code(error_code);
-    build_refused_wire_json(code_slot, preview_wording_slot(msg_slot))
+    render_engine_refusal_wire_json_from(PREVIEW_ARM_WORDING, error_code)
+}
+
+/// Pinned tool result JSON returned when [`preview_seat_bundle`] rejects a `--preview-tool control`
+/// draft with an [`EngineError`], mapped strictly through [`CONTROL_ARM_WORDING`].
+#[must_use]
+pub fn render_control_engine_refusal_wire_json(error_code: &str) -> String {
+    render_engine_refusal_wire_json_from(CONTROL_ARM_WORDING, error_code)
 }
 
 /// Relay-owned wire adapter around [`WhatIfPreview`] (`Card 7`, design `B8`).
@@ -3440,29 +3535,59 @@ pub fn preview_seat_bundle_executions_for_table_for_test(table_id: u64) -> usize
         .unwrap_or(0)
 }
 
+fn execute_tool_call_with_preview(
+    preview_state: &PublicPreviewState,
+    raw_arguments: &str,
+    entries: &[WordingEntry],
+    malformed_wire_json: fn() -> String,
+    return_projection: bool,
+) -> String {
+    let Some(req) = parse_preview_tool_arguments(raw_arguments, preview_state.seat) else {
+        return malformed_wire_json();
+    };
+    #[cfg(any(test, feature = "test-hooks"))]
+    record_preview_seat_bundle_execution_for_test(preview_state.table_id.0);
+    match preview_seat_bundle(preview_state, &req) {
+        Ok(preview) => {
+            if return_projection {
+                AiPreviewWireOutput::from_what_if_preview(&preview).to_json_string()
+            } else {
+                drop(preview);
+                render_preview_wording_slot_from(entries, "control_fixed_reply")
+            }
+        }
+        Err(err) => render_engine_refusal_wire_json_from(entries, err.code()),
+    }
+}
+
 /// Evaluate [`AiPreviewRequest`] through [`preview_seat_bundle`] and return pinned wire JSON.
 #[must_use]
 pub fn execute_preview_tool_call(
     preview_state: &PublicPreviewState,
     raw_arguments: &str,
 ) -> String {
-    let Some(req) = parse_preview_tool_arguments(raw_arguments, preview_state.seat) else {
-        return render_malformed_tool_call_wire_json();
-    };
-    #[cfg(any(test, feature = "test-hooks"))]
-    record_preview_seat_bundle_execution_for_test(preview_state.table_id.0);
-    match preview_seat_bundle(preview_state, &req) {
-        Ok(preview) => AiPreviewWireOutput::from_what_if_preview(&preview).to_json_string(),
-        Err(err) => render_engine_refusal_wire_json(err.code()),
-    }
+    execute_tool_call_with_preview(
+        preview_state,
+        raw_arguments,
+        PREVIEW_ARM_WORDING,
+        render_malformed_tool_call_wire_json,
+        true,
+    )
 }
 
-/// Parse `draft_turn_orders` arguments without rule validation or simulation and return the pinned
-/// `control_fixed_reply` text (or `render_control_malformed_tool_call_wire_json` when malformed).
+/// Evaluate `draft_turn_orders` arguments through [`preview_seat_bundle`] legality checks without
+/// exposing any simulation or projection fields: returns pinned refusal wire JSON on engine refusal,
+/// or the pinned `control_fixed_reply` string on pass.
 #[must_use]
-pub fn execute_control_tool_call(asking_seat: u8, raw_arguments: &str) -> String {
-    if parse_preview_tool_arguments(raw_arguments, asking_seat).is_none() {
-        return render_control_malformed_tool_call_wire_json();
-    }
-    control_wording_slot("control_fixed_reply")
+pub fn execute_control_tool_call(
+    preview_state: &PublicPreviewState,
+    raw_arguments: &str,
+) -> String {
+    execute_tool_call_with_preview(
+        preview_state,
+        raw_arguments,
+        CONTROL_ARM_WORDING,
+        render_control_malformed_tool_call_wire_json,
+        false,
+    )
 }

@@ -5539,7 +5539,10 @@ pub(crate) fn run_turn_with_diag(
         config.preview_tool,
         redaction_key,
     )?;
-    let preview_states = if config.preview_tool == PreviewToolMode::On && config.round == Round::Act
+    let preview_states = if matches!(
+        config.preview_tool,
+        PreviewToolMode::On | PreviewToolMode::Control
+    ) && config.round == Round::Act
     {
         Some(load_preview_states_for_act_turn(config, redaction_key)?)
     } else {
@@ -5696,17 +5699,8 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let seat_tool_mode = match (config.preview_tool, config.round) {
-                        (PreviewToolMode::On, Round::Act) => preview_states
-                            .as_deref()
-                            .and_then(|v| v.get(idx))
-                            .and_then(Option::as_ref)
-                            .map(SeatToolMode::Preview),
-                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
-                            asking_seat: idx as u8,
-                        }),
-                        _ => None,
-                    };
+                    let seat_tool_mode =
+                        seat_tool_mode_for(config.preview_tool, config.round, &preview_states, idx);
                     handles.push(scope.spawn(move || {
                         let view =
                             view_openrouter_seat(&config.endpoint_url, or_seat, keeps_scratchpad);
@@ -5731,17 +5725,8 @@ pub(crate) fn run_turn_with_diag(
                     let wrapper_ref = wrapper_text.as_deref();
                     let ledger_ref = &ledger;
                     let calls_ref = &calls_path;
-                    let seat_tool_mode = match (config.preview_tool, config.round) {
-                        (PreviewToolMode::On, Round::Act) => preview_states
-                            .as_deref()
-                            .and_then(|v| v.get(idx))
-                            .and_then(Option::as_ref)
-                            .map(SeatToolMode::Preview),
-                        (PreviewToolMode::Control, Round::Act) => Some(SeatToolMode::Control {
-                            asking_seat: idx as u8,
-                        }),
-                        _ => None,
-                    };
+                    let seat_tool_mode =
+                        seat_tool_mode_for(config.preview_tool, config.round, &preview_states, idx);
                     handles.push(scope.spawn(move || {
                         let view = view_local_seat(local_seat, keeps_scratchpad);
                         let outcome = run_single_automated_seat(
@@ -5890,7 +5875,27 @@ struct OwnedToolHistoryMessage {
 #[derive(Clone, Copy)]
 enum SeatToolMode<'a> {
     Preview(&'a PublicPreviewState),
-    Control { asking_seat: u8 },
+    Control(&'a PublicPreviewState),
+}
+
+fn seat_tool_mode_for<'a>(
+    preview_tool: PreviewToolMode,
+    round: Round,
+    preview_states: &'a Option<Vec<Option<PublicPreviewState>>>,
+    idx: usize,
+) -> Option<SeatToolMode<'a>> {
+    if round != Round::Act {
+        return None;
+    }
+    let st = preview_states
+        .as_deref()
+        .and_then(|v| v.get(idx))
+        .and_then(Option::as_ref)?;
+    match preview_tool {
+        PreviewToolMode::On => Some(SeatToolMode::Preview(st)),
+        PreviewToolMode::Control => Some(SeatToolMode::Control(st)),
+        PreviewToolMode::Off => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7195,9 +7200,9 @@ fn run_single_automated_seat(
                                             &call.function.arguments,
                                         )
                                     }
-                                    (Some(SeatToolMode::Control { asking_seat }), true) => {
+                                    (Some(SeatToolMode::Control(preview_state)), true) => {
                                         execute_control_tool_call(
-                                            asking_seat,
+                                            preview_state,
                                             &call.function.arguments,
                                         )
                                     }

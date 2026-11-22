@@ -358,7 +358,7 @@ pub struct WordingArmDigests {
     pub neutral_arm: String,
     /// SHA-256 digest of canonical `MODEL_FACING_WORDING` entries.
     pub neutral_wording_sha256: String,
-    /// Control arm label (`v2_control_2026_11_21_r1`).
+    /// Control arm label (`v2_control_2026_11_22_r2`).
     pub control_arm: String,
     /// SHA-256 digest of canonical `CONTROL_ARM_WORDING` entries.
     pub control_wording_sha256: String,
