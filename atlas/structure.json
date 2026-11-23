@@ -13,7 +13,7 @@
           "path": ".github/audit-allowlist.json"
         },
         {
-          "hash": "041e086d7e3465c4f4bf4b5f99851f46bba68768d2cd6e1be46df9839c9c073a",
+          "hash": "8dead2187d3e822b885ef545d8c5660d99eb6bcf968064436a0782e5e8764ded",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -44,7 +44,7 @@
           "path": "docs/club-mode-design.md"
         },
         {
-          "hash": "801c6bd27ea5eef3873c4c1dd2fe349cf6bb08a8be9d7df27b52f0b1d899e748",
+          "hash": "5acafdd86ed0387475cef4267c5d6dc1ec40077e34919178d728d5569fe57582",
           "path": "docs/decision-scorer.md"
         },
         {
@@ -2403,7 +2403,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 27,
+      "testedBy": 28,
       "unresolvedSites": 0
     },
     {
@@ -2461,14 +2461,14 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 9,
+      "testedBy": 10,
       "unresolvedSites": 0
     },
     {
       "dynamicReads": 26,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
-      "dynamicWrites": 16,
+      "dynamicWrites": 15,
       "entryPoints": [
         "crates/league-eval/src/lib.rs",
         "crates/league-eval/src/main.rs"
@@ -2480,7 +2480,7 @@
           "path": "crates/league-eval/Cargo.toml"
         },
         {
-          "hash": "0c48c1060b0b8ca5d9ee208206209d42bc925ec7c76992eb597bf83930cccef5",
+          "hash": "50b8819b3aeef2c952e5bda70d87b834fc71c84db8fb3d4d4426fec65a312219",
           "path": "crates/league-eval/README.md"
         },
         {
@@ -2539,7 +2539,7 @@
               "line": 488
             }
           ],
-          "hash": "b54ec9b395522df5cf05c9e6375d27ad33a067d180323665bba346721f914666",
+          "hash": "562c65fbc27bd46b2fca6d634b7beb48e96a1090abdb49640b9bd5dea568296d",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -2622,15 +2622,15 @@
             {
               "in": "cmd_join",
               "kind": "err",
-              "line": 747
+              "line": 751
             },
             {
               "in": "parse_memory_mode",
               "kind": "err",
-              "line": 778
+              "line": 783
             }
           ],
-          "hash": "e5414240f246901b004014d3aa823c9ae5d19d2017dbe2e489950097cda87729",
+          "hash": "d6c7873215b9c08e4515604a2b7b7a094a0e3a6c4589a617c8c41350f19a624f",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -2747,7 +2747,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -2756,7 +2756,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -2764,7 +2764,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -2773,7 +2773,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -2781,7 +2781,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -2790,7 +2790,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -2799,7 +2799,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -2808,7 +2808,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -2817,7 +2817,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -2826,7 +2826,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -2972,7 +2972,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -2981,7 +2981,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -2989,7 +2989,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -2998,7 +2998,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3006,7 +3006,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3015,7 +3015,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3024,7 +3024,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3033,7 +3033,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3042,7 +3042,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3051,7 +3051,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3196,7 +3196,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3205,7 +3205,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3213,7 +3213,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3222,7 +3222,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3230,7 +3230,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3239,7 +3239,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3248,7 +3248,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3257,7 +3257,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3266,7 +3266,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3275,7 +3275,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3453,7 +3453,7 @@
                   "via": "cmd_play"
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3462,7 +3462,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3470,7 +3470,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3479,7 +3479,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3487,7 +3487,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3496,7 +3496,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3505,7 +3505,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3514,7 +3514,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3523,7 +3523,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3532,7 +3532,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3626,7 +3626,7 @@
                   }
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3635,7 +3635,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3643,7 +3643,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3652,7 +3652,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3660,7 +3660,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3669,7 +3669,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3678,7 +3678,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3687,7 +3687,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3696,7 +3696,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3705,7 +3705,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3753,7 +3753,7 @@
                   }
                 },
                 {
-                  "line": 778,
+                  "line": 783,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -3762,7 +3762,7 @@
                   "via": "parse_memory_mode"
                 },
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -3771,7 +3771,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
@@ -3779,7 +3779,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -3788,7 +3788,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
@@ -3796,7 +3796,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -3805,7 +3805,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -3814,7 +3814,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -3823,7 +3823,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -3832,7 +3832,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -3841,7 +3841,7 @@
                   "via": "execute_with_transport"
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -3998,7 +3998,7 @@
             {
               "calls": [
                 {
-                  "line": 735,
+                  "line": 736,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4006,14 +4006,14 @@
                   }
                 },
                 {
-                  "line": 763,
+                  "line": 768,
                   "name": "run_join",
                   "target": {
                     "file": "crates/league-eval/src/freeze_gate.rs"
                   }
                 },
                 {
-                  "line": 769,
+                  "line": 774,
                   "name": "Io",
                   "receiver": "EvalError",
                   "target": {
@@ -4029,7 +4029,7 @@
             {
               "calls": [
                 {
-                  "line": 778,
+                  "line": 783,
                   "name": "Usage",
                   "receiver": "EvalError",
                   "target": {
@@ -4045,7 +4045,7 @@
             {
               "calls": [
                 {
-                  "line": 804,
+                  "line": 809,
                   "name": "from_env",
                   "receiver": "ApiKey",
                   "target": {
@@ -4053,14 +4053,14 @@
                   }
                 },
                 {
-                  "line": 810,
+                  "line": 815,
                   "name": "validate_vm_host_allowance",
                   "target": {
                     "file": "crates/league-relay/src/lib.rs"
                   }
                 },
                 {
-                  "line": 813,
+                  "line": 818,
                   "name": "load_with_allowed_hosts",
                   "receiver": "SeatFile",
                   "target": {
@@ -4068,14 +4068,14 @@
                   }
                 },
                 {
-                  "line": 814,
+                  "line": 819,
                   "name": "validate_eval_seats_file",
                   "target": {
                     "file": "crates/league-eval/src/driver.rs"
                   }
                 },
                 {
-                  "line": 817,
+                  "line": 822,
                   "name": "load_with_key",
                   "receiver": "MockDirTransport",
                   "target": {
@@ -4083,7 +4083,7 @@
                   }
                 },
                 {
-                  "line": 820,
+                  "line": 825,
                   "name": "acquire",
                   "receiver": "LocalGate",
                   "target": {
@@ -4091,7 +4091,7 @@
                   }
                 },
                 {
-                  "line": 827,
+                  "line": 832,
                   "name": "new",
                   "receiver": "LocalOpenAiTransport",
                   "target": {
@@ -4099,7 +4099,7 @@
                   }
                 },
                 {
-                  "line": 830,
+                  "line": 835,
                   "name": "from_env_reader",
                   "receiver": "ApiKey",
                   "target": {
@@ -4107,7 +4107,7 @@
                   }
                 },
                 {
-                  "line": 837,
+                  "line": 842,
                   "name": "acquire",
                   "receiver": "LiveGate",
                   "target": {
@@ -4115,7 +4115,7 @@
                   }
                 },
                 {
-                  "line": 839,
+                  "line": 844,
                   "name": "new",
                   "receiver": "UreqTransport",
                   "target": {
@@ -4483,7 +4483,7 @@
           "testsInside": true
         },
         {
-          "hash": "09d05237f100327ac3d8a5fd9a7f85089771e6e24d309d0333144b652561e20d",
+          "hash": "153146f8858832af97ba84ac755fec80f6a9eb42e13dd40258c245ea7b07812e",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4495,23 +4495,21 @@
         {
           "exports": [
             "run_freeze",
-            "run_join"
+            "run_join",
+            "summarize_arm_talk_counts_from_slices",
+            "write_freeze_file_with_writer",
+            "write_freeze_file_with_writer_and_remover"
           ],
           "failurePaths": [
             {
               "in": "validate",
               "kind": "err",
-              "line": 73
+              "line": 78
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 91
-            },
-            {
-              "in": "validate",
-              "kind": "err",
-              "line": 97
+              "line": 96
             },
             {
               "in": "validate",
@@ -4519,109 +4517,104 @@
               "line": 102
             },
             {
-              "in": "run_freeze",
+              "in": "validate",
               "kind": "err",
-              "line": 236
+              "line": 107
             },
             {
               "in": "run_freeze",
               "kind": "err",
-              "line": 250
+              "line": 291
             },
             {
               "in": "run_freeze",
               "kind": "err",
-              "line": 256
+              "line": 305
+            },
+            {
+              "in": "run_freeze",
+              "kind": "err",
+              "line": 311
+            },
+            {
+              "in": "write_freeze_file_with_writer_and_remover",
+              "kind": "match-err",
+              "line": 381
+            },
+            {
+              "in": "write_freeze_file_with_writer_and_remover",
+              "kind": "match-err",
+              "line": 383
+            },
+            {
+              "in": "write_freeze_file_with_writer_and_remover",
+              "kind": "err",
+              "line": 384
+            },
+            {
+              "in": "write_freeze_file_with_writer_and_remover",
+              "kind": "err",
+              "line": 389
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 331
+              "line": 416
             },
             {
               "in": "validate_blind_inputs_dir_against_config",
               "kind": "err",
-              "line": 346
+              "line": 431
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 400
+              "line": 485
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 407
+              "line": 492
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 430
+              "line": 515
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 455
+              "line": 540
             },
             {
               "in": "verify_control_entry_wording_arm",
               "kind": "err",
-              "line": 461
+              "line": 546
             },
             {
               "in": "verify_control_entry_wording_arm",
-              "kind": "err",
-              "line": 471
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 501
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 507
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 519
-            },
-            {
-              "in": "verify_score_matches_arm_map",
-              "kind": "err",
-              "line": 530
-            },
-            {
-              "in": "run_join",
-              "kind": "err",
-              "line": 542
-            },
-            {
-              "in": "run_join",
               "kind": "err",
               "line": 556
             },
             {
-              "in": "run_join",
+              "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 579
+              "line": 586
             },
             {
-              "in": "run_join",
+              "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 588
+              "line": 592
             },
             {
-              "in": "run_join",
+              "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 598
+              "line": 604
             },
             {
-              "in": "run_join",
+              "in": "verify_score_matches_arm_map",
               "kind": "err",
-              "line": 612
+              "line": 615
             },
             {
               "in": "run_join",
@@ -4631,14 +4624,55 @@
             {
               "in": "run_join",
               "kind": "err",
-              "line": 636
+              "line": 641
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 660
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 669
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 678
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 688
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 702
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 713
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 722
+            },
+            {
+              "in": "run_join",
+              "kind": "err",
+              "line": 731
             }
           ],
-          "hash": "ac6736ab9e6b9935c9447a5273e89f73d8fde7ac0274153e2462a17f19af712a",
+          "hash": "7ef01f42dfef84d9d049b724633601602ddd205acd70810dfa784b78b78f245a",
           "importOrder": [
             "crates/league-scorer/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/talk_extract.rs"
@@ -4646,6 +4680,7 @@
           "importsFiles": [
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/serving.rs",
             "crates/league-eval/src/talk_extract.rs",
@@ -4654,13 +4689,14 @@
           "path": "crates/league-eval/src/freeze_gate.rs"
         },
         {
-          "hash": "7fd31d0703bfa4fdaec6c58140a9df826aab9fbadd7b94b74b4db17d8b798d70",
+          "hash": "7e13b4c03d9f81302941cf75308e70b72718a521b78c70d10e3432a4ec1b8a26",
           "importsFiles": [
             "crates/league-eval/src/blind_builder.rs",
             "crates/league-eval/src/cli.rs",
             "crates/league-eval/src/driver.rs",
             "crates/league-eval/src/error.rs",
             "crates/league-eval/src/freeze_gate.rs",
+            "crates/league-eval/src/mechanisms.rs",
             "crates/league-eval/src/records.rs",
             "crates/league-eval/src/reply.rs",
             "crates/league-eval/src/schema.rs",
@@ -4787,7 +4823,7 @@
                       "via": "cmd_play"
                     },
                     {
-                      "line": 804,
+                      "line": 809,
                       "name": "from_env",
                       "receiver": "ApiKey",
                       "target": {
@@ -4796,7 +4832,7 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 810,
+                      "line": 815,
                       "name": "validate_vm_host_allowance",
                       "target": {
                         "file": "crates/league-relay/src/lib.rs"
@@ -4804,7 +4840,7 @@
                       "via": "execute_with_transport"
                     },
                     {
-                      "line": 813,
+                      "line": 818,
                       "name": "load_with_allowed_hosts",
                       "receiver": "SeatFile",
                       "target": {
@@ -4827,6 +4863,65 @@
               "name": "main"
             }
           ]
+        },
+        {
+          "exports": [
+            "compute_decision_mechanisms",
+            "index_source_game_dirs",
+            "measure_reasoning_length_in_memory",
+            "parse_json_prose_safe",
+            "read_http_reply_reasoning_chars",
+            "read_tool_round_reasoning_chars",
+            "summarize_arm_mechanisms"
+          ],
+          "failurePaths": [
+            {
+              "in": "scan_source_game_dir",
+              "kind": "err",
+              "line": 522
+            },
+            {
+              "in": "scan_source_game_dir",
+              "kind": "err",
+              "line": 530
+            },
+            {
+              "in": "verify_and_fork_pre_act_host",
+              "kind": "err",
+              "line": 575
+            },
+            {
+              "in": "extract_outgoing_commitments_in_memory",
+              "kind": "err",
+              "line": 770
+            }
+          ],
+          "hash": "5b28afb37ad689b027a398ca0ecdc97e8f9116a3e2ba219dd1ad3fbadd5fccad",
+          "importOrder": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs",
+            "crates/league-eval/src/blind_builder.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/freeze_gate.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/talk_extract.rs"
+          ],
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/blind_builder.rs",
+            "crates/league-eval/src/error.rs",
+            "crates/league-eval/src/freeze_gate.rs",
+            "crates/league-eval/src/records.rs",
+            "crates/league-eval/src/reply.rs",
+            "crates/league-eval/src/talk_extract.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
+          ],
+          "path": "crates/league-eval/src/mechanisms.rs"
         },
         {
           "exports": [
@@ -5129,6 +5224,8 @@
           "exports": [
             "extract_talk_commitments_for_state",
             "extract_talk_commitments_from_messages",
+            "extract_talk_commitments_from_messages_with_rules",
+            "extract_talk_commitments_with_counts_for_state",
             "resolve_eval_seat_guilds",
             "talk_rules_v2_digest",
             "talk_rules_v2_digest_for"
@@ -5137,30 +5234,30 @@
             {
               "in": "resolve_eval_seat_guilds",
               "kind": "err",
-              "line": 281
+              "line": 501
             },
             {
-              "in": "extract_talk_commitments_from_messages",
+              "in": "extract_talk_commitments_from_messages_with_rules",
               "kind": "err",
-              "line": 865
+              "line": 1236
             },
             {
-              "in": "extract_talk_commitments_from_messages",
+              "in": "extract_talk_commitments_from_messages_with_rules",
               "kind": "err",
-              "line": 871
+              "line": 1242
             },
             {
-              "in": "extract_talk_commitments_for_state",
+              "in": "extract_talk_commitments_with_counts_for_state",
               "kind": "err",
-              "line": 897
+              "line": 1287
             },
             {
-              "in": "extract_talk_commitments_for_state",
+              "in": "extract_talk_commitments_with_counts_for_state",
               "kind": "err",
-              "line": 903
+              "line": 1293
             }
           ],
-          "hash": "c510bc29a68b0fe5e28d7994fc32b4dca3c6587451a4185d4cd6de7cfd201829",
+          "hash": "9775a45f441768d6b13cd6f0d5cfb326872c097ccb4a35f485bd470ac0238997",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -5283,7 +5380,7 @@
           "testsInside": true
         },
         {
-          "hash": "05a3d71f22373d20a76feef178b537e04e39931e45733f27e97de308613fbd27",
+          "hash": "5d4028c6caee62d1629861f4767e5525bb9de568e1c78222d3e243d0eb4e0346",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -5294,6 +5391,19 @@
           ],
           "library": "crates/league-eval/src/lib.rs",
           "path": "crates/league-eval/tests/scorer_s3a_pipeline.rs",
+          "testsInside": true
+        },
+        {
+          "hash": "e3ed862174868cf3193bf31f0b09ee4ac4e386ccd3de754dde51576318f9260a",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-eval/src/lib.rs",
+            "crates/league-relay/src/lib.rs",
+            "crates/league-scorer/src/lib.rs",
+            "crates/league-seat-types/src/lib.rs"
+          ],
+          "library": "crates/league-eval/src/lib.rs",
+          "path": "crates/league-eval/tests/scorer_s3b_mechanisms.rs",
           "testsInside": true
         },
         {
@@ -5309,20 +5419,20 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 28,
+          "reads": 41,
           "where": [
             "caller"
           ],
-          "writes": 2
+          "writes": 3
         }
       ],
-      "outsideReads": 28,
-      "outsideWrites": 2,
+      "outsideReads": 41,
+      "outsideWrites": 3,
       "role": "code",
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 11,
+      "testedBy": 12,
       "unresolvedSites": 0
     },
     {
@@ -10340,7 +10450,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 9,
+      "testedBy": 10,
       "unresolvedSites": 0
     },
     {
@@ -10359,7 +10469,7 @@
           "path": "crates/league-scorer/Cargo.toml"
         },
         {
-          "hash": "af501cd7cd102ebff6890d20eacc9894705ce91955ca1eb0fe15c9c66b9fbfdf",
+          "hash": "e09e0f326c45616a179615dad7c3fa43206c5297ac5cb18cae430e10f1f66d9b",
           "path": "crates/league-scorer/README.md"
         },
         {
@@ -10390,7 +10500,7 @@
               "line": 975
             }
           ],
-          "hash": "7a4b4daaac71917fea0d7f3ae40a106fe33a9ad1af0736889c3a43bc2a100634",
+          "hash": "3bb256f86ef19793122ca0b8db024cfc31eaf8180c76756674b620c95e60f1b2",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-seat-types/src/lib.rs",
@@ -11910,7 +12020,7 @@
           "path": "crates/league-scorer/src/error.rs"
         },
         {
-          "hash": "f50a37bc33775a9d01b093953354488f1975677a44bb3b9db95d3fe80edef1c7",
+          "hash": "584d309a5290d80df747d25297fb5ae2e4363b437c78978534ba5fa0d6022368",
           "importsFiles": [
             "crates/league-scorer/src/candidates.rs",
             "crates/league-scorer/src/cli.rs",
@@ -12199,7 +12309,7 @@
               "line": 212
             }
           ],
-          "hash": "5d6dcae75035bbc6bb239dd4b43289c68aecc48a4ccc53c81038717f9f461c67",
+          "hash": "d5af3efbf8ccdd835e0af99a66b85b8c666eb9dbf3acf997db2b7391b5172449",
           "importsFiles": [
             "crates/league-scorer/src/error.rs",
             "crates/league-scorer/src/types.rs"
@@ -12343,97 +12453,107 @@
               "line": 534
             },
             {
-              "in": "parse_blind_scoring_request_strict",
+              "in": "validate",
               "kind": "err",
-              "line": 598
+              "line": 581
             },
             {
-              "in": "parse_blind_scoring_request_strict",
+              "in": "validate",
               "kind": "err",
-              "line": 603
-            },
-            {
-              "in": "parse_blind_scoring_request_strict",
-              "kind": "err",
-              "line": 610
+              "line": 640
             },
             {
               "in": "parse_blind_scoring_request_strict",
               "kind": "err",
-              "line": 617
+              "line": 686
+            },
+            {
+              "in": "parse_blind_scoring_request_strict",
+              "kind": "err",
+              "line": 691
+            },
+            {
+              "in": "parse_blind_scoring_request_strict",
+              "kind": "err",
+              "line": 698
+            },
+            {
+              "in": "parse_blind_scoring_request_strict",
+              "kind": "err",
+              "line": 705
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 629
+              "line": 717
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 639
+              "line": 727
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 646
+              "line": 734
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 656
+              "line": 745
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 662
+              "line": 751
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 672
+              "line": 761
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 680
+              "line": 769
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 685
+              "line": 774
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 697
+              "line": 786
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 708
+              "line": 797
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 856
+              "line": 949
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 862
+              "line": 955
             },
             {
               "in": "validate",
               "kind": "err",
-              "line": 868
+              "line": 961
             },
             {
               "in": "compute_blind_inputs_manifest_sha256",
               "kind": "err",
-              "line": 932
+              "line": 1025
             }
           ],
-          "hash": "70e0fb169c160d4c6f8996576bae96e589b568a1db583c759823c53b20c41963",
+          "hash": "5a4e87fe7aee19b9ecf62722c03ab5e3dc0f71cd1ffbf5cf0d055fe771b08493",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-seat-types/src/lib.rs",
@@ -12447,7 +12567,7 @@
           "path": "crates/league-scorer/src/types.rs"
         },
         {
-          "hash": "64d1d51d45ea565faf1c38d2c89299ca49650b9fbda6ca7badf2f110a6bef1fa",
+          "hash": "48bb500bc8efa3a000df7e48fd69005511228d719b63a44b1e8e18c9dca2dd3b",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/cli.rs",
@@ -12495,7 +12615,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 3,
+      "testedBy": 4,
       "unresolvedSites": 0
     },
     {
@@ -12776,7 +12896,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 7,
+      "testedBy": 8,
       "unresolvedSites": 0
     },
     {
@@ -16012,7 +16132,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "c61baaf216074afdda36db5a7cb6a7990042be1b101d77df38a640cfc5861c7e",
+          "hash": "ef75a6c36495021709094492f3bd6c7df27e52d96dcc805a26d193b281b827eb",
           "path": "CHANGELOG.md"
         },
         {
@@ -16020,7 +16140,7 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "a0831fdacaf6a7be7e366e8eb3fb910588e75848e89bf92889fd12f61f53d009",
+          "hash": "e4c62d7d0caa9d7d57d114dff2cc535599de3a09028f02329776472330b3be98",
           "path": "Cargo.lock"
         },
         {
@@ -16240,7 +16360,7 @@
           "programs": [
             "cargo"
           ],
-          "step": "Test"
+          "step": "Test (doc tests)"
         },
         {
           "dir": "",
@@ -16414,7 +16534,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 20
+          "files": 22
         },
         {
           "boundary": "league-gen",
@@ -16989,14 +17109,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 66,
+          "files": 67,
           "job": "check",
           "runner": "cargo test",
-          "step": "Test"
+          "step": "Test (doc tests)"
         },
         {
           "coverage": true,
-          "files": 66,
+          "files": 67,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -17224,7 +17344,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 15
+          "files": 16
         },
         {
           "boundary": "league-relay",
@@ -17829,8 +17949,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "6bb8fc70544d39ec39dc61de5cd60308aa616476",
-    "tracked": 648
+    "commit": "3cd4f615e768b2e7d7b48f3086365e948b992c89",
+    "tracked": 650
   },
   "landings": [
     {
@@ -19159,7 +19279,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 105,
+  "testFiles": 106,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",

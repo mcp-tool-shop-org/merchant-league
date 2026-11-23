@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::blind_builder::{ArmMapEntry, ArmMapStateFile};
 use crate::error::EvalError;
+use crate::mechanisms::{
+    DecisionMechanismMetrics, MECHANISM_DATA_LIMITS, PerArmMechanismSummary,
+    compute_decision_mechanisms, index_source_game_dirs, summarize_arm_mechanisms,
+};
 use crate::records::{EvalArm, EvalManifest, EvalSetupFile};
 use crate::serving::{CrateGitShaSource, resolve_crate_git_sha_from};
 use crate::talk_extract::talk_rules_v2_digest;
@@ -121,6 +125,9 @@ pub struct JoinOptions {
     pub out_dir: PathBuf,
     /// Optional explicit `blind_inputs/` directory to cross-check directly on disk.
     pub blind_dir: Option<PathBuf>,
+    /// Optional source game directories carrying `setup.json`, `checkpoints/`, `decisions/`,
+    /// `to-seat/`, and optional `scoreboard.json` for §7.2 Measure 5(a)/(b) evaluation.
+    pub source_game_dirs: Vec<PathBuf>,
 }
 
 /// One joined `(state_id, arm, replicate)` row linking blind scores to provenance.
@@ -161,6 +168,9 @@ pub struct JoinedDecisionRow {
     /// Per-state talk message extraction counts echoed from `StateScoreOutput`.
     #[serde(default)]
     pub talk_extraction_counts: TalkExtractionCounts,
+    /// Unblinded §7.2 descriptive mechanism metrics (`inferential_status: "descriptive_only"`).
+    #[serde(default)]
+    pub mechanisms: DecisionMechanismMetrics,
     /// Unblinded `decision.json` provenance path.
     pub decision_path: PathBuf,
     /// Unblinded `outcome.json` provenance path.
@@ -223,6 +233,9 @@ pub struct PerArmSummaryRow {
     /// Descriptive talk message count totals and per-state distributions for this arm (`§7.1`).
     #[serde(default)]
     pub talk_counts: PerArmTalkCountsSummary,
+    /// Descriptive §7.2 per-arm mechanism summary (`inferential_status: "descriptive_only"`).
+    #[serde(default)]
+    pub mechanisms: PerArmMechanismSummary,
 }
 
 /// Joined descriptive summary output written to `<out>/per_arm_summary.json`.
@@ -236,6 +249,9 @@ pub struct PerArmSummaryFile {
     pub freeze_sha256: String,
     /// Sorted per-arm descriptive summaries.
     pub arms: Vec<PerArmSummaryRow>,
+    /// Fixed §7.2.3 statement of what the recorded Evaluation data cannot tell.
+    #[serde(default)]
+    pub data_limits: Vec<String>,
 }
 
 /// Complete joined per-decision report written to `<out>/joined_decisions.json`.
@@ -717,21 +733,50 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         ));
     }
 
-    let mut rows = Vec::new();
+    // Verify every freeze/manifest/config/wording gate BEFORE inspecting unblinded decision or
+    // sidecar files for §7.2 mechanism reporting.
     for (state_id, arm_map) in &arm_maps {
         let score = &scores_by_state[state_id];
         verify_score_matches_arm_map(score, arm_map, &freeze)?;
-
         for entry in &arm_map.entries {
             if entry.arm == EvalArm::Control {
                 verify_control_entry_wording_arm(entry, &freeze.control_wording_arm)?;
             }
+            let _ = find_candidate_score(score, &entry.committed_candidate_id)?;
+            if let Some(cid) = entry.first_draft_candidate_id.as_deref() {
+                let _ = find_candidate_score(score, cid)?;
+            }
+        }
+    }
+
+    let source_games = index_source_game_dirs(&opts.source_game_dirs)?;
+
+    let mut rows = Vec::new();
+    for (state_id, arm_map) in &arm_maps {
+        let score = &scores_by_state[state_id];
+        let source_game_dir = source_games
+            .get(&arm_map.source_game_id)
+            .map(PathBuf::as_path);
+
+        for entry in &arm_map.entries {
             let committed_score = find_candidate_score(score, &entry.committed_candidate_id)?;
             let draft_score = entry
                 .first_draft_candidate_id
                 .as_deref()
                 .map(|cid| find_candidate_score(score, cid))
                 .transpose()?;
+            let first_draft_ev_total_equity = draft_score.map(|s| s.ev_total_equity);
+            let first_draft_score_norm = draft_score.and_then(|s| s.score_norm);
+            let mechanisms = compute_decision_mechanisms(
+                arm_map,
+                &entry.decision_path,
+                &entry.outcome_path,
+                committed_score.ev_total_equity,
+                committed_score.score_norm,
+                first_draft_ev_total_equity,
+                first_draft_score_norm,
+                source_game_dir,
+            )?;
 
             rows.push(JoinedDecisionRow {
                 state_id: state_id.clone(),
@@ -747,11 +792,12 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
                 committed_sensitivity_indep_percentile: committed_score
                     .sensitivity_indep_percentile,
                 committed_sensitivity_indep_rank: committed_score.sensitivity_indep_rank,
-                first_draft_ev_total_equity: draft_score.map(|s| s.ev_total_equity),
-                first_draft_score_norm: draft_score.and_then(|s| s.score_norm),
+                first_draft_ev_total_equity,
+                first_draft_score_norm,
                 excluded_by_prescreen: score.prescreen.excluded_by_prescreen,
                 degenerate_flat_set: score.degenerate_flat_set,
                 talk_extraction_counts: score.talk_extraction_counts.clone(),
+                mechanisms,
                 decision_path: entry.decision_path.clone(),
                 outcome_path: entry.outcome_path.clone(),
             });
@@ -784,6 +830,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         let sum_norm: f64 = norm_vals.iter().sum();
         let sum_pct: f64 = pct_vals.iter().sum();
         let talk_counts = summarize_arm_talk_counts(&arm_rows);
+        let mechanisms = summarize_arm_mechanisms(&arm_rows);
 
         arm_summaries.push(PerArmSummaryRow {
             arm,
@@ -797,6 +844,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
             mean_sensitivity_indep_percentile: (!pct_vals.is_empty())
                 .then(|| sum_pct / (pct_vals.len() as f64)),
             talk_counts,
+            mechanisms,
         });
     }
 
@@ -808,6 +856,10 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         inferential_status: DESCRIPTIVE_ONLY_INFERENTIAL_STATUS.to_owned(),
         freeze_sha256: freeze_sha256.clone(),
         arms: arm_summaries.clone(),
+        data_limits: MECHANISM_DATA_LIMITS
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
     };
     let decisions_file = JoinedDecisionsFile {
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
@@ -871,12 +923,12 @@ fn compute_count_distribution(values: &[u64]) -> CountDistribution {
     }
 }
 
-fn summarize_arm_talk_counts(arm_rows: &[&JoinedDecisionRow]) -> PerArmTalkCountsSummary {
+pub(crate) fn summarize_arm_talk_counts_from_slices(
+    pairs: &[(&str, &TalkExtractionCounts)],
+) -> PerArmTalkCountsSummary {
     let mut per_state: BTreeMap<&str, &TalkExtractionCounts> = BTreeMap::new();
-    for row in arm_rows {
-        per_state
-            .entry(row.state_id.as_str())
-            .or_insert(&row.talk_extraction_counts);
+    for &(state_id, counts) in pairs {
+        per_state.entry(state_id).or_insert(counts);
     }
     let mut totals = TalkExtractionCounts::default();
     let mut seen_vals = Vec::with_capacity(per_state.len());
@@ -897,4 +949,12 @@ fn summarize_arm_talk_counts(arm_rows: &[&JoinedDecisionRow]) -> PerArmTalkCount
         per_state_matched: compute_count_distribution(&matched_vals),
         per_state_ambiguous: compute_count_distribution(&ambiguous_vals),
     }
+}
+
+fn summarize_arm_talk_counts(arm_rows: &[&JoinedDecisionRow]) -> PerArmTalkCountsSummary {
+    let pairs: Vec<(&str, &TalkExtractionCounts)> = arm_rows
+        .iter()
+        .map(|row| (row.state_id.as_str(), &row.talk_extraction_counts))
+        .collect();
+    summarize_arm_talk_counts_from_slices(&pairs)
 }

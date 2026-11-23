@@ -1430,6 +1430,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected MISSING_FREEZE_FILE")?;
@@ -1497,6 +1498,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected FREEZE_MANIFEST_MISMATCH")?;
@@ -1516,6 +1518,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected FREEZE_CONFIG_MISMATCH")?;
@@ -1534,6 +1537,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         scores_dir: scores_dir.clone(),
         out_dir: joined_out.clone(),
         blind_dir: Some(blind_dir.clone()),
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected CONTROL_WORDING_ARM_MISMATCH when setup.json relay_wording_arm differs")?;
@@ -1581,6 +1585,7 @@ fn freeze_and_join_gates_refuse_every_violation_with_named_codes() -> TestResult
         scores_dir,
         out_dir: joined_out,
         blind_dir: Some(blind_dir),
+        source_game_dirs: Vec::new(),
     })?;
     assert_eq!(join_ok.states_joined, 1);
     assert_eq!(join_ok.decisions_joined, 1);
@@ -2249,6 +2254,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected empty arm-map error")?
@@ -2280,6 +2286,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: Some(empty_dir.clone()),
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected empty blind error")?
@@ -2318,6 +2325,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: Some(bad_blind_dir.clone()),
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected blind stem mismatch")?
@@ -2343,6 +2351,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: Some(bad_blind_dir),
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected blind manifest mismatch")?
@@ -2358,6 +2367,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: empty_dir,
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected empty scores error")?
@@ -2384,6 +2394,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected state_id set mismatch")?
@@ -2405,6 +2416,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected metadata mismatch")?
@@ -2430,6 +2442,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected candidate set mismatch")?
@@ -2456,6 +2469,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: diff_cfg_scores,
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected score config mismatch")?
@@ -2476,6 +2490,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected wrong setup.json arm")?
@@ -2500,6 +2515,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected bad manifest relay_wording_arm")?
@@ -2524,6 +2540,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir.clone(),
             out_dir: joined_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected bad relay/setup.json wording_arm")?
@@ -2560,6 +2577,7 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             scores_dir: direct_scores_dir,
             out_dir: joined_fail,
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing wording proof")?
@@ -3071,6 +3089,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected bad freeze json EVAL_IO")?
@@ -3084,6 +3103,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing arm_map EVAL_IO")?
@@ -3101,6 +3121,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected bad arm_map EVAL_IO")?
@@ -3118,6 +3139,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: bad_scores_dir,
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected bad score EVAL_IO")?
@@ -3136,6 +3158,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected malformed setup.json")?
@@ -3150,6 +3173,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing setup.json")?
@@ -3168,6 +3192,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected malformed manifest.json")?
@@ -3182,6 +3207,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing manifest.json")?
@@ -3200,6 +3226,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected malformed relay/setup.json")?
@@ -3227,6 +3254,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir: scores_dir.clone(),
             out_dir: out_fail.clone(),
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing committed candidate in score.candidates")?
@@ -3249,6 +3277,7 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
             scores_dir,
             out_dir: out_fail,
             blind_dir: None,
+            source_game_dirs: Vec::new(),
         })
         .err()
         .ok_or("expected missing first_draft candidate in score.candidates")?
@@ -4049,6 +4078,7 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
         scores_dir: scores_dir.clone(),
         out_dir: tmp.path().join("joined_fail"),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected CONTROL_WORDING_ARM_MISMATCH when relay/setup.json lacks wording_arm")?;
@@ -4062,6 +4092,7 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
         scores_dir,
         out_dir: tmp.path().join("joined_fail2"),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected CONTROL_WORDING_ARM_MISMATCH on non-string wording_arm")?;
@@ -4364,6 +4395,20 @@ fn talk_rules_v2_sec52_doc_matches_frozen_table() -> TestResult {
 }
 
 #[test]
+fn colon_space_lead_templates_are_subset_of_neutral_templates() -> TestResult {
+    let rules = TalkRulesV2Table::frozen();
+    let neutral_set: BTreeSet<&[&str]> = rules.neutral_templates.iter().copied().collect();
+    for lead in rules.colon_space_lead_templates {
+        assert!(
+            neutral_set.contains(lead),
+            "colon_space_lead_templates entry {lead:?} missing from neutral_templates"
+        );
+    }
+    assert!(!rules.colon_space_lead_templates.is_empty());
+    Ok(())
+}
+
+#[test]
 fn write_freeze_file_removes_partial_file_on_write_error_allowing_retry() -> TestResult {
     let tmp = TmpDir::new("freeze_partial_cleanup")?;
     let freeze_path = tmp.path().join("scorer_freeze.json");
@@ -4504,6 +4549,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         scores_dir: scores_dir.clone(),
         out_dir: tmp.path().join("out_dup_score"),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected DUPLICATE_STATE_ID on duplicate score state_id")?;
@@ -4523,6 +4569,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         scores_dir,
         out_dir: tmp.path().join("out_dup_am"),
         blind_dir: None,
+        source_game_dirs: Vec::new(),
     })
     .err()
     .ok_or("expected DUPLICATE_STATE_ID on duplicate arm_map state_id")?;
@@ -5027,6 +5074,52 @@ fn talk_v2_extract_state_merge_latch_and_state_isolation() -> TestResult {
 }
 
 #[test]
+fn we_will_sell_message_lands_in_matched_counts() -> TestResult {
+    let tmp = TmpDir::new("we_will_sell_matched")?;
+    let host = EvalHost::from_standard_setup(TableId(9119), 4, 1, 77)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Hearth".to_owned(),
+        "Wharf".to_owned(),
+    ];
+    let game_dir = tmp.path().join("game");
+    fs::create_dir_all(game_dir.join("to-seat"))?;
+    fs::create_dir_all(game_dir.join("decisions"))?;
+    fs::write(
+        game_dir.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "We will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    let ext = extract_talk_commitments_with_counts_for_state(&game_dir, 1, 0, &seat_guilds, &obs)?;
+    assert_eq!(ext.commitments.len(), 1);
+    assert_eq!(
+        ext.counts,
+        TalkExtractionCounts {
+            negotiation: TalkSourceCounts {
+                ambiguous: 0,
+                matched: 1,
+                seen: 1,
+            },
+            talk: TalkSourceCounts::default(),
+            total: TalkSourceCounts {
+                ambiguous: 0,
+                matched: 1,
+                seen: 1,
+            },
+        }
+    );
+    Ok(())
+}
+
+#[test]
 fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
     let tmp = TmpDir::new("counts_pipeline")?;
     let wrapper_path = copy_pinned_wrapper(tmp.path())?;
@@ -5292,6 +5385,7 @@ fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
         scores_dir,
         out_dir: joined_dir.clone(),
         blind_dir: Some(blind_a),
+        source_game_dirs: Vec::new(),
     })?;
     assert_eq!(report.states_joined, 2);
 
