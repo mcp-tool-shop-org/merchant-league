@@ -2536,3 +2536,691 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
     let _ = outcomes;
     Ok(())
 }
+
+#[test]
+fn builder_and_talk_error_paths_and_edge_branches() -> TestResult {
+    let tmp = TmpDir::new("builder_talk_errs")?;
+    let git_sha = clean_git_sha_source();
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+
+    // 1. `talk_extract`: additional ClauseEffect::Ignore patterns & file parse errors.
+    let host = EvalHost::from_standard_setup(TableId(9107), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Mint".to_owned(),
+    ];
+    let ignore_msgs = vec![(
+        1_u8,
+        0_u8,
+        ". ; I commit to buy 100 raw0 and 200 raw1 for 300 CRED. \
+         I commit to buy 100 at 200 raw0. \
+         I commit to buy 100 raw0 at 200 roughly."
+            .to_owned(),
+    )];
+    let ignored_res = extract_talk_commitments_from_messages(0, &seat_guilds, &ignore_msgs, &obs)?;
+    assert!(ignored_res.is_empty());
+
+    let bad_manifest_dir = tmp.path().join("bad_manifest_game");
+    fs::create_dir_all(&bad_manifest_dir)?;
+    fs::write(bad_manifest_dir.join("manifest.json"), b"{bad")?;
+    assert_eq!(
+        resolve_eval_seat_guilds(&bad_manifest_dir, 4)
+            .err()
+            .ok_or("expected malformed manifest error")?
+            .code(),
+        "EVAL_IO"
+    );
+
+    let bad_neg_dir = tmp.path().join("bad_neg_game");
+    fs::create_dir_all(bad_neg_dir.join("to-seat"))?;
+    fs::write(
+        bad_neg_dir.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        b"{bad",
+    )?;
+    assert_eq!(
+        extract_talk_commitments_for_state(&bad_neg_dir, 1, 0, &seat_guilds, &obs)
+            .err()
+            .ok_or("expected malformed negotiation.json error")?
+            .code(),
+        "EVAL_IO"
+    );
+
+    let bad_talk_dir = tmp.path().join("bad_talk_game");
+    fs::create_dir_all(bad_talk_dir.join("decisions"))?;
+    fs::write(
+        bad_talk_dir.join("decisions/day-01-talk-Quarry.json"),
+        b"{bad",
+    )?;
+    assert_eq!(
+        extract_talk_commitments_for_state(&bad_talk_dir, 1, 0, &seat_guilds, &obs)
+            .err()
+            .ok_or("expected malformed talk decision.json error")?
+            .code(),
+        "EVAL_IO"
+    );
+
+    // 2. `run_build_blind_inputs`: config I/O + parse errors.
+    let dummy_run = tmp.path().join("dummy_run");
+    fs::create_dir_all(&dummy_run)?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![dummy_run.clone()],
+            out_blind_dir: tmp.path().join("ob_mcfg"),
+            out_arm_map_dir: tmp.path().join("oa_mcfg"),
+            out_checkpoints_dir: None,
+            config_path: tmp.path().join("no_cfg.json"),
+            scorer_seed: 1,
+        })
+        .err()
+        .ok_or("expected missing config EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    let bad_cfg_path = tmp.path().join("bad_cfg.json");
+    fs::write(&bad_cfg_path, b"{bad")?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![dummy_run.clone()],
+            out_blind_dir: tmp.path().join("ob_bcfg"),
+            out_arm_map_dir: tmp.path().join("oa_bcfg"),
+            out_checkpoints_dir: None,
+            config_path: bad_cfg_path,
+            scorer_seed: 1,
+        })
+        .err()
+        .ok_or("expected malformed config EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    // Build real synthetic fixtures for deeper builder edge branches.
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let transport = SyntheticPipelineTransport;
+
+    let play_dir = tmp.path().join("play_b");
+    let _ = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_dir.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Off,
+            table_id: 9108,
+            seed: 13,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let branch_dir = tmp.path().join("branch_b");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_dir.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Off, EvalArm::Control],
+            out_dir: branch_dir.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    // Malformed outcome.json & malformed decision.json.
+    let bad_out_dir = tmp.path().join("bad_outcome_run");
+    fs::create_dir_all(bad_out_dir.join("off"))?;
+    fs::write(bad_out_dir.join("off/outcome.json"), b"{bad")?;
+    fs::copy(
+        branch_dir.join("off/decision.json"),
+        bad_out_dir.join("off/decision.json"),
+    )?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![bad_out_dir],
+            out_blind_dir: tmp.path().join("ob_bo"),
+            out_arm_map_dir: tmp.path().join("oa_bo"),
+            out_checkpoints_dir: None,
+            config_path: cfg_path.clone(),
+            scorer_seed: 1,
+        })
+        .err()
+        .ok_or("expected malformed outcome EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    let bad_dec_dir = tmp.path().join("bad_dec_run");
+    fs::create_dir_all(bad_dec_dir.join("off"))?;
+    fs::copy(
+        branch_dir.join("off/outcome.json"),
+        bad_dec_dir.join("off/outcome.json"),
+    )?;
+    fs::write(bad_dec_dir.join("off/decision.json"), b"{bad")?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![bad_dec_dir],
+            out_blind_dir: tmp.path().join("ob_bd"),
+            out_arm_map_dir: tmp.path().join("oa_bd"),
+            out_checkpoints_dir: None,
+            config_path: cfg_path.clone(),
+            scorer_seed: 1,
+        })
+        .err()
+        .ok_or("expected malformed decision EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    // Exercise `no_reply: false, raw_reply: None`, parent/direct `setup.json` matching `arm`,
+    // `relay/seats/` ignored subdir + wrong round/guild + `calls.jsonl` blank line & reservation filter.
+    let off_dec_path = branch_dir.join("off/decision.json");
+    let orig_off_dec = fs::read_to_string(&off_dec_path)?;
+    let mut no_raw_dec: EvalDecisionRecord = serde_json::from_str(&orig_off_dec)?;
+    no_raw_dec.no_reply = false;
+    no_raw_dec.raw_reply = None;
+    fs::write(&off_dec_path, serde_json::to_string_pretty(&no_raw_dec)?)?;
+
+    // Copy `play_dir/setup.json` into `branch_dir/setup.json` (which has `arm: Off`), matching parent setup!
+    fs::copy(play_dir.join("setup.json"), branch_dir.join("setup.json"))?;
+    // Copy `setup.json` directly into `branch_dir/off/setup.json` too? Let's test `off` via parent setup and
+    // `control` via direct setup copy!
+    let mut ctrl_direct_setup: EvalSetupFile =
+        serde_json::from_str(&fs::read_to_string(play_dir.join("setup.json"))?)?;
+    ctrl_direct_setup.arm = EvalArm::Control;
+    ctrl_direct_setup.relay_wording_arm = CONTROL_WORDING_ARM.to_owned();
+    fs::write(
+        branch_dir.join("control/setup.json"),
+        serde_json::to_string_pretty(&ctrl_direct_setup)?,
+    )?;
+
+    let ctrl_seats = branch_dir.join("control/relay/seats");
+    fs::create_dir_all(ctrl_seats.join("ignored_subdir"))?;
+    fs::write(
+        ctrl_seats.join("Foundry.day-01-act.tool-round-ignore.txt"),
+        b"txt",
+    )?;
+    // Copy existing tool-round JSON into an unrelated Talk-round record with same prefix pattern.
+    for entry in fs::read_dir(&ctrl_seats)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("Foundry.day-01-act.tool-round-") && name.ends_with(".json") {
+            let mut wrong_rec: SavedToolRoundRecord =
+                serde_json::from_slice(&fs::read(entry.path())?)?;
+            wrong_rec.round = Round::Talk;
+            fs::write(
+                ctrl_seats.join("Foundry.day-01-act.tool-round-999.json"),
+                serde_json::to_string_pretty(&wrong_rec)?,
+            )?;
+            let mut wrong_resv: SavedToolRoundRecord =
+                serde_json::from_slice(&fs::read(entry.path())?)?;
+            wrong_resv.reservation_id = "other_unmatched_resv".to_owned();
+            fs::write(
+                ctrl_seats.join("Foundry.day-01-act.tool-round-998.json"),
+                serde_json::to_string_pretty(&wrong_resv)?,
+            )?;
+            break;
+        }
+    }
+    let ctrl_calls = branch_dir.join("control/relay/calls.jsonl");
+    let calls_orig = fs::read_to_string(&ctrl_calls)?;
+    fs::write(&ctrl_calls, format!("\n{calls_orig}\n"))?;
+
+    let edge_blind = tmp.path().join("edge_blind");
+    let edge_arm_map = tmp.path().join("edge_arm_map");
+    let edge_report = run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir.clone(), branch_dir.clone()],
+        out_blind_dir: edge_blind,
+        out_arm_map_dir: edge_arm_map.clone(),
+        out_checkpoints_dir: None,
+        config_path: cfg_path.clone(),
+        scorer_seed: 7,
+    })?;
+    assert_eq!(edge_report.states_built, 1);
+
+    // Malformed `calls.jsonl` line & malformed tool-round JSON error paths.
+    fs::write(&ctrl_calls, "{bad json line\n")?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![play_dir.clone(), branch_dir.clone()],
+            out_blind_dir: tmp.path().join("ob_bc"),
+            out_arm_map_dir: tmp.path().join("oa_bc"),
+            out_checkpoints_dir: None,
+            config_path: cfg_path.clone(),
+            scorer_seed: 7,
+        })
+        .err()
+        .ok_or("expected malformed calls.jsonl EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    fs::write(&ctrl_calls, calls_orig)?;
+
+    fs::write(
+        ctrl_seats.join("Foundry.day-01-act.tool-round-999.json"),
+        b"{bad",
+    )?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![play_dir.clone(), branch_dir.clone()],
+            out_blind_dir: tmp.path().join("ob_btr"),
+            out_arm_map_dir: tmp.path().join("oa_btr"),
+            out_checkpoints_dir: None,
+            config_path: cfg_path.clone(),
+            scorer_seed: 7,
+        })
+        .err()
+        .ok_or("expected malformed tool-round EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    fs::remove_file(ctrl_seats.join("Foundry.day-01-act.tool-round-999.json"))?;
+    fs::remove_file(ctrl_seats.join("Foundry.day-01-act.tool-round-998.json"))?;
+
+    // Missing pre-act checkpoint seal triggers `CHECKPOINT_NOT_FOUND`.
+    let seal_file = play_dir.join("checkpoints/day-01-pre-act.seal");
+    fs::remove_file(&seal_file)?;
+    assert_eq!(
+        run_build_blind_inputs(&BuildBlindInputsOptions {
+            run_dirs: vec![play_dir, branch_dir],
+            out_blind_dir: tmp.path().join("ob_mckpt"),
+            out_arm_map_dir: tmp.path().join("oa_mckpt"),
+            out_checkpoints_dir: None,
+            config_path: cfg_path,
+            scorer_seed: 7,
+        })
+        .err()
+        .ok_or("expected missing pre-act checkpoint CHECKPOINT_NOT_FOUND")?
+        .code(),
+        "CHECKPOINT_NOT_FOUND"
+    );
+
+    let _ = edge_arm_map;
+    Ok(())
+}
+
+#[test]
+fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
+    let tmp = TmpDir::new("freeze_join_parse")?;
+    let git_sha = clean_git_sha_source();
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+
+    // `run_freeze` error paths: missing config, malformed config, nonexistent --blind dir.
+    assert_eq!(
+        run_freeze(
+            &FreezeOptions {
+                blind_dir: tmp.path().join("missing_blind"),
+                config_path: tmp.path().join("no_cfg.json"),
+                control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+                out_path: tmp.path().join("nf.json"),
+                scorer_crate_dir: None,
+            },
+            &git_sha,
+        )
+        .err()
+        .ok_or("expected freeze missing config EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    let bad_cfg = tmp.path().join("bad_cfg.json");
+    fs::write(&bad_cfg, b"{bad")?;
+    assert_eq!(
+        run_freeze(
+            &FreezeOptions {
+                blind_dir: tmp.path().join("missing_blind"),
+                config_path: bad_cfg,
+                control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+                out_path: tmp.path().join("nf2.json"),
+                scorer_crate_dir: None,
+            },
+            &git_sha,
+        )
+        .err()
+        .ok_or("expected freeze bad config EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    assert_eq!(
+        run_freeze(
+            &FreezeOptions {
+                blind_dir: tmp.path().join("missing_blind"),
+                config_path: cfg_path.clone(),
+                control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+                out_path: tmp.path().join("nf3.json"),
+                scorer_crate_dir: None,
+            },
+            &git_sha,
+        )
+        .err()
+        .ok_or("expected freeze missing --blind FREEZE_MANIFEST_MISMATCH")?
+        .code(),
+        "FREEZE_MANIFEST_MISMATCH"
+    );
+
+    // Invalid `--error-format` on each CLI subcommand.
+    for cmd in ["build-blind-inputs", "freeze", "join"] {
+        let (code, _, err) = run_eval_cli(&[cmd, "--error-format", "xml"], &git_sha);
+        assert_eq!(code, 1, "expected invalid error-format for {cmd}: {err}");
+        assert!(err.contains("INVALID_USAGE"));
+    }
+
+    // Build minimal synthetic fixture with control arm to exercise remaining `run_join` branches.
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let transport = SyntheticPipelineTransport;
+
+    let play_dir = tmp.path().join("play_j");
+    let play_manifest = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_dir.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9109,
+            seed: 19,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let branch_dir = tmp.path().join("branch_j");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_dir.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Control],
+            out_dir: branch_dir.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let blind_dir = tmp.path().join("blind");
+    let arm_map_dir = tmp.path().join("arm_map");
+    let ckpts_dir = tmp.path().join("ckpts");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir.clone(), branch_dir.clone()],
+        out_blind_dir: blind_dir.clone(),
+        out_arm_map_dir: arm_map_dir.clone(),
+        out_checkpoints_dir: Some(ckpts_dir.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 23,
+    })?;
+
+    let scores_dir = tmp.path().join("scores");
+    assert_eq!(
+        run_scorer_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                scores_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut Vec::new(),
+        ),
+        0
+    );
+
+    // Freeze written into a newly created nested subdirectory.
+    let nested_freeze_path = tmp.path().join("nested/dir/scorer_freeze.json");
+    let _freeze = run_freeze(
+        &FreezeOptions {
+            blind_dir,
+            config_path: cfg_path,
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: nested_freeze_path.clone(),
+            scorer_crate_dir: None,
+        },
+        &git_sha,
+    )?;
+
+    let sid = format!("{}-day-01-seat-0", play_manifest.game_id);
+    let out_fail = tmp.path().join("out_fail");
+
+    // Malformed freeze JSON, nonexistent --arm-map, malformed arm_map JSON, malformed score JSON.
+    let bad_freeze_json = tmp.path().join("bad_freeze.json");
+    fs::write(&bad_freeze_json, b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: bad_freeze_json,
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected bad freeze json EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: tmp.path().join("missing_arm_map"),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected missing arm_map EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    let bad_am_dir = tmp.path().join("bad_am");
+    fs::create_dir_all(&bad_am_dir)?;
+    fs::write(bad_am_dir.join(format!("{sid}.json")), b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: bad_am_dir,
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected bad arm_map EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    let bad_scores_dir = tmp.path().join("bad_scores");
+    fs::create_dir_all(&bad_scores_dir)?;
+    fs::write(bad_scores_dir.join(format!("{sid}.json")), b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: bad_scores_dir,
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected bad score EVAL_IO")?
+        .code(),
+        "EVAL_IO"
+    );
+
+    // Control setup.json malformed & missing; manifest.json malformed & missing; relay/setup.json malformed.
+    let setup_path = play_dir.join("setup.json");
+    let setup_orig = fs::read_to_string(&setup_path)?;
+    fs::write(&setup_path, b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected malformed setup.json")?
+        .code(),
+        "CONTROL_WORDING_ARM_MISMATCH"
+    );
+    fs::remove_file(&setup_path)?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected missing setup.json")?
+        .code(),
+        "CONTROL_WORDING_ARM_MISMATCH"
+    );
+    fs::write(&setup_path, setup_orig)?;
+
+    let ctrl_manifest_path = branch_dir.join("control/manifest.json");
+    let manifest_orig = fs::read_to_string(&ctrl_manifest_path)?;
+    fs::write(&ctrl_manifest_path, b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected malformed manifest.json")?
+        .code(),
+        "CONTROL_WORDING_ARM_MISMATCH"
+    );
+    fs::remove_file(&ctrl_manifest_path)?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected missing manifest.json")?
+        .code(),
+        "CONTROL_WORDING_ARM_MISMATCH"
+    );
+    fs::write(&ctrl_manifest_path, manifest_orig)?;
+
+    let relay_setup_path = branch_dir.join("control/relay/setup.json");
+    let relay_setup_orig = fs::read_to_string(&relay_setup_path)?;
+    fs::write(&relay_setup_path, b"{bad")?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: arm_map_dir.clone(),
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected malformed relay/setup.json")?
+        .code(),
+        "CONTROL_WORDING_ARM_MISMATCH"
+    );
+    fs::write(&relay_setup_path, relay_setup_orig)?;
+
+    // Exercise `find_candidate_score`: missing committed_candidate_id and missing first_draft_candidate_id
+    // while `blind_candidate_ids` still matches `score.candidates`.
+    let mut am_missing_commit: ArmMapStateFile =
+        serde_json::from_slice(&fs::read(arm_map_dir.join(format!("{sid}.json")))?)?;
+    let real_commit_id = am_missing_commit.entries[0].committed_candidate_id.clone();
+    am_missing_commit.entries[0].committed_candidate_id = "absent_commit_cid".to_owned();
+    let am_mc_dir = tmp.path().join("am_mc");
+    fs::create_dir_all(&am_mc_dir)?;
+    fs::write(
+        am_mc_dir.join(format!("{sid}.json")),
+        to_sorted_pretty_json(&am_missing_commit)?,
+    )?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path.clone(),
+            arm_map_dir: am_mc_dir,
+            scores_dir: scores_dir.clone(),
+            out_dir: out_fail.clone(),
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected missing committed candidate in score.candidates")?
+        .code(),
+        "FREEZE_MANIFEST_MISMATCH"
+    );
+
+    am_missing_commit.entries[0].committed_candidate_id = real_commit_id;
+    am_missing_commit.entries[0].first_draft_candidate_id = Some("absent_draft_cid".to_owned());
+    let am_md_dir = tmp.path().join("am_md");
+    fs::create_dir_all(&am_md_dir)?;
+    fs::write(
+        am_md_dir.join(format!("{sid}.json")),
+        to_sorted_pretty_json(&am_missing_commit)?,
+    )?;
+    assert_eq!(
+        run_join(&JoinOptions {
+            freeze_path: nested_freeze_path,
+            arm_map_dir: am_md_dir,
+            scores_dir,
+            out_dir: out_fail,
+            blind_dir: None,
+        })
+        .err()
+        .ok_or("expected missing first_draft candidate in score.candidates")?
+        .code(),
+        "FREEZE_MANIFEST_MISMATCH"
+    );
+
+    Ok(())
+}
