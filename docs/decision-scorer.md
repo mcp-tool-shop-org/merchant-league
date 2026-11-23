@@ -121,19 +121,20 @@ None of `ScorerConfig`, `crates/league-scorer`, or the fixed code constants belo
 | `synth_slot_fill_order` | Deterministic priority queue truncating excess feasible synthetics (incl. cleared-pass-B `ClubBot` copy) at `k_synth_max` | `["cleared_pass_b", "claims_council", "upkeep_inputs", "cross_quotes", "batches", "debt", "composite_drops", "scaled"]` |
 | `upkeep_cover_turns` | Minimum upkeep turns reserved by synthetic upkeep rule and conservative posture | `2` turns |
 | `parity_spread_threshold_bps` | Minimum spread vs shadow parity triggering liquidity posture `PostOffer` posts | `500` bps (`5%`) |
-| `talk_extractor_version` & `talk_extractor_rules_digest` | Frozen deterministic talk-commitment extractor version and domain-separated SHA-256 covering canonical `TalkRulesV2Table` compact JSON (`§5.2.1`) and LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes (clause splitting, precedence, good matching, verb-governed negation scoping, and cross-source merging); upstream reply/record/whisper readers (`reply.rs`, `records.rs`, `league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256` | `"talk_rules_v2"` + `"9af92adfb19b8e5c08b171ad5c1ee93981f2cba56726dbb8aabeabea3d0f49f5"` |
+| `talk_extractor_version` & `talk_extractor_rules_digest` | Frozen deterministic talk-commitment extractor version and domain-separated SHA-256 covering canonical `TalkRulesV2Table` compact JSON (`§5.2.1`) and LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes (per-message `allowed_ascii_chars` validation, clause splitting, precedence, good matching, governed vs fail-closed negation scoping, and cross-source pair latching/merging); upstream reply/record/whisper readers (`reply.rs`, `records.rs`, `league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256` | `"talk_rules_v2"` + `"a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239"` |
 | `mandate_stratification_mode` | Permutation stratification scheme over undealt `spec.mandate_deck` entries | `"uniform_undealt_fy_stratified"` |
 | `prescreen_min_arm_indep_span` | Minimum arm-independent `v_max_indep - v_min_indep` span to pass `§3.2` | `1` (placeholder until arm-blind pilot calibration) |
 | `prescreen_exclude_flat_sets` | Exclude states with `v_max_indep == v_min_indep` in `§3.2` | `true` |
 | `prescreen_min_arm_indep_candidates` | Minimum feasible candidates in `C_indep(state)` | `2` (placeholder until arm-blind pilot calibration) |
 | `strata_schedule` | Checkpoint stratification across early/mid/late season thirds (`league-eval select`) | `"2_early_2_mid_2_late_20_seeds"` (`docs/eval-harness.md` `D5`) |
 
-*Proposed fixed code constants (to be pinned by `scorer_tree_sha256` when `crates/league-scorer` is built, `§3.1`):* `SYNTH_MAX_CONVERTER_BATCHES = 4`, `SYNTH_MAX_PROJECT_BATCHES = 4`, `SYNTH_PROJECT_RANK_BY_EQUITY = true` (rank coverable project batches by descending equity, then ascending project ID), `SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`, `SYNTH_CLAIM_MATURING_EXACT = true`, `SYNTH_COUNCIL_SELF_NOMINATION = true`, `DROP_TIE_BREAK_BY_CANDIDATE_ID = true` (tie-break only when legs under `composite_greedy_rules` share equal milli-`CRED` upkeep risk), `COMPOSITE_GREEDY_RULES_DEFAULT = "top_pass_per_axis_plus_drop_max_upkeep"`, `SYNTH_CHARTER_BID_CRED = 150` (fixed charter-turn bid matching `ClubBot`, `crates/league-core/src/bot.rs:554`), `SYNTH_QUOTE_CRED_SHARE_BPS = 5_000` (50% spare `CRED` allocation per parity-anchored buy quote, scaled by `league_seat_types::UNIT_SCALE = 1_000` and `BPS_SCALE = 10_000`), `SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE` (`UNIT_SCALE`, i.e., `1_000`, is one whole commodity unit in fixed-point `Units`, not `1_000` whole units; tying the cap to `UNIT_SCALE` limits each parity-anchored buy quote to `1.000` whole commodity unit regardless of fixed-point scaling), `SYNTH_QUOTE_MIN_UNITS = 100` (minimum commodity unit floor for parity-anchored quotes), `SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2` (2x milli-`CRED` parity-value multiplier when pricing `upkeep_good` sell drops so every leg-drop weight compares milli-`CRED` `Units`), `SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1` (minimum `1` milli-`CRED` risk for other market actions), `SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2` (milli-`CRED` sentinel prioritizing `project_deliveries` drops), `SYNTH_SCALE_SEED_PER_AXIS = 2` (seed drafts per axis for `scaled` synthesis), `SYNTH_SCALE_SEED_POOL_MAX = 6` (maximum combined seed drafts scaled per `quantity_scales_bps` entry), `HONOUR_PPM_SCALE = 1_000_000` (integer PPM denominator for `p_honour_to_ppm` and `draw_honour_commitment`), `TALK_EXTRACTOR_VERSION_V2 = "talk_rules_v2"` (frozen `talk_rules_v2` commitment extractor version), and `TALK_EXTRACTOR_RULES_DIGEST_V2 = "9af92adfb19b8e5c08b171ad5c1ee93981f2cba56726dbb8aabeabea3d0f49f5"` (domain-separated SHA-256 covering the 27-field `TalkRulesV2Table` compact JSON in `§5.2.1` plus LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/negotiation readers in `reply.rs`, `records.rs`, and `league-relay` are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`). The council-election and charter-auction turn cadences (`obs.turn.is_multiple_of(4)`, `obs.turn.is_multiple_of(6)`, `crates/league-scorer/src/candidates.rs:127, 152`) and charter-role list (`ClearinghouseBroker`, `OracleAuditor`, `CustomsInspector`, `candidates.rs:153-157`) mirror `league-core`'s engine rules (`crates/league-core/src/engine.rs:3670, 3844-3849`). **Build requirement:** when `crates/league-scorer` is built, it must contain no unlisted free value outside the proposed `ScorerConfig` fields and these proposed fixed constants.
+*Proposed fixed code constants (to be pinned by `scorer_tree_sha256` when `crates/league-scorer` is built, `§3.1`):* `SYNTH_MAX_CONVERTER_BATCHES = 4`, `SYNTH_MAX_PROJECT_BATCHES = 4`, `SYNTH_PROJECT_RANK_BY_EQUITY = true` (rank coverable project batches by descending equity, then ascending project ID), `SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`, `SYNTH_CLAIM_MATURING_EXACT = true`, `SYNTH_COUNCIL_SELF_NOMINATION = true`, `DROP_TIE_BREAK_BY_CANDIDATE_ID = true` (tie-break only when legs under `composite_greedy_rules` share equal milli-`CRED` upkeep risk), `COMPOSITE_GREEDY_RULES_DEFAULT = "top_pass_per_axis_plus_drop_max_upkeep"`, `SYNTH_CHARTER_BID_CRED = 150` (fixed charter-turn bid matching `ClubBot`, `crates/league-core/src/bot.rs:554`), `SYNTH_QUOTE_CRED_SHARE_BPS = 5_000` (50% spare `CRED` allocation per parity-anchored buy quote, scaled by `league_seat_types::UNIT_SCALE = 1_000` and `BPS_SCALE = 10_000`), `SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE` (`UNIT_SCALE`, i.e., `1_000`, is one whole commodity unit in fixed-point `Units`, not `1_000` whole units; tying the cap to `UNIT_SCALE` limits each parity-anchored buy quote to `1.000` whole commodity unit regardless of fixed-point scaling), `SYNTH_QUOTE_MIN_UNITS = 100` (minimum commodity unit floor for parity-anchored quotes), `SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2` (2x milli-`CRED` parity-value multiplier when pricing `upkeep_good` sell drops so every leg-drop weight compares milli-`CRED` `Units`), `SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1` (minimum `1` milli-`CRED` risk for other market actions), `SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2` (milli-`CRED` sentinel prioritizing `project_deliveries` drops), `SYNTH_SCALE_SEED_PER_AXIS = 2` (seed drafts per axis for `scaled` synthesis), `SYNTH_SCALE_SEED_POOL_MAX = 6` (maximum combined seed drafts scaled per `quantity_scales_bps` entry), `HONOUR_PPM_SCALE = 1_000_000` (integer PPM denominator for `p_honour_to_ppm` and `draw_honour_commitment`), `TALK_EXTRACTOR_VERSION_V2 = "talk_rules_v2"` (frozen `talk_rules_v2` commitment extractor version), and `TALK_EXTRACTOR_RULES_DIGEST_V2 = "a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239"` (domain-separated SHA-256 covering the 28-field `TalkRulesV2Table` compact JSON in `§5.2.1` plus LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/negotiation readers in `reply.rs`, `records.rs`, and `league-relay` are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`). The council-election and charter-auction turn cadences (`obs.turn.is_multiple_of(4)`, `obs.turn.is_multiple_of(6)`, `crates/league-scorer/src/candidates.rs:127, 152`) and charter-role list (`ClearinghouseBroker`, `OracleAuditor`, `CustomsInspector`, `candidates.rs:153-157`) mirror `league-core`'s engine rules (`crates/league-core/src/engine.rs:3670, 3844-3849`). **Build requirement:** when `crates/league-scorer` is built, it must contain no unlisted free value outside the proposed `ScorerConfig` fields and these proposed fixed constants.
 
 #### 5.2.1 Frozen Talk Extractor Rule Table (`talk_rules_v2`)
 
-Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/talk_extract.rs`) is listed below with its meaning and exact frozen JSON representation. Extractor control flow (retraction-first precedence, independent per-source processing with cross-source retraction dominance, and seat-reference grammar covering `seat_index`, case-insensitive guild name, compound prefix-ref, `prefix ref`, and `guild prefix`) lives in `crates/league-eval/src/talk_extract.rs` and is pinned via its LF-normalized source bytes in `TALK_EXTRACTOR_RULES_DIGEST_V2`; upstream reply parsing (`crates/league-eval/src/reply.rs`), decision records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
+Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/talk_extract.rs`) is listed below with its meaning and exact frozen JSON representation. Extractor control flow (per-message `allowed_ascii_chars` validation, retraction-first precedence, fail-closed pair ambiguity/negation latching across remaining messages in a source and across sources, independent per-source processing with cross-source retraction dominance, and seat-reference grammar covering `seat_index`, case-insensitive guild name, compound prefix-ref, `prefix ref`, and `guild prefix`) lives in `crates/league-eval/src/talk_extract.rs` and is pinned via its LF-normalized source bytes in `TALK_EXTRACTOR_RULES_DIGEST_V2`; upstream reply parsing (`crates/league-eval/src/reply.rs`), decision records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 
+- **`allowed_ascii_chars`:** Complete set of ASCII bytes permitted in a talk message after `quote_normalizations`; any disallowed ASCII byte or non-ASCII byte causes the entire message to fail closed and latches that `(proposer, counterparty)` pair empty across all remaining messages and sources (`" \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"`).
 - **`ambiguity_cues`:** Case-insensitive hedge, uncertainty, or question cues that discard a clause rather than extracting an offer (`["?", "maybe", "might", "perhaps", "possibly", "probably", "could", "would consider", "consider", "thinking", "uncertain", "not sure", "unsure", "tentative", "roughly", "around", "about", "approx", "approximately", "either", "or", "whether", "depends"]`).
 - **`buy_tokens`:** Lowercase tokens designating `OfferSide::Buy` (`["buy", "buying", "bid"]`).
 - **`clause_break_chars`:** Single-byte ASCII delimiters separating clauses (`["\n", "\r", ";", "!", "?", "."]`).
@@ -147,6 +148,7 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
 - **`exactly_one_price_after_cue`:** Require strictly one positive whole-number price after the price cue (`true`).
 - **`exactly_one_price_cue`:** Require strictly one price delimiter token per offer clause (`true`).
 - **`explicit_retraction_cues`:** Case-insensitive withdrawal cues triggering retraction (`["cancel", "retract", "withdraw", "never mind", "nevermind", "call off", "no deal", "rescind", "walk back"]`).
+- **`fail_closed_negation_cues`:** Negation cues that, when present alongside a `negated_offer_verbs` token in the same clause outside handled `explicit_retraction_cues` or governed `negated_offer_cues` within `negated_offer_max_gap_tokens`, fail the whole message closed and latch the `(proposer, counterparty)` pair empty (`["not", "never", "no", "wont", "dont", "cant", "cannot", "nor", "won't", "will not", "can't", "don't", "do not"]`).
 - **`negated_offer_cues`:** Multi- or single-token negation prefixes checked against nearby trade verbs (`["won't", "will not", "cannot", "can't", "don't", "do not"]`).
 - **`negated_offer_max_gap_tokens`:** Maximum lookahead token window after a `negated_offer_cues` match in which a governed trade verb triggers retraction (`2`).
 - **`negated_offer_verbs`:** Governed trade verbs whose presence within `negated_offer_max_gap_tokens` turns a negation cue into an offer retraction rather than harmless filler (`["sell", "selling", "buy", "buying", "bid", "offer", "post", "commit", "trade", "deal"]`).
@@ -155,7 +157,6 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
 - **`quote_normalizations`:** Typographic single- and double-quote `(from, to)` normalizations applied before clause tokenization so apostrophes like `U+2019` match negation contractions (`U+2018 -> '`, `U+2019 -> '`, `U+02BC -> '`, `U+FF07 -> '`, `U+201C -> "`, `U+201D -> "`, `U+FF02 -> "`).
 - **`raw_prefixes`:** Token prefixes identifying `AssetId::Raw(i)` (`["raw"]`).
 - **`refined_prefixes`:** Token prefixes identifying `AssetId::Refined(i)` (`["refined", "ref"]`).
-- **`reject_non_ascii_clauses`:** When `true`, any clause still containing non-ASCII bytes after `quote_normalizations` is ignored rather than parsed (`true`).
 - **`sell_tokens`:** Lowercase tokens designating `OfferSide::Sell` (`["sell", "selling", "ask"]`).
 - **`token_join_chars`:** Non-alphanumeric ASCII characters preserved inside compound tokens (`["_", "'", ":", "."]`).
 - **`token_trim_chars`:** Characters stripped from token boundaries after tokenization (`[".", ":", "_"]`).
@@ -165,6 +166,7 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
 <!-- talk_rules_v2_table:start -->
 ```json
 {
+  "allowed_ascii_chars": " \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
   "ambiguity_cues": [
     "?",
     "maybe",
@@ -245,6 +247,21 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
     "rescind",
     "walk back"
   ],
+  "fail_closed_negation_cues": [
+    "not",
+    "never",
+    "no",
+    "wont",
+    "dont",
+    "cant",
+    "cannot",
+    "nor",
+    "won't",
+    "will not",
+    "can't",
+    "don't",
+    "do not"
+  ],
   "negated_offer_cues": [
     "won't",
     "will not",
@@ -309,7 +326,6 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
     "refined",
     "ref"
   ],
-  "reject_non_ascii_clauses": true,
   "sell_tokens": [
     "sell",
     "selling",

@@ -76,9 +76,9 @@ pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 /// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
 
-/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
+/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; enforces per-message `allowed_ascii_chars` validation and fail-closed pair ambiguity/negation latching; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
-    "9af92adfb19b8e5c08b171ad5c1ee93981f2cba56726dbb8aabeabea3d0f49f5";
+    "a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {

@@ -314,7 +314,12 @@ pub fn write_freeze_file_with_writer(
         })?;
     if let Err(e) = write_fn(&mut file) {
         drop(file);
-        let _ = fs::remove_file(out_path);
+        if let Err(rm_err) = fs::remove_file(out_path) {
+            return Err(EvalError::Io(format!(
+                "write {}: {e} (also failed to remove partial file: {rm_err})",
+                out_path.display()
+            )));
+        }
         return Err(EvalError::Io(format!("write {}: {e}", out_path.display())));
     }
     Ok(())
@@ -586,7 +591,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         );
         let state_id = state.state_id.clone();
         if arm_maps.insert(state_id.clone(), state).is_some() {
-            return Err(EvalError::FreezeManifestMismatch(format!(
+            return Err(EvalError::DuplicateStateId(format!(
                 "duplicate state_id `{state_id}` across --arm-map files"
             )));
         }
@@ -639,7 +644,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         );
         let state_id = score.state_id.clone();
         if scores_by_state.insert(state_id.clone(), score).is_some() {
-            return Err(EvalError::FreezeManifestMismatch(format!(
+            return Err(EvalError::DuplicateStateId(format!(
                 "duplicate state_id `{state_id}` across --scores files"
             )));
         }

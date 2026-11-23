@@ -1674,6 +1674,10 @@ fn cli_flag_validation_and_error_variants_for_s3a() -> TestResult {
             EvalError::ControlWordingArmMismatch("arm".into()),
             "CONTROL_WORDING_ARM_MISMATCH",
         ),
+        (
+            EvalError::DuplicateStateId("dup".into()),
+            "DUPLICATE_STATE_ID",
+        ),
     ] {
         assert_eq!(err.code(), expected_code);
         assert!(err.to_string().starts_with(expected_code));
@@ -3262,6 +3266,10 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
 
     // Mutating any single field of `TalkRulesV2Table` changes the digest.
     let mut t = base.clone();
+    t.allowed_ascii_chars = "abc";
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.ambiguity_cues = &["maybe"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3314,6 +3322,10 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
+    t.fail_closed_negation_cues = &["not"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.negated_offer_cues = &["won't"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3343,10 +3355,6 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
 
     let mut t = base.clone();
     t.refined_prefixes = &["refined"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.reject_non_ascii_clauses = false;
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -3499,14 +3507,15 @@ fn talk_v2_scaling_decimals_overflow_merge_and_retraction_scoping() -> TestResul
         )?,
         expected_five
     );
-    assert_eq!(
+    // Comma leaves `Don't` and `sell` in one clause, so fail-closed negation triggers ambiguity.
+    assert!(
         extract_talk_commitments_from_messages(
             0,
             &seat_guilds,
             &[(1, 0, "Don't worry, I will sell 5 raw 0 at 10".to_owned())],
             &obs,
-        )?,
-        expected_five
+        )?
+        .is_empty()
     );
     assert!(
         extract_talk_commitments_from_messages(
@@ -4143,13 +4152,19 @@ fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
         expected_five
     );
 
-    // Non-ASCII text (non-Latin script or accented/unmapped Unicode) drops the clause cleanly.
+    // Ambiguous whole messages (unlisted em-dash, non-ASCII text/scripts, unmapped prime,
+    // backtick, `~`, `<`, `(`, or fail-closed negation + trade verb) yield nothing and latch
+    // their `(proposer, counterparty)` pair so earlier or later offers for that pair are cancelled.
     for non_ascii in [
         "Не буду sell 5 raw 0 at 10",
         "Не продаю: I won\u{2019}t sell 5 raw 0 at 10; Не буду sell 5 raw 0 at 10",
         "私は sell 5 raw 0 at 10",
         "I will sell 5 raw 0 at 10 caf\u{00e9}",
         "I won\u{2032}t sell 5 raw 0 at 10",
+        "I will sell 5 raw 0 at 10. Actually\u{2014}cancel that.",
+        "I will sell 5 raw 0 at 10. Отменяю.",
+        "I will sell 5 raw 0 at 10. Не буду sell 4 raw 1 at 20.",
+        "I will sell 5 raw 0 at 10. I won\u{2032}t sell raw 0.",
     ] {
         assert!(
             extract_talk_commitments_from_messages(
@@ -4159,24 +4174,105 @@ fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
                 &obs,
             )?
             .is_empty(),
-            "non-ASCII clause must be discarded: `{non_ascii}`"
+            "ambiguous non-ASCII/unlisted message must fail closed: `{non_ascii}`"
         );
     }
+    Ok(())
+}
 
-    // One clean ASCII offer plus one non-ASCII clause keeps only the ASCII offer.
+#[test]
+fn talk_v2_per_message_fail_closed_ambiguity_latches_pair_and_negation() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9115), 4, 1, 0)?;
+    let obs = host.observe_seat(league_core::Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    let expected_five = vec![league_scorer::ExtractedTalkCommitment {
+        proposer_seat: 1,
+        counterparty_seat: 0,
+        offered_action: MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(0),
+                amount: 5 * UNIT_SCALE,
+                price_per_unit_cred: 10 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        },
+    }];
+
+    // Single-message and cross-message ambiguity (`\u{2014}`) cancels earlier and later offers on
+    // that pair, without disturbing clean offers from another pair.
+    assert!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[
+                (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                (1, 0, "Actually\u{2014}cancel that.".to_owned()),
+                (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+            ],
+            &obs,
+        )?
+        .is_empty()
+    );
     assert_eq!(
         extract_talk_commitments_from_messages(
             0,
             &seat_guilds,
-            &[(
-                1,
-                0,
-                "I will sell 5 raw 0 at 10. Не буду sell 4 raw 1 at 20.".to_owned()
-            )],
+            &[
+                (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                (2, 0, "Actually\u{2014}cancel that.".to_owned()),
+            ],
             &obs,
         )?,
         expected_five
     );
+
+    // Disallowed ASCII characters (`~`, `<`, `(`, `` ` ``) and non-refusal negation + verb cues
+    // all fail closed and cancel any prior offer on that pair.
+    for msg in [
+        "I won`t sell 5 raw 0 at 10",
+        "I will sell 5 raw 0 at ~10",
+        "I will sell 5 raw 0 at <10",
+        "I will sell 5 raw 0 at (10)",
+        "I am not selling 5 raw 0 at 10",
+        "I never sell 5 raw 0 at 10",
+        "I wont sell 5 raw 0 at 10",
+        "Neither buy nor sell 5 raw 0 at 10",
+        "I have no offer to sell 5 raw 0 at 10",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "fail-closed message must yield empty: `{msg}`"
+        );
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, msg.to_owned()),
+                    (1, 0, "I will sell 6 raw 0 at 12.".to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "fail-closed message must latch pair empty: `{msg}`"
+        );
+    }
     Ok(())
 }
 
@@ -4393,7 +4489,7 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
 
     let sid = format!("{}-day-01-seat-0", play_manifest.game_id);
 
-    // 1. Duplicate `state_id` across score files must be refused with FREEZE_MANIFEST_MISMATCH.
+    // 1. Duplicate `state_id` across score files must be refused with DUPLICATE_STATE_ID.
     let dup_score_path = scores_dir.join("scores").join(format!("{sid}-dup.json"));
     fs::copy(
         scores_dir.join("scores").join(format!("{sid}.json")),
@@ -4407,15 +4503,15 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         blind_dir: None,
     })
     .err()
-    .ok_or("expected FREEZE_MANIFEST_MISMATCH on duplicate score state_id")?;
-    assert_eq!(err_dup_score.code(), "FREEZE_MANIFEST_MISMATCH");
+    .ok_or("expected DUPLICATE_STATE_ID on duplicate score state_id")?;
+    assert_eq!(err_dup_score.code(), "DUPLICATE_STATE_ID");
     assert!(
         err_dup_score.to_string().contains("duplicate state_id"),
         "unexpected error: {err_dup_score}"
     );
     fs::remove_file(&dup_score_path)?;
 
-    // 2. Duplicate `state_id` across arm_map/ files must be refused with FREEZE_MANIFEST_MISMATCH.
+    // 2. Duplicate `state_id` across arm_map/ files must be refused with DUPLICATE_STATE_ID.
     let dup_am_path = arm_map_dir.join(format!("{sid}-dup.json"));
     fs::copy(arm_map_dir.join(format!("{sid}.json")), &dup_am_path)?;
     let err_dup_am = run_join(&JoinOptions {
@@ -4426,8 +4522,8 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         blind_dir: None,
     })
     .err()
-    .ok_or("expected FREEZE_MANIFEST_MISMATCH on duplicate arm_map state_id")?;
-    assert_eq!(err_dup_am.code(), "FREEZE_MANIFEST_MISMATCH");
+    .ok_or("expected DUPLICATE_STATE_ID on duplicate arm_map state_id")?;
+    assert_eq!(err_dup_am.code(), "DUPLICATE_STATE_ID");
     assert!(
         err_dup_am.to_string().contains("duplicate state_id"),
         "unexpected error: {err_dup_am}"

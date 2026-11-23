@@ -28,12 +28,15 @@ use crate::reply::parse_eval_talk_reply;
 /// Field names appear in strict alphabetical order so compact JSON serialization and
 /// `talk_extractor_rules_digest` remain deterministic. `talk_extractor_rules_digest` pins this
 /// rule table together with LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes
-/// (covering clause splitting, precedence, good matching, verb-governed negation scoping, and
-/// cross-source merging). Upstream reply parsing (`crates/league-eval/src/reply.rs`), decision
-/// records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are
-/// pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
+/// (covering per-message allowed-ASCII validation, fail-closed ambiguity latching, clause
+/// splitting, precedence, good matching, negation scoping, and cross-source merging). Upstream
+/// reply parsing (`crates/league-eval/src/reply.rs`), decision records
+/// (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned
+/// by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TalkRulesV2Table {
+    /// Complete set of allowed ASCII bytes after `quote_normalizations`; any message holding another ASCII byte or any non-ASCII char fails closed as ambiguous for its pair.
+    pub allowed_ascii_chars: &'static str,
     /// Cues indicating uncertainty, hedging, or questions (discard clause).
     pub ambiguity_cues: &'static [&'static str],
     /// Tokens designating a buy offer (`OfferSide::Buy`).
@@ -60,24 +63,24 @@ pub struct TalkRulesV2Table {
     pub exactly_one_price_cue: bool,
     /// Explicit cancellation cues that retract any prior matching commitment cleanly.
     pub explicit_retraction_cues: &'static [&'static str],
+    /// Negation cues that latch the pair as ambiguous when paired with a trade verb without matching a parsed refusal.
+    pub fail_closed_negation_cues: &'static [&'static str],
     /// Negation cues that trigger retraction only when governing a trade verb nearby.
     pub negated_offer_cues: &'static [&'static str],
     /// Maximum token distance after a negated cue within which a trade verb triggers retraction.
     pub negated_offer_max_gap_tokens: usize,
-    /// Trade verbs governed by `negated_offer_cues` to distinguish offers from filler phrases.
+    /// Trade verbs governed by `negated_offer_cues` and `fail_closed_negation_cues`.
     pub negated_offer_verbs: &'static [&'static str],
     /// Fixed-point unit multiplier (`league_seat_types::UNIT_SCALE = 1_000`).
     pub number_unit_scale: i64,
     /// Prepositions/symbols separating order amount/good from limit unit price.
     pub price_cues: &'static [&'static str],
-    /// Typographic apostrophe/quote `(from, to)` normalizations applied before clause tokenization.
+    /// Typographic apostrophe/quote `(from, to)` normalizations applied before whole-message validation.
     pub quote_normalizations: &'static [(&'static str, &'static str)],
     /// Prefixes identifying `AssetId::Raw(i)`.
     pub raw_prefixes: &'static [&'static str],
     /// Prefixes identifying `AssetId::Refined(i)`.
     pub refined_prefixes: &'static [&'static str],
-    /// Whether clauses still containing non-ASCII characters after quote normalization are discarded.
-    pub reject_non_ascii_clauses: bool,
     /// Tokens designating a sell offer (`OfferSide::Sell`).
     pub sell_tokens: &'static [&'static str],
     /// Non-alphanumeric characters kept inside compound tokens.
@@ -95,6 +98,7 @@ impl TalkRulesV2Table {
     #[must_use]
     pub const fn frozen() -> Self {
         Self {
+            allowed_ascii_chars: " \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
             ambiguity_cues: &[
                 "?",
                 "maybe",
@@ -161,6 +165,10 @@ impl TalkRulesV2Table {
                 "rescind",
                 "walk back",
             ],
+            fail_closed_negation_cues: &[
+                "not", "never", "no", "wont", "dont", "cant", "cannot", "nor", "won't", "will not",
+                "can't", "don't", "do not",
+            ],
             negated_offer_cues: &["won't", "will not", "cannot", "can't", "don't", "do not"],
             negated_offer_max_gap_tokens: 2,
             negated_offer_verbs: &[
@@ -180,7 +188,6 @@ impl TalkRulesV2Table {
             ],
             raw_prefixes: &["raw"],
             refined_prefixes: &["refined", "ref"],
-            reject_non_ascii_clauses: true,
             sell_tokens: &["sell", "selling", "ask"],
             token_join_chars: &["_", "'", ":", "."],
             token_trim_chars: &[".", ":", "_"],
@@ -306,8 +313,17 @@ enum SourceAssetOutcome {
 
 #[derive(Debug, Clone, Default)]
 struct SourcePairOutcome {
+    ambiguous_latched: bool,
     retracted_all: bool,
     assets: BTreeMap<AssetId, SourceAssetOutcome>,
+}
+
+impl SourcePairOutcome {
+    fn latch_ambiguous(&mut self) {
+        self.ambiguous_latched = true;
+        self.retracted_all = true;
+        self.assets.clear();
+    }
 }
 
 fn is_word_byte(b: u8) -> bool {
@@ -333,22 +349,28 @@ fn contains_cue(lower: &str, cue: &str) -> bool {
     false
 }
 
+fn cue_match_end_positions(tokens: &[String], cue: &str) -> Vec<usize> {
+    let cue_words: Vec<&str> = cue.split_ascii_whitespace().collect();
+    if cue_words.is_empty() || cue_words.len() > tokens.len() {
+        return Vec::new();
+    }
+    let max_start = tokens.len() - cue_words.len();
+    let mut ends = Vec::new();
+    for start in 0..=max_start {
+        if cue_words
+            .iter()
+            .enumerate()
+            .all(|(off, w)| tokens[start + off] == *w)
+        {
+            ends.push(start + cue_words.len());
+        }
+    }
+    ends
+}
+
 fn has_negated_offer_retraction(tokens: &[String], rules: &TalkRulesV2Table) -> bool {
     for &cue in rules.negated_offer_cues {
-        let cue_words: Vec<&str> = cue.split_ascii_whitespace().collect();
-        if cue_words.is_empty() || cue_words.len() > tokens.len() {
-            continue;
-        }
-        let max_start = tokens.len() - cue_words.len();
-        for start in 0..=max_start {
-            let matches_cue = cue_words
-                .iter()
-                .enumerate()
-                .all(|(off, w)| tokens[start + off] == *w);
-            if !matches_cue {
-                continue;
-            }
-            let after = start + cue_words.len();
+        for after in cue_match_end_positions(tokens, cue) {
             let look_end = (after + rules.negated_offer_max_gap_tokens).min(tokens.len());
             if tokens[after..look_end]
                 .iter()
@@ -359,6 +381,17 @@ fn has_negated_offer_retraction(tokens: &[String], rules: &TalkRulesV2Table) -> 
         }
     }
     false
+}
+
+fn has_any_negation_with_trade_verb(tokens: &[String], rules: &TalkRulesV2Table) -> bool {
+    let has_verb = tokens
+        .iter()
+        .any(|tok| rules.negated_offer_verbs.contains(&tok.as_str()));
+    has_verb
+        && rules
+            .fail_closed_negation_cues
+            .iter()
+            .any(|cue| !cue_match_end_positions(tokens, cue).is_empty())
 }
 
 fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
@@ -593,12 +626,13 @@ fn parse_good_span(
 
 enum ClauseEffect {
     Ignore,
+    AmbiguousMessage,
     Retract(Option<AssetId>),
     Offer(OfferProposal),
 }
 
-fn normalize_clause_text(clause: &str, rules: &TalkRulesV2Table) -> String {
-    let mut normalized = clause.to_owned();
+fn normalize_message_text(body: &str, rules: &TalkRulesV2Table) -> String {
+    let mut normalized = body.to_owned();
     for &(from, to) in rules.quote_normalizations {
         if normalized.contains(from) {
             normalized = normalized.replace(from, to);
@@ -607,16 +641,17 @@ fn normalize_clause_text(clause: &str, rules: &TalkRulesV2Table) -> String {
     normalized
 }
 
+fn message_has_only_allowed_ascii(text: &str, rules: &TalkRulesV2Table) -> bool {
+    let allowed = rules.allowed_ascii_chars.as_bytes();
+    text.bytes().all(|b| b.is_ascii() && allowed.contains(&b))
+}
+
 fn interpret_clause(
     clause: &str,
     rules: &TalkRulesV2Table,
     seat_guilds: &[String],
 ) -> ClauseEffect {
-    let normalized = normalize_clause_text(clause, rules);
-    if rules.reject_non_ascii_clauses && !normalized.is_ascii() {
-        return ClauseEffect::Ignore;
-    }
-    let lower = normalized.to_ascii_lowercase();
+    let lower = clause.to_ascii_lowercase();
     let tokens = tokenize_clause(&lower, rules);
     if tokens.is_empty() {
         return ClauseEffect::Ignore;
@@ -635,6 +670,10 @@ fn interpret_clause(
             None
         };
         return ClauseEffect::Retract(targeted);
+    }
+
+    if has_any_negation_with_trade_verb(&tokens, rules) {
+        return ClauseEffect::AmbiguousMessage;
     }
 
     if rules
@@ -758,9 +797,21 @@ fn process_source_messages(
         let pair = by_pair
             .entry((*proposer_seat, *counterparty_seat))
             .or_default();
-        for clause in split_clauses(body, rules) {
+        if pair.ambiguous_latched {
+            continue;
+        }
+        let normalized = normalize_message_text(body, rules);
+        if !message_has_only_allowed_ascii(&normalized, rules) {
+            pair.latch_ambiguous();
+            continue;
+        }
+        for clause in split_clauses(&normalized, rules) {
             match interpret_clause(clause, rules, seat_guilds) {
                 ClauseEffect::Ignore => {}
+                ClauseEffect::AmbiguousMessage => {
+                    pair.latch_ambiguous();
+                    break;
+                }
                 ClauseEffect::Retract(Some(good)) => {
                     pair.assets.insert(good, SourceAssetOutcome::Retracted);
                 }
@@ -830,6 +881,13 @@ fn merge_two_pair_sources(
     talk: &SourcePairOutcome,
     rules: &TalkRulesV2Table,
 ) -> SourcePairOutcome {
+    if neg.ambiguous_latched || talk.ambiguous_latched {
+        return SourcePairOutcome {
+            ambiguous_latched: true,
+            retracted_all: true,
+            assets: BTreeMap::new(),
+        };
+    }
     let mut all_assets = BTreeMap::<AssetId, ()>::new();
     for &g in neg.assets.keys() {
         all_assets.insert(g, ());
@@ -839,6 +897,7 @@ fn merge_two_pair_sources(
     }
 
     let mut merged = SourcePairOutcome {
+        ambiguous_latched: false,
         retracted_all: neg.retracted_all || talk.retracted_all,
         assets: BTreeMap::new(),
     };

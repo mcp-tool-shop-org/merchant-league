@@ -107,6 +107,8 @@ pub enum EvalError {
     MissingFreezeFile(String),
     /// `join` refused because `blind_inputs_manifest_sha256` disagrees with `scorer_freeze.json` (`exit 1`).
     FreezeManifestMismatch(String),
+    /// `join` refused because duplicate `state_id` entries appear in `--arm-map` or `--scores` (`exit 1`).
+    DuplicateStateId(String),
     /// `join` refused because `scorer_config_sha256` disagrees with `scorer_freeze.json` (`exit 1`).
     FreezeConfigMismatch(String),
     /// `join` or input builder refused because `control` wording arm disagrees with `scorer_freeze.json` (`exit 1`).
@@ -170,6 +172,7 @@ impl EvalError {
             Self::FreezeFileExists(_) => "FREEZE_FILE_EXISTS",
             Self::MissingFreezeFile(_) => "MISSING_FREEZE_FILE",
             Self::FreezeManifestMismatch(_) => "FREEZE_MANIFEST_MISMATCH",
+            Self::DuplicateStateId(_) => "DUPLICATE_STATE_ID",
             Self::FreezeConfigMismatch(_) => "FREEZE_CONFIG_MISMATCH",
             Self::ControlWordingArmMismatch(_) => "CONTROL_WORDING_ARM_MISMATCH",
             Self::Scorer(err) => err.code(),
@@ -215,6 +218,7 @@ impl EvalError {
             | Self::FreezeFileExists(_)
             | Self::MissingFreezeFile(_)
             | Self::FreezeManifestMismatch(_)
+            | Self::DuplicateStateId(_)
             | Self::FreezeConfigMismatch(_)
             | Self::ControlWordingArmMismatch(_) => EXIT_USER_ERROR,
             Self::Scorer(err) => err.exit_code(),
@@ -392,6 +396,9 @@ impl fmt::Display for EvalError {
             }
             Self::FreezeManifestMismatch(msg) => {
                 write!(f, "FREEZE_MANIFEST_MISMATCH: {}", scrub_secret_text(msg))
+            }
+            Self::DuplicateStateId(msg) => {
+                write!(f, "DUPLICATE_STATE_ID: {}", scrub_secret_text(msg))
             }
             Self::FreezeConfigMismatch(msg) => {
                 write!(f, "FREEZE_CONFIG_MISMATCH: {}", scrub_secret_text(msg))
@@ -690,6 +697,12 @@ impl ToStructuredError for EvalError {
                 self.code(),
                 self.to_string(),
                 "ensure blind_inputs/*.json and scores/*.json match the manifest SHA-256 frozen in scorer_freeze.json",
+                false,
+            ),
+            Self::DuplicateStateId(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure every file in --arm-map and --scores has a unique state_id",
                 false,
             ),
             Self::FreezeConfigMismatch(_) => StructuredError::new(
