@@ -64,6 +64,8 @@ pub use serving::{
     resolve_verified_crate_git_sha_in, validate_crate_git_sha_against,
     validate_crate_git_sha_and_cleanliness, validate_serving_manifest_input,
 };
+#[doc(hidden)]
+pub use talk_extract::extract_talk_commitments_from_messages_with_rules;
 pub use talk_extract::{
     TalkExtractionResult, TalkRulesV2Table, extract_talk_commitments_for_state,
     extract_talk_commitments_from_messages, extract_talk_commitments_with_counts_for_state,

@@ -21,11 +21,11 @@ use league_eval::{
     EvalDecisionRecord, EvalError, EvalManifest, EvalSetupFile, FreezeOptions, JoinOptions,
     JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, ScorerFreezeFile, TalkRulesV2Table,
     eval_wording_slot, execute_cli_with_git_sha, extract_talk_commitments_for_state,
-    extract_talk_commitments_from_messages, extract_talk_commitments_with_counts_for_state,
-    resolve_eval_seat_guilds, run_branch_with_transport_and_git_sha, run_build_blind_inputs,
-    run_freeze, run_join, run_play_with_transport_and_git_sha, talk_rules_v2_digest,
-    talk_rules_v2_digest_for, write_freeze_file_with_writer,
-    write_freeze_file_with_writer_and_remover,
+    extract_talk_commitments_from_messages, extract_talk_commitments_from_messages_with_rules,
+    extract_talk_commitments_with_counts_for_state, resolve_eval_seat_guilds,
+    run_branch_with_transport_and_git_sha, run_build_blind_inputs, run_freeze, run_join,
+    run_play_with_transport_and_git_sha, talk_rules_v2_digest, talk_rules_v2_digest_for,
+    write_freeze_file_with_writer, write_freeze_file_with_writer_and_remover,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
@@ -1207,7 +1207,7 @@ fn talk_extractor_files_cover_clear_ambiguous_retraction_and_repeat_determinism(
         vec![UntrustedWhisper {
             from_guild: "Quarry".to_owned(),
             intent_header: None,
-            body: "I commit to buy 500 refined Foundry for 400 CRED.".to_owned(),
+            body: "I commit to buy 500 refined Foundry at 400 CRED.".to_owned(),
         }],
     )?;
     let c1 = extract_talk_commitments_for_state(&case_clear, 1, 0, &seat_guilds, &obs)?;
@@ -1317,7 +1317,7 @@ fn talk_extractor_files_cover_clear_ambiguous_retraction_and_repeat_determinism(
             UntrustedWhisper {
                 from_guild: "Quarry".to_owned(),
                 intent_header: None,
-                body: "We will buy 500 refined Foundry for 400 CRED.".to_owned(),
+                body: "We will buy 500 refined Foundry at 400 CRED.".to_owned(),
             },
             UntrustedWhisper {
                 from_guild: "Quarry".to_owned(),
@@ -1749,12 +1749,12 @@ fn talk_extractor_grammar_variants_ignored_clauses_and_errors() -> TestResult {
         (
             2_u8,
             0_u8,
-            "I commit to buy 300 refined:0 for 420 CRED.".to_owned(),
+            "I commit to buy 300 refined:0 at 420 CRED.".to_owned(),
         ),
         (
             3_u8,
             0_u8,
-            "Hi! I will buy 150 Foundry raw for 310 CRED.".to_owned(),
+            "Hi! I will buy 150 Foundry raw at 310 CRED.".to_owned(),
         ),
     ];
     let extracted = extract_talk_commitments_from_messages(0, &seat_guilds, &messages, &obs)?;
@@ -1796,7 +1796,7 @@ fn talk_extractor_grammar_variants_ignored_clauses_and_errors() -> TestResult {
         whispers: vec![UntrustedWhisper {
             from_guild: "Quarry".to_owned(),
             intent_header: None,
-            body: "I commit to buy 500 Foundry refined for 400 CRED.".to_owned(),
+            body: "I commit to buy 500 Foundry refined at 400 CRED.".to_owned(),
         }],
     };
     fs::write(
@@ -1845,7 +1845,7 @@ fn talk_extractor_grammar_variants_ignored_clauses_and_errors() -> TestResult {
             club_bot_baseline: None,
         };
     let differing_talk = json!({
-        "messages": [{ "to_guild": "Foundry", "body": "I commit to buy 450 raw1 for 390 CRED." }],
+        "messages": [{ "to_guild": "Foundry", "body": "I commit to buy 450 raw1 at 390 CRED." }],
         "market_actions": [],
         "bundle": {}
     })
@@ -3277,6 +3277,10 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
 
     // Mutating any single field of `TalkRulesV2Table` changes the digest.
     let mut t = base.clone();
+    t.allow_guild_then_prefix_goods = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.allow_thousands_comma_groups = false;
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3297,7 +3301,15 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
+    t.colon_space_lead_templates = &[&["hi"]];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.commitment_templates = &[&["i", "sell", "<AMOUNT>", "<GOOD>", "<PRICE_CUE>", "<PRICE>"]];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.compound_good_separators = &["_"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -3350,6 +3362,10 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
 
     let mut t = base.clone();
     t.sell_tokens = &["ask"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.standalone_tokens = &[];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -4118,7 +4134,7 @@ fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
         extract_talk_commitments_from_messages(
             0,
             &seat_guilds,
-            &[(1, 0, "Thanks: I will sell 5 raw 0 at 10".to_owned())],
+            &[(1, 0, "Hello: I will sell 5 raw 0 at 10".to_owned())],
             &obs,
         )?,
         expected_five
@@ -4552,6 +4568,8 @@ fn talk_v2_closed_grammar_rejects_unlisted_clauses_and_latches_pair() -> TestRes
         "Sell me 5 raw 0 at 10",
         "I will sell 5 raw 0 at 10,5",
         "I will sell 5,5 raw 0 at 10",
+        "I will sell 5 raw 0 for 50 creds.",
+        "I commit to buy 500 refined Foundry for 400 CRED.",
     ] {
         assert!(
             extract_talk_commitments_from_messages(
@@ -4593,7 +4611,7 @@ fn talk_v2_insert_word_sweep_across_commitment_templates_emits_zero_offers() -> 
     let rules = TalkRulesV2Table::frozen();
     let sweep_words = [
         "not", "no", "never", "maybe", "if", "unless", "would", "wouldn't", "refuse", "he",
-        "wrote", "you", "me", "foundry", "please", "probably",
+        "wrote", "you", "me", "foundry", "please", "probably", "for",
     ];
 
     let mut total_cases = 0_usize;
@@ -4641,7 +4659,7 @@ fn talk_v2_insert_word_sweep_across_commitment_templates_emits_zero_offers() -> 
             }
         }
     }
-    assert_eq!(total_cases, 2000);
+    assert_eq!(total_cases, 2125);
     eprintln!("INSERT_WORD_SWEEP_CASES={total_cases}");
     Ok(())
 }
@@ -4666,7 +4684,7 @@ fn talk_v2_closed_grammar_valid_templates_retractions_and_thousands_commas() -> 
             10 * UNIT_SCALE,
         ),
         (
-            "Hello! I'll buy 1,000 refined 0 for 250 CRED.",
+            "Hello! I'll buy 1,000 refined 0 at 250 CRED.",
             OfferSide::Buy,
             AssetId::Refined(0),
             1_000 * UNIT_SCALE,
@@ -4687,7 +4705,7 @@ fn talk_v2_closed_grammar_valid_templates_retractions_and_thousands_commas() -> 
             15 * UNIT_SCALE,
         ),
         (
-            "Thank you! I commit to sell 9 raw:0 for 40.",
+            "Thank you! I commit to sell 9 raw:0 at 40.",
             OfferSide::Sell,
             AssetId::Raw(0),
             9 * UNIT_SCALE,
@@ -4708,7 +4726,7 @@ fn talk_v2_closed_grammar_valid_templates_retractions_and_thousands_commas() -> 
             55 * UNIT_SCALE,
         ),
         (
-            "Noted. We offer to buy 6 raw 0 for 12.",
+            "Noted. We offer to buy 6 raw 0 at 12.",
             OfferSide::Buy,
             AssetId::Raw(0),
             6 * UNIT_SCALE,
@@ -4729,7 +4747,7 @@ fn talk_v2_closed_grammar_valid_templates_retractions_and_thousands_commas() -> 
             18 * UNIT_SCALE,
         ),
         (
-            "I will post sell 15 raw 1 for 25.",
+            "I will post sell 15 raw 1 at 25.",
             OfferSide::Sell,
             AssetId::Raw(1),
             15 * UNIT_SCALE,
@@ -4973,6 +4991,38 @@ fn talk_v2_extract_state_merge_latch_and_state_isolation() -> TestResult {
     write_talk(&s2, "I will sell 5 raw 0 at 10.")?;
     let clean_out = extract_talk_commitments_for_state(&s2, 1, 0, &seat_guilds, &obs)?;
     assert_eq!(clean_out.len(), 1);
+
+    // Same game directory across two days: day 1 ambiguous latch leaves day 2's clean offer intact.
+    let same_game = tmp.path().join("same_game_two_days");
+    fs::create_dir_all(same_game.join("to-seat"))?;
+    fs::create_dir_all(same_game.join("decisions"))?;
+    fs::write(
+        same_game.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "Maybe I will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    fs::write(
+        same_game.join("to-seat/day-02-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "I will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    assert!(extract_talk_commitments_for_state(&same_game, 1, 0, &seat_guilds, &obs)?.is_empty());
+    assert_eq!(
+        extract_talk_commitments_for_state(&same_game, 2, 0, &seat_guilds, &obs)?,
+        clean_out
+    );
     Ok(())
 }
 
@@ -5297,5 +5347,222 @@ fn write_freeze_file_reports_partial_cleanup_removal_failure() -> TestResult {
         "unexpected cleanup failure error: {msg}"
     );
     let _ = fs::remove_file(&freeze_path);
+    Ok(())
+}
+
+#[test]
+fn talk_v2_colon_space_lead_ins_allow_greetings_only_and_refuse_others() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9121), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    for allowed in [
+        "Hi: I will sell 5 raw 0 at 10.",
+        "Hello: I will sell 5 raw 0 at 10.",
+        "Greetings: I will sell 5 raw 0 at 10.",
+        "Hi: Ok. I will sell 5 raw 0 at 10.",
+    ] {
+        let out = extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, allowed.to_owned())],
+            &obs,
+        )?;
+        assert_eq!(
+            out.len(),
+            1,
+            "expected allowed colon-space lead `{allowed}`"
+        );
+    }
+
+    for refused in [
+        "Ok: I will sell 5 raw 0 at 10.",
+        "Okay: I will sell 5 raw 0 at 10.",
+        "Noted: I will sell 5 raw 0 at 10.",
+        "Understood: I will sell 5 raw 0 at 10.",
+        "Thanks: I will sell 5 raw 0 at 10.",
+        "Thank you: I will sell 5 raw 0 at 10.",
+        "Cancel that: I will sell 5 raw 0 at 10.",
+        "I will sell 5 raw 0 at 10: no deal.",
+        ": I will sell 5 raw 0 at 10.",
+        "Noted: ",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, refused.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "colon-space lead must fail closed alone: `{refused}`"
+        );
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, refused.to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "colon-space lead must latch prior offer empty: `{refused}`"
+        );
+    }
+
+    // Two retractions joined by `: ` without any offer continue to retract cleanly.
+    assert!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[
+                (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                (1, 0, "Cancel that: no deal.".to_owned()),
+            ],
+            &obs,
+        )?
+        .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn talk_v2_table_driven_standalone_compound_and_guild_prefix_rules() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9122), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+    let frozen = TalkRulesV2Table::frozen();
+
+    // 1. `standalone_tokens` governs `@` splitting (`raw 0@10` and `raw 0 @ 10`).
+    for msg in ["I will sell 5 raw 0@10.", "I will sell 5 raw 0 @ 10."] {
+        assert_eq!(
+            extract_talk_commitments_from_messages_with_rules(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+                &frozen,
+            )?
+            .len(),
+            1
+        );
+        let mut no_standalone = frozen.clone();
+        no_standalone.standalone_tokens = &[];
+        assert!(
+            extract_talk_commitments_from_messages_with_rules(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+                &no_standalone,
+            )?
+            .is_empty(),
+            "removing standalone_tokens must disable `{msg}`"
+        );
+    }
+
+    // 2. `compound_good_separators` governs `:` / `_` in compound goods (`raw:0`, `raw_0`).
+    assert_eq!(
+        extract_talk_commitments_from_messages_with_rules(
+            0,
+            &seat_guilds,
+            &[(1, 0, "I will sell 5 raw:0 at 10.".to_owned())],
+            &obs,
+            &frozen,
+        )?
+        .len(),
+        1
+    );
+    let mut only_underscore = frozen.clone();
+    only_underscore.compound_good_separators = &["_"];
+    assert!(
+        extract_talk_commitments_from_messages_with_rules(
+            0,
+            &seat_guilds,
+            &[(1, 0, "I will sell 5 raw:0 at 10.".to_owned())],
+            &obs,
+            &only_underscore,
+        )?
+        .is_empty()
+    );
+    assert_eq!(
+        extract_talk_commitments_from_messages_with_rules(
+            0,
+            &seat_guilds,
+            &[(1, 0, "I will sell 5 raw_0 at 10.".to_owned())],
+            &obs,
+            &only_underscore,
+        )?
+        .len(),
+        1
+    );
+
+    // 3. `allow_guild_then_prefix_goods` governs `<GUILD> raw` and `<GUILD> refined`.
+    for msg in [
+        "I will sell 5 Foundry raw at 10.",
+        "I will sell 5 Foundry refined at 10.",
+    ] {
+        assert_eq!(
+            extract_talk_commitments_from_messages_with_rules(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+                &frozen,
+            )?
+            .len(),
+            1
+        );
+        let mut no_guild_prefix = frozen.clone();
+        no_guild_prefix.allow_guild_then_prefix_goods = false;
+        assert!(
+            extract_talk_commitments_from_messages_with_rules(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+                &no_guild_prefix,
+            )?
+            .is_empty(),
+            "disabling allow_guild_then_prefix_goods must reject `{msg}`"
+        );
+    }
+
+    // 4. `colon_space_lead_templates` governs whether `Hi:` is accepted.
+    assert_eq!(
+        extract_talk_commitments_from_messages_with_rules(
+            0,
+            &seat_guilds,
+            &[(1, 0, "Hi: I will sell 5 raw 0 at 10.".to_owned())],
+            &obs,
+            &frozen,
+        )?
+        .len(),
+        1
+    );
+    let mut no_colon_leads = frozen;
+    no_colon_leads.colon_space_lead_templates = &[];
+    assert!(
+        extract_talk_commitments_from_messages_with_rules(
+            0,
+            &seat_guilds,
+            &[(1, 0, "Hi: I will sell 5 raw 0 at 10.".to_owned())],
+            &obs,
+            &no_colon_leads,
+        )?
+        .is_empty()
+    );
     Ok(())
 }

@@ -30,13 +30,14 @@ use league_scorer::{
     ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2,
     TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts, apply_talk_commitments,
     build_arm_independent_request, candidate_id_for_submission, canonicalize_talk_commitments,
-    compute_blind_inputs_manifest_sha256, compute_pre_act_pair_sha256_hex,
-    compute_scorer_tree_sha256, decide_peer_turn, dedupe_candidates, draw_honour_commitment,
-    draw_scenarios, execute_blind_request, generate_arm_independent_candidates,
-    is_valid_sha256_hex, p_honour_to_ppm, parse_blind_scoring_request_strict, posture_for_scenario,
-    probe_checkpoint_sanitized, prune_refused_market_actions, run_single_rollout,
-    run_single_rollout_with_replay_log, score_outcomes, sha256_hex, to_sorted_compact_json,
-    to_sorted_pretty_json, validate_talk_commitment, verify_checkpoint_pair,
+    compute_blind_inputs_manifest_sha256, compute_blind_inputs_manifest_sha256_from_entries,
+    compute_pre_act_pair_sha256_hex, compute_scorer_tree_sha256, decide_peer_turn,
+    dedupe_candidates, draw_honour_commitment, draw_scenarios, execute_blind_request,
+    generate_arm_independent_candidates, is_valid_sha256_hex, p_honour_to_ppm,
+    parse_blind_scoring_request_strict, posture_for_scenario, probe_checkpoint_sanitized,
+    prune_refused_market_actions, run_single_rollout, run_single_rollout_with_replay_log,
+    score_outcomes, sha256_hex, to_sorted_compact_json, to_sorted_pretty_json,
+    validate_talk_commitment, verify_checkpoint_pair,
 };
 use league_seat_types::UNIT_SCALE;
 
@@ -5794,5 +5795,123 @@ fn s3a_freeze_helpers_and_cli_validation_cover_error_branches() -> TestResult {
         EXIT_USER_ERROR
     );
     assert!(String::from_utf8_lossy(&err_buf).contains("INVALID_HEX_DIGEST"));
+    Ok(())
+}
+
+#[test]
+fn blind_request_and_state_score_output_require_talk_extraction_counts() -> TestResult {
+    let cfg = ScorerConfig {
+        scenarios_m: 2,
+        k_synth_max: 2,
+        ..ScorerConfig::default()
+    };
+    let cand = build_candidate(EvalActSubmission::default(), true, true)?;
+    let valid_hex = sha256_hex(b"seed");
+    let req = BlindScoringRequest {
+        candidates: vec![cand],
+        focal_seat: 0,
+        pre_act_pair_sha256: valid_hex.clone(),
+        pre_act_save_sha256: valid_hex.clone(),
+        pre_act_seal_sha256: valid_hex,
+        schema_version: BLIND_SCORING_SCHEMA_VERSION,
+        scorer_config_sha256: cfg.sha256_hex()?,
+        scorer_seed: 7,
+        state_id: "counts_required_day-01_seat-0".to_owned(),
+        talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
+    };
+    let mut val = serde_json::to_value(&req)?;
+    val.as_object_mut()
+        .ok_or("expected JSON object")?
+        .remove("talk_extraction_counts");
+    let err = parse_blind_scoring_request_strict(&serde_json::to_vec(&val)?)
+        .err()
+        .ok_or("expected missing talk_extraction_counts error")?;
+    assert_eq!(err.code(), "INVALID_JSON");
+    assert_eq!(err.exit_code(), EXIT_USER_ERROR);
+
+    let outcome = ScenarioRolloutOutcome {
+        mandate_bonus: 0,
+        net_asset_equity: 10,
+        project_equity: 0,
+        total_equity: 10,
+    };
+    let out = score_outcomes(&req, &cfg, 1, &[vec![outcome; 2]])?;
+    let mut out_val = serde_json::to_value(&out)?;
+    out_val
+        .as_object_mut()
+        .ok_or("expected StateScoreOutput JSON object")?
+        .remove("talk_extraction_counts");
+    assert!(serde_json::from_value::<StateScoreOutput>(out_val).is_err());
+    Ok(())
+}
+
+#[test]
+fn talk_extraction_counts_from_sources_rejects_seen_overflow() -> TestResult {
+    let neg = TalkSourceCounts {
+        ambiguous: 0,
+        matched: u64::MAX,
+        seen: u64::MAX,
+    };
+    let talk = TalkSourceCounts {
+        ambiguous: 0,
+        matched: 1,
+        seen: 1,
+    };
+    let err = TalkExtractionCounts::from_sources(neg, talk)
+        .err()
+        .ok_or("expected u64 overflow error")?;
+    assert_eq!(err.code(), "INVALID_TALK_COMMITMENT");
+    assert_eq!(err.exit_code(), EXIT_USER_ERROR);
+    Ok(())
+}
+
+#[test]
+fn manifest_and_scorer_tree_digests_cover_filter_skip_and_error_paths() -> TestResult {
+    let tmp = UniqueTmpDir::new("digest_paths")?;
+
+    let missing_dir = tmp.path.join("does_not_exist");
+    let missing_manifest = compute_blind_inputs_manifest_sha256(&missing_dir)
+        .err()
+        .ok_or("expected missing blind inputs dir error")?;
+    assert_eq!(missing_manifest.code(), "NO_BLIND_INPUTS");
+
+    let empty_dir = tmp.path.join("empty_blind");
+    fs::create_dir_all(&empty_dir)?;
+    fs::write(empty_dir.join("notes.txt"), b"ignored")?;
+    fs::create_dir_all(empty_dir.join("nested_dir.json"))?;
+    let empty_manifest = compute_blind_inputs_manifest_sha256(&empty_dir)
+        .err()
+        .ok_or("expected empty blind inputs dir error")?;
+    assert_eq!(empty_manifest.code(), "NO_BLIND_INPUTS");
+
+    fs::write(empty_dir.join("alpha.json"), b"{\"a\":1}")?;
+    let mut expected_entries = BTreeMap::new();
+    expected_entries.insert("alpha.json".to_owned(), sha256_hex(b"{\"a\":1}"));
+    assert_eq!(
+        compute_blind_inputs_manifest_sha256(&empty_dir)?,
+        compute_blind_inputs_manifest_sha256_from_entries(&expected_entries)
+    );
+
+    let missing_tree = compute_scorer_tree_sha256(&missing_dir)
+        .err()
+        .ok_or("expected missing crate dir error")?;
+    assert_eq!(missing_tree.code(), "IO_ERROR");
+
+    let tree_a = tmp.path.join("tree_a");
+    let tree_b = tmp.path.join("tree_b");
+    for root in [&tree_a, &tree_b] {
+        fs::create_dir_all(root.join("src"))?;
+        fs::write(root.join("Cargo.toml"), b"[package]\nname=\"demo\"\n")?;
+        fs::write(root.join("src/lib.rs"), b"pub fn x() {}\n")?;
+    }
+    fs::create_dir_all(tree_a.join("target/debug"))?;
+    fs::write(tree_a.join("target/debug/artifact.bin"), b"ignored")?;
+    fs::create_dir_all(tree_a.join(".git/objects"))?;
+    fs::write(tree_a.join(".git/HEAD"), b"ref: refs/heads/main\n")?;
+    assert_eq!(
+        compute_scorer_tree_sha256(&tree_a)?,
+        compute_scorer_tree_sha256(&tree_b)?
+    );
     Ok(())
 }

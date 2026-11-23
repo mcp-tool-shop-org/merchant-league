@@ -36,6 +36,8 @@ use crate::reply::parse_eval_talk_reply;
 /// by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TalkRulesV2Table {
+    /// Whether `<GUILD> raw` / `<GUILD> refined` two-token goods are accepted.
+    pub allow_guild_then_prefix_goods: bool,
     /// Whether exact `1,000`-style comma thousands groups are parsed inside numeric tokens.
     pub allow_thousands_comma_groups: bool,
     /// Complete set of allowed ASCII bytes after `quote_normalizations`; any message holding another ASCII byte or any non-ASCII char fails closed as ambiguous for its pair.
@@ -46,8 +48,12 @@ pub struct TalkRulesV2Table {
     pub clause_break_chars: &'static [&'static str],
     /// Whether `": "` breaks clauses (keeping compact `raw:0` intact).
     pub colon_space_breaks_clause: bool,
+    /// Closed list of neutral lead-in clause templates permitted before a colon-space break.
+    pub colon_space_lead_templates: &'static [&'static [&'static str]],
     /// Closed list of first-person spot-offer commitment templates matching complete clauses.
     pub commitment_templates: &'static [&'static [&'static str]],
+    /// Single leading separator prefixes stripped between a good prefix and seat reference in compound tokens.
+    pub compound_good_separators: &'static [&'static str],
     /// Whether conflicting active offers for the same `(pair, asset)` latch to contradicted.
     pub contradiction_latches_pair_asset: bool,
     /// Optional trailing currency unit tokens consumed by `<CRED?>`.
@@ -74,6 +80,8 @@ pub struct TalkRulesV2Table {
     pub retraction_templates: &'static [&'static [&'static str]],
     /// Lowercase tokens matching `<SIDE>` as `OfferSide::Sell`.
     pub sell_tokens: &'static [&'static str],
+    /// Symbols emitted as standalone tokens even when adjacent to alphanumerics.
+    pub standalone_tokens: &'static [&'static str],
     /// Non-alphanumeric characters kept inside compound tokens.
     pub token_join_chars: &'static [&'static str],
     /// Version identifier pinned in `ScorerConfig::talk_extractor_version`.
@@ -85,11 +93,13 @@ impl TalkRulesV2Table {
     #[must_use]
     pub const fn frozen() -> Self {
         Self {
+            allow_guild_then_prefix_goods: true,
             allow_thousands_comma_groups: true,
             allowed_ascii_chars: " \t\n\r!',.:;@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
             buy_tokens: &["buy"],
             clause_break_chars: &["\n", "\r", ";", "!", "."],
             colon_space_breaks_clause: true,
+            colon_space_lead_templates: &[&["hi"], &["hello"], &["greetings"]],
             commitment_templates: &[
                 &[
                     "i",
@@ -217,6 +227,7 @@ impl TalkRulesV2Table {
                     "<CRED?>",
                 ],
             ],
+            compound_good_separators: &[":", "_"],
             contradiction_latches_pair_asset: true,
             cred_tokens: &["cred", "creds"],
             decimal_dot_keeps_clause: true,
@@ -240,7 +251,7 @@ impl TalkRulesV2Table {
                 &["understood"],
             ],
             number_unit_scale: UNIT_SCALE,
-            price_cues: &["@", "at", "for"],
+            price_cues: &["@", "at"],
             quote_normalizations: &[
                 ("\u{2018}", "'"),
                 ("\u{2019}", "'"),
@@ -391,6 +402,7 @@ impl TalkRulesV2Table {
                 &["we", "<NEG>", "deal"],
             ],
             sell_tokens: &["sell"],
+            standalone_tokens: &["@"],
             token_join_chars: &["_", "'", ":", "."],
             version: TALK_EXTRACTOR_VERSION_V2,
         }
@@ -532,7 +544,7 @@ impl SourcePairOutcome {
     }
 }
 
-fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
+fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<(&'a str, bool)> {
     let bytes = body.as_bytes();
     let mut out = Vec::new();
     let mut start = 0_usize;
@@ -549,17 +561,19 @@ fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
                 is_break = false;
             }
         }
+        let mut ended_at_colon_space = false;
         if !is_break
             && rules.colon_space_breaks_clause
             && b == b':'
             && bytes.get(i + 1).is_some_and(u8::is_ascii_whitespace)
         {
             is_break = true;
+            ended_at_colon_space = true;
         }
         if is_break {
             let slice = body[start..i].trim();
-            if !slice.is_empty() {
-                out.push(slice);
+            if !slice.is_empty() || ended_at_colon_space {
+                out.push((slice, ended_at_colon_space));
             }
             start = i + 1;
         }
@@ -567,7 +581,7 @@ fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
     }
     let tail = body[start..].trim();
     if !tail.is_empty() {
-        out.push(tail);
+        out.push((tail, false));
     }
     out
 }
@@ -579,17 +593,25 @@ fn is_join_char(ch: char, rules: &TalkRulesV2Table) -> bool {
         .any(|s| s.starts_with(ch) && s.len() == ch.len_utf8())
 }
 
+fn matching_standalone_prefix(slice: &str, rules: &TalkRulesV2Table) -> Option<&'static str> {
+    rules
+        .standalone_tokens
+        .iter()
+        .copied()
+        .find(|tok| !tok.is_empty() && slice.starts_with(tok))
+}
+
 fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
     let bytes = lower.as_bytes();
     let mut tokens = Vec::new();
     let mut i = 0_usize;
     while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'@' {
-            tokens.push("@".to_owned());
-            i += 1;
+        if let Some(standalone) = matching_standalone_prefix(&lower[i..], rules) {
+            tokens.push(standalone.to_owned());
+            i += standalone.len();
             continue;
         }
+        let b = bytes[i];
         let ch = char::from(b);
         let starts_comma_num = b == b',' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit);
         let is_tok = b.is_ascii_alphanumeric() || is_join_char(ch, rules) || starts_comma_num;
@@ -599,6 +621,9 @@ fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
         }
         let mut buf = String::new();
         while i < bytes.len() {
+            if matching_standalone_prefix(&lower[i..], rules).is_some() {
+                break;
+            }
             let c = bytes[i];
             if c == b',' {
                 let prev_digit = !buf.is_empty() && buf.as_bytes()[buf.len() - 1].is_ascii_digit();
@@ -689,10 +714,15 @@ fn resolve_seat_ref(tok: &str, seat_guilds: &[String]) -> Option<u8> {
     resolve_guild_seat_ref(tok, seat_guilds)
 }
 
-fn strip_single_compound_sep(rest: &str) -> &str {
-    rest.strip_prefix(':')
-        .or_else(|| rest.strip_prefix('_'))
-        .unwrap_or(rest)
+fn strip_single_compound_sep<'a>(rest: &'a str, rules: &TalkRulesV2Table) -> &'a str {
+    for &sep in rules.compound_good_separators {
+        if !sep.is_empty()
+            && let Some(stripped) = rest.strip_prefix(sep)
+        {
+            return stripped;
+        }
+    }
+    rest
 }
 
 fn parse_good_at(
@@ -704,7 +734,7 @@ fn parse_good_at(
     let t = tokens.get(pos)?.as_str();
     for &pref in rules.raw_prefixes {
         if let Some(rest) = t.strip_prefix(pref) {
-            let trimmed = strip_single_compound_sep(rest);
+            let trimmed = strip_single_compound_sep(rest, rules);
             if !trimmed.is_empty()
                 && let Some(seat) = resolve_seat_ref(trimmed, seat_guilds)
             {
@@ -714,7 +744,7 @@ fn parse_good_at(
     }
     for &pref in rules.refined_prefixes {
         if let Some(rest) = t.strip_prefix(pref) {
-            let trimmed = strip_single_compound_sep(rest);
+            let trimmed = strip_single_compound_sep(rest, rules);
             if !trimmed.is_empty()
                 && let Some(seat) = resolve_seat_ref(trimmed, seat_guilds)
             {
@@ -736,7 +766,9 @@ fn parse_good_at(
     }
     // Only named guild tokens match `guild_then_prefix` (e.g. `Foundry raw`) so bare
     // whole-unit amounts like `2 raw 1` never capture the quantity as a seat.
-    if let Some(seat) = resolve_guild_seat_ref(t, seat_guilds) {
+    if rules.allow_guild_then_prefix_goods
+        && let Some(seat) = resolve_guild_seat_ref(t, seat_guilds)
+    {
         if rules.raw_prefixes.contains(&next) {
             return Some((AssetId::Raw(seat), 2));
         }
@@ -954,19 +986,30 @@ fn interpret_clause(
     clause: &str,
     rules: &TalkRulesV2Table,
     seat_guilds: &[String],
-) -> Option<MatchedClause> {
+) -> Option<(MatchedClause, bool)> {
     let lower = clause.to_ascii_lowercase();
     let tokens = tokenize_clause(&lower, rules);
     if tokens.is_empty() {
-        return Some(MatchedClause::Neutral);
+        return Some((MatchedClause::Neutral, false));
+    }
+
+    if match_any_template(
+        &tokens,
+        rules.colon_space_lead_templates,
+        rules,
+        seat_guilds,
+    )
+    .is_some()
+    {
+        return Some((MatchedClause::Neutral, true));
     }
 
     if match_any_template(&tokens, rules.neutral_templates, rules, seat_guilds).is_some() {
-        return Some(MatchedClause::Neutral);
+        return Some((MatchedClause::Neutral, false));
     }
 
     if let Some(cap) = match_any_template(&tokens, rules.retraction_templates, rules, seat_guilds) {
-        return Some(MatchedClause::Retract(cap.good));
+        return Some((MatchedClause::Retract(cap.good), false));
     }
     if tokens.len() > 1
         && rules
@@ -975,7 +1018,7 @@ fn interpret_clause(
         && let Some(cap) =
             match_any_template(&tokens[1..], rules.retraction_templates, rules, seat_guilds)
     {
-        return Some(MatchedClause::Retract(cap.good));
+        return Some((MatchedClause::Retract(cap.good), false));
     }
 
     if let Some(cap) = match_any_template(&tokens, rules.commitment_templates, rules, seat_guilds) {
@@ -987,7 +1030,7 @@ fn interpret_clause(
             domain_id: None,
             is_hybrid: false,
         };
-        return Some(MatchedClause::Offer(proposal));
+        return Some((MatchedClause::Offer(proposal), false));
     }
 
     None
@@ -1020,15 +1063,37 @@ fn process_source_messages(
             continue;
         }
         let mut parsed_clauses = Vec::new();
+        let mut any_retract_before_colon_space = false;
+        let mut has_offer = false;
         let mut message_ambiguous = false;
-        for clause in split_clauses(&normalized, rules) {
+        for (clause, ended_at_colon_space) in split_clauses(&normalized, rules) {
             match interpret_clause(clause, rules, seat_guilds) {
-                Some(effect) => parsed_clauses.push(effect),
+                Some((effect, is_colon_lead)) => {
+                    if ended_at_colon_space {
+                        match &effect {
+                            MatchedClause::Neutral if is_colon_lead => {}
+                            MatchedClause::Retract(_) => {
+                                any_retract_before_colon_space = true;
+                            }
+                            _ => {
+                                message_ambiguous = true;
+                                break;
+                            }
+                        }
+                    }
+                    if matches!(effect, MatchedClause::Offer(_)) {
+                        has_offer = true;
+                    }
+                    parsed_clauses.push(effect);
+                }
                 None => {
                     message_ambiguous = true;
                     break;
                 }
             }
+        }
+        if any_retract_before_colon_space && has_offer {
+            message_ambiguous = true;
         }
         if message_ambiguous {
             counts.ambiguous = counts.ambiguous.saturating_add(1);
@@ -1156,15 +1221,16 @@ fn merge_two_pair_sources(
     merged
 }
 
-/// Pure deterministic talk commitment extraction over ordered `(proposer_seat, counterparty_seat, body)`
-/// messages (`talk_rules_v2`, `§4.3`).
-pub fn extract_talk_commitments_from_messages(
+/// Test helper evaluating an explicit [`TalkRulesV2Table`] against ordered
+/// `(proposer_seat, counterparty_seat, body)` messages.
+#[doc(hidden)]
+pub fn extract_talk_commitments_from_messages_with_rules(
     focal_seat: u8,
     seat_guilds: &[String],
     messages: &[(u8, u8, String)],
     obs: &SeatObservation,
+    rules: &TalkRulesV2Table,
 ) -> Result<Vec<ExtractedTalkCommitment>, EvalError> {
-    let rules = TalkRulesV2Table::frozen();
     let seat_count = obs.spec.seat_count;
     if usize::from(seat_count) != seat_guilds.len() {
         return Err(EvalError::SchemaValidation(format!(
@@ -1178,8 +1244,26 @@ pub fn extract_talk_commitments_from_messages(
         )));
     }
 
-    let (pair_map, _counts) = process_source_messages(focal_seat, seat_guilds, messages, &rules);
+    let (pair_map, _counts) = process_source_messages(focal_seat, seat_guilds, messages, rules);
     finalize_pair_assets(pair_map, focal_seat, seat_count)
+}
+
+/// Pure deterministic talk commitment extraction over ordered `(proposer_seat, counterparty_seat, body)`
+/// messages (`talk_rules_v2`, `§4.3`).
+pub fn extract_talk_commitments_from_messages(
+    focal_seat: u8,
+    seat_guilds: &[String],
+    messages: &[(u8, u8, String)],
+    obs: &SeatObservation,
+) -> Result<Vec<ExtractedTalkCommitment>, EvalError> {
+    let rules = TalkRulesV2Table::frozen();
+    extract_talk_commitments_from_messages_with_rules(
+        focal_seat,
+        seat_guilds,
+        messages,
+        obs,
+        &rules,
+    )
 }
 
 /// Extracts frozen deterministic `talk_rules_v2` commitments and message classification counts

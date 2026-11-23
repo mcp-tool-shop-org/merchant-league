@@ -78,7 +78,7 @@ pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
 
 /// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; enforces per-message `allowed_ascii_chars` validation, thousands-comma grouping, whole-clause closed grammar matching, and fail-closed pair latching; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
-    "8edf70e7a60f3550f79b82dd354af84185094addd0333a9724bf701b0f56bfaa";
+    "5d5225ee3cbfc466cdd553bbf61c47d34c628632b8239a88f56c35f446f718a8";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -610,18 +610,10 @@ impl TalkExtractionCounts {
         let seen = negotiation.seen.checked_add(talk.seen).ok_or_else(|| {
             ScorerError::InvalidTalkCommitment("total seen talk count overflow".to_owned())
         })?;
-        let matched = negotiation
-            .matched
-            .checked_add(talk.matched)
-            .ok_or_else(|| {
-                ScorerError::InvalidTalkCommitment("total matched talk count overflow".to_owned())
-            })?;
-        let ambiguous = negotiation
-            .ambiguous
-            .checked_add(talk.ambiguous)
-            .ok_or_else(|| {
-                ScorerError::InvalidTalkCommitment("total ambiguous talk count overflow".to_owned())
-            })?;
+        // Per-source validation guarantees `matched <= seen` and `ambiguous <= seen`, so once
+        // `seen` sums without overflowing `u64`, neither component sum can overflow.
+        let matched = negotiation.matched + talk.matched;
+        let ambiguous = negotiation.ambiguous + talk.ambiguous;
         let out = Self {
             negotiation,
             talk,
@@ -678,7 +670,6 @@ pub struct BlindScoringRequest {
     /// Neutral counterfactual talk-phase trade commitments (`§4.3`).
     pub talk_commitments: Vec<ExtractedTalkCommitment>,
     /// Per-source and total talk message classification counts (`§4.3`, `§8.1`).
-    #[serde(default)]
     pub talk_extraction_counts: TalkExtractionCounts,
 }
 
@@ -928,7 +919,6 @@ pub struct StateScoreOutput {
     /// Arm-blind canonical state identifier.
     pub state_id: String,
     /// Per-source and total talk message classification counts echoed from [`BlindScoringRequest`].
-    #[serde(default)]
     pub talk_extraction_counts: TalkExtractionCounts,
     /// Maximum `ev_total_equity` over `in_span == true` candidates.
     pub v_max: f64,
