@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use league_core::{
-    AiPreviewRequest, AssetId, EvalActSubmission, EvalHost, EvalSaveSnapshot, EvalSeatApplyReport,
-    MarketAction, OfferProposal, OfferSide, PublicSweepReceipt, SealedOrderBundle, Seat, TableId,
-    preview_seat_bundle,
+    AssetId, EvalActSubmission, EvalHost, EvalSeatApplyReport, MarketAction, OfferProposal,
+    OfferSide, PublicSweepReceipt, SealedOrderBundle, Seat, TableId,
 };
 use league_eval::{
     ArmMapEntry, ArmMapStateFile, BranchArmOutcome, CRATE_GIT_SHA, CrateGitShaSource,
@@ -25,7 +24,7 @@ use league_eval::{
 };
 use league_relay::{
     CONTROL_WORDING_ARM, CallLogEntry, NegotiationInputs, Round, SavedHttpReplyRecord,
-    SavedToolRoundRecord, UntrustedWhisper,
+    SavedToolRoundRecord, UntrustedWhisper, execute_preview_tool_call,
 };
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest, CandidateScoreOutput,
@@ -2787,11 +2786,18 @@ fn sec72_measure5_methods_align_with_doc_and_preview_equivalence() -> TestResult
     let _ = host.apply_act_submissions(&t1_subs)?;
     let _ = host.sweep_turn()?;
     let (save_path, seal_path) = host.write_pre_act_checkpoint(tmp.path())?;
-    let snap: EvalSaveSnapshot = serde_json::from_slice(&fs::read(&save_path)?)?;
+    let snap_val: serde_json::Value = serde_json::from_slice(&fs::read(&save_path)?)?;
     let obs = host.observe_seat(Seat(0))?;
-    assert!(!snap.pledges.is_empty());
-    assert_eq!(snap.pledges, obs.pledges);
-    assert_eq!(snap.audited_pledges, obs.audited_pledges);
+    assert!(
+        snap_val["pledges"]
+            .as_object()
+            .is_some_and(|m| !m.is_empty())
+    );
+    assert_eq!(snap_val["pledges"], serde_json::to_value(&obs.pledges)?);
+    assert_eq!(
+        snap_val["audited_pledges"],
+        serde_json::to_value(&obs.audited_pledges)?
+    );
 
     let preview_state = obs.to_public_preview_state();
     let legal = MarketAction::PostOffer {
@@ -2818,18 +2824,34 @@ fn sec72_measure5_methods_align_with_doc_and_preview_equivalence() -> TestResult
         },
     };
 
-    for (action, expected_legal) in [(legal, true), (illegal, false)] {
+    for (amount, action, expected_legal) in [
+        (UNIT_SCALE, legal, true),
+        (excessive_units * UNIT_SCALE, illegal, false),
+    ] {
         let mut fork = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
-        let via_apply = fork.apply_market_action(action.clone()).is_ok();
-        let via_preview = preview_seat_bundle(
-            &preview_state,
-            &AiPreviewRequest {
-                seat: 0,
-                market_actions: vec![action],
-                bundle: SealedOrderBundle::default(),
-            },
-        )
-        .is_ok_and(|p| p.refused_market_actions.is_empty());
+        let via_apply = fork.apply_market_action(action).is_ok();
+        let preview_args = serde_json::json!({
+            "market_actions": [{
+                "action_kind": "post_offer",
+                "side": "sell",
+                "good": { "asset_kind": "raw", "good_index": 0 },
+                "amount": amount,
+                "price_per_unit_cred": 10 * UNIT_SCALE,
+                "domain_id": serde_json::Value::Null,
+                "is_hybrid": false,
+            }],
+            "bundle": {},
+        })
+        .to_string();
+        let wire_raw = execute_preview_tool_call(&preview_state, &preview_args);
+        let wire_val: serde_json::Value = serde_json::from_str(&wire_raw)?;
+        assert_eq!(
+            wire_val["status"], "ok",
+            "unexpected wire reply: {wire_raw}"
+        );
+        let via_preview = wire_val["refused_market_actions"]
+            .as_array()
+            .is_some_and(Vec::is_empty);
         assert_eq!(via_apply, expected_legal);
         assert_eq!(via_apply, via_preview);
     }
