@@ -935,14 +935,33 @@ fn spend_cap_sums_calls_jsonl_and_refuses_with_cap_reached() -> TestResult {
 }
 
 struct CostUnknownSequencedTransport {
+    calls_log_path: std::path::PathBuf,
     seat_a_returned: (Mutex<bool>, Condvar),
+    wait_timed_out: std::sync::atomic::AtomicBool,
 }
 
 impl CostUnknownSequencedTransport {
-    fn new() -> Self {
+    fn new(calls_log_path: std::path::PathBuf) -> Self {
         Self {
+            calls_log_path,
             seat_a_returned: (Mutex::new(false), Condvar::new()),
+            wait_timed_out: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn wait_timed_out(&self) -> bool {
+        self.wait_timed_out.load(Ordering::SeqCst)
+    }
+
+    fn saltworks_cost_unknown_committed(&self) -> bool {
+        let Ok(raw) = fs::read_to_string(&self.calls_log_path) else {
+            return false;
+        };
+        raw.lines().filter(|l| !l.trim().is_empty()).any(|line| {
+            serde_json::from_str::<CallLogEntry>(line)
+                .map(|c| c.guild == "Saltworks" && c.outcome == "OK" && c.cost.is_none())
+                .unwrap_or(false)
+        })
     }
 }
 
@@ -962,30 +981,48 @@ impl Transport for CostUnknownSequencedTransport {
             }
             return Ok(resp);
         }
-        // Seat B waits until Seat A has returned its costless response, then takes
-        // one transient failure so its retry hits the ledger after Seat A recorded cost=None.
+        // Seat B waits until Seat A has returned its costless response AND committed
+        // Saltworks's costless entry to relay/calls.jsonl, then takes one transient
+        // failure so its retry reads the ledger after Saltworks recorded cost=None.
+        let deadline = Instant::now() + Duration::from_secs(5);
         let (lock, cvar) = &self.seat_a_returned;
         if let Ok(mut done) = lock.lock() {
             while !*done {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    self.wait_timed_out.store(true, Ordering::SeqCst);
+                    return Err(TransportError::Network(
+                        "timed out waiting for Seat A response signal".to_owned(),
+                    ));
+                }
                 let (next_guard, timeout_res) = cvar
-                    .wait_timeout(done, Duration::from_secs(2))
+                    .wait_timeout(done, remaining)
                     .map_err(|_| TransportError::Network("condvar poisoned".to_owned()))?;
                 done = next_guard;
-                if timeout_res.timed_out() {
-                    break;
+                if !*done && timeout_res.timed_out() {
+                    self.wait_timed_out.store(true, Ordering::SeqCst);
+                    return Err(TransportError::Network(
+                        "timed out waiting for Seat A response signal".to_owned(),
+                    ));
                 }
             }
         }
-        // Small yield so Seat A finishes committing its call log line under the ledger mutex.
-        thread::sleep(Duration::from_millis(15));
+        while !self.saltworks_cost_unknown_committed() {
+            if Instant::now() >= deadline {
+                self.wait_timed_out.store(true, Ordering::SeqCst);
+                return Err(TransportError::Network(
+                    "timed out waiting for Saltworks call log line in calls.jsonl".to_owned(),
+                ));
+            }
+            thread::yield_now();
+        }
         Err(TransportError::Network(
             "transient drop before retry".to_owned(),
         ))
     }
 }
 
-#[test]
-fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> TestResult {
+fn run_missing_response_cost_turn_once() -> TestResult {
     let tmp = TempDir::new()?;
     let game_dir = tmp.path().join("game");
     let wrapper = tmp.path().join("wrapper.md");
@@ -1018,7 +1055,8 @@ fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> Test
     })
     .to_string();
     let seats = SeatFile::from_json_str(&seats_raw, None)?;
-    let transport = CostUnknownSequencedTransport::new();
+    let calls_log_path = game_dir.join("relay").join("calls.jsonl");
+    let transport = CostUnknownSequencedTransport::new(calls_log_path);
     let cfg = TurnConfig::new(
         game_dir.clone(),
         "01".to_owned(),
@@ -1030,6 +1068,10 @@ fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> Test
     );
 
     let summary = run_turn(&cfg, &transport, None)?;
+    assert!(
+        !transport.wait_timed_out(),
+        "CostUnknownSequencedTransport timed out waiting for Saltworks commit"
+    );
     assert!(matches!(
         summary.reports[0].outcome,
         SeatOutcome::Delivered { .. }
@@ -1056,6 +1098,20 @@ fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> Test
     assert_eq!(salt_call.total_tokens, Some(135));
     assert!(calls.iter().any(|c| c.outcome == "COST_UNKNOWN"));
 
+    Ok(())
+}
+
+#[test]
+fn missing_response_cost_logs_tokens_and_fails_closed_for_rest_of_turn() -> TestResult {
+    run_missing_response_cost_turn_once()
+}
+
+#[test]
+fn missing_response_cost_stress_50_runs_deterministically() -> TestResult {
+    for iter in 0..50 {
+        run_missing_response_cost_turn_once()
+            .map_err(|e| format!("stress iteration {iter} failed: {e}"))?;
+    }
     Ok(())
 }
 
