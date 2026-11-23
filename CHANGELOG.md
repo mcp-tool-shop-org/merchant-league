@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- CI: the workspace tests run once, inside the Coverage step (`cargo llvm-cov` fails on any test failure); the Test step now runs only the doc tests, which coverage leaves out. The check job had grown to 54 minutes because every test ran twice.
+
 - Dependency lockfile bump (`Cargo.lock`): updated `cookie` `0.18.2` -> `0.18.3` for `RUSTSEC-2026-0594`.
 
 - Blind evaluation decision scorer S2 (`crates/league-scorer`, `docs/decision-scorer.md`, `CHANGELOG.md`,

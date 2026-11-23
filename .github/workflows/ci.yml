@@ -132,8 +132,11 @@ jobs:
             exit 1
           fi
 
-      - name: Test
-        run: cargo test --workspace --locked
+      # The workspace's unit and integration tests run once, inside the Coverage step
+      # (cargo llvm-cov fails the job when any test fails). This step runs the doc
+      # tests, which cargo llvm-cov leaves out by default.
+      - name: Test (doc tests)
+        run: cargo test --workspace --locked --doc
 
       # Coverage floor 92, raised for Card 5 Part B2b (CI measured 92.16% lines). Never
       # lowered to make a build green.
