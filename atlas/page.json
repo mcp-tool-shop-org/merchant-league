@@ -21,6 +21,21 @@
       "partLabel": "league-core"
     },
     {
+      "doors": 5,
+      "importedBy": [
+        "league-core",
+        "league-eval",
+        "league-gen",
+        "league-scorer",
+        "league-seat-ui",
+        "league-tui"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-seat-types",
+      "partLabel": "league-seat-types"
+    },
+    {
       "doors": 8,
       "importedBy": [
         "league-core",
@@ -33,20 +48,6 @@
       "kind": "part",
       "name": "league-error",
       "partLabel": "league-error"
-    },
-    {
-      "doors": 5,
-      "importedBy": [
-        "league-core",
-        "league-gen",
-        "league-scorer",
-        "league-seat-ui",
-        "league-tui"
-      ],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-seat-types",
-      "partLabel": "league-seat-types"
     },
     {
       "doors": 4,
@@ -69,6 +70,16 @@
       "partLabel": "league-relay"
     },
     {
+      "doors": 3,
+      "importedBy": [
+        "league-eval"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-scorer",
+      "partLabel": "league-scorer"
+    },
+    {
       "doors": 2,
       "importedBy": [
         "league-tui"
@@ -87,42 +98,58 @@
       "kind": "part",
       "name": "league-seat-ui",
       "partLabel": "league-seat-ui"
-    },
-    {
-      "doors": 2,
-      "importedBy": [],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-eval",
-      "partLabel": "league-eval"
     }
   ],
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 10,
+      "changed": 16,
       "moved": 0,
-      "parts": 3,
+      "parts": 4,
       "removed": 0
     },
     "items": [
       {
         "kind": "import-added",
-        "sentence": "league-scorer now imports league-seat-types.",
+        "sentence": "league-eval now imports league-seat-types.",
         "subjects": [
-          "league-scorer",
+          "league-eval",
           "league-seat-types"
         ]
       },
       {
+        "kind": "door",
+        "sentence": "CI no longer runs crates/league-eval/src/talk_extract.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-eval/src/talk_extract.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-eval/src/talk_extract.rs is now read by crates/league-eval/src/talk_extract.rs.",
+        "subjects": [
+          "crates/league-eval/src/talk_extract.rs",
+          "crates/league-eval/src/talk_extract.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-seat-types/ is now also read by crates/league-eval/Cargo.toml.",
+        "subjects": [
+          "crates/league-seat-types/",
+          "crates/league-eval/Cargo.toml"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "10 files changed content, across 3 parts.",
+        "sentence": "16 files changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "e7364a66a1faad44fc27a29551f73ab9d93389ec",
-      "generatedAt": "2026-11-23T04:07:38.346Z"
+      "commit": "246a9e068b92dfd67347775429e4922dc58ebd18",
+      "generatedAt": "2026-11-23T08:27:38.447Z"
     },
     "unchanged": false
   },
@@ -208,9 +235,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "71957443a36fb3d7cc0c906e3c41ce1b41e8070a",
+  "commit": "6bb8fc70544d39ec39dc61de5cd60308aa616476",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (408 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -243,7 +270,7 @@
         {
           "boundary": "league-eval",
           "depth": 0,
-          "files": 16
+          "files": 20
         },
         {
           "boundary": "league-gen",
@@ -348,7 +375,7 @@
         "site/src/"
       ],
       "runsCount": 49,
-      "runsMore": 71,
+      "runsMore": 72,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -382,6 +409,57 @@
         "on a push to main touching 2 paths",
         "or by hand"
       ]
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": "crates/league-eval/Cargo.toml",
+      "id": "crates/league-eval/Cargo.toml#league-eval",
+      "kind": "command",
+      "landings": [],
+      "name": "league-eval",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-eval",
+          "depth": 0,
+          "files": 15
+        },
+        {
+          "boundary": "league-relay",
+          "depth": 1,
+          "files": 8
+        },
+        {
+          "boundary": "league-core",
+          "depth": 2,
+          "files": 15
+        },
+        {
+          "boundary": "league-error",
+          "depth": 3,
+          "files": 1
+        },
+        {
+          "boundary": "league-scorer",
+          "depth": 3,
+          "files": 9
+        },
+        {
+          "boundary": "league-seat-types",
+          "depth": 4,
+          "files": 12
+        }
+      ],
+      "runs": [
+        "crates/league-eval/src/main.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
     },
     {
       "checks": [],
@@ -427,52 +505,6 @@
       ],
       "runs": [
         "crates/league-tui/src/main.rs"
-      ],
-      "runsCount": 1,
-      "runsMore": 0,
-      "sends": [],
-      "stages": [],
-      "triggers": []
-    },
-    {
-      "checks": [],
-      "checksCount": 0,
-      "checksMore": 0,
-      "file": "crates/league-eval/Cargo.toml",
-      "id": "crates/league-eval/Cargo.toml#league-eval",
-      "kind": "command",
-      "landings": [],
-      "name": "league-eval",
-      "pushes": false,
-      "reach": [
-        {
-          "boundary": "league-eval",
-          "depth": 0,
-          "files": 12
-        },
-        {
-          "boundary": "league-relay",
-          "depth": 1,
-          "files": 8
-        },
-        {
-          "boundary": "league-core",
-          "depth": 2,
-          "files": 15
-        },
-        {
-          "boundary": "league-error",
-          "depth": 3,
-          "files": 1
-        },
-        {
-          "boundary": "league-seat-types",
-          "depth": 4,
-          "files": 12
-        }
-      ],
-      "runs": [
-        "crates/league-eval/src/main.rs"
       ],
       "runsCount": 1,
       "runsMore": 0,
@@ -699,16 +731,6 @@
       "to": "league-seat-types"
     },
     {
-      "from": "league-eval",
-      "fromTests": false,
-      "to": "league-core"
-    },
-    {
-      "from": "league-eval",
-      "fromTests": false,
-      "to": "league-relay"
-    },
-    {
       "from": "league-gen",
       "fromTests": false,
       "to": "league-core"
@@ -734,6 +756,16 @@
       "to": "league-error"
     },
     {
+      "from": "league-scorer",
+      "fromTests": false,
+      "to": "league-core"
+    },
+    {
+      "from": "league-scorer",
+      "fromTests": false,
+      "to": "league-seat-types"
+    },
+    {
       "from": "league-seat-types",
       "fromTests": false,
       "to": "league-error"
@@ -746,12 +778,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-23T05:08:17.692Z",
+  "generatedAt": "2026-11-23T11:29:51.971Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "41 writes and 32 reads use paths built at run time and are not named here.",
+    "53 writes and 49 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "18 writes and 49 reads go to a path their caller passes, not to this repository.",
+    "18 writes and 64 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -780,29 +812,31 @@
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
-  "startDoor": "crates/league-tui/Cargo.toml#league-tui",
+  "startDoor": "crates/league-eval/Cargo.toml#league-eval",
   "startHere": [
-    "crates/league-tui/src/main.rs",
+    "crates/league-eval/src/main.rs",
+    "crates/league-eval/src/lib.rs",
+    "crates/league-eval/src/cli.rs",
     "crates/league-core/src/lib.rs",
     "crates/league-core/src/bot.rs",
     "crates/league-core/src/commit.rs",
     "crates/league-seat-types/src/lib.rs",
     "crates/league-error/src/lib.rs"
   ],
-  "startReason": "This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
+  "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 104,
+  "testFiles": 105,
   "testedBy": {
-    "league-core": 26,
-    "league-error": 8,
-    "league-eval": 10,
+    "league-core": 27,
+    "league-error": 9,
+    "league-eval": 11,
     "league-gen": 10,
     "league-ledger": 8,
-    "league-relay": 8,
-    "league-scorer": 2,
+    "league-relay": 9,
+    "league-scorer": 3,
     "league-season": 1,
-    "league-seat-types": 6,
+    "league-seat-types": 7,
     "league-seat-ui": 1,
     "league-standalone": 5,
     "league-tui": 2,
@@ -814,7 +848,7 @@
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 41,
+  "unnamedWrites": 53,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

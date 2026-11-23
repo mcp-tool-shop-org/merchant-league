@@ -1,12 +1,17 @@
 //! Blind input, frozen configuration, and deterministic output schemas for `league-scorer`.
 
+use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::fs;
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use league_core::{EvalActSubmission, MarketAction, Units};
 use league_seat_types::UNIT_SCALE;
 
-use crate::error::ScorerError;
+use crate::error::{ScorerError, sanitize_error_text};
 
 /// Fixed schema version accepted by S1 blind scoring requests.
 pub const BLIND_SCORING_SCHEMA_VERSION: u32 = 1;
@@ -67,6 +72,13 @@ pub const SYNTH_SCALE_SEED_POOL_MAX: usize = 6;
 
 /// Proposed fixed code constant: integer parts-per-million denominator for Bernoulli talk-honour draws (`§4.3`, `§5.2`).
 pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
+
+/// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
+pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
+
+/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; enforces per-message `allowed_ascii_chars` validation, thousands-comma grouping, whole-clause closed grammar matching, and fail-closed pair latching; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
+pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
+    "5d5225ee3cbfc466cdd553bbf61c47d34c628632b8239a88f56c35f446f718a8";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -249,7 +261,7 @@ pub struct ScorerConfig {
     pub strata_schedule: String,
     /// Deterministic priority queue truncating excess feasible synthetics at `k_synth_max`.
     pub synth_slot_fill_order: Vec<String>,
-    /// 64-hex SHA-256 of the talk commitment extractor rule table.
+    /// 64-hex SHA-256 over the talk commitment extractor rule table and source code.
     pub talk_extractor_rules_digest: String,
     /// Talk commitment extractor version identifier.
     pub talk_extractor_version: String,
@@ -293,8 +305,8 @@ impl Default for ScorerConfig {
                 "composite_drops".to_owned(),
                 "scaled".to_owned(),
             ],
-            talk_extractor_rules_digest: sha256_hex(b"talk_rules_v1"),
-            talk_extractor_version: "talk_rules_v1".to_owned(),
+            talk_extractor_rules_digest: TALK_EXTRACTOR_RULES_DIGEST_V2.to_owned(),
+            talk_extractor_version: TALK_EXTRACTOR_VERSION_V2.to_owned(),
             upkeep_cover_turns: 2,
         }
     }
@@ -547,6 +559,92 @@ pub struct BlindCandidate {
     pub submission: EvalActSubmission,
 }
 
+/// Per-source talk message extraction counts included in [`BlindScoringRequest`] (`§4.3`, `§8.1`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TalkSourceCounts {
+    /// Messages failing closed as ambiguous for their `(proposer, counterparty)` pair.
+    pub ambiguous: u64,
+    /// Messages in which every clause matched a closed-grammar template cleanly.
+    pub matched: u64,
+    /// Total peer messages targeting `focal_seat` inspected from this source (`matched + ambiguous`).
+    pub seen: u64,
+}
+
+impl TalkSourceCounts {
+    /// Checks `matched + ambiguous == seen`.
+    pub fn validate(&self, label: &str) -> Result<(), ScorerError> {
+        let sum = self.matched.checked_add(self.ambiguous).ok_or_else(|| {
+            ScorerError::InvalidTalkCommitment(format!("{label} talk counts overflow u64"))
+        })?;
+        if sum != self.seen {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "{label} seen count {} != matched {} + ambiguous {}",
+                self.seen, self.matched, self.ambiguous
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Per-state message extraction counts covered by `blind_request_sha256` (`§4.3`, `§7.1`, `§8.1`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TalkExtractionCounts {
+    /// Counts from `to-seat/day-DD-act-<Guild>.negotiation.json` whispers targeting `focal_seat`.
+    pub negotiation: TalkSourceCounts,
+    /// Counts from `decisions/day-DD-talk-<Guild>.json` replies targeting `focal_seat`.
+    pub talk: TalkSourceCounts,
+    /// Element-wise sum of `negotiation` and `talk` counts.
+    pub total: TalkSourceCounts,
+}
+
+impl TalkExtractionCounts {
+    /// Constructs verified totals from per-source `negotiation` and `talk` counts.
+    pub fn from_sources(
+        negotiation: TalkSourceCounts,
+        talk: TalkSourceCounts,
+    ) -> Result<Self, ScorerError> {
+        negotiation.validate("negotiation")?;
+        talk.validate("talk")?;
+        let seen = negotiation.seen.checked_add(talk.seen).ok_or_else(|| {
+            ScorerError::InvalidTalkCommitment("total seen talk count overflow".to_owned())
+        })?;
+        // Per-source validation guarantees `matched <= seen` and `ambiguous <= seen`, so once
+        // `seen` sums without overflowing `u64`, neither component sum can overflow.
+        let matched = negotiation.matched + talk.matched;
+        let ambiguous = negotiation.ambiguous + talk.ambiguous;
+        let out = Self {
+            negotiation,
+            talk,
+            total: TalkSourceCounts {
+                ambiguous,
+                matched,
+                seen,
+            },
+        };
+        out.validate()?;
+        Ok(out)
+    }
+
+    /// Verifies per-source `seen == matched + ambiguous` and `total == negotiation + talk`.
+    pub fn validate(&self) -> Result<(), ScorerError> {
+        self.negotiation.validate("negotiation")?;
+        self.talk.validate("talk")?;
+        self.total.validate("total")?;
+        if self.negotiation.seen.checked_add(self.talk.seen) != Some(self.total.seen)
+            || self.negotiation.matched.checked_add(self.talk.matched) != Some(self.total.matched)
+            || self.negotiation.ambiguous.checked_add(self.talk.ambiguous)
+                != Some(self.total.ambiguous)
+        {
+            return Err(ScorerError::InvalidTalkCommitment(
+                "talk_extraction_counts.total disagrees with negotiation + talk".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Arm-blind scoring request for one `(state_id, pre_act_checkpoint, focal_seat)` (`§8.1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -571,6 +669,8 @@ pub struct BlindScoringRequest {
     pub state_id: String,
     /// Neutral counterfactual talk-phase trade commitments (`§4.3`).
     pub talk_commitments: Vec<ExtractedTalkCommitment>,
+    /// Per-source and total talk message classification counts (`§4.3`, `§8.1`).
+    pub talk_extraction_counts: TalkExtractionCounts,
 }
 
 /// Parses raw JSON bytes into [`BlindScoringRequest`], refusing unknown or non-canonical fields
@@ -639,6 +739,7 @@ impl BlindScoringRequest {
         for commitment in &self.talk_commitments {
             validate_talk_commitment(commitment, self.focal_seat, EVAL_TABLE_SEAT_COUNT)?;
         }
+        self.talk_extraction_counts.validate()?;
         let cfg_hash = config.sha256_hex()?;
         if self.scorer_config_sha256 != cfg_hash {
             return Err(ScorerError::ConfigHashMismatch {
@@ -785,6 +886,10 @@ pub struct CandidateScoreOutput {
 /// Omits all timestamps, durations, hostnames, filesystem paths, and arm labels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StateScoreOutput {
+    /// SHA-256 hex digest of the blind scoring request (`§8.2`). `league-scorer score` records the
+    /// exact file bytes read from `--blind-inputs/<state_id>.json`; direct library calls to
+    /// `execute_blind_request` default to the SHA-256 of `to_sorted_pretty_json(request)`.
+    pub blind_request_sha256: String,
     /// Winning `in_span` candidate identifier achieving `v_max` (ties broken by ascending `candidate_id`).
     pub c_best: String,
     /// Per-candidate score records in ascending `candidate_id` order.
@@ -813,10 +918,183 @@ pub struct StateScoreOutput {
     pub scorer_seed: u64,
     /// Arm-blind canonical state identifier.
     pub state_id: String,
+    /// Per-source and total talk message classification counts echoed from [`BlindScoringRequest`].
+    pub talk_extraction_counts: TalkExtractionCounts,
     /// Maximum `ev_total_equity` over `in_span == true` candidates.
     pub v_max: f64,
     /// Minimum `ev_total_equity` over `in_span == true` candidates.
     pub v_min: f64,
     /// Split-half Winner's curse upward-bias estimate (`§7.1`).
     pub winners_curse: WinnersCurseSummary,
+}
+
+/// Blinded projection of `scorer_freeze.json` read by `league-scorer score --freeze` (`§8.2` step 4).
+///
+/// Intentionally omits `deny_unknown_fields` so unblinded fields (such as `control_wording_arm`)
+/// remain invisible to `league-scorer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScorerFreezeBlindView {
+    /// Sorted manifest SHA-256 of `blind_inputs/*.json`.
+    pub blind_inputs_manifest_sha256: String,
+    /// Canonical SHA-256 of the frozen [`ScorerConfig`].
+    pub scorer_config_sha256: String,
+    /// Canonical SHA-256 over `crates/league-scorer/**`.
+    pub scorer_tree_sha256: String,
+}
+
+impl ScorerFreezeBlindView {
+    /// Validates all SHA-256 digest strings on the freeze view.
+    pub fn validate(&self) -> Result<(), ScorerError> {
+        if !is_valid_sha256_hex(&self.scorer_tree_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "scorer_tree_sha256",
+                value: self.scorer_tree_sha256.clone(),
+            });
+        }
+        if !is_valid_sha256_hex(&self.scorer_config_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "scorer_config_sha256",
+                value: self.scorer_config_sha256.clone(),
+            });
+        }
+        if !is_valid_sha256_hex(&self.blind_inputs_manifest_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "blind_inputs_manifest_sha256",
+                value: self.blind_inputs_manifest_sha256.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Computes `blind_inputs_manifest_sha256` from a filename-sorted map of `filename -> file_sha256` (`§8.2`).
+#[must_use]
+pub fn compute_blind_inputs_manifest_sha256_from_entries(
+    entries: &BTreeMap<String, String>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"merchant-league/blind-inputs-manifest/v1\n");
+    for (filename, file_sha256) in entries {
+        hasher.update(filename.as_bytes());
+        hasher.update(b":");
+        hasher.update(file_sha256.as_bytes());
+        hasher.update(b"\n");
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    encode_digest_hex(&digest)
+}
+
+/// Computes the sorted SHA-256 manifest digest over all `*.json` files in `blind_inputs_dir` (`§8.2`).
+pub fn compute_blind_inputs_manifest_sha256(
+    blind_inputs_dir: &Path,
+) -> Result<String, ScorerError> {
+    let read_dir = fs::read_dir(blind_inputs_dir).map_err(|e| {
+        ScorerError::NoBlindInputs(sanitize_error_text(
+            &format!("cannot read blind inputs directory: {e}"),
+            &[blind_inputs_dir],
+        ))
+    })?;
+    let mut entries = BTreeMap::new();
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read blind inputs entry: {e}"),
+                &[blind_inputs_dir],
+            ))
+        })?;
+        let ft = entry.file_type().map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("inspect blind inputs entry: {e}"),
+                &[blind_inputs_dir, &entry.path()],
+            ))
+        })?;
+        if ft.is_file() && entry.path().extension() == Some(OsStr::new("json")) {
+            let name = entry.file_name().into_string().map_err(|_| {
+                ScorerError::InvalidStateId("non-UTF-8 blind input filename".to_owned())
+            })?;
+            let bytes = fs::read(entry.path()).map_err(|e| {
+                ScorerError::Io(sanitize_error_text(
+                    &format!("read blind input bytes: {e}"),
+                    &[blind_inputs_dir, &entry.path()],
+                ))
+            })?;
+            entries.insert(name, sha256_hex(&bytes));
+        }
+    }
+    if entries.is_empty() {
+        return Err(ScorerError::NoBlindInputs(
+            "no *.json request files found in --blind-inputs".to_owned(),
+        ));
+    }
+    Ok(compute_blind_inputs_manifest_sha256_from_entries(&entries))
+}
+
+fn collect_scorer_tree_entries(
+    root: &Path,
+    dir: &Path,
+    rel_prefix: &str,
+    entries: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), ScorerError> {
+    let read_dir = fs::read_dir(dir).map_err(|e| {
+        ScorerError::Io(sanitize_error_text(
+            &format!("read scorer crate dir: {e}"),
+            &[root, dir],
+        ))
+    })?;
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read scorer crate entry: {e}"),
+                &[root, dir],
+            ))
+        })?;
+        let name_os = entry.file_name();
+        let name = name_os.to_str().ok_or_else(|| {
+            ScorerError::Io("non-UTF-8 filename in scorer crate directory".to_owned())
+        })?;
+        let ft = entry.file_type().map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("inspect scorer crate entry: {e}"),
+                &[root, &entry.path()],
+            ))
+        })?;
+        let rel = if rel_prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{rel_prefix}/{name}")
+        };
+        if ft.is_dir() {
+            if name == "target" || name == ".git" {
+                continue;
+            }
+            collect_scorer_tree_entries(root, &entry.path(), &rel, entries)?;
+        } else if ft.is_file() {
+            let bytes = fs::read(entry.path()).map_err(|e| {
+                ScorerError::Io(sanitize_error_text(
+                    &format!("read scorer crate file: {e}"),
+                    &[root, &entry.path()],
+                ))
+            })?;
+            entries.insert(rel, bytes);
+        }
+    }
+    Ok(())
+}
+
+/// Computes `scorer_tree_sha256` across `crate_dir` (`crates/league-scorer/**`), walking files
+/// in ascending POSIX relative-path order (excluding `target/` and `.git/`).
+pub fn compute_scorer_tree_sha256(crate_dir: &Path) -> Result<String, ScorerError> {
+    let mut entries = BTreeMap::new();
+    collect_scorer_tree_entries(crate_dir, crate_dir, "", &mut entries)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"merchant-league/scorer-tree/v1\n");
+    for (rel, bytes) in entries {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(b"\0");
+        hasher.update(&bytes);
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    Ok(encode_digest_hex(&digest))
 }

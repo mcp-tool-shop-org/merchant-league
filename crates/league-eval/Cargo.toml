@@ -20,6 +20,8 @@ path = "src/main.rs"
 league-core = { path = "../league-core" }
 league-error = { path = "../league-error" }
 league-relay = { path = "../league-relay" }
+league-scorer = { path = "../league-scorer" }
+league-seat-types = { path = "../league-seat-types" }
 getrandom = "0.3.4"
 hex = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -3,7 +3,8 @@
 use crate::error::ScorerError;
 use crate::types::{
     BLIND_SCORING_SCHEMA_VERSION, BlindScoringRequest, CandidateScoreOutput, PrescreenSummary,
-    ScenarioRolloutOutcome, ScorerConfig, StateScoreOutput, WinnersCurseSummary,
+    ScenarioRolloutOutcome, ScorerConfig, StateScoreOutput, WinnersCurseSummary, sha256_hex,
+    to_sorted_pretty_json,
 };
 
 struct CandidateTotals {
@@ -273,6 +274,9 @@ pub fn score_outcomes(
     let winners_curse = compute_winners_curse(request, &totals, half)?;
 
     Ok(StateScoreOutput {
+        // Default for direct library callers; the `score` CLI overwrites this with `sha256_hex`
+        // over the exact request file bytes read from `--blind-inputs/<state_id>.json`.
+        blind_request_sha256: sha256_hex(to_sorted_pretty_json(request)?.as_bytes()),
         c_best,
         candidates: candidate_outputs,
         degenerate_flat_set,
@@ -287,6 +291,7 @@ pub fn score_outcomes(
         scorer_config_sha256: request.scorer_config_sha256.clone(),
         scorer_seed: request.scorer_seed,
         state_id: request.state_id.clone(),
+        talk_extraction_counts: request.talk_extraction_counts.clone(),
         v_max,
         v_min,
         winners_curse,
