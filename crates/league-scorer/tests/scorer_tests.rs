@@ -1239,3 +1239,651 @@ fn cli_refuses_bad_layouts_tampered_checkpoints_and_usage_errors() -> TestResult
     assert!(String::from_utf8_lossy(&err_sub).contains("INVALID_CHECKPOINTS_LAYOUT"));
     Ok(())
 }
+
+struct FailingWriter;
+
+impl std::io::Write for FailingWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("simulated write error"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn all_scorer_error_variants_report_codes_hints_exit_codes_and_display() -> TestResult {
+    let variants = vec![
+        (ScorerError::Usage("bad usage".into()), EXIT_USER_ERROR),
+        (ScorerError::UnsupportedSchemaVersion(99), EXIT_USER_ERROR),
+        (
+            ScorerError::InvalidStateId("bad id".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::InvalidHexDigest {
+                field: "candidate_id",
+                value: "zz".into(),
+            },
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::InvalidFocalSeat {
+                focal_seat: 4,
+                seat_count: 4,
+            },
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::EmptyCandidates("empty".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::NoInSpanCandidates("none".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::UnsortedCandidates {
+                prev: "b".into(),
+                current: "a".into(),
+            },
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::DuplicateCandidateId("a".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::CandidateIdMismatch {
+                index: 0,
+                declared: "a".into(),
+                actual: "b".into(),
+            },
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::ConfigHashMismatch {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::PostureNotImplemented("active".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::TalkCommitmentsNotImplemented(2),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::InvalidScorerConfig("odd M".into()),
+            EXIT_USER_ERROR,
+        ),
+        (ScorerError::Json("parse".into()), EXIT_USER_ERROR),
+        (ScorerError::NoBlindInputs("none".into()), EXIT_USER_ERROR),
+        (
+            ScorerError::InvalidCheckpointsLayout("bad".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::CheckpointNotFound("missing".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::CheckpointHashMismatch("mismatch".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::InvalidCheckpointState("5 seats".into()),
+            EXIT_USER_ERROR,
+        ),
+        (ScorerError::FocalMandateNotInDeck, EXIT_RUNTIME_ERROR),
+        (
+            ScorerError::InsufficientMandatePool {
+                pool_len: 1,
+                needed: 3,
+            },
+            EXIT_RUNTIME_ERROR,
+        ),
+        (ScorerError::Engine("engine".into()), EXIT_RUNTIME_ERROR),
+        (ScorerError::Io("disk".into()), EXIT_RUNTIME_ERROR),
+    ];
+
+    for (err, expected_exit) in variants {
+        let code = err.code();
+        assert!(!code.is_empty());
+        assert_eq!(err.exit_code(), expected_exit, "code={code}");
+        assert!(!err.hint().is_empty(), "code={code}");
+        let msg = err.to_string();
+        assert!(msg.starts_with(code), "msg={msg}");
+        let structured = err.to_structured_error();
+        assert_eq!(structured.code, code);
+        assert_eq!(structured.hint, err.hint());
+    }
+
+    assert_eq!(
+        league_scorer::validate_state_id(".")
+            .err()
+            .map(|e| e.code()),
+        Some("INVALID_STATE_ID")
+    );
+    let too_long = "a".repeat(129);
+    assert_eq!(
+        league_scorer::validate_state_id(&too_long)
+            .err()
+            .map(|e| e.code()),
+        Some("INVALID_STATE_ID")
+    );
+
+    let mut cfg_nan = ScorerConfig::s1_standard(4);
+    cfg_nan.p_honour = f64::NAN;
+    assert_eq!(
+        cfg_nan.validate_for_s1().err().map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+    Ok(())
+}
+
+#[test]
+fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
+    let tmp = UniqueTmpDir::new("rollout_edges")?;
+    let TestCheckpointFixture {
+        cas_save,
+        cas_seal,
+        save_sha,
+        seal_sha,
+        pair_sha,
+        save_bytes: _,
+    } = make_real_checkpoint_pair(tmp.path(), 8108, 0)?;
+
+    let cfg = ScorerConfig::s1_standard(2);
+    let cfg_sha = cfg.sha256_hex()?;
+    let c_passive = build_candidate(EvalActSubmission::default(), true, false)?;
+    let req = BlindScoringRequest {
+        candidates: vec![c_passive.clone()],
+        focal_seat: 0,
+        pre_act_pair_sha256: pair_sha.clone(),
+        pre_act_save_sha256: save_sha,
+        pre_act_seal_sha256: seal_sha,
+        schema_version: 1,
+        scorer_config_sha256: cfg_sha.clone(),
+        scorer_seed: 12,
+        state_id: "edge_8108".to_owned(),
+        talk_commitments: Vec::new(),
+    };
+
+    // Missing save file in verify_checkpoint_pair.
+    assert_eq!(
+        verify_checkpoint_pair(&tmp.path().join("missing.save.json"), &cas_seal, &req)
+            .err()
+            .map(|e| e.code()),
+        Some("CHECKPOINT_NOT_FOUND")
+    );
+
+    // Seal hash mismatch in verify_checkpoint_pair.
+    let bad_seal_path = tmp.path().join("tampered.seal");
+    fs::write(&bad_seal_path, b"corrupt seal bytes")?;
+    assert_eq!(
+        verify_checkpoint_pair(&cas_save, &bad_seal_path, &req)
+            .err()
+            .map(|e| e.code()),
+        Some("CHECKPOINT_HASH_MISMATCH")
+    );
+
+    // run_single_rollout errors: missing file, focal_seat out of range, illegal submission.
+    let probe = EvalHost::fork_from_checkpoint(&cas_save, &cas_seal)?;
+    let focal_obs = probe.observe_seat(Seat(0))?;
+    let focal_mandate = *focal_obs.own_mandate().ok_or("missing focal mandate")?;
+    let scenarios = draw_scenarios(&focal_obs.spec, focal_mandate, 0, 12, &pair_sha, 1, 2)?;
+    let mut peer_subs = BTreeMap::new();
+    for s in 1..4_u8 {
+        let p_obs = probe.observe_seat(Seat(s))?;
+        let p_mandate = *scenarios[0]
+            .peer_mandates
+            .get(&s)
+            .ok_or("missing peer mandate")?;
+        let dec = ClubBot::new(scenarios[0].bot_base_seed.wrapping_add(u64::from(s)))
+            .decide_full_turn(&p_obs, &p_mandate);
+        peer_subs.insert(
+            s,
+            EvalActSubmission {
+                market_actions: dec.pass_a_actions,
+                pass_b_actions: dec.pass_b_actions,
+                bundle: dec.bundle,
+            },
+        );
+    }
+
+    assert_eq!(
+        run_single_rollout(
+            &tmp.path().join("missing.save.json"),
+            &cas_seal,
+            0,
+            &c_passive.submission,
+            &peer_subs,
+            focal_mandate,
+            &scenarios[0],
+        )
+        .err()
+        .map(|e| e.code()),
+        Some("ENGINE_ERROR")
+    );
+
+    assert_eq!(
+        run_single_rollout(
+            &cas_save,
+            &cas_seal,
+            4,
+            &c_passive.submission,
+            &peer_subs,
+            focal_mandate,
+            &scenarios[0],
+        )
+        .err()
+        .map(|e| e.code()),
+        Some("INVALID_FOCAL_SEAT")
+    );
+
+    let mut bad_peer_subs = peer_subs.clone();
+    bad_peer_subs.insert(99, EvalActSubmission::default());
+    assert_eq!(
+        run_single_rollout(
+            &cas_save,
+            &cas_seal,
+            0,
+            &c_passive.submission,
+            &bad_peer_subs,
+            focal_mandate,
+            &scenarios[0],
+        )
+        .err()
+        .map(|e| e.code()),
+        Some("ENGINE_ERROR")
+    );
+
+    // 5-seat checkpoint refused by both run_single_rollout and execute_blind_request.
+    let mut host5 = EvalHost::from_standard_setup(TableId(8109), 5, 1, 0)?;
+    let raw5_dir = tmp.path().join("raw5");
+    fs::create_dir_all(&raw5_dir)?;
+    let (save5, seal5) = host5.write_pre_act_checkpoint(&raw5_dir)?;
+    let save5_bytes = fs::read(&save5)?;
+    let seal5_bytes = fs::read(&seal5)?;
+    let req5 = BlindScoringRequest {
+        candidates: vec![build_candidate(EvalActSubmission::default(), true, true)?],
+        focal_seat: 0,
+        pre_act_pair_sha256: compute_pre_act_pair_sha256_hex(&save5_bytes, &seal5_bytes),
+        pre_act_save_sha256: sha256_hex(&save5_bytes),
+        pre_act_seal_sha256: sha256_hex(&seal5_bytes),
+        schema_version: 1,
+        scorer_config_sha256: cfg_sha.clone(),
+        scorer_seed: 1,
+        state_id: "seat5".to_owned(),
+        talk_commitments: Vec::new(),
+    };
+    assert_eq!(
+        execute_blind_request(&req5, &cfg, &save5, &seal5)
+            .err()
+            .map(|e| e.code()),
+        Some("INVALID_CHECKPOINT_STATE")
+    );
+    assert_eq!(
+        run_single_rollout(
+            &save5,
+            &seal5,
+            0,
+            &c_passive.submission,
+            &peer_subs,
+            focal_mandate,
+            &scenarios[0],
+        )
+        .err()
+        .map(|e| e.code()),
+        Some("INVALID_CHECKPOINT_STATE")
+    );
+
+    // execute_blind_request refuses corrupt JSON with valid hashes as ENGINE_ERROR.
+    let fake_save = tmp.path().join("fake.save.json");
+    let fake_seal = tmp.path().join("fake.seal");
+    fs::write(&fake_save, b"{not valid json")?;
+    fs::write(&fake_seal, b"{not valid seal")?;
+    let fake_req = BlindScoringRequest {
+        candidates: vec![build_candidate(EvalActSubmission::default(), true, true)?],
+        focal_seat: 0,
+        pre_act_pair_sha256: compute_pre_act_pair_sha256_hex(
+            b"{not valid json",
+            b"{not valid seal",
+        ),
+        pre_act_save_sha256: sha256_hex(b"{not valid json"),
+        pre_act_seal_sha256: sha256_hex(b"{not valid seal"),
+        schema_version: 1,
+        scorer_config_sha256: cfg_sha,
+        scorer_seed: 1,
+        state_id: "fake_ckpt".to_owned(),
+        talk_commitments: Vec::new(),
+    };
+    assert_eq!(
+        execute_blind_request(&fake_req, &cfg, &fake_save, &fake_seal)
+            .err()
+            .map(|e| e.code()),
+        Some("ENGINE_ERROR")
+    );
+
+    // score_outcomes shape mismatches & zero arm-independent candidates branch.
+    assert_eq!(
+        score_outcomes(&req, &cfg, 1, &[]).err().map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+    assert_eq!(
+        score_outcomes(
+            &req,
+            &cfg,
+            1,
+            &[vec![ScenarioRolloutOutcome {
+                mandate_bonus: 0,
+                net_asset_equity: 0,
+                project_equity: 0,
+                total_equity: 0,
+            }]],
+        )
+        .err()
+        .map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+    let no_indep_out = score_outcomes(
+        &req,
+        &cfg,
+        1,
+        &[vec![
+            ScenarioRolloutOutcome {
+                mandate_bonus: 0,
+                net_asset_equity: 100,
+                project_equity: 0,
+                total_equity: 100,
+            },
+            ScenarioRolloutOutcome {
+                mandate_bonus: 0,
+                net_asset_equity: 200,
+                project_equity: 0,
+                total_equity: 200,
+            },
+        ]],
+    )?;
+    assert_eq!(no_indep_out.prescreen.n_feasible_indep, 0);
+    assert_eq!(no_indep_out.prescreen.v_min_indep, None);
+    assert_eq!(no_indep_out.prescreen.v_max_indep, None);
+    assert!(no_indep_out.prescreen.excluded_by_prescreen);
+    assert_eq!(no_indep_out.candidates[0].sensitivity_indep_rank, None);
+    assert_eq!(
+        no_indep_out.candidates[0].sensitivity_indep_percentile,
+        None
+    );
+    Ok(())
+}
+
+#[test]
+fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
+    let tmp = UniqueTmpDir::new("cli_more_edges")?;
+    let TestCheckpointFixture {
+        cas_save: _,
+        cas_seal: _,
+        save_sha,
+        seal_sha,
+        pair_sha,
+        save_bytes: _,
+    } = make_real_checkpoint_pair(tmp.path(), 8110, 0)?;
+
+    let cfg = ScorerConfig::s1_standard(2);
+    let cfg_sha = cfg.sha256_hex()?;
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+
+    let c_passive = build_candidate(EvalActSubmission::default(), true, true)?;
+    let req = BlindScoringRequest {
+        candidates: vec![c_passive],
+        focal_seat: 0,
+        pre_act_pair_sha256: pair_sha,
+        pre_act_save_sha256: save_sha,
+        pre_act_seal_sha256: seal_sha,
+        schema_version: 1,
+        scorer_config_sha256: cfg_sha,
+        scorer_seed: 9,
+        state_id: "state_8110".to_owned(),
+        talk_commitments: Vec::new(),
+    };
+
+    let blind_dir = tmp.path().join("blind");
+    fs::create_dir_all(&blind_dir)?;
+    fs::write(blind_dir.join("notes.txt"), b"ignored")?;
+    fs::create_dir_all(blind_dir.join("nested_dir"))?;
+    fs::write(blind_dir.join("req.json"), to_sorted_compact_json(&req)?)?;
+    let ckpts_dir = tmp.path().join("checkpoints");
+    let out_dir = tmp.path().join("out");
+
+    // Short flags `-h` and `-V`, plus stdout write failures.
+    for flag in ["-h", "-V"] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(run_cli([flag], &mut out, &mut err), EXIT_OK);
+        assert!(!out.is_empty());
+
+        let mut fail_out = FailingWriter;
+        let mut err_w = Vec::new();
+        assert_eq!(
+            run_cli([flag], &mut fail_out, &mut err_w),
+            EXIT_RUNTIME_ERROR
+        );
+    }
+
+    // Usage edge cases (duplicate flags, missing values, empty value, missing required flags, text error format).
+    for args in [
+        vec!["--error-format", "text"],
+        vec!["score", "--blind-inputs"],
+        vec!["score", "--blind-inputs", ""],
+        vec!["score", "--checkpoints", "a", "--checkpoints", "b"],
+        vec!["score", "--config", "a", "--config", "b"],
+        vec!["score", "--out", "a", "--out", "b"],
+        vec!["score", "--error-format"],
+        vec!["score", "--error-format", "xml"],
+        vec!["score", "--blind-inputs", "a"],
+        vec!["score", "--blind-inputs", "a", "--checkpoints", "b"],
+        vec![
+            "score",
+            "--blind-inputs",
+            "a",
+            "--checkpoints",
+            "b",
+            "--config",
+            "c",
+        ],
+        vec![
+            "score",
+            "--blind-inputs",
+            "a",
+            "--checkpoints",
+            "b",
+            "--config",
+            "c",
+            "--out",
+            "d",
+            "--error-format",
+            "text",
+        ],
+    ] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            run_cli(args.clone(), &mut out, &mut err),
+            EXIT_USER_ERROR,
+            "args={args:?}"
+        );
+        assert!(!err.is_empty());
+    }
+
+    // Missing config file & bad JSON config file.
+    let bad_cfg_path = tmp.path().join("bad_cfg.json");
+    fs::write(&bad_cfg_path, b"{bad")?;
+    for (cfg_arg, expected_code) in [
+        (tmp.path().join("no_cfg.json"), "INVALID_SCORER_CONFIG"),
+        (bad_cfg_path, "INVALID_JSON"),
+    ] {
+        let mut err = Vec::new();
+        assert_eq!(
+            run_cli(
+                [
+                    "score",
+                    "--blind-inputs",
+                    blind_dir.to_str().ok_or("utf8")?,
+                    "--checkpoints",
+                    ckpts_dir.to_str().ok_or("utf8")?,
+                    "--config",
+                    cfg_arg.to_str().ok_or("utf8")?,
+                    "--out",
+                    out_dir.to_str().ok_or("utf8")?,
+                ],
+                &mut Vec::new(),
+                &mut err,
+            ),
+            EXIT_USER_ERROR
+        );
+        assert!(String::from_utf8_lossy(&err).contains(expected_code));
+    }
+
+    // Missing checkpoints dir & Missing blind-inputs dir.
+    for (bi, ck, expected_code) in [
+        (
+            &blind_dir,
+            &tmp.path().join("no_ckpts"),
+            "INVALID_CHECKPOINTS_LAYOUT",
+        ),
+        (&tmp.path().join("no_blind"), &ckpts_dir, "NO_BLIND_INPUTS"),
+    ] {
+        let mut err = Vec::new();
+        assert_eq!(
+            run_cli(
+                [
+                    "score",
+                    "--blind-inputs",
+                    bi.to_str().ok_or("utf8")?,
+                    "--checkpoints",
+                    ck.to_str().ok_or("utf8")?,
+                    "--config",
+                    cfg_path.to_str().ok_or("utf8")?,
+                    "--out",
+                    out_dir.to_str().ok_or("utf8")?,
+                ],
+                &mut Vec::new(),
+                &mut err,
+            ),
+            EXIT_USER_ERROR
+        );
+        assert!(String::from_utf8_lossy(&err).contains(expected_code));
+    }
+
+    // Non-64-hex `.save.json` stem inside `--checkpoints`.
+    let non_hex = ckpts_dir.join("short.save.json");
+    fs::write(&non_hex, b"{}")?;
+    let mut err_non_hex = Vec::new();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_non_hex,
+        ),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_non_hex).contains("INVALID_CHECKPOINTS_LAYOUT"));
+    fs::remove_file(&non_hex)?;
+
+    // Invalid JSON blind request.
+    let bad_req_path = blind_dir.join("zzz_bad.json");
+    fs::write(&bad_req_path, b"{not json")?;
+    let mut err_bad_req = Vec::new();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_bad_req,
+        ),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_bad_req).contains("INVALID_JSON"));
+    fs::remove_file(&bad_req_path)?;
+
+    // `--out` pointing to a regular file fails `create_dir_all` with EXIT_RUNTIME_ERROR.
+    let file_as_out = tmp.path().join("out_is_file");
+    fs::write(&file_as_out, b"block")?;
+    let mut err_out_io = Vec::new();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                file_as_out.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_out_io,
+        ),
+        EXIT_RUNTIME_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_out_io).contains("IO_ERROR"));
+
+    // Valid execution succeeds even with ignored notes.txt / nested_dir, and handles stdout write error.
+    let mut fail_stdout = FailingWriter;
+    let mut err_stdout = Vec::new();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut fail_stdout,
+            &mut err_stdout,
+        ),
+        EXIT_RUNTIME_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_stdout).contains("IO_ERROR"));
+
+    // Also run binary with `--help` and `--version` so CLI help/version paths work end-to-end.
+    let bin = env!("CARGO_BIN_EXE_league-scorer");
+    for arg in ["--help", "--version"] {
+        let out = Command::new(bin).arg(arg).output()?;
+        assert!(out.status.success(), "bin {arg}");
+        assert!(!out.stdout.is_empty(), "bin {arg}");
+    }
+    Ok(())
+}
