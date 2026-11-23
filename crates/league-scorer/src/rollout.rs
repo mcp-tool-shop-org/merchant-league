@@ -219,14 +219,11 @@ pub fn run_single_rollout_with_replay_log(
             };
             subs.insert(s, sub);
         }
-        host.apply_act_submissions(&subs).map_err(|e| {
-            ScorerError::Engine(format!(
-                "apply turn {} rollout submissions: {e}",
-                host.turn()
-            ))
-        })?;
+        let turn = host.turn();
+        host.apply_act_submissions(&subs)
+            .map_err(|e| ScorerError::Engine(format!("apply turn {turn}: {e}")))?;
         host.sweep_turn()
-            .map_err(|e| ScorerError::Engine(format!("sweep turn {} rollout: {e}", host.turn())))?;
+            .map_err(|e| ScorerError::Engine(format!("sweep turn {turn}: {e}")))?;
     }
 
     let (scoreboard, replay_log, _, _) = host
@@ -236,11 +233,7 @@ pub fn run_single_rollout_with_replay_log(
         .standings
         .iter()
         .find(|e| e.seat == focal_seat)
-        .ok_or_else(|| {
-            ScorerError::Engine(format!(
-                "focal seat {focal_seat} missing from FinalScoreboard"
-            ))
-        })?;
+        .ok_or_else(|| ScorerError::Engine(format!("focal seat {focal_seat} missing")))?;
 
     Ok((
         ScenarioRolloutOutcome {

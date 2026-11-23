@@ -10,16 +10,17 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use league_core::{
-    AiPreviewRequest, AssetId, CheckProposal, ClubBot, CommitmentHash, EscrowProposal,
+    AiPreviewRequest, AssetId, CharterRole, CheckProposal, ClubBot, CommitmentHash, EscrowProposal,
     EvalActSubmission, EvalHost, GradedMandateCard, IntentPledge, IntentTarget, MandateKind,
     MarketAction, OfferProposal, OfferSide, PublicTableSpec, SealedOrderBundle, Seat, TableId,
-    ToStructuredError as _, TurnPhase, preview_seat_bundle, replay_eval_season,
+    ToStructuredError as _, TurnPhase, mul_units_parity, preview_seat_bundle, replay_eval_season,
+    town_import_cost_cred,
 };
 use league_scorer::cli::run_cli;
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest,
     COMPOSITE_GREEDY_RULES_DEFAULT, DROP_TIE_BREAK_BY_CANDIDATE_ID, EXIT_OK, EXIT_RUNTIME_ERROR,
-    EXIT_USER_ERROR, ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind,
+    EXIT_USER_ERROR, ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind, PostureWeights,
     SYNTH_CHARTER_BID_CRED, SYNTH_CLAIM_MATURING_EXACT, SYNTH_CONVERTER_INPUT_DEFICIT_COVER,
     SYNTH_COUNCIL_SELF_NOMINATION, SYNTH_DROP_DEFAULT_ACTION_RISK_CRED,
     SYNTH_DROP_PROJECT_RISK_CRED, SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER,
@@ -840,6 +841,7 @@ fn real_checkpoint_rollout_cli_determinism_and_engine_parity() -> TestResult {
         pair_sha,
         save_bytes: _,
     } = make_real_checkpoint_pair(tmp.path(), 8102, 0)?;
+    assert!(probe_checkpoint_sanitized(&cas_save, &cas_seal).is_ok());
 
     let cfg = ScorerConfig::s1_standard(2);
     let cfg_sha = cfg.sha256_hex()?;
@@ -3779,6 +3781,587 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
     Ok(())
 }
 
+fn extract_backticked_tokens(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('`') else {
+            break;
+        };
+        out.push(&after[..close]);
+        rest = &after[close + 1..];
+    }
+    out
+}
+
+fn parse_sec52_table(sec52: &str) -> Result<BTreeMap<String, String>, String> {
+    let mut rows = BTreeMap::new();
+    let mut in_table = false;
+    let mut saw_separator = false;
+    for raw_line in sec52.lines() {
+        let line = raw_line.trim();
+        if line.starts_with("| Proposed Parameter (`ScorerConfig` field)") {
+            in_table = true;
+            continue;
+        }
+        if !in_table {
+            continue;
+        }
+        if !line.starts_with('|') {
+            break;
+        }
+        if line.starts_with("|---") {
+            saw_separator = true;
+            continue;
+        }
+        if !saw_separator {
+            return Err("expected markdown separator row after header".to_owned());
+        }
+        let cols: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+        if cols.len() != 3 {
+            return Err(format!("expected 3 columns in §5.2 table row `{line}`"));
+        }
+        let field_tokens: Vec<&str> = extract_backticked_tokens(cols[0])
+            .into_iter()
+            .filter(|tok| {
+                !tok.is_empty()
+                    && tok
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            })
+            .collect();
+        if field_tokens.is_empty() {
+            return Err(format!("no field name found in row `{line}`"));
+        }
+        for field in field_tokens {
+            if rows.insert(field.to_owned(), cols[2].to_owned()).is_some() {
+                return Err(format!("duplicate field `{field}` in §5.2 table"));
+            }
+        }
+    }
+    if rows.is_empty() {
+        return Err("failed to parse any §5.2 table rows".to_owned());
+    }
+    Ok(rows)
+}
+
+fn first_backticked(cell: &str, field: &str) -> Result<String, String> {
+    extract_backticked_tokens(cell)
+        .into_iter()
+        .next()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("missing backticked value in §5.2 cell for `{field}`: `{cell}`"))
+}
+
+fn unquote_doc_str(tok: &str, field: &str) -> Result<String, String> {
+    tok.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("expected quoted string in §5.2 for `{field}`, got `{tok}`"))
+}
+
+fn parse_doc_posture_kind(tok: &str) -> Result<PostureKind, String> {
+    match tok {
+        "Std" | "Standard" => Ok(PostureKind::Standard),
+        "Act" | "Active" => Ok(PostureKind::Active),
+        "Cons" | "Conservative" => Ok(PostureKind::Conservative),
+        _ => Err(format!("unknown posture token `{tok}` in §5.2 cell")),
+    }
+}
+
+fn verify_sec52_table_matches_defaults(sec52: &str) -> Result<(), String> {
+    let table = parse_sec52_table(sec52)?;
+    // Exhaustive destructuring without `..` ensures any added ScorerConfig or PostureWeights
+    // field fails to compile until explicitly mapped to its own row in §5.2.
+    let ScorerConfig {
+        composite_greedy_rules,
+        debt_repayment_grid_bps,
+        include_pass_b_cleared_club_bot,
+        k_synth_max,
+        mandate_stratification_mode,
+        p_honour,
+        parity_spread_threshold_bps,
+        partial_crossing_fractions_bps,
+        posture_schedule,
+        posture_weights:
+            PostureWeights {
+                active,
+                conservative,
+                standard,
+            },
+        prescreen_exclude_flat_sets,
+        prescreen_min_arm_indep_candidates,
+        prescreen_min_arm_indep_span,
+        quantity_scales_bps,
+        quote_offsets_bps,
+        scenarios_m,
+        strata_schedule,
+        synth_slot_fill_order,
+        talk_extractor_rules_digest,
+        talk_extractor_version,
+        upkeep_cover_turns,
+    } = ScorerConfig::default();
+
+    const EXPECTED_FIELD_COUNT: usize = 21;
+    if table.len() != EXPECTED_FIELD_COUNT {
+        return Err(format!(
+            "§5.2 table mapped {} fields, expected {EXPECTED_FIELD_COUNT}",
+            table.len()
+        ));
+    }
+    let get = |name: &str| -> Result<&str, String> {
+        table
+            .get(name)
+            .map(String::as_str)
+            .ok_or_else(|| format!("§5.2 table missing field `{name}`"))
+    };
+
+    // 1–4. posture_weights.{standard, active, conservative} & posture_schedule
+    let pw_cell = get("posture_weights")?;
+    let ps_cell = get("posture_schedule")?;
+    if pw_cell != ps_cell {
+        return Err("posture_weights and posture_schedule cells disagree".to_owned());
+    }
+    let pw_tokens = extract_backticked_tokens(pw_cell);
+    if pw_tokens.len() < 2 {
+        return Err(format!("invalid posture cell `{pw_cell}`"));
+    }
+    let mix_inner = pw_tokens[0]
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .ok_or_else(|| format!("expected bracketed weight mix in `{pw_cell}`"))?;
+    let mut doc_std = None;
+    let mut doc_act = None;
+    let mut doc_cons = None;
+    for part in mix_inner.split(',').map(str::trim) {
+        let mut it = part.split_whitespace();
+        let w: u32 = it
+            .next()
+            .ok_or_else(|| format!("missing weight count in `{part}`"))?
+            .parse()
+            .map_err(|e| format!("bad weight `{part}`: {e}"))?;
+        let label = it
+            .next()
+            .ok_or_else(|| format!("missing posture label in `{part}`"))?;
+        match label {
+            "Standard" => doc_std = Some(w),
+            "Active" => doc_act = Some(w),
+            "Conservative" => doc_cons = Some(w),
+            other => return Err(format!("unknown posture label `{other}`")),
+        }
+    }
+    if (doc_std, doc_act, doc_cons) != (Some(standard), Some(active), Some(conservative)) {
+        return Err(format!(
+            "posture_weights mismatch: doc=({doc_std:?},{doc_act:?},{doc_cons:?}) default=({standard},{active},{conservative})"
+        ));
+    }
+    let mapping = pw_tokens[1]
+        .strip_prefix("m % 4")
+        .ok_or_else(|| format!("expected `m % 4` schedule mapping in `{}`", pw_tokens[1]))?
+        .trim();
+    // Parse schedule robustly on `m % 4` without brace comma ambiguity by splitting on `->`.
+    let mut doc_sched_vec = vec![PostureKind::Standard; 4];
+    let mut seen_mask = [false; 4];
+    let arrow_parts: Vec<&str> = mapping.split("->").map(str::trim).collect();
+    if arrow_parts.len() < 2 {
+        return Err(format!(
+            "missing `->` schedule mapping in `{}`",
+            pw_tokens[1]
+        ));
+    }
+    for i in 0..arrow_parts.len() - 1 {
+        let idx_side = if i == 0 {
+            arrow_parts[i]
+        } else {
+            arrow_parts[i]
+                .split_once(',')
+                .map(|(_, rest)| rest.trim())
+                .unwrap_or("")
+        };
+        let rhs_raw = arrow_parts[i + 1];
+        let label = if i + 1 == arrow_parts.len() - 1 {
+            rhs_raw
+        } else {
+            rhs_raw
+                .split_once(',')
+                .map(|(lbl, _)| lbl.trim())
+                .ok_or_else(|| format!("malformed mapping rhs `{rhs_raw}`"))?
+        };
+        let kind = parse_doc_posture_kind(label)?;
+        let cleaned = idx_side.trim_start_matches("in ").trim();
+        let idxs_str = cleaned
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(cleaned);
+        for num_s in idxs_str.split(',').map(str::trim) {
+            let idx: usize = num_s
+                .parse()
+                .map_err(|e| format!("bad slot index `{num_s}`: {e}"))?;
+            if idx >= 4 {
+                return Err(format!("slot index {idx} >= 4"));
+            }
+            doc_sched_vec[idx] = kind;
+            seen_mask[idx] = true;
+        }
+    }
+    if !seen_mask.into_iter().all(|b| b) || doc_sched_vec != posture_schedule {
+        return Err(format!(
+            "posture_schedule mismatch: doc={doc_sched_vec:?} seen={seen_mask:?} default={posture_schedule:?}"
+        ));
+    }
+
+    // 5. p_honour
+    let doc_p: f64 = first_backticked(get("p_honour")?, "p_honour")?
+        .parse()
+        .map_err(|e| format!("bad p_honour: {e}"))?;
+    if doc_p != p_honour {
+        return Err(format!("p_honour mismatch: doc={doc_p} default={p_honour}"));
+    }
+
+    // 6. scenarios_m
+    let doc_m: usize = first_backticked(get("scenarios_m")?, "scenarios_m")?
+        .parse()
+        .map_err(|e| format!("bad scenarios_m: {e}"))?;
+    if doc_m != scenarios_m {
+        return Err(format!(
+            "scenarios_m mismatch: doc={doc_m} default={scenarios_m}"
+        ));
+    }
+
+    // 7. k_synth_max
+    let doc_k: usize = first_backticked(get("k_synth_max")?, "k_synth_max")?
+        .parse()
+        .map_err(|e| format!("bad k_synth_max: {e}"))?;
+    if doc_k != k_synth_max {
+        return Err(format!(
+            "k_synth_max mismatch: doc={doc_k} default={k_synth_max}"
+        ));
+    }
+
+    // 8. include_pass_b_cleared_club_bot
+    let doc_inc: bool = first_backticked(
+        get("include_pass_b_cleared_club_bot")?,
+        "include_pass_b_cleared_club_bot",
+    )?
+    .parse()
+    .map_err(|e| format!("bad include_pass_b_cleared_club_bot: {e}"))?;
+    if doc_inc != include_pass_b_cleared_club_bot {
+        return Err(format!(
+            "include_pass_b_cleared_club_bot mismatch: doc={doc_inc} default={include_pass_b_cleared_club_bot}"
+        ));
+    }
+
+    // 9. partial_crossing_fractions_bps
+    let doc_part: Vec<u16> = serde_json::from_str(&first_backticked(
+        get("partial_crossing_fractions_bps")?,
+        "partial_crossing_fractions_bps",
+    )?)
+    .map_err(|e| format!("bad partial_crossing_fractions_bps: {e}"))?;
+    if doc_part != partial_crossing_fractions_bps {
+        return Err(format!(
+            "partial_crossing_fractions_bps mismatch: doc={doc_part:?} default={partial_crossing_fractions_bps:?}"
+        ));
+    }
+
+    // 10. debt_repayment_grid_bps
+    let doc_debt: Vec<u16> = serde_json::from_str(&first_backticked(
+        get("debt_repayment_grid_bps")?,
+        "debt_repayment_grid_bps",
+    )?)
+    .map_err(|e| format!("bad debt_repayment_grid_bps: {e}"))?;
+    if doc_debt != debt_repayment_grid_bps {
+        return Err(format!(
+            "debt_repayment_grid_bps mismatch: doc={doc_debt:?} default={debt_repayment_grid_bps:?}"
+        ));
+    }
+
+    // 11. quote_offsets_bps
+    let doc_quotes: Vec<i16> = serde_json::from_str(&first_backticked(
+        get("quote_offsets_bps")?,
+        "quote_offsets_bps",
+    )?)
+    .map_err(|e| format!("bad quote_offsets_bps: {e}"))?;
+    if doc_quotes != quote_offsets_bps {
+        return Err(format!(
+            "quote_offsets_bps mismatch: doc={doc_quotes:?} default={quote_offsets_bps:?}"
+        ));
+    }
+
+    // 12. quantity_scales_bps
+    let doc_scales: Vec<u16> = serde_json::from_str(&first_backticked(
+        get("quantity_scales_bps")?,
+        "quantity_scales_bps",
+    )?)
+    .map_err(|e| format!("bad quantity_scales_bps: {e}"))?;
+    if doc_scales != quantity_scales_bps {
+        return Err(format!(
+            "quantity_scales_bps mismatch: doc={doc_scales:?} default={quantity_scales_bps:?}"
+        ));
+    }
+
+    // 13. composite_greedy_rules
+    let doc_greedy = unquote_doc_str(
+        &first_backticked(get("composite_greedy_rules")?, "composite_greedy_rules")?,
+        "composite_greedy_rules",
+    )?;
+    if doc_greedy != composite_greedy_rules {
+        return Err(format!(
+            "composite_greedy_rules mismatch: doc={doc_greedy} default={composite_greedy_rules}"
+        ));
+    }
+
+    // 14. synth_slot_fill_order
+    let doc_slots: Vec<String> = serde_json::from_str(&first_backticked(
+        get("synth_slot_fill_order")?,
+        "synth_slot_fill_order",
+    )?)
+    .map_err(|e| format!("bad synth_slot_fill_order: {e}"))?;
+    if doc_slots != synth_slot_fill_order {
+        return Err(format!(
+            "synth_slot_fill_order mismatch: doc={doc_slots:?} default={synth_slot_fill_order:?}"
+        ));
+    }
+
+    // 15. upkeep_cover_turns
+    let doc_upkeep: u8 = first_backticked(get("upkeep_cover_turns")?, "upkeep_cover_turns")?
+        .parse()
+        .map_err(|e| format!("bad upkeep_cover_turns: {e}"))?;
+    if doc_upkeep != upkeep_cover_turns {
+        return Err(format!(
+            "upkeep_cover_turns mismatch: doc={doc_upkeep} default={upkeep_cover_turns}"
+        ));
+    }
+
+    // 16. parity_spread_threshold_bps
+    let doc_spread: u16 = first_backticked(
+        get("parity_spread_threshold_bps")?,
+        "parity_spread_threshold_bps",
+    )?
+    .parse()
+    .map_err(|e| format!("bad parity_spread_threshold_bps: {e}"))?;
+    if doc_spread != parity_spread_threshold_bps {
+        return Err(format!(
+            "parity_spread_threshold_bps mismatch: doc={doc_spread} default={parity_spread_threshold_bps}"
+        ));
+    }
+
+    // 17–18. talk_extractor_version & talk_extractor_rules_digest
+    let talk_v_cell = get("talk_extractor_version")?;
+    let talk_d_cell = get("talk_extractor_rules_digest")?;
+    if talk_v_cell != talk_d_cell {
+        return Err("talk_extractor_version and talk_extractor_rules_digest cells disagree".into());
+    }
+    let doc_talk_ver = unquote_doc_str(
+        &first_backticked(talk_v_cell, "talk_extractor_version")?,
+        "talk_extractor_version",
+    )?;
+    if doc_talk_ver != talk_extractor_version {
+        return Err(format!(
+            "talk_extractor_version mismatch: doc={doc_talk_ver} default={talk_extractor_version}"
+        ));
+    }
+    if !talk_d_cell.contains("+ frozen rules digest")
+        || talk_extractor_rules_digest != sha256_hex(doc_talk_ver.as_bytes())
+    {
+        return Err(format!(
+            "talk_extractor_rules_digest mismatch against doc `{talk_d_cell}`"
+        ));
+    }
+
+    // 19. mandate_stratification_mode
+    let doc_mode = unquote_doc_str(
+        &first_backticked(
+            get("mandate_stratification_mode")?,
+            "mandate_stratification_mode",
+        )?,
+        "mandate_stratification_mode",
+    )?;
+    if doc_mode != mandate_stratification_mode {
+        return Err(format!(
+            "mandate_stratification_mode mismatch: doc={doc_mode} default={mandate_stratification_mode}"
+        ));
+    }
+
+    // 20. prescreen_min_arm_indep_span
+    let doc_span: i64 = first_backticked(
+        get("prescreen_min_arm_indep_span")?,
+        "prescreen_min_arm_indep_span",
+    )?
+    .parse()
+    .map_err(|e| format!("bad prescreen_min_arm_indep_span: {e}"))?;
+    if doc_span != prescreen_min_arm_indep_span {
+        return Err(format!(
+            "prescreen_min_arm_indep_span mismatch: doc={doc_span} default={prescreen_min_arm_indep_span}"
+        ));
+    }
+
+    // 21. prescreen_exclude_flat_sets
+    let doc_flat: bool = first_backticked(
+        get("prescreen_exclude_flat_sets")?,
+        "prescreen_exclude_flat_sets",
+    )?
+    .parse()
+    .map_err(|e| format!("bad prescreen_exclude_flat_sets: {e}"))?;
+    if doc_flat != prescreen_exclude_flat_sets {
+        return Err(format!(
+            "prescreen_exclude_flat_sets mismatch: doc={doc_flat} default={prescreen_exclude_flat_sets}"
+        ));
+    }
+
+    // 22. prescreen_min_arm_indep_candidates
+    let doc_cands: usize = first_backticked(
+        get("prescreen_min_arm_indep_candidates")?,
+        "prescreen_min_arm_indep_candidates",
+    )?
+    .parse()
+    .map_err(|e| format!("bad prescreen_min_arm_indep_candidates: {e}"))?;
+    if doc_cands != prescreen_min_arm_indep_candidates {
+        return Err(format!(
+            "prescreen_min_arm_indep_candidates mismatch: doc={doc_cands} default={prescreen_min_arm_indep_candidates}"
+        ));
+    }
+
+    // 23. strata_schedule
+    let doc_strata = unquote_doc_str(
+        &first_backticked(get("strata_schedule")?, "strata_schedule")?,
+        "strata_schedule",
+    )?;
+    if doc_strata != strata_schedule {
+        return Err(format!(
+            "strata_schedule mismatch: doc={doc_strata} default={strata_schedule}"
+        ));
+    }
+
+    Ok(())
+}
+
+fn parse_sec52_fixed_constants(sec52: &str) -> Result<BTreeMap<String, String>, String> {
+    let para_start = sec52
+        .find("*Proposed fixed code constants")
+        .ok_or("missing fixed constants paragraph in §5.2")?;
+    let para_end = sec52[para_start..]
+        .find("**Build requirement:**")
+        .map(|off| para_start + off)
+        .ok_or("missing Build requirement end marker in §5.2")?;
+    let para = &sec52[para_start..para_end];
+
+    let mut map = BTreeMap::new();
+    for tok in extract_backticked_tokens(para) {
+        if let Some((lhs, rhs)) = tok.split_once('=') {
+            let name = lhs.trim();
+            let val = rhs.trim();
+            if !name.is_empty()
+                && name.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+                && map.insert(name.to_owned(), val.to_owned()).is_some()
+            {
+                return Err(format!("duplicate constant `{name}` in §5.2"));
+            }
+        }
+    }
+    Ok(map)
+}
+
+fn verify_sec52_constants_match(sec52: &str) -> Result<(), String> {
+    let constants = parse_sec52_fixed_constants(sec52)?;
+    const EXPECTED_CONSTANT_COUNT: usize = 19;
+    if constants.len() != EXPECTED_CONSTANT_COUNT {
+        return Err(format!(
+            "§5.2 constants count mismatch: got {}, expected {EXPECTED_CONSTANT_COUNT}",
+            constants.len()
+        ));
+    }
+    let check_num = |name: &str, actual: &str| -> Result<(), String> {
+        let raw = constants
+            .get(name)
+            .ok_or_else(|| format!("§5.2 constants missing `{name}`"))?;
+        let normalized_doc = raw.replace('_', "");
+        let normalized_actual = actual.replace('_', "");
+        if normalized_doc != normalized_actual {
+            return Err(format!(
+                "constant `{name}` mismatch: doc=`{raw}` code=`{actual}`"
+            ));
+        }
+        Ok(())
+    };
+    let check_exact = |name: &str, expected: &str| -> Result<(), String> {
+        let raw = constants
+            .get(name)
+            .ok_or_else(|| format!("§5.2 constants missing `{name}`"))?;
+        if raw != expected {
+            return Err(format!(
+                "constant `{name}` mismatch: doc=`{raw}` expected=`{expected}`"
+            ));
+        }
+        Ok(())
+    };
+
+    check_num(
+        "SYNTH_MAX_CONVERTER_BATCHES",
+        &SYNTH_MAX_CONVERTER_BATCHES.to_string(),
+    )?;
+    check_num(
+        "SYNTH_MAX_PROJECT_BATCHES",
+        &SYNTH_MAX_PROJECT_BATCHES.to_string(),
+    )?;
+    check_exact(
+        "SYNTH_PROJECT_RANK_BY_EQUITY",
+        &SYNTH_PROJECT_RANK_BY_EQUITY.to_string(),
+    )?;
+    check_exact(
+        "SYNTH_CONVERTER_INPUT_DEFICIT_COVER",
+        &SYNTH_CONVERTER_INPUT_DEFICIT_COVER.to_string(),
+    )?;
+    check_exact(
+        "SYNTH_CLAIM_MATURING_EXACT",
+        &SYNTH_CLAIM_MATURING_EXACT.to_string(),
+    )?;
+    check_exact(
+        "SYNTH_COUNCIL_SELF_NOMINATION",
+        &SYNTH_COUNCIL_SELF_NOMINATION.to_string(),
+    )?;
+    check_exact(
+        "DROP_TIE_BREAK_BY_CANDIDATE_ID",
+        &DROP_TIE_BREAK_BY_CANDIDATE_ID.to_string(),
+    )?;
+    check_exact(
+        "COMPOSITE_GREEDY_RULES_DEFAULT",
+        &format!("\"{COMPOSITE_GREEDY_RULES_DEFAULT}\""),
+    )?;
+    check_num(
+        "SYNTH_CHARTER_BID_CRED",
+        &SYNTH_CHARTER_BID_CRED.to_string(),
+    )?;
+    check_num(
+        "SYNTH_QUOTE_CRED_SHARE_BPS",
+        &SYNTH_QUOTE_CRED_SHARE_BPS.to_string(),
+    )?;
+    check_num("BPS_SCALE", &league_core::BPS_SCALE.to_string())?;
+    assert_eq!(SYNTH_QUOTE_MAX_UNITS, UNIT_SCALE);
+    check_exact("SYNTH_QUOTE_MAX_UNITS", "UNIT_SCALE")?;
+    check_num("SYNTH_QUOTE_MIN_UNITS", &SYNTH_QUOTE_MIN_UNITS.to_string())?;
+    check_num(
+        "SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER",
+        &SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER.to_string(),
+    )?;
+    check_num(
+        "SYNTH_DROP_DEFAULT_ACTION_RISK_CRED",
+        &SYNTH_DROP_DEFAULT_ACTION_RISK_CRED.to_string(),
+    )?;
+    assert_eq!(SYNTH_DROP_PROJECT_RISK_CRED, i64::MAX / 2);
+    check_exact("SYNTH_DROP_PROJECT_RISK_CRED", "i64::MAX / 2")?;
+    check_num(
+        "SYNTH_SCALE_SEED_PER_AXIS",
+        &SYNTH_SCALE_SEED_PER_AXIS.to_string(),
+    )?;
+    check_num(
+        "SYNTH_SCALE_SEED_POOL_MAX",
+        &SYNTH_SCALE_SEED_POOL_MAX.to_string(),
+    )?;
+    check_num("HONOUR_PPM_SCALE", &HONOUR_PPM_SCALE.to_string())?;
+    Ok(())
+}
+
 #[test]
 fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestResult {
     let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/decision-scorer.md");
@@ -3792,152 +4375,55 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
         .ok_or("missing §6 heading after §5.2")?;
     let sec52 = &doc[sec52_start..sec6_start];
 
-    // Assert every ScorerConfig::default() field matches §5.2's documented Pilot Initial Value.
     let cfg = ScorerConfig::default();
     assert!(cfg.validate().is_ok());
-    assert_eq!(cfg.posture_weights.standard, 2);
-    assert_eq!(cfg.posture_weights.active, 1);
-    assert_eq!(cfg.posture_weights.conservative, 1);
-    assert_eq!(
-        cfg.posture_schedule,
-        vec![
-            PostureKind::Standard,
-            PostureKind::Standard,
-            PostureKind::Active,
-            PostureKind::Conservative,
-        ]
-    );
-    assert!(sec52.contains("`posture_weights` & `posture_schedule`"));
-    assert!(sec52.contains("`[2 Standard, 1 Active, 1 Conservative]`"));
+    verify_sec52_table_matches_defaults(sec52)?;
+    verify_sec52_constants_match(sec52)?;
 
-    assert_eq!(cfg.p_honour, 0.75);
-    assert!(sec52.contains("`p_honour`") && sec52.contains("`0.75` (`Bernoulli(0.75)`)"));
-    assert_eq!(cfg.scenarios_m, 16);
-    assert!(sec52.contains("`scenarios_m` (`M`)") && sec52.contains("| `16` |"));
-    assert_eq!(cfg.k_synth_max, 32);
-    assert!(sec52.contains("`k_synth_max` (`K_synth_max`)") && sec52.contains("| `32` |"));
-    assert!(cfg.include_pass_b_cleared_club_bot);
-    assert!(sec52.contains("`include_pass_b_cleared_club_bot`") && sec52.contains("| `true` |"));
-    assert_eq!(cfg.partial_crossing_fractions_bps, vec![5000, 10_000]);
-    assert!(
-        sec52.contains("`partial_crossing_fractions_bps`") && sec52.contains("`[5000, 10000]` bps")
-    );
-    assert_eq!(cfg.debt_repayment_grid_bps, vec![5000, 10_000]);
-    assert!(sec52.contains("`debt_repayment_grid_bps`") && sec52.contains("`[5000, 10000]` bps"));
-    assert_eq!(cfg.quote_offsets_bps, vec![-1000, -500, 500, 1000]);
-    assert!(sec52.contains("`quote_offsets_bps`") && sec52.contains("`[-1000, -500, 500, 1000]`"));
-    assert_eq!(cfg.quantity_scales_bps, vec![5000, 10_000]);
-    assert!(sec52.contains("`quantity_scales_bps`") && sec52.contains("`[5000, 10000]` bps"));
-    assert_eq!(cfg.composite_greedy_rules, COMPOSITE_GREEDY_RULES_DEFAULT);
-    assert!(
-        sec52.contains("`composite_greedy_rules`")
-            && sec52.contains("`\"top_pass_per_axis_plus_drop_max_upkeep\"`")
-    );
-    assert_eq!(
-        cfg.synth_slot_fill_order,
-        vec![
-            "cleared_pass_b",
-            "claims_council",
-            "upkeep_inputs",
-            "cross_quotes",
-            "batches",
-            "debt",
-            "composite_drops",
-            "scaled",
-        ]
-    );
-    assert!(sec52.contains("`synth_slot_fill_order`") && sec52.contains(
-        "`[\"cleared_pass_b\", \"claims_council\", \"upkeep_inputs\", \"cross_quotes\", \"batches\", \"debt\", \"composite_drops\", \"scaled\"]`"
-    ));
-    assert_eq!(cfg.upkeep_cover_turns, 2);
-    assert!(sec52.contains("`upkeep_cover_turns`") && sec52.contains("| `2` turns |"));
-    assert_eq!(cfg.parity_spread_threshold_bps, 500);
-    assert!(
-        sec52.contains("`parity_spread_threshold_bps`") && sec52.contains("| `500` bps (`5%`) |")
-    );
-    assert_eq!(cfg.talk_extractor_version, "talk_rules_v1");
-    assert_eq!(
-        cfg.talk_extractor_rules_digest,
-        sha256_hex(b"talk_rules_v1")
-    );
-    assert!(
-        sec52.contains("`talk_extractor_version` & `talk_extractor_rules_digest`")
-            && sec52.contains("`\"talk_rules_v1\"`")
-    );
-    assert_eq!(
-        cfg.mandate_stratification_mode,
-        "uniform_undealt_fy_stratified"
-    );
-    assert!(
-        sec52.contains("`mandate_stratification_mode`")
-            && sec52.contains("`\"uniform_undealt_fy_stratified\"`")
-    );
-    assert_eq!(cfg.prescreen_min_arm_indep_span, 1);
-    assert!(
-        sec52.contains("`prescreen_min_arm_indep_span`") && sec52.contains("| `1` (placeholder")
-    );
-    assert!(cfg.prescreen_exclude_flat_sets);
-    assert!(sec52.contains("`prescreen_exclude_flat_sets`") && sec52.contains("| `true` |"));
-    assert_eq!(cfg.prescreen_min_arm_indep_candidates, 2);
-    assert!(
-        sec52.contains("`prescreen_min_arm_indep_candidates`")
-            && sec52.contains("| `2` (placeholder")
-    );
-    assert_eq!(cfg.strata_schedule, "2_early_2_mid_2_late_20_seeds");
-    assert!(
-        sec52.contains("`strata_schedule`")
-            && sec52.contains("`\"2_early_2_mid_2_late_20_seeds\"`")
-    );
+    // Negative controls proving doc drift or removed rows fail immediately:
+    let mutated_m = sec52.replacen("| `scenarios_m` (`M`) | Number of CRN scenarios per state (sized from pilot measured SE/diversity) | `16` |", "| `scenarios_m` (`M`) | Number of CRN scenarios per state (sized from pilot measured SE/diversity) | `32` |", 1);
+    assert_ne!(mutated_m, sec52);
+    let err_m = verify_sec52_table_matches_defaults(&mutated_m)
+        .err()
+        .ok_or("expected mutated scenarios_m row to fail")?;
+    eprintln!("negative_control[value_changed:scenarios_m]: {err_m}");
 
-    // Assert every exported fixed code constant matches its §5.2 declaration.
-    assert_eq!(SYNTH_MAX_CONVERTER_BATCHES, 4);
-    assert_eq!(SYNTH_MAX_PROJECT_BATCHES, 4);
-    const {
-        assert!(SYNTH_PROJECT_RANK_BY_EQUITY);
-        assert!(SYNTH_CONVERTER_INPUT_DEFICIT_COVER);
-        assert!(SYNTH_CLAIM_MATURING_EXACT);
-        assert!(SYNTH_COUNCIL_SELF_NOMINATION);
-        assert!(DROP_TIE_BREAK_BY_CANDIDATE_ID);
-    }
-    assert_eq!(
-        COMPOSITE_GREEDY_RULES_DEFAULT,
-        "top_pass_per_axis_plus_drop_max_upkeep"
+    let mutated_bool = sec52.replacen(
+        "| `include_pass_b_cleared_club_bot` | Include `ClubBot` decision with `pass_b_actions` cleared (counted inside `k_synth_max`) | `true` |",
+        "| `include_pass_b_cleared_club_bot` | Include `ClubBot` decision with `pass_b_actions` cleared (counted inside `k_synth_max`) | `false` |",
+        1,
     );
-    assert_eq!(SYNTH_CHARTER_BID_CRED, 150);
-    assert_eq!(SYNTH_QUOTE_CRED_SHARE_BPS, 5_000);
-    assert_eq!(SYNTH_QUOTE_MAX_UNITS, UNIT_SCALE);
-    assert_eq!(SYNTH_QUOTE_MIN_UNITS, 100);
-    assert_eq!(SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, 2);
-    assert_eq!(SYNTH_DROP_DEFAULT_ACTION_RISK_CRED, 1);
-    assert_eq!(SYNTH_DROP_PROJECT_RISK_CRED, i64::MAX / 2);
-    assert_eq!(SYNTH_SCALE_SEED_PER_AXIS, 2);
-    assert_eq!(SYNTH_SCALE_SEED_POOL_MAX, 6);
-    assert_eq!(HONOUR_PPM_SCALE, 1_000_000);
-    for expected_decl in [
-        "`SYNTH_MAX_CONVERTER_BATCHES = 4`",
-        "`SYNTH_MAX_PROJECT_BATCHES = 4`",
-        "`SYNTH_PROJECT_RANK_BY_EQUITY = true`",
-        "`SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`",
-        "`SYNTH_CLAIM_MATURING_EXACT = true`",
-        "`SYNTH_COUNCIL_SELF_NOMINATION = true`",
-        "`DROP_TIE_BREAK_BY_CANDIDATE_ID = true`",
-        "`COMPOSITE_GREEDY_RULES_DEFAULT = \"top_pass_per_axis_plus_drop_max_upkeep\"`",
+    assert_ne!(mutated_bool, sec52);
+    let err_bool = verify_sec52_table_matches_defaults(&mutated_bool)
+        .err()
+        .ok_or("expected mutated bool row to fail")?;
+    eprintln!("negative_control[value_changed:include_pass_b_cleared_club_bot]: {err_bool}");
+
+    let removed_row: String = sec52
+        .lines()
+        .filter(|l| !l.contains("`upkeep_cover_turns`"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let err_removed = verify_sec52_table_matches_defaults(&removed_row)
+        .err()
+        .ok_or("expected removed upkeep_cover_turns row to fail")?;
+    eprintln!("negative_control[row_removed:upkeep_cover_turns]: {err_removed}");
+
+    let mutated_const = sec52.replacen(
         "`SYNTH_CHARTER_BID_CRED = 150`",
-        "`SYNTH_QUOTE_CRED_SHARE_BPS = 5_000`",
-        "`SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE`",
-        "`SYNTH_QUOTE_MIN_UNITS = 100`",
-        "`SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2`",
-        "`SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1`",
-        "`SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2`",
-        "`SYNTH_SCALE_SEED_PER_AXIS = 2`",
-        "`SYNTH_SCALE_SEED_POOL_MAX = 6`",
-        "`HONOUR_PPM_SCALE = 1_000_000`",
-    ] {
-        assert!(
-            sec52.contains(expected_decl),
-            "§5.2 missing fixed constant declaration `{expected_decl}`"
-        );
-    }
+        "`SYNTH_CHARTER_BID_CRED = 151`",
+        1,
+    );
+    let err_const_val = verify_sec52_constants_match(&mutated_const)
+        .err()
+        .ok_or("expected mutated constant value to fail")?;
+    eprintln!("negative_control[const_changed:SYNTH_CHARTER_BID_CRED]: {err_const_val}");
+
+    let removed_const = sec52.replacen(", and `HONOUR_PPM_SCALE = 1_000_000`", "", 1);
+    let err_const_rm = verify_sec52_constants_match(&removed_const)
+        .err()
+        .ok_or("expected removed constant to fail")?;
+    eprintln!("negative_control[const_removed:HONOUR_PPM_SCALE]: {err_const_rm}");
 
     // Pin SYNTH_CHARTER_BID_CRED to ClubBot's charter auction bid on Turn 6.
     let mut host = EvalHost::from_standard_setup(TableId(8261), 4, 1, 0)?;
@@ -4044,7 +4530,7 @@ fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -
     let tmp = UniqueTmpDir::new("replay_parity_s2")?;
     let mut host = EvalHost::from_standard_setup(TableId(8263), 4, 1, 0)?;
 
-    // Advance past Turn 1 so Turn 2 begins cleanly before writing the checkpoint.
+    // Turn 1: play unmodified ClubBot.
     let mut t1_subs = BTreeMap::new();
     for s in 0..4_u8 {
         let obs = host.observe_seat(Seat(s))?;
@@ -4062,66 +4548,187 @@ fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -
     host.apply_act_submissions(&t1_subs)?;
     host.sweep_turn()?;
 
-    let ckpt_dir = tmp.path().join("ckpt");
-    fs::create_dir_all(&ckpt_dir)?;
-    let (save_path, seal_path) = host.write_pre_act_checkpoint(&ckpt_dir)?;
-    let save_bytes = fs::read(&save_path)?;
-    let seal_bytes = fs::read(&seal_path)?;
-    let save_sha = sha256_hex(&save_bytes);
-    let seal_sha = sha256_hex(&seal_bytes);
-    let pair_sha = compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes);
+    // Turn 2 checkpoint: verify Conservative actually diverges from Standard on Turn 2 under default config.
+    let ckpt_t2 = tmp.path().join("ckpt_t2");
+    fs::create_dir_all(&ckpt_t2)?;
+    let (save_t2, seal_t2) = host.write_pre_act_checkpoint(&ckpt_t2)?;
+    let save_t2_bytes = fs::read(&save_t2)?;
+    let seal_t2_bytes = fs::read(&seal_t2)?;
+    let save_t2_sha = sha256_hex(&save_t2_bytes);
+    let seal_t2_sha = sha256_hex(&seal_t2_bytes);
+    let pair_t2_sha = compute_pre_act_pair_sha256_hex(&save_t2_bytes, &seal_t2_bytes);
 
-    let focal_obs = host.observe_seat(Seat(0))?;
-    let focal_mandate = *focal_obs.own_mandate().ok_or("missing focal mandate")?;
-    let day = host.turn();
-    let scenarios = draw_scenarios(&focal_obs.spec, focal_mandate, 0, 99, &pair_sha, day, 2)?;
+    let focal_t2 = host.observe_seat(Seat(0))?;
+    let focal_mandate_t2 = *focal_t2
+        .own_mandate()
+        .ok_or("missing focal Turn-2 mandate")?;
+    let scenarios_t2 = draw_scenarios(
+        &focal_t2.spec,
+        focal_mandate_t2,
+        0,
+        99,
+        &pair_t2_sha,
+        host.turn(),
+        2,
+    )?;
     let cfg = ScorerConfig::default();
 
-    // Verify independent replay parity for both Active and Conservative peer postures.
-    for posture in [PostureKind::Active, PostureKind::Conservative] {
-        let mut peer_day_subs = BTreeMap::new();
-        for s in 1..4_u8 {
-            let obs_s = host.observe_seat(Seat(s))?;
-            let m_s = *scenarios[0]
-                .peer_mandates
-                .get(&s)
-                .ok_or("missing peer mandate")?;
-            let sub_s = decide_peer_turn(
-                posture,
-                scenarios[0].bot_base_seed.wrapping_add(u64::from(s)),
-                &obs_s,
-                &m_s,
-                &cfg,
-            )?;
-            peer_day_subs.insert(s, sub_s);
-        }
-
-        let (outcome, log) = run_single_rollout_with_replay_log(
-            &save_path,
-            &seal_path,
-            (&save_sha, &seal_sha, &pair_sha),
-            0,
-            &EvalActSubmission::default(),
-            &peer_day_subs,
-            focal_mandate,
-            &scenarios[0],
-            posture,
-            &cfg,
-        )?;
-        let replayed = replay_eval_season(&log)?;
-        let replay_row0 = replayed
-            .scoreboard
-            .standings
-            .iter()
-            .find(|e| e.seat == 0)
-            .ok_or("missing replay seat 0")?;
-        assert_eq!(outcome.total_equity, replay_row0.total_equity);
-        assert_eq!(outcome.project_equity, replay_row0.project_equity);
-        assert_eq!(outcome.net_asset_equity, replay_row0.net_asset_equity);
-        assert_eq!(outcome.mandate_bonus, replay_row0.mandate_bonus);
+    let mut std_t2_subs = BTreeMap::new();
+    let mut cons_t2_subs = BTreeMap::new();
+    for s in 1..4_u8 {
+        let obs_s = host.observe_seat(Seat(s))?;
+        let m_s = *scenarios_t2[0]
+            .peer_mandates
+            .get(&s)
+            .ok_or("missing Turn-2 peer mandate")?;
+        let seed_s = scenarios_t2[0].bot_base_seed.wrapping_add(u64::from(s));
+        std_t2_subs.insert(
+            s,
+            decide_peer_turn(PostureKind::Standard, seed_s, &obs_s, &m_s, &cfg)?,
+        );
+        cons_t2_subs.insert(
+            s,
+            decide_peer_turn(PostureKind::Conservative, seed_s, &obs_s, &m_s, &cfg)?,
+        );
     }
+    assert!(
+        (1..4_u8).any(|s| cons_t2_subs[&s] != std_t2_subs[&s]),
+        "expected Conservative Turn-day submission to differ from Standard for at least one peer"
+    );
 
-    // Verify independent replay parity when a talk commitment is honoured (p_honour = 1.0).
+    let (cons_outcome, cons_log) = run_single_rollout_with_replay_log(
+        &save_t2,
+        &seal_t2,
+        (&save_t2_sha, &seal_t2_sha, &pair_t2_sha),
+        0,
+        &EvalActSubmission::default(),
+        &cons_t2_subs,
+        focal_mandate_t2,
+        &scenarios_t2[0],
+        PostureKind::Conservative,
+        &cfg,
+    )?;
+    let cons_replayed = replay_eval_season(&cons_log)?;
+    let cons_row0 = cons_replayed
+        .scoreboard
+        .standings
+        .iter()
+        .find(|e| e.seat == 0)
+        .ok_or("missing Conservative replay seat 0")?;
+    assert_eq!(cons_outcome.total_equity, cons_row0.total_equity);
+    assert_eq!(cons_outcome.project_equity, cons_row0.project_equity);
+    assert_eq!(cons_outcome.net_asset_equity, cons_row0.net_asset_equity);
+    assert_eq!(cons_outcome.mandate_bonus, cons_row0.mandate_bonus);
+
+    // Turn 2 -> Turn 3: seat 2 posts an ask-free bid on `wide_g` (`best_ask == None`) so Active
+    // posture diverges from Standard on Turn 3 across peers holding spare `wide_g`.
+    let probe1 = host.observe_seat(Seat(1))?;
+    let wide_g = (0..4_u8)
+        .map(AssetId::Raw)
+        .find(|&g| matches!(g, AssetId::Raw(idx) if probe1.seats[1].raw[usize::from(idx)] >= 200))
+        .ok_or("seat 1 lacks >= 200 raw units for Turn-3 Active crossing")?;
+    let mut t2_subs = BTreeMap::new();
+    for s in 0..4_u8 {
+        let obs_s = host.observe_seat(Seat(s))?;
+        let p_wide = obs_s.parities.asset_parity(wide_g);
+        let mut actions = Vec::new();
+        if s == 2 {
+            actions.push(MarketAction::PostOffer {
+                seat: 2,
+                order: OfferProposal {
+                    side: OfferSide::Buy,
+                    good: wide_g,
+                    amount: 200,
+                    price_per_unit_cred: (p_wide * 80) / 100,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            });
+        }
+        t2_subs.insert(
+            s,
+            EvalActSubmission {
+                market_actions: actions,
+                pass_b_actions: Vec::new(),
+                bundle: SealedOrderBundle::default(),
+            },
+        );
+    }
+    host.apply_act_submissions(&t2_subs)?;
+    host.sweep_turn()?;
+
+    let ckpt_t3 = tmp.path().join("ckpt_t3");
+    fs::create_dir_all(&ckpt_t3)?;
+    let (save_t3, seal_t3) = host.write_pre_act_checkpoint(&ckpt_t3)?;
+    let save_t3_bytes = fs::read(&save_t3)?;
+    let seal_t3_bytes = fs::read(&seal_t3)?;
+    let save_t3_sha = sha256_hex(&save_t3_bytes);
+    let seal_t3_sha = sha256_hex(&seal_t3_bytes);
+    let pair_t3_sha = compute_pre_act_pair_sha256_hex(&save_t3_bytes, &seal_t3_bytes);
+
+    let day_t3 = host.turn();
+    let focal_t3 = host.observe_seat(Seat(0))?;
+    let focal_mandate_t3 = *focal_t3
+        .own_mandate()
+        .ok_or("missing focal Turn-3 mandate")?;
+    let scenarios_t3 = draw_scenarios(
+        &focal_t3.spec,
+        focal_mandate_t3,
+        0,
+        99,
+        &pair_t3_sha,
+        day_t3,
+        2,
+    )?;
+
+    let mut std_t3_subs = BTreeMap::new();
+    let mut act_t3_subs = BTreeMap::new();
+    for s in 1..4_u8 {
+        let obs_s = host.observe_seat(Seat(s))?;
+        let m_s = *scenarios_t3[0]
+            .peer_mandates
+            .get(&s)
+            .ok_or("missing Turn-3 peer mandate")?;
+        let seed_s = scenarios_t3[0].bot_base_seed.wrapping_add(u64::from(s));
+        std_t3_subs.insert(
+            s,
+            decide_peer_turn(PostureKind::Standard, seed_s, &obs_s, &m_s, &cfg)?,
+        );
+        act_t3_subs.insert(
+            s,
+            decide_peer_turn(PostureKind::Active, seed_s, &obs_s, &m_s, &cfg)?,
+        );
+    }
+    assert!(
+        (1..4_u8).any(|s| act_t3_subs[&s] != std_t3_subs[&s]),
+        "expected Active Turn-day submission to differ from Standard for at least one peer"
+    );
+
+    let (act_outcome, act_log) = run_single_rollout_with_replay_log(
+        &save_t3,
+        &seal_t3,
+        (&save_t3_sha, &seal_t3_sha, &pair_t3_sha),
+        0,
+        &EvalActSubmission::default(),
+        &act_t3_subs,
+        focal_mandate_t3,
+        &scenarios_t3[0],
+        PostureKind::Active,
+        &cfg,
+    )?;
+    let act_replayed = replay_eval_season(&act_log)?;
+    let act_row0 = act_replayed
+        .scoreboard
+        .standings
+        .iter()
+        .find(|e| e.seat == 0)
+        .ok_or("missing Active replay seat 0")?;
+    assert_eq!(act_outcome.total_equity, act_row0.total_equity);
+    assert_eq!(act_outcome.project_equity, act_row0.project_equity);
+    assert_eq!(act_outcome.net_asset_equity, act_row0.net_asset_equity);
+    assert_eq!(act_outcome.mandate_bonus, act_row0.mandate_bonus);
+
+    // Verify independent replay parity and exact Turn-day log entry when a talk commitment is honoured (p_honour = 1.0).
     let honoured_action = MarketAction::TownImport {
         good: AssetId::Raw(0),
         seat: 1,
@@ -4135,19 +4742,19 @@ fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -
     let mut honoured_peer_subs = BTreeMap::new();
     for s in 1..4_u8 {
         let obs_s = host.observe_seat(Seat(s))?;
-        let m_s = *scenarios[1]
+        let m_s = *scenarios_t3[1]
             .peer_mandates
             .get(&s)
-            .ok_or("missing peer mandate")?;
+            .ok_or("missing Turn-3 scenario-1 peer mandate")?;
         let base_s = decide_peer_turn(
             PostureKind::Standard,
-            scenarios[1].bot_base_seed.wrapping_add(u64::from(s)),
+            scenarios_t3[1].bot_base_seed.wrapping_add(u64::from(s)),
             &obs_s,
             &m_s,
             &cfg,
         )?;
         let applied_s =
-            apply_talk_commitments(&obs_s, base_s, &commitments, 99, &pair_sha, 1, 1.0)?;
+            apply_talk_commitments(&obs_s, base_s, &commitments, 99, &pair_t3_sha, 1, 1.0)?;
         honoured_peer_subs.insert(s, applied_s);
     }
     assert!(
@@ -4158,21 +4765,25 @@ fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -
     );
 
     let (honoured_outcome, honoured_log) = run_single_rollout_with_replay_log(
-        &save_path,
-        &seal_path,
-        (&save_sha, &seal_sha, &pair_sha),
+        &save_t3,
+        &seal_t3,
+        (&save_t3_sha, &seal_t3_sha, &pair_t3_sha),
         0,
         &EvalActSubmission::default(),
         &honoured_peer_subs,
-        focal_mandate,
-        &scenarios[1],
+        focal_mandate_t3,
+        &scenarios_t3[1],
         PostureKind::Standard,
         &cfg,
     )?;
-    let log_json = String::from_utf8(to_sorted_compact_json(&honoured_log)?)?;
+    let day_turn = honoured_log
+        .turns
+        .iter()
+        .find(|t| t.turn == day_t3)
+        .ok_or("missing Turn-day entry in honoured SeasonReplayLog")?;
     assert!(
-        log_json.contains("TownImport"),
-        "expected honoured TownImport recorded in replay log"
+        day_turn.market_actions.contains(&honoured_action),
+        "expected specific honoured TownImport action recorded in Turn-{day_t3} replay log"
     );
     let replayed_honoured = replay_eval_season(&honoured_log)?;
     let replay_honoured_row0 = replayed_honoured
@@ -4199,16 +4810,16 @@ fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -
     );
 
     // Missing peer mandate in scenario fails closed cleanly inside run_single_rollout_with_replay_log.
-    let mut bad_scenario = scenarios[0].clone();
+    let mut bad_scenario = scenarios_t3[0].clone();
     bad_scenario.peer_mandates.remove(&1);
     let missing_mandate_err = run_single_rollout_with_replay_log(
-        &save_path,
-        &seal_path,
-        (&save_sha, &seal_sha, &pair_sha),
+        &save_t3,
+        &seal_t3,
+        (&save_t3_sha, &seal_t3_sha, &pair_t3_sha),
         0,
         &EvalActSubmission::default(),
         &honoured_peer_subs,
-        focal_mandate,
+        focal_mandate_t3,
         &bad_scenario,
         PostureKind::Standard,
         &cfg,
@@ -4224,44 +4835,226 @@ fn composite_drops_prices_upkeep_sell_in_milli_cred_parity() -> TestResult {
     let host = EvalHost::from_standard_setup(TableId(8264), 4, 1, 0)?;
     let mut obs = host.observe_seat(Seat(0))?;
     let mandate = *obs.own_mandate().ok_or("missing mandate")?;
-    let upkeep_idx = usize::from(obs.spec.seats[0].upkeep_good);
+    let seat_cfg = obs.spec.seats[0].clone();
+    let upkeep_idx = usize::from(seat_cfg.upkeep_good);
+    let (raw_idx, per_run) = seat_cfg
+        .converters
+        .first()
+        .and_then(|r| r.inputs.first().copied())
+        .ok_or("expected converter recipe raw input on seat 0")?;
 
-    // Configure an election turn holding only excess upkeep_good plus one positive quote offset so
-    // `cross_quotes` emits an upkeep Sell and `composite_drops` combines it with `StandForOffice`,
-    // then drops the high milli-CRED upkeep Sell leg while retaining `StandForOffice`.
-    obs.turn = 4;
+    // Set upkeep_good parity = 200 (!= UNIT_SCALE = 1_000) and converter raw parity high enough that:
+    //   new_upkeep_risk = mul_units_parity(1_000, 200) * 2 = 400
+    //   < import_cost (from TownImport of converter input)
+    //   < old_upkeep_risk = 1_000 * 2 = 2_000.
+    // Because build_single_dropped_variant drops the HIGHEST-risk leg first:
+    // - New code: drops TownImport, leaving PostOffer(Sell, upkeep_good) alone.
+    // - Old code: dropped PostOffer(Sell, upkeep_good), leaving TownImport alone.
+    obs.turn = 1;
     obs.offers.clear();
-    obs.seats[0].cred = 1;
+    obs.parities.refined_per_unit[upkeep_idx] = 200;
+    obs.parities.raw_per_unit.fill(250);
+    obs.seats[0].cred = 100_000;
+    obs.seats[0].cred_debt = 0;
     obs.seats[0].raw.fill(0);
     obs.seats[0].refined.fill(0);
-    obs.seats[0].refined[upkeep_idx] = 10_000;
 
     let cfg = ScorerConfig {
         include_pass_b_cleared_club_bot: false,
+        k_synth_max: 8,
         quote_offsets_bps: vec![500],
         partial_crossing_fractions_bps: Vec::new(),
         debt_repayment_grid_bps: Vec::new(),
-        synth_slot_fill_order: vec![
-            "composite_drops".to_owned(),
-            "claims_council".to_owned(),
-            "cross_quotes".to_owned(),
-        ],
+        synth_slot_fill_order: vec!["composite_drops".to_owned()],
         ..ScorerConfig::s1_standard(2)
     };
+    let upkeep_reserve = seat_cfg
+        .upkeep_amount
+        .saturating_mul(i64::from(cfg.upkeep_cover_turns));
+    let excess_amount: i64 = 1_000;
+    obs.seats[0].refined[upkeep_idx] = upkeep_reserve.saturating_add(excess_amount);
+
+    let new_upkeep_risk =
+        mul_units_parity(excess_amount, obs.parities.refined_per_unit[upkeep_idx])
+            .saturating_mul(SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER);
+    let old_upkeep_risk = excess_amount.saturating_mul(SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER);
+    let import_cost = town_import_cost_cred(
+        per_run,
+        obs.parities.raw_per_unit[usize::from(raw_idx)],
+        obs.spec.town_import_premium_bps,
+    )?;
+    assert!(
+        new_upkeep_risk < import_cost && import_cost < old_upkeep_risk,
+        "expected {new_upkeep_risk} < {import_cost} < {old_upkeep_risk}"
+    );
+
     let cands = generate_arm_independent_candidates(&obs, &mandate, &cfg, 17)?;
     assert!(
         cands.iter().any(|c| {
             c.submission
                 .market_actions
                 .iter()
-                .any(|a| matches!(a, MarketAction::StandForOffice { .. }))
+                .any(|a| matches!(a, MarketAction::PostOffer { .. }))
+                && !c
+                    .submission
+                    .market_actions
+                    .iter()
+                    .any(|a| matches!(a, MarketAction::TownImport { .. }))
+        }),
+        "expected composite_drops to drop higher milli-CRED TownImport ({import_cost}) and retain PostOffer(upkeep Sell, risk={new_upkeep_risk})"
+    );
+    assert!(
+        !cands.iter().any(|c| {
+            c.submission
+                .market_actions
+                .iter()
+                .any(|a| matches!(a, MarketAction::TownImport { .. }))
                 && !c
                     .submission
                     .market_actions
                     .iter()
                     .any(|a| matches!(a, MarketAction::PostOffer { .. }))
         }),
-        "expected composite_drops to price upkeep Sell in milli-CRED parity and drop it before StandForOffice"
+        "old raw-units formula would drop PostOffer first leaving TownImport alone"
     );
+    Ok(())
+}
+
+#[test]
+fn engine_cadences_and_charter_roles_pin_generator_rules() -> TestResult {
+    // Exhaustive match without wildcard guarantees adding a CharterRole in league-core fails compilation here.
+    let assert_charter_role_exhaustiveness = |r: CharterRole| match r {
+        CharterRole::ClearinghouseBroker => "ClearinghouseBroker",
+        CharterRole::OracleAuditor => "OracleAuditor",
+        CharterRole::CustomsInspector => "CustomsInspector",
+    };
+    let all_roles = [
+        CharterRole::ClearinghouseBroker,
+        CharterRole::OracleAuditor,
+        CharterRole::CustomsInspector,
+    ];
+    for r in all_roles {
+        assert!(!assert_charter_role_exhaustiveness(r).is_empty());
+    }
+
+    let mut host = EvalHost::from_standard_setup(TableId(8265), 4, 1, 0)?;
+    let cfg = ScorerConfig {
+        k_synth_max: 64,
+        ..ScorerConfig::default()
+    };
+
+    while host.turn() < 3 && host.phase() == TurnPhase::TalkAndMarket {
+        host.apply_act_submissions(&BTreeMap::new())?;
+        host.sweep_turn()?;
+    }
+    // Turn 3 (non-election): engine emits council_elected = None; generator emits no StandForOffice.
+    assert_eq!(host.turn(), 3);
+    let obs3 = host.observe_seat(Seat(0))?;
+    let m3 = *obs3.own_mandate().ok_or("missing turn-3 mandate")?;
+    let cands3 = generate_arm_independent_candidates(&obs3, &m3, &cfg, 1)?;
+    assert!(!cands3.iter().any(|c| {
+        c.submission
+            .market_actions
+            .iter()
+            .any(|a| matches!(a, MarketAction::StandForOffice { .. }))
+    }));
+    let out3 = host.apply_act_submissions(&BTreeMap::new())?;
+    let _ = out3;
+    let rep3 = host.sweep_turn()?;
+    assert!(rep3.elected_officers.is_none());
+
+    // Turn 4 (election, turn % 4 == 0): engine elects council; generator emits StandForOffice.
+    assert_eq!(host.turn(), 4);
+    let mut obs4 = host.observe_seat(Seat(0))?;
+    obs4.seats[0].cred = 1_000_000;
+    let m4 = *obs4.own_mandate().ok_or("missing turn-4 mandate")?;
+    let cands4 = generate_arm_independent_candidates(&obs4, &m4, &cfg, 1)?;
+    assert!(cands4.iter().any(|c| {
+        c.submission
+            .market_actions
+            .iter()
+            .any(|a| matches!(a, MarketAction::StandForOffice { .. }))
+    }));
+    let mut subs4 = BTreeMap::new();
+    let b4 = SealedOrderBundle {
+        council_vote: Some(league_core::CouncilVoteBallot {
+            cartel_chair: 1,
+            trade_minister: 0,
+        }),
+        ..SealedOrderBundle::default()
+    };
+    subs4.insert(
+        0,
+        EvalActSubmission {
+            market_actions: vec![MarketAction::StandForOffice {
+                seat: 0,
+                platform: Default::default(),
+            }],
+            pass_b_actions: Vec::new(),
+            bundle: b4,
+        },
+    );
+    host.apply_act_submissions(&subs4)?;
+    let rep4 = host.sweep_turn()?;
+    assert!(rep4.elected_officers.is_some());
+
+    // Turn 5 (non-charter): engine awards no charters even if bids submitted; generator emits no charter bids.
+    assert_eq!(host.turn(), 5);
+    let mut obs5 = host.observe_seat(Seat(0))?;
+    obs5.seats[0].cred = 1_000_000;
+    let m5 = *obs5.own_mandate().ok_or("missing turn-5 mandate")?;
+    let cands5 = generate_arm_independent_candidates(&obs5, &m5, &cfg, 1)?;
+    assert!(
+        !cands5
+            .iter()
+            .any(|c| !c.submission.bundle.charter_bids.is_empty())
+    );
+    host.apply_act_submissions(&BTreeMap::new())?;
+    let rep5 = host.sweep_turn()?;
+    assert!(rep5.charters_awarded.is_empty());
+
+    // Turn 6 (charter auction, turn % 6 == 0): generator bids on all 3 CharterRoles and engine awards all 3.
+    assert_eq!(host.turn(), 6);
+    let mut obs6 = host.observe_seat(Seat(0))?;
+    obs6.seats[0].cred = 1_000_000;
+    let m6 = *obs6.own_mandate().ok_or("missing turn-6 mandate")?;
+    let cands6 = generate_arm_independent_candidates(&obs6, &m6, &cfg, 1)?;
+    for role in all_roles {
+        assert!(
+            cands6.iter().any(|c| {
+                c.submission
+                    .bundle
+                    .charter_bids
+                    .iter()
+                    .any(|b| b.role == role)
+            }),
+            "expected synthetic generator to emit CharterRole::{role:?} on Turn 6"
+        );
+    }
+    let mut subs6 = BTreeMap::new();
+    for (idx, role) in all_roles.into_iter().enumerate() {
+        let mut bundle = SealedOrderBundle::default();
+        bundle.charter_bids.push(league_core::CharterBidOrder {
+            bid_cred: SYNTH_CHARTER_BID_CRED,
+            role,
+        });
+        subs6.insert(
+            idx as u8,
+            EvalActSubmission {
+                market_actions: Vec::new(),
+                pass_b_actions: Vec::new(),
+                bundle,
+            },
+        );
+    }
+    host.apply_act_submissions(&subs6)?;
+    let rep6 = host.sweep_turn()?;
+    assert_eq!(rep6.charters_awarded.len(), all_roles.len());
+    for role in all_roles {
+        assert!(
+            rep6.charters_awarded.iter().any(|&(r, _)| r == role),
+            "engine did not award {role:?} on Turn 6"
+        );
+    }
     Ok(())
 }

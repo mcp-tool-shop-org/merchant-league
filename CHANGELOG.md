@@ -11,9 +11,10 @@
     `pass_b_actions`-cleared `ClubBot`, and `preview_seat_bundle`-verified synthetic drafts
     (`claims_council`, `upkeep_inputs`, `cross_quotes`, `batches`, `debt`, `composite_drops`,
     `scaled`) using named `docs/decision-scorer.md` §5.2 constants (`league_seat_types::UNIT_SCALE`,
-    `SYNTH_CHARTER_BID_CRED`, `SYNTH_QUOTE_*`, `SYNTH_DROP_*`, `SYNTH_SCALE_*`) with uniform
-    milli-`CRED` upkeep drop risk, bounded by `k_synth_max` + `synth_slot_fill_order` with
-    `candidate_id` tie-breaking, plus `league-scorer candidates --checkpoints <dir> --save-sha256
+    `SYNTH_CHARTER_BID_CRED`, `SYNTH_QUOTE_*`, `SYNTH_DROP_*`, `SYNTH_SCALE_*`), where upkeep-sell
+    leg-drop risk now uses parity-weighted value (`mul_units_parity(amount, parity) * 2`), which
+    can change which leg is dropped when upkeep parity is not `UNIT_SCALE`, bounded by `k_synth_max`
+    + `synth_slot_fill_order` with `candidate_id` tie-breaking, plus `league-scorer candidates --checkpoints <dir> --save-sha256
     <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64>
     --out <dir>` writing sorted `<out>/<state_id>.json` with empty `talk_commitments`.
   - **Peer postures, talk-commitment compliance & replay parity (`crates/league-scorer/src/{postures.rs,
