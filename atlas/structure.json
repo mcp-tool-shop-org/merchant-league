@@ -40,8 +40,12 @@
       "externals": 0,
       "files": [
         {
-          "hash": "4d4ab5494c7bb6c31d1a5dbe34942b6d2cfb8d4c14f6c3ee0872c9a22bb48ffa",
+          "hash": "0fed83bc33cbd18db504a079228bb4a0ee53358e235eb7359a0a0aa5e1ff7e62",
           "path": "docs/club-mode-design.md"
+        },
+        {
+          "hash": "3c668e4f5be73542178a040c484f0243752d554dae25f78f9fdd951c3fcc0ce6",
+          "path": "docs/decision-scorer.md"
         },
         {
           "hash": "0bd0ef1043501fb4e7c542f2d4eee72acd0c5841a6473edc7ddf1d5148624aaf",
@@ -52,7 +56,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "efd28d45017726f496b7fe748225e9ed57989eb26f8ac9a12c23039ffb8fb1d4",
+          "hash": "5c4c36261e7ec1a93e9668beed9cd201588c88591ce9f254398c2909acb14826",
           "path": "docs/eval-harness.md"
         },
         {
@@ -164,7 +168,7 @@
           "path": "docs/paper-test/game-06/setup.md"
         },
         {
-          "hash": "62e045e8b4f5101babdf664b9b4b2328edb74d574b66a9b565c900b0db4d8079",
+          "hash": "1494121ad7530cf4fa5c716eaba20e391d82418ea47272fd3894ab5ecc4f39cb",
           "path": "docs/paper-test/relay.md"
         },
         {
@@ -2326,7 +2330,7 @@
           "testsInside": true
         },
         {
-          "hash": "e8c01cda30fda4061d9608be5bd6fd849d529068527022ff46996726a7e24b24",
+          "hash": "4ace6c0266328a0aa3f00aa6f03d01bf65f765ae1d21735caab2e0a06442ebb1",
           "importsFiles": [
             "crates/league-core/src/lib.rs"
           ],
@@ -2399,7 +2403,7 @@
       "testRunners": [
         "cargo test"
       ],
-      "testedBy": 24,
+      "testedBy": 26,
       "unresolvedSites": 0
     },
     {
@@ -4166,105 +4170,105 @@
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2235
+              "line": 2237
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2243
+              "line": 2245
             },
             {
               "in": "run_play_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2297
+              "line": 2299
             },
             {
               "in": "ensure_arm_dir_empty",
               "kind": "err",
-              "line": 2340
+              "line": 2342
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2368
+              "line": 2370
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2391
+              "line": 2393
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2408
+              "line": 2410
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2429
+              "line": 2431
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2455
+              "line": 2457
             },
             {
               "in": "run_branch_with_transport_and_git_sha",
               "kind": "err",
-              "line": 2539
+              "line": 2541
             },
             {
               "in": "verify_branch_target_no_model_regent",
               "kind": "err",
-              "line": 2568
+              "line": 2570
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2627
+              "line": 2629
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2639
+              "line": 2641
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2646
+              "line": 2648
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2669
+              "line": 2671
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2678
+              "line": 2680
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2706
+              "line": 2708
             },
             {
               "in": "branch_one_target",
               "kind": "err",
-              "line": 2713
+              "line": 2715
             },
             {
               "in": "load_pre_act_transcript_prefix",
               "kind": "err",
-              "line": 3018
+              "line": 3020
             },
             {
               "in": "resolve_focal_seat",
               "kind": "err",
-              "line": 3089
+              "line": 3091
             }
           ],
-          "hash": "7df5a32e017b6044606bc37b09af8b24a322bb4bf0b22a12f560b083cfcf8601",
+          "hash": "38e4b2f6277b7b7707ded0f6e3a28695625428740029f32c960094b11bb6cb06",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4496,7 +4500,7 @@
               "line": 225
             }
           ],
-          "hash": "6444b6f03ba4e3e1d46f80411598acc1d7ed51d163e510329e4a17043e4c1580",
+          "hash": "f2e6b08d58bc4fbb523fcb98b0666d9bb57d3337e5c4fe0a03974a187f7f25f1",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4754,7 +4758,7 @@
               "line": 1008
             }
           ],
-          "hash": "10faffb5dc497688b8aaa11f4d89f9fd51c484ecd136b27dd8d4ba7c00449f78",
+          "hash": "9788b73c6e1d144dcd67166a640cd48ea77372ec80138b0679a6c586045e0330",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-relay/src/lib.rs",
@@ -4840,7 +4844,7 @@
           "testsInside": true
         },
         {
-          "hash": "6450153ba89f8298e67350cb095eac884d867b26d519bad1bcb2d0a8036ede06",
+          "hash": "0bee667ce3eb12f4495e0c388a3bf97ffad2747e6b1cde9413013d3816499e06",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -4855,7 +4859,7 @@
           "path": "crates/league-eval/tests/fixtures/day-01-talk-Foundry.expected.md"
         },
         {
-          "hash": "49c0e1e965c68785f479294dfc88560d492ad28f44ef3d76b72aa4f8fac467e5",
+          "hash": "a73ea128959e8a74de1971539861a9d960d19f212d9f95aed0b84b6b6d89b461",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -7697,7 +7701,7 @@
           "exports": [
             "scrub_structured_error_with_keys"
           ],
-          "hash": "3dccac0ec4bd4e7a9a48ac674af4a1f6f229820f031dfb5233492b5bf14ff9f3",
+          "hash": "ebe711dc30166a43576562e480506dde052c77fd93752c49235c8659c399db0a",
           "importsFiles": [
             "crates/league-error/src/lib.rs",
             "crates/league-relay/src/secret.rs"
@@ -7705,7 +7709,7 @@
           "path": "crates/league-relay/src/error.rs"
         },
         {
-          "hash": "6763c5b573fa7bf4ff34702171550de5ccd404e755f159cfcd73819d18d39ca5",
+          "hash": "a1943fcb99179ca949ed11ceec4cb6ceaf854fb2069d180a2c82036c0cb77fb2",
           "importsFiles": [
             "crates/league-relay/src/cli.rs",
             "crates/league-relay/src/error.rs",
@@ -8737,385 +8741,385 @@
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5575
+              "line": 5578
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5586
+              "line": 5589
             },
             {
               "in": "run_turn_with_diag",
               "kind": "err",
-              "line": 5805
+              "line": 5790
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5941
+              "line": 5946
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5950
+              "line": 5955
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 5959
+              "line": 5964
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6036
+              "line": 6041
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6050
+              "line": 6055
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6081
+              "line": 6086
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6381
+              "line": 6386
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6420
+              "line": 6425
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6442
+              "line": 6447
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6452
+              "line": 6457
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6472
+              "line": 6477
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6530
+              "line": 6535
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6577
+              "line": 6582
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6605
+              "line": 6610
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6609
+              "line": 6614
             },
             {
               "in": "run_single_automated_seat",
               "kind": "err",
-              "line": 6684
+              "line": 6689
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6713
+              "line": 6718
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6760
+              "line": 6765
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6803
+              "line": 6808
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6905
+              "line": 6910
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6920
+              "line": 6925
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6928
+              "line": 6933
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6956
+              "line": 6961
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6978
+              "line": 6983
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 6990
+              "line": 6995
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7059
+              "line": 7064
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7109
+              "line": 7114
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7326
+              "line": 7331
             },
             {
               "in": "run_single_automated_seat",
               "kind": "match-err",
-              "line": 7374
+              "line": 7379
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7601
+              "line": 7606
             },
             {
               "in": "prepare_eval_local_prompt_telemetry",
               "kind": "err",
-              "line": 7617
+              "line": 7622
             },
             {
               "in": "finish_eval_prompt_prep_error",
               "kind": "match-err",
-              "line": 7660
+              "line": 7665
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7706
+              "line": 7711
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7706
+              "line": 7711
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7707
+              "line": 7712
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7708
+              "line": 7713
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7714
+              "line": 7719
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "err",
-              "line": 7714
+              "line": 7719
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7725
+              "line": 7730
             },
             {
               "in": "call_with_wall_timeout",
               "kind": "match-err",
-              "line": 7729
+              "line": 7734
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "match-err",
-              "line": 7862
+              "line": 7867
             },
             {
               "in": "persist_raw_http_reply_at_boundary",
               "kind": "err",
-              "line": 7863
+              "line": 7868
             },
             {
               "in": "parse_single_tool_call_item",
               "kind": "err",
-              "line": 8096
+              "line": 8101
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8188
+              "line": 8193
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8194
+              "line": 8199
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8200
+              "line": 8205
             },
             {
               "in": "validate_json_value_against_schema",
               "kind": "err",
-              "line": 8210
+              "line": 8215
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8264
+              "line": 8269
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8273
+              "line": 8278
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8322
+              "line": 8327
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8350
+              "line": 8355
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8364
+              "line": 8369
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8418
+              "line": 8423
             },
             {
               "in": "evaluate_call_result",
               "kind": "match-err",
-              "line": 8442
+              "line": 8447
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8510
+              "line": 8515
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8521
+              "line": 8526
             },
             {
               "in": "probe_tool_round_store",
               "kind": "match-err",
-              "line": 8542
+              "line": 8547
             },
             {
               "in": "probe_tool_round_store",
               "kind": "err",
-              "line": 8544
+              "line": 8549
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8665
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "match-err",
-              "line": 8674
-            },
-            {
-              "in": "write_json_record_atomic",
-              "kind": "err",
-              "line": 8676
+              "line": 8670
             },
             {
               "in": "write_json_record_atomic",
               "kind": "match-err",
-              "line": 8678
+              "line": 8679
             },
             {
               "in": "write_json_record_atomic",
               "kind": "err",
-              "line": 8680
+              "line": 8681
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "match-err",
+              "line": 8683
+            },
+            {
+              "in": "write_json_record_atomic",
+              "kind": "err",
+              "line": 8685
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8759
+              "line": 8764
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8768
+              "line": 8773
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8780
+              "line": 8785
             },
             {
               "in": "load_transcript",
               "kind": "err",
-              "line": 8790
+              "line": 8795
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8836
+              "line": 8841
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8845
+              "line": 8850
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8847
+              "line": 8852
             },
             {
               "in": "write_verbatim_reply",
               "kind": "match-err",
-              "line": 8849
+              "line": 8854
             },
             {
               "in": "write_verbatim_reply",
               "kind": "err",
-              "line": 8851
+              "line": 8856
             },
             {
               "in": "format_system_time_utc_rfc3339",
               "kind": "match-err",
-              "line": 8925
+              "line": 8930
             }
           ],
-          "hash": "c6f54159725f54e53dc35043c6e10dc4a97f3bbbbab2996dc26c9b6963d7599e",
+          "hash": "61c7e54cfbe27f58cc91da0b083861b65472c774cb5ff116fa57c40e7488cbb6",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/seats.rs",
@@ -9593,6 +9597,8 @@
             "build_control_turn_orders_tool_definition",
             "build_preview_turn_orders_tool_definition",
             "cap_words_and_chars",
+            "control_r1_wording_slot",
+            "control_r1_wording_template",
             "control_wording_slot",
             "control_wording_template",
             "escape_default_ignorable_code_points",
@@ -9613,6 +9619,7 @@
             "preview_wording_template",
             "render_call_limit_reached_wire_json",
             "render_control_call_limit_reached_wire_json",
+            "render_control_engine_refusal_wire_json",
             "render_control_malformed_tool_call_wire_json",
             "render_engine_refusal_wire_json",
             "render_json_escaped_whisper_line",
@@ -9672,60 +9679,60 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 896
+              "line": 902
             },
             {
               "in": "reject_unknown_keys",
               "kind": "err",
-              "line": 2200
+              "line": 2286
             },
             {
               "in": "parse_hex32",
               "kind": "err",
-              "line": 2248
+              "line": 2334
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 2278
+              "line": 2364
             },
             {
               "in": "parse_asset_val",
               "kind": "err",
-              "line": 2286
+              "line": 2372
             },
             {
               "in": "parse_bond_opt",
               "kind": "err",
-              "line": 2313
+              "line": 2399
             },
             {
               "in": "parse_intent_target",
               "kind": "err",
-              "line": 2357
+              "line": 2443
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2383
+              "line": 2469
             },
             {
               "in": "parse_market_action",
               "kind": "err",
-              "line": 2565
+              "line": 2651
             },
             {
               "in": "parse_bundle_obj",
               "kind": "err",
-              "line": 2765
+              "line": 2851
             },
             {
-              "in": "execute_preview_tool_call",
+              "in": "execute_tool_call_with_preview",
               "kind": "match-err",
-              "line": 3456
+              "line": 3620
             }
           ],
-          "hash": "856039a0135fa191a96f35f204f52667e85abaf72bd8afc5393dfd189dbbc7d9",
+          "hash": "9380ada834f4324009e52dd07dfa4d40328a1022dff1f61713a1cbb4a9f50593",
           "importOrder": [
             "crates/league-relay/src/error.rs",
             "crates/league-relay/src/secret.rs",
@@ -9763,6 +9770,10 @@
         {
           "hash": "c6d152f20ebe17b80ea8078f044150a4ef4236b8964850c5f3276c345e045d19",
           "path": "crates/league-relay/tests/fixtures/b2d77ce8_tool_off_calls.jsonl"
+        },
+        {
+          "hash": "fb578ee7383f8c1a918bfe13652379cd87154bef9f24ed575cca619cf8762b6e",
+          "path": "crates/league-relay/tests/fixtures/control_arm_r2_wording.json"
         },
         {
           "hash": "e2be0e0292c6981c2762d80b978ab4de5832c124a178f6ce620f0bc1d8e373b2",
@@ -9861,7 +9872,7 @@
           "path": "crates/league-relay/tests/fixtures/play_mode_on_golden/to-seat/day-02-talk-Saltworks.md"
         },
         {
-          "hash": "b564af9e762f3480bc575a6b9e884d8e4e2fe34f7f1105e24649519cb4736011",
+          "hash": "a920cc46619a40ab40a2cd38b52abad25fc96942a3f3e60994d0ab87ef60bd6e",
           "importsFiles": [
             "crates/league-core/src/club/host.rs",
             "crates/league-core/src/lib.rs",
@@ -9909,6 +9920,1627 @@
         "cargo test"
       ],
       "testedBy": 8,
+      "unresolvedSites": 0
+    },
+    {
+      "dynamicReads": 2,
+      "dynamicSpawns": 0,
+      "dynamicSpawnsInTests": 0,
+      "dynamicWrites": 2,
+      "entryPoints": [
+        "crates/league-scorer/src/lib.rs",
+        "crates/league-scorer/src/main.rs"
+      ],
+      "externals": 0,
+      "files": [
+        {
+          "hash": "b86baf95de748984b1ed0e6f5676c5e58eb8dd45975243f8286dec923f6d37f4",
+          "path": "crates/league-scorer/Cargo.toml"
+        },
+        {
+          "hash": "5359740f80f30c8c576e8066d690afc81675645a0fcaaeaf1f11964876d68194",
+          "path": "crates/league-scorer/README.md"
+        },
+        {
+          "entry": "main_entry",
+          "entryRule": 4,
+          "exports": [
+            "main_entry",
+            "run_cli"
+          ],
+          "failurePaths": [
+            {
+              "in": "parse",
+              "kind": "err",
+              "line": 39
+            },
+            {
+              "in": "run_cli",
+              "kind": "match-err",
+              "line": 65
+            },
+            {
+              "in": "take_path",
+              "kind": "err",
+              "line": 107
+            },
+            {
+              "in": "run_cli_args",
+              "kind": "err",
+              "line": 154
+            },
+            {
+              "in": "run_cli_args",
+              "kind": "err",
+              "line": 157
+            },
+            {
+              "in": "parse_score_flags",
+              "kind": "err",
+              "line": 177
+            },
+            {
+              "in": "parse_score_flags",
+              "kind": "err",
+              "line": 185
+            },
+            {
+              "in": "parse_score_flags",
+              "kind": "err",
+              "line": 193
+            },
+            {
+              "in": "parse_score_flags",
+              "kind": "err",
+              "line": 199
+            },
+            {
+              "in": "parse_score_flags",
+              "kind": "err",
+              "line": 210
+            },
+            {
+              "in": "validate_checkpoints_layout",
+              "kind": "err",
+              "line": 245
+            },
+            {
+              "in": "validate_checkpoints_layout",
+              "kind": "err",
+              "line": 253
+            },
+            {
+              "in": "validate_checkpoints_layout",
+              "kind": "err",
+              "line": 258
+            },
+            {
+              "in": "collect_blind_request_files",
+              "kind": "err",
+              "line": 283
+            },
+            {
+              "in": "execute_score_command",
+              "kind": "err",
+              "line": 309
+            }
+          ],
+          "hash": "766e74a970c56d1f03f158a14ea1d2ba01da11f9d474f74ac623160502bb9379",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/error.rs",
+            "crates/league-scorer/src/rollout.rs",
+            "crates/league-scorer/src/types.rs"
+          ],
+          "path": "crates/league-scorer/src/cli.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "branch": "s == \"--help\" || s == \"-h\"",
+                  "line": 128,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "branch": "s == \"--version\" || s == \"-V\"",
+                  "line": 133,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "line": 140,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "branch": "blind_inputs_dir.is_some()",
+                  "line": 177,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 105,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "raw.is_empty()",
+                  "line": 107,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "checkpoints_dir.is_some()",
+                  "line": 185,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "config_path.is_some()",
+                  "line": 193,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "out_dir.is_some()",
+                  "line": 199,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 205,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 292,
+                  "name": "InvalidScorerConfig",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 294,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 233,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!file_type.is_file()",
+                  "line": 245,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 253,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 257,
+                  "name": "is_valid_sha256_hex",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!is_valid_sha256_hex(stem)",
+                  "line": 258,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 268,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 273,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "branch": "paths.is_empty()",
+                  "line": 283,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 304,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 306,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "branch": "!seen_state_ids.insert(req.state_id.clone())",
+                  "line": 309,
+                  "name": "InvalidStateId",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 319,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "main_entry",
+              "truncated": true
+            },
+            {
+              "calls": [
+                {
+                  "branch": "s == \"--help\" || s == \"-h\"",
+                  "line": 128,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "branch": "s == \"--version\" || s == \"-V\"",
+                  "line": 133,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "line": 140,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "run_cli_args"
+                },
+                {
+                  "branch": "blind_inputs_dir.is_some()",
+                  "line": 177,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 105,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "raw.is_empty()",
+                  "line": 107,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "checkpoints_dir.is_some()",
+                  "line": 185,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "config_path.is_some()",
+                  "line": 193,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "out_dir.is_some()",
+                  "line": 199,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 205,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 292,
+                  "name": "InvalidScorerConfig",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 294,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 233,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!file_type.is_file()",
+                  "line": 245,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 253,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 257,
+                  "name": "is_valid_sha256_hex",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!is_valid_sha256_hex(stem)",
+                  "line": 258,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 268,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 273,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "branch": "paths.is_empty()",
+                  "line": 283,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 304,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 306,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "branch": "!seen_state_ids.insert(req.state_id.clone())",
+                  "line": 309,
+                  "name": "InvalidStateId",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 319,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                }
+              ],
+              "exported": true,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "run_cli",
+              "truncated": true
+            },
+            {
+              "calls": [
+                {
+                  "line": 92,
+                  "name": "new",
+                  "receiver": "StructuredError",
+                  "target": {
+                    "file": "crates/league-core/src/lib.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "write_cli_error"
+            },
+            {
+              "calls": [
+                {
+                  "line": 105,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "raw.is_empty()",
+                  "line": 107,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "take_path"
+            },
+            {
+              "calls": [
+                {
+                  "branch": "s == \"--help\" || s == \"-h\"",
+                  "line": 128,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "s == \"--version\" || s == \"-V\"",
+                  "line": 133,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 140,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "blind_inputs_dir.is_some()",
+                  "line": 177,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 105,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "raw.is_empty()",
+                  "line": 107,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "checkpoints_dir.is_some()",
+                  "line": 185,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "config_path.is_some()",
+                  "line": 193,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "branch": "out_dir.is_some()",
+                  "line": 199,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 205,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "parse_score_flags"
+                },
+                {
+                  "line": 292,
+                  "name": "InvalidScorerConfig",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 294,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 233,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!file_type.is_file()",
+                  "line": 245,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 253,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 257,
+                  "name": "is_valid_sha256_hex",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!is_valid_sha256_hex(stem)",
+                  "line": 258,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 268,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 273,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "branch": "paths.is_empty()",
+                  "line": 283,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 304,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 306,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "branch": "!seen_state_ids.insert(req.state_id.clone())",
+                  "line": 309,
+                  "name": "InvalidStateId",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                },
+                {
+                  "line": 319,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "execute_score_command"
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "run_cli_args",
+              "truncated": true
+            },
+            {
+              "calls": [
+                {
+                  "branch": "blind_inputs_dir.is_some()",
+                  "line": 177,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 105,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "raw.is_empty()",
+                  "line": 107,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_path"
+                },
+                {
+                  "branch": "checkpoints_dir.is_some()",
+                  "line": 185,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "config_path.is_some()",
+                  "line": 193,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "out_dir.is_some()",
+                  "line": 199,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 205,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "parse_score_flags"
+            },
+            {
+              "calls": [
+                {
+                  "line": 233,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "!file_type.is_file()",
+                  "line": 245,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 253,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 257,
+                  "name": "is_valid_sha256_hex",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  }
+                },
+                {
+                  "branch": "!is_valid_sha256_hex(stem)",
+                  "line": 258,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "validate_checkpoints_layout"
+            },
+            {
+              "calls": [
+                {
+                  "line": 268,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 273,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "paths.is_empty()",
+                  "line": 283,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "collect_blind_request_files"
+            },
+            {
+              "calls": [
+                {
+                  "line": 292,
+                  "name": "InvalidScorerConfig",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 294,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 233,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!file_type.is_file()",
+                  "line": 245,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 253,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 257,
+                  "name": "is_valid_sha256_hex",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "branch": "!is_valid_sha256_hex(stem)",
+                  "line": 258,
+                  "name": "InvalidCheckpointsLayout",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "validate_checkpoints_layout"
+                },
+                {
+                  "line": 268,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 273,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "branch": "paths.is_empty()",
+                  "line": 283,
+                  "name": "NoBlindInputs",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "collect_blind_request_files"
+                },
+                {
+                  "line": 304,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 306,
+                  "name": "Json",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "branch": "!seen_state_ids.insert(req.state_id.clone())",
+                  "line": 309,
+                  "name": "InvalidStateId",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 319,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                },
+                {
+                  "line": 328,
+                  "name": "execute_blind_request",
+                  "target": {
+                    "file": "crates/league-scorer/src/rollout.rs"
+                  }
+                },
+                {
+                  "line": 329,
+                  "name": "to_sorted_pretty_json",
+                  "target": {
+                    "file": "crates/league-scorer/src/types.rs"
+                  }
+                },
+                {
+                  "line": 332,
+                  "name": "Io",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": false,
+              "isDefaultExport": false,
+              "name": "execute_score_command"
+            }
+          ]
+        },
+        {
+          "hash": "d3a0c073e1ad17fdfc2b1eb32818ad0c843acb6914d91a9af65f4f0ec3f1a117",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs"
+          ],
+          "path": "crates/league-scorer/src/error.rs"
+        },
+        {
+          "hash": "f0e71d47553abbec08e42a7117e683ea08fe5fa13639367ba8a8c307a4f883d2",
+          "importsFiles": [
+            "crates/league-scorer/src/cli.rs",
+            "crates/league-scorer/src/error.rs",
+            "crates/league-scorer/src/rollout.rs",
+            "crates/league-scorer/src/scenarios.rs",
+            "crates/league-scorer/src/scoring.rs",
+            "crates/league-scorer/src/types.rs"
+          ],
+          "path": "crates/league-scorer/src/lib.rs"
+        },
+        {
+          "entry": "main",
+          "entryRule": 1,
+          "hash": "2d950ba14d55c733753dc88149b627d65520146b6e082b07d6cb2449c74a2f01",
+          "importsFiles": [
+            "crates/league-scorer/src/cli.rs"
+          ],
+          "library": "crates/league-scorer/src/lib.rs",
+          "path": "crates/league-scorer/src/main.rs",
+          "sequences": [
+            {
+              "calls": [
+                {
+                  "inner": [
+                    {
+                      "branch": "s == \"--help\" || s == \"-h\"",
+                      "line": 128,
+                      "name": "Io",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "run_cli_args"
+                    },
+                    {
+                      "branch": "s == \"--version\" || s == \"-V\"",
+                      "line": 133,
+                      "name": "Io",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "run_cli_args"
+                    },
+                    {
+                      "line": 140,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "run_cli_args"
+                    },
+                    {
+                      "branch": "blind_inputs_dir.is_some()",
+                      "line": 177,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "parse_score_flags"
+                    },
+                    {
+                      "line": 105,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "take_path"
+                    },
+                    {
+                      "branch": "raw.is_empty()",
+                      "line": 107,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "take_path"
+                    },
+                    {
+                      "branch": "checkpoints_dir.is_some()",
+                      "line": 185,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "parse_score_flags"
+                    },
+                    {
+                      "branch": "config_path.is_some()",
+                      "line": 193,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "parse_score_flags"
+                    },
+                    {
+                      "branch": "out_dir.is_some()",
+                      "line": 199,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "parse_score_flags"
+                    },
+                    {
+                      "line": 205,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "parse_score_flags"
+                    },
+                    {
+                      "line": 292,
+                      "name": "InvalidScorerConfig",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "execute_score_command"
+                    },
+                    {
+                      "line": 294,
+                      "name": "Json",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "execute_score_command"
+                    }
+                  ],
+                  "innerTruncated": true,
+                  "line": 6,
+                  "name": "main_entry",
+                  "target": {
+                    "file": "crates/league-scorer/src/cli.rs"
+                  }
+                }
+              ],
+              "exported": false,
+              "invokedAtTopLevel": true,
+              "isDefaultExport": false,
+              "name": "main"
+            }
+          ]
+        },
+        {
+          "exports": [
+            "execute_blind_request",
+            "run_single_rollout",
+            "verify_checkpoint_pair"
+          ],
+          "failurePaths": [
+            {
+              "in": "verify_checkpoint_pair",
+              "kind": "err",
+              "line": 57
+            },
+            {
+              "in": "verify_checkpoint_pair",
+              "kind": "err",
+              "line": 64
+            },
+            {
+              "in": "verify_checkpoint_pair",
+              "kind": "err",
+              "line": 71
+            },
+            {
+              "in": "run_single_rollout",
+              "kind": "err",
+              "line": 99
+            },
+            {
+              "in": "run_single_rollout",
+              "kind": "err",
+              "line": 104
+            },
+            {
+              "in": "execute_blind_request",
+              "kind": "err",
+              "line": 185
+            }
+          ],
+          "hash": "891ebe6e82eb2bb71ff640aeffb9c539b6001411c138714042b23d8147d528b6",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/error.rs",
+            "crates/league-scorer/src/scenarios.rs",
+            "crates/league-scorer/src/scoring.rs",
+            "crates/league-scorer/src/types.rs"
+          ],
+          "path": "crates/league-scorer/src/rollout.rs"
+        },
+        {
+          "exports": [
+            "draw_scenarios"
+          ],
+          "failurePaths": [
+            {
+              "in": "draw_scenarios",
+              "kind": "err",
+              "line": 81
+            },
+            {
+              "in": "draw_scenarios",
+              "kind": "err",
+              "line": 102
+            },
+            {
+              "in": "draw_scenarios",
+              "kind": "err",
+              "line": 108
+            }
+          ],
+          "hash": "a7500eba13f27039540062006ba309281b9b9da685f9a90bdb27e6a8c87e0c30",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/error.rs"
+          ],
+          "path": "crates/league-scorer/src/scenarios.rs"
+        },
+        {
+          "exports": [
+            "score_outcomes"
+          ],
+          "failurePaths": [
+            {
+              "in": "compute_winners_curse",
+              "kind": "err",
+              "line": 137
+            },
+            {
+              "in": "score_outcomes",
+              "kind": "err",
+              "line": 175
+            },
+            {
+              "in": "score_outcomes",
+              "kind": "err",
+              "line": 182
+            },
+            {
+              "in": "score_outcomes",
+              "kind": "err",
+              "line": 211
+            }
+          ],
+          "hash": "9ce0cf53e513405ec3424683a3b04f1f00570d04fa8a046220ce1d5a28f9355d",
+          "importsFiles": [
+            "crates/league-scorer/src/error.rs",
+            "crates/league-scorer/src/types.rs"
+          ],
+          "path": "crates/league-scorer/src/scoring.rs"
+        },
+        {
+          "exports": [
+            "candidate_id_for_submission",
+            "compute_pre_act_pair_sha256_hex",
+            "is_valid_sha256_hex",
+            "sha256_hex",
+            "to_sorted_compact_json",
+            "to_sorted_pretty_json",
+            "validate_state_id"
+          ],
+          "failurePaths": [
+            {
+              "in": "validate_state_id",
+              "kind": "err",
+              "line": 84
+            },
+            {
+              "in": "validate_state_id",
+              "kind": "err",
+              "line": 92
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 293
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 299
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 305
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 311
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 317
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 325
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 331
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 337
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 343
+            },
+            {
+              "in": "validate_for_s1",
+              "kind": "err",
+              "line": 349
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 414
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 424
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 431
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 437
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 443
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 449
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 459
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 467
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 472
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 484
+            },
+            {
+              "in": "validate",
+              "kind": "err",
+              "line": 495
+            }
+          ],
+          "hash": "0136c63a7f16f2f26bb9fdf353b1440d01adedd2f273c45fc1c6d2d515fcb758",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/error.rs"
+          ],
+          "path": "crates/league-scorer/src/types.rs"
+        },
+        {
+          "hash": "65ff6becd4f515b526e9e82b05739b6c65a3191ff8d3cb456c09e4dcc99742ff",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/cli.rs",
+            "crates/league-scorer/src/lib.rs"
+          ],
+          "library": "crates/league-scorer/src/lib.rs",
+          "path": "crates/league-scorer/tests/scorer_tests.rs",
+          "spawns": [
+            "crates/league-scorer/src/main.rs"
+          ],
+          "spawnsInstalled": [
+            "crates/league-scorer/src/main.rs"
+          ],
+          "testsInside": true
+        },
+        {
+          "hash": "5ced67eea49cd36854fefbd41fdfef911954f38ada83588b230d0bd925198c1e",
+          "importsFiles": [
+            "crates/league-core/src/lib.rs",
+            "crates/league-scorer/src/lib.rs"
+          ],
+          "library": "crates/league-scorer/src/lib.rs",
+          "path": "crates/league-scorer/tests/timing_bench.rs",
+          "testsInside": true
+        }
+      ],
+      "globs": [
+        "crates/league-scorer/**"
+      ],
+      "importConfidence": "full",
+      "name": "league-scorer",
+      "origin": "authored",
+      "outsidePlaces": [
+        {
+          "reads": 4,
+          "where": [
+            "caller"
+          ],
+          "writes": 0
+        }
+      ],
+      "outsideReads": 4,
+      "role": "code",
+      "testRunners": [
+        "cargo test"
+      ],
+      "testedBy": 2,
       "unresolvedSites": 0
     },
     {
@@ -13425,7 +15057,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "71df8493c75b103739a081ca3e3c94fb62edea423d17e6675c707ea0071be8c8",
+          "hash": "0258645a67baff7d9a32a041ed37388f49cc248f885bb6a93be56b38f264f56b",
           "path": "CHANGELOG.md"
         },
         {
@@ -13433,11 +15065,11 @@
           "path": "CLAUDE.md"
         },
         {
-          "hash": "801f32bcae282686f060e4a64cca3b29539242cb92891f19f1004a3132e2fcac",
+          "hash": "34206cbdef2a8c4b71a6e6bdb17f2bb8b9d25a96c7af8f062c55c900168eb1c8",
           "path": "Cargo.lock"
         },
         {
-          "hash": "8821149ad8ff741c6472a741e87ae9182d8ea595387aa2343ef7755fbfc66422",
+          "hash": "dbb3fd9f73ae17a3a4eaf4e4b9284326a9c926222d7e10360fea3cda444f769f",
           "path": "Cargo.toml"
         },
         {
@@ -13584,7 +15216,7 @@
   ],
   "doors": [
     {
-      "checksCount": 10,
+      "checksCount": 12,
       "commands": [
         {
           "dir": "",
@@ -13843,6 +15475,11 @@
           "boundary": "league-relay",
           "depth": 0,
           "files": 11
+        },
+        {
+          "boundary": "league-scorer",
+          "depth": 0,
+          "files": 10
         },
         {
           "boundary": "league-season",
@@ -14221,6 +15858,42 @@
           "via": "cargo test"
         },
         {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-scorer/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-scorer/src/lib.rs",
+          "runKind": "checks",
+          "via": "cargo clippy"
+        },
+        {
+          "job": "audit",
+          "matched": true,
+          "path": "crates/league-scorer/src/main.rs",
+          "runKind": "checks",
+          "via": "cargo install"
+        },
+        {
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-scorer/src/main.rs",
+          "runKind": "checks",
+          "via": "cargo clippy"
+        },
+        {
+          "directory": true,
+          "job": "check",
+          "matched": true,
+          "path": "crates/league-scorer/tests/",
+          "runKind": "executes",
+          "via": "cargo test"
+        },
+        {
           "directory": true,
           "job": "check",
           "matched": true,
@@ -14346,7 +16019,7 @@
           "via": "astro build"
         }
       ],
-      "runsCount": 58,
+      "runsCount": 61,
       "secrets": [],
       "sends": {
         "deploysPages": false,
@@ -14361,14 +16034,14 @@
       "stages": [],
       "tests": [
         {
-          "files": 63,
+          "files": 65,
           "job": "check",
           "runner": "cargo test",
           "step": "Test"
         },
         {
           "coverage": true,
-          "files": 63,
+          "files": 65,
           "job": "check",
           "runner": "cargo test",
           "step": "Coverage"
@@ -14888,6 +16561,75 @@
       "checksCount": 0,
       "commands": [],
       "elsewhere": [],
+      "file": "crates/league-scorer/Cargo.toml",
+      "kind": "command",
+      "landings": [],
+      "mentions": [],
+      "name": "league-scorer",
+      "permissions": [],
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-scorer",
+          "depth": 0,
+          "files": 7
+        },
+        {
+          "boundary": "league-core",
+          "depth": 2,
+          "enters": {
+            "file": "crates/league-core/src/lib.rs",
+            "from": "crates/league-scorer/src/cli.rs"
+          },
+          "files": 15
+        },
+        {
+          "boundary": "league-error",
+          "depth": 4,
+          "enters": {
+            "file": "crates/league-error/src/lib.rs",
+            "from": "crates/league-core/src/error.rs"
+          },
+          "files": 1
+        },
+        {
+          "boundary": "league-seat-types",
+          "depth": 4,
+          "enters": {
+            "file": "crates/league-seat-types/src/lib.rs",
+            "from": "crates/league-core/src/commit.rs"
+          },
+          "files": 12
+        }
+      ],
+      "readers": [],
+      "runs": [
+        {
+          "path": "crates/league-scorer/src/main.rs",
+          "runKind": "executes"
+        }
+      ],
+      "runsCount": 1,
+      "secrets": [],
+      "sends": {
+        "deploysPages": false,
+        "dispatchesTo": [],
+        "opensIssues": false,
+        "opensIssuesOnFailure": false,
+        "opensPullRequests": false,
+        "publishes": false,
+        "publishesTo": [],
+        "releases": false
+      },
+      "stages": [],
+      "triggers": [],
+      "uses": [],
+      "usesWorkflowToken": false
+    },
+    {
+      "checksCount": 0,
+      "commands": [],
+      "elsewhere": [],
       "file": "crates/league-tui/Cargo.toml",
       "kind": "command",
       "landings": [],
@@ -15056,6 +16798,11 @@
       "to": "league-error"
     },
     {
+      "from": "league-scorer",
+      "kind": "file",
+      "to": "league-core"
+    },
+    {
       "from": "league-seat-types",
       "kind": "file",
       "to": "league-error"
@@ -15103,8 +16850,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "fd899c39e064ed7073ecd85da2cf53ab51391fe1",
-    "tracked": 627
+    "commit": "58d7882800f73143c4e6ab8acf9fa172b2db8832",
+    "tracked": 641
   },
   "landings": [
     {
@@ -15310,6 +17057,11 @@
         },
         {
           "by": "crates/league-relay/Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        },
+        {
+          "by": "crates/league-scorer/Cargo.toml",
           "call": "configuration",
           "confidence": "config"
         },
@@ -15591,6 +17343,29 @@
     {
       "readers": [
         {
+          "by": "crates/league-relay/tests/relay_integration.rs",
+          "call": "include_str",
+          "confidence": "ast",
+          "fromTests": true
+        }
+      ],
+      "target": "crates/league-relay/tests/fixtures/control_arm_r2_wording.json",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        }
+      ],
+      "target": "crates/league-scorer",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
           "by": "Cargo.toml",
           "call": "configuration",
           "confidence": "config"
@@ -15613,6 +17388,11 @@
         },
         {
           "by": "crates/league-gen/Cargo.toml",
+          "call": "configuration",
+          "confidence": "config"
+        },
+        {
+          "by": "crates/league-scorer/Cargo.toml",
           "call": "configuration",
           "confidence": "config"
         },
@@ -16373,7 +18153,7 @@
   "overlaps": [],
   "submodules": [],
   "symlinks": [],
-  "testFiles": 101,
+  "testFiles": 104,
   "unassigned": [
     {
       "hash": "21dd8cc5ce6c646dea1113a861b26447a9f4785650ac0dae86117948ba30f2e8",

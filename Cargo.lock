@@ -1479,6 +1479,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "league-scorer"
+version = "0.1.0"
+dependencies = [
+ "league-core",
+ "league-seat-types",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "league-season"
 version = "0.1.0"
 

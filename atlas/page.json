@@ -6,7 +6,22 @@
   ],
   "breaks": [
     {
-      "doors": 7,
+      "doors": 5,
+      "importedBy": [
+        "league-eval",
+        "league-gen",
+        "league-relay",
+        "league-scorer",
+        "league-standalone",
+        "league-tui"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-core",
+      "partLabel": "league-core"
+    },
+    {
+      "doors": 8,
       "importedBy": [
         "league-core",
         "league-ledger",
@@ -20,21 +35,7 @@
       "partLabel": "league-error"
     },
     {
-      "doors": 4,
-      "importedBy": [
-        "league-eval",
-        "league-gen",
-        "league-relay",
-        "league-standalone",
-        "league-tui"
-      ],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-core",
-      "partLabel": "league-core"
-    },
-    {
-      "doors": 4,
+      "doors": 5,
       "importedBy": [
         "league-core",
         "league-gen",
@@ -97,30 +98,99 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 0,
-      "changed": 7,
+      "added": 14,
+      "changed": 17,
       "moved": 0,
-      "parts": 4,
+      "parts": 6,
       "removed": 0
     },
     "items": [
       {
+        "kind": "import-added",
+        "sentence": "league-scorer now imports league-core.",
+        "subjects": [
+          "league-scorer",
+          "league-core"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also runs crates/league-scorer/tests/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-scorer/tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "CI now also checks crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "crates/league-scorer/src/lib.rs",
+          "crates/league-scorer/src/main.rs"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "league-scorer (crates/league-scorer/Cargo.toml) is a new command. It runs crates/league-scorer/src/main.rs.",
+        "subjects": [
+          "crates/league-scorer/Cargo.toml",
+          "crates/league-scorer/src/main.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-core/ is now also read by crates/league-scorer/Cargo.toml.",
+        "subjects": [
+          "crates/league-core/",
+          "crates/league-scorer/Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-relay/tests/fixtures/control_arm_r2_wording.json is now read by crates/league-relay/tests/relay_integration.rs.",
+        "subjects": [
+          "crates/league-relay/tests/fixtures/control_arm_r2_wording.json",
+          "crates/league-relay/tests/relay_integration.rs"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "crates/league-scorer/ is now read by Cargo.toml.",
+        "subjects": [
+          "crates/league-scorer/",
+          "Cargo.toml"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "And 1 more new writer or reader of a place.",
+        "subjects": []
+      },
+      {
+        "kind": "part",
+        "sentence": "league-scorer is a new part, drawn from `crates/league-scorer/**`.",
+        "subjects": [
+          "league-scorer"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-22; 7 files changed content.",
+        "sentence": "14 files added and 17 changed content, across 6 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "2a908a121a215a75a90bb4417d3810a850cc69fe",
-      "generatedAt": "2026-11-22T10:32:39.214Z"
+      "commit": "fd899c39e064ed7073ecd85da2cf53ab51391fe1",
+      "generatedAt": "2026-11-22T12:05:41.578Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
       "a": "crates/league-eval/src/driver.rs",
       "b": "crates/league-eval/tests/play_and_branch.rs",
-      "either": 7,
+      "either": 6,
       "partLabels": [
         "league-eval",
         "league-eval"
@@ -134,7 +204,7 @@
     },
     {
       "a": "crates/league-eval/src/driver.rs",
-      "b": "crates/league-eval/src/error.rs",
+      "b": "crates/league-eval/src/records.rs",
       "either": 6,
       "partLabels": [
         "league-eval",
@@ -163,34 +233,34 @@
       "shared": 5
     },
     {
-      "a": "crates/league-gen/src/empirical.rs",
-      "b": "crates/league-gen/tests/properties.rs",
+      "a": "crates/league-eval/src/records.rs",
+      "b": "crates/league-eval/tests/play_and_branch.rs",
       "either": 6,
       "partLabels": [
-        "league-gen",
-        "league-gen"
+        "league-eval",
+        "league-eval"
       ],
       "parts": [
-        "league-gen",
-        "league-gen"
+        "league-eval",
+        "league-eval"
       ],
       "relation": "inside",
       "shared": 5
     },
     {
-      "a": "crates/league-relay/src/relay.rs",
-      "b": "crates/league-relay/tests/relay_integration.rs",
-      "either": 31,
+      "a": "crates/league-eval/tests/addendum_item9.rs",
+      "b": "crates/league-eval/tests/play_and_branch.rs",
+      "either": 6,
       "partLabels": [
-        "league-relay",
-        "league-relay"
+        "league-eval",
+        "league-eval"
       ],
       "parts": [
-        "league-relay",
-        "league-relay"
+        "league-eval",
+        "league-eval"
       ],
       "relation": "inside",
-      "shared": 25
+      "shared": 5
     }
   ],
   "changesTogetherNote": [
@@ -198,9 +268,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "fd899c39e064ed7073ecd85da2cf53ab51391fe1",
+  "commit": "58d7882800f73143c4e6ab8acf9fa172b2db8832",
   "defaultBranch": "main",
-  "derived": "15 parts, mostly Rust (392 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 9 doors; the busiest is CI, which reaches 12 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (402 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -208,10 +278,12 @@
         "crates/league-eval/src/main.rs",
         "crates/league-gen/src/lib.rs",
         "crates/league-relay/src/lib.rs",
-        "crates/league-relay/src/main.rs"
+        "crates/league-relay/src/main.rs",
+        "crates/league-scorer/src/lib.rs",
+        "crates/league-scorer/src/main.rs"
       ],
-      "checksCount": 5,
-      "checksMore": 2,
+      "checksCount": 7,
+      "checksMore": 4,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
       "landings": [],
@@ -247,6 +319,11 @@
           "boundary": "league-relay",
           "depth": 0,
           "files": 11
+        },
+        {
+          "boundary": "league-scorer",
+          "depth": 0,
+          "files": 10
         },
         {
           "boundary": "league-season",
@@ -320,6 +397,7 @@
         "crates/league-relay/src/secret.rs",
         "crates/league-relay/src/transport.rs",
         "crates/league-relay/tests/",
+        "crates/league-scorer/tests/",
         "crates/league-season/",
         "crates/league-seat-types/src/lib.rs",
         "crates/league-seat-types/src/view.rs",
@@ -329,8 +407,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 48,
-      "runsMore": 69,
+      "runsCount": 49,
+      "runsMore": 71,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -496,6 +574,47 @@
       ],
       "runs": [
         "crates/league-relay/src/main.rs"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": "crates/league-scorer/Cargo.toml",
+      "id": "crates/league-scorer/Cargo.toml#league-scorer",
+      "kind": "command",
+      "landings": [],
+      "name": "league-scorer",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "league-scorer",
+          "depth": 0,
+          "files": 7
+        },
+        {
+          "boundary": "league-core",
+          "depth": 2,
+          "files": 15
+        },
+        {
+          "boundary": "league-error",
+          "depth": 4,
+          "files": 1
+        },
+        {
+          "boundary": "league-seat-types",
+          "depth": 4,
+          "files": 12
+        }
+      ],
+      "runs": [
+        "crates/league-scorer/src/main.rs"
       ],
       "runsCount": 1,
       "runsMore": 0,
@@ -687,12 +806,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-22T12:05:41.578Z",
+  "generatedAt": "2026-11-22T23:40:43.573Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "37 writes and 31 reads use paths built at run time and are not named here.",
+    "39 writes and 33 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "18 writes and 44 reads go to a path their caller passes, not to this repository.",
+    "18 writes and 48 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -708,6 +827,7 @@
     "league-gen": "league-gen",
     "league-ledger": "league-ledger",
     "league-relay": "league-relay",
+    "league-scorer": "league-scorer",
     "league-season": "league-season",
     "league-seat-types": "league-seat-types",
     "league-seat-ui": "league-seat-ui",
@@ -716,7 +836,7 @@
     "root": "the repository root",
     "scripts": "scripts"
   },
-  "parts": 15,
+  "parts": 16,
   "readers": [],
   "repo": "mcp-tool-shop-org/merchant-league",
   "sequences": [],
@@ -732,14 +852,15 @@
   "startReason": "This path follows league-tui (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 101,
+  "testFiles": 104,
   "testedBy": {
-    "league-core": 24,
+    "league-core": 26,
     "league-error": 7,
     "league-eval": 10,
     "league-gen": 10,
     "league-ledger": 8,
     "league-relay": 8,
+    "league-scorer": 2,
     "league-season": 1,
     "league-seat-types": 5,
     "league-seat-ui": 1,
@@ -747,13 +868,13 @@
     "league-tui": 2,
     "scripts": 1
   },
-  "testedCodeParts": 12,
+  "testedCodeParts": 13,
   "testedInside": [
     "league-season",
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 37,
+  "unnamedWrites": 39,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

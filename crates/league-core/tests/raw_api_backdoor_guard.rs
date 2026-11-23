@@ -133,12 +133,13 @@ const FORBIDDEN_SEAT_IDENTIFIERS: [&str; 44] = [
 
 const TUI_HOST_MODULES: [&str; 2] = ["src/host.rs", "src/main.rs"];
 
-const NON_SEAT_WORKSPACE_CRATES: [&str; 8] = [
+const NON_SEAT_WORKSPACE_CRATES: [&str; 9] = [
     "league-core",
     "league-standalone",
     "league-error",
     "league-eval",
     "league-ledger",
+    "league-scorer",
     "league-season",
     "league-gen",
     "league-tui",
@@ -9169,6 +9170,8 @@ fn check_workspace_manifests_and_crate_sources(
                     "league-tui",
                     "league-season",
                 ]
+            } else if crate_name == "league-scorer" {
+                &["league-eval", "league-relay"]
             } else {
                 &[]
             };
