@@ -17,16 +17,25 @@ use league_core::{
 };
 use league_scorer::cli::run_cli;
 use league_scorer::{
-    BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest, EXIT_OK, EXIT_RUNTIME_ERROR,
-    EXIT_USER_ERROR, ExtractedTalkCommitment, PostureKind, ScenarioRolloutOutcome, ScorerConfig,
+    BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest,
+    COMPOSITE_GREEDY_RULES_DEFAULT, DROP_TIE_BREAK_BY_CANDIDATE_ID, EXIT_OK, EXIT_RUNTIME_ERROR,
+    EXIT_USER_ERROR, ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind,
+    SYNTH_CHARTER_BID_CRED, SYNTH_CLAIM_MATURING_EXACT, SYNTH_CONVERTER_INPUT_DEFICIT_COVER,
+    SYNTH_COUNCIL_SELF_NOMINATION, SYNTH_DROP_DEFAULT_ACTION_RISK_CRED,
+    SYNTH_DROP_PROJECT_RISK_CRED, SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER,
+    SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES, SYNTH_PROJECT_RANK_BY_EQUITY,
+    SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS, SYNTH_QUOTE_MIN_UNITS,
+    SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScenarioRolloutOutcome, ScorerConfig,
     ScorerError, StateScoreOutput, apply_talk_commitments, build_arm_independent_request,
     candidate_id_for_submission, canonicalize_talk_commitments, compute_pre_act_pair_sha256_hex,
     decide_peer_turn, dedupe_candidates, draw_honour_commitment, draw_scenarios,
     execute_blind_request, generate_arm_independent_candidates, is_valid_sha256_hex,
-    parse_blind_scoring_request_strict, posture_for_scenario, probe_checkpoint_sanitized,
-    run_single_rollout, score_outcomes, sha256_hex, to_sorted_compact_json, to_sorted_pretty_json,
-    validate_talk_commitment, verify_checkpoint_pair,
+    p_honour_to_ppm, parse_blind_scoring_request_strict, posture_for_scenario,
+    probe_checkpoint_sanitized, prune_refused_market_actions, run_single_rollout,
+    run_single_rollout_with_replay_log, score_outcomes, sha256_hex, to_sorted_compact_json,
+    to_sorted_pretty_json, validate_talk_commitment, verify_checkpoint_pair,
 };
+use league_seat_types::UNIT_SCALE;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -233,6 +242,41 @@ fn request_and_config_validation_refuses_every_error_code() -> TestResult {
     cfg_empty_sched.posture_schedule.clear();
     assert_eq!(
         cfg_empty_sched.validate().err().map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+
+    let mut cfg_bad_ratio = ScorerConfig::s1_standard(4);
+    cfg_bad_ratio.posture_schedule = vec![PostureKind::Standard, PostureKind::Active];
+    assert_eq!(
+        cfg_bad_ratio.validate().err().map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+    let cfg_default_bad_sched = ScorerConfig {
+        posture_schedule: vec![
+            PostureKind::Standard,
+            PostureKind::Active,
+            PostureKind::Conservative,
+        ],
+        ..ScorerConfig::default()
+    };
+    assert_eq!(
+        cfg_default_bad_sched.validate().err().map(|e| e.code()),
+        Some("INVALID_SCORER_CONFIG")
+    );
+    let mut cfg_scaled_ratio = ScorerConfig::s1_standard(4);
+    cfg_scaled_ratio.posture_schedule = vec![
+        PostureKind::Standard,
+        PostureKind::Standard,
+        PostureKind::Active,
+    ];
+    cfg_scaled_ratio.posture_weights.standard = 4;
+    cfg_scaled_ratio.posture_weights.active = 2;
+    assert!(cfg_scaled_ratio.validate().is_ok());
+
+    let mut cfg_bad_greedy = ScorerConfig::s1_standard(4);
+    cfg_bad_greedy.composite_greedy_rules = "unknown_greedy_rule".to_owned();
+    assert_eq!(
+        cfg_bad_greedy.validate().err().map(|e| e.code()),
         Some("INVALID_SCORER_CONFIG")
     );
 
@@ -2390,15 +2434,15 @@ fn postures_schedule_active_liquidity_and_conservative_reserves() -> TestResult 
     );
     let peer_mandate = *peer_obs.own_mandate().ok_or("missing peer mandate")?;
 
-    let std_sub = decide_peer_turn(PostureKind::Standard, 700, &peer_obs, &peer_mandate, &cfg);
-    let act_sub = decide_peer_turn(PostureKind::Active, 700, &peer_obs, &peer_mandate, &cfg);
+    let std_sub = decide_peer_turn(PostureKind::Standard, 700, &peer_obs, &peer_mandate, &cfg)?;
+    let act_sub = decide_peer_turn(PostureKind::Active, 700, &peer_obs, &peer_mandate, &cfg)?;
     let cons_sub = decide_peer_turn(
         PostureKind::Conservative,
         700,
         &peer_obs,
         &peer_mandate,
         &cfg,
-    );
+    )?;
 
     // Every posture output must pass preview_seat_bundle with zero refused actions.
     let pub_state = peer_obs.to_public_preview_state();
@@ -2455,7 +2499,7 @@ fn postures_schedule_active_liquidity_and_conservative_reserves() -> TestResult 
         &peer_obs,
         &peer_mandate,
         &strict_cfg,
-    );
+    )?;
     let seat_cfg = &peer_obs.spec.seats[1];
     let upkeep_good = AssetId::Refined(seat_cfg.upkeep_good);
     for act in &strict_cons.market_actions {
@@ -2543,39 +2587,35 @@ fn talk_commitments_canonicalization_bernoulli_rate_and_pruning() -> TestResult 
     };
     let canon_bytes = to_sorted_compact_json(&c_legal)?;
 
-    // Exact boundary probabilities 0.0, 1.0, NaN.
+    // Exact boundary probabilities 0.0, 1.0, and integer conversion validation.
+    assert_eq!(p_honour_to_ppm(0.0)?, 0);
+    assert_eq!(p_honour_to_ppm(1.0)?, HONOUR_PPM_SCALE);
+    assert_eq!(p_honour_to_ppm(0.75)?, 750_000);
+    assert_eq!(p_honour_to_ppm(0.25)?, 250_000);
+    for invalid_p in [f64::NAN, -0.01, 1.01, f64::INFINITY] {
+        assert_eq!(
+            p_honour_to_ppm(invalid_p).err().map(|e| e.code()),
+            Some("INVALID_SCORER_CONFIG")
+        );
+    }
     for m in 0..100_usize {
-        assert!(!draw_honour_commitment(
-            9,
-            &pair_hex,
-            1,
-            m,
-            &canon_bytes,
-            0.0
-        ));
-        assert!(!draw_honour_commitment(
-            9,
-            &pair_hex,
-            1,
-            m,
-            &canon_bytes,
-            f64::NAN
-        ));
+        assert!(!draw_honour_commitment(9, &pair_hex, 1, m, &canon_bytes, 0));
         assert!(draw_honour_commitment(
             9,
             &pair_hex,
             1,
             m,
             &canon_bytes,
-            1.0
+            HONOUR_PPM_SCALE
         ));
     }
 
     // Empirical Bernoulli mean over N=2000 draws within tolerance for p=0.75 and p=0.25.
     for target_p in [0.75_f64, 0.25_f64] {
         let draws = 2000_usize;
+        let threshold_ppm = p_honour_to_ppm(target_p)?;
         let count = (0..draws)
-            .filter(|&m| draw_honour_commitment(9, &pair_hex, 1, m, &canon_bytes, target_p))
+            .filter(|&m| draw_honour_commitment(9, &pair_hex, 1, m, &canon_bytes, threshold_ppm))
             .count();
         let mean = (count as f64) / (draws as f64);
         assert!(
@@ -2601,7 +2641,7 @@ fn talk_commitments_canonicalization_bernoulli_rate_and_pruning() -> TestResult 
         &obs1,
         &mandate1,
         &ScorerConfig::default(),
-    );
+    )?;
     let orig_len = base_sub.market_actions.len();
     let applied = apply_talk_commitments(&obs1, base_sub, &ab, 9, &pair_hex, 0, 1.0)?;
     assert!(applied.market_actions.contains(&c_legal.offered_action));
@@ -2799,8 +2839,8 @@ fn talk_commitments_canonicalization_bernoulli_rate_and_pruning() -> TestResult 
 }
 
 #[test]
-fn part4_hardenings_and_end_to_end_s2_determinism() -> TestResult {
-    let tmp = UniqueTmpDir::new("s2_part4")?;
+fn request_hardenings_and_end_to_end_determinism() -> TestResult {
+    let tmp = UniqueTmpDir::new("s2_hardenings")?;
     let TestCheckpointFixture {
         cas_save,
         cas_seal,
@@ -2852,7 +2892,7 @@ fn part4_hardenings_and_end_to_end_s2_determinism() -> TestResult {
     };
     assert!(req.validate(&cfg).is_ok());
 
-    // 4a: Unknown extra JSON fields inside candidate.submission and nested bundle are refused.
+    // Unknown extra JSON fields inside candidate.submission and nested bundle are refused.
     let mut bad_val = serde_json::to_value(&req)?;
     bad_val["candidates"][0]["submission"]["unexpected_field"] = serde_json::json!(true);
     let bad_bytes = serde_json::to_vec(&bad_val)?;
@@ -2892,7 +2932,7 @@ fn part4_hardenings_and_end_to_end_s2_determinism() -> TestResult {
     );
     assert!(String::from_utf8_lossy(&err_nested).contains("UNKNOWN_SUBMISSION_FIELD"));
 
-    // 4d: Directory paths are stripped from probe_checkpoint_sanitized error messages.
+    // Directory paths are stripped from probe_checkpoint_sanitized error messages.
     let secret_dir = tmp.path().join("very_secret_parent_dir_token");
     fs::create_dir_all(&secret_dir)?;
     let missing_save_path = secret_dir.join("missing_target.save.json");
@@ -2910,7 +2950,7 @@ fn part4_hardenings_and_end_to_end_s2_determinism() -> TestResult {
     );
     assert!(sanitize_msg.contains("missing_target.save.json"));
 
-    // 4c: Re-verifying save/seal/pair hashes catches mid-run tampering after initial probe.
+    // Re-verifying save/seal/pair hashes catches mid-run tampering after initial probe.
     verify_checkpoint_pair(&cas_save, &cas_seal, &req)?;
     let tampered_dir = tmp.path().join("midrun_tamper");
     fs::create_dir_all(&tampered_dir)?;
@@ -3314,8 +3354,8 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
     for seat_idx in [1_u8, 2, 3] {
         let obs_s = host.observe_seat(Seat(seat_idx))?;
         let m_s = *obs_s.own_mandate().ok_or("missing mandate")?;
-        let _ = decide_peer_turn(PostureKind::Active, 700, &obs_s, &m_s, &cfg);
-        let _ = decide_peer_turn(PostureKind::Conservative, 700, &obs_s, &m_s, &cfg);
+        let _ = decide_peer_turn(PostureKind::Active, 700, &obs_s, &m_s, &cfg)?;
+        let _ = decide_peer_turn(PostureKind::Conservative, 700, &obs_s, &m_s, &cfg)?;
     }
 
     // Exercise rich-inventory/debt synthetic generation (`ranked_project_batches`, `gen_debt`, `composite_drops`, `scaled`).
@@ -3347,7 +3387,7 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
     obs_frozen.seats[0].wash_frozen_until_turn = obs_frozen.turn;
     let frozen_cands = generate_arm_independent_candidates(&obs_frozen, &mandate_t4, &cfg, 77)?;
     assert!(!frozen_cands.is_empty());
-    let _ = decide_peer_turn(PostureKind::Active, 700, &obs_frozen, &mandate_t4, &cfg);
+    let _ = decide_peer_turn(PostureKind::Active, 700, &obs_frozen, &mandate_t4, &cfg)?;
     let dummy_sub = EvalActSubmission::default();
     let other_comm = vec![ExtractedTalkCommitment {
         counterparty_seat: 2,
@@ -3735,6 +3775,493 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
             .err()
             .map(|e| e.code()),
         Some("IO_ERROR")
+    );
+    Ok(())
+}
+
+#[test]
+fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestResult {
+    let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/decision-scorer.md");
+    let doc = fs::read_to_string(&doc_path)?;
+    let sec52_start = doc
+        .find("### 5.2 Complete Pre-Registered Free Parameter Table")
+        .ok_or("missing §5.2 heading in docs/decision-scorer.md")?;
+    let sec6_start = doc[sec52_start..]
+        .find("## 6. Horizon Valuation")
+        .map(|off| sec52_start + off)
+        .ok_or("missing §6 heading after §5.2")?;
+    let sec52 = &doc[sec52_start..sec6_start];
+
+    // Assert every ScorerConfig::default() field matches §5.2's documented Pilot Initial Value.
+    let cfg = ScorerConfig::default();
+    assert!(cfg.validate().is_ok());
+    assert_eq!(cfg.posture_weights.standard, 2);
+    assert_eq!(cfg.posture_weights.active, 1);
+    assert_eq!(cfg.posture_weights.conservative, 1);
+    assert_eq!(
+        cfg.posture_schedule,
+        vec![
+            PostureKind::Standard,
+            PostureKind::Standard,
+            PostureKind::Active,
+            PostureKind::Conservative,
+        ]
+    );
+    assert!(sec52.contains("`posture_weights` & `posture_schedule`"));
+    assert!(sec52.contains("`[2 Standard, 1 Active, 1 Conservative]`"));
+
+    assert_eq!(cfg.p_honour, 0.75);
+    assert!(sec52.contains("`p_honour`") && sec52.contains("`0.75` (`Bernoulli(0.75)`)"));
+    assert_eq!(cfg.scenarios_m, 16);
+    assert!(sec52.contains("`scenarios_m` (`M`)") && sec52.contains("| `16` |"));
+    assert_eq!(cfg.k_synth_max, 32);
+    assert!(sec52.contains("`k_synth_max` (`K_synth_max`)") && sec52.contains("| `32` |"));
+    assert!(cfg.include_pass_b_cleared_club_bot);
+    assert!(sec52.contains("`include_pass_b_cleared_club_bot`") && sec52.contains("| `true` |"));
+    assert_eq!(cfg.partial_crossing_fractions_bps, vec![5000, 10_000]);
+    assert!(
+        sec52.contains("`partial_crossing_fractions_bps`") && sec52.contains("`[5000, 10000]` bps")
+    );
+    assert_eq!(cfg.debt_repayment_grid_bps, vec![5000, 10_000]);
+    assert!(sec52.contains("`debt_repayment_grid_bps`") && sec52.contains("`[5000, 10000]` bps"));
+    assert_eq!(cfg.quote_offsets_bps, vec![-1000, -500, 500, 1000]);
+    assert!(sec52.contains("`quote_offsets_bps`") && sec52.contains("`[-1000, -500, 500, 1000]`"));
+    assert_eq!(cfg.quantity_scales_bps, vec![5000, 10_000]);
+    assert!(sec52.contains("`quantity_scales_bps`") && sec52.contains("`[5000, 10000]` bps"));
+    assert_eq!(cfg.composite_greedy_rules, COMPOSITE_GREEDY_RULES_DEFAULT);
+    assert!(
+        sec52.contains("`composite_greedy_rules`")
+            && sec52.contains("`\"top_pass_per_axis_plus_drop_max_upkeep\"`")
+    );
+    assert_eq!(
+        cfg.synth_slot_fill_order,
+        vec![
+            "cleared_pass_b",
+            "claims_council",
+            "upkeep_inputs",
+            "cross_quotes",
+            "batches",
+            "debt",
+            "composite_drops",
+            "scaled",
+        ]
+    );
+    assert!(sec52.contains("`synth_slot_fill_order`") && sec52.contains(
+        "`[\"cleared_pass_b\", \"claims_council\", \"upkeep_inputs\", \"cross_quotes\", \"batches\", \"debt\", \"composite_drops\", \"scaled\"]`"
+    ));
+    assert_eq!(cfg.upkeep_cover_turns, 2);
+    assert!(sec52.contains("`upkeep_cover_turns`") && sec52.contains("| `2` turns |"));
+    assert_eq!(cfg.parity_spread_threshold_bps, 500);
+    assert!(
+        sec52.contains("`parity_spread_threshold_bps`") && sec52.contains("| `500` bps (`5%`) |")
+    );
+    assert_eq!(cfg.talk_extractor_version, "talk_rules_v1");
+    assert_eq!(
+        cfg.talk_extractor_rules_digest,
+        sha256_hex(b"talk_rules_v1")
+    );
+    assert!(
+        sec52.contains("`talk_extractor_version` & `talk_extractor_rules_digest`")
+            && sec52.contains("`\"talk_rules_v1\"`")
+    );
+    assert_eq!(
+        cfg.mandate_stratification_mode,
+        "uniform_undealt_fy_stratified"
+    );
+    assert!(
+        sec52.contains("`mandate_stratification_mode`")
+            && sec52.contains("`\"uniform_undealt_fy_stratified\"`")
+    );
+    assert_eq!(cfg.prescreen_min_arm_indep_span, 1);
+    assert!(
+        sec52.contains("`prescreen_min_arm_indep_span`") && sec52.contains("| `1` (placeholder")
+    );
+    assert!(cfg.prescreen_exclude_flat_sets);
+    assert!(sec52.contains("`prescreen_exclude_flat_sets`") && sec52.contains("| `true` |"));
+    assert_eq!(cfg.prescreen_min_arm_indep_candidates, 2);
+    assert!(
+        sec52.contains("`prescreen_min_arm_indep_candidates`")
+            && sec52.contains("| `2` (placeholder")
+    );
+    assert_eq!(cfg.strata_schedule, "2_early_2_mid_2_late_20_seeds");
+    assert!(
+        sec52.contains("`strata_schedule`")
+            && sec52.contains("`\"2_early_2_mid_2_late_20_seeds\"`")
+    );
+
+    // Assert every exported fixed code constant matches its §5.2 declaration.
+    assert_eq!(SYNTH_MAX_CONVERTER_BATCHES, 4);
+    assert_eq!(SYNTH_MAX_PROJECT_BATCHES, 4);
+    const {
+        assert!(SYNTH_PROJECT_RANK_BY_EQUITY);
+        assert!(SYNTH_CONVERTER_INPUT_DEFICIT_COVER);
+        assert!(SYNTH_CLAIM_MATURING_EXACT);
+        assert!(SYNTH_COUNCIL_SELF_NOMINATION);
+        assert!(DROP_TIE_BREAK_BY_CANDIDATE_ID);
+    }
+    assert_eq!(
+        COMPOSITE_GREEDY_RULES_DEFAULT,
+        "top_pass_per_axis_plus_drop_max_upkeep"
+    );
+    assert_eq!(SYNTH_CHARTER_BID_CRED, 150);
+    assert_eq!(SYNTH_QUOTE_CRED_SHARE_BPS, 5_000);
+    assert_eq!(SYNTH_QUOTE_MAX_UNITS, UNIT_SCALE);
+    assert_eq!(SYNTH_QUOTE_MIN_UNITS, 100);
+    assert_eq!(SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, 2);
+    assert_eq!(SYNTH_DROP_DEFAULT_ACTION_RISK_CRED, 1);
+    assert_eq!(SYNTH_DROP_PROJECT_RISK_CRED, i64::MAX / 2);
+    assert_eq!(SYNTH_SCALE_SEED_PER_AXIS, 2);
+    assert_eq!(SYNTH_SCALE_SEED_POOL_MAX, 6);
+    assert_eq!(HONOUR_PPM_SCALE, 1_000_000);
+    for expected_decl in [
+        "`SYNTH_MAX_CONVERTER_BATCHES = 4`",
+        "`SYNTH_MAX_PROJECT_BATCHES = 4`",
+        "`SYNTH_PROJECT_RANK_BY_EQUITY = true`",
+        "`SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`",
+        "`SYNTH_CLAIM_MATURING_EXACT = true`",
+        "`SYNTH_COUNCIL_SELF_NOMINATION = true`",
+        "`DROP_TIE_BREAK_BY_CANDIDATE_ID = true`",
+        "`COMPOSITE_GREEDY_RULES_DEFAULT = \"top_pass_per_axis_plus_drop_max_upkeep\"`",
+        "`SYNTH_CHARTER_BID_CRED = 150`",
+        "`SYNTH_QUOTE_CRED_SHARE_BPS = 5_000`",
+        "`SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE`",
+        "`SYNTH_QUOTE_MIN_UNITS = 100`",
+        "`SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2`",
+        "`SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1`",
+        "`SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2`",
+        "`SYNTH_SCALE_SEED_PER_AXIS = 2`",
+        "`SYNTH_SCALE_SEED_POOL_MAX = 6`",
+        "`HONOUR_PPM_SCALE = 1_000_000`",
+    ] {
+        assert!(
+            sec52.contains(expected_decl),
+            "§5.2 missing fixed constant declaration `{expected_decl}`"
+        );
+    }
+
+    // Pin SYNTH_CHARTER_BID_CRED to ClubBot's charter auction bid on Turn 6.
+    let mut host = EvalHost::from_standard_setup(TableId(8261), 4, 1, 0)?;
+    while host.turn() < 6 && host.phase() == TurnPhase::TalkAndMarket {
+        let mut subs = BTreeMap::new();
+        for s in 0..4_u8 {
+            let obs = host.observe_seat(Seat(s))?;
+            let mandate = *obs.own_mandate().ok_or("missing mandate")?;
+            let dec =
+                ClubBot::new(100_u64.wrapping_add(u64::from(s))).decide_full_turn(&obs, &mandate);
+            subs.insert(
+                s,
+                EvalActSubmission {
+                    market_actions: dec.pass_a_actions,
+                    pass_b_actions: dec.pass_b_actions,
+                    bundle: dec.bundle,
+                },
+            );
+        }
+        host.apply_act_submissions(&subs)?;
+        host.sweep_turn()?;
+    }
+    assert_eq!(host.turn(), 6);
+    let mut obs6 = host.observe_seat(Seat(0))?;
+    let mandate6 = *obs6.own_mandate().ok_or("missing turn-6 mandate")?;
+    obs6.seats[0].cred = 1_000_000;
+    let bot_dec6 = ClubBot::new(1).decide_full_turn(&obs6, &mandate6);
+    let bot_charter_bid = bot_dec6
+        .bundle
+        .charter_bids
+        .first()
+        .ok_or("expected ClubBot charter_bid on Turn 6")?;
+    assert_eq!(bot_charter_bid.bid_cred, SYNTH_CHARTER_BID_CRED);
+    let cands6 = generate_arm_independent_candidates(&obs6, &mandate6, &cfg, 1)?;
+    assert!(
+        cands6.iter().any(|c| {
+            c.submission
+                .bundle
+                .charter_bids
+                .iter()
+                .any(|b| b.bid_cred == SYNTH_CHARTER_BID_CRED)
+        }),
+        "expected synthetic charter bid matching SYNTH_CHARTER_BID_CRED"
+    );
+    Ok(())
+}
+
+#[test]
+fn preview_error_fails_closed_across_pruning_and_commitments() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(8262), 4, 1, 0)?;
+    let mut bad_obs = host.observe_seat(Seat(1))?;
+    bad_obs.seat = 99;
+    let dummy_action = MarketAction::TownImport {
+        good: AssetId::Raw(0),
+        seat: 99,
+        amount: 10,
+    };
+    let prune_err = prune_refused_market_actions(
+        &bad_obs,
+        vec![dummy_action.clone()],
+        &SealedOrderBundle::default(),
+    )
+    .err()
+    .ok_or("expected ENGINE_ERROR from prune_refused_market_actions on invalid seat")?;
+    assert_eq!(prune_err.code(), "ENGINE_ERROR");
+
+    let comm = [ExtractedTalkCommitment {
+        counterparty_seat: 0,
+        offered_action: dummy_action,
+        proposer_seat: 99,
+    }];
+    let pair_sha = sha256_hex(b"fail-closed");
+    let apply_err = apply_talk_commitments(
+        &bad_obs,
+        EvalActSubmission::default(),
+        &comm,
+        1,
+        &pair_sha,
+        0,
+        1.0,
+    )
+    .err()
+    .ok_or("expected ENGINE_ERROR from apply_talk_commitments on invalid seat")?;
+    assert_eq!(apply_err.code(), "ENGINE_ERROR");
+
+    let obs_valid = host.observe_seat(Seat(1))?;
+    let bad_p_err = apply_talk_commitments(
+        &obs_valid,
+        EvalActSubmission::default(),
+        &comm,
+        1,
+        &pair_sha,
+        0,
+        f64::NAN,
+    )
+    .err()
+    .ok_or("expected INVALID_SCORER_CONFIG on NaN p_honour")?;
+    assert_eq!(bad_p_err.code(), "INVALID_SCORER_CONFIG");
+    Ok(())
+}
+
+#[test]
+fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -> TestResult {
+    let tmp = UniqueTmpDir::new("replay_parity_s2")?;
+    let mut host = EvalHost::from_standard_setup(TableId(8263), 4, 1, 0)?;
+
+    // Advance past Turn 1 so Turn 2 begins cleanly before writing the checkpoint.
+    let mut t1_subs = BTreeMap::new();
+    for s in 0..4_u8 {
+        let obs = host.observe_seat(Seat(s))?;
+        let mandate = *obs.own_mandate().ok_or("missing Turn-1 mandate")?;
+        let dec = ClubBot::new(50_u64.wrapping_add(u64::from(s))).decide_full_turn(&obs, &mandate);
+        t1_subs.insert(
+            s,
+            EvalActSubmission {
+                market_actions: dec.pass_a_actions,
+                pass_b_actions: dec.pass_b_actions,
+                bundle: dec.bundle,
+            },
+        );
+    }
+    host.apply_act_submissions(&t1_subs)?;
+    host.sweep_turn()?;
+
+    let ckpt_dir = tmp.path().join("ckpt");
+    fs::create_dir_all(&ckpt_dir)?;
+    let (save_path, seal_path) = host.write_pre_act_checkpoint(&ckpt_dir)?;
+    let save_bytes = fs::read(&save_path)?;
+    let seal_bytes = fs::read(&seal_path)?;
+    let save_sha = sha256_hex(&save_bytes);
+    let seal_sha = sha256_hex(&seal_bytes);
+    let pair_sha = compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes);
+
+    let focal_obs = host.observe_seat(Seat(0))?;
+    let focal_mandate = *focal_obs.own_mandate().ok_or("missing focal mandate")?;
+    let day = host.turn();
+    let scenarios = draw_scenarios(&focal_obs.spec, focal_mandate, 0, 99, &pair_sha, day, 2)?;
+    let cfg = ScorerConfig::default();
+
+    // Verify independent replay parity for both Active and Conservative peer postures.
+    for posture in [PostureKind::Active, PostureKind::Conservative] {
+        let mut peer_day_subs = BTreeMap::new();
+        for s in 1..4_u8 {
+            let obs_s = host.observe_seat(Seat(s))?;
+            let m_s = *scenarios[0]
+                .peer_mandates
+                .get(&s)
+                .ok_or("missing peer mandate")?;
+            let sub_s = decide_peer_turn(
+                posture,
+                scenarios[0].bot_base_seed.wrapping_add(u64::from(s)),
+                &obs_s,
+                &m_s,
+                &cfg,
+            )?;
+            peer_day_subs.insert(s, sub_s);
+        }
+
+        let (outcome, log) = run_single_rollout_with_replay_log(
+            &save_path,
+            &seal_path,
+            (&save_sha, &seal_sha, &pair_sha),
+            0,
+            &EvalActSubmission::default(),
+            &peer_day_subs,
+            focal_mandate,
+            &scenarios[0],
+            posture,
+            &cfg,
+        )?;
+        let replayed = replay_eval_season(&log)?;
+        let replay_row0 = replayed
+            .scoreboard
+            .standings
+            .iter()
+            .find(|e| e.seat == 0)
+            .ok_or("missing replay seat 0")?;
+        assert_eq!(outcome.total_equity, replay_row0.total_equity);
+        assert_eq!(outcome.project_equity, replay_row0.project_equity);
+        assert_eq!(outcome.net_asset_equity, replay_row0.net_asset_equity);
+        assert_eq!(outcome.mandate_bonus, replay_row0.mandate_bonus);
+    }
+
+    // Verify independent replay parity when a talk commitment is honoured (p_honour = 1.0).
+    let honoured_action = MarketAction::TownImport {
+        good: AssetId::Raw(0),
+        seat: 1,
+        amount: 25,
+    };
+    let commitments = canonicalize_talk_commitments(&[ExtractedTalkCommitment {
+        counterparty_seat: 2,
+        offered_action: honoured_action.clone(),
+        proposer_seat: 1,
+    }])?;
+    let mut honoured_peer_subs = BTreeMap::new();
+    for s in 1..4_u8 {
+        let obs_s = host.observe_seat(Seat(s))?;
+        let m_s = *scenarios[1]
+            .peer_mandates
+            .get(&s)
+            .ok_or("missing peer mandate")?;
+        let base_s = decide_peer_turn(
+            PostureKind::Standard,
+            scenarios[1].bot_base_seed.wrapping_add(u64::from(s)),
+            &obs_s,
+            &m_s,
+            &cfg,
+        )?;
+        let applied_s =
+            apply_talk_commitments(&obs_s, base_s, &commitments, 99, &pair_sha, 1, 1.0)?;
+        honoured_peer_subs.insert(s, applied_s);
+    }
+    assert!(
+        honoured_peer_subs
+            .get(&1)
+            .is_some_and(|s| s.market_actions.contains(&honoured_action)),
+        "expected honoured TownImport commitment in Seat 1 Turn-day submission"
+    );
+
+    let (honoured_outcome, honoured_log) = run_single_rollout_with_replay_log(
+        &save_path,
+        &seal_path,
+        (&save_sha, &seal_sha, &pair_sha),
+        0,
+        &EvalActSubmission::default(),
+        &honoured_peer_subs,
+        focal_mandate,
+        &scenarios[1],
+        PostureKind::Standard,
+        &cfg,
+    )?;
+    let log_json = String::from_utf8(to_sorted_compact_json(&honoured_log)?)?;
+    assert!(
+        log_json.contains("TownImport"),
+        "expected honoured TownImport recorded in replay log"
+    );
+    let replayed_honoured = replay_eval_season(&honoured_log)?;
+    let replay_honoured_row0 = replayed_honoured
+        .scoreboard
+        .standings
+        .iter()
+        .find(|e| e.seat == 0)
+        .ok_or("missing honoured replay seat 0")?;
+    assert_eq!(
+        honoured_outcome.total_equity,
+        replay_honoured_row0.total_equity
+    );
+    assert_eq!(
+        honoured_outcome.project_equity,
+        replay_honoured_row0.project_equity
+    );
+    assert_eq!(
+        honoured_outcome.net_asset_equity,
+        replay_honoured_row0.net_asset_equity
+    );
+    assert_eq!(
+        honoured_outcome.mandate_bonus,
+        replay_honoured_row0.mandate_bonus
+    );
+
+    // Missing peer mandate in scenario fails closed cleanly inside run_single_rollout_with_replay_log.
+    let mut bad_scenario = scenarios[0].clone();
+    bad_scenario.peer_mandates.remove(&1);
+    let missing_mandate_err = run_single_rollout_with_replay_log(
+        &save_path,
+        &seal_path,
+        (&save_sha, &seal_sha, &pair_sha),
+        0,
+        &EvalActSubmission::default(),
+        &honoured_peer_subs,
+        focal_mandate,
+        &bad_scenario,
+        PostureKind::Standard,
+        &cfg,
+    )
+    .err()
+    .ok_or("expected ENGINE_ERROR when peer mandate is missing")?;
+    assert_eq!(missing_mandate_err.code(), "ENGINE_ERROR");
+    Ok(())
+}
+
+#[test]
+fn composite_drops_prices_upkeep_sell_in_milli_cred_parity() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(8264), 4, 1, 0)?;
+    let mut obs = host.observe_seat(Seat(0))?;
+    let mandate = *obs.own_mandate().ok_or("missing mandate")?;
+    let upkeep_idx = usize::from(obs.spec.seats[0].upkeep_good);
+
+    // Configure an election turn holding only excess upkeep_good plus one positive quote offset so
+    // `cross_quotes` emits an upkeep Sell and `composite_drops` combines it with `StandForOffice`,
+    // then drops the high milli-CRED upkeep Sell leg while retaining `StandForOffice`.
+    obs.turn = 4;
+    obs.offers.clear();
+    obs.seats[0].cred = 1;
+    obs.seats[0].raw.fill(0);
+    obs.seats[0].refined.fill(0);
+    obs.seats[0].refined[upkeep_idx] = 10_000;
+
+    let cfg = ScorerConfig {
+        include_pass_b_cleared_club_bot: false,
+        quote_offsets_bps: vec![500],
+        partial_crossing_fractions_bps: Vec::new(),
+        debt_repayment_grid_bps: Vec::new(),
+        synth_slot_fill_order: vec![
+            "composite_drops".to_owned(),
+            "claims_council".to_owned(),
+            "cross_quotes".to_owned(),
+        ],
+        ..ScorerConfig::s1_standard(2)
+    };
+    let cands = generate_arm_independent_candidates(&obs, &mandate, &cfg, 17)?;
+    assert!(
+        cands.iter().any(|c| {
+            c.submission
+                .market_actions
+                .iter()
+                .any(|a| matches!(a, MarketAction::StandForOffice { .. }))
+                && !c
+                    .submission
+                    .market_actions
+                    .iter()
+                    .any(|a| matches!(a, MarketAction::PostOffer { .. }))
+        }),
+        "expected composite_drops to price upkeep Sell in milli-CRED parity and drop it before StandForOffice"
     );
     Ok(())
 }

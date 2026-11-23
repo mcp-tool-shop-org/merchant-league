@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use league_core::{EvalActSubmission, MarketAction};
+use league_core::{EvalActSubmission, MarketAction, Units};
+use league_seat_types::UNIT_SCALE;
 
 use crate::error::ScorerError;
 
@@ -12,6 +13,9 @@ pub const BLIND_SCORING_SCHEMA_VERSION: u32 = 1;
 
 /// Fixed Evaluation Mode table size (`D6`).
 pub const EVAL_TABLE_SEAT_COUNT: u8 = 4;
+
+/// Default and only supported `ScorerConfig::composite_greedy_rules` rule identifier (`§5.2`).
+pub const COMPOSITE_GREEDY_RULES_DEFAULT: &str = "top_pass_per_axis_plus_drop_max_upkeep";
 
 /// Proposed fixed code constant: maximum synthetic converter batches per turn (`§5.2`).
 pub const SYNTH_MAX_CONVERTER_BATCHES: usize = 4;
@@ -33,6 +37,36 @@ pub const SYNTH_COUNCIL_SELF_NOMINATION: bool = true;
 
 /// Proposed fixed code constant: break upkeep-risk leg-drop ties by ascending `candidate_id` (`§5.2`).
 pub const DROP_TIE_BREAK_BY_CANDIDATE_ID: bool = true;
+
+/// Proposed fixed code constant: fixed charter auction `bid_cred` matching `ClubBot` (`bot.rs:554`).
+pub const SYNTH_CHARTER_BID_CRED: Units = 150;
+
+/// Proposed fixed code constant: fraction of spare `CRED` allocated per parity-anchored buy quote (bps).
+pub const SYNTH_QUOTE_CRED_SHARE_BPS: u16 = 5_000;
+
+/// Proposed fixed code constant: maximum commodity units per parity-anchored buy quote (`UNIT_SCALE`).
+pub const SYNTH_QUOTE_MAX_UNITS: Units = UNIT_SCALE;
+
+/// Proposed fixed code constant: minimum commodity units for parity-anchored synthetic quotes (`>= 100`).
+pub const SYNTH_QUOTE_MIN_UNITS: Units = 100;
+
+/// Proposed fixed code constant: parity-value multiplier applied when pricing `upkeep_good` sell drop risk.
+pub const SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER: i64 = 2;
+
+/// Proposed fixed code constant: minimum non-zero milli-`CRED` drop risk assigned to other market actions.
+pub const SYNTH_DROP_DEFAULT_ACTION_RISK_CRED: Units = 1;
+
+/// Proposed fixed code constant: milli-`CRED` sentinel drop risk prioritizing `project_deliveries` drops first.
+pub const SYNTH_DROP_PROJECT_RISK_CRED: Units = i64::MAX / 2;
+
+/// Proposed fixed code constant: maximum seed drafts drawn per axis into the `scaled` pool.
+pub const SYNTH_SCALE_SEED_PER_AXIS: usize = 2;
+
+/// Proposed fixed code constant: maximum combined seed drafts scaled per `quantity_scales_bps` entry.
+pub const SYNTH_SCALE_SEED_POOL_MAX: usize = 6;
+
+/// Proposed fixed code constant: integer parts-per-million denominator for Bernoulli talk-honour draws (`§4.3`, `§5.2`).
+pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -226,7 +260,7 @@ pub struct ScorerConfig {
 impl Default for ScorerConfig {
     fn default() -> Self {
         Self {
-            composite_greedy_rules: "top_pass_per_axis_plus_drop_max_upkeep".to_owned(),
+            composite_greedy_rules: COMPOSITE_GREEDY_RULES_DEFAULT.to_owned(),
             debt_repayment_grid_bps: vec![5000, 10_000],
             include_pass_b_cleared_club_bot: true,
             k_synth_max: 32,
@@ -320,6 +354,41 @@ impl ScorerConfig {
             return Err(ScorerError::InvalidScorerConfig(
                 "posture_weights sum must be > 0".to_owned(),
             ));
+        }
+        let sched_std = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Standard)
+            .count() as u128;
+        let sched_act = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Active)
+            .count() as u128;
+        let sched_cons = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Conservative)
+            .count() as u128;
+        let w_std = u128::from(self.posture_weights.standard);
+        let w_act = u128::from(self.posture_weights.active);
+        let w_cons = u128::from(self.posture_weights.conservative);
+        if sched_std * w_act != sched_act * w_std
+            || sched_std * w_cons != sched_cons * w_std
+            || sched_act * w_cons != sched_cons * w_act
+        {
+            return Err(ScorerError::InvalidScorerConfig(format!(
+                "posture_weights ({}, {}, {}) disagrees with posture_schedule counts ({sched_std}, {sched_act}, {sched_cons})",
+                self.posture_weights.standard,
+                self.posture_weights.active,
+                self.posture_weights.conservative
+            )));
+        }
+        if self.composite_greedy_rules != COMPOSITE_GREEDY_RULES_DEFAULT {
+            return Err(ScorerError::InvalidScorerConfig(format!(
+                "unsupported composite_greedy_rules `{}` (expected `{COMPOSITE_GREEDY_RULES_DEFAULT}`)",
+                self.composite_greedy_rules
+            )));
         }
         if self.synth_slot_fill_order.is_empty() {
             return Err(ScorerError::InvalidScorerConfig(

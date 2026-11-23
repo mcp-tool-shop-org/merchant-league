@@ -128,7 +128,7 @@ fn timing_benchmark_early_mid_late_rollouts() -> Result<(), Box<dyn Error>> {
                     &p_obs,
                     &p_mandate,
                     &cfg,
-                );
+                )?;
                 peer_day_subs.insert(s, sub);
             }
             peer_day_subs_by_m.push(peer_day_subs);

@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-23 from commit e7364a6 by Atlas 1.26.0.
+Mapped at 2026-11-23 from commit 7195744 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,9 +8,10 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-23 (6522b2c)
+## What changed since 2026-11-23 (e7364a6)
 
-Nothing structural changed since 2026-11-23; 3 files changed content.
+- league-scorer now imports league-seat-types.
+- 10 files changed content, across 3 parts.
 
 ## What comes in
 
@@ -58,7 +59,7 @@ CI writes only to site/audit-report.json, which is not tracked.
 
 - **league-core** is imported by 6 parts (league-eval, league-gen, league-relay, league-scorer, league-standalone, league-tui) and sits on the path of 5 doors.
 - **league-error** is imported by 5 parts (league-core, league-ledger, league-relay, league-seat-types, league-standalone) and sits on the path of 8 doors.
-- **league-seat-types** is imported by 4 parts (league-core, league-gen, league-seat-ui, league-tui) and sits on the path of 5 doors.
+- **league-seat-types** is imported by 5 parts (league-core, league-gen, league-scorer, league-seat-ui, league-tui) and sits on the path of 5 doors.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 - **league-relay** is imported by 1 part (league-eval) and sits on the path of 3 doors.
 - **league-gen** is imported by 1 part (league-tui) and sits on the path of 2 doors.

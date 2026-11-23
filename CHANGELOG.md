@@ -2,10 +2,44 @@
 
 ## [Unreleased]
 
-- Blind evaluation decision scorer S2 (`crates/league-scorer`, `docs/decision-scorer.md`, `CHANGELOG.md`, `atlas`):
-  - **Arm-independent candidate generators & `candidates` CLI (`crates/league-scorer/src/{candidates.rs, cli.rs, lib.rs}`):** implemented `generate_arm_independent_candidates`, `dedupe_candidates` (OR-merging duplicate `in_span`/`is_arm_independent` flags), and `build_arm_independent_request` producing `passive`, unmodified `ClubBot`, optional `pass_b_actions`-cleared `ClubBot`, and `preview_seat_bundle`-verified synthetic drafts (`claims_council`, `upkeep_inputs`, `cross_quotes`, `batches`, `debt`, `composite_drops`, `scaled`) bounded by `k_synth_max` + `synth_slot_fill_order` with `candidate_id` tie-breaking, plus `league-scorer candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64> --out <dir>` writing sorted `<out>/<state_id>.json` with empty `talk_commitments`.
-  - **Peer postures & talk-commitment compliance (`crates/league-scorer/src/{postures.rs, rollout.rs, scoring.rs, types.rs}`):** implemented `Standard`, `Active` (crossing bids beyond `parity_spread_threshold_bps` and pruning via `preview_seat_bundle`), and `Conservative` (`upkeep_cover_turns` reserve protection) peer policies under `posture_schedule` (`[Standard, Standard, Active, Conservative]` pilot default) across Turn `day` and `(day + 1)..close` rollouts, plus validated `canonicalize_talk_commitments`, integer-threshold SHA-256 `Bernoulli(p_honour)` draws, and `preview_seat_bundle` legality pruning in `apply_talk_commitments`.
-  - **Audit & blinding hardenings (`crates/league-scorer/src/{error.rs, types.rs, rollout.rs, cli.rs}`, `docs/decision-scorer.md`, `crates/league-scorer/README.md`):** added strict `parse_blind_scoring_request_strict` rejecting unknown/extra fields inside nested `candidate.submission` structs (`UNKNOWN_SUBMISSION_FIELD`), per-fork save/seal/pair SHA-256 re-verification before every `EvalHost::fork_from_checkpoint`, `sanitize_error_text` directory-path stripping across errors and CLI I/O, filename stem `== req.state_id` (`STATE_ID_FILENAME_MISMATCH`) and case-insensitive `state_id` collision checks, updated `state_id` separators from `:` to `-` (`<source_game_id>-day-<DD>-seat-<idx>`, `2026-11-22` Windows portability amendment), documented even `scenarios_m >= 2` for split-half Winner's curse, and labeled `prescreen_min_arm_indep_span` / `prescreen_min_arm_indep_candidates` defaults (`1`, `2`) as placeholders until pilot calibration.
+- Blind evaluation decision scorer S2 (`crates/league-scorer`, `docs/decision-scorer.md`, `CHANGELOG.md`,
+  `crates/league-scorer/README.md`, `atlas`):
+  - **Arm-independent candidate generators & `candidates` CLI (`crates/league-scorer/src/{candidates.rs,
+    cli.rs, lib.rs}`):** implemented `generate_arm_independent_candidates`, `dedupe_candidates`
+    (OR-merging duplicate `in_span`/`is_arm_independent` flags), and
+    `build_arm_independent_request` producing `passive`, unmodified `ClubBot`, optional
+    `pass_b_actions`-cleared `ClubBot`, and `preview_seat_bundle`-verified synthetic drafts
+    (`claims_council`, `upkeep_inputs`, `cross_quotes`, `batches`, `debt`, `composite_drops`,
+    `scaled`) using named `docs/decision-scorer.md` §5.2 constants (`league_seat_types::UNIT_SCALE`,
+    `SYNTH_CHARTER_BID_CRED`, `SYNTH_QUOTE_*`, `SYNTH_DROP_*`, `SYNTH_SCALE_*`) with uniform
+    milli-`CRED` upkeep drop risk, bounded by `k_synth_max` + `synth_slot_fill_order` with
+    `candidate_id` tie-breaking, plus `league-scorer candidates --checkpoints <dir> --save-sha256
+    <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64>
+    --out <dir>` writing sorted `<out>/<state_id>.json` with empty `talk_commitments`.
+  - **Peer postures, talk-commitment compliance & replay parity (`crates/league-scorer/src/{postures.rs,
+    rollout.rs, scoring.rs, types.rs}`):** implemented `Standard`, `Active` (crossing bids beyond
+    `parity_spread_threshold_bps`, treating one-sided bid books `best_ask == None` as infinite spread,
+    and reserving upkeep/converter raw inputs while fail-closed propagating `preview_seat_bundle`
+    errors), and `Conservative` (`upkeep_cover_turns` reserve protection) peer policies under
+    validated `posture_schedule` + `posture_weights` ratios (`[Standard, Standard, Active,
+    Conservative]` pilot default) and `composite_greedy_rules` validation across Turn `day` and
+    `(day + 1)..close` rollouts, plus validated `canonicalize_talk_commitments`, integer-threshold
+    `p_honour_to_ppm` -> pure-integer SHA-256 `draw_honour_commitment` (`HONOUR_PPM_SCALE =
+    1_000_000`), fail-closed `preview_seat_bundle` pruning in `apply_talk_commitments`, and
+    `run_single_rollout_with_replay_log` for independent `replay_eval_season` parity checks across
+    `Active`, `Conservative`, and honoured talk-commitment rollouts.
+  - **Audit & blinding hardenings (`crates/league-scorer/src/{error.rs, types.rs, rollout.rs,
+    cli.rs}`, `docs/decision-scorer.md`, `crates/league-scorer/README.md`):** added strict
+    `parse_blind_scoring_request_strict` rejecting unknown/extra fields inside nested
+    `candidate.submission` structs (`UNKNOWN_SUBMISSION_FIELD`), per-fork save/seal/pair SHA-256
+    re-verification before every `EvalHost::fork_from_checkpoint` (and documented the local TOCTOU
+    window with `pub(crate)` `from_save_and_seal_bytes` in §10), `sanitize_error_text` directory-path
+    stripping across errors and CLI I/O, filename stem `== req.state_id` (`STATE_ID_FILENAME_MISMATCH`)
+    and case-insensitive `state_id` collision checks, updated `state_id` separators from `:` to `-`
+    (`<source_game_id>-day-<DD>-seat-<idx>`, `2026-11-22` Windows portability amendment), documented
+    even `scenarios_m >= 2` for split-half Winner's curse, and labeled
+    `prescreen_min_arm_indep_span` / `prescreen_min_arm_indep_candidates` defaults (`1`, `2`) as
+    placeholders until pilot calibration.
 
 - Blind evaluation decision scorer kernel (`crates/league-scorer`, stage S1; `raw_api_backdoor_guard`, docs, `atlas`):
   - **Workspace-isolated blind crate (`crates/league-scorer/`, `Cargo.toml`, `Cargo.lock`, `crates/league-core/tests/raw_api_backdoor_guard.rs`):** added `crates/league-scorer` (library + `league-scorer` binary) inheriting `[workspace.lints]` with dependencies restricted strictly to `league-core`, `league-seat-types`, `serde`, `serde_json`, and `sha2` (enforced both by unit blinding tests and `raw_api_backdoor_guard` classifying `league-scorer` as a non-seat crate forbidding `league-eval` and `league-relay`, with zero changes to `league-core` library code or existing workspace crates' behavior).

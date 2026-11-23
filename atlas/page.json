@@ -39,6 +39,7 @@
       "importedBy": [
         "league-core",
         "league-gen",
+        "league-scorer",
         "league-seat-ui",
         "league-tui"
       ],
@@ -99,23 +100,31 @@
   "changes": {
     "fileCounts": {
       "added": 0,
-      "changed": 3,
+      "changed": 10,
       "moved": 0,
-      "parts": 1,
+      "parts": 3,
       "removed": 0
     },
     "items": [
       {
+        "kind": "import-added",
+        "sentence": "league-scorer now imports league-seat-types.",
+        "subjects": [
+          "league-scorer",
+          "league-seat-types"
+        ]
+      },
+      {
         "kind": "counts",
-        "sentence": "Nothing structural changed since 2026-11-23; 3 files changed content.",
+        "sentence": "10 files changed content, across 3 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "6522b2c9ff1f1f7298d3cdc3211d2c1fcfbd8ac9",
-      "generatedAt": "2026-11-23T03:56:15.457Z"
+      "commit": "e7364a66a1faad44fc27a29551f73ab9d93389ec",
+      "generatedAt": "2026-11-23T04:07:38.346Z"
     },
-    "unchanged": true
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -199,7 +208,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "e7364a66a1faad44fc27a29551f73ab9d93389ec",
+  "commit": "71957443a36fb3d7cc0c906e3c41ce1b41e8070a",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -534,14 +543,14 @@
           "files": 15
         },
         {
+          "boundary": "league-seat-types",
+          "depth": 3,
+          "files": 12
+        },
+        {
           "boundary": "league-error",
           "depth": 4,
           "files": 1
-        },
-        {
-          "boundary": "league-seat-types",
-          "depth": 4,
-          "files": 12
         }
       ],
       "runs": [
@@ -737,7 +746,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-23T04:07:38.346Z",
+  "generatedAt": "2026-11-23T05:08:17.692Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "41 writes and 32 reads use paths built at run time and are not named here.",
@@ -786,14 +795,14 @@
   "testFiles": 104,
   "testedBy": {
     "league-core": 26,
-    "league-error": 7,
+    "league-error": 8,
     "league-eval": 10,
     "league-gen": 10,
     "league-ledger": 8,
     "league-relay": 8,
     "league-scorer": 2,
     "league-season": 1,
-    "league-seat-types": 5,
+    "league-seat-types": 6,
     "league-seat-ui": 1,
     "league-standalone": 5,
     "league-tui": 2,

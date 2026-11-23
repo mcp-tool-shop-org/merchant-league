@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use league_core::{ClubBot, EvalActSubmission, EvalHost, PrivateMandate, Seat, TurnPhase};
+use league_core::{
+    ClubBot, EvalActSubmission, EvalHost, PrivateMandate, SeasonReplayLog, Seat, TurnPhase,
+};
 
 use crate::error::{ScorerError, sanitize_error_text};
 use crate::postures::{
@@ -18,7 +20,7 @@ use crate::types::{
     StateScoreOutput, compute_pre_act_pair_sha256_hex, sha256_hex,
 };
 
-/// Forks `EvalHost` from `(save_path, seal_path)`, stripping directory paths from any engine error (`§6.1`, Part 4d).
+/// Forks `EvalHost` from `(save_path, seal_path)`, stripping directory paths from any engine error (`§6.1`).
 pub(crate) fn fork_checkpoint_sanitized(
     save_path: &Path,
     seal_path: &Path,
@@ -145,6 +147,36 @@ pub fn run_single_rollout(
     posture: PostureKind,
     config: &ScorerConfig,
 ) -> Result<ScenarioRolloutOutcome, ScorerError> {
+    let (outcome, _) = run_single_rollout_with_replay_log(
+        save_path,
+        seal_path,
+        expected_digests,
+        focal_seat,
+        focal_submission,
+        peer_day_submissions,
+        focal_mandate,
+        scenario,
+        posture,
+        config,
+    )?;
+    Ok(outcome)
+}
+
+/// Runs one deterministic fork-to-close rollout and also returns the finalized `SeasonReplayLog`
+/// so tests can independently verify engine replay parity across postures and talk commitments.
+#[allow(clippy::too_many_arguments)]
+pub fn run_single_rollout_with_replay_log(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_digests: (&str, &str, &str),
+    focal_seat: u8,
+    focal_submission: &EvalActSubmission,
+    peer_day_submissions: &BTreeMap<u8, EvalActSubmission>,
+    focal_mandate: PrivateMandate,
+    scenario: &ScenarioAssignment,
+    posture: PostureKind,
+    config: &ScorerConfig,
+) -> Result<(ScenarioRolloutOutcome, SeasonReplayLog), ScorerError> {
     let (save_sha, seal_sha, pair_sha) = expected_digests;
     let (mut host, _) =
         verify_and_fork_checkpoint(save_path, seal_path, save_sha, seal_sha, Some(pair_sha))?;
@@ -183,7 +215,7 @@ pub fn run_single_rollout(
                     .get(&s)
                     .copied()
                     .ok_or_else(|| ScorerError::Engine(format!("missing peer mandate {s}")))?;
-                decide_peer_turn(posture, seed, &obs, &mandate, config)
+                decide_peer_turn(posture, seed, &obs, &mandate, config)?
             };
             subs.insert(s, sub);
         }
@@ -197,7 +229,7 @@ pub fn run_single_rollout(
             .map_err(|e| ScorerError::Engine(format!("sweep turn {} rollout: {e}", host.turn())))?;
     }
 
-    let (scoreboard, _, _, _) = host
+    let (scoreboard, replay_log, _, _) = host
         .finalize_eval_season()
         .map_err(|e| ScorerError::Engine(format!("finalize_eval_season: {e}")))?;
     let entry = scoreboard
@@ -210,12 +242,15 @@ pub fn run_single_rollout(
             ))
         })?;
 
-    Ok(ScenarioRolloutOutcome {
-        mandate_bonus: entry.mandate_bonus,
-        net_asset_equity: entry.net_asset_equity,
-        project_equity: entry.project_equity,
-        total_equity: entry.total_equity,
-    })
+    Ok((
+        ScenarioRolloutOutcome {
+            mandate_bonus: entry.mandate_bonus,
+            net_asset_equity: entry.net_asset_equity,
+            project_equity: entry.project_equity,
+            total_equity: entry.total_equity,
+        },
+        replay_log,
+    ))
 }
 
 /// Verifies checkpoint hashes before every fork, draws `scenarios_m` counterfactual scenarios with
@@ -283,7 +318,7 @@ pub fn execute_blind_request(
                 .copied()
                 .ok_or_else(|| ScorerError::Engine(format!("missing peer mandate {s}")))?;
             let seed = scenario.bot_base_seed.wrapping_add(u64::from(*s));
-            let base_sub = decide_peer_turn(posture, seed, obs_s, &mandate, config);
+            let base_sub = decide_peer_turn(posture, seed, obs_s, &mandate, config)?;
             let final_sub = apply_talk_commitments(
                 obs_s,
                 base_sub,

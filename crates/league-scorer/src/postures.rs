@@ -11,9 +11,9 @@ use league_core::{
 use sha2::{Digest, Sha256};
 
 use crate::error::ScorerError;
-use crate::types::{ExtractedTalkCommitment, PostureKind, ScorerConfig, to_sorted_compact_json};
-
-const HONOUR_PPM_SCALE: u64 = 1_000_000;
+use crate::types::{
+    ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind, ScorerConfig, to_sorted_compact_json,
+};
 
 /// Converts [`ClubBotDecision`] into an [`EvalActSubmission`].
 #[must_use]
@@ -26,37 +26,34 @@ pub fn submission_from_club_bot(decision: ClubBotDecision) -> EvalActSubmission 
 }
 
 /// Runs `preview_seat_bundle` against `obs.to_public_preview_state()` for legality and upkeep checks.
-#[must_use]
 pub fn preview_submission(
     obs: &SeatObservation,
     market_actions: &[MarketAction],
     bundle: &SealedOrderBundle,
-) -> Option<WhatIfPreview> {
+) -> Result<WhatIfPreview, ScorerError> {
     let pub_state = obs.to_public_preview_state();
     let req = AiPreviewRequest {
         seat: obs.seat,
         market_actions: market_actions.to_vec(),
         bundle: bundle.clone(),
     };
-    preview_seat_bundle(&pub_state, &req).ok()
+    preview_seat_bundle(&pub_state, &req)
+        .map_err(|e| ScorerError::Engine(format!("preview_seat_bundle for seat {}: {e}", obs.seat)))
 }
 
-/// Iteratively removes any Phase-1 actions rejected by `preview_seat_bundle`.
-#[must_use]
+/// Iteratively removes any Phase-1 actions rejected by `preview_seat_bundle`, failing closed on engine errors.
 pub fn prune_refused_market_actions(
     obs: &SeatObservation,
     mut actions: Vec<MarketAction>,
     bundle: &SealedOrderBundle,
-) -> Vec<MarketAction> {
+) -> Result<Vec<MarketAction>, ScorerError> {
     for _ in 0..=actions.len() {
         if actions.is_empty() {
             break;
         }
-        let Some(preview) = preview_submission(obs, &actions, bundle) else {
-            return Vec::new();
-        };
+        let preview = preview_submission(obs, &actions, bundle)?;
         if preview.refused_market_actions.is_empty() {
-            return actions;
+            return Ok(actions);
         }
         let mut refused_indices: Vec<usize> = preview
             .refused_market_actions
@@ -74,7 +71,7 @@ pub fn prune_refused_market_actions(
             }
         }
     }
-    actions
+    Ok(actions)
 }
 
 /// Maps scenario index `m` deterministically to its counterfactual peer [`PostureKind`] (`§4.2`, `§5.2`).
@@ -119,24 +116,32 @@ fn sha256_u64_honour(
     u64::from_le_bytes(buf)
 }
 
-/// Draws `Bernoulli(p_honour)` deterministically with pure integer arithmetic in `[0, 1_000_000)` (`§4.3`).
+/// Converts `p_honour in [0.0, 1.0]` once into an integer threshold in `0..=HONOUR_PPM_SCALE` (`§5.2`).
+pub fn p_honour_to_ppm(p_honour: f64) -> Result<u64, ScorerError> {
+    if !p_honour.is_finite() || !(0.0..=1.0).contains(&p_honour) {
+        return Err(ScorerError::InvalidScorerConfig(format!(
+            "p_honour must be in [0.0, 1.0], got {p_honour}"
+        )));
+    }
+    if p_honour == 0.0 {
+        return Ok(0);
+    }
+    if p_honour == 1.0 {
+        return Ok(HONOUR_PPM_SCALE);
+    }
+    Ok(((p_honour * (HONOUR_PPM_SCALE as f64)).round() as u64).min(HONOUR_PPM_SCALE))
+}
+
+/// Draws `Bernoulli(threshold_ppm / HONOUR_PPM_SCALE)` deterministically with pure integer arithmetic (`§4.3`).
 #[must_use]
-#[allow(clippy::too_many_arguments)]
 pub fn draw_honour_commitment(
     scorer_seed: u64,
     pre_act_pair_sha256: &str,
     day: u8,
     scenario_m: usize,
     commitment_canonical_json: &[u8],
-    p_honour: f64,
+    threshold_ppm: u64,
 ) -> bool {
-    if p_honour <= 0.0 || !p_honour.is_finite() {
-        return false;
-    }
-    if p_honour >= 1.0 {
-        return true;
-    }
-    let threshold_ppm = (p_honour * (HONOUR_PPM_SCALE as f64)).round() as u64;
     if threshold_ppm == 0 {
         return false;
     }
@@ -194,18 +199,18 @@ fn build_active_turn(
     mut base: EvalActSubmission,
     obs: &SeatObservation,
     config: &ScorerConfig,
-) -> EvalActSubmission {
+) -> Result<EvalActSubmission, ScorerError> {
     if obs.phase != TurnPhase::TalkAndMarket || obs.cancel_locked {
-        return base;
+        return Ok(base);
     }
     let seat_idx = usize::from(obs.seat);
     let (Some(seat_state), Some(seat_cfg)) =
         (obs.seats.get(seat_idx), obs.spec.seats.get(seat_idx))
     else {
-        return base;
+        return Ok(base);
     };
     if seat_state.wash_frozen_until_turn >= obs.turn {
-        return base;
+        return Ok(base);
     }
 
     // Account for balances already committed by `ClubBot`'s Pass-A sells.
@@ -305,20 +310,20 @@ fn build_active_turn(
         }
     }
 
-    base.market_actions = prune_refused_market_actions(obs, base.market_actions, &base.bundle);
-    base
+    base.market_actions = prune_refused_market_actions(obs, base.market_actions, &base.bundle)?;
+    Ok(base)
 }
 
 fn build_conservative_turn(
     mut base: EvalActSubmission,
     obs: &SeatObservation,
     config: &ScorerConfig,
-) -> EvalActSubmission {
+) -> Result<EvalActSubmission, ScorerError> {
     let seat_idx = usize::from(obs.seat);
     let (Some(seat_state), Some(seat_cfg)) =
         (obs.seats.get(seat_idx), obs.spec.seats.get(seat_idx))
     else {
-        return base;
+        return Ok(base);
     };
 
     let upkeep_good = AssetId::Refined(seat_cfg.upkeep_good);
@@ -386,22 +391,21 @@ fn build_conservative_turn(
     // Also spare `upkeep_cred_floor` when voluntarily repaying CRED debt.
     let excess_cred = seat_state.cred.saturating_sub(upkeep_cred_floor).max(0);
     base.bundle.debt_repayment_cred = base.bundle.debt_repayment_cred.min(excess_cred);
-    base.market_actions = prune_refused_market_actions(obs, filtered_pass_a, &base.bundle);
-    base
+    base.market_actions = prune_refused_market_actions(obs, filtered_pass_a, &base.bundle)?;
+    Ok(base)
 }
 
 /// Computes a deterministic counterfactual peer turn submission under `posture` (`§4.2`).
-#[must_use]
 pub fn decide_peer_turn(
     posture: PostureKind,
     bot_seed: u64,
     obs: &SeatObservation,
     mandate: &PrivateMandate,
     config: &ScorerConfig,
-) -> EvalActSubmission {
+) -> Result<EvalActSubmission, ScorerError> {
     let base = submission_from_club_bot(ClubBot::new(bot_seed).decide_full_turn(obs, mandate));
     match posture {
-        PostureKind::Standard => base,
+        PostureKind::Standard => Ok(base),
         PostureKind::Active => build_active_turn(base, obs, config),
         PostureKind::Conservative => build_conservative_turn(base, obs, config),
     }
@@ -418,6 +422,7 @@ pub fn apply_talk_commitments(
     scenario_m: usize,
     p_honour: f64,
 ) -> Result<EvalActSubmission, ScorerError> {
+    let threshold_ppm = p_honour_to_ppm(p_honour)?;
     if obs.phase != TurnPhase::TalkAndMarket || obs.cancel_locked {
         return Ok(sub);
     }
@@ -433,7 +438,7 @@ pub fn apply_talk_commitments(
             obs.turn,
             scenario_m,
             &key_bytes,
-            p_honour,
+            threshold_ppm,
         ) {
             honoured.push(commitment.offered_action.clone());
         }
@@ -442,6 +447,6 @@ pub fn apply_talk_commitments(
         return Ok(sub);
     }
     honoured.append(&mut sub.market_actions);
-    sub.market_actions = prune_refused_market_actions(obs, honoured, &sub.bundle);
+    sub.market_actions = prune_refused_market_actions(obs, honoured, &sub.bundle)?;
     Ok(sub)
 }

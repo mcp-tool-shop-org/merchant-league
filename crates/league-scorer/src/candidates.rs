@@ -9,16 +9,20 @@ use league_core::{
     PrivateMandate, ProjectDeliveryOrder, SealedOrderBundle, Seat, SeatObservation, TurnPhase,
     Units, checked_ceil_units_parity, mul_units_parity, town_import_cost_cred,
 };
+use league_seat_types::UNIT_SCALE;
 
 use crate::error::ScorerError;
 use crate::postures::{preview_submission, submission_from_club_bot};
 use crate::rollout::verify_and_fork_checkpoint;
 use crate::types::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest,
-    DROP_TIE_BREAK_BY_CANDIDATE_ID, EVAL_TABLE_SEAT_COUNT, SYNTH_CLAIM_MATURING_EXACT,
-    SYNTH_CONVERTER_INPUT_DEFICIT_COVER, SYNTH_COUNCIL_SELF_NOMINATION,
-    SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES, SYNTH_PROJECT_RANK_BY_EQUITY,
-    ScorerConfig, candidate_id_for_submission, is_valid_sha256_hex, validate_state_id,
+    DROP_TIE_BREAK_BY_CANDIDATE_ID, EVAL_TABLE_SEAT_COUNT, SYNTH_CHARTER_BID_CRED,
+    SYNTH_CLAIM_MATURING_EXACT, SYNTH_CONVERTER_INPUT_DEFICIT_COVER, SYNTH_COUNCIL_SELF_NOMINATION,
+    SYNTH_DROP_DEFAULT_ACTION_RISK_CRED, SYNTH_DROP_PROJECT_RISK_CRED,
+    SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES,
+    SYNTH_PROJECT_RANK_BY_EQUITY, SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS,
+    SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScorerConfig,
+    candidate_id_for_submission, is_valid_sha256_hex, validate_state_id,
 };
 
 /// Deduplicates `candidates` by canonical `candidate_id` (`sha256_hex` of compact submission JSON),
@@ -54,7 +58,7 @@ fn free_asset(obs: &SeatObservation, seat: u8, asset: AssetId) -> Units {
 }
 
 fn is_legal_synthetic(obs: &SeatObservation, sub: &EvalActSubmission) -> bool {
-    let Some(preview) = preview_submission(obs, &sub.market_actions, &sub.bundle) else {
+    let Ok(preview) = preview_submission(obs, &sub.market_actions, &sub.bundle) else {
         return false;
     };
     if !preview.refused_market_actions.is_empty() {
@@ -154,7 +158,7 @@ fn gen_claims_and_council(obs: &SeatObservation) -> Vec<EvalActSubmission> {
                 let mut b = bundle_claims.clone();
                 b.charter_bids.push(CharterBidOrder {
                     role,
-                    bid_cred: 150,
+                    bid_cred: SYNTH_CHARTER_BID_CRED,
                 });
                 drafts.push(EvalActSubmission {
                     market_actions: Vec::new(),
@@ -322,8 +326,8 @@ fn gen_cross_and_quotes(obs: &SeatObservation, config: &ScorerConfig) -> Vec<Eva
             if ask_price <= 0 || seat_state.cred <= 0 {
                 continue;
             }
-            let max_by_cred =
-                ((i128::from(seat_state.cred) * 1_000_i128) / i128::from(ask_price)) as Units;
+            let max_by_cred = ((i128::from(seat_state.cred) * i128::from(UNIT_SCALE))
+                / i128::from(ask_price)) as Units;
             let cap = ask_avail.min(max_by_cred);
             let mut amount = ((i128::from(cap) * i128::from(frac_bps)) / BPS_SCALE) as Units;
             while amount > 0
@@ -372,9 +376,13 @@ fn gen_cross_and_quotes(obs: &SeatObservation, config: &ScorerConfig) -> Vec<Eva
                 let price = ((i128::from(parity) * (BPS_SCALE + i128::from(offset_bps)))
                     / BPS_SCALE)
                     .max(1) as Units;
-                let max_units = ((i128::from(seat_state.cred / 2) * 1_000_i128) / i128::from(price))
-                    .min(1_000) as Units;
-                if max_units >= 100
+                let quote_cred_budget = (i128::from(seat_state.cred)
+                    * i128::from(SYNTH_QUOTE_CRED_SHARE_BPS))
+                    / BPS_SCALE;
+                let max_units = ((quote_cred_budget * i128::from(UNIT_SCALE)) / i128::from(price))
+                    .min(i128::from(SYNTH_QUOTE_MAX_UNITS))
+                    as Units;
+                if max_units >= SYNTH_QUOTE_MIN_UNITS
                     && checked_ceil_units_parity(max_units, price)
                         .is_ok_and(|lock| lock <= seat_state.cred)
                 {
@@ -404,7 +412,7 @@ fn gen_cross_and_quotes(obs: &SeatObservation, config: &ScorerConfig) -> Vec<Eva
                     } else {
                         held
                     };
-                    if sellable < 100 {
+                    if sellable < SYNTH_QUOTE_MIN_UNITS {
                         continue;
                     }
                     let parity = obs.parities.asset_parity(good).max(1);
@@ -658,13 +666,15 @@ fn build_single_dropped_variant(
                 checked_ceil_units_parity(order.amount, order.price_per_unit_cred).unwrap_or(0)
             }
             MarketAction::PostOffer { order, .. } if order.good == upkeep_good => {
-                order.amount.saturating_mul(2)
+                let parity = obs.parities.asset_parity(upkeep_good).max(1);
+                mul_units_parity(order.amount, parity)
+                    .saturating_mul(SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER)
             }
             MarketAction::TownImport { good, amount, .. } => {
                 let p = obs.parities.asset_parity(*good).max(1);
                 town_import_cost_cred(*amount, p, obs.spec.town_import_premium_bps).unwrap_or(0)
             }
-            _ => 1,
+            _ => SYNTH_DROP_DEFAULT_ACTION_RISK_CRED,
         };
         if let Ok(cid) = candidate_id_for_submission(&copy) {
             variants.push((risk, cid, copy));
@@ -677,7 +687,7 @@ fn build_single_dropped_variant(
         if is_legal_synthetic(obs, &copy)
             && let Ok(cid) = candidate_id_for_submission(&copy)
         {
-            variants.push((i64::MAX / 2, cid, copy));
+            variants.push((SYNTH_DROP_PROJECT_RISK_CRED, cid, copy));
         }
     }
     if base.bundle.debt_repayment_cred > 0 {
@@ -792,10 +802,10 @@ fn gen_scaled(
 ) -> Vec<EvalActSubmission> {
     let mut drafts = Vec::new();
     for &scale_bps in &config.quantity_scales_bps {
-        if scale_bps == 0 || scale_bps == 10_000 {
+        if scale_bps == 0 || i128::from(scale_bps) == BPS_SCALE {
             continue;
         }
-        for sub in seed_pool.iter().take(6) {
+        for sub in seed_pool.iter().take(SYNTH_SCALE_SEED_POOL_MAX) {
             let scaled = scale_submission(sub, scale_bps);
             if scaled != *sub && is_legal_synthetic(obs, &scaled) {
                 drafts.push(scaled);
@@ -846,9 +856,14 @@ pub fn generate_arm_independent_candidates(
         ],
     );
     let mut scale_seed_pool = Vec::new();
-    scale_seed_pool.extend(composite_drafts.iter().take(2).cloned());
-    scale_seed_pool.extend(batch_drafts.iter().take(2).cloned());
-    scale_seed_pool.extend(cross_drafts.iter().take(2).cloned());
+    scale_seed_pool.extend(
+        composite_drafts
+            .iter()
+            .take(SYNTH_SCALE_SEED_PER_AXIS)
+            .cloned(),
+    );
+    scale_seed_pool.extend(batch_drafts.iter().take(SYNTH_SCALE_SEED_PER_AXIS).cloned());
+    scale_seed_pool.extend(cross_drafts.iter().take(SYNTH_SCALE_SEED_PER_AXIS).cloned());
     let scaled_drafts = gen_scaled(obs, config, &scale_seed_pool);
 
     let buckets: BTreeMap<&str, Vec<EvalActSubmission>> = BTreeMap::from([
