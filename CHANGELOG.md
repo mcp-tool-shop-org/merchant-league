@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Dependency lockfile bump (`Cargo.lock`): updated `cookie` `0.18.2` -> `0.18.3` for `RUSTSEC-2026-0594`.
+
 - Blind evaluation decision scorer S2 (`crates/league-scorer`, `docs/decision-scorer.md`, `CHANGELOG.md`,
   `crates/league-scorer/README.md`, `atlas`):
   - **Arm-independent candidate generators & `candidates` CLI (`crates/league-scorer/src/{candidates.rs,
