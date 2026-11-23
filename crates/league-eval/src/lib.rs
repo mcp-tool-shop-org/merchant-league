@@ -63,8 +63,8 @@ pub use serving::{
     validate_crate_git_sha_and_cleanliness, validate_serving_manifest_input,
 };
 pub use talk_extract::{
-    TalkRulesV1Table, extract_talk_commitments_for_state, extract_talk_commitments_from_messages,
-    resolve_eval_seat_guilds, talk_rules_v1_digest,
+    TalkRulesV2Table, extract_talk_commitments_for_state, extract_talk_commitments_from_messages,
+    resolve_eval_seat_guilds, talk_rules_v2_digest, talk_rules_v2_digest_for,
 };
 pub use view::{
     EVAL_SEAT_VIEW_JSON_INDENT_SPACES, EVAL_SEAT_VIEW_SERIALIZER_NAME,

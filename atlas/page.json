@@ -21,6 +21,21 @@
       "partLabel": "league-core"
     },
     {
+      "doors": 5,
+      "importedBy": [
+        "league-core",
+        "league-eval",
+        "league-gen",
+        "league-scorer",
+        "league-seat-ui",
+        "league-tui"
+      ],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "league-seat-types",
+      "partLabel": "league-seat-types"
+    },
+    {
       "doors": 8,
       "importedBy": [
         "league-core",
@@ -33,20 +48,6 @@
       "kind": "part",
       "name": "league-error",
       "partLabel": "league-error"
-    },
-    {
-      "doors": 5,
-      "importedBy": [
-        "league-core",
-        "league-gen",
-        "league-scorer",
-        "league-seat-ui",
-        "league-tui"
-      ],
-      "importedByTests": [],
-      "kind": "part",
-      "name": "league-seat-types",
-      "partLabel": "league-seat-types"
     },
     {
       "doors": 4,
@@ -101,8 +102,8 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 5,
-      "changed": 13,
+      "added": 0,
+      "changed": 16,
       "moved": 0,
       "parts": 4,
       "removed": 0
@@ -110,15 +111,15 @@
     "items": [
       {
         "kind": "import-added",
-        "sentence": "league-eval now imports league-scorer.",
+        "sentence": "league-eval now imports league-seat-types.",
         "subjects": [
           "league-eval",
-          "league-scorer"
+          "league-seat-types"
         ]
       },
       {
         "kind": "door",
-        "sentence": "CI now also runs crates/league-eval/src/talk_extract.rs.",
+        "sentence": "CI no longer runs crates/league-eval/src/talk_extract.rs.",
         "subjects": [
           ".github/workflows/ci.yml",
           "crates/league-eval/src/talk_extract.rs"
@@ -126,29 +127,29 @@
       },
       {
         "kind": "landing",
-        "sentence": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md is now also read by crates/league-eval/tests/scorer_s3a_pipeline.rs.",
+        "sentence": "crates/league-eval/src/talk_extract.rs is now read by crates/league-eval/src/talk_extract.rs.",
         "subjects": [
-          "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md",
-          "crates/league-eval/tests/scorer_s3a_pipeline.rs"
+          "crates/league-eval/src/talk_extract.rs",
+          "crates/league-eval/src/talk_extract.rs"
         ]
       },
       {
         "kind": "landing",
-        "sentence": "crates/league-scorer/ is now also read by crates/league-eval/Cargo.toml.",
+        "sentence": "crates/league-seat-types/ is now also read by crates/league-eval/Cargo.toml.",
         "subjects": [
-          "crates/league-scorer/",
+          "crates/league-seat-types/",
           "crates/league-eval/Cargo.toml"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "5 files added and 13 changed content, across 4 parts.",
+        "sentence": "16 files changed content, across 4 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "71957443a36fb3d7cc0c906e3c41ce1b41e8070a",
-      "generatedAt": "2026-11-23T05:08:17.692Z"
+      "commit": "246a9e068b92dfd67347775429e4922dc58ebd18",
+      "generatedAt": "2026-11-23T08:27:38.447Z"
     },
     "unchanged": false
   },
@@ -234,7 +235,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "246a9e068b92dfd67347775429e4922dc58ebd18",
+  "commit": "6bb8fc70544d39ec39dc61de5cd60308aa616476",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (408 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -344,7 +345,6 @@
         "crates/league-eval/src/reply.rs",
         "crates/league-eval/src/schema.rs",
         "crates/league-eval/src/serving.rs",
-        "crates/league-eval/src/talk_extract.rs",
         "crates/league-eval/src/view.rs",
         "crates/league-eval/src/wording.rs",
         "crates/league-eval/tests/",
@@ -374,8 +374,8 @@
         "site/astro.config.mjs",
         "site/src/"
       ],
-      "runsCount": 50,
-      "runsMore": 73,
+      "runsCount": 49,
+      "runsMore": 72,
       "sends": [],
       "stages": [],
       "triggers": [
@@ -778,7 +778,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-23T08:27:38.447Z",
+  "generatedAt": "2026-11-23T11:29:51.971Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 49 reads use paths built at run time and are not named here.",
@@ -826,17 +826,17 @@
   "startReason": "This path follows league-eval (a command people run) from its entry, since CI runs only tests, scripts that import no code here and checks.",
   "summary": "Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet.",
   "summaryFrom": "person",
-  "testFiles": 106,
+  "testFiles": 105,
   "testedBy": {
     "league-core": 27,
-    "league-error": 8,
-    "league-eval": 12,
+    "league-error": 9,
+    "league-eval": 11,
     "league-gen": 10,
     "league-ledger": 8,
     "league-relay": 9,
     "league-scorer": 3,
     "league-season": 1,
-    "league-seat-types": 6,
+    "league-seat-types": 7,
     "league-seat-ui": 1,
     "league-standalone": 5,
     "league-tui": 2,

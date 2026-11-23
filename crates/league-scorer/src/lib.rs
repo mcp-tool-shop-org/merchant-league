@@ -41,7 +41,7 @@ pub use types::{
     SYNTH_PROJECT_RANK_BY_EQUITY, SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS,
     SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX,
     SYNTH_SLOT_BUCKET_NAMES, ScenarioRolloutOutcome, ScorerConfig, ScorerFreezeBlindView,
-    StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V1, TALK_EXTRACTOR_VERSION_V1,
+    StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2,
     WinnersCurseSummary, candidate_id_for_submission, compute_blind_inputs_manifest_sha256,
     compute_blind_inputs_manifest_sha256_from_entries, compute_pre_act_pair_sha256_hex,
     compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,

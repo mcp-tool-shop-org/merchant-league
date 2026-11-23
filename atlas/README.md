@@ -1,6 +1,6 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-23 from commit 246a9e0 by Atlas 1.26.0.
+Mapped at 2026-11-23 from commit 6bb8fc7 by Atlas 1.26.0.
 
 ## What this is
 
@@ -8,17 +8,17 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 16 parts, mostly Rust (408 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-23 (7195744)
+## What changed since 2026-11-23 (246a9e0)
 
-- league-eval now imports league-scorer.
-- CI now also runs crates/league-eval/src/talk_extract.rs.
-- crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md is now also read by crates/league-eval/tests/scorer_s3a_pipeline.rs.
-- crates/league-scorer/ is now also read by crates/league-eval/Cargo.toml.
-- 5 files added and 13 changed content, across 4 parts.
+- league-eval now imports league-seat-types.
+- CI no longer runs crates/league-eval/src/talk_extract.rs.
+- crates/league-eval/src/talk_extract.rs is now read by crates/league-eval/src/talk_extract.rs.
+- crates/league-seat-types/ is now also read by crates/league-eval/Cargo.toml.
+- 16 files changed content, across 4 parts.
 
 ## What comes in
 
-1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 73 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
+1. **CI.** On a pull request; on a push to main touching 15 paths; or by hand. Runs scripts/check-audit-allowlist.mjs, scripts/check-audit-allowlist.test.mjs, scripts/check-copy.sh and 72 more; checks crates/league-eval/src/lib.rs, crates/league-eval/src/main.rs, crates/league-gen/src/lib.rs and 4 more.
 2. **Deploy site to GitHub Pages.** On a push to main touching 2 paths; or by hand. Runs site/astro.config.mjs and site/src/.
 3. **league-eval** (a command people run). Runs crates/league-eval/src/main.rs.
 4. **league-tui** (a command people run). Runs crates/league-tui/src/main.rs.
@@ -31,7 +31,7 @@ Merchant League: a slow-turn trading game for 2 to 6 players, played only on the
 
 ## What happens through CI
 
-1. The workflow runs 6 files in scripts, 17 files in league-core, crates/league-error/ in league-error, 13 files in league-eval, 10 files in league-gen, and 28 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
+1. The workflow runs 6 files in scripts, 17 files in league-core, crates/league-error/ in league-error, 12 files in league-eval, 10 files in league-gen, and 28 files in 10 more places; it checks crates/league-eval/src/lib.rs and crates/league-eval/src/main.rs in league-eval, crates/league-gen/src/lib.rs in league-gen, crates/league-relay/src/lib.rs and crates/league-relay/src/main.rs in league-relay, and crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs in league-scorer.
 2. It writes to site/audit-report.json, which is not tracked.
 
 ## Who reads the results
@@ -61,8 +61,8 @@ CI writes only to site/audit-report.json, which is not tracked.
 ## What breaks what
 
 - **league-core** is imported by 6 parts (league-eval, league-gen, league-relay, league-scorer, league-standalone, league-tui) and sits on the path of 5 doors.
+- **league-seat-types** is imported by 6 parts (league-core, league-eval, league-gen, league-scorer, league-seat-ui, league-tui) and sits on the path of 5 doors.
 - **league-error** is imported by 5 parts (league-core, league-ledger, league-relay, league-seat-types, league-standalone) and sits on the path of 8 doors.
-- **league-seat-types** is imported by 5 parts (league-core, league-gen, league-scorer, league-seat-ui, league-tui) and sits on the path of 5 doors.
 - **league-ledger** is imported by 1 part (league-standalone) and sits on the path of 4 doors.
 - **league-relay** is imported by 1 part (league-eval) and sits on the path of 3 doors.
 - **league-scorer** is imported by 1 part (league-eval) and sits on the path of 3 doors.

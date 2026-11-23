@@ -9,11 +9,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, CandidateScoreOutput, ScorerConfig, StateScoreOutput,
-    TALK_EXTRACTOR_VERSION_V1, compute_blind_inputs_manifest_sha256,
+    TALK_EXTRACTOR_VERSION_V2, compute_blind_inputs_manifest_sha256,
     compute_blind_inputs_manifest_sha256_from_entries, compute_scorer_tree_sha256,
     is_valid_sha256_hex, parse_blind_scoring_request_strict, to_sorted_pretty_json,
 };
@@ -23,7 +24,7 @@ use crate::blind_builder::{ArmMapEntry, ArmMapStateFile};
 use crate::error::EvalError;
 use crate::records::{EvalArm, EvalManifest, EvalSetupFile};
 use crate::serving::{CrateGitShaSource, resolve_crate_git_sha_from};
-use crate::talk_extract::talk_rules_v1_digest;
+use crate::talk_extract::talk_rules_v2_digest;
 
 /// Descriptive-only inferential tag required by `§7.1`.
 pub const DESCRIPTIVE_ONLY_INFERENTIAL_STATUS: &str = "descriptive_only";
@@ -57,9 +58,9 @@ pub struct ScorerFreezeFile {
     pub scorer_git_sha: String,
     /// Canonical tree SHA-256 over `crates/league-scorer/**`.
     pub scorer_tree_sha256: String,
-    /// Canonical compact-JSON SHA-256 of frozen `talk_rules_v1` rule table.
+    /// Canonical SHA-256 over the `talk_rules_v2` rule table and LF-normalized extractor source.
     pub talk_extractor_rules_digest: String,
-    /// Talk commitment extractor version (`talk_rules_v1`).
+    /// Talk commitment extractor version (`talk_rules_v2`).
     pub talk_extractor_version: String,
 }
 
@@ -231,12 +232,6 @@ pub fn run_freeze(
     opts: &FreezeOptions,
     git_sha: &CrateGitShaSource<'_>,
 ) -> Result<ScorerFreezeFile, EvalError> {
-    if opts.out_path.exists() {
-        return Err(EvalError::FreezeFileExists(format!(
-            "freeze file already exists at {}; refusing to overwrite",
-            opts.out_path.display()
-        )));
-    }
     if opts.control_wording_arm.trim().is_empty() {
         return Err(EvalError::Usage(
             "`--control-wording-arm <label>` cannot be empty".to_owned(),
@@ -250,8 +245,8 @@ pub fn run_freeze(
     let config: ScorerConfig = serde_json::from_slice(&cfg_bytes)
         .map_err(|e| EvalError::Io(format!("parse ScorerConfig JSON: {e}")))?;
     config.validate()?;
-    let expected_talk_digest = talk_rules_v1_digest()?;
-    if config.talk_extractor_version != TALK_EXTRACTOR_VERSION_V1 {
+    let expected_talk_digest = talk_rules_v2_digest()?;
+    if config.talk_extractor_version != TALK_EXTRACTOR_VERSION_V2 {
         return Err(EvalError::SchemaValidation(format!(
             "unsupported talk_extractor_version `{}`",
             config.talk_extractor_version
@@ -292,7 +287,21 @@ pub fn run_freeze(
             .map_err(|e| EvalError::Io(format!("create freeze parent dir: {e}")))?;
     }
     let json_text = to_sorted_pretty_json(&freeze)?;
-    fs::write(&opts.out_path, json_text.as_bytes())
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&opts.out_path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                EvalError::FreezeFileExists(format!(
+                    "freeze file already exists at {}; refusing to overwrite",
+                    opts.out_path.display()
+                ))
+            } else {
+                EvalError::Io(format!("create {}: {e}", opts.out_path.display()))
+            }
+        })?;
+    file.write_all(json_text.as_bytes())
         .map_err(|e| EvalError::Io(format!("write {}: {e}", opts.out_path.display())))?;
     Ok(freeze)
 }
@@ -442,9 +451,13 @@ fn verify_control_entry_wording_arm(
                     relay_setup.display()
                 ))
             })?;
-            if let Some(wording_arm) = val.get("wording_arm").and_then(|v| v.as_str())
-                && wording_arm != expected_control_wording_arm
-            {
+            let Some(wording_arm) = val.get("wording_arm").and_then(|v| v.as_str()) else {
+                return Err(EvalError::ControlWordingArmMismatch(format!(
+                    "control relay/setup.json {} lacks string wording_arm key",
+                    relay_setup.display()
+                )));
+            };
+            if wording_arm != expected_control_wording_arm {
                 return Err(EvalError::ControlWordingArmMismatch(format!(
                     "control relay/setup.json {} has wording_arm `{wording_arm}`, expected frozen `{expected_control_wording_arm}`",
                     relay_setup.display()
@@ -488,6 +501,12 @@ fn verify_score_matches_arm_map(
         return Err(EvalError::FreezeConfigMismatch(format!(
             "score `{}` scorer_config_sha256 `{}` != freeze `{}`",
             score.state_id, score.scorer_config_sha256, freeze.scorer_config_sha256
+        )));
+    }
+    if score.blind_request_sha256 != arm_map.blind_input_sha256 {
+        return Err(EvalError::FreezeManifestMismatch(format!(
+            "score `{}` blind_request_sha256 `{}` != arm_map blind_input_sha256 `{}`",
+            score.state_id, score.blind_request_sha256, arm_map.blind_input_sha256
         )));
     }
     if score.day != arm_map.day
@@ -583,12 +602,32 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
     }
 
     let mut scores_by_state: BTreeMap<String, StateScoreOutput> = BTreeMap::new();
+    let mut scored_manifest_entries: BTreeMap<String, String> = BTreeMap::new();
     for path in score_paths {
         let raw = fs::read_to_string(&path)
             .map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
         let score: StateScoreOutput = serde_json::from_str(&raw)
             .map_err(|e| EvalError::Io(format!("parse {}: {e}", path.display())))?;
+        if !is_valid_sha256_hex(&score.blind_request_sha256) {
+            return Err(EvalError::FreezeManifestMismatch(format!(
+                "score `{}` has invalid blind_request_sha256 `{}`",
+                score.state_id, score.blind_request_sha256
+            )));
+        }
+        scored_manifest_entries.insert(
+            format!("{}.json", score.state_id),
+            score.blind_request_sha256.clone(),
+        );
         scores_by_state.insert(score.state_id.clone(), score);
+    }
+
+    let scored_manifest_sha =
+        compute_blind_inputs_manifest_sha256_from_entries(&scored_manifest_entries);
+    if scored_manifest_sha != freeze.blind_inputs_manifest_sha256 {
+        return Err(EvalError::FreezeManifestMismatch(format!(
+            "scored blind_request_sha256 manifest `{scored_manifest_sha}` != freeze `{}`",
+            freeze.blind_inputs_manifest_sha256
+        )));
     }
 
     let arm_keys: BTreeSet<&String> = arm_maps.keys().collect();

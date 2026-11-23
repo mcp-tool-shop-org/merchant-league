@@ -14,17 +14,20 @@ use crate::rollout::execute_blind_request;
 use crate::types::{
     ScorerConfig, ScorerFreezeBlindView, compute_blind_inputs_manifest_sha256,
     compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
-    to_sorted_pretty_json,
+    sha256_hex, to_sorted_pretty_json,
 };
 
 const HELP_TEXT: &str = "\
 Merchant League blind decision scorer
 
 USAGE:
-  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir> [--freeze <file>]
+  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir> [--freeze <file>] [--scorer-crate-dir <dir>]
   league-scorer [--error-format text|json] candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64> --out <dir>
   league-scorer --help | -h
   league-scorer --version | -V
+
+NOTES:
+  --scorer-crate-dir hashes the given crate source tree on disk, not the running binary.
 ";
 
 /// CLI error output mode (`--error-format text|json`).
@@ -558,6 +561,7 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
                 &[&path],
             ))
         })?;
+        let req_sha256 = sha256_hex(&raw);
         let req = parse_blind_scoring_request_strict(&raw)?;
         req.validate(&config)?;
 
@@ -577,7 +581,7 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
                 req.state_id
             )));
         }
-        requests.push(req);
+        requests.push((req, req_sha256));
     }
 
     let scores_dir = args.out_dir.join("scores");
@@ -588,14 +592,15 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
         ))
     })?;
 
-    for req in &requests {
+    for (req, req_sha256) in &requests {
         let save_path = args
             .checkpoints_dir
             .join(format!("{}.save.json", req.pre_act_save_sha256));
         let seal_path = args
             .checkpoints_dir
             .join(format!("{}.seal", req.pre_act_seal_sha256));
-        let output = execute_blind_request(req, &config, &save_path, &seal_path)?;
+        let mut output = execute_blind_request(req, &config, &save_path, &seal_path)?;
+        output.blind_request_sha256 = req_sha256.clone();
         let json_text = to_sorted_pretty_json(&output)?;
         let out_path = scores_dir.join(format!("{}.json", req.state_id));
         fs::write(&out_path, json_text.as_bytes()).map_err(|e| {

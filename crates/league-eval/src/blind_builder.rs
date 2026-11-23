@@ -17,7 +17,7 @@ use league_relay::{
 };
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest, ScorerConfig,
-    TALK_EXTRACTOR_VERSION_V1, candidate_id_for_submission, compute_pre_act_pair_sha256_hex,
+    TALK_EXTRACTOR_VERSION_V2, candidate_id_for_submission, compute_pre_act_pair_sha256_hex,
     dedupe_candidates, generate_arm_independent_candidates, parse_blind_scoring_request_strict,
     sha256_hex, to_sorted_pretty_json, validate_state_id,
 };
@@ -27,7 +27,7 @@ use crate::error::EvalError;
 use crate::records::{BranchArmOutcome, EvalArm, EvalDecisionRecord, EvalSetupFile};
 use crate::reply::parse_eval_act_reply;
 use crate::talk_extract::{
-    extract_talk_commitments_for_state, resolve_eval_seat_guilds, talk_rules_v1_digest,
+    extract_talk_commitments_for_state, resolve_eval_seat_guilds, talk_rules_v2_digest,
 };
 
 /// Options for [`run_build_blind_inputs`].
@@ -385,13 +385,13 @@ pub fn run_build_blind_inputs(
     let config: ScorerConfig = serde_json::from_slice(&cfg_bytes)
         .map_err(|e| EvalError::Io(format!("parse ScorerConfig JSON: {e}")))?;
     config.validate()?;
-    if config.talk_extractor_version != TALK_EXTRACTOR_VERSION_V1 {
+    if config.talk_extractor_version != TALK_EXTRACTOR_VERSION_V2 {
         return Err(EvalError::SchemaValidation(format!(
-            "unsupported talk_extractor_version `{}` (expected `{TALK_EXTRACTOR_VERSION_V1}`)",
+            "unsupported talk_extractor_version `{}` (expected `{TALK_EXTRACTOR_VERSION_V2}`)",
             config.talk_extractor_version
         )));
     }
-    let expected_talk_digest = talk_rules_v1_digest()?;
+    let expected_talk_digest = talk_rules_v2_digest()?;
     if config.talk_extractor_rules_digest != expected_talk_digest {
         return Err(EvalError::SchemaValidation(format!(
             "config talk_extractor_rules_digest `{}` != `{expected_talk_digest}`",

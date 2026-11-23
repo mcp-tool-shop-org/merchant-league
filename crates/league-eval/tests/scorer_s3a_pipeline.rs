@@ -18,11 +18,11 @@ use league_eval::{
     ArmMapStateFile, BranchManifest, BranchOptions, BuildBlindInputsOptions, CRATE_GIT_SHA,
     CrateGitShaSource, DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, EVAL_REPLY_WORDING_ARM, EvalArm,
     EvalDecisionRecord, EvalError, EvalManifest, EvalSetupFile, FreezeOptions, JoinOptions,
-    JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, ScorerFreezeFile, eval_wording_slot,
-    execute_cli_with_git_sha, extract_talk_commitments_for_state,
+    JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, ScorerFreezeFile, TalkRulesV2Table,
+    eval_wording_slot, execute_cli_with_git_sha, extract_talk_commitments_for_state,
     extract_talk_commitments_from_messages, resolve_eval_seat_guilds,
     run_branch_with_transport_and_git_sha, run_build_blind_inputs, run_freeze, run_join,
-    run_play_with_transport_and_git_sha,
+    run_play_with_transport_and_git_sha, talk_rules_v2_digest, talk_rules_v2_digest_for,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
@@ -31,9 +31,11 @@ use league_relay::{
 use league_scorer::cli::run_cli as run_scorer_cli;
 use league_scorer::{
     BlindScoringRequest, CandidateScoreOutput, ScorerConfig, ScorerError, StateScoreOutput,
-    TALK_EXTRACTOR_RULES_DIGEST_V1, TALK_EXTRACTOR_VERSION_V1, candidate_id_for_submission,
-    compute_blind_inputs_manifest_sha256, to_sorted_pretty_json,
+    TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2, candidate_id_for_submission,
+    compute_blind_inputs_manifest_sha256, sha256_hex, to_sorted_compact_json,
+    to_sorted_pretty_json,
 };
+use league_seat_types::UNIT_SCALE;
 use serde_json::{Value, json};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -577,12 +579,26 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
     assert_blind_bytes_clean(&blind_dir, tmp.path())?;
 
     let expected_state_id = format!("{}-day-01-seat-0", play_manifest.game_id);
-    let blind_req: BlindScoringRequest = serde_json::from_slice(&fs::read(
-        blind_dir.join(format!("{expected_state_id}.json")),
-    )?)?;
+    let blind_raw_bytes = fs::read(blind_dir.join(format!("{expected_state_id}.json")))?;
+    let expected_blind_sha = sha256_hex(&blind_raw_bytes);
+    let blind_req: BlindScoringRequest = serde_json::from_slice(&blind_raw_bytes)?;
     assert_eq!(blind_req.talk_commitments.len(), 1);
     assert_eq!(blind_req.talk_commitments[0].proposer_seat, 1);
     assert_eq!(blind_req.talk_commitments[0].counterparty_seat, 0);
+    assert_eq!(
+        blind_req.talk_commitments[0].offered_action,
+        MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(1),
+                amount: 1_000 * UNIT_SCALE,
+                price_per_unit_cred: 250 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        }
+    );
 
     let arm_map: ArmMapStateFile = serde_json::from_slice(&fs::read(
         arm_map_dir.join(format!("{expected_state_id}.json")),
@@ -689,7 +705,7 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
 
     let freeze: ScorerFreezeFile = serde_json::from_slice(&fs::read(&freeze_path)?)?;
     assert_eq!(freeze.control_wording_arm, CONTROL_WORDING_ARM);
-    assert_eq!(freeze.talk_extractor_version, "talk_rules_v1");
+    assert_eq!(freeze.talk_extractor_version, "talk_rules_v2");
 
     let scores_frozen = tmp.path().join("scores_frozen");
     let mut sf_out = Vec::new();
@@ -721,10 +737,11 @@ fn e2e_synthetic_play_branch_blind_score_freeze_and_join_pipeline() -> TestResul
         "E2E[score --freeze]: {}",
         String::from_utf8_lossy(&sf_out).trim()
     );
-    assert_eq!(
-        fs::read(scores_frozen.join(format!("scores/{expected_state_id}.json")))?,
-        bytes_a
-    );
+    let frozen_score_bytes =
+        fs::read(scores_frozen.join(format!("scores/{expected_state_id}.json")))?;
+    assert_eq!(frozen_score_bytes, bytes_a);
+    let frozen_score_parsed: StateScoreOutput = serde_json::from_slice(&frozen_score_bytes)?;
+    assert_eq!(frozen_score_parsed.blind_request_sha256, expected_blind_sha);
 
     // 6. Run join gate and verify each arm's committed_candidate_id reproduces accurately.
     let joined_dir = tmp.path().join("joined");
@@ -1200,8 +1217,8 @@ fn talk_extractor_files_cover_clear_ambiguous_retraction_and_repeat_determinism(
             order: OfferProposal {
                 side: OfferSide::Buy,
                 good: AssetId::Refined(0),
-                amount: 500,
-                price_per_unit_cred: 400,
+                amount: 500 * UNIT_SCALE,
+                price_per_unit_cred: 400 * UNIT_SCALE,
                 domain_id: None,
                 is_hybrid: false,
             },
@@ -2202,8 +2219,8 @@ fn cli_flag_errors_and_builder_freeze_join_refusal_matrix() -> TestResult {
             .code(),
         "SCHEMA_VALIDATION_FAILED"
     );
-    assert_eq!(freeze.talk_extractor_version, TALK_EXTRACTOR_VERSION_V1);
-    assert!(!TALK_EXTRACTOR_RULES_DIGEST_V1.is_empty());
+    assert_eq!(freeze.talk_extractor_version, TALK_EXTRACTOR_VERSION_V2);
+    assert!(!TALK_EXTRACTOR_RULES_DIGEST_V2.is_empty());
 
     let joined_fail = tmp.path().join("joined_fail");
 
@@ -3222,5 +3239,829 @@ fn freeze_and_join_parse_and_candidate_error_paths() -> TestResult {
         "FREEZE_MANIFEST_MISMATCH"
     );
 
+    Ok(())
+}
+
+#[test]
+fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult {
+    let base = TalkRulesV2Table::frozen();
+    let sample_src = b"fn sample() -> i64 { 1000 }\r\n";
+    let base_digest = talk_rules_v2_digest_for(&base, sample_src)?;
+
+    // CRLF and LF source bytes normalize identically across platforms.
+    assert_eq!(
+        base_digest,
+        talk_rules_v2_digest_for(&base, b"fn sample() -> i64 { 1000 }\n")?
+    );
+
+    // Changing any byte of source changes the digest.
+    let mut_src_digest = talk_rules_v2_digest_for(&base, b"fn sample() -> i64 { 1001 }\n")?;
+    assert_ne!(mut_src_digest, base_digest);
+
+    // Mutating any single field of `TalkRulesV2Table` changes the digest.
+    let mut t = base.clone();
+    t.ambiguity_cues = &["maybe"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.buy_tokens = &["buy"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.clause_break_chars = &[";"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.colon_space_breaks_clause = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.commitment_cues = &["will sell"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.contradiction_latches_pair_asset = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.cred_tokens = &["cred"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.cue_precedence = &["commitment", "retraction"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.decimal_dot_keeps_clause = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.exactly_one_amount_before_price = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.exactly_one_good_before_price = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.exactly_one_price_after_cue = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.exactly_one_price_cue = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.explicit_retraction_cues = &["cancel"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.merge_policy = "other";
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.negated_offer_cues = &["won't"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.negated_offer_max_gap_tokens = 3;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.negated_offer_verbs = &["sell"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.number_unit_scale = 1;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.price_cues = &["at"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.raw_prefixes = &["r"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.refined_prefixes = &["refined"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.retraction_scope_policy = "other";
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.seat_ref_forms = &["seat_index"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.sell_tokens = &["sell"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.token_join_chars = &["_"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.token_trim_chars = &["."];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.unsupported_condition_cues = &["if"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base;
+    t.version = "talk_rules_v99";
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    // Pinned live digest must equal scorer constant.
+    assert_eq!(talk_rules_v2_digest()?, TALK_EXTRACTOR_RULES_DIGEST_V2);
+    Ok(())
+}
+
+#[test]
+fn talk_v2_scaling_decimals_overflow_merge_and_retraction_scoping() -> TestResult {
+    let tmp = TmpDir::new("talk_v2")?;
+    let host = EvalHost::from_standard_setup(TableId(9110), 4, 1, 0)?;
+    let obs = host.observe_seat(league_core::Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    // Clear scaled offer and byte-identical repeat determinism.
+    let clear = extract_talk_commitments_from_messages(
+        0,
+        &seat_guilds,
+        &[(1, 0, "I will sell 1000 raw 1 at 250 CRED.".to_owned())],
+        &obs,
+    )?;
+    assert_eq!(clear.len(), 1);
+    assert_eq!(
+        clear[0].offered_action,
+        MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(1),
+                amount: 1_000 * UNIT_SCALE,
+                price_per_unit_cred: 250 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        }
+    );
+    let clear_repeat = extract_talk_commitments_from_messages(
+        0,
+        &seat_guilds,
+        &[(1, 0, "I will sell 1000 raw 1 at 250 CRED.".to_owned())],
+        &obs,
+    )?;
+    assert_eq!(
+        to_sorted_compact_json(&clear)?,
+        to_sorted_compact_json(&clear_repeat)?
+    );
+
+    // Ambiguous, decimal, zero, and overflow quantities/prices are all refused cleanly.
+    for rejected in [
+        "Maybe I will sell 1000 raw 1 at 250 CRED.",
+        "Will sell 1000 raw 1 at 250 or 300 CRED.",
+        "If you agree, I will sell 1000 raw 1 at 250 CRED?",
+        "I offer 1000 raw 1 at 250 CRED.",
+        "I will sell 1.5 raw 1 at 250 CRED.",
+        "I will sell 1000 raw 1 at 25.5 CRED.",
+        "I will sell 0 raw 1 at 250 CRED.",
+        "I will sell 99999999999999999 raw 1 at 250 CRED.",
+        "I will sell 10 raw 1 at 999999999999999999 CRED.",
+        "I will sell 99999999999999999999 raw 1 at 10 CRED.",
+    ] {
+        let out = extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, rejected.to_owned())],
+            &obs,
+        )?;
+        assert!(
+            out.is_empty(),
+            "expected empty for `{rejected}`, got {out:?}"
+        );
+    }
+
+    // Later explicit retraction and contradiction drop the commitment.
+    assert!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[
+                (1, 0, "I will sell 1000 raw 1 at 250 CRED.".to_owned()),
+                (1, 0, "Actually, I retract my offer on raw 1.".to_owned()),
+            ],
+            &obs,
+        )?
+        .is_empty()
+    );
+    assert!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[
+                (1, 0, "I will sell 1000 raw 1 at 250 CRED.".to_owned()),
+                (
+                    1,
+                    0,
+                    "Correction: I will sell 500 raw 1 at 300 CRED.".to_owned(),
+                ),
+            ],
+            &obs,
+        )?
+        .is_empty()
+    );
+
+    // Retraction scoping: filler negation keeps the offer; verb-governed negation retracts it.
+    let expected_five = vec![league_scorer::ExtractedTalkCommitment {
+        proposer_seat: 1,
+        counterparty_seat: 0,
+        offered_action: MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(0),
+                amount: 5 * UNIT_SCALE,
+                price_per_unit_cred: 10 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        },
+    }];
+    assert_eq!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, "Don't worry: I will sell 5 raw 0 at 10".to_owned())],
+            &obs,
+        )?,
+        expected_five
+    );
+    assert_eq!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, "Don't worry, I will sell 5 raw 0 at 10".to_owned())],
+            &obs,
+        )?,
+        expected_five
+    );
+    assert!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[
+                (1, 0, "I will sell 5 raw 0 at 10".to_owned()),
+                (1, 0, "I won't sell raw 0".to_owned()),
+            ],
+            &obs,
+        )?
+        .is_empty()
+    );
+
+    // Cross-source merge policy across `to-seat/*.negotiation.json` and `decisions/day-01-talk-*.json`:
+    // Retraction in one source must NEVER be resurrected by a copy of the offer in the other.
+    let make_talk_rec = |seat: u8, guild: &str, messages: Value| EvalDecisionRecord {
+        game_id: host.game_id().to_owned(),
+        table_id: 9110,
+        day: 1,
+        round: Round::Talk,
+        seat,
+        guild: guild.to_owned(),
+        arm: EvalArm::Off,
+        seat_kind: "Model".to_owned(),
+        keeps_notes: false,
+        notes_present: false,
+        raw_reply: Some(
+            json!({
+                "messages": messages,
+                "market_actions": [],
+                "bundle": {}
+            })
+            .to_string(),
+        ),
+        discarded_reply_path: None,
+        discarded_reply_sha256: None,
+        attempts: 1,
+        failed_attempts: Vec::new(),
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        wall_secs: None,
+        tool_calls_used: 0,
+        cleared_non_empty_actions: false,
+        prompt_token_ids_sha256s: Vec::new(),
+        prompt_token_ids_source: None,
+        prompt_token_ids_template_check: None,
+        reply_token_ids: Vec::new(),
+        reply_top_logprobs: Vec::new(),
+        intermediate_bundle_sha256s: Vec::new(),
+        refused_market_actions: 0,
+        refused_bundle_legs: 0,
+        parse_failure: false,
+        refusal_code: None,
+        refusal_reason: None,
+        loaded_history_sha256: BTreeMap::new(),
+        invalid_recipients: Vec::new(),
+        no_reply: false,
+        apply_report: None,
+        refused_bundle: None,
+        club_bot_baseline: None,
+    };
+
+    // Case A: Retracted in negotiation.json while talk reply still repeats the offer -> empty.
+    let case_neg_retract = tmp.path().join("neg_retract");
+    fs::create_dir_all(case_neg_retract.join("to-seat"))?;
+    fs::create_dir_all(case_neg_retract.join("decisions"))?;
+    fs::write(
+        case_neg_retract.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: "I will sell 5 raw 0 at 10.".to_owned(),
+                },
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: "Actually I retract raw 0.".to_owned(),
+                },
+            ],
+        })?,
+    )?;
+    fs::write(
+        case_neg_retract.join("decisions/day-01-talk-Quarry.json"),
+        serde_json::to_string_pretty(&make_talk_rec(
+            1,
+            "Quarry",
+            json!([{ "to_guild": "Foundry", "body": "I will sell 5 raw 0 at 10." }]),
+        ))?,
+    )?;
+    assert!(
+        extract_talk_commitments_for_state(&case_neg_retract, 1, 0, &seat_guilds, &obs)?.is_empty()
+    );
+
+    // Case B: Offered in negotiation.json while retracted (named & global) in talk reply -> empty.
+    let case_talk_retract = tmp.path().join("talk_retract");
+    fs::create_dir_all(case_talk_retract.join("to-seat"))?;
+    fs::create_dir_all(case_talk_retract.join("decisions"))?;
+    fs::write(
+        case_talk_retract.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "I will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    fs::write(
+        case_talk_retract.join("decisions/day-01-talk-Quarry.json"),
+        serde_json::to_string_pretty(&make_talk_rec(
+            1,
+            "Quarry",
+            json!([{ "to_guild": "Foundry", "body": "Cancel that, no deal." }]),
+        ))?,
+    )?;
+    assert!(
+        extract_talk_commitments_for_state(&case_talk_retract, 1, 0, &seat_guilds, &obs)?
+            .is_empty()
+    );
+
+    // Case C: Distinct non-retracted offers across negotiation + talk survive; conflicting prices drop.
+    let case_union = tmp.path().join("union_ok");
+    fs::create_dir_all(case_union.join("to-seat"))?;
+    fs::create_dir_all(case_union.join("decisions"))?;
+    fs::write(
+        case_union.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: "I will sell 5 raw 0 at 10.".to_owned(),
+                },
+                UntrustedWhisper {
+                    from_guild: "Harbor".to_owned(),
+                    intent_header: None,
+                    body: "I will buy 4 raw 1 at 20.".to_owned(),
+                },
+            ],
+        })?,
+    )?;
+    fs::write(
+        case_union.join("decisions/day-01-talk-Quarry.json"),
+        serde_json::to_string_pretty(&make_talk_rec(
+            1,
+            "Quarry",
+            json!([{ "to_guild": "Foundry", "body": "I will buy 3 refined 0 at 50." }]),
+        ))?,
+    )?;
+    fs::write(
+        case_union.join("decisions/day-01-talk-Harbor.json"),
+        serde_json::to_string_pretty(&make_talk_rec(
+            2,
+            "Harbor",
+            json!([{ "to_guild": "Foundry", "body": "I will buy 4 raw 1 at 30." }]),
+        ))?,
+    )?;
+    let union_out = extract_talk_commitments_for_state(&case_union, 1, 0, &seat_guilds, &obs)?;
+    assert_eq!(
+        union_out,
+        vec![
+            league_scorer::ExtractedTalkCommitment {
+                proposer_seat: 1,
+                counterparty_seat: 0,
+                offered_action: MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Buy,
+                        good: AssetId::Refined(0),
+                        amount: 3 * UNIT_SCALE,
+                        price_per_unit_cred: 50 * UNIT_SCALE,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                },
+            },
+            league_scorer::ExtractedTalkCommitment {
+                proposer_seat: 1,
+                counterparty_seat: 0,
+                offered_action: MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: OfferSide::Sell,
+                        good: AssetId::Raw(0),
+                        amount: 5 * UNIT_SCALE,
+                        price_per_unit_cred: 10 * UNIT_SCALE,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                },
+            },
+        ]
+    );
+
+    // Small whole-unit amount (`2 raw 1`) must parse as amount=2*UNIT_SCALE on Raw(1), not `2 raw`.
+    let small_unit_out = extract_talk_commitments_from_messages(
+        0,
+        &seat_guilds,
+        &[(1, 0, "I will sell 2 raw 1 at 250 CRED.".to_owned())],
+        &obs,
+    )?;
+    assert_eq!(
+        small_unit_out,
+        vec![league_scorer::ExtractedTalkCommitment {
+            proposer_seat: 1,
+            counterparty_seat: 0,
+            offered_action: MarketAction::PostOffer {
+                seat: 1,
+                order: OfferProposal {
+                    side: OfferSide::Sell,
+                    good: AssetId::Raw(1),
+                    amount: 2 * UNIT_SCALE,
+                    price_per_unit_cred: 250 * UNIT_SCALE,
+                    domain_id: None,
+                    is_hybrid: false,
+                },
+            },
+        }]
+    );
+
+    Ok(())
+}
+
+#[test]
+fn join_refuses_scores_from_rebuilt_blind_inputs_with_different_talk_commitments() -> TestResult {
+    let tmp = TmpDir::new("talk_tamper")?;
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let git_sha = clean_git_sha_source();
+    let transport = SyntheticPipelineTransport;
+
+    // 1. Build run A with initial talk commitments and freeze A.
+    let play_dir = tmp.path().join("play_a");
+    let play_manifest = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_dir.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9111,
+            seed: 31,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+    let branch_dir = tmp.path().join("branch_a");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_dir.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Control],
+            out_dir: branch_dir.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+
+    let blind_a = tmp.path().join("blind_a");
+    let arm_map_a = tmp.path().join("arm_map_a");
+    let ckpts_a = tmp.path().join("ckpts_a");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir.clone(), branch_dir.clone()],
+        out_blind_dir: blind_a.clone(),
+        out_arm_map_dir: arm_map_a.clone(),
+        out_checkpoints_dir: Some(ckpts_a.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 42,
+    })?;
+
+    let freeze_a = tmp.path().join("freeze_a.json");
+    run_freeze(
+        &FreezeOptions {
+            blind_dir: blind_a.clone(),
+            config_path: cfg_path.clone(),
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: freeze_a.clone(),
+            scorer_crate_dir: None,
+        },
+        &git_sha,
+    )?;
+
+    // 2. Modify talk commitments in `play_a`'s recorded talk inputs, rebuild B with identical
+    // `candidate_id`s, score B, then attempt `join` against A's freeze + A's `arm_map/` (without `--blind`).
+    let neg_path = play_dir.join("to-seat/day-01-act-Foundry.negotiation.json");
+    fs::write(
+        &neg_path,
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: eval_wording_slot("eval_batna").to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "I commit to buy 200 raw 1 at 300 CRED.".to_owned(),
+            }],
+        })?,
+    )?;
+    let talk_dec_path = play_dir.join("decisions/day-01-talk-Quarry.json");
+    let mut talk_dec: EvalDecisionRecord = serde_json::from_slice(&fs::read(&talk_dec_path)?)?;
+    talk_dec.raw_reply = Some(
+        json!({
+            "messages": [{ "to_guild": "Foundry", "body": "I commit to buy 200 raw 1 at 300 CRED." }],
+            "market_actions": [],
+            "bundle": {}
+        })
+        .to_string(),
+    );
+    fs::write(&talk_dec_path, serde_json::to_string_pretty(&talk_dec)?)?;
+
+    let blind_b = tmp.path().join("blind_b");
+    let arm_map_b = tmp.path().join("arm_map_b");
+    let ckpts_b = tmp.path().join("ckpts_b");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir, branch_dir],
+        out_blind_dir: blind_b.clone(),
+        out_arm_map_dir: arm_map_b,
+        out_checkpoints_dir: Some(ckpts_b.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 42,
+    })?;
+
+    let sid = format!("{}-day-01-seat-0", play_manifest.game_id);
+    let req_a: BlindScoringRequest =
+        serde_json::from_slice(&fs::read(blind_a.join(format!("{sid}.json")))?)?;
+    let req_b: BlindScoringRequest =
+        serde_json::from_slice(&fs::read(blind_b.join(format!("{sid}.json")))?)?;
+    let cids_a: Vec<String> = req_a
+        .candidates
+        .iter()
+        .map(|c| c.candidate_id.clone())
+        .collect();
+    let cids_b: Vec<String> = req_b
+        .candidates
+        .iter()
+        .map(|c| c.candidate_id.clone())
+        .collect();
+    assert_eq!(
+        cids_a, cids_b,
+        "candidate IDs must remain identical across A and B"
+    );
+    assert_ne!(
+        req_a.talk_commitments, req_b.talk_commitments,
+        "talk_commitments must differ between A and B"
+    );
+
+    let scores_b = tmp.path().join("scores_b");
+    let mut sb_out = Vec::new();
+    let mut sb_err = Vec::new();
+    assert_eq!(
+        run_scorer_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_b.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_b.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                scores_b.to_str().ok_or("utf8")?,
+            ],
+            &mut sb_out,
+            &mut sb_err,
+        ),
+        0,
+        "score B failed: {}",
+        String::from_utf8_lossy(&sb_err)
+    );
+
+    let joined_tampered = tmp.path().join("joined_tampered");
+    let (join_code, _join_out, join_err) = run_eval_cli(
+        &[
+            "join",
+            "--freeze",
+            freeze_a.to_str().ok_or("utf8")?,
+            "--arm-map",
+            arm_map_a.to_str().ok_or("utf8")?,
+            "--scores",
+            scores_b.to_str().ok_or("utf8")?,
+            "--out",
+            joined_tampered.to_str().ok_or("utf8")?,
+        ],
+        &git_sha,
+    );
+    assert_eq!(join_code, 1);
+    assert!(
+        join_err.contains("FREEZE_MANIFEST_MISMATCH"),
+        "expected FREEZE_MANIFEST_MISMATCH, got: {join_err}"
+    );
+    eprintln!(
+        "REBUILT_TALK_JOIN_REJECTED: exit={join_code} {}",
+        join_err.trim()
+    );
+    Ok(())
+}
+
+#[test]
+fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch() -> TestResult {
+    let tmp = TmpDir::new("relay_setup_missing_key")?;
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let git_sha = clean_git_sha_source();
+    let transport = SyntheticPipelineTransport;
+
+    let play_dir = tmp.path().join("play_r");
+    let play_manifest = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_dir.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9112,
+            seed: 41,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+    let branch_dir = tmp.path().join("branch_r");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_dir.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Control],
+            out_dir: branch_dir.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let blind_dir = tmp.path().join("blind");
+    let arm_map_dir = tmp.path().join("arm_map");
+    let ckpts_dir = tmp.path().join("ckpts");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir, branch_dir.clone()],
+        out_blind_dir: blind_dir.clone(),
+        out_arm_map_dir: arm_map_dir.clone(),
+        out_checkpoints_dir: Some(ckpts_dir.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 17,
+    })?;
+    let scores_dir = tmp.path().join("scores");
+    assert_eq!(
+        run_scorer_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                scores_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut Vec::new(),
+        ),
+        0
+    );
+    let freeze_path = tmp.path().join("freeze.json");
+    run_freeze(
+        &FreezeOptions {
+            blind_dir,
+            config_path: cfg_path,
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: freeze_path.clone(),
+            scorer_crate_dir: None,
+        },
+        &git_sha,
+    )?;
+
+    // Overwrite `control/relay/setup.json` with `{}` (missing `"wording_arm"` key) -> refused!
+    let sid = format!("{}-day-01-seat-0", play_manifest.game_id);
+    let relay_setup_path = branch_dir.join("control/relay/setup.json");
+    fs::write(&relay_setup_path, b"{}")?;
+    let err_missing_key = run_join(&JoinOptions {
+        freeze_path: freeze_path.clone(),
+        arm_map_dir: arm_map_dir.clone(),
+        scores_dir: scores_dir.clone(),
+        out_dir: tmp.path().join("joined_fail"),
+        blind_dir: None,
+    })
+    .err()
+    .ok_or("expected CONTROL_WORDING_ARM_MISMATCH when relay/setup.json lacks wording_arm")?;
+    assert_eq!(err_missing_key.code(), "CONTROL_WORDING_ARM_MISMATCH");
+
+    // Non-string `"wording_arm"` is also refused (`CONTROL_WORDING_ARM_MISMATCH`).
+    fs::write(&relay_setup_path, b"{\"wording_arm\":123}")?;
+    let err_non_str = run_join(&JoinOptions {
+        freeze_path,
+        arm_map_dir,
+        scores_dir,
+        out_dir: tmp.path().join("joined_fail2"),
+        blind_dir: None,
+    })
+    .err()
+    .ok_or("expected CONTROL_WORDING_ARM_MISMATCH on non-string wording_arm")?;
+    assert_eq!(err_non_str.code(), "CONTROL_WORDING_ARM_MISMATCH");
+    let _ = sid;
     Ok(())
 }

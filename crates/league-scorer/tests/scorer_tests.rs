@@ -27,8 +27,8 @@ use league_scorer::{
     SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES, SYNTH_PROJECT_RANK_BY_EQUITY,
     SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS, SYNTH_QUOTE_MIN_UNITS,
     SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScenarioRolloutOutcome, ScorerConfig,
-    ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V1,
-    TALK_EXTRACTOR_VERSION_V1, apply_talk_commitments, build_arm_independent_request,
+    ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2,
+    TALK_EXTRACTOR_VERSION_V2, apply_talk_commitments, build_arm_independent_request,
     candidate_id_for_submission, canonicalize_talk_commitments,
     compute_blind_inputs_manifest_sha256, compute_pre_act_pair_sha256_hex,
     compute_scorer_tree_sha256, decide_peer_turn, dedupe_candidates, draw_honour_commitment,
@@ -981,9 +981,11 @@ fn real_checkpoint_rollout_cli_determinism_and_engine_parity() -> TestResult {
     let direct_out = execute_blind_request(&req, &cfg, &cas_save, &cas_seal)?;
     let blind_dir = tmp.path().join("blind_inputs");
     fs::create_dir_all(&blind_dir)?;
+    let req_compact_bytes = to_sorted_compact_json(&req)?;
+    let expected_req_sha = sha256_hex(&req_compact_bytes);
     fs::write(
         blind_dir.join(format!("{}.json", req.state_id)),
-        to_sorted_compact_json(&req)?,
+        req_compact_bytes,
     )?;
 
     let out_a = tmp.path().join("out_a");
@@ -1044,7 +1046,10 @@ fn real_checkpoint_rollout_cli_determinism_and_engine_parity() -> TestResult {
     let text_a = String::from_utf8(bytes_a)?;
     eprintln!("EXAMPLE_SCORE_FILE_JSON:\n{text_a}");
     let parsed: StateScoreOutput = serde_json::from_str(&text_a)?;
-    assert_eq!(parsed, direct_out);
+    assert_eq!(parsed.blind_request_sha256, expected_req_sha);
+    let mut direct_aligned = direct_out;
+    direct_aligned.blind_request_sha256 = expected_req_sha;
+    assert_eq!(parsed, direct_aligned);
 
     // Confirm sorted object keys at root and nested levels, and zero disallowed fields.
     let val_a: serde_json::Value = serde_json::from_str(&text_a)?;
@@ -1821,7 +1826,25 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
     let ckpts_dir = tmp.path().join("checkpoints");
     let out_dir = tmp.path().join("out");
 
-    // Short flags `-h` and `-V`, plus stdout write failures.
+    // Short flags `-h` and `-V` (plus `--help` source-tree hash disclosure), and stdout write failures.
+    for flag in ["-h", "--help"] {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(run_cli([flag], &mut out, &mut err), EXIT_OK);
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            text.contains("--freeze <file>"),
+            "help missing --freeze: {text}"
+        );
+        assert!(
+            text.contains("--scorer-crate-dir <dir>"),
+            "help missing --scorer-crate-dir: {text}"
+        );
+        assert!(
+            text.contains("source tree") && text.contains("not the running binary"),
+            "help missing source-tree vs running-binary disclosure: {text}"
+        );
+    }
     for flag in ["-h", "-V"] {
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -4517,12 +4540,12 @@ fn verify_sec52_constants_match(sec52: &str) -> Result<(), String> {
     )?;
     check_num("HONOUR_PPM_SCALE", &HONOUR_PPM_SCALE.to_string())?;
     check_exact(
-        "TALK_EXTRACTOR_VERSION_V1",
-        &format!("\"{TALK_EXTRACTOR_VERSION_V1}\""),
+        "TALK_EXTRACTOR_VERSION_V2",
+        &format!("\"{TALK_EXTRACTOR_VERSION_V2}\""),
     )?;
     check_exact(
-        "TALK_EXTRACTOR_RULES_DIGEST_V1",
-        &format!("\"{TALK_EXTRACTOR_RULES_DIGEST_V1}\""),
+        "TALK_EXTRACTOR_RULES_DIGEST_V2",
+        &format!("\"{TALK_EXTRACTOR_RULES_DIGEST_V2}\""),
     )?;
     Ok(())
 }
@@ -4644,7 +4667,7 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
     );
     eprintln!("negative_control[const_removed:HONOUR_PPM_SCALE]: {err_const_rm}");
 
-    let mutated_talk_digest = sec52.replacen(TALK_EXTRACTOR_RULES_DIGEST_V1, &"0".repeat(64), 2);
+    let mutated_talk_digest = sec52.replacen(TALK_EXTRACTOR_RULES_DIGEST_V2, &"0".repeat(64), 2);
     let err_talk_table = verify_sec52_table_matches_defaults(&mutated_talk_digest)
         .err()
         .ok_or("expected mutated talk digest row to fail")?;
@@ -4656,7 +4679,7 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
         .err()
         .ok_or("expected mutated talk digest constant to fail")?;
     assert!(
-        err_talk_const.contains("TALK_EXTRACTOR_RULES_DIGEST_V1"),
+        err_talk_const.contains("TALK_EXTRACTOR_RULES_DIGEST_V2"),
         "unexpected: {err_talk_const}"
     );
 

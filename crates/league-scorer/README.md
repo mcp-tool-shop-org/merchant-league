@@ -48,10 +48,12 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
   `null` `score_norm` with `degenerate_flat_set: true` on flat spans, paired SE against `c_best`,
   arm-independent rank and mid-rank percentile sensitivity score, `§3.2` arm-blind pre-screen
   flags, and `league-scorer score --blind-inputs <dir> --checkpoints <dir> --config <file> --out
-  <dir>` enforcing filename stem `== req.state_id`, rejecting case-insensitive `state_id`
-  collisions, resolving strictly `<sha256>.save.json` / `<sha256>.seal` blobs, and writing
-  sorted-key `<out>/scores/<state_id>.json` with zero timestamps, durations, hostnames, paths, or
-  arm labels.
+  <dir> [--freeze <file>] [--scorer-crate-dir <dir>]` enforcing filename stem `== req.state_id`,
+  rejecting case-insensitive `state_id` collisions, resolving strictly `<sha256>.save.json` /
+  `<sha256>.seal` blobs, echoing `blind_request_sha256` from the exact scored request bytes, and
+  writing sorted-key `<out>/scores/<state_id>.json` with zero timestamps, durations, hostnames,
+  paths, or arm labels. When `--freeze` is supplied, `--scorer-crate-dir` hashes the given crate
+  source tree on disk, not the running binary.
 
 ## Remaining stages (S3–S4)
 

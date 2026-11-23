@@ -3,7 +3,8 @@
 use crate::error::ScorerError;
 use crate::types::{
     BLIND_SCORING_SCHEMA_VERSION, BlindScoringRequest, CandidateScoreOutput, PrescreenSummary,
-    ScenarioRolloutOutcome, ScorerConfig, StateScoreOutput, WinnersCurseSummary,
+    ScenarioRolloutOutcome, ScorerConfig, StateScoreOutput, WinnersCurseSummary, sha256_hex,
+    to_sorted_pretty_json,
 };
 
 struct CandidateTotals {
@@ -273,6 +274,7 @@ pub fn score_outcomes(
     let winners_curse = compute_winners_curse(request, &totals, half)?;
 
     Ok(StateScoreOutput {
+        blind_request_sha256: sha256_hex(to_sorted_pretty_json(request)?.as_bytes()),
         c_best,
         candidates: candidate_outputs,
         degenerate_flat_set,

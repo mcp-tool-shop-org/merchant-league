@@ -74,11 +74,11 @@ pub const SYNTH_SCALE_SEED_POOL_MAX: usize = 6;
 pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 
 /// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
-pub const TALK_EXTRACTOR_VERSION_V1: &str = "talk_rules_v1";
+pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
 
-/// Frozen canonical SHA-256 of the `talk_rules_v1` extraction rules table (`§5.2`, `§8.2`).
-pub const TALK_EXTRACTOR_RULES_DIGEST_V1: &str =
-    "e6a37efa7171683b6e5ca7208bf0c6a375e1d6ed1319f7ddf8ae2fe253b84757";
+/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical rule table JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source, `§5.2`, `§8.2`).
+pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
+    "160d5af0e970655103ef93b67a945a3bf36a26ed26ee1a04892c6d30342cfcfb";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -261,7 +261,7 @@ pub struct ScorerConfig {
     pub strata_schedule: String,
     /// Deterministic priority queue truncating excess feasible synthetics at `k_synth_max`.
     pub synth_slot_fill_order: Vec<String>,
-    /// 64-hex SHA-256 of the talk commitment extractor rule table.
+    /// 64-hex SHA-256 over the talk commitment extractor rule table and source code.
     pub talk_extractor_rules_digest: String,
     /// Talk commitment extractor version identifier.
     pub talk_extractor_version: String,
@@ -305,8 +305,8 @@ impl Default for ScorerConfig {
                 "composite_drops".to_owned(),
                 "scaled".to_owned(),
             ],
-            talk_extractor_rules_digest: TALK_EXTRACTOR_RULES_DIGEST_V1.to_owned(),
-            talk_extractor_version: TALK_EXTRACTOR_VERSION_V1.to_owned(),
+            talk_extractor_rules_digest: TALK_EXTRACTOR_RULES_DIGEST_V2.to_owned(),
+            talk_extractor_version: TALK_EXTRACTOR_VERSION_V2.to_owned(),
             upkeep_cover_turns: 2,
         }
     }
@@ -797,6 +797,8 @@ pub struct CandidateScoreOutput {
 /// Omits all timestamps, durations, hostnames, filesystem paths, and arm labels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StateScoreOutput {
+    /// SHA-256 hex digest of the exact blind scoring request bytes scored for this state (`§8.2`).
+    pub blind_request_sha256: String,
     /// Winning `in_span` candidate identifier achieving `v_max` (ties broken by ascending `candidate_id`).
     pub c_best: String,
     /// Per-candidate score records in ascending `candidate_id` order.
