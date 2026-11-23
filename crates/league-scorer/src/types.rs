@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use league_core::{EvalActSubmission, MarketAction};
+use league_core::{EvalActSubmission, MarketAction, Units};
+use league_seat_types::UNIT_SCALE;
 
 use crate::error::ScorerError;
 
@@ -12,6 +13,9 @@ pub const BLIND_SCORING_SCHEMA_VERSION: u32 = 1;
 
 /// Fixed Evaluation Mode table size (`D6`).
 pub const EVAL_TABLE_SEAT_COUNT: u8 = 4;
+
+/// Default and only supported `ScorerConfig::composite_greedy_rules` rule identifier (`§5.2`).
+pub const COMPOSITE_GREEDY_RULES_DEFAULT: &str = "top_pass_per_axis_plus_drop_max_upkeep";
 
 /// Proposed fixed code constant: maximum synthetic converter batches per turn (`§5.2`).
 pub const SYNTH_MAX_CONVERTER_BATCHES: usize = 4;
@@ -33,6 +37,36 @@ pub const SYNTH_COUNCIL_SELF_NOMINATION: bool = true;
 
 /// Proposed fixed code constant: break upkeep-risk leg-drop ties by ascending `candidate_id` (`§5.2`).
 pub const DROP_TIE_BREAK_BY_CANDIDATE_ID: bool = true;
+
+/// Proposed fixed code constant: fixed charter auction `bid_cred` matching `ClubBot` (`bot.rs:554`).
+pub const SYNTH_CHARTER_BID_CRED: Units = 150;
+
+/// Proposed fixed code constant: fraction of spare `CRED` allocated per parity-anchored buy quote (bps).
+pub const SYNTH_QUOTE_CRED_SHARE_BPS: u16 = 5_000;
+
+/// Proposed fixed code constant: maximum commodity units per parity-anchored buy quote (`UNIT_SCALE`).
+pub const SYNTH_QUOTE_MAX_UNITS: Units = UNIT_SCALE;
+
+/// Proposed fixed code constant: minimum commodity units for parity-anchored synthetic quotes (`>= 100`).
+pub const SYNTH_QUOTE_MIN_UNITS: Units = 100;
+
+/// Proposed fixed code constant: parity-value multiplier applied when pricing `upkeep_good` sell drop risk.
+pub const SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER: i64 = 2;
+
+/// Proposed fixed code constant: minimum non-zero milli-`CRED` drop risk assigned to other market actions.
+pub const SYNTH_DROP_DEFAULT_ACTION_RISK_CRED: Units = 1;
+
+/// Proposed fixed code constant: milli-`CRED` sentinel drop risk prioritizing `project_deliveries` drops first.
+pub const SYNTH_DROP_PROJECT_RISK_CRED: Units = i64::MAX / 2;
+
+/// Proposed fixed code constant: maximum seed drafts drawn per axis into the `scaled` pool.
+pub const SYNTH_SCALE_SEED_PER_AXIS: usize = 2;
+
+/// Proposed fixed code constant: maximum combined seed drafts scaled per `quantity_scales_bps` entry.
+pub const SYNTH_SCALE_SEED_POOL_MAX: usize = 6;
+
+/// Proposed fixed code constant: integer parts-per-million denominator for Bernoulli talk-honour draws (`§4.3`, `§5.2`).
+pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -201,9 +235,9 @@ pub struct ScorerConfig {
     pub posture_weights: PostureWeights,
     /// Exclude states with `v_max_indep == v_min_indep` in the `§3.2` arm-blind pre-screen.
     pub prescreen_exclude_flat_sets: bool,
-    /// Minimum distinct feasible candidates required in `C_indep(state)` (`§3.2`).
+    /// Minimum distinct feasible candidates required in `C_indep(state)` (`§3.2`, placeholder until pilot calibration).
     pub prescreen_min_arm_indep_candidates: usize,
-    /// Minimum arm-independent `v_max_indep - v_min_indep` span in integer equity (`§3.2`).
+    /// Minimum arm-independent `v_max_indep - v_min_indep` span in integer equity (`§3.2`, placeholder until pilot calibration).
     pub prescreen_min_arm_indep_span: i64,
     /// Perturbation scalings applied to feasible composite drafts (bps).
     pub quantity_scales_bps: Vec<u16>,
@@ -226,7 +260,7 @@ pub struct ScorerConfig {
 impl Default for ScorerConfig {
     fn default() -> Self {
         Self {
-            composite_greedy_rules: "top_pass_per_axis_plus_drop_max_upkeep".to_owned(),
+            composite_greedy_rules: COMPOSITE_GREEDY_RULES_DEFAULT.to_owned(),
             debt_repayment_grid_bps: vec![5000, 10_000],
             include_pass_b_cleared_club_bot: true,
             k_synth_max: 32,
@@ -242,6 +276,7 @@ impl Default for ScorerConfig {
             ],
             posture_weights: PostureWeights::default(),
             prescreen_exclude_flat_sets: true,
+            // Placeholder defaults until arm-blind pilot calibration (§3.2, §5.2).
             prescreen_min_arm_indep_candidates: 2,
             prescreen_min_arm_indep_span: 1,
             quantity_scales_bps: vec![5000, 10_000],
@@ -265,8 +300,20 @@ impl Default for ScorerConfig {
     }
 }
 
+/// Allowed bucket identifiers for [`ScorerConfig::synth_slot_fill_order`].
+pub const SYNTH_SLOT_BUCKET_NAMES: [&str; 8] = [
+    "cleared_pass_b",
+    "claims_council",
+    "upkeep_inputs",
+    "cross_quotes",
+    "batches",
+    "debt",
+    "composite_drops",
+    "scaled",
+];
+
 impl ScorerConfig {
-    /// Builds an S1-valid all-Standard `ScorerConfig` using `scenarios_m` CRN scenarios.
+    /// Builds an all-Standard `ScorerConfig` using `scenarios_m` CRN scenarios (useful for baseline tests).
     #[must_use]
     pub fn s1_standard(scenarios_m: usize) -> Self {
         Self {
@@ -287,8 +334,8 @@ impl ScorerConfig {
         Ok(sha256_hex(&bytes))
     }
 
-    /// Validates all S1 invariants and refuses unbuilt postures (`Active` / `Conservative`).
-    pub fn validate_for_s1(&self) -> Result<(), ScorerError> {
+    /// Validates all `ScorerConfig` invariants (`§5.2`, `§7.1`).
+    pub fn validate(&self) -> Result<(), ScorerError> {
         if self.scenarios_m < 2 || !self.scenarios_m.is_multiple_of(2) {
             return Err(ScorerError::InvalidScorerConfig(format!(
                 "scenarios_m must be an even integer >= 2 for split-half Winner's curse, got {}",
@@ -300,23 +347,66 @@ impl ScorerConfig {
                 "posture_schedule cannot be empty".to_owned(),
             ));
         }
-        for posture in &self.posture_schedule {
-            if *posture != PostureKind::Standard {
-                return Err(ScorerError::PostureNotImplemented(format!(
-                    "posture not built yet: `{posture:?}` in posture_schedule"
-                )));
-            }
+        let weight_sum = u64::from(self.posture_weights.standard)
+            + u64::from(self.posture_weights.active)
+            + u64::from(self.posture_weights.conservative);
+        if weight_sum == 0 {
+            return Err(ScorerError::InvalidScorerConfig(
+                "posture_weights sum must be > 0".to_owned(),
+            ));
         }
-        if self.posture_weights.active > 0 || self.posture_weights.conservative > 0 {
-            return Err(ScorerError::PostureNotImplemented(format!(
-                "posture not built yet: non-zero active ({}) or conservative ({}) weight",
-                self.posture_weights.active, self.posture_weights.conservative
+        let sched_std = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Standard)
+            .count() as u128;
+        let sched_act = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Active)
+            .count() as u128;
+        let sched_cons = self
+            .posture_schedule
+            .iter()
+            .filter(|&&p| p == PostureKind::Conservative)
+            .count() as u128;
+        let w_std = u128::from(self.posture_weights.standard);
+        let w_act = u128::from(self.posture_weights.active);
+        let w_cons = u128::from(self.posture_weights.conservative);
+        if sched_std * w_act != sched_act * w_std
+            || sched_std * w_cons != sched_cons * w_std
+            || sched_act * w_cons != sched_cons * w_act
+        {
+            return Err(ScorerError::InvalidScorerConfig(format!(
+                "posture_weights ({}, {}, {}) disagrees with posture_schedule counts ({sched_std}, {sched_act}, {sched_cons})",
+                self.posture_weights.standard,
+                self.posture_weights.active,
+                self.posture_weights.conservative
             )));
         }
-        if self.posture_weights.standard == 0 {
+        if self.composite_greedy_rules != COMPOSITE_GREEDY_RULES_DEFAULT {
+            return Err(ScorerError::InvalidScorerConfig(format!(
+                "unsupported composite_greedy_rules `{}` (expected `{COMPOSITE_GREEDY_RULES_DEFAULT}`)",
+                self.composite_greedy_rules
+            )));
+        }
+        if self.synth_slot_fill_order.is_empty() {
             return Err(ScorerError::InvalidScorerConfig(
-                "posture_weights.standard must be > 0".to_owned(),
+                "synth_slot_fill_order cannot be empty".to_owned(),
             ));
+        }
+        let mut seen_slots = std::collections::BTreeSet::new();
+        for slot in &self.synth_slot_fill_order {
+            if !SYNTH_SLOT_BUCKET_NAMES.contains(&slot.as_str()) {
+                return Err(ScorerError::InvalidScorerConfig(format!(
+                    "unknown synth_slot_fill_order bucket `{slot}`"
+                )));
+            }
+            if !seen_slots.insert(slot.as_str()) {
+                return Err(ScorerError::InvalidScorerConfig(format!(
+                    "duplicate synth_slot_fill_order bucket `{slot}`"
+                )));
+            }
         }
         if !matches!(
             self.mandate_stratification_mode.as_str(),
@@ -354,7 +444,7 @@ impl ScorerConfig {
     }
 }
 
-/// Neutral counterfactual talk-phase trade commitment (`§4.3`, `§8.1`). Deferred to S2.
+/// Neutral counterfactual talk-phase trade commitment (`§4.3`, `§8.1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractedTalkCommitment {
@@ -364,6 +454,82 @@ pub struct ExtractedTalkCommitment {
     pub offered_action: MarketAction,
     /// Seat index of the proposing peer (`0..4`).
     pub proposer_seat: u8,
+}
+
+/// Validates a single [`ExtractedTalkCommitment`] against table bounds and counterparty consistency (`§4.3`).
+pub fn validate_talk_commitment(
+    commitment: &ExtractedTalkCommitment,
+    focal_seat: u8,
+    seat_count: u8,
+) -> Result<(), ScorerError> {
+    if commitment.proposer_seat >= seat_count {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {} out of range 0..{seat_count}",
+            commitment.proposer_seat
+        )));
+    }
+    if commitment.counterparty_seat >= seat_count {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "counterparty_seat {} out of range 0..{seat_count}",
+            commitment.counterparty_seat
+        )));
+    }
+    if commitment.proposer_seat == commitment.counterparty_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {} equals counterparty_seat",
+            commitment.proposer_seat
+        )));
+    }
+    if commitment.proposer_seat == focal_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {focal_seat} cannot match focal_seat"
+        )));
+    }
+    let actor = commitment.offered_action.actor_seat();
+    if actor != commitment.proposer_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "offered_action actor_seat {actor} != proposer_seat {}",
+            commitment.proposer_seat
+        )));
+    }
+    match &commitment.offered_action {
+        MarketAction::CreateCheck { check, .. } if check.payee != commitment.counterparty_seat => {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "CreateCheck payee {} != counterparty_seat {}",
+                check.payee, commitment.counterparty_seat
+            )));
+        }
+        MarketAction::CreateEscrow { escrow, .. }
+            if escrow.destination != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "CreateEscrow destination {} != counterparty_seat {}",
+                escrow.destination, commitment.counterparty_seat
+            )));
+        }
+        MarketAction::FlagWashFreeze { target_seat, .. }
+            if *target_seat != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "FlagWashFreeze target_seat {target_seat} != counterparty_seat {}",
+                commitment.counterparty_seat
+            )));
+        }
+        MarketAction::RecordIntentPledge { pledge, .. }
+            if pledge.promisor != commitment.proposer_seat
+                || pledge.counterparty != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "RecordIntentPledge ({}, {}) != ({}, {})",
+                pledge.promisor,
+                pledge.counterparty,
+                commitment.proposer_seat,
+                commitment.counterparty_seat
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// One anonymized candidate submission inside a [`BlindScoringRequest`] (`§8.1`).
@@ -403,12 +569,49 @@ pub struct BlindScoringRequest {
     pub scorer_seed: u64,
     /// Canonical arm-blind state identifier (cross-platform filename stem).
     pub state_id: String,
-    /// Neutral counterfactual talk-phase trade commitments (must be empty in S1).
+    /// Neutral counterfactual talk-phase trade commitments (`§4.3`).
     pub talk_commitments: Vec<ExtractedTalkCommitment>,
 }
 
+/// Parses raw JSON bytes into [`BlindScoringRequest`], refusing unknown or non-canonical fields
+/// inside nested `candidate.submission` structs without modifying `league-core` (`§8.1`).
+pub fn parse_blind_scoring_request_strict(
+    bytes: &[u8],
+) -> Result<BlindScoringRequest, ScorerError> {
+    let raw_val: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| ScorerError::Json(format!("parse BlindScoringRequest JSON: {e}")))?;
+    let parsed: BlindScoringRequest = serde_json::from_value(raw_val.clone())
+        .map_err(|e| ScorerError::Json(format!("parse BlindScoringRequest schema: {e}")))?;
+    let Some(raw_cands) = raw_val.get("candidates").and_then(|v| v.as_array()) else {
+        return Err(ScorerError::UnknownSubmissionField(
+            "missing candidates array in raw JSON".to_owned(),
+        ));
+    };
+    if raw_cands.len() != parsed.candidates.len() {
+        return Err(ScorerError::UnknownSubmissionField(
+            "candidates array length mismatch".to_owned(),
+        ));
+    }
+    for (idx, (raw_cand, parsed_cand)) in raw_cands.iter().zip(parsed.candidates.iter()).enumerate()
+    {
+        let Some(raw_sub) = raw_cand.get("submission") else {
+            return Err(ScorerError::UnknownSubmissionField(format!(
+                "candidate[{idx}] missing submission object"
+            )));
+        };
+        let canonical_sub = serde_json::to_value(&parsed_cand.submission)
+            .map_err(|e| ScorerError::Json(format!("re-serialize submission: {e}")))?;
+        if *raw_sub != canonical_sub {
+            return Err(ScorerError::UnknownSubmissionField(format!(
+                "candidate[{idx}] submission contains unknown or non-canonical JSON fields"
+            )));
+        }
+    }
+    Ok(parsed)
+}
+
 impl BlindScoringRequest {
-    /// Validates every S1 structural, hashing, ordering, and config-binding requirement.
+    /// Validates every structural, hashing, ordering, talk-commitment, and config-binding invariant.
     pub fn validate(&self, config: &ScorerConfig) -> Result<(), ScorerError> {
         if self.schema_version != BLIND_SCORING_SCHEMA_VERSION {
             return Err(ScorerError::UnsupportedSchemaVersion(self.schema_version));
@@ -433,10 +636,8 @@ impl BlindScoringRequest {
                 seat_count: EVAL_TABLE_SEAT_COUNT,
             });
         }
-        if !self.talk_commitments.is_empty() {
-            return Err(ScorerError::TalkCommitmentsNotImplemented(
-                self.talk_commitments.len(),
-            ));
+        for commitment in &self.talk_commitments {
+            validate_talk_commitment(commitment, self.focal_seat, EVAL_TABLE_SEAT_COUNT)?;
         }
         let cfg_hash = config.sha256_hex()?;
         if self.scorer_config_sha256 != cfg_hash {

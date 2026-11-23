@@ -167,7 +167,7 @@ pub fn score_outcomes(
     day: u8,
     outcomes: &[Vec<ScenarioRolloutOutcome>],
 ) -> Result<StateScoreOutput, ScorerError> {
-    config.validate_for_s1()?;
+    config.validate()?;
     request.validate(config)?;
     let k = request.candidates.len();
     let m_len = config.scenarios_m;
