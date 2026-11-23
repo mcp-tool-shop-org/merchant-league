@@ -928,15 +928,218 @@ For every candidate `c in C(state)` across scenarios `m in 0..M` (stored without
 
 ### 7.2 Unblinded D5 Pre-Registration Mechanism Measures
 
-Joined post-scoring by `(state_id, arm, replicate)` **only after** `scorer_freeze.json` is written and recorded (`§8.2`), using the reporting step's `arm_map/`, `decisions/`, `outcome.json`, and `relay/seats/` sidecars (no scorer re-run required):
+Joined post-scoring by `(state_id, arm, replicate)` inside `league-eval`'s unblinded reporting step (`join`, `crates/league-eval/src/freeze_gate.rs:640-808`) **only after** `scorer_freeze.json` verification passes (`§8.2`), using the reporting step's own inputs (`arm_map/<state_id>.json`, `scores/<state_id>.json`, each entry's unblinded `decision.json`, `outcome.json`, sibling `relay/seats/` + `relay/calls.jsonl`, and optional `--source-game <dir>` directories holding `setup.json`, `checkpoints/day-DD-pre-act.save.json`, `decisions/day-DD-talk-<Guild>.json`, `to-seat/day-DD-act-<Guild>.negotiation.json`, and optional terminal `scoreboard.json`). No §7.2 measure alters `league-core`, `league-seat-types`, `league-relay`, `crates/league-scorer`, any `ScorerConfig` default, or any recorded Evaluation file format. Every §7.2 field is marked `inferential_status: "descriptive_only"`, and **no freeze gate, normalization rule, or pass/fail check reads any §7.2 field**.
 
-1. **Tool-call rate:** Mean `tool_calls_used` (`EvalDecisionRecord::tool_calls_used`, `records.rs:375`) and fraction of rounds with `tool_calls_used >= 1`.
-2. **Draft-to-commit revision gain:** For each decision with `!intermediate_bundle_sha256s.is_empty()` (`driver.rs:749-766`), locate the **first** parsed sent tool call (non-`CALL_LIMIT_REACHED`, non-`MALFORMED_TOOL_CALL`, including rule-refused drafts) in `(round_index, attempt, call_index)` order (`SavedToolRoundCall::call_index` at `crates/league-relay/src/relay.rs:2651`, set from the enumeration at `:7237`, matching the position in `rec.calls` iterated at `driver.rs:747-749`), take `market_actions` and `bundle` from `SavedToolRoundCall::arguments` (`relay.rs:2660`) to resolve `first_draft_candidate_id` (already evaluated inside `C(state)` outside `[v_min, v_max]`), and report `score_norm(committed) - score_norm(first_draft)` (when `v_max > v_min`) and raw `ev_total_equity(committed) - ev_total_equity(first_draft)`, with `n_with_draft` reported separately.
-3. **Reasoning length:** Total character length of `SavedToolRoundRecord::reasoning` (`crates/league-relay/src/relay.rs:2710`) and raw reasoning text stored inside `SavedHttpReplyRecord::body` (`relay.rs:2830`), alongside token counts (`completion_tokens` / `reply_token_ids` lengths).
-4. **Illegal-order rate:** Fraction with reply-level refusal (`parse_failure` or `refusal_code.is_some()`), mean `refused_market_actions`, and fraction with whole-bundle reveal rejection (`refused_bundle.is_some()` / `refused_bundle_legs > 0`).
-5. **Deal-keeping (two explicit lines):**
-   - *(a) Engine-recorded pledges:* count structured Track-2 `pledges` / `audited_pledges` (`crates/league-core/src/eval/host.rs:85-88`) and terminal `broken_promises` (`crates/league-core/src/scoring.rs:595`) directly on their own reporting line wherever engine pledges exist.
-   - *(b) Text-parsed talk commitments:* extracted deterministically from `decisions/day-DD-talk-<Guild>.json` (`driver.rs:2038`, `reply.rs:577`) and `to-seat/day-DD-act-<Guild>.negotiation.json` (`view.rs:48`) using closed-grammar `talk_extractor_version`, reported as `honoured_commitments / applicable_commitments` with `applicable_commitments` stated separately (never imputing `0/0`), alongside descriptive per-arm `talk_counts` (`seen`, `matched`, `ambiguous`) showing what fell outside the closed grammar.
+*What `join` already computes at baseline:* `JoinedDecisionRow` (`crates/league-eval/src/freeze_gate.rs:128-168,729-757`) already resolves `first_draft_candidate_id`, `committed_ev_total_equity`, `committed_score_norm`, `first_draft_ev_total_equity`, and `first_draft_score_norm`, and `PerArmSummaryRow::n_with_first_draft` (`freeze_gate.rs:213-214,778-781,793`) already counts decisions carrying a `first_draft_candidate_id`. Measure 2 below computes the explicit signed revision-gain deltas and per-arm means on top of those joined scores without re-running `league-scorer`.
+
+#### 7.2.1 Named Constants
+
+All thresholds and windows used by Measures 1–5 are fixed named constants (checked against code by an automated parity test; no unrecorded literals):
+
+| Constant | Rust Type | Value | Meaning |
+|---|---|---|---|
+| `TOOL_CALL_USED_MIN_COUNT` | `u32` | `1` | Minimum `EvalDecisionRecord::tool_calls_used` for a decision to count as having used at least one tool call (Measure 1). |
+| `HTTP_REPLY_OK_STATUS` | `u16` | `200` | Exact HTTP status required for a non-late `SavedHttpReplyRecord` to contribute HTTP-reply reasoning text (Measure 3). |
+| `REFUSED_BUNDLE_LEGS_MIN_COUNT` | `u32` | `1` | Minimum `EvalDecisionRecord::refused_bundle_legs` counting as a whole-bundle reveal rejection alongside `refused_bundle.is_some()` (Measure 4). |
+| `TALK_COMMITMENT_HONOUR_WINDOW_DAYS` | `u8` | `0` | Maximum turn offset `fill.turn - day` checked for Measure 5(b) fulfillment (`0` = same day `receipt.turn == day` only, matching single-day `branch` replay). |
+| `TALK_COMMITMENT_MIN_FILL_BPS` | `u32` | `10_000` | Minimum qualifying bilateral fill share in basis points (`10_000` = 100.00%, full committed `OrderProposal::amount`) required for `honoured` in Measure 5(b). |
+| `TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED` | `i64` | `0` | Exact integer tolerance in milli-`CRED` per `1_000` commodity units around `committed.price_per_unit_cred` when testing counterparty at-or-better price in Measure 5(b) (`0` = strict at-or-better). |
+
+#### 7.2.2 Measure Definitions (1–5)
+
+For each `(state_id, arm, replicate)` entry in `arm_map/<state_id>.json`, let `arm_dir` be `entry.decision_path.parent()`. Missing or unparseable optional sidecars emit `null` (`None`) on the affected per-decision metric and reduce that metric's explicit `n_*_available` denominator in `PerArmMechanismSummary`; **never** impute missing data as `0` or `0/0`. No-reply/transport-failed decisions (`EvalDecisionRecord::no_reply == true`) retain recorded attempt/refusal/reasoning telemetry where present and are included in denominators only for fields whose source records exist on disk.
+
+1. **Tool-call rate:**
+   - **Recorded source:** `<arm_dir>/decision.json` referenced by `ArmMapEntry::decision_path` (`crates/league-eval/src/blind_builder.rs:63`), reading `EvalDecisionRecord::tool_calls_used` (`crates/league-eval/src/records.rs:375`, incremented at `crates/league-eval/src/driver.rs:754-757` for every sent tool call other than `CALL_LIMIT_REACHED`, including `MALFORMED_TOOL_CALL` and rule-refused previews) and `EvalDecisionRecord::no_reply` (`records.rs:422`).
+   - **Counted quantity & per-decision value:** `tool_calls_used: u32` and `used_any_tool_call: bool` (`tool_calls_used >= TOOL_CALL_USED_MIN_COUNT`), plus `no_reply: bool`. (If `decision.json` is readable, both fields are defined across all joined decisions `n_decisions`.)
+   - **Per-arm aggregate:** `n_decisions`, `mean_tool_calls_used: Option<f64>` (`Some(sum / n_decisions)` when `n_decisions > 0`), `n_with_tool_call: usize` (`count(used_any_tool_call)`), and `tool_call_rate: Option<f64>` (`Some(n_with_tool_call / n_decisions)` when `n_decisions > 0`).
+   - **Missing data:** If `n_decisions == 0`, both means/rates are `None` (`null`), never `0.0`.
+
+2. **Draft-to-commit revision gain:**
+   - **Recorded source:** `ArmMapEntry::{committed_candidate_id, first_draft_candidate_id}` (`crates/league-eval/src/blind_builder.rs:58-61`), backed by `<arm_dir>/decision.json` (`EvalDecisionRecord::intermediate_bundle_sha256s`, `crates/league-eval/src/records.rs:390`, `driver.rs:747-766`) and `<arm_dir>/relay/seats/<Guild>.day-DD-act.tool-round-*.json` filtered by `<arm_dir>/relay/calls.jsonl` (`blind_builder.rs:245-326`), taking the first sent parsed `arguments` (`SavedToolRoundCall::{call_index, arguments, tool_result_sent, result_wire_json}`, `crates/league-relay/src/relay.rs:2651-2674`; `SavedToolRoundRecord::{round_index, attempt, calls}`, `relay.rs:2699-2717`) in `(round_index, attempt, call_index)` order (`call_index` set at `relay.rs:7242`) alongside blind score outputs joined in `JoinedDecisionRow::{committed_ev_total_equity, committed_score_norm, first_draft_ev_total_equity, first_draft_score_norm}` (`crates/league-eval/src/freeze_gate.rs:142-156,729-757`).
+   - **Counted quantity & per-decision value:**
+     - `revision_gain_ev_total_equity: Option<f64>`: `Some(committed_ev_total_equity - first_draft_ev_total_equity)` whenever `first_draft_ev_total_equity` is `Some`, else `None` (`null`, e.g., `off` arm or tool-arm decision with zero parsed drafts).
+     - `revision_gain_score_norm: Option<f64>`: `Some(committed_score_norm - first_draft_score_norm)` whenever **both** `committed_score_norm` and `first_draft_score_norm` are `Some` (`v_max > v_min`), else `None` (`null`).
+   - **Per-arm aggregate:** `n_with_first_draft` (already tracked on `PerArmSummaryRow`, `freeze_gate.rs:214`), `n_with_revision_gain_score_norm: usize` (`count(revision_gain_score_norm.is_some())`), `mean_revision_gain_ev_total_equity: Option<f64>` (mean over `n_with_first_draft`; `None` if `0`), and `mean_revision_gain_score_norm: Option<f64>` (mean over `n_with_revision_gain_score_norm`; `None` if `0`).
+   - **Missing data:** Decisions without a first draft (`off` arm or zero drafts) or on degenerate flat states (`v_max == v_min`, `score_norm == None`) emit `null`, never `0.0`.
+
+3. **Reasoning length:**
+   - **Recorded source:**
+     - Tool-round sidecars `<arm_dir>/relay/seats/<Guild>.day-DD-act.tool-round-*.json` (`driver.rs:714`, `SavedToolRoundRecord::{reservation_id, round_index, attempt, reasoning}` at `crates/league-relay/src/relay.rs:2695-2710`), filtered by reservation IDs belonging to `(day, round="act", guild)` in `<arm_dir>/relay/calls.jsonl` (matching `blind_builder.rs:252-295`). Sorted by `(round_index, attempt)` with consecutive deduplication if both attempt files are absent/present (each unique `(round_index, attempt, reservation_id)` counted once).
+     - Final HTTP reply sidecars `<arm_dir>/relay/seats/<Guild>.day-DD-act.http-reply-round-*.json` (`driver.rs:715`, `SavedHttpReplyRecord::{reservation_id, round_index, attempt, status, is_late, body}` at `crates/league-relay/src/relay.rs:2810-2830`), filtered by the same reservation IDs and requiring `status == HTTP_REPLY_OK_STATUS && !is_late` and parsed JSON `body` without a non-null top-level `"error"` field (matching `driver.rs:772-775`). Raw HTTP reasoning text is extracted from `choices[0].message.reasoning` falling back to `choices[0].message.reasoning_content` (`crates/league-relay/src/relay.rs:8311,8402`).
+     - Token telemetry from `<arm_dir>/decision.json`: `EvalDecisionRecord::completion_tokens` (`crates/league-eval/src/records.rs:369`) and `EvalDecisionRecord::reply_token_ids` (`records.rs:405`, summing `.len()` across outer rounds).
+   - **Counted quantity & per-decision value:** Because tool-round HTTP replies also produce `SavedHttpReplyRecord`s when captured, each stream is reported **separately without double-counting**, plus a clear combined character sum only when the two sets are disjoint by `reservation_id`:
+     - `tool_round_reasoning_chars: Option<u64>`: sum of `reasoning.chars().count()` across matching `SavedToolRoundRecord`s when `relay/seats/` exists (`Some(0)` when the directory exists cleanly with `0` non-`None` `reasoning` strings; `None` if `relay/seats/` is missing).
+     - `http_reply_reasoning_chars: Option<u64>`: sum of `raw_reasoning.chars().count()` across qualifying `SavedHttpReplyRecord`s (`status == HTTP_REPLY_OK_STATUS && !is_late`) when `relay/seats/` exists (`None` if `relay/seats/` is missing).
+     - `total_reasoning_chars: Option<u64>`: deduplicated by `reservation_id` (taking `SavedToolRoundRecord::reasoning` when present for a `reservation_id`, otherwise the qualifying `SavedHttpReplyRecord` raw reasoning for that `reservation_id`, or summing disjoint streams when reservation IDs differ; `None` if `relay/seats/` is missing).
+     - `completion_tokens: u64` (`EvalDecisionRecord::completion_tokens`).
+     - `reply_token_ids_len: Option<u64>`: `Some(sum(round_ids.len()))` when `!reply_token_ids.is_empty()`, else `None` (backends without per-token logprobs, e.g., non-local endpoints, leave `reply_token_ids` empty).
+   - **Per-arm aggregate:** Explicit denominators (`n_with_reasoning_sidecars`, `n_with_reply_token_ids`) alongside `mean_tool_round_reasoning_chars`, `mean_http_reply_reasoning_chars`, `mean_total_reasoning_chars`, `mean_completion_tokens`, and `mean_reply_token_ids_len` (each `None` when its denominator is `0`).
+   - **Missing data:** If `relay/seats/` is absent (or `reasoning.exclude_from_transcript == true` omitted reasoning text), `None` is emitted for unavailable character/logprob counts rather than conflating missing sidecars with `0`-character reasoning; when a backend emits neither `reasoning`/`reasoning_content` fields nor per-token `logprobs`, only `completion_tokens` is guaranteed and the text/token-ID breakdown cannot tell reasoning tokens apart from content tokens.
+
+4. **Illegal-order rate:**
+   - **Recorded source:** `<arm_dir>/decision.json`, reading `EvalDecisionRecord::{parse_failure, refused_market_actions, refused_bundle_legs, refusal_code, refused_bundle}` (`crates/league-eval/src/records.rs:378,381,384,414,428`).
+   - **Counted quantity & per-decision value:**
+     - `has_reply_refusal: bool`: `parse_failure || refusal_code.is_some()`.
+     - `refused_market_actions: u32`: exact count of refused Pass-A market actions recorded on `EvalDecisionRecord`.
+     - `has_bundle_rejection: bool`: `refused_bundle.is_some() || refused_bundle_legs >= REFUSED_BUNDLE_LEGS_MIN_COUNT`.
+   - **Per-arm aggregate:** Across `n_decisions`: `n_reply_refusals`, `reply_refusal_rate: Option<f64>`, `mean_refused_market_actions: Option<f64>`, `n_bundle_rejections`, and `bundle_rejection_rate: Option<f64>` (`None` when `n_decisions == 0`).
+
+5. **Deal-keeping (two explicit, separate lines):**
+   - **5(a) Engine-recorded pledges (structured Track-2 on-ledger line):**
+     - **Recorded source:**
+       - `checkpoints/day-DD-pre-act.save.json` in the matched source game directory (verified against `ArmMapStateFile::pre_act_save_sha256` at `blind_builder.rs:90`), reading `EvalSaveSnapshot::{pledges, audited_pledges}` (`crates/league-core/src/eval/host.rs:86-88`) filtered to `IntentPledge::promisor == focal_seat` (`crates/league-seat-types/src/commit.rs:260-264`).
+       - `<arm_dir>/outcome.json`, reading `BranchArmOutcome::receipt.broken_promises` (`crates/league-eval/src/records.rs:617`, `crates/league-seat-types/src/observation.rs:79`) filtered to `BrokenPromiseRecord::promisor == focal_seat` (`crates/league-seat-types/src/engine_types.rs:64-68`).
+       - Optional terminal `<source_game_dir>/scoreboard.json` (`driver.rs:2255`), reading `FinalScoreboard::standings` (`SeatScoreEntry::broken_promises` at `crates/league-core/src/scoring.rs:595` / `crates/league-seat-types/src/scoring_types.rs:120`) for `seat == focal_seat`.
+     - **Per-decision & per-arm values:**
+       - `pre_act_pledges_count: Option<u32>` and `pre_act_audited_pledges_count: Option<u32>` for `promisor == focal_seat` (`None` if no source `pre-act.save.json` is available).
+       - `sweep_broken_promises_count: u32` (`receipt.broken_promises` with `promisor == focal_seat` on this day's sweep).
+       - `terminal_broken_promises_count: Option<u32>` (`None` on single-day `branch` runs or missing `scoreboard.json`; **never** imputed as `0` when terminal close data is absent).
+       - Per-arm sums (`total_pre_act_pledges`, `total_pre_act_audited_pledges`, `total_sweep_broken_promises`, `total_terminal_broken_promises`) with explicit availability counts (`n_with_pre_act_pledge_snapshot`, `n_with_terminal_scoreboard`), keeping engine-recorded pledges strictly on their own reporting line wherever engine pledges exist.
+   - **5(b) Text-parsed talk commitments (`honoured_commitments / applicable_commitments`):**
+     - **Recorded source:** For the state's `(source_game_dir, day, focal_seat)`:
+       - Incoming peer `negotiation.json` files: `<source_game_dir>/to-seat/day-DD-act-<PeerGuild>.negotiation.json` (`driver.rs:2048`, `view.rs:48`, `wording.rs:266-285`), reading `NegotiationInputs::whispers` where `whisper.from_guild == focal_guild`.
+       - Focal seat's talk decision record: `<source_game_dir>/decisions/day-DD-talk-<FocalGuild>.json` (`driver.rs:2038`, `records.rs:344-351`, `reply.rs:577`), parsing non-refused `EvalDecisionRecord::raw_reply` with `parse_eval_talk_reply` (`talk_extract.rs:1332-1363`).
+       - Pre-act engine snapshot: `<source_game_dir>/checkpoints/day-DD-pre-act.save.json` (`host.rs:54-121`, SHA-256 matched against `ArmMapStateFile::pre_act_save_sha256`).
+       - Evaluated arm outcome: `<arm_dir>/decision.json` (`EvalDecisionRecord::{no_reply, refusal_code, raw_reply, apply_report}` at `records.rs:351,414,422,425`; `EvalSeatApplyReport` at `host.rs:148-156`) and `<arm_dir>/outcome.json` (`BranchArmOutcome::receipt` -> `PublicSweepReceipt::fills` at `observation.rs:99`; `FillRecord` & `FillKind` at `contracts.rs:375-423`).
+     - **Formal definitions of extracted set, `applicable`, `honoured`, and ambiguous/unsettled breakdowns:** see `§7.2.3`.
+     - **Per-decision & per-arm values:** `extracted_outgoing_commitments: Option<u32>`, `applicable_commitments: Option<u32>`, `inapplicable_commitments: Option<u32>`, `honoured_commitments: Option<u32>`, `third_party_fill_commitments: Option<u32>`, `posted_unfilled_commitments: Option<u32>`, `partial_bilateral_fill_commitments: Option<u32>`, `focal_talk_counts: Option<TalkExtractionCounts>` (`seen`, `matched`, `ambiguous` on focal outgoing whispers), `honour_rate: Option<f64>` (`Some(honoured / applicable)` iff `applicable > 0`, else `None`), plus per-arm sums `applicable_commitments_total`, `honoured_commitments_total`, `inapplicable_commitments_total`, `third_party_fill_commitments_total`, `posted_unfilled_commitments_total`, `partial_bilateral_fill_commitments_total`, `n_with_talk_commitment_inputs`, and `honour_rate: Option<f64>` (`Some(honoured_total as f64 / applicable_total as f64)` iff `applicable_total > 0`, **never imputing `0/0` as `0.0` or `1.0`**).
+
+#### 7.2.3 Definition of `applicable` and `honoured` for Measure 5(b), and Limits of Recorded Data
+
+1. **Outgoing commitment extraction (exact symmetry with `talk_rules_v2`):**
+   - Measure 5(b) evaluates whether **`focal_seat`** kept commitments that `focal_seat` itself made to peers during Turn `day`'s `talk` round (complementing the peer-to-focal extractor in `crates/league-eval/src/talk_extract.rs:1048-1054,1277-1393`).
+   - Run the frozen `TalkRulesV2Table::frozen()` grammar (`talk_extract.rs:38-419`), normalization, retraction/ambiguity latch dominance, whole-token amount/price scaling (`UNIT_SCALE`), and two-source cross-merge (`to-seat/day-DD-act-<PeerGuild>.negotiation.json` for `whisper.from_guild == focal_guild` merged per `(focal_seat, counterparty_seat, good)` with `decisions/day-DD-talk-<FocalGuild>.json`) filtering to **`proposer_seat == focal_seat && counterparty_seat != focal_seat && counterparty_seat < seat_count`**.
+   - Every outgoing focal-to-peer whisper inspected populates `focal_talk_counts` (`seen = matched + ambiguous` per source and `total`), showing what prose fell outside the closed grammar. Each surviving merged outgoing `ExtractedTalkCommitment` (`counterparty_seat`, `offered_action = MarketAction::PostOffer { seat: focal_seat, order }`, where `order: OfferProposal` at `contracts.rs:258-271`) is evaluated independently. (If `--source-game` files are absent, all Measure 5(b) counts for that decision emit `None`/`null`, never `0`.)
+
+2. **When an extracted outgoing commitment is `applicable`:**
+   - Reconstruct a scrubbed `PublicPreviewState` (`crates/league-seat-types/src/observation.rs:484-544`) from `<source_game_dir>/checkpoints/day-DD-pre-act.save.json` (`EvalSaveSnapshot`, `host.rs:54-121`; fields align 1:1 with `preview_state_to_engine` at `observation.rs:237-295`) and validate `[MarketAction::PostOffer { seat: focal_seat, order }]` alone with `preview_seat_bundle` (`crates/league-core/src/observation.rs:542-568`, executing `TurnEngine::handle_post_offer` at `crates/league-core/src/engine.rs:1789-1855`).
+   - A commitment is **`applicable`** iff `preview_seat_bundle` succeeds (`Ok(preview)`) with `preview.refused_market_actions.is_empty()` (`WhatIfPreview::refused_market_actions` at `observation.rs:827`). That tests pre-act legality on `day`: `focal_seat` is not `CustomsInspector` wash-frozen (`wash_frozen_until_turn < turn`), `amount > 0 && price_per_unit_cred > 0`, `good` is valid, cartel domain / `is_hybrid` (`ClearinghouseBroker`) access holds, and `focal_seat`'s pre-act free balance holds enough commodity (`OfferSide::Sell`) or locked `CRED` (`OfferSide::Buy`, `checked_ceil_units_parity`).
+   - Otherwise (any `Err(_)` or non-empty `refused_market_actions`), the commitment was **not legally fillable from the pre-act checkpoint** and is counted in `inapplicable_commitments` (excluded from `applicable_commitments`). A focal `no_reply`, act refusal, or self-conflict across multiple simultaneous promises by `focal_seat` does **not** render an individually legal commitment inapplicable.
+
+3. **When an `applicable` commitment is `honoured`:**
+   - **Window:** Single-day `branch` outcomes record sweeps only for `day` (`BranchArmOutcome::receipt.turn == day`). Qualifying fills must satisfy `fill.turn >= day && fill.turn <= day.saturating_add(TALK_COMMITMENT_HONOUR_WINDOW_DAYS)`. With frozen `TALK_COMMITMENT_HONOUR_WINDOW_DAYS = 0`, only **same-day (`fill.turn == day`)** settlements in `outcome.json` (`BranchArmOutcome::receipt.fills`, `observation.rs:99`) are in window.
+   - **Counterparty, good, side, and price matching on `FillRecord` (`contracts.rs:404-423`):** Inspect `FillRecord` entries in `receipt.fills` with:
+     - `fill.kind` in `{FillKind::BatchFill, FillKind::AtomicSwap, FillKind::ContractDelivery}` (`contracts.rs:375-380`, populated at `engine.rs:2102-2112,2598-2639,3005-3057`);
+     - `fill.good == Some(order.good)`;
+     - **Direction (per `FillRecord` `from` = seller/delivering seat, `to` = buyer/receiving seat):**
+       - If `order.side == OfferSide::Sell`: `fill.from == Some(focal_seat) && fill.to == counterparty_seat`, and `fill.unit_price_cred == Some(p)` satisfies `(p as i64) <= (order.price_per_unit_cred as i64).saturating_add(TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED)` (counterparty buys at or below the promised ask price, i.e. at-or-better for counterparty);
+       - If `order.side == OfferSide::Buy`: `fill.from == Some(counterparty_seat) && fill.to == focal_seat`, and `fill.unit_price_cred == Some(p)` satisfies `(p as i64) >= (order.price_per_unit_cred as i64).saturating_sub(TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED)` (counterparty sells at or above the promised bid price, i.e. at-or-better for counterparty).
+     - Fills with `unit_price_cred == None` (unpriced barters / unpaid contract deliveries) cannot establish priced execution at-or-better and do not qualify.
+   - **Volume threshold (full vs partial):** Let `bilateral_units: i128` be the sum of `fill.units as i128` across all qualifying bilateral `FillRecord`s in window. An `applicable` commitment is **`honoured`** iff:
+     `bilateral_units * 10_000 >= (order.amount as i128) * (TALK_COMMITMENT_MIN_FILL_BPS as i128)`
+     With frozen `TALK_COMMITMENT_MIN_FILL_BPS = 10_000`, `100.00%` of the committed `order.amount` must bilaterally settle at-or-better price on `day`. (Partial fills `0 < bilateral_units < order.amount` do **not** increment `honoured_commitments` and are reported explicitly in `partial_bilateral_fill_commitments`.)
+
+4. **Diagnostic sub-counts for unresolved / ambiguous outcomes (reported, never guessed):**
+   For each `applicable` commitment that is **not** `honoured`, `join` classifies why without guessing intent:
+   - `partial_bilateral_fill_commitments`: `0 < bilateral_units` satisfies the direction/price predicate but fails `TALK_COMMITMENT_MIN_FILL_BPS`.
+   - `third_party_fill_commitments`: `bilateral_units == 0`, while `receipt.fills` contains one or more same-day same-good same-focal-side `BatchFill`/`AtomicSwap`/`ContractDelivery` fills at qualifying price with a **third seat** (`other_seat != counterparty_seat`).
+   - `posted_unfilled_commitments`: neither bilateral nor qualifying third-party fills settled, yet `focal_seat`'s committed `act` reply (`decision.json` parsed `raw_reply` minus any refused indices in `EvalDecisionRecord::apply_report`) submitted an accepted Pass-A `MarketAction::PostOffer` matching `(focal_seat, order.side, order.good)` at-or-better price and total posted amount `>= order.amount` (so a resting DEX order stood on the book without matching `counterparty_seat`).
+
+5. **Plain statement of what the recorded data cannot tell (never guessed):**
+   - **Public DEX order provenance vs bilateral intent (third-party fills):** `MarketAction::PostOffer` / `OfferProposal` (`contracts.rs:258-271`) carries no counterparty field, and Step 0 uniform-price batch clearing (`BatchFill`, `engine.rs:2102-2112`) matches anonymous limit orders on price/tie-break across the entire table. If `focal_seat` posts the promised public order and a third seat crosses it ahead of `counterparty_seat`, `PublicSweepReceipt::fills` records `other_seat` rather than `counterparty_seat`. `join` reports `third_party_fill_commitments` separately and does not guess whether `focal_seat` kept faith or traded away.
+   - **Resting unfilled orders vs counterparty refusal (`posted_unfilled_commitments`):** Because single-day `outcome.json` stores no peer private rationale and `PublicSweepReceipt::fills` logs only executed trades, a resting accepted `PostOffer` that went unfilled cannot distinguish a counterparty that walked away from a toxic/mispriced commitment designed not to clear; reported separately in `posted_unfilled_commitments`.
+   - **Partial bilateral fills (`partial_bilateral_fill_commitments`):** Partial settlement due to counterparty size limits vs `focal_seat` posting less than promised is reported in `partial_bilateral_fill_commitments` and never rounded up to `honoured`.
+   - **Multi-day horizon beyond `day`:** Single-day `branch` runs stop after `receipt.turn == day`, so fulfillment occurring on `day + 1..` does not exist in `outcome.json`.
+   - **Free-text promises outside `talk_rules_v2`:** Vague prose, conditional clauses, or unlisted phrasing fail closed into `focal_talk_counts.ambiguous` (`seen`, `matched`, `ambiguous` reported alongside 5(b)) and are never interpreted post hoc.
+   - **Terminal season `broken_promises` in single-day branches (5(a)):** `SeatScoreEntry::broken_promises` only exists when a full-season `scoreboard.json` is produced (`terminal_broken_promises_count = null` on single-day branches).
+   - **Reasoning tokens when sidecars/logprobs are absent (Measure 3):** If a backend omits `reasoning`/`reasoning_content` or per-token `logprobs`, `completion_tokens` alone cannot separate internal reasoning tokens from final JSON answer tokens.
+
+#### 7.2.4 Descriptive Report Schema (Per-Decision and Per-Arm)
+
+Both `JoinedDecisionRow` (inside `<out>/joined_decisions.json`) and `PerArmSummaryRow` (inside `<out>/per_arm_summary.json`) gain an explicit `mechanisms` object (`DecisionMechanismMetrics` and `PerArmMechanismSummary`). Enclosing files preserve `inferential_status: "descriptive_only"` (`crates/league-eval/src/freeze_gate.rs:234,247,808`), and **no gate, freeze check, or normalization rule reads any §7.2 field**:
+
+```text
+DecisionMechanismMetrics {                             // on JoinedDecisionRow::mechanisms (descriptive_only)
+  // Measure 1: tool-call rate
+  tool_calls_used: u32,                                // EvalDecisionRecord::tool_calls_used
+  used_any_tool_call: bool,                            // tool_calls_used >= TOOL_CALL_USED_MIN_COUNT
+  no_reply: bool,                                      // EvalDecisionRecord::no_reply
+
+  // Measure 2: draft-to-commit revision gain
+  revision_gain_ev_total_equity: Option<f64>,          // committed_ev - first_draft_ev (null if no draft)
+  revision_gain_score_norm: Option<f64>,               // committed_norm - first_draft_norm (null if no draft or flat)
+
+  // Measure 3: reasoning length
+  tool_round_reasoning_chars: Option<u64>,             // chars across SavedToolRoundRecord::reasoning (null if relay/seats/ absent)
+  http_reply_reasoning_chars: Option<u64>,             // chars across HTTP 200 !is_late message.reasoning / reasoning_content
+  total_reasoning_chars: Option<u64>,                  // reservation_id-deduplicated reasoning char sum
+  completion_tokens: u64,                              // EvalDecisionRecord::completion_tokens
+  reply_token_ids_len: Option<u64>,                    // sum(round.len()) when !reply_token_ids.is_empty(), else null
+
+  // Measure 4: illegal-order rate
+  has_reply_refusal: bool,                             // parse_failure || refusal_code.is_some()
+  refused_market_actions: u32,                         // EvalDecisionRecord::refused_market_actions
+  has_bundle_rejection: bool,                          // refused_bundle.is_some() || refused_bundle_legs >= REFUSED_BUNDLE_LEGS_MIN_COUNT
+
+  // Measure 5(a): engine-recorded pledges (separate line)
+  pre_act_pledges_count: Option<u32>,                  // EvalSaveSnapshot::pledges where promisor == focal_seat
+  pre_act_audited_pledges_count: Option<u32>,          // pre_act_pledges intersect EvalSaveSnapshot::audited_pledges
+  sweep_broken_promises_count: u32,                    // PublicSweepReceipt::broken_promises where promisor == focal_seat
+  terminal_broken_promises_count: Option<u32>,         // SeatScoreEntry::broken_promises if scoreboard.json present
+
+  // Measure 5(b): text-parsed outgoing talk commitments (separate line)
+  extracted_outgoing_commitments: Option<u32>,         // talk_rules_v2 commitments where proposer_seat == focal_seat
+  applicable_commitments: Option<u32>,                 // subset legal under pre-act preview_seat_bundle
+  inapplicable_commitments: Option<u32>,               // extracted - applicable
+  honoured_commitments: Option<u32>,                   // applicable commitments meeting fill + price + window
+  third_party_fill_commitments: Option<u32>,           // unhonoured applicable with qualifying third-party fill
+  posted_unfilled_commitments: Option<u32>,            // unhonoured applicable with qualifying accepted PostOffer
+  partial_bilateral_fill_commitments: Option<u32>,     // unhonoured applicable with >0 and <100% bilateral fill
+  honour_rate: Option<f64>,                            // honoured / applicable when applicable > 0, else null
+  focal_talk_counts: Option<TalkExtractionCounts>,     // outgoing focal->peer { seen, matched, ambiguous } counts
+}
+
+PerArmMechanismSummary {                               // on PerArmSummaryRow::mechanisms (descriptive_only)
+  // Measure 1: tool-call rate
+  n_decisions: usize,                                  // total decisions in arm
+  n_with_tool_call: usize,                             // count(used_any_tool_call)
+  mean_tool_calls_used: Option<f64>,                   // None when n_decisions == 0
+  tool_call_rate: Option<f64>,                         // n_with_tool_call / n_decisions; None when 0
+
+  // Measure 2: draft-to-commit revision gain (complementing PerArmSummaryRow::n_with_first_draft)
+  n_with_first_draft: usize,                           // count(revision_gain_ev_total_equity.is_some())
+  n_with_revision_gain_score_norm: usize,              // count(revision_gain_score_norm.is_some())
+  mean_revision_gain_ev_total_equity: Option<f64>,     // None when n_with_first_draft == 0
+  mean_revision_gain_score_norm: Option<f64>,          // None when n_with_revision_gain_score_norm == 0
+
+  // Measure 3: reasoning length
+  n_with_reasoning_sidecars: usize,                    // count(total_reasoning_chars.is_some())
+  n_with_reply_token_ids: usize,                       // count(reply_token_ids_len.is_some())
+  mean_tool_round_reasoning_chars: Option<f64>,        // None when n_with_reasoning_sidecars == 0
+  mean_http_reply_reasoning_chars: Option<f64>,        // None when n_with_reasoning_sidecars == 0
+  mean_total_reasoning_chars: Option<f64>,             // None when n_with_reasoning_sidecars == 0
+  mean_completion_tokens: Option<f64>,                 // None when n_decisions == 0
+  mean_reply_token_ids_len: Option<f64>,               // None when n_with_reply_token_ids == 0
+
+  // Measure 4: illegal-order rate
+  n_reply_refusals: usize,                             // count(has_reply_refusal)
+  reply_refusal_rate: Option<f64>,                     // n_reply_refusals / n_decisions; None when 0
+  mean_refused_market_actions: Option<f64>,            // None when n_decisions == 0
+  n_bundle_rejections: usize,                          // count(has_bundle_rejection)
+  bundle_rejection_rate: Option<f64>,                  // n_bundle_rejections / n_decisions; None when 0
+
+  // Measure 5(a): engine-recorded pledges (separate line)
+  n_with_pre_act_pledge_snapshot: usize,               // count(pre_act_pledges_count.is_some())
+  n_with_terminal_scoreboard: usize,                   // count(terminal_broken_promises_count.is_some())
+  total_pre_act_pledges: Option<u64>,                  // None when n_with_pre_act_pledge_snapshot == 0
+  total_pre_act_audited_pledges: Option<u64>,          // None when n_with_pre_act_pledge_snapshot == 0
+  total_sweep_broken_promises: u64,                    // sum(sweep_broken_promises_count)
+  total_terminal_broken_promises: Option<u64>,         // None when n_with_terminal_scoreboard == 0
+
+  // Measure 5(b): text-parsed outgoing talk commitments (separate line)
+  n_with_talk_commitment_inputs: usize,                // count(applicable_commitments.is_some())
+  extracted_outgoing_commitments_total: Option<u64>,   // None when n_with_talk_commitment_inputs == 0
+  applicable_commitments_total: Option<u64>,           // None when n_with_talk_commitment_inputs == 0
+  inapplicable_commitments_total: Option<u64>,         // None when n_with_talk_commitment_inputs == 0
+  honoured_commitments_total: Option<u64>,             // None when n_with_talk_commitment_inputs == 0
+  third_party_fill_commitments_total: Option<u64>,     // None when n_with_talk_commitment_inputs == 0
+  posted_unfilled_commitments_total: Option<u64>,      // None when n_with_talk_commitment_inputs == 0
+  partial_bilateral_fill_commitments_total: Option<u64>, // None when n_with_talk_commitment_inputs == 0
+  honour_rate: Option<f64>,                            // honoured_total / applicable_total iff > 0, else null (never 0/0)
+  focal_talk_counts: Option<PerArmTalkCountsSummary>,  // None when n_with_talk_commitment_inputs == 0; else { seen, matched, ambiguous }
+}
+```
 
 ---
 
