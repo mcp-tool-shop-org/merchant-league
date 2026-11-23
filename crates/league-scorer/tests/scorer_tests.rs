@@ -27,11 +27,13 @@ use league_scorer::{
     SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES, SYNTH_PROJECT_RANK_BY_EQUITY,
     SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS, SYNTH_QUOTE_MIN_UNITS,
     SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScenarioRolloutOutcome, ScorerConfig,
-    ScorerError, StateScoreOutput, apply_talk_commitments, build_arm_independent_request,
-    candidate_id_for_submission, canonicalize_talk_commitments, compute_pre_act_pair_sha256_hex,
-    decide_peer_turn, dedupe_candidates, draw_honour_commitment, draw_scenarios,
-    execute_blind_request, generate_arm_independent_candidates, is_valid_sha256_hex,
-    p_honour_to_ppm, parse_blind_scoring_request_strict, posture_for_scenario,
+    ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V1,
+    TALK_EXTRACTOR_VERSION_V1, apply_talk_commitments, build_arm_independent_request,
+    candidate_id_for_submission, canonicalize_talk_commitments,
+    compute_blind_inputs_manifest_sha256, compute_pre_act_pair_sha256_hex,
+    compute_scorer_tree_sha256, decide_peer_turn, dedupe_candidates, draw_honour_commitment,
+    draw_scenarios, execute_blind_request, generate_arm_independent_candidates,
+    is_valid_sha256_hex, p_honour_to_ppm, parse_blind_scoring_request_strict, posture_for_scenario,
     probe_checkpoint_sanitized, prune_refused_market_actions, run_single_rollout,
     run_single_rollout_with_replay_log, score_outcomes, sha256_hex, to_sorted_compact_json,
     to_sorted_pretty_json, validate_talk_commitment, verify_checkpoint_pair,
@@ -870,7 +872,7 @@ fn real_checkpoint_rollout_cli_determinism_and_engine_parity() -> TestResult {
         pre_act_save_sha256: save_sha.clone(),
         pre_act_seal_sha256: seal_sha.clone(),
         schema_version: 1,
-        scorer_config_sha256: cfg_sha,
+        scorer_config_sha256: cfg_sha.clone(),
         scorer_seed: 12345,
         state_id: "season8102_day-01_seat-0".to_owned(),
         talk_commitments: Vec::new(),
@@ -1111,7 +1113,7 @@ fn cli_refuses_bad_layouts_tampered_checkpoints_and_usage_errors() -> TestResult
         pre_act_save_sha256: save_sha.clone(),
         pre_act_seal_sha256: seal_sha.clone(),
         schema_version: 1,
-        scorer_config_sha256: cfg_sha,
+        scorer_config_sha256: cfg_sha.clone(),
         scorer_seed: 7,
         state_id: "state_8103".to_owned(),
         talk_commitments: Vec::new(),
@@ -1442,6 +1444,18 @@ fn all_scorer_error_variants_report_codes_hints_exit_codes_and_display() -> Test
             ScorerError::InvalidScorerConfig("odd M".into()),
             EXIT_USER_ERROR,
         ),
+        (
+            ScorerError::FreezeConfigMismatch("cfg mismatch".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::FreezeTreeMismatch("tree mismatch".into()),
+            EXIT_USER_ERROR,
+        ),
+        (
+            ScorerError::FreezeManifestMismatch("manifest mismatch".into()),
+            EXIT_USER_ERROR,
+        ),
         (ScorerError::Json("parse".into()), EXIT_USER_ERROR),
         (ScorerError::NoBlindInputs("none".into()), EXIT_USER_ERROR),
         (
@@ -1701,7 +1715,7 @@ fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
         pre_act_save_sha256: sha256_hex(b"{not valid json"),
         pre_act_seal_sha256: sha256_hex(b"{not valid seal"),
         schema_version: 1,
-        scorer_config_sha256: cfg_sha,
+        scorer_config_sha256: cfg_sha.clone(),
         scorer_seed: 1,
         state_id: "fake_ckpt".to_owned(),
         talk_commitments: Vec::new(),
@@ -1790,7 +1804,7 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
         pre_act_save_sha256: save_sha,
         pre_act_seal_sha256: seal_sha,
         schema_version: 1,
-        scorer_config_sha256: cfg_sha,
+        scorer_config_sha256: cfg_sha.clone(),
         scorer_seed: 9,
         state_id: "state_8110".to_owned(),
         talk_commitments: Vec::new(),
@@ -2023,6 +2037,101 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
         EXIT_RUNTIME_ERROR
     );
     assert!(String::from_utf8_lossy(&err_stdout).contains("IO_ERROR"));
+
+    // `--freeze <file>` succeeds when valid (ignoring extra unblinded fields) and refuses mismatches.
+    let scorer_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let real_tree_sha = compute_scorer_tree_sha256(scorer_manifest_dir)?;
+    let real_manifest_sha = compute_blind_inputs_manifest_sha256(&blind_dir)?;
+    let valid_freeze_path = tmp.path().join("valid_freeze.json");
+    let valid_freeze_json = serde_json::json!({
+        "blind_inputs_manifest_sha256": real_manifest_sha,
+        "control_wording_arm": "v2_control_2026_11_22_r2",
+        "scorer_config_sha256": cfg_sha,
+        "scorer_tree_sha256": real_tree_sha,
+    });
+    fs::write(
+        &valid_freeze_path,
+        to_sorted_pretty_json(&valid_freeze_json)?,
+    )?;
+    let freeze_ok_out = tmp.path().join("out_freeze_ok");
+    let mut err_freeze_ok = Vec::new();
+    let mut out_freeze_ok_msg = Vec::new();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--freeze",
+                valid_freeze_path.to_str().ok_or("utf8")?,
+                "--out",
+                freeze_ok_out.to_str().ok_or("utf8")?,
+            ],
+            &mut out_freeze_ok_msg,
+            &mut err_freeze_ok,
+        ),
+        EXIT_OK
+    );
+
+    let bad_cfg_freeze = ScorerFreezeBlindView {
+        blind_inputs_manifest_sha256: real_manifest_sha.clone(),
+        scorer_config_sha256: "f".repeat(64),
+        scorer_tree_sha256: real_tree_sha.clone(),
+    };
+    let bad_tree_freeze = ScorerFreezeBlindView {
+        blind_inputs_manifest_sha256: real_manifest_sha.clone(),
+        scorer_config_sha256: cfg_sha.clone(),
+        scorer_tree_sha256: "e".repeat(64),
+    };
+    let bad_manifest_freeze = ScorerFreezeBlindView {
+        blind_inputs_manifest_sha256: "d".repeat(64),
+        scorer_config_sha256: cfg_sha.clone(),
+        scorer_tree_sha256: real_tree_sha,
+    };
+    for (idx, (freeze_view, expected_code)) in [
+        (bad_cfg_freeze, "FREEZE_CONFIG_MISMATCH"),
+        (bad_tree_freeze, "FREEZE_TREE_MISMATCH"),
+        (bad_manifest_freeze, "FREEZE_MANIFEST_MISMATCH"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let p = tmp.path().join(format!("bad_freeze_{idx}.json"));
+        fs::write(&p, to_sorted_pretty_json(&freeze_view)?)?;
+        let mut err_buf = Vec::new();
+        assert_eq!(
+            run_cli(
+                [
+                    "score",
+                    "--blind-inputs",
+                    blind_dir.to_str().ok_or("utf8")?,
+                    "--checkpoints",
+                    ckpts_dir.to_str().ok_or("utf8")?,
+                    "--config",
+                    cfg_path.to_str().ok_or("utf8")?,
+                    "--freeze",
+                    p.to_str().ok_or("utf8")?,
+                    "--out",
+                    tmp.path()
+                        .join(format!("out_bad_freeze_{idx}"))
+                        .to_str()
+                        .ok_or("utf8")?,
+                ],
+                &mut Vec::new(),
+                &mut err_buf,
+            ),
+            EXIT_USER_ERROR
+        );
+        assert!(
+            String::from_utf8_lossy(&err_buf).contains(expected_code),
+            "expected {expected_code}, got {}",
+            String::from_utf8_lossy(&err_buf)
+        );
+    }
 
     // Also run binary with `--help` and `--version` so CLI help/version paths work end-to-end.
     let bin = env!("CARGO_BIN_EXE_league-scorer");
@@ -2879,7 +2988,7 @@ fn request_hardenings_and_end_to_end_determinism() -> TestResult {
         pre_act_save_sha256: save_sha.clone(),
         pre_act_seal_sha256: seal_sha.clone(),
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
-        scorer_config_sha256: cfg_sha,
+        scorer_config_sha256: cfg_sha.clone(),
         scorer_seed: 1234,
         state_id: "game8230-day-01-seat-0".to_owned(),
         talk_commitments: vec![ExtractedTalkCommitment {
@@ -4152,20 +4261,22 @@ fn verify_sec52_table_matches_defaults(sec52: &str) -> Result<(), String> {
     if talk_v_cell != talk_d_cell {
         return Err("talk_extractor_version and talk_extractor_rules_digest cells disagree".into());
     }
-    let doc_talk_ver = unquote_doc_str(
-        &first_backticked(talk_v_cell, "talk_extractor_version")?,
-        "talk_extractor_version",
-    )?;
+    let talk_tokens = extract_backticked_tokens(talk_v_cell);
+    if talk_tokens.len() < 2 {
+        return Err(format!(
+            "expected version and digest backticked tokens in `{talk_v_cell}`"
+        ));
+    }
+    let doc_talk_ver = unquote_doc_str(talk_tokens[0], "talk_extractor_version")?;
     if doc_talk_ver != talk_extractor_version {
         return Err(format!(
             "talk_extractor_version mismatch: doc={doc_talk_ver} default={talk_extractor_version}"
         ));
     }
-    if !talk_d_cell.contains("+ frozen rules digest")
-        || talk_extractor_rules_digest != sha256_hex(doc_talk_ver.as_bytes())
-    {
+    let doc_talk_digest = unquote_doc_str(talk_tokens[1], "talk_extractor_rules_digest")?;
+    if !is_valid_sha256_hex(&doc_talk_digest) || doc_talk_digest != talk_extractor_rules_digest {
         return Err(format!(
-            "talk_extractor_rules_digest mismatch against doc `{talk_d_cell}`"
+            "talk_extractor_rules_digest mismatch: doc={doc_talk_digest} default={talk_extractor_rules_digest}"
         ));
     }
 
@@ -4252,7 +4363,10 @@ fn parse_sec52_fixed_constants(sec52: &str) -> Result<BTreeMap<String, String>, 
             let name = lhs.trim().rsplit("::").next().unwrap_or("").trim();
             let val = rhs.trim();
             if !name.is_empty()
-                && name.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+                && name.bytes().any(|b| b.is_ascii_uppercase())
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
                 && map.insert(name.to_owned(), val.to_owned()).is_some()
             {
                 return Err(format!("duplicate constant `{name}` in §5.2"));
@@ -4262,37 +4376,51 @@ fn parse_sec52_fixed_constants(sec52: &str) -> Result<BTreeMap<String, String>, 
     Ok(map)
 }
 
-fn verify_types_rs_pub_consts_documented(types_src: &str, sec52: &str) -> Result<(), String> {
+fn verify_scorer_constants_documented(sources: &[(&str, &str)], sec52: &str) -> Result<(), String> {
     const ALLOWED_SCHEMA_AND_TABLE_CONSTS: [&str; 3] = [
         "BLIND_SCORING_SCHEMA_VERSION",
         "EVAL_TABLE_SEAT_COUNT",
         "SYNTH_SLOT_BUCKET_NAMES",
     ];
+    const PREFIXES: [&str; 4] = [
+        "pub const ",
+        "pub(crate) const ",
+        "pub static ",
+        "pub(crate) static ",
+    ];
     let documented = parse_sec52_fixed_constants(sec52)?;
     let mut found_count = 0_usize;
-    for raw_line in types_src.lines() {
-        let trimmed = raw_line.trim_start();
-        if let Some(after) = trimmed.strip_prefix("pub const ")
-            && let Some((name_raw, _)) = after.split_once(':')
-        {
-            let name = name_raw.trim();
-            found_count += 1;
-            if !documented.contains_key(name) && !ALLOWED_SCHEMA_AND_TABLE_CONSTS.contains(&name) {
-                return Err(format!(
-                    "public constant `{name}` in types.rs is missing from docs/decision-scorer.md §5.2"
-                ));
+    for &(file_label, src) in sources {
+        for raw_line in src.lines() {
+            let trimmed = raw_line.trim_start();
+            for prefix in PREFIXES {
+                if let Some(after) = trimmed.strip_prefix(prefix)
+                    && let Some((name_raw, _)) = after.split_once(':')
+                {
+                    let name = name_raw.trim();
+                    found_count += 1;
+                    if !documented.contains_key(name)
+                        && !ALLOWED_SCHEMA_AND_TABLE_CONSTS.contains(&name)
+                    {
+                        return Err(format!(
+                            "constant `{name}` in {file_label} is missing from docs/decision-scorer.md §5.2"
+                        ));
+                    }
+                }
             }
         }
     }
     if found_count == 0 {
-        return Err("failed to enumerate any `pub const` declarations in types.rs".to_owned());
+        return Err(
+            "failed to enumerate any constant/static declarations in scorer sources".to_owned(),
+        );
     }
     Ok(())
 }
 
 fn verify_sec52_constants_match(sec52: &str) -> Result<(), String> {
     let constants = parse_sec52_fixed_constants(sec52)?;
-    const EXPECTED_CONSTANT_COUNT: usize = 20;
+    const EXPECTED_CONSTANT_COUNT: usize = 22;
     if constants.len() != EXPECTED_CONSTANT_COUNT {
         return Err(format!(
             "§5.2 constants count mismatch: got {}, expected {EXPECTED_CONSTANT_COUNT}",
@@ -4388,6 +4516,14 @@ fn verify_sec52_constants_match(sec52: &str) -> Result<(), String> {
         &SYNTH_SCALE_SEED_POOL_MAX.to_string(),
     )?;
     check_num("HONOUR_PPM_SCALE", &HONOUR_PPM_SCALE.to_string())?;
+    check_exact(
+        "TALK_EXTRACTOR_VERSION_V1",
+        &format!("\"{TALK_EXTRACTOR_VERSION_V1}\""),
+    )?;
+    check_exact(
+        "TALK_EXTRACTOR_RULES_DIGEST_V1",
+        &format!("\"{TALK_EXTRACTOR_RULES_DIGEST_V1}\""),
+    )?;
     Ok(())
 }
 
@@ -4405,12 +4541,23 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
         .ok_or("missing §6 heading after §5.2")?;
     let sec52 = &doc[sec52_start..sec6_start];
     let types_src = fs::read_to_string(manifest_dir.join("src/types.rs"))?;
+    let candidates_src = fs::read_to_string(manifest_dir.join("src/candidates.rs"))?;
+    let postures_src = fs::read_to_string(manifest_dir.join("src/postures.rs"))?;
+    let scenarios_src = fs::read_to_string(manifest_dir.join("src/scenarios.rs"))?;
 
     let cfg = ScorerConfig::default();
     assert!(cfg.validate().is_ok());
     verify_sec52_table_matches_defaults(sec52)?;
     verify_sec52_constants_match(sec52)?;
-    verify_types_rs_pub_consts_documented(&types_src, sec52)?;
+    verify_scorer_constants_documented(
+        &[
+            ("types.rs", &types_src),
+            ("candidates.rs", &candidates_src),
+            ("postures.rs", &postures_src),
+            ("scenarios.rs", &scenarios_src),
+        ],
+        sec52,
+    )?;
 
     // Negative controls proving doc drift, removed rows, or unlisted constants fail with exact error reasons:
     let mutated_m = sec52.replacen("| `scenarios_m` (`M`) | Number of CRN scenarios per state (sized from pilot measured SE/diversity) | `16` |", "| `scenarios_m` (`M`) | Number of CRN scenarios per state (sized from pilot measured SE/diversity) | `32` |", 1);
@@ -4487,18 +4634,34 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
     );
     eprintln!("negative_control[const_changed:UNIT_SCALE]: {err_unit_scale}");
 
-    let removed_const = sec52.replacen(", and `HONOUR_PPM_SCALE = 1_000_000`", "", 1);
+    let removed_const = sec52.replacen("`HONOUR_PPM_SCALE = 1_000_000`", "`REMOVED_NONE`", 1);
     let err_const_rm = verify_sec52_constants_match(&removed_const)
         .err()
         .ok_or("expected removed constant to fail")?;
     assert!(
-        err_const_rm.contains("got 19, expected 20"),
+        err_const_rm.contains("got 21, expected 22"),
         "unexpected: {err_const_rm}"
     );
     eprintln!("negative_control[const_removed:HONOUR_PPM_SCALE]: {err_const_rm}");
 
+    let mutated_talk_digest = sec52.replacen(TALK_EXTRACTOR_RULES_DIGEST_V1, &"0".repeat(64), 2);
+    let err_talk_table = verify_sec52_table_matches_defaults(&mutated_talk_digest)
+        .err()
+        .ok_or("expected mutated talk digest row to fail")?;
+    assert!(
+        err_talk_table.contains("talk_extractor_rules_digest mismatch"),
+        "unexpected: {err_talk_table}"
+    );
+    let err_talk_const = verify_sec52_constants_match(&mutated_talk_digest)
+        .err()
+        .ok_or("expected mutated talk digest constant to fail")?;
+    assert!(
+        err_talk_const.contains("TALK_EXTRACTOR_RULES_DIGEST_V1"),
+        "unexpected: {err_talk_const}"
+    );
+
     let unlisted_types = format!("{types_src}\npub const UNLISTED_MAGIC: u64 = 42;\n");
-    let err_unlisted = verify_types_rs_pub_consts_documented(&unlisted_types, sec52)
+    let err_unlisted = verify_scorer_constants_documented(&[("types.rs", &unlisted_types)], sec52)
         .err()
         .ok_or("expected unlisted types.rs pub const to fail")?;
     assert!(
@@ -4506,6 +4669,32 @@ fn scorer_config_default_and_constants_match_design_doc_and_club_bot() -> TestRe
         "unexpected: {err_unlisted}"
     );
     eprintln!("negative_control[unlisted_pub_const:UNLISTED_MAGIC]: {err_unlisted}");
+
+    for (label, decl, expected_name) in [
+        (
+            "candidates.rs",
+            "pub(crate) const UNLISTED_CRATE_CONST: u64 = 7;\n",
+            "UNLISTED_CRATE_CONST",
+        ),
+        (
+            "postures.rs",
+            "pub static UNLISTED_POSTURE_STATIC: u64 = 9;\n",
+            "UNLISTED_POSTURE_STATIC",
+        ),
+        (
+            "scenarios.rs",
+            "pub(crate) static UNLISTED_SCENARIO_STATIC: u64 = 11;\n",
+            "UNLISTED_SCENARIO_STATIC",
+        ),
+    ] {
+        let err_mod = verify_scorer_constants_documented(&[(label, decl)], sec52)
+            .err()
+            .ok_or("expected unlisted constant/static to fail")?;
+        assert!(
+            err_mod.contains(expected_name) && err_mod.contains(label),
+            "unexpected for {label}: {err_mod}"
+        );
+    }
 
     // Pin SYNTH_CHARTER_BID_CRED to ClubBot's charter auction bid on Turn 6.
     let mut host = EvalHost::from_standard_setup(TableId(8261), 4, 1, 0)?;
@@ -5248,7 +5437,9 @@ fn rollout_engine_error_branches_report_step_and_strip_paths() -> TestResult {
     assert_eq!(apply_err.code(), "ENGINE_ERROR");
     let apply_msg = apply_err.to_string();
     assert!(
-        apply_msg.contains("apply turn 2 submissions:"),
+        apply_msg.contains("apply turn 2 submissions:")
+            && apply_msg.contains("InvalidSeat(9)")
+            && apply_msg.contains("invalid seat index: 9"),
         "unexpected apply message: {apply_msg}"
     );
     assert!(
@@ -5286,7 +5477,9 @@ fn rollout_engine_error_branches_report_step_and_strip_paths() -> TestResult {
     assert_eq!(finalize_err.code(), "ENGINE_ERROR");
     let finalize_msg = finalize_err.to_string();
     assert!(
-        finalize_msg.contains("finalize_eval_season:"),
+        finalize_msg.contains("finalize_eval_season:")
+            && finalize_msg.contains("post_state_digest diverged")
+            && finalize_msg.contains("turn 1"),
         "unexpected finalize message: {finalize_msg}"
     );
     assert!(
@@ -5315,5 +5508,205 @@ fn rollout_engine_error_branches_report_step_and_strip_paths() -> TestResult {
     let mandate_msg = mandate_err.to_string();
     assert!(mandate_msg.contains("missing peer mandate 1"));
     assert!(!mandate_msg.contains("secret_rollout_err_dir_token"));
+    Ok(())
+}
+
+#[test]
+fn s3a_freeze_helpers_and_cli_validation_cover_error_branches() -> TestResult {
+    let tmp = UniqueTmpDir::new("freeze_helpers")?;
+    let valid_hex = "a".repeat(64);
+    let valid_view = ScorerFreezeBlindView {
+        blind_inputs_manifest_sha256: valid_hex.clone(),
+        scorer_config_sha256: valid_hex.clone(),
+        scorer_tree_sha256: valid_hex.clone(),
+    };
+    valid_view.validate()?;
+
+    let mut bad_tree = valid_view.clone();
+    bad_tree.scorer_tree_sha256 = "not_hex".to_owned();
+    assert_eq!(
+        bad_tree
+            .validate()
+            .err()
+            .ok_or("expected bad scorer_tree_sha256")?
+            .code(),
+        "INVALID_HEX_DIGEST"
+    );
+
+    let mut bad_cfg = valid_view.clone();
+    bad_cfg.scorer_config_sha256 = "z".repeat(64);
+    assert_eq!(
+        bad_cfg
+            .validate()
+            .err()
+            .ok_or("expected bad scorer_config_sha256")?
+            .code(),
+        "INVALID_HEX_DIGEST"
+    );
+
+    let mut bad_manifest = valid_view;
+    bad_manifest.blind_inputs_manifest_sha256 = "ab".to_owned();
+    assert_eq!(
+        bad_manifest
+            .validate()
+            .err()
+            .ok_or("expected bad blind_inputs_manifest_sha256")?
+            .code(),
+        "INVALID_HEX_DIGEST"
+    );
+
+    let missing_blind = tmp.path.join("no_such_blind_dir");
+    assert_eq!(
+        compute_blind_inputs_manifest_sha256(&missing_blind)
+            .err()
+            .ok_or("expected NoBlindInputs on missing dir")?
+            .code(),
+        "NO_BLIND_INPUTS"
+    );
+
+    let empty_blind = tmp.path.join("empty_blind_dir");
+    fs::create_dir_all(empty_blind.join("nested_dir"))?;
+    fs::write(empty_blind.join("note.txt"), b"ignored")?;
+    assert_eq!(
+        compute_blind_inputs_manifest_sha256(&empty_blind)
+            .err()
+            .ok_or("expected NoBlindInputs on empty dir")?
+            .code(),
+        "NO_BLIND_INPUTS"
+    );
+
+    let missing_crate = tmp.path.join("no_such_crate");
+    assert_eq!(
+        compute_scorer_tree_sha256(&missing_crate)
+            .err()
+            .ok_or("expected Io error on missing crate dir")?
+            .code(),
+        "IO_ERROR"
+    );
+
+    let fake_crate = tmp.path.join("fake_crate");
+    fs::create_dir_all(fake_crate.join("src"))?;
+    fs::create_dir_all(fake_crate.join("target"))?;
+    fs::create_dir_all(fake_crate.join(".git"))?;
+    fs::write(fake_crate.join("src/lib.rs"), b"pub fn f() {}")?;
+    fs::write(fake_crate.join("target/ignored.txt"), b"a")?;
+    fs::write(fake_crate.join(".git/HEAD"), b"ref: refs/heads/main\n")?;
+    let hash_a = compute_scorer_tree_sha256(&fake_crate)?;
+    fs::write(fake_crate.join("target/ignored.txt"), b"changed_b")?;
+    let hash_b = compute_scorer_tree_sha256(&fake_crate)?;
+    assert_eq!(hash_a, hash_b, "target/ and .git/ must be excluded");
+
+    // CLI `--freeze` / `--scorer-crate-dir` usage & error branches.
+    let mut err_buf = Vec::new();
+    assert_eq!(
+        run_cli(["score", "--freeze"], &mut Vec::new(), &mut err_buf),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_buf).contains("USAGE_ERROR"));
+
+    err_buf.clear();
+    assert_eq!(
+        run_cli(
+            ["score", "--scorer-crate-dir"],
+            &mut Vec::new(),
+            &mut err_buf
+        ),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_buf).contains("USAGE_ERROR"));
+
+    let ckpts_dir = tmp.path.join("ckpts");
+    fs::create_dir_all(&ckpts_dir)?;
+    let cfg_path = tmp.path.join("cfg.json");
+    let cfg = ScorerConfig {
+        scenarios_m: 2,
+        k_synth_max: 2,
+        ..ScorerConfig::default()
+    };
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let blind_dir = tmp.path.join("blind_req");
+    fs::create_dir_all(&blind_dir)?;
+    fs::write(blind_dir.join("s1.json"), b"{}")?;
+    let out_dir = tmp.path.join("scores_out");
+    let missing_freeze = tmp.path.join("missing_freeze.json");
+    err_buf.clear();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--freeze",
+                missing_freeze.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_buf
+        ),
+        EXIT_RUNTIME_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_buf).contains("IO_ERROR"));
+
+    let bad_json_freeze = tmp.path.join("bad_json_freeze.json");
+    fs::write(&bad_json_freeze, b"{not json")?;
+    err_buf.clear();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--freeze",
+                bad_json_freeze.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_buf
+        ),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_buf).contains("INVALID_JSON"));
+
+    let bad_hex_freeze = tmp.path.join("bad_hex_freeze.json");
+    fs::write(
+        &bad_hex_freeze,
+        to_sorted_pretty_json(&ScorerFreezeBlindView {
+            blind_inputs_manifest_sha256: "bad".to_owned(),
+            scorer_config_sha256: valid_hex.clone(),
+            scorer_tree_sha256: valid_hex,
+        })?,
+    )?;
+    err_buf.clear();
+    assert_eq!(
+        run_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--freeze",
+                bad_hex_freeze.to_str().ok_or("utf8")?,
+                "--out",
+                out_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut err_buf
+        ),
+        EXIT_USER_ERROR
+    );
+    assert!(String::from_utf8_lossy(&err_buf).contains("INVALID_HEX_DIGEST"));
     Ok(())
 }

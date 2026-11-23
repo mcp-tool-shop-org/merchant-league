@@ -11,10 +11,12 @@ use league_relay::{
     redact_secrets_multi_with_limit, validate_vm_host_allowance,
 };
 
+use crate::blind_builder::{BuildBlindInputsOptions, run_build_blind_inputs};
 use crate::driver::{
     BranchOptions, NoopTransport, PlayOptions, run_branch_with_transport_and_git_sha,
     run_play_with_transport_and_git_sha, validate_eval_seats_file,
 };
+use crate::freeze_gate::{FreezeOptions, JoinOptions, run_freeze, run_join};
 use crate::records::{EvalArm, summarize_branch_outcomes};
 use crate::select::{SelectOptions, run_select};
 use crate::serving::CrateGitShaSource;
@@ -29,9 +31,12 @@ USAGE:
   league-eval --version | -V
 
 COMMANDS:
-  play     Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>`
-  branch   Replay a frozen pre-act checkpoint across `--arms <off,control,on>` holding peer actions fixed
-  select   Deterministically select stratified early/mid/late pre-act checkpoints across games
+  play                Play up to `--turns` full turns from standard setup or turn-0 fork under `--arm <off|control|on>`
+  branch              Replay a frozen pre-act checkpoint across `--arms <off,control,on>` holding peer actions fixed
+  select              Deterministically select stratified early/mid/late pre-act checkpoints across games
+  build-blind-inputs  Build anonymized `blind_inputs/` and disjoint `arm_map/` from run directories
+  freeze              Write write-once `scorer_freeze.json` on a clean worktree before scoring or joining
+  join                Enforce the freeze gate and join blind scores with `arm_map/` (descriptive only)
 ";
 
 /// CLI error output mode (`--error-format text|json`).
@@ -189,7 +194,8 @@ fn run_cli_args(
 
     let Some(subcmd_os) = iter.next() else {
         return Err(EvalError::Usage(
-            "missing subcommand (`play`, `branch`, or `select`); run with `--help`".to_owned(),
+            "missing subcommand (`play`, `branch`, `select`, `build-blind-inputs`, `freeze`, or `join`); run with `--help`"
+                .to_owned(),
         ));
     };
     let subcmd = subcmd_os.to_string_lossy();
@@ -208,8 +214,11 @@ fn run_cli_args(
         "play" => cmd_play(&rest, redaction_keys, git_sha, stdout),
         "branch" => cmd_branch(&rest, redaction_keys, git_sha, stdout),
         "select" => cmd_select(&rest, stdout),
+        "build-blind-inputs" => cmd_build_blind_inputs(&rest, stdout),
+        "freeze" => cmd_freeze(&rest, git_sha, stdout),
+        "join" => cmd_join(&rest, stdout),
         other => Err(EvalError::Usage(format!(
-            "unknown subcommand '{other}'; expected `play`, `branch`, or `select`"
+            "unknown subcommand '{other}'; expected `play`, `branch`, `select`, `build-blind-inputs`, `freeze`, or `join`"
         ))),
     }
 }
@@ -563,6 +572,199 @@ fn cmd_select(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError
         "selected_states={} out={}",
         list.states.len(),
         opts.out_path.display()
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
+fn cmd_build_blind_inputs(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> {
+    let mut run_dirs: Vec<PathBuf> = Vec::new();
+    let mut out_blind: Option<PathBuf> = None;
+    let mut out_arm_map: Option<PathBuf> = None;
+    let mut out_checkpoints: Option<PathBuf> = None;
+    let mut config_path: Option<PathBuf> = None;
+    let mut scorer_seed: Option<u64> = None;
+
+    let mut iter = args.iter().cloned().peekable();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--run" => {
+                let first = take_value(&mut iter, "--run")?;
+                for part in first.split(',').filter(|p| !p.trim().is_empty()) {
+                    run_dirs.push(PathBuf::from(part.trim()));
+                }
+                while let Some(next_os) = iter.peek() {
+                    let s = next_os.to_string_lossy();
+                    if s.starts_with("--") {
+                        break;
+                    }
+                    let val = take_value(&mut iter, "--run")?;
+                    for part in val.split(',').filter(|p| !p.trim().is_empty()) {
+                        run_dirs.push(PathBuf::from(part.trim()));
+                    }
+                }
+            }
+            "--out-blind" => out_blind = Some(PathBuf::from(take_value(&mut iter, "--out-blind")?)),
+            "--out-arm-map" => {
+                out_arm_map = Some(PathBuf::from(take_value(&mut iter, "--out-arm-map")?));
+            }
+            "--out-checkpoints" => {
+                out_checkpoints = Some(PathBuf::from(take_value(&mut iter, "--out-checkpoints")?));
+            }
+            "--config" => config_path = Some(PathBuf::from(take_value(&mut iter, "--config")?)),
+            "--scorer-seed" => {
+                let raw = take_value(&mut iter, "--scorer-seed")?;
+                scorer_seed = Some(
+                    raw.parse()
+                        .map_err(|_| EvalError::Usage(format!("invalid --scorer-seed '{raw}'")))?,
+                );
+            }
+            other => {
+                return Err(EvalError::Usage(format!(
+                    "unknown `build-blind-inputs` flag '{other}'"
+                )));
+            }
+        }
+    }
+
+    let opts = BuildBlindInputsOptions {
+        run_dirs,
+        out_blind_dir: out_blind.ok_or_else(|| {
+            EvalError::Usage("`build-blind-inputs` requires `--out-blind <dir>`".to_owned())
+        })?,
+        out_arm_map_dir: out_arm_map.ok_or_else(|| {
+            EvalError::Usage("`build-blind-inputs` requires `--out-arm-map <dir>`".to_owned())
+        })?,
+        out_checkpoints_dir: out_checkpoints,
+        config_path: config_path.ok_or_else(|| {
+            EvalError::Usage("`build-blind-inputs` requires `--config <file>`".to_owned())
+        })?,
+        scorer_seed: scorer_seed.ok_or_else(|| {
+            EvalError::Usage("`build-blind-inputs` requires `--scorer-seed <u64>`".to_owned())
+        })?,
+    };
+    let report = run_build_blind_inputs(&opts)?;
+    writeln!(
+        stdout,
+        "states_built={} arm_entries_mapped={}",
+        report.states_built, report.arm_entries_mapped
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
+fn cmd_freeze(
+    args: &[OsString],
+    git_sha: &CrateGitShaSource<'_>,
+    stdout: &mut dyn Write,
+) -> Result<(), EvalError> {
+    let mut blind_dir: Option<PathBuf> = None;
+    let mut config_path: Option<PathBuf> = None;
+    let mut control_wording_arm: Option<String> = None;
+    let mut out_path: Option<PathBuf> = None;
+    let mut scorer_crate_dir: Option<PathBuf> = None;
+
+    let mut iter = args.iter().cloned();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--blind" => blind_dir = Some(PathBuf::from(take_value(&mut iter, "--blind")?)),
+            "--config" => config_path = Some(PathBuf::from(take_value(&mut iter, "--config")?)),
+            "--control-wording-arm" => {
+                control_wording_arm = Some(take_value(&mut iter, "--control-wording-arm")?);
+            }
+            "--out" => out_path = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--scorer-crate-dir" => {
+                scorer_crate_dir =
+                    Some(PathBuf::from(take_value(&mut iter, "--scorer-crate-dir")?));
+            }
+            other => {
+                return Err(EvalError::Usage(format!("unknown `freeze` flag '{other}'")));
+            }
+        }
+    }
+
+    let opts = FreezeOptions {
+        blind_dir: blind_dir
+            .ok_or_else(|| EvalError::Usage("`freeze` requires `--blind <dir>`".to_owned()))?,
+        config_path: config_path
+            .ok_or_else(|| EvalError::Usage("`freeze` requires `--config <file>`".to_owned()))?,
+        control_wording_arm: control_wording_arm.ok_or_else(|| {
+            EvalError::Usage("`freeze` requires `--control-wording-arm <label>`".to_owned())
+        })?,
+        out_path: out_path
+            .ok_or_else(|| EvalError::Usage("`freeze` requires `--out <file>`".to_owned()))?,
+        scorer_crate_dir,
+    };
+    let freeze = run_freeze(&opts, git_sha)?;
+    writeln!(
+        stdout,
+        "freeze_written={} config_sha256={} manifest_sha256={}",
+        opts.out_path.display(),
+        freeze.scorer_config_sha256,
+        freeze.blind_inputs_manifest_sha256
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
+fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> {
+    let mut freeze_path: Option<PathBuf> = None;
+    let mut arm_map_dir: Option<PathBuf> = None;
+    let mut scores_dir: Option<PathBuf> = None;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut blind_dir: Option<PathBuf> = None;
+
+    let mut iter = args.iter().cloned();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--freeze" => freeze_path = Some(PathBuf::from(take_value(&mut iter, "--freeze")?)),
+            "--arm-map" => arm_map_dir = Some(PathBuf::from(take_value(&mut iter, "--arm-map")?)),
+            "--scores" => scores_dir = Some(PathBuf::from(take_value(&mut iter, "--scores")?)),
+            "--out" => out_dir = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--blind" => blind_dir = Some(PathBuf::from(take_value(&mut iter, "--blind")?)),
+            other => {
+                return Err(EvalError::Usage(format!("unknown `join` flag '{other}'")));
+            }
+        }
+    }
+
+    let opts = JoinOptions {
+        freeze_path: freeze_path
+            .ok_or_else(|| EvalError::Usage("`join` requires `--freeze <file>`".to_owned()))?,
+        arm_map_dir: arm_map_dir
+            .ok_or_else(|| EvalError::Usage("`join` requires `--arm-map <dir>`".to_owned()))?,
+        scores_dir: scores_dir
+            .ok_or_else(|| EvalError::Usage("`join` requires `--scores <dir>`".to_owned()))?,
+        out_dir: out_dir
+            .ok_or_else(|| EvalError::Usage("`join` requires `--out <dir>`".to_owned()))?,
+        blind_dir,
+    };
+    let report = run_join(&opts)?;
+    writeln!(
+        stdout,
+        "states_joined={} decisions_joined={}",
+        report.states_joined, report.decisions_joined
     )
     .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
     Ok(())

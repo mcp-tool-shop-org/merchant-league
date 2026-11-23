@@ -157,14 +157,16 @@
         "collapsed": false,
         "confidence": "low",
         "importsAndCoChanges": [],
-        "importsOnly": []
+        "importsOnly": [
+          "league-eval"
+        ]
       },
       "cohesion": null,
       "cohesionDropped": false,
       "confidence": "low",
       "highWater": null,
       "name": "league-scorer",
-      "qualifyingSourceCommits": 3,
+      "qualifyingSourceCommits": 2,
       "rebaseline": null
     },
     {
@@ -328,7 +330,7 @@
       },
       {
         "commits": 86,
-        "lines": 577,
+        "lines": 612,
         "path": "CHANGELOG.md"
       },
       {
@@ -407,8 +409,8 @@
         "path": "SHIP_GATE.md"
       },
       {
-        "commits": 82,
-        "lines": 1751,
+        "commits": 81,
+        "lines": 1740,
         "path": "atlas/README.md"
       },
       {
@@ -417,18 +419,18 @@
         "path": "atlas/boundaries.yaml"
       },
       {
-        "commits": 82,
-        "lines": 6478,
+        "commits": 81,
+        "lines": 6449,
         "path": "atlas/page.json"
       },
       {
-        "commits": 82,
-        "lines": 23083,
+        "commits": 81,
+        "lines": 22968,
         "path": "atlas/statistics.json"
       },
       {
-        "commits": 82,
-        "lines": 89016,
+        "commits": 81,
+        "lines": 89018,
         "path": "atlas/structure.json"
       },
       {
@@ -1033,12 +1035,12 @@
       },
       {
         "commits": 2,
-        "lines": 32,
+        "lines": 81,
         "path": "crates/league-scorer/README.md"
       },
       {
         "commits": 1,
-        "lines": 987,
+        "lines": 1002,
         "path": "crates/league-scorer/src/candidates.rs"
       },
       {
@@ -1052,8 +1054,8 @@
         "path": "crates/league-scorer/src/error.rs"
       },
       {
-        "commits": 3,
-        "lines": 59,
+        "commits": 2,
+        "lines": 67,
         "path": "crates/league-scorer/src/lib.rs"
       },
       {
@@ -1063,12 +1065,12 @@
       },
       {
         "commits": 1,
-        "lines": 447,
+        "lines": 452,
         "path": "crates/league-scorer/src/postures.rs"
       },
       {
-        "commits": 3,
-        "lines": 458,
+        "commits": 2,
+        "lines": 499,
         "path": "crates/league-scorer/src/rollout.rs"
       },
       {
@@ -1083,12 +1085,12 @@
       },
       {
         "commits": 2,
-        "lines": 805,
+        "lines": 874,
         "path": "crates/league-scorer/src/types.rs"
       },
       {
-        "commits": 3,
-        "lines": 3836,
+        "commits": 2,
+        "lines": 5409,
         "path": "crates/league-scorer/tests/scorer_tests.rs"
       },
       {
@@ -1263,7 +1265,7 @@
       },
       {
         "commits": 3,
-        "lines": 293,
+        "lines": 302,
         "path": "docs/decision-scorer.md"
       },
       {
@@ -3572,38 +3574,38 @@
     "level": "low",
     "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-11-23T05:08:17.692Z",
+  "generatedAt": "2026-11-23T08:27:38.447Z",
   "generatedFrom": {
-    "commit": "71957443a36fb3d7cc0c906e3c41ce1b41e8070a"
+    "commit": "246a9e068b92dfd67347775429e4922dc58ebd18"
   },
   "pairs": [
     {
       "a": "CHANGELOG.md",
       "b": "atlas/README.md",
-      "either": 83,
+      "either": 82,
       "shared": 51,
-      "strength": 0.614458
+      "strength": 0.621951
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/page.json",
-      "either": 83,
+      "either": 82,
       "shared": 51,
-      "strength": 0.614458
+      "strength": 0.621951
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/statistics.json",
-      "either": 83,
+      "either": 82,
       "shared": 51,
-      "strength": 0.614458
+      "strength": 0.621951
     },
     {
       "a": "CHANGELOG.md",
       "b": "atlas/structure.json",
-      "either": 83,
+      "either": 82,
       "shared": 51,
-      "strength": 0.614458
+      "strength": 0.621951
     },
     {
       "a": "README.es.md",
@@ -3755,43 +3757,43 @@
     {
       "a": "atlas/README.md",
       "b": "atlas/page.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/statistics.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
       "a": "atlas/README.md",
       "b": "atlas/structure.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/statistics.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
       "a": "atlas/page.json",
       "b": "atlas/structure.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
       "a": "atlas/statistics.json",
       "b": "atlas/structure.json",
-      "either": 64,
-      "shared": 64,
+      "either": 63,
+      "shared": 63,
       "strength": 1
     },
     {
@@ -4113,16 +4115,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-11-22T23:07:49-05:00",
-    "inScopeFiles": 648,
+    "headDate": "2026-11-23T02:57:01-05:00",
+    "inScopeFiles": 653,
     "pinnedStart": null,
     "priorFloor": "fallen",
-    "qualifyingCommits": 100,
+    "qualifyingCommits": 99,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-05-27T04:07:49.000Z",
+    "since": "2026-05-27T07:57:01.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",

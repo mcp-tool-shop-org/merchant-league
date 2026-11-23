@@ -4,6 +4,7 @@ use std::fmt;
 
 use league_core::{EngineError, StructuredError, ToStructuredError, scrub_secret_text};
 use league_relay::RelayError;
+use league_scorer::ScorerError;
 
 pub use league_relay::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR};
 
@@ -100,6 +101,18 @@ pub enum EvalError {
     PartialTurnFromSeatExists(String),
     /// Game has zero automated model seats recorded in `manifest.json` for `select` (`exit 1`).
     NoModelSeatsForSelect(String),
+    /// `freeze` refused to overwrite an existing `scorer_freeze.json` (`exit 1`).
+    FreezeFileExists(String),
+    /// `join` refused because `scorer_freeze.json` does not exist (`exit 1`).
+    MissingFreezeFile(String),
+    /// `join` refused because `blind_inputs_manifest_sha256` disagrees with `scorer_freeze.json` (`exit 1`).
+    FreezeManifestMismatch(String),
+    /// `join` refused because `scorer_config_sha256` disagrees with `scorer_freeze.json` (`exit 1`).
+    FreezeConfigMismatch(String),
+    /// `join` or input builder refused because `control` wording arm disagrees with `scorer_freeze.json` (`exit 1`).
+    ControlWordingArmMismatch(String),
+    /// Underlying `league-scorer` error.
+    Scorer(ScorerError),
     /// Underlying `EvalHost` / `league-core` error.
     Engine(EngineError),
     /// Underlying `league-relay` error.
@@ -154,6 +167,12 @@ impl EvalError {
             Self::IncompatibleEvalSetup(_) => "INCOMPATIBLE_EVAL_SETUP",
             Self::PartialTurnFromSeatExists(_) => "PARTIAL_TURN_FROM_SEAT_EXISTS",
             Self::NoModelSeatsForSelect(_) => "NO_MODEL_SEATS_FOR_SELECT",
+            Self::FreezeFileExists(_) => "FREEZE_FILE_EXISTS",
+            Self::MissingFreezeFile(_) => "MISSING_FREEZE_FILE",
+            Self::FreezeManifestMismatch(_) => "FREEZE_MANIFEST_MISMATCH",
+            Self::FreezeConfigMismatch(_) => "FREEZE_CONFIG_MISMATCH",
+            Self::ControlWordingArmMismatch(_) => "CONTROL_WORDING_ARM_MISMATCH",
+            Self::Scorer(err) => err.code(),
             Self::Engine(err) => err.code(),
             Self::Relay(err) => err.code(),
             Self::Io(_) => "EVAL_IO",
@@ -192,7 +211,13 @@ impl EvalError {
             | Self::MissingSourceSetup(_)
             | Self::IncompatibleEvalSetup(_)
             | Self::PartialTurnFromSeatExists(_)
-            | Self::NoModelSeatsForSelect(_) => EXIT_USER_ERROR,
+            | Self::NoModelSeatsForSelect(_)
+            | Self::FreezeFileExists(_)
+            | Self::MissingFreezeFile(_)
+            | Self::FreezeManifestMismatch(_)
+            | Self::FreezeConfigMismatch(_)
+            | Self::ControlWordingArmMismatch(_) => EXIT_USER_ERROR,
+            Self::Scorer(err) => err.exit_code(),
             Self::Relay(err) => err.exit_code(),
             Self::InvalidWrongPartRate(_)
             | Self::InvalidCrateGitSha(_)
@@ -359,6 +384,26 @@ impl fmt::Display for EvalError {
             Self::NoModelSeatsForSelect(msg) => {
                 write!(f, "NO_MODEL_SEATS_FOR_SELECT: {}", scrub_secret_text(msg))
             }
+            Self::FreezeFileExists(msg) => {
+                write!(f, "FREEZE_FILE_EXISTS: {}", scrub_secret_text(msg))
+            }
+            Self::MissingFreezeFile(msg) => {
+                write!(f, "MISSING_FREEZE_FILE: {}", scrub_secret_text(msg))
+            }
+            Self::FreezeManifestMismatch(msg) => {
+                write!(f, "FREEZE_MANIFEST_MISMATCH: {}", scrub_secret_text(msg))
+            }
+            Self::FreezeConfigMismatch(msg) => {
+                write!(f, "FREEZE_CONFIG_MISMATCH: {}", scrub_secret_text(msg))
+            }
+            Self::ControlWordingArmMismatch(msg) => {
+                write!(
+                    f,
+                    "CONTROL_WORDING_ARM_MISMATCH: {}",
+                    scrub_secret_text(msg)
+                )
+            }
+            Self::Scorer(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Engine(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Relay(err) => write!(f, "{}", scrub_secret_text(&err.to_string())),
             Self::Io(msg) => f.write_str(&scrub_secret_text(msg)),
@@ -377,6 +422,12 @@ impl From<EngineError> for EvalError {
 impl From<RelayError> for EvalError {
     fn from(value: RelayError) -> Self {
         Self::Relay(value)
+    }
+}
+
+impl From<ScorerError> for EvalError {
+    fn from(value: ScorerError) -> Self {
+        Self::Scorer(value)
     }
 }
 
@@ -623,6 +674,37 @@ impl ToStructuredError for EvalError {
                 "select requires at least one automated model seat (`role = \"Model\"`) in `manifest.json`",
                 false,
             ),
+            Self::FreezeFileExists(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "scorer_freeze.json is write-once; pass a fresh --out path rather than overwriting",
+                false,
+            ),
+            Self::MissingFreezeFile(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "run `league-eval freeze` to record scorer_freeze.json before joining arm_map/ to scores",
+                false,
+            ),
+            Self::FreezeManifestMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure blind_inputs/*.json and scores/*.json match the manifest SHA-256 frozen in scorer_freeze.json",
+                false,
+            ),
+            Self::FreezeConfigMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure scores/*.json were scored with the ScorerConfig SHA-256 frozen in scorer_freeze.json",
+                false,
+            ),
+            Self::ControlWordingArmMismatch(_) => StructuredError::new(
+                self.code(),
+                self.to_string(),
+                "ensure every control run's relay_wording_arm matches scorer_freeze.json::control_wording_arm",
+                false,
+            ),
+            Self::Scorer(err) => err.to_structured_error(),
             Self::Engine(err) => err.to_structured_error(),
             Self::Relay(err) => err.to_structured_error(),
             Self::Io(_) => StructuredError::new(

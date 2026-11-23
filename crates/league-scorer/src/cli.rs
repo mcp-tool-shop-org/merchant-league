@@ -12,14 +12,16 @@ use crate::candidates::build_arm_independent_request;
 use crate::error::{EXIT_OK, ScorerError, sanitize_error_text};
 use crate::rollout::execute_blind_request;
 use crate::types::{
-    ScorerConfig, is_valid_sha256_hex, parse_blind_scoring_request_strict, to_sorted_pretty_json,
+    ScorerConfig, ScorerFreezeBlindView, compute_blind_inputs_manifest_sha256,
+    compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
+    to_sorted_pretty_json,
 };
 
 const HELP_TEXT: &str = "\
-Merchant League blind decision scorer (S2)
+Merchant League blind decision scorer
 
 USAGE:
-  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir>
+  league-scorer [--error-format text|json] score --blind-inputs <dir> --checkpoints <dir> --config <file> --out <dir> [--freeze <file>]
   league-scorer [--error-format text|json] candidates --checkpoints <dir> --save-sha256 <hex> --seal-sha256 <hex> --focal-seat <n> --state-id <id> --config <file> --scorer-seed <u64> --out <dir>
   league-scorer --help | -h
   league-scorer --version | -V
@@ -131,6 +133,8 @@ struct ScoreCliArgs {
     blind_inputs_dir: PathBuf,
     checkpoints_dir: PathBuf,
     config_path: PathBuf,
+    freeze_path: Option<PathBuf>,
+    scorer_crate_dir: Option<PathBuf>,
     out_dir: PathBuf,
 }
 
@@ -209,6 +213,8 @@ where
     let mut blind_inputs_dir: Option<PathBuf> = None;
     let mut checkpoints_dir: Option<PathBuf> = None;
     let mut config_path: Option<PathBuf> = None;
+    let mut freeze_path: Option<PathBuf> = None;
+    let mut scorer_crate_dir: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
 
     while let Some(arg) = iter.next() {
@@ -228,6 +234,16 @@ where
                 &mut config_path,
                 take_path(&mut iter, "--config")?,
                 "--config",
+            )?,
+            "--freeze" => set_unique(
+                &mut freeze_path,
+                take_path(&mut iter, "--freeze")?,
+                "--freeze",
+            )?,
+            "--scorer-crate-dir" => set_unique(
+                &mut scorer_crate_dir,
+                take_path(&mut iter, "--scorer-crate-dir")?,
+                "--scorer-crate-dir",
             )?,
             "--out" => set_unique(&mut out_dir, take_path(&mut iter, "--out")?, "--out")?,
             "--error-format" => {
@@ -250,6 +266,8 @@ where
             .ok_or_else(|| ScorerError::Usage("missing required --checkpoints <dir>".to_owned()))?,
         config_path: config_path
             .ok_or_else(|| ScorerError::Usage("missing required --config <file>".to_owned()))?,
+        freeze_path,
+        scorer_crate_dir,
         out_dir: out_dir
             .ok_or_else(|| ScorerError::Usage("missing required --out <dir>".to_owned()))?,
     })
@@ -489,6 +507,47 @@ fn execute_score_command(args: &ScoreCliArgs, stdout: &mut dyn Write) -> Result<
     let config = load_and_validate_config(&args.config_path)?;
     validate_checkpoints_layout(&args.checkpoints_dir)?;
     let request_paths = collect_blind_request_files(&args.blind_inputs_dir)?;
+
+    if let Some(freeze_path) = &args.freeze_path {
+        let freeze_bytes = fs::read(freeze_path).map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read --freeze file: {e}"),
+                &[freeze_path],
+            ))
+        })?;
+        let freeze: ScorerFreezeBlindView = serde_json::from_slice(&freeze_bytes)
+            .map_err(|e| ScorerError::Json(format!("parse --freeze JSON: {e}")))?;
+        freeze.validate()?;
+
+        let actual_cfg_sha = config.sha256_hex()?;
+        if actual_cfg_sha != freeze.scorer_config_sha256 {
+            return Err(ScorerError::FreezeConfigMismatch(format!(
+                "config SHA-256 `{actual_cfg_sha}` != freeze `{}`",
+                freeze.scorer_config_sha256
+            )));
+        }
+
+        let default_crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let crate_dir = args
+            .scorer_crate_dir
+            .as_deref()
+            .unwrap_or(&default_crate_dir);
+        let actual_tree_sha = compute_scorer_tree_sha256(crate_dir)?;
+        if actual_tree_sha != freeze.scorer_tree_sha256 {
+            return Err(ScorerError::FreezeTreeMismatch(format!(
+                "scorer_tree_sha256 `{actual_tree_sha}` != freeze `{}`",
+                freeze.scorer_tree_sha256
+            )));
+        }
+
+        let actual_manifest_sha = compute_blind_inputs_manifest_sha256(&args.blind_inputs_dir)?;
+        if actual_manifest_sha != freeze.blind_inputs_manifest_sha256 {
+            return Err(ScorerError::FreezeManifestMismatch(format!(
+                "blind_inputs_manifest_sha256 `{actual_manifest_sha}` != freeze `{}`",
+                freeze.blind_inputs_manifest_sha256
+            )));
+        }
+    }
 
     let mut requests = Vec::with_capacity(request_paths.len());
     let mut seen_state_ids_ci = BTreeSet::new();

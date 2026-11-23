@@ -195,8 +195,12 @@ pub fn run_single_rollout_with_replay_log(
 
     let mut day_subs = peer_day_submissions.clone();
     day_subs.insert(focal_seat, focal_submission.clone());
-    host.apply_act_submissions(&day_subs)
-        .map_err(|e| ScorerError::Engine(format!("apply turn {} submissions: {e}", host.turn())))?;
+    host.apply_act_submissions(&day_subs).map_err(|e| {
+        ScorerError::Engine(format!(
+            "apply turn {} submissions: {e} ({e:?})",
+            host.turn()
+        ))
+    })?;
     host.sweep_turn()
         .map_err(|e| ScorerError::Engine(format!("sweep turn {}: {e}", host.turn())))?;
 

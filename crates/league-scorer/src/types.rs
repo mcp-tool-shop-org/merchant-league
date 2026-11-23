@@ -1,12 +1,17 @@
 //! Blind input, frozen configuration, and deterministic output schemas for `league-scorer`.
 
+use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::fs;
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use league_core::{EvalActSubmission, MarketAction, Units};
 use league_seat_types::UNIT_SCALE;
 
-use crate::error::ScorerError;
+use crate::error::{ScorerError, sanitize_error_text};
 
 /// Fixed schema version accepted by S1 blind scoring requests.
 pub const BLIND_SCORING_SCHEMA_VERSION: u32 = 1;
@@ -67,6 +72,13 @@ pub const SYNTH_SCALE_SEED_POOL_MAX: usize = 6;
 
 /// Proposed fixed code constant: integer parts-per-million denominator for Bernoulli talk-honour draws (`§4.3`, `§5.2`).
 pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
+
+/// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
+pub const TALK_EXTRACTOR_VERSION_V1: &str = "talk_rules_v1";
+
+/// Frozen canonical SHA-256 of the `talk_rules_v1` extraction rules table (`§5.2`, `§8.2`).
+pub const TALK_EXTRACTOR_RULES_DIGEST_V1: &str =
+    "e6a37efa7171683b6e5ca7208bf0c6a375e1d6ed1319f7ddf8ae2fe253b84757";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -293,8 +305,8 @@ impl Default for ScorerConfig {
                 "composite_drops".to_owned(),
                 "scaled".to_owned(),
             ],
-            talk_extractor_rules_digest: sha256_hex(b"talk_rules_v1"),
-            talk_extractor_version: "talk_rules_v1".to_owned(),
+            talk_extractor_rules_digest: TALK_EXTRACTOR_RULES_DIGEST_V1.to_owned(),
+            talk_extractor_version: TALK_EXTRACTOR_VERSION_V1.to_owned(),
             upkeep_cover_turns: 2,
         }
     }
@@ -819,4 +831,175 @@ pub struct StateScoreOutput {
     pub v_min: f64,
     /// Split-half Winner's curse upward-bias estimate (`§7.1`).
     pub winners_curse: WinnersCurseSummary,
+}
+
+/// Blinded projection of `scorer_freeze.json` read by `league-scorer score --freeze` (`§8.2` step 4).
+///
+/// Intentionally omits `deny_unknown_fields` so unblinded fields (such as `control_wording_arm`)
+/// remain invisible to `league-scorer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScorerFreezeBlindView {
+    /// Sorted manifest SHA-256 of `blind_inputs/*.json`.
+    pub blind_inputs_manifest_sha256: String,
+    /// Canonical SHA-256 of the frozen [`ScorerConfig`].
+    pub scorer_config_sha256: String,
+    /// Canonical SHA-256 over `crates/league-scorer/**`.
+    pub scorer_tree_sha256: String,
+}
+
+impl ScorerFreezeBlindView {
+    /// Validates all SHA-256 digest strings on the freeze view.
+    pub fn validate(&self) -> Result<(), ScorerError> {
+        if !is_valid_sha256_hex(&self.scorer_tree_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "scorer_tree_sha256",
+                value: self.scorer_tree_sha256.clone(),
+            });
+        }
+        if !is_valid_sha256_hex(&self.scorer_config_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "scorer_config_sha256",
+                value: self.scorer_config_sha256.clone(),
+            });
+        }
+        if !is_valid_sha256_hex(&self.blind_inputs_manifest_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "blind_inputs_manifest_sha256",
+                value: self.blind_inputs_manifest_sha256.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Computes `blind_inputs_manifest_sha256` from a filename-sorted map of `filename -> file_sha256` (`§8.2`).
+#[must_use]
+pub fn compute_blind_inputs_manifest_sha256_from_entries(
+    entries: &BTreeMap<String, String>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"merchant-league/blind-inputs-manifest/v1\n");
+    for (filename, file_sha256) in entries {
+        hasher.update(filename.as_bytes());
+        hasher.update(b":");
+        hasher.update(file_sha256.as_bytes());
+        hasher.update(b"\n");
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    encode_digest_hex(&digest)
+}
+
+/// Computes the sorted SHA-256 manifest digest over all `*.json` files in `blind_inputs_dir` (`§8.2`).
+pub fn compute_blind_inputs_manifest_sha256(
+    blind_inputs_dir: &Path,
+) -> Result<String, ScorerError> {
+    let read_dir = fs::read_dir(blind_inputs_dir).map_err(|e| {
+        ScorerError::NoBlindInputs(sanitize_error_text(
+            &format!("cannot read blind inputs directory: {e}"),
+            &[blind_inputs_dir],
+        ))
+    })?;
+    let mut entries = BTreeMap::new();
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read blind inputs entry: {e}"),
+                &[blind_inputs_dir],
+            ))
+        })?;
+        let ft = entry.file_type().map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("inspect blind inputs entry: {e}"),
+                &[blind_inputs_dir, &entry.path()],
+            ))
+        })?;
+        if ft.is_file() && entry.path().extension() == Some(OsStr::new("json")) {
+            let name = entry.file_name().into_string().map_err(|_| {
+                ScorerError::InvalidStateId("non-UTF-8 blind input filename".to_owned())
+            })?;
+            let bytes = fs::read(entry.path()).map_err(|e| {
+                ScorerError::Io(sanitize_error_text(
+                    &format!("read blind input bytes: {e}"),
+                    &[blind_inputs_dir, &entry.path()],
+                ))
+            })?;
+            entries.insert(name, sha256_hex(&bytes));
+        }
+    }
+    if entries.is_empty() {
+        return Err(ScorerError::NoBlindInputs(
+            "no *.json request files found in --blind-inputs".to_owned(),
+        ));
+    }
+    Ok(compute_blind_inputs_manifest_sha256_from_entries(&entries))
+}
+
+fn collect_scorer_tree_entries(
+    root: &Path,
+    dir: &Path,
+    rel_prefix: &str,
+    entries: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), ScorerError> {
+    let read_dir = fs::read_dir(dir).map_err(|e| {
+        ScorerError::Io(sanitize_error_text(
+            &format!("read scorer crate dir: {e}"),
+            &[root, dir],
+        ))
+    })?;
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("read scorer crate entry: {e}"),
+                &[root, dir],
+            ))
+        })?;
+        let name_os = entry.file_name();
+        let name = name_os.to_str().ok_or_else(|| {
+            ScorerError::Io("non-UTF-8 filename in scorer crate directory".to_owned())
+        })?;
+        let ft = entry.file_type().map_err(|e| {
+            ScorerError::Io(sanitize_error_text(
+                &format!("inspect scorer crate entry: {e}"),
+                &[root, &entry.path()],
+            ))
+        })?;
+        let rel = if rel_prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{rel_prefix}/{name}")
+        };
+        if ft.is_dir() {
+            if name == "target" || name == ".git" {
+                continue;
+            }
+            collect_scorer_tree_entries(root, &entry.path(), &rel, entries)?;
+        } else if ft.is_file() {
+            let bytes = fs::read(entry.path()).map_err(|e| {
+                ScorerError::Io(sanitize_error_text(
+                    &format!("read scorer crate file: {e}"),
+                    &[root, &entry.path()],
+                ))
+            })?;
+            entries.insert(rel, bytes);
+        }
+    }
+    Ok(())
+}
+
+/// Computes `scorer_tree_sha256` across `crate_dir` (`crates/league-scorer/**`), walking files
+/// in ascending POSIX relative-path order (excluding `target/` and `.git/`).
+pub fn compute_scorer_tree_sha256(crate_dir: &Path) -> Result<String, ScorerError> {
+    let mut entries = BTreeMap::new();
+    collect_scorer_tree_entries(crate_dir, crate_dir, "", &mut entries)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"merchant-league/scorer-tree/v1\n");
+    for (rel, bytes) in entries {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(b"\0");
+        hasher.update(&bytes);
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    Ok(encode_digest_hex(&digest))
 }

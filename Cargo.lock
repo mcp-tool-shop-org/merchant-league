@@ -1429,6 +1429,7 @@ dependencies = [
  "league-core",
  "league-error",
  "league-relay",
+ "league-scorer",
  "serde",
  "serde_json",
  "sha2",

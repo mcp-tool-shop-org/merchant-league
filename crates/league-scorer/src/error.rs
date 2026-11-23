@@ -104,6 +104,12 @@ pub enum ScorerError {
         /// Hash of loaded `ScorerConfig`.
         actual: String,
     },
+    /// `--freeze` `scorer_config_sha256` disagrees with loaded `ScorerConfig` (`exit 1`).
+    FreezeConfigMismatch(String),
+    /// `--freeze` `scorer_tree_sha256` disagrees with `crates/league-scorer/**` (`exit 1`).
+    FreezeTreeMismatch(String),
+    /// `--freeze` `blind_inputs_manifest_sha256` disagrees with `--blind-inputs` (`exit 1`).
+    FreezeManifestMismatch(String),
     /// Invalid `ExtractedTalkCommitment` in `BlindScoringRequest` (`exit 1`).
     InvalidTalkCommitment(String),
     /// Invalid scenario count `M` or `ScorerConfig` invariant (`exit 1`).
@@ -153,6 +159,9 @@ impl ScorerError {
             Self::CandidateIdMismatch { .. } => "CANDIDATE_ID_MISMATCH",
             Self::UnknownSubmissionField(_) => "UNKNOWN_SUBMISSION_FIELD",
             Self::ConfigHashMismatch { .. } => "CONFIG_HASH_MISMATCH",
+            Self::FreezeConfigMismatch(_) => "FREEZE_CONFIG_MISMATCH",
+            Self::FreezeTreeMismatch(_) => "FREEZE_TREE_MISMATCH",
+            Self::FreezeManifestMismatch(_) => "FREEZE_MANIFEST_MISMATCH",
             Self::InvalidTalkCommitment(_) => "INVALID_TALK_COMMITMENT",
             Self::InvalidScorerConfig(_) => "INVALID_SCORER_CONFIG",
             Self::Json(_) => "INVALID_JSON",
@@ -185,6 +194,9 @@ impl ScorerError {
             | Self::CandidateIdMismatch { .. }
             | Self::UnknownSubmissionField(_)
             | Self::ConfigHashMismatch { .. }
+            | Self::FreezeConfigMismatch(_)
+            | Self::FreezeTreeMismatch(_)
+            | Self::FreezeManifestMismatch(_)
             | Self::InvalidTalkCommitment(_)
             | Self::InvalidScorerConfig(_)
             | Self::Json(_)
@@ -238,6 +250,15 @@ impl ScorerError {
             Self::ConfigHashMismatch { .. } => {
                 "Pass the matching ScorerConfig JSON or rebuild requests against the frozen config."
             }
+            Self::FreezeConfigMismatch(_) => {
+                "Pass the ScorerConfig frozen inside scorer_freeze.json."
+            }
+            Self::FreezeTreeMismatch(_) => {
+                "Run the exact league-scorer revision whose tree digest is recorded in scorer_freeze.json."
+            }
+            Self::FreezeManifestMismatch(_) => {
+                "Pass the exact blind_inputs directory whose manifest digest is recorded in scorer_freeze.json."
+            }
             Self::InvalidTalkCommitment(_) => {
                 "Ensure commitment seats are distinct in-range peer seats matching offered_action."
             }
@@ -280,6 +301,9 @@ impl fmt::Display for ScorerError {
             | Self::NoInSpanCandidates(msg)
             | Self::DuplicateCandidateId(msg)
             | Self::UnknownSubmissionField(msg)
+            | Self::FreezeConfigMismatch(msg)
+            | Self::FreezeTreeMismatch(msg)
+            | Self::FreezeManifestMismatch(msg)
             | Self::InvalidTalkCommitment(msg)
             | Self::InvalidScorerConfig(msg)
             | Self::Json(msg)
