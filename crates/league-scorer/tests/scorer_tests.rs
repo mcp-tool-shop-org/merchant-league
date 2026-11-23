@@ -28,8 +28,8 @@ use league_scorer::{
     SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS, SYNTH_QUOTE_MIN_UNITS,
     SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScenarioRolloutOutcome, ScorerConfig,
     ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2,
-    TALK_EXTRACTOR_VERSION_V2, apply_talk_commitments, build_arm_independent_request,
-    candidate_id_for_submission, canonicalize_talk_commitments,
+    TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts, apply_talk_commitments,
+    build_arm_independent_request, candidate_id_for_submission, canonicalize_talk_commitments,
     compute_blind_inputs_manifest_sha256, compute_pre_act_pair_sha256_hex,
     compute_scorer_tree_sha256, decide_peer_turn, dedupe_candidates, draw_honour_commitment,
     draw_scenarios, execute_blind_request, generate_arm_independent_candidates,
@@ -390,6 +390,7 @@ fn request_and_config_validation_refuses_every_error_code() -> TestResult {
         scorer_seed: 99,
         state_id: "game1_day-01_seat-0".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     assert!(valid_req.validate(&cfg).is_ok());
 
@@ -445,6 +446,59 @@ fn request_and_config_validation_refuses_every_error_code() -> TestResult {
         .ok_or("expected INVALID_TALK_COMMITMENT")?;
     assert_eq!(err_talk.code(), "INVALID_TALK_COMMITMENT");
     assert_eq!(err_talk.exit_code(), EXIT_USER_ERROR);
+
+    let mut bad_counts = valid_req.clone();
+    bad_counts.talk_extraction_counts = TalkExtractionCounts {
+        negotiation: TalkSourceCounts {
+            ambiguous: 1,
+            matched: 1,
+            seen: 3,
+        },
+        talk: TalkSourceCounts::default(),
+        total: TalkSourceCounts {
+            ambiguous: 1,
+            matched: 1,
+            seen: 3,
+        },
+    };
+    assert_eq!(
+        bad_counts.validate(&cfg).err().map(|e| e.code()),
+        Some("INVALID_TALK_COMMITMENT")
+    );
+    let bad_sum = TalkExtractionCounts::from_sources(
+        TalkSourceCounts {
+            ambiguous: 1,
+            matched: u64::MAX,
+            seen: u64::MAX,
+        },
+        TalkSourceCounts::default(),
+    );
+    assert_eq!(
+        bad_sum.err().map(|e| e.code()),
+        Some("INVALID_TALK_COMMITMENT")
+    );
+    let mut mismatch_total = valid_req.clone();
+    mismatch_total.talk_extraction_counts = TalkExtractionCounts {
+        negotiation: TalkSourceCounts {
+            ambiguous: 1,
+            matched: 1,
+            seen: 2,
+        },
+        talk: TalkSourceCounts {
+            ambiguous: 0,
+            matched: 1,
+            seen: 1,
+        },
+        total: TalkSourceCounts {
+            ambiguous: 0,
+            matched: 2,
+            seen: 2,
+        },
+    };
+    assert_eq!(
+        mismatch_total.validate(&cfg).err().map(|e| e.code()),
+        Some("INVALID_TALK_COMMITMENT")
+    );
 
     let mut bad_cfg_hash = valid_req.clone();
     bad_cfg_hash.scorer_config_sha256 = good_hex.clone();
@@ -719,6 +773,7 @@ fn scoring_math_spans_flat_sets_drafts_ranks_split_half_and_prescreen() -> TestR
         scorer_seed: 1,
         state_id: "hand_math_1".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
 
     let out = score_outcomes(&req, &cfg, 5, &outcomes)?;
@@ -876,6 +931,7 @@ fn real_checkpoint_rollout_cli_determinism_and_engine_parity() -> TestResult {
         scorer_seed: 12345,
         state_id: "season8102_day-01_seat-0".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     verify_checkpoint_pair(&cas_save, &cas_seal, &req)?;
 
@@ -1122,6 +1178,7 @@ fn cli_refuses_bad_layouts_tampered_checkpoints_and_usage_errors() -> TestResult
         scorer_seed: 7,
         state_id: "state_8103".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     let blind_dir = tmp.path().join("blind");
     fs::create_dir_all(&blind_dir)?;
@@ -1552,6 +1609,7 @@ fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
         scorer_seed: 12,
         state_id: "edge_8108".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
 
     // Missing save file in verify_checkpoint_pair.
@@ -1676,6 +1734,7 @@ fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
         scorer_seed: 1,
         state_id: "seat5".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     assert_eq!(
         execute_blind_request(&req5, &cfg, &save5, &seal5)
@@ -1724,6 +1783,7 @@ fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
         scorer_seed: 1,
         state_id: "fake_ckpt".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     assert_eq!(
         execute_blind_request(&fake_req, &cfg, &fake_save, &fake_seal)
@@ -1813,6 +1873,7 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
         scorer_seed: 9,
         state_id: "state_8110".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
 
     let blind_dir = tmp.path().join("blind");
@@ -3023,6 +3084,7 @@ fn request_hardenings_and_end_to_end_determinism() -> TestResult {
             },
             proposer_seat: 1,
         }],
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     assert!(req.validate(&cfg).is_ok());
 
@@ -3895,6 +3957,7 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
         scorer_seed: 1,
         state_id: "dir_err".to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     let dir_as_file = tmp.path().join("dir_as_ckpt");
     fs::create_dir_all(&dir_as_file)?;

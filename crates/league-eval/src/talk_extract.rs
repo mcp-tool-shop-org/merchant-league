@@ -1,10 +1,11 @@
-//! Frozen deterministic talk-phase trade commitment extractor (`§4.3`, `§5.2`).
+//! Frozen deterministic closed-grammar talk-phase trade commitment extractor (`§4.3`, `§5.2`).
 //!
 //! Reads `to-seat/day-DD-act-<Guild>.negotiation.json` (`NegotiationInputs::whispers`) and
 //! `decisions/day-DD-talk-<Guild>.json` (`parse_eval_talk_reply`) under `TALK_EXTRACTOR_VERSION_V2`
 //! (`"talk_rules_v2"`) and extracts unambiguous `(proposer_seat, counterparty_seat, offered_action)`
 //! spot-offer commitments scaled to `league_seat_types::UNIT_SCALE` milli-units/milli-`CRED`,
-//! dropping any commitment retracted or contradicted in talk.
+//! failing closed per message whenever any character, number, or clause falls outside the closed
+//! grammar table.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -13,8 +14,8 @@ use std::path::Path;
 use league_core::{AssetId, MarketAction, OfferProposal, OfferSide, SeatObservation};
 use league_relay::NegotiationInputs;
 use league_scorer::{
-    ExtractedTalkCommitment, TALK_EXTRACTOR_VERSION_V2, canonicalize_talk_commitments, sha256_hex,
-    to_sorted_compact_json, validate_talk_commitment,
+    ExtractedTalkCommitment, TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts,
+    canonicalize_talk_commitments, sha256_hex, to_sorted_compact_json, validate_talk_commitment,
 };
 use league_seat_types::UNIT_SCALE;
 use serde::Serialize;
@@ -23,72 +24,58 @@ use crate::error::EvalError;
 use crate::records::{EvalDecisionRecord, EvalManifest};
 use crate::reply::parse_eval_talk_reply;
 
-/// Canonical frozen rule table for `talk_rules_v2` (`§4.3`, `§5.2`).
+/// Canonical frozen closed-grammar rule table for `talk_rules_v2` (`§4.3`, `§5.2`).
 ///
 /// Field names appear in strict alphabetical order so compact JSON serialization and
 /// `talk_extractor_rules_digest` remain deterministic. `talk_extractor_rules_digest` pins this
 /// rule table together with LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes
 /// (covering per-message allowed-ASCII validation, fail-closed ambiguity latching, clause
-/// splitting, precedence, good matching, negation scoping, and cross-source merging). Upstream
-/// reply parsing (`crates/league-eval/src/reply.rs`), decision records
+/// splitting, closed-grammar whole-clause templates, thousands comma grouping, and cross-source
+/// merging). Upstream reply parsing (`crates/league-eval/src/reply.rs`), decision records
 /// (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned
 /// by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TalkRulesV2Table {
+    /// Whether exact `1,000`-style comma thousands groups are parsed inside numeric tokens.
+    pub allow_thousands_comma_groups: bool,
     /// Complete set of allowed ASCII bytes after `quote_normalizations`; any message holding another ASCII byte or any non-ASCII char fails closed as ambiguous for its pair.
     pub allowed_ascii_chars: &'static str,
-    /// Cues indicating uncertainty, hedging, or questions (discard clause).
-    pub ambiguity_cues: &'static [&'static str],
-    /// Tokens designating a buy offer (`OfferSide::Buy`).
+    /// Lowercase tokens matching `<SIDE>` as `OfferSide::Buy`.
     pub buy_tokens: &'static [&'static str],
     /// ASCII clause delimiter characters.
     pub clause_break_chars: &'static [&'static str],
     /// Whether `": "` breaks clauses (keeping compact `raw:0` intact).
     pub colon_space_breaks_clause: bool,
-    /// Phrases/tokens signaling an explicit commitment to post an offer.
-    pub commitment_cues: &'static [&'static str],
+    /// Closed list of first-person spot-offer commitment templates matching complete clauses.
+    pub commitment_templates: &'static [&'static [&'static str]],
     /// Whether conflicting active offers for the same `(pair, asset)` latch to contradicted.
     pub contradiction_latches_pair_asset: bool,
-    /// Optional unit suffixes following price figures (`CRED`).
+    /// Optional trailing currency unit tokens consumed by `<CRED?>`.
     pub cred_tokens: &'static [&'static str],
     /// Whether `.` followed immediately by an ASCII digit stays inside the current clause.
     pub decimal_dot_keeps_clause: bool,
-    /// Require exactly one positive whole-number amount before the price cue.
-    pub exactly_one_amount_before_price: bool,
-    /// Require exactly one asset specification before the price cue.
-    pub exactly_one_good_before_price: bool,
-    /// Require exactly one positive whole-number price after the price cue.
-    pub exactly_one_price_after_cue: bool,
-    /// Require exactly one price cue per commitment clause.
-    pub exactly_one_price_cue: bool,
-    /// Explicit cancellation cues that retract any prior matching commitment cleanly.
-    pub explicit_retraction_cues: &'static [&'static str],
-    /// Negation cues that latch the pair as ambiguous when paired with a trade verb without matching a parsed refusal.
-    pub fail_closed_negation_cues: &'static [&'static str],
-    /// Negation cues that trigger retraction only when governing a trade verb nearby.
-    pub negated_offer_cues: &'static [&'static str],
-    /// Maximum token distance after a negated cue within which a trade verb triggers retraction.
-    pub negated_offer_max_gap_tokens: usize,
-    /// Trade verbs governed by `negated_offer_cues` and `fail_closed_negation_cues`.
-    pub negated_offer_verbs: &'static [&'static str],
+    /// Negation prefixes expanded by `<NEG>` inside `retraction_templates`.
+    pub negation_prefixes: &'static [&'static [&'static str]],
+    /// Closed list of neutral non-commitment templates (plus empty clauses) that neither propose nor retract.
+    pub neutral_templates: &'static [&'static [&'static str]],
     /// Fixed-point unit multiplier (`league_seat_types::UNIT_SCALE = 1_000`).
     pub number_unit_scale: i64,
-    /// Prepositions/symbols separating order amount/good from limit unit price.
+    /// Prepositions/symbols matching `<PRICE_CUE>`.
     pub price_cues: &'static [&'static str],
-    /// Typographic apostrophe/quote `(from, to)` normalizations applied before whole-message validation.
+    /// Typographic apostrophe `(from, to)` normalizations applied before whole-message validation.
     pub quote_normalizations: &'static [(&'static str, &'static str)],
     /// Prefixes identifying `AssetId::Raw(i)`.
     pub raw_prefixes: &'static [&'static str],
     /// Prefixes identifying `AssetId::Refined(i)`.
     pub refined_prefixes: &'static [&'static str],
-    /// Tokens designating a sell offer (`OfferSide::Sell`).
+    /// Optional single leading token stripped before matching `retraction_templates`.
+    pub retraction_optional_lead_tokens: &'static [&'static str],
+    /// Closed list of explicit retraction and first-person refusal templates matching complete clauses.
+    pub retraction_templates: &'static [&'static [&'static str]],
+    /// Lowercase tokens matching `<SIDE>` as `OfferSide::Sell`.
     pub sell_tokens: &'static [&'static str],
     /// Non-alphanumeric characters kept inside compound tokens.
     pub token_join_chars: &'static [&'static str],
-    /// Leading/trailing punctuation characters trimmed from finished tokens.
-    pub token_trim_chars: &'static [&'static str],
-    /// Conditional or out-of-scope settlement cues (discard clause rather than guessing).
-    pub unsupported_condition_cues: &'static [&'static str],
     /// Version identifier pinned in `ScorerConfig::talk_extractor_version`.
     pub version: &'static str,
 }
@@ -98,82 +85,159 @@ impl TalkRulesV2Table {
     #[must_use]
     pub const fn frozen() -> Self {
         Self {
-            allowed_ascii_chars: " \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
-            ambiguity_cues: &[
-                "?",
-                "maybe",
-                "might",
-                "perhaps",
-                "possibly",
-                "probably",
-                "could",
-                "would consider",
-                "consider",
-                "thinking",
-                "uncertain",
-                "not sure",
-                "unsure",
-                "tentative",
-                "roughly",
-                "around",
-                "about",
-                "approx",
-                "approximately",
-                "either",
-                "or",
-                "whether",
-                "depends",
-            ],
-            buy_tokens: &["buy", "buying", "bid"],
-            clause_break_chars: &["\n", "\r", ";", "!", "?", "."],
+            allow_thousands_comma_groups: true,
+            allowed_ascii_chars: " \t\n\r!',.:;@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
+            buy_tokens: &["buy"],
+            clause_break_chars: &["\n", "\r", ";", "!", "."],
             colon_space_breaks_clause: true,
-            commitment_cues: &[
-                "will sell",
-                "will buy",
-                "i'll sell",
-                "i'll buy",
-                "we will sell",
-                "we will buy",
-                "i commit to",
-                "commit to",
-                "agree to",
-                "offer to",
-                "post sell",
-                "post buy",
-                "i offer",
-                "offer",
-                "selling",
-                "buying",
-                "sell",
-                "buy",
+            commitment_templates: &[
+                &[
+                    "i",
+                    "will",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i'll",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "will",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we'll",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "commit",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "commit",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "offer",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "offer",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "agree",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "agree",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "will",
+                    "post",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i'll",
+                    "post",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
             ],
             contradiction_latches_pair_asset: true,
             cred_tokens: &["cred", "creds"],
             decimal_dot_keeps_clause: true,
-            exactly_one_amount_before_price: true,
-            exactly_one_good_before_price: true,
-            exactly_one_price_after_cue: true,
-            exactly_one_price_cue: true,
-            explicit_retraction_cues: &[
-                "cancel",
-                "retract",
-                "withdraw",
-                "never mind",
-                "nevermind",
-                "call off",
-                "no deal",
-                "rescind",
-                "walk back",
+            negation_prefixes: &[
+                &["won't"],
+                &["will", "not"],
+                &["cannot"],
+                &["can't"],
+                &["don't"],
+                &["do", "not"],
             ],
-            fail_closed_negation_cues: &[
-                "not", "never", "no", "wont", "dont", "cant", "cannot", "nor", "won't", "will not",
-                "can't", "don't", "do not",
-            ],
-            negated_offer_cues: &["won't", "will not", "cannot", "can't", "don't", "do not"],
-            negated_offer_max_gap_tokens: 2,
-            negated_offer_verbs: &[
-                "sell", "selling", "buy", "buying", "bid", "offer", "post", "commit", "trade",
-                "deal",
+            neutral_templates: &[
+                &["hi"],
+                &["hello"],
+                &["greetings"],
+                &["thanks"],
+                &["thank", "you"],
+                &["ok"],
+                &["okay"],
+                &["noted"],
+                &["understood"],
             ],
             number_unit_scale: UNIT_SCALE,
             price_cues: &["@", "at", "for"],
@@ -182,22 +246,164 @@ impl TalkRulesV2Table {
                 ("\u{2019}", "'"),
                 ("\u{02bc}", "'"),
                 ("\u{ff07}", "'"),
-                ("\u{201c}", "\""),
-                ("\u{201d}", "\""),
-                ("\u{ff02}", "\""),
             ],
             raw_prefixes: &["raw"],
             refined_prefixes: &["refined", "ref"],
-            sell_tokens: &["sell", "selling", "ask"],
-            token_join_chars: &["_", "'", ":", "."],
-            token_trim_chars: &[".", ":", "_"],
-            unsupported_condition_cues: &[
-                "if", "unless", "when", "until", "hybrid", "domain", "swap", "check", "escrow",
-                "pledge",
+            retraction_optional_lead_tokens: &["actually"],
+            retraction_templates: &[
+                &["cancel"],
+                &["cancel", "that"],
+                &["cancel", "all"],
+                &["cancel", "all", "offers"],
+                &["cancel", "my", "offer"],
+                &["cancel", "that", "no", "deal"],
+                &["i", "cancel"],
+                &["we", "cancel"],
+                &["i", "cancel", "that"],
+                &["i", "cancel", "all", "offers"],
+                &["retract"],
+                &["retract", "that"],
+                &["retract", "all"],
+                &["retract", "all", "offers"],
+                &["retract", "my", "offer"],
+                &["i", "retract"],
+                &["i", "retract", "that"],
+                &["i", "retract", "my", "offer"],
+                &["we", "retract"],
+                &["withdraw"],
+                &["withdraw", "that"],
+                &["withdraw", "my", "offer"],
+                &["i", "withdraw"],
+                &["we", "withdraw"],
+                &["never", "mind"],
+                &["nevermind"],
+                &["call", "off"],
+                &["call", "that", "off"],
+                &["no", "deal"],
+                &["rescind"],
+                &["walk", "back"],
+                &["cancel", "<GOOD>"],
+                &["cancel", "on", "<GOOD>"],
+                &["cancel", "for", "<GOOD>"],
+                &["cancel", "my", "offer", "on", "<GOOD>"],
+                &["i", "cancel", "<GOOD>"],
+                &["i", "cancel", "my", "offer", "on", "<GOOD>"],
+                &["retract", "<GOOD>"],
+                &["retract", "on", "<GOOD>"],
+                &["retract", "for", "<GOOD>"],
+                &["retract", "my", "offer", "on", "<GOOD>"],
+                &["i", "retract", "<GOOD>"],
+                &["i", "retract", "my", "offer", "on", "<GOOD>"],
+                &["we", "retract", "<GOOD>"],
+                &["withdraw", "<GOOD>"],
+                &["withdraw", "my", "offer", "on", "<GOOD>"],
+                &["i", "withdraw", "<GOOD>"],
+                &["i", "withdraw", "my", "offer", "on", "<GOOD>"],
+                &["no", "deal", "on", "<GOOD>"],
+                &["no", "deal", "for", "<GOOD>"],
+                &["rescind", "<GOOD>"],
+                &["walk", "back", "<GOOD>"],
+                &[
+                    "i",
+                    "<NEG>",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "<NEG>",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "<NEG>",
+                    "commit",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "<NEG>",
+                    "commit",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "i",
+                    "<NEG>",
+                    "offer",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &[
+                    "we",
+                    "<NEG>",
+                    "offer",
+                    "to",
+                    "<SIDE>",
+                    "<AMOUNT>",
+                    "<GOOD>",
+                    "<PRICE_CUE>",
+                    "<PRICE>",
+                    "<CRED?>",
+                ],
+                &["i", "<NEG>", "<SIDE>", "<GOOD>"],
+                &["we", "<NEG>", "<SIDE>", "<GOOD>"],
+                &["i", "<NEG>", "commit", "to", "<SIDE>", "<GOOD>"],
+                &["we", "<NEG>", "commit", "to", "<SIDE>", "<GOOD>"],
+                &["i", "<NEG>", "offer", "to", "<SIDE>", "<GOOD>"],
+                &["we", "<NEG>", "offer", "to", "<SIDE>", "<GOOD>"],
+                &["i", "<NEG>", "trade", "<GOOD>"],
+                &["we", "<NEG>", "trade", "<GOOD>"],
+                &["i", "<NEG>", "deal", "on", "<GOOD>"],
+                &["we", "<NEG>", "deal", "on", "<GOOD>"],
+                &["i", "<NEG>", "<SIDE>"],
+                &["we", "<NEG>", "<SIDE>"],
+                &["i", "<NEG>", "commit"],
+                &["we", "<NEG>", "commit"],
+                &["i", "<NEG>", "trade"],
+                &["we", "<NEG>", "trade"],
+                &["i", "<NEG>", "deal"],
+                &["we", "<NEG>", "deal"],
             ],
+            sell_tokens: &["sell"],
+            token_join_chars: &["_", "'", ":", "."],
             version: TALK_EXTRACTOR_VERSION_V2,
         }
     }
+}
+
+/// Result returned by [`extract_talk_commitments_with_counts_for_state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TalkExtractionResult {
+    /// Canonical extracted peer trade commitments for the state.
+    pub commitments: Vec<ExtractedTalkCommitment>,
+    /// Per-source and total message classification counts.
+    pub counts: TalkExtractionCounts,
 }
 
 fn normalize_crlf_to_lf(source_bytes: &[u8]) -> Vec<u8> {
@@ -326,74 +532,6 @@ impl SourcePairOutcome {
     }
 }
 
-fn is_word_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'\''
-}
-
-fn contains_cue(lower: &str, cue: &str) -> bool {
-    if cue == "?" || cue == "@" {
-        return lower.contains(cue);
-    }
-    let hay = lower.as_bytes();
-    let mut start_from = 0_usize;
-    while let Some(rel) = lower[start_from..].find(cue) {
-        let abs_start = start_from + rel;
-        let abs_end = abs_start + cue.len();
-        let left_ok = abs_start == 0 || !is_word_byte(hay[abs_start - 1]);
-        let right_ok = abs_end == hay.len() || !is_word_byte(hay[abs_end]);
-        if left_ok && right_ok {
-            return true;
-        }
-        start_from = abs_start + 1;
-    }
-    false
-}
-
-fn cue_match_end_positions(tokens: &[String], cue: &str) -> Vec<usize> {
-    let cue_words: Vec<&str> = cue.split_ascii_whitespace().collect();
-    if cue_words.is_empty() || cue_words.len() > tokens.len() {
-        return Vec::new();
-    }
-    let max_start = tokens.len() - cue_words.len();
-    let mut ends = Vec::new();
-    for start in 0..=max_start {
-        if cue_words
-            .iter()
-            .enumerate()
-            .all(|(off, w)| tokens[start + off] == *w)
-        {
-            ends.push(start + cue_words.len());
-        }
-    }
-    ends
-}
-
-fn has_negated_offer_retraction(tokens: &[String], rules: &TalkRulesV2Table) -> bool {
-    for &cue in rules.negated_offer_cues {
-        for after in cue_match_end_positions(tokens, cue) {
-            let look_end = (after + rules.negated_offer_max_gap_tokens).min(tokens.len());
-            if tokens[after..look_end]
-                .iter()
-                .any(|tok| rules.negated_offer_verbs.contains(&tok.as_str()))
-            {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn has_any_negation_with_trade_verb(tokens: &[String], rules: &TalkRulesV2Table) -> bool {
-    let has_verb = tokens
-        .iter()
-        .any(|tok| rules.negated_offer_verbs.contains(&tok.as_str()));
-    has_verb
-        && rules
-            .fail_closed_negation_cues
-            .iter()
-            .any(|cue| !cue_match_end_positions(tokens, cue).is_empty())
-}
-
 fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
     let bytes = body.as_bytes();
     let mut out = Vec::new();
@@ -419,8 +557,7 @@ fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
             is_break = true;
         }
         if is_break {
-            let end = if b == b'?' { i + 1 } else { i };
-            let slice = body[start..end].trim();
+            let slice = body[start..i].trim();
             if !slice.is_empty() {
                 out.push(slice);
             }
@@ -435,17 +572,11 @@ fn split_clauses<'a>(body: &'a str, rules: &TalkRulesV2Table) -> Vec<&'a str> {
     out
 }
 
-fn char_in_rule_list(ch: char, list: &[&str]) -> bool {
-    list.iter()
-        .any(|s| s.starts_with(ch) && s.len() == ch.len_utf8())
-}
-
 fn is_join_char(ch: char, rules: &TalkRulesV2Table) -> bool {
-    char_in_rule_list(ch, rules.token_join_chars)
-}
-
-fn is_trim_char(ch: char, rules: &TalkRulesV2Table) -> bool {
-    char_in_rule_list(ch, rules.token_trim_chars)
+    rules
+        .token_join_chars
+        .iter()
+        .any(|s| s.starts_with(ch) && s.len() == ch.len_utf8())
 }
 
 fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
@@ -460,7 +591,8 @@ fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
             continue;
         }
         let ch = char::from(b);
-        let is_tok = b.is_ascii_alphanumeric() || is_join_char(ch, rules);
+        let starts_comma_num = b == b',' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit);
+        let is_tok = b.is_ascii_alphanumeric() || is_join_char(ch, rules) || starts_comma_num;
         if !is_tok {
             i += 1;
             continue;
@@ -471,7 +603,8 @@ fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
             if c == b',' {
                 let prev_digit = !buf.is_empty() && buf.as_bytes()[buf.len() - 1].is_ascii_digit();
                 let next_digit = bytes.get(i + 1).is_some_and(u8::is_ascii_digit);
-                if prev_digit && next_digit {
+                if prev_digit || next_digit {
+                    buf.push(',');
                     i += 1;
                     continue;
                 }
@@ -485,148 +618,319 @@ fn tokenize_clause(lower: &str, rules: &TalkRulesV2Table) -> Vec<String> {
                 break;
             }
         }
-        let trimmed = buf.trim_matches(|c| is_trim_char(c, rules));
-        if !trimmed.is_empty() {
-            tokens.push(trimmed.to_owned());
+        if !buf.is_empty() {
+            tokens.push(buf);
         }
     }
     tokens
 }
 
-enum ParsedScaledNum {
-    NotNumeric,
-    InvalidOrOverflow,
-    Valid(i64),
-}
-
-fn parse_pos_scaled_units(tok: &str, scale: i64) -> ParsedScaledNum {
-    let cleaned = tok.replace('_', "");
-    if cleaned.is_empty() {
-        return ParsedScaledNum::NotNumeric;
+fn parse_pos_scaled_units(tok: &str, rules: &TalkRulesV2Table) -> Option<i64> {
+    if tok.is_empty() {
+        return None;
     }
-    if cleaned.contains('.') {
-        let without_dots = cleaned.replace('.', "");
-        if !without_dots.is_empty() && without_dots.bytes().all(|b| b.is_ascii_digit()) {
-            return ParsedScaledNum::InvalidOrOverflow;
+    let digits = if tok.contains(',') {
+        if !rules.allow_thousands_comma_groups {
+            return None;
         }
-        return ParsedScaledNum::NotNumeric;
-    }
-    if !cleaned.bytes().all(|b| b.is_ascii_digit()) {
-        return ParsedScaledNum::NotNumeric;
-    }
-    let Ok(val) = cleaned.parse::<i64>() else {
-        return ParsedScaledNum::InvalidOrOverflow;
+        let mut groups = tok.split(',');
+        let first = groups.next()?;
+        if first.is_empty()
+            || first.len() > 3
+            || first.starts_with('0')
+            || !first.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        let mut combined = String::from(first);
+        let mut group_count = 1_usize;
+        for group in groups {
+            if group.len() != 3 || !group.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            combined.push_str(group);
+            group_count += 1;
+        }
+        if group_count < 2 {
+            return None;
+        }
+        combined
+    } else {
+        if !tok.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        tok.to_owned()
     };
+
+    let val = digits.parse::<i64>().ok()?;
     if val <= 0 {
-        return ParsedScaledNum::InvalidOrOverflow;
+        return None;
     }
-    match val.checked_mul(scale) {
-        Some(scaled) if scaled > 0 => ParsedScaledNum::Valid(scaled),
-        _ => ParsedScaledNum::InvalidOrOverflow,
-    }
+    val.checked_mul(rules.number_unit_scale)
 }
 
-fn resolve_guild_seat_ref(
-    tok: &str,
-    seat_guilds: &[String],
-    rules: &TalkRulesV2Table,
-) -> Option<u8> {
-    let stripped = tok.trim_matches(|c| is_trim_char(c, rules));
+fn resolve_guild_seat_ref(tok: &str, seat_guilds: &[String]) -> Option<u8> {
     for (idx, guild) in seat_guilds.iter().enumerate() {
-        if stripped == guild.to_ascii_lowercase() {
+        if tok == guild.to_ascii_lowercase() {
             return u8::try_from(idx).ok();
         }
     }
     None
 }
 
-fn resolve_seat_ref(tok: &str, seat_guilds: &[String], rules: &TalkRulesV2Table) -> Option<u8> {
-    let stripped = tok.trim_matches(|c| is_trim_char(c, rules));
-    if stripped.bytes().all(|b| b.is_ascii_digit())
-        && !stripped.is_empty()
-        && let Ok(idx) = stripped.parse::<usize>()
+fn resolve_seat_ref(tok: &str, seat_guilds: &[String]) -> Option<u8> {
+    if !tok.is_empty()
+        && tok.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(idx) = tok.parse::<usize>()
         && idx < seat_guilds.len()
     {
         return u8::try_from(idx).ok();
     }
-    resolve_guild_seat_ref(tok, seat_guilds, rules)
+    resolve_guild_seat_ref(tok, seat_guilds)
 }
 
-fn parse_good_span(
+fn strip_single_compound_sep(rest: &str) -> &str {
+    rest.strip_prefix(':')
+        .or_else(|| rest.strip_prefix('_'))
+        .unwrap_or(rest)
+}
+
+fn parse_good_at(
     tokens: &[String],
+    pos: usize,
     rules: &TalkRulesV2Table,
     seat_guilds: &[String],
-) -> Vec<(AssetId, usize, usize)> {
-    let mut matches = Vec::new();
-    let mut i = 0_usize;
-    while i < tokens.len() {
-        let t = tokens[i].as_str();
-        let mut compound_hit = None;
-        for &pref in rules.raw_prefixes {
-            if let Some(rest) = t.strip_prefix(pref)
-                && !rest.is_empty()
-                && let Some(seat) = resolve_seat_ref(rest, seat_guilds, rules)
+) -> Option<(AssetId, usize)> {
+    let t = tokens.get(pos)?.as_str();
+    for &pref in rules.raw_prefixes {
+        if let Some(rest) = t.strip_prefix(pref) {
+            let trimmed = strip_single_compound_sep(rest);
+            if !trimmed.is_empty()
+                && let Some(seat) = resolve_seat_ref(trimmed, seat_guilds)
             {
-                compound_hit = Some(AssetId::Raw(seat));
-                break;
+                return Some((AssetId::Raw(seat), 1));
             }
         }
-        if compound_hit.is_none() {
-            for &pref in rules.refined_prefixes {
-                if let Some(rest) = t.strip_prefix(pref)
-                    && !rest.is_empty()
-                    && let Some(seat) = resolve_seat_ref(rest, seat_guilds, rules)
-                {
-                    compound_hit = Some(AssetId::Refined(seat));
-                    break;
-                }
-            }
-        }
-        if let Some(asset) = compound_hit {
-            matches.push((asset, i, i + 1));
-            i += 1;
-            continue;
-        }
-
-        if i + 1 < tokens.len() {
-            let next = tokens[i + 1].as_str();
-            if rules.raw_prefixes.contains(&t)
-                && let Some(seat) = resolve_seat_ref(next, seat_guilds, rules)
-            {
-                matches.push((AssetId::Raw(seat), i, i + 2));
-                i += 2;
-                continue;
-            }
-            if rules.refined_prefixes.contains(&t)
-                && let Some(seat) = resolve_seat_ref(next, seat_guilds, rules)
-            {
-                matches.push((AssetId::Refined(seat), i, i + 2));
-                i += 2;
-                continue;
-            }
-            // Only named guild tokens match `guild_then_prefix` (e.g. `Foundry raw`) so bare
-            // whole-unit amounts like `2 raw 1` or `0 raw 1` never capture the quantity as a seat.
-            if let Some(seat) = resolve_guild_seat_ref(t, seat_guilds, rules) {
-                if rules.raw_prefixes.contains(&next) {
-                    matches.push((AssetId::Raw(seat), i, i + 2));
-                    i += 2;
-                    continue;
-                }
-                if rules.refined_prefixes.contains(&next) {
-                    matches.push((AssetId::Refined(seat), i, i + 2));
-                    i += 2;
-                    continue;
-                }
-            }
-        }
-        i += 1;
     }
-    matches
+    for &pref in rules.refined_prefixes {
+        if let Some(rest) = t.strip_prefix(pref) {
+            let trimmed = strip_single_compound_sep(rest);
+            if !trimmed.is_empty()
+                && let Some(seat) = resolve_seat_ref(trimmed, seat_guilds)
+            {
+                return Some((AssetId::Refined(seat), 1));
+            }
+        }
+    }
+
+    let next = tokens.get(pos + 1)?.as_str();
+    if rules.raw_prefixes.contains(&t)
+        && let Some(seat) = resolve_seat_ref(next, seat_guilds)
+    {
+        return Some((AssetId::Raw(seat), 2));
+    }
+    if rules.refined_prefixes.contains(&t)
+        && let Some(seat) = resolve_seat_ref(next, seat_guilds)
+    {
+        return Some((AssetId::Refined(seat), 2));
+    }
+    // Only named guild tokens match `guild_then_prefix` (e.g. `Foundry raw`) so bare
+    // whole-unit amounts like `2 raw 1` never capture the quantity as a seat.
+    if let Some(seat) = resolve_guild_seat_ref(t, seat_guilds) {
+        if rules.raw_prefixes.contains(&next) {
+            return Some((AssetId::Raw(seat), 2));
+        }
+        if rules.refined_prefixes.contains(&next) {
+            return Some((AssetId::Refined(seat), 2));
+        }
+    }
+    None
 }
 
-enum ClauseEffect {
-    Ignore,
-    AmbiguousMessage,
+#[derive(Debug, Clone, Default)]
+struct TemplateCapture {
+    side: Option<OfferSide>,
+    amount: Option<i64>,
+    good: Option<AssetId>,
+    price: Option<i64>,
+}
+
+fn match_template_from(
+    tokens: &[String],
+    t_idx: usize,
+    pattern: &[&str],
+    p_idx: usize,
+    rules: &TalkRulesV2Table,
+    seat_guilds: &[String],
+    cap: TemplateCapture,
+) -> Option<TemplateCapture> {
+    if p_idx == pattern.len() {
+        return (t_idx == tokens.len()).then_some(cap);
+    }
+    let pat = pattern[p_idx];
+    if pat == "<CRED?>" {
+        if t_idx < tokens.len()
+            && rules.cred_tokens.contains(&tokens[t_idx].as_str())
+            && let Some(matched) = match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                cap.clone(),
+            )
+        {
+            return Some(matched);
+        }
+        return match_template_from(tokens, t_idx, pattern, p_idx + 1, rules, seat_guilds, cap);
+    }
+    if t_idx >= tokens.len() {
+        return None;
+    }
+
+    match pat {
+        "<SIDE>" => {
+            let tok = tokens[t_idx].as_str();
+            let side = if rules.sell_tokens.contains(&tok) {
+                OfferSide::Sell
+            } else if rules.buy_tokens.contains(&tok) {
+                OfferSide::Buy
+            } else {
+                return None;
+            };
+            let mut next_cap = cap;
+            next_cap.side = Some(side);
+            match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                next_cap,
+            )
+        }
+        "<AMOUNT>" => {
+            let val = parse_pos_scaled_units(&tokens[t_idx], rules)?;
+            let mut next_cap = cap;
+            next_cap.amount = Some(val);
+            match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                next_cap,
+            )
+        }
+        "<PRICE>" => {
+            let val = parse_pos_scaled_units(&tokens[t_idx], rules)?;
+            let mut next_cap = cap;
+            next_cap.price = Some(val);
+            match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                next_cap,
+            )
+        }
+        "<PRICE_CUE>" => {
+            if !rules.price_cues.contains(&tokens[t_idx].as_str()) {
+                return None;
+            }
+            match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                cap,
+            )
+        }
+        "<GOOD>" => {
+            let (good, used) = parse_good_at(tokens, t_idx, rules, seat_guilds)?;
+            let mut next_cap = cap;
+            next_cap.good = Some(good);
+            match_template_from(
+                tokens,
+                t_idx + used,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                next_cap,
+            )
+        }
+        "<NEG>" => {
+            for &neg in rules.negation_prefixes {
+                if tokens[t_idx..].len() >= neg.len()
+                    && neg
+                        .iter()
+                        .enumerate()
+                        .all(|(off, w)| tokens[t_idx + off] == *w)
+                    && let Some(matched) = match_template_from(
+                        tokens,
+                        t_idx + neg.len(),
+                        pattern,
+                        p_idx + 1,
+                        rules,
+                        seat_guilds,
+                        cap.clone(),
+                    )
+                {
+                    return Some(matched);
+                }
+            }
+            None
+        }
+        literal => {
+            if tokens[t_idx] != literal {
+                return None;
+            }
+            match_template_from(
+                tokens,
+                t_idx + 1,
+                pattern,
+                p_idx + 1,
+                rules,
+                seat_guilds,
+                cap,
+            )
+        }
+    }
+}
+
+fn match_any_template(
+    tokens: &[String],
+    templates: &[&[&str]],
+    rules: &TalkRulesV2Table,
+    seat_guilds: &[String],
+) -> Option<TemplateCapture> {
+    for &template in templates {
+        if let Some(cap) = match_template_from(
+            tokens,
+            0,
+            template,
+            0,
+            rules,
+            seat_guilds,
+            TemplateCapture::default(),
+        ) {
+            return Some(cap);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+enum MatchedClause {
+    Neutral,
     Retract(Option<AssetId>),
     Offer(OfferProposal),
 }
@@ -650,133 +954,43 @@ fn interpret_clause(
     clause: &str,
     rules: &TalkRulesV2Table,
     seat_guilds: &[String],
-) -> ClauseEffect {
+) -> Option<MatchedClause> {
     let lower = clause.to_ascii_lowercase();
     let tokens = tokenize_clause(&lower, rules);
     if tokens.is_empty() {
-        return ClauseEffect::Ignore;
+        return Some(MatchedClause::Neutral);
     }
 
-    let is_explicit_retract = rules
-        .explicit_retraction_cues
-        .iter()
-        .any(|cue| contains_cue(&lower, cue));
-    let is_negated_retract = has_negated_offer_retraction(&tokens, rules);
-    if is_explicit_retract || is_negated_retract {
-        let goods = parse_good_span(&tokens, rules, seat_guilds);
-        let targeted = if goods.len() == 1 {
-            Some(goods[0].0)
-        } else {
-            None
+    if match_any_template(&tokens, rules.neutral_templates, rules, seat_guilds).is_some() {
+        return Some(MatchedClause::Neutral);
+    }
+
+    if let Some(cap) = match_any_template(&tokens, rules.retraction_templates, rules, seat_guilds) {
+        return Some(MatchedClause::Retract(cap.good));
+    }
+    if tokens.len() > 1
+        && rules
+            .retraction_optional_lead_tokens
+            .contains(&tokens[0].as_str())
+        && let Some(cap) =
+            match_any_template(&tokens[1..], rules.retraction_templates, rules, seat_guilds)
+    {
+        return Some(MatchedClause::Retract(cap.good));
+    }
+
+    if let Some(cap) = match_any_template(&tokens, rules.commitment_templates, rules, seat_guilds) {
+        let proposal = OfferProposal {
+            side: cap.side?,
+            good: cap.good?,
+            amount: cap.amount?,
+            price_per_unit_cred: cap.price?,
+            domain_id: None,
+            is_hybrid: false,
         };
-        return ClauseEffect::Retract(targeted);
+        return Some(MatchedClause::Offer(proposal));
     }
 
-    if has_any_negation_with_trade_verb(&tokens, rules) {
-        return ClauseEffect::AmbiguousMessage;
-    }
-
-    if rules
-        .ambiguity_cues
-        .iter()
-        .any(|cue| contains_cue(&lower, cue))
-    {
-        return ClauseEffect::Ignore;
-    }
-    if rules
-        .unsupported_condition_cues
-        .iter()
-        .any(|cue| contains_cue(&lower, cue))
-    {
-        return ClauseEffect::Ignore;
-    }
-
-    let has_commit_cue = rules
-        .commitment_cues
-        .iter()
-        .any(|cue| contains_cue(&lower, cue));
-    if !has_commit_cue {
-        return ClauseEffect::Ignore;
-    }
-
-    let mut has_sell = false;
-    let mut has_buy = false;
-    let mut price_cue_positions = Vec::new();
-    for (idx, tok) in tokens.iter().enumerate() {
-        let t = tok.as_str();
-        if rules.sell_tokens.contains(&t) {
-            has_sell = true;
-        }
-        if rules.buy_tokens.contains(&t) {
-            has_buy = true;
-        }
-        if rules.price_cues.contains(&t) {
-            price_cue_positions.push(idx);
-        }
-    }
-    let side = match (has_sell, has_buy) {
-        (true, false) => OfferSide::Sell,
-        (false, true) => OfferSide::Buy,
-        _ => return ClauseEffect::Ignore,
-    };
-
-    if price_cue_positions.is_empty()
-        || (rules.exactly_one_price_cue && price_cue_positions.len() != 1)
-    {
-        return ClauseEffect::Ignore;
-    }
-    let price_idx = price_cue_positions[0];
-
-    let goods = parse_good_span(&tokens, rules, seat_guilds);
-    if goods.is_empty() || (rules.exactly_one_good_before_price && goods.len() != 1) {
-        return ClauseEffect::Ignore;
-    }
-    let (good, good_start, good_end) = goods[0];
-    if good_end > price_idx {
-        return ClauseEffect::Ignore;
-    }
-
-    let mut amounts = Vec::new();
-    for (idx, tok) in tokens[..price_idx].iter().enumerate() {
-        if idx >= good_start && idx < good_end {
-            continue;
-        }
-        match parse_pos_scaled_units(tok, rules.number_unit_scale) {
-            ParsedScaledNum::Valid(val) => amounts.push(val),
-            ParsedScaledNum::InvalidOrOverflow => return ClauseEffect::Ignore,
-            ParsedScaledNum::NotNumeric => {}
-        }
-    }
-    if amounts.is_empty() || (rules.exactly_one_amount_before_price && amounts.len() != 1) {
-        return ClauseEffect::Ignore;
-    }
-    let amount = amounts[0];
-
-    let mut prices = Vec::new();
-    for tok in &tokens[(price_idx + 1)..] {
-        if rules.cred_tokens.contains(&tok.as_str()) {
-            continue;
-        }
-        match parse_pos_scaled_units(tok, rules.number_unit_scale) {
-            ParsedScaledNum::Valid(val) => prices.push(val),
-            ParsedScaledNum::InvalidOrOverflow | ParsedScaledNum::NotNumeric => {
-                return ClauseEffect::Ignore;
-            }
-        }
-    }
-    if prices.is_empty() || (rules.exactly_one_price_after_cue && prices.len() != 1) {
-        return ClauseEffect::Ignore;
-    }
-    let price_per_unit_cred = prices[0];
-
-    ClauseEffect::Offer(OfferProposal {
-        side,
-        good,
-        amount,
-        price_per_unit_cred,
-        domain_id: None,
-        is_hybrid: false,
-    })
+    None
 }
 
 fn process_source_messages(
@@ -784,8 +998,9 @@ fn process_source_messages(
     seat_guilds: &[String],
     messages: &[(u8, u8, String)],
     rules: &TalkRulesV2Table,
-) -> BTreeMap<(u8, u8), SourcePairOutcome> {
+) -> (BTreeMap<(u8, u8), SourcePairOutcome>, TalkSourceCounts) {
     let mut by_pair: BTreeMap<(u8, u8), SourcePairOutcome> = BTreeMap::new();
+    let mut counts = TalkSourceCounts::default();
     let seat_count = seat_guilds.len();
     for (proposer_seat, counterparty_seat, body) in messages {
         if *proposer_seat == focal_seat
@@ -794,41 +1009,52 @@ fn process_source_messages(
         {
             continue;
         }
+        counts.seen = counts.seen.saturating_add(1);
         let pair = by_pair
             .entry((*proposer_seat, *counterparty_seat))
             .or_default();
-        if pair.ambiguous_latched {
-            continue;
-        }
         let normalized = normalize_message_text(body, rules);
         if !message_has_only_allowed_ascii(&normalized, rules) {
+            counts.ambiguous = counts.ambiguous.saturating_add(1);
             pair.latch_ambiguous();
             continue;
         }
+        let mut parsed_clauses = Vec::new();
+        let mut message_ambiguous = false;
         for clause in split_clauses(&normalized, rules) {
             match interpret_clause(clause, rules, seat_guilds) {
-                ClauseEffect::Ignore => {}
-                ClauseEffect::AmbiguousMessage => {
-                    pair.latch_ambiguous();
+                Some(effect) => parsed_clauses.push(effect),
+                None => {
+                    message_ambiguous = true;
                     break;
                 }
-                ClauseEffect::Retract(Some(good)) => {
+            }
+        }
+        if message_ambiguous {
+            counts.ambiguous = counts.ambiguous.saturating_add(1);
+            pair.latch_ambiguous();
+            continue;
+        }
+        counts.matched = counts.matched.saturating_add(1);
+        if pair.ambiguous_latched {
+            continue;
+        }
+        for effect in parsed_clauses {
+            match effect {
+                MatchedClause::Neutral => {}
+                MatchedClause::Retract(Some(good)) => {
                     pair.assets.insert(good, SourceAssetOutcome::Retracted);
                 }
-                ClauseEffect::Retract(None) => {
+                MatchedClause::Retract(None) => {
                     pair.retracted_all = true;
                     for val in pair.assets.values_mut() {
                         *val = SourceAssetOutcome::Retracted;
                     }
                 }
-                ClauseEffect::Offer(proposal) => {
+                MatchedClause::Offer(proposal) => {
                     let asset = proposal.good;
                     match pair.assets.get_mut(&asset) {
-                        None => {
-                            pair.assets
-                                .insert(asset, SourceAssetOutcome::Active(proposal));
-                        }
-                        Some(SourceAssetOutcome::Retracted) => {
+                        None | Some(SourceAssetOutcome::Retracted) => {
                             pair.assets
                                 .insert(asset, SourceAssetOutcome::Active(proposal));
                         }
@@ -845,7 +1071,7 @@ fn process_source_messages(
             }
         }
     }
-    by_pair
+    (by_pair, counts)
 }
 
 fn finalize_pair_assets(
@@ -952,24 +1178,25 @@ pub fn extract_talk_commitments_from_messages(
         )));
     }
 
-    let pair_map = process_source_messages(focal_seat, seat_guilds, messages, &rules);
+    let (pair_map, _counts) = process_source_messages(focal_seat, seat_guilds, messages, &rules);
     finalize_pair_assets(pair_map, focal_seat, seat_count)
 }
 
-/// Extracts frozen deterministic `talk_rules_v2` commitments for `day` from
-/// `<source_game_dir>/to-seat/day-DD-act-<Guild>.negotiation.json` and
+/// Extracts frozen deterministic `talk_rules_v2` commitments and message classification counts
+/// for `day` from `<source_game_dir>/to-seat/day-DD-act-<Guild>.negotiation.json` and
 /// `<source_game_dir>/decisions/day-DD-talk-<Guild>.json` (`§4.3`, `§8.1`).
 ///
 /// Because neither file carries cross-source message timestamps, each source is processed
-/// independently and merged per `(proposer, counterparty, asset)` with retraction dominance so a
-/// retracted commitment in one source is never resurrected by a stale copy in the other.
-pub fn extract_talk_commitments_for_state(
+/// independently and merged per `(proposer, counterparty, asset)` with retraction and ambiguity
+/// latch dominance so a retracted or latched-empty commitment in one source is never resurrected
+/// by a stale copy in the other.
+pub fn extract_talk_commitments_with_counts_for_state(
     source_game_dir: &Path,
     day: u8,
     focal_seat: u8,
     seat_guilds: &[String],
     obs: &SeatObservation,
-) -> Result<Vec<ExtractedTalkCommitment>, EvalError> {
+) -> Result<TalkExtractionResult, EvalError> {
     let rules = TalkRulesV2Table::frozen();
     let seat_count = obs.spec.seat_count;
     if usize::from(seat_count) != seat_guilds.len() {
@@ -1051,8 +1278,10 @@ pub fn extract_talk_commitments_for_state(
         }
     }
 
-    let neg_outcomes = process_source_messages(focal_seat, seat_guilds, &neg_msgs, &rules);
-    let talk_outcomes = process_source_messages(focal_seat, seat_guilds, &talk_msgs, &rules);
+    let (neg_outcomes, neg_counts) =
+        process_source_messages(focal_seat, seat_guilds, &neg_msgs, &rules);
+    let (talk_outcomes, talk_counts) =
+        process_source_messages(focal_seat, seat_guilds, &talk_msgs, &rules);
 
     let mut all_pairs = BTreeMap::<(u8, u8), ()>::new();
     for &pair in neg_outcomes.keys() {
@@ -1070,5 +1299,30 @@ pub fn extract_talk_commitments_for_state(
         merged.insert(pair, merge_two_pair_sources(n, t, &rules));
     }
 
-    finalize_pair_assets(merged, focal_seat, seat_count)
+    let commitments = finalize_pair_assets(merged, focal_seat, seat_count)?;
+    let counts = TalkExtractionCounts::from_sources(neg_counts, talk_counts)
+        .map_err(|e| EvalError::SchemaValidation(format!("talk extraction counts: {e}")))?;
+    Ok(TalkExtractionResult {
+        commitments,
+        counts,
+    })
+}
+
+/// Convenience wrapper returning only extracted commitments from
+/// [`extract_talk_commitments_with_counts_for_state`].
+pub fn extract_talk_commitments_for_state(
+    source_game_dir: &Path,
+    day: u8,
+    focal_seat: u8,
+    seat_guilds: &[String],
+    obs: &SeatObservation,
+) -> Result<Vec<ExtractedTalkCommitment>, EvalError> {
+    Ok(extract_talk_commitments_with_counts_for_state(
+        source_game_dir,
+        day,
+        focal_seat,
+        seat_guilds,
+        obs,
+    )?
+    .commitments)
 }

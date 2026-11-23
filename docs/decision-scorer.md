@@ -85,7 +85,7 @@ Instead of conditioning on the single realized peer vector in `day-DD-act-record
      - *Conservative/upkeep-first* (`m % 4 == 3`): retains `decide_full_turn` while suppressing speculative resting offer posts that lock `CRED` or goods below `upkeep_cover_turns`.
    - All postures respect the `ClubBot` `pass_a_actions`, `pass_b_actions`, `bundle` interface cleanly and are parameterized strictly in `ScorerConfig` (`§5.2`).
 3. **Talk-phase trade commitments and conditional compliance:**
-   - **Offline extraction (before blinding):** A frozen deterministic extractor scans `to-seat/day-DD-act-<Guild>.negotiation.json` (`NegotiationInputs::whispers`) and outgoing `decisions/day-DD-talk-<Guild>.json` (`parse_eval_talk_reply`, `crates/league-eval/src/reply.rs:577`) using versioned rules (`talk_extractor_version`, `§5.2`), extracting unambiguous `(proposer_seat, counterparty_seat, offered_action_template)` commitments without later conflicting retractions.
+   - **Offline closed-grammar extraction (before blinding):** A frozen deterministic extractor scans `to-seat/day-DD-act-<Guild>.negotiation.json` (`NegotiationInputs::whispers`) and outgoing `decisions/day-DD-talk-<Guild>.json` (`parse_eval_talk_reply`, `crates/league-eval/src/reply.rs:577`) using versioned `talk_rules_v2` whole-clause templates (`talk_extractor_version`, `§5.2`, `§5.2.1`). Three closed template families are recognized: first-person spot-offer commitments (`commitment_templates`, optional trailing `cred`/`creds`), whole-clause explicit retractions and first-person refusals (`retraction_templates`, optional leading `actually`), and a tiny closed neutral set (`neutral_templates`, plus empty clauses). After apostrophe-only normalization and strict `allowed_ascii_chars` checks (rejecting `"`, `?`, non-ASCII text, and all non-thousands comma numbers or non-integer numbers), any message holding an unlisted clause fails closed, yields zero commitments, and latches that `(proposer, counterparty)` pair empty for that state across remaining messages and cross-source merges. Recall is intentionally traded for zero invented commitments; per-source and total `(seen, matched, ambiguous)` message counts recorded in `BlindScoringRequest::talk_extraction_counts` and reported descriptively per arm by `join` quantify what was lost.
    - **Probabilistic compliance in rollouts:** For each `(m, s)` with an extracted commitment, the deterministic scenario PRNG draws `honour_{m,s} ~ Bernoulli(p_honour)` (`p_honour = 0.75` pilot initial in `§5.2`) using wrapping SHA-256 keying. When `true`, the corresponding legal `MarketAction` is prepended to `pass_a_actions` (pruned via `preview_seat_bundle(&obs_s.to_public_preview_state(), ...)` if unaffordable).
 
 ---
@@ -121,110 +121,187 @@ None of `ScorerConfig`, `crates/league-scorer`, or the fixed code constants belo
 | `synth_slot_fill_order` | Deterministic priority queue truncating excess feasible synthetics (incl. cleared-pass-B `ClubBot` copy) at `k_synth_max` | `["cleared_pass_b", "claims_council", "upkeep_inputs", "cross_quotes", "batches", "debt", "composite_drops", "scaled"]` |
 | `upkeep_cover_turns` | Minimum upkeep turns reserved by synthetic upkeep rule and conservative posture | `2` turns |
 | `parity_spread_threshold_bps` | Minimum spread vs shadow parity triggering liquidity posture `PostOffer` posts | `500` bps (`5%`) |
-| `talk_extractor_version` & `talk_extractor_rules_digest` | Frozen deterministic talk-commitment extractor version and domain-separated SHA-256 covering canonical `TalkRulesV2Table` compact JSON (`§5.2.1`) and LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes (per-message `allowed_ascii_chars` validation, clause splitting, precedence, good matching, governed vs fail-closed negation scoping, and cross-source pair latching/merging); upstream reply/record/whisper readers (`reply.rs`, `records.rs`, `league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256` | `"talk_rules_v2"` + `"a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239"` |
+| `talk_extractor_version` & `talk_extractor_rules_digest` | Frozen deterministic closed-grammar talk-commitment extractor version and domain-separated SHA-256 covering canonical `TalkRulesV2Table` compact JSON (`§5.2.1`) and LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes (per-message `allowed_ascii_chars` validation, thousands-comma / plain-integer number parsing, whole-clause template matching across `commitment_templates` / `retraction_templates` / `neutral_templates`, and fail-closed cross-source pair latching); upstream reply/record/whisper readers (`reply.rs`, `records.rs`, `league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256` | `"talk_rules_v2"` + `"8edf70e7a60f3550f79b82dd354af84185094addd0333a9724bf701b0f56bfaa"` |
 | `mandate_stratification_mode` | Permutation stratification scheme over undealt `spec.mandate_deck` entries | `"uniform_undealt_fy_stratified"` |
 | `prescreen_min_arm_indep_span` | Minimum arm-independent `v_max_indep - v_min_indep` span to pass `§3.2` | `1` (placeholder until arm-blind pilot calibration) |
 | `prescreen_exclude_flat_sets` | Exclude states with `v_max_indep == v_min_indep` in `§3.2` | `true` |
 | `prescreen_min_arm_indep_candidates` | Minimum feasible candidates in `C_indep(state)` | `2` (placeholder until arm-blind pilot calibration) |
 | `strata_schedule` | Checkpoint stratification across early/mid/late season thirds (`league-eval select`) | `"2_early_2_mid_2_late_20_seeds"` (`docs/eval-harness.md` `D5`) |
 
-*Proposed fixed code constants (to be pinned by `scorer_tree_sha256` when `crates/league-scorer` is built, `§3.1`):* `SYNTH_MAX_CONVERTER_BATCHES = 4`, `SYNTH_MAX_PROJECT_BATCHES = 4`, `SYNTH_PROJECT_RANK_BY_EQUITY = true` (rank coverable project batches by descending equity, then ascending project ID), `SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`, `SYNTH_CLAIM_MATURING_EXACT = true`, `SYNTH_COUNCIL_SELF_NOMINATION = true`, `DROP_TIE_BREAK_BY_CANDIDATE_ID = true` (tie-break only when legs under `composite_greedy_rules` share equal milli-`CRED` upkeep risk), `COMPOSITE_GREEDY_RULES_DEFAULT = "top_pass_per_axis_plus_drop_max_upkeep"`, `SYNTH_CHARTER_BID_CRED = 150` (fixed charter-turn bid matching `ClubBot`, `crates/league-core/src/bot.rs:554`), `SYNTH_QUOTE_CRED_SHARE_BPS = 5_000` (50% spare `CRED` allocation per parity-anchored buy quote, scaled by `league_seat_types::UNIT_SCALE = 1_000` and `BPS_SCALE = 10_000`), `SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE` (`UNIT_SCALE`, i.e., `1_000`, is one whole commodity unit in fixed-point `Units`, not `1_000` whole units; tying the cap to `UNIT_SCALE` limits each parity-anchored buy quote to `1.000` whole commodity unit regardless of fixed-point scaling), `SYNTH_QUOTE_MIN_UNITS = 100` (minimum commodity unit floor for parity-anchored quotes), `SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2` (2x milli-`CRED` parity-value multiplier when pricing `upkeep_good` sell drops so every leg-drop weight compares milli-`CRED` `Units`), `SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1` (minimum `1` milli-`CRED` risk for other market actions), `SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2` (milli-`CRED` sentinel prioritizing `project_deliveries` drops), `SYNTH_SCALE_SEED_PER_AXIS = 2` (seed drafts per axis for `scaled` synthesis), `SYNTH_SCALE_SEED_POOL_MAX = 6` (maximum combined seed drafts scaled per `quantity_scales_bps` entry), `HONOUR_PPM_SCALE = 1_000_000` (integer PPM denominator for `p_honour_to_ppm` and `draw_honour_commitment`), `TALK_EXTRACTOR_VERSION_V2 = "talk_rules_v2"` (frozen `talk_rules_v2` commitment extractor version), and `TALK_EXTRACTOR_RULES_DIGEST_V2 = "a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239"` (domain-separated SHA-256 covering the 28-field `TalkRulesV2Table` compact JSON in `§5.2.1` plus LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/negotiation readers in `reply.rs`, `records.rs`, and `league-relay` are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`). The council-election and charter-auction turn cadences (`obs.turn.is_multiple_of(4)`, `obs.turn.is_multiple_of(6)`, `crates/league-scorer/src/candidates.rs:127, 152`) and charter-role list (`ClearinghouseBroker`, `OracleAuditor`, `CustomsInspector`, `candidates.rs:153-157`) mirror `league-core`'s engine rules (`crates/league-core/src/engine.rs:3670, 3844-3849`). **Build requirement:** when `crates/league-scorer` is built, it must contain no unlisted free value outside the proposed `ScorerConfig` fields and these proposed fixed constants.
+*Proposed fixed code constants (to be pinned by `scorer_tree_sha256` when `crates/league-scorer` is built, `§3.1`):* `SYNTH_MAX_CONVERTER_BATCHES = 4`, `SYNTH_MAX_PROJECT_BATCHES = 4`, `SYNTH_PROJECT_RANK_BY_EQUITY = true` (rank coverable project batches by descending equity, then ascending project ID), `SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`, `SYNTH_CLAIM_MATURING_EXACT = true`, `SYNTH_COUNCIL_SELF_NOMINATION = true`, `DROP_TIE_BREAK_BY_CANDIDATE_ID = true` (tie-break only when legs under `composite_greedy_rules` share equal milli-`CRED` upkeep risk), `COMPOSITE_GREEDY_RULES_DEFAULT = "top_pass_per_axis_plus_drop_max_upkeep"`, `SYNTH_CHARTER_BID_CRED = 150` (fixed charter-turn bid matching `ClubBot`, `crates/league-core/src/bot.rs:554`), `SYNTH_QUOTE_CRED_SHARE_BPS = 5_000` (50% spare `CRED` allocation per parity-anchored buy quote, scaled by `league_seat_types::UNIT_SCALE = 1_000` and `BPS_SCALE = 10_000`), `SYNTH_QUOTE_MAX_UNITS = UNIT_SCALE` (`UNIT_SCALE`, i.e., `1_000`, is one whole commodity unit in fixed-point `Units`, not `1_000` whole units; tying the cap to `UNIT_SCALE` limits each parity-anchored buy quote to `1.000` whole commodity unit regardless of fixed-point scaling), `SYNTH_QUOTE_MIN_UNITS = 100` (minimum commodity unit floor for parity-anchored quotes), `SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER = 2` (2x milli-`CRED` parity-value multiplier when pricing `upkeep_good` sell drops so every leg-drop weight compares milli-`CRED` `Units`), `SYNTH_DROP_DEFAULT_ACTION_RISK_CRED = 1` (minimum `1` milli-`CRED` risk for other market actions), `SYNTH_DROP_PROJECT_RISK_CRED = i64::MAX / 2` (milli-`CRED` sentinel prioritizing `project_deliveries` drops), `SYNTH_SCALE_SEED_PER_AXIS = 2` (seed drafts per axis for `scaled` synthesis), `SYNTH_SCALE_SEED_POOL_MAX = 6` (maximum combined seed drafts scaled per `quantity_scales_bps` entry), `HONOUR_PPM_SCALE = 1_000_000` (integer PPM denominator for `p_honour_to_ppm` and `draw_honour_commitment`), `TALK_EXTRACTOR_VERSION_V2 = "talk_rules_v2"` (frozen `talk_rules_v2` commitment extractor version), and `TALK_EXTRACTOR_RULES_DIGEST_V2 = "8edf70e7a60f3550f79b82dd354af84185094addd0333a9724bf701b0f56bfaa"` (domain-separated SHA-256 covering the 21-field `TalkRulesV2Table` compact JSON in `§5.2.1` plus LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/negotiation readers in `reply.rs`, `records.rs`, and `league-relay` are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`). The council-election and charter-auction turn cadences (`obs.turn.is_multiple_of(4)`, `obs.turn.is_multiple_of(6)`, `crates/league-scorer/src/candidates.rs:127, 152`) and charter-role list (`ClearinghouseBroker`, `OracleAuditor`, `CustomsInspector`, `candidates.rs:153-157`) mirror `league-core`'s engine rules (`crates/league-core/src/engine.rs:3670, 3844-3849`). **Build requirement:** when `crates/league-scorer` is built, it must contain no unlisted free value outside the proposed `ScorerConfig` fields and these proposed fixed constants.
 
 #### 5.2.1 Frozen Talk Extractor Rule Table (`talk_rules_v2`)
 
-Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/talk_extract.rs`) is listed below with its meaning and exact frozen JSON representation. Extractor control flow (per-message `allowed_ascii_chars` validation, retraction-first precedence, fail-closed pair ambiguity/negation latching across remaining messages in a source and across sources, independent per-source processing with cross-source retraction dominance, and seat-reference grammar covering `seat_index`, case-insensitive guild name, compound prefix-ref, `prefix ref`, and `guild prefix`) lives in `crates/league-eval/src/talk_extract.rs` and is pinned via its LF-normalized source bytes in `TALK_EXTRACTOR_RULES_DIGEST_V2`; upstream reply parsing (`crates/league-eval/src/reply.rs`), decision records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
+`talk_rules_v2` is a **closed grammar** parameterized entirely by the 21 fields in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/talk_extract.rs`), whose compact JSON + LF-normalized `talk_extract.rs` source bytes are pinned by `TALK_EXTRACTOR_RULES_DIGEST_V2`. Upstream reply parsing (`crates/league-eval/src/reply.rs`), decision records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 
-- **`allowed_ascii_chars`:** Complete set of ASCII bytes permitted in a talk message after `quote_normalizations`; any disallowed ASCII byte or non-ASCII byte causes the entire message to fail closed and latches that `(proposer, counterparty)` pair empty across all remaining messages and sources (`" \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"`).
-- **`ambiguity_cues`:** Case-insensitive hedge, uncertainty, or question cues that discard a clause rather than extracting an offer (`["?", "maybe", "might", "perhaps", "possibly", "probably", "could", "would consider", "consider", "thinking", "uncertain", "not sure", "unsure", "tentative", "roughly", "around", "about", "approx", "approximately", "either", "or", "whether", "depends"]`).
-- **`buy_tokens`:** Lowercase tokens designating `OfferSide::Buy` (`["buy", "buying", "bid"]`).
-- **`clause_break_chars`:** Single-byte ASCII delimiters separating clauses (`["\n", "\r", ";", "!", "?", "."]`).
-- **`colon_space_breaks_clause`:** When `true`, `": "` terminates a clause while keeping compact forms like `refined:0` intact (`true`).
-- **`commitment_cues`:** Explicit commitment substrings required in non-retracted offer clauses (`["will sell", "will buy", "i'll sell", "i'll buy", "we will sell", "we will buy", "i commit to", "commit to", "agree to", "offer to", "post sell", "post buy", "i offer", "offer", "selling", "buying", "sell", "buy"]`).
+- **Design tradeoff (recall vs. zero invented commitments):** Free-text talk messages outside this closed grammar are never guessed from partial keywords or loose negation windows. A message contributes commitments only if (1) after `quote_normalizations`, every byte lies in `allowed_ascii_chars` (which excludes `"` and `?`, as well as curly quotes and non-ASCII text), and (2) **every** non-empty clause's complete token sequence matches one listed template (fillers included). Any disallowed byte, invalid number format, or unmatched/extra token makes the whole message ambiguous, cancels all prior and subsequent commitments for that `(proposer, counterparty)` pair in that state across remaining messages and cross-source merges (`latch_ambiguous`), and increments `ambiguous` in `BlindScoringRequest::talk_extraction_counts` (tracked per source and in total as `seen = matched + ambiguous` so downstream summaries show how much recall was lost).
+- **Template kinds and fillers:** Templates in `commitment_templates`, `retraction_templates`, and `neutral_templates` match full clause token slices using exact lowercase literals plus slots `<SIDE>` (`sell_tokens` / `buy_tokens`), `<AMOUNT>` / `<PRICE>`, `<GOOD>` (`raw`/`refined`/`ref` + `seat_index` or guild name, allowing compact forms like `raw0`, `refined:0`, `raw_1`, or `Foundry raw`), `<PRICE_CUE>` (`price_cues`), `<NEG>` (`negation_prefixes`), and listed optional fillers `<CRED?>` (`cred_tokens`: `cred`/`creds`) and `retraction_optional_lead_tokens` (`actually`). Empty clauses and `neutral_templates` neither propose nor retract.
+- **Character and number rules:** `quote_normalizations` maps four typographic apostrophes (`U+2018`, `U+2019`, `U+02BC`, `U+FF07`) to `'`, then `allowed_ascii_chars` rejects every unlisted ASCII or non-ASCII byte (including `"` and `?`). Digit commas stay attached to adjacent digits in tokenization and are accepted **only** when `allow_thousands_comma_groups` is `true` and the token forms exact thousands groups (`1–3` non-zero-leading digits, comma, then one or more `3`-digit groups such as `1,000` or `12,500`); decimals (`1.5`), underscores (`1_000`), malformed commas (`10,5`, `5,5`, `1,00`, `1000,`, `,1000`, `1,,000`), and overflow fail closed.
+
+- **`allow_thousands_comma_groups`:** When `true`, strictly grouped `1,000`-style comma thousands integers are parsed while all other comma-number forms fail closed (`true`).
+- **`allowed_ascii_chars`:** Complete ASCII byte allowlist permitted after `quote_normalizations` (excludes `"` and `?`); any byte outside it fails the message closed and latches its `(proposer, counterparty)` pair empty (`" \t\n\r!',.:;@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"`).
+- **`buy_tokens`:** Lowercase tokens matching `<SIDE>` as `OfferSide::Buy` (`["buy"]`).
+- **`clause_break_chars`:** Single-byte ASCII delimiters separating clauses (`["\n", "\r", ";", "!", "."]`).
+- **`colon_space_breaks_clause`:** When `true`, `": "` terminates a clause while keeping compact `refined:0` intact (`true`).
+- **`commitment_templates`:** Closed list of 12 first-person spot-offer templates (`i/we will|'ll`, `i/we commit|offer|agree to`, `i/i'll will post` + `<SIDE> <AMOUNT> <GOOD> <PRICE_CUE> <PRICE> <CRED?>`).
 - **`contradiction_latches_pair_asset`:** When `true`, disagreeing active proposals for the same `(proposer, counterparty, asset)` latch to `Contradicted` and are dropped (`true`).
-- **`cred_tokens`:** Ignored currency unit tokens allowed after the price (`["cred", "creds"]`).
-- **`decimal_dot_keeps_clause`:** When `true`, `.` followed immediately by an ASCII digit does not split a clause so decimal numbers remain intact to be rejected cleanly (`true`).
-- **`exactly_one_amount_before_price`:** Require strictly one positive whole-number quantity before the price cue (`true`).
-- **`exactly_one_good_before_price`:** Require strictly one commodity specification before the price cue (`true`).
-- **`exactly_one_price_after_cue`:** Require strictly one positive whole-number price after the price cue (`true`).
-- **`exactly_one_price_cue`:** Require strictly one price delimiter token per offer clause (`true`).
-- **`explicit_retraction_cues`:** Case-insensitive withdrawal cues triggering retraction (`["cancel", "retract", "withdraw", "never mind", "nevermind", "call off", "no deal", "rescind", "walk back"]`).
-- **`fail_closed_negation_cues`:** Negation cues that, when present alongside a `negated_offer_verbs` token in the same clause outside handled `explicit_retraction_cues` or governed `negated_offer_cues` within `negated_offer_max_gap_tokens`, fail the whole message closed and latch the `(proposer, counterparty)` pair empty (`["not", "never", "no", "wont", "dont", "cant", "cannot", "nor", "won't", "will not", "can't", "don't", "do not"]`).
-- **`negated_offer_cues`:** Multi- or single-token negation prefixes checked against nearby trade verbs (`["won't", "will not", "cannot", "can't", "don't", "do not"]`).
-- **`negated_offer_max_gap_tokens`:** Maximum lookahead token window after a `negated_offer_cues` match in which a governed trade verb triggers retraction (`2`).
-- **`negated_offer_verbs`:** Governed trade verbs whose presence within `negated_offer_max_gap_tokens` turns a negation cue into an offer retraction rather than harmless filler (`["sell", "selling", "buy", "buying", "bid", "offer", "post", "commit", "trade", "deal"]`).
-- **`number_unit_scale`:** Fixed-point multiplier applied to whole-number amounts and unit prices (`league_seat_types::UNIT_SCALE = 1_000`; decimals and overflow are discarded).
-- **`price_cues`:** Tokens separating order quantity/good from unit limit price (`["@", "at", "for"]`).
-- **`quote_normalizations`:** Typographic single- and double-quote `(from, to)` normalizations applied before clause tokenization so apostrophes like `U+2019` match negation contractions (`U+2018 -> '`, `U+2019 -> '`, `U+02BC -> '`, `U+FF07 -> '`, `U+201C -> "`, `U+201D -> "`, `U+FF02 -> "`).
+- **`cred_tokens`:** Listed optional currency unit filler tokens matched by `<CRED?>` (`["cred", "creds"]`).
+- **`decimal_dot_keeps_clause`:** When `true`, `.` followed immediately by an ASCII digit stays inside the clause so decimals fail closed as malformed numbers (`true`).
+- **`negation_prefixes`:** Multi- or single-token negation prefixes expanded by `<NEG>` inside first-person refusal templates (`[["won't"], ["will", "not"], ["cannot"], ["can't"], ["don't"], ["do", "not"]]`).
+- **`neutral_templates`:** Closed list of non-commitment neutral clause templates (`hi`, `hello`, `greetings`, `thanks`, `thank you`, `ok`, `okay`, `noted`, `understood`) that neither propose nor retract (`[[...]]`).
+- **`number_unit_scale`:** Fixed-point multiplier applied to positive whole numbers and exact thousands groups (`league_seat_types::UNIT_SCALE = 1_000`).
+- **`price_cues`:** Tokens matching `<PRICE_CUE>` between good specification and unit limit price (`["@", "at", "for"]`).
+- **`quote_normalizations`:** Typographic single-quote `(from, to)` normalizations applied before whole-message validation (`U+2018 -> '`, `U+2019 -> '`, `U+02BC -> '`, `U+FF07 -> '`; curly double quotes remain disallowed).
 - **`raw_prefixes`:** Token prefixes identifying `AssetId::Raw(i)` (`["raw"]`).
 - **`refined_prefixes`:** Token prefixes identifying `AssetId::Refined(i)` (`["refined", "ref"]`).
-- **`sell_tokens`:** Lowercase tokens designating `OfferSide::Sell` (`["sell", "selling", "ask"]`).
+- **`retraction_optional_lead_tokens`:** Optional single leading filler token allowed before any `retraction_templates` pattern (`["actually"]`).
+- **`retraction_templates`:** Closed list of explicit global/asset-scoped retraction templates and first-person `<NEG>` refusal templates matching full clauses (asset-scoped when `<GOOD>` is present).
+- **`sell_tokens`:** Lowercase tokens matching `<SIDE>` as `OfferSide::Sell` (`["sell"]`).
 - **`token_join_chars`:** Non-alphanumeric ASCII characters preserved inside compound tokens (`["_", "'", ":", "."]`).
-- **`token_trim_chars`:** Characters stripped from token boundaries after tokenization (`[".", ":", "_"]`).
-- **`unsupported_condition_cues`:** Conditional or out-of-scope settlement terms causing the clause to be ignored (`["if", "unless", "when", "until", "hybrid", "domain", "swap", "check", "escrow", "pledge"]`).
 - **`version`:** Version identifier matched against `ScorerConfig::talk_extractor_version` (`"talk_rules_v2"`).
 
 <!-- talk_rules_v2_table:start -->
 ```json
 {
-  "allowed_ascii_chars": " \t\n\r!\"',.:;?@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
-  "ambiguity_cues": [
-    "?",
-    "maybe",
-    "might",
-    "perhaps",
-    "possibly",
-    "probably",
-    "could",
-    "would consider",
-    "consider",
-    "thinking",
-    "uncertain",
-    "not sure",
-    "unsure",
-    "tentative",
-    "roughly",
-    "around",
-    "about",
-    "approx",
-    "approximately",
-    "either",
-    "or",
-    "whether",
-    "depends"
-  ],
+  "allow_thousands_comma_groups": true,
+  "allowed_ascii_chars": " \t\n\r!',.:;@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz",
   "buy_tokens": [
-    "buy",
-    "buying",
-    "bid"
+    "buy"
   ],
   "clause_break_chars": [
     "\n",
     "\r",
     ";",
     "!",
-    "?",
     "."
   ],
   "colon_space_breaks_clause": true,
-  "commitment_cues": [
-    "will sell",
-    "will buy",
-    "i'll sell",
-    "i'll buy",
-    "we will sell",
-    "we will buy",
-    "i commit to",
-    "commit to",
-    "agree to",
-    "offer to",
-    "post sell",
-    "post buy",
-    "i offer",
-    "offer",
-    "selling",
-    "buying",
-    "sell",
-    "buy"
+  "commitment_templates": [
+    [
+      "i",
+      "will",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i'll",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "will",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we'll",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "agree",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "agree",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "will",
+      "post",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i'll",
+      "post",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ]
   ],
   "contradiction_latches_pair_asset": true,
   "cred_tokens": [
@@ -232,56 +309,57 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
     "creds"
   ],
   "decimal_dot_keeps_clause": true,
-  "exactly_one_amount_before_price": true,
-  "exactly_one_good_before_price": true,
-  "exactly_one_price_after_cue": true,
-  "exactly_one_price_cue": true,
-  "explicit_retraction_cues": [
-    "cancel",
-    "retract",
-    "withdraw",
-    "never mind",
-    "nevermind",
-    "call off",
-    "no deal",
-    "rescind",
-    "walk back"
+  "negation_prefixes": [
+    [
+      "won't"
+    ],
+    [
+      "will",
+      "not"
+    ],
+    [
+      "cannot"
+    ],
+    [
+      "can't"
+    ],
+    [
+      "don't"
+    ],
+    [
+      "do",
+      "not"
+    ]
   ],
-  "fail_closed_negation_cues": [
-    "not",
-    "never",
-    "no",
-    "wont",
-    "dont",
-    "cant",
-    "cannot",
-    "nor",
-    "won't",
-    "will not",
-    "can't",
-    "don't",
-    "do not"
-  ],
-  "negated_offer_cues": [
-    "won't",
-    "will not",
-    "cannot",
-    "can't",
-    "don't",
-    "do not"
-  ],
-  "negated_offer_max_gap_tokens": 2,
-  "negated_offer_verbs": [
-    "sell",
-    "selling",
-    "buy",
-    "buying",
-    "bid",
-    "offer",
-    "post",
-    "commit",
-    "trade",
-    "deal"
+  "neutral_templates": [
+    [
+      "hi"
+    ],
+    [
+      "hello"
+    ],
+    [
+      "greetings"
+    ],
+    [
+      "thanks"
+    ],
+    [
+      "thank",
+      "you"
+    ],
+    [
+      "ok"
+    ],
+    [
+      "okay"
+    ],
+    [
+      "noted"
+    ],
+    [
+      "understood"
+    ]
   ],
   "number_unit_scale": 1000,
   "price_cues": [
@@ -305,18 +383,6 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
     [
       "＇",
       "'"
-    ],
-    [
-      "“",
-      "\""
-    ],
-    [
-      "”",
-      "\""
-    ],
-    [
-      "＂",
-      "\""
     ]
   ],
   "raw_prefixes": [
@@ -326,33 +392,448 @@ Every data parameter in `TalkRulesV2Table::frozen()` (`crates/league-eval/src/ta
     "refined",
     "ref"
   ],
+  "retraction_optional_lead_tokens": [
+    "actually"
+  ],
+  "retraction_templates": [
+    [
+      "cancel"
+    ],
+    [
+      "cancel",
+      "that"
+    ],
+    [
+      "cancel",
+      "all"
+    ],
+    [
+      "cancel",
+      "all",
+      "offers"
+    ],
+    [
+      "cancel",
+      "my",
+      "offer"
+    ],
+    [
+      "cancel",
+      "that",
+      "no",
+      "deal"
+    ],
+    [
+      "i",
+      "cancel"
+    ],
+    [
+      "we",
+      "cancel"
+    ],
+    [
+      "i",
+      "cancel",
+      "that"
+    ],
+    [
+      "i",
+      "cancel",
+      "all",
+      "offers"
+    ],
+    [
+      "retract"
+    ],
+    [
+      "retract",
+      "that"
+    ],
+    [
+      "retract",
+      "all"
+    ],
+    [
+      "retract",
+      "all",
+      "offers"
+    ],
+    [
+      "retract",
+      "my",
+      "offer"
+    ],
+    [
+      "i",
+      "retract"
+    ],
+    [
+      "i",
+      "retract",
+      "that"
+    ],
+    [
+      "i",
+      "retract",
+      "my",
+      "offer"
+    ],
+    [
+      "we",
+      "retract"
+    ],
+    [
+      "withdraw"
+    ],
+    [
+      "withdraw",
+      "that"
+    ],
+    [
+      "withdraw",
+      "my",
+      "offer"
+    ],
+    [
+      "i",
+      "withdraw"
+    ],
+    [
+      "we",
+      "withdraw"
+    ],
+    [
+      "never",
+      "mind"
+    ],
+    [
+      "nevermind"
+    ],
+    [
+      "call",
+      "off"
+    ],
+    [
+      "call",
+      "that",
+      "off"
+    ],
+    [
+      "no",
+      "deal"
+    ],
+    [
+      "rescind"
+    ],
+    [
+      "walk",
+      "back"
+    ],
+    [
+      "cancel",
+      "<GOOD>"
+    ],
+    [
+      "cancel",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "cancel",
+      "for",
+      "<GOOD>"
+    ],
+    [
+      "cancel",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "cancel",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "cancel",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "retract",
+      "<GOOD>"
+    ],
+    [
+      "retract",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "retract",
+      "for",
+      "<GOOD>"
+    ],
+    [
+      "retract",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "retract",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "retract",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "retract",
+      "<GOOD>"
+    ],
+    [
+      "withdraw",
+      "<GOOD>"
+    ],
+    [
+      "withdraw",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "withdraw",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "withdraw",
+      "my",
+      "offer",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "no",
+      "deal",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "no",
+      "deal",
+      "for",
+      "<GOOD>"
+    ],
+    [
+      "rescind",
+      "<GOOD>"
+    ],
+    [
+      "walk",
+      "back",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<AMOUNT>",
+      "<GOOD>",
+      "<PRICE_CUE>",
+      "<PRICE>",
+      "<CRED?>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "commit",
+      "to",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "offer",
+      "to",
+      "<SIDE>",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "trade",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "trade",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "deal",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "deal",
+      "on",
+      "<GOOD>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "<SIDE>"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "<SIDE>"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "commit"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "commit"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "trade"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "trade"
+    ],
+    [
+      "i",
+      "<NEG>",
+      "deal"
+    ],
+    [
+      "we",
+      "<NEG>",
+      "deal"
+    ]
+  ],
   "sell_tokens": [
-    "sell",
-    "selling",
-    "ask"
+    "sell"
   ],
   "token_join_chars": [
     "_",
     "'",
     ":",
     "."
-  ],
-  "token_trim_chars": [
-    ".",
-    ":",
-    "_"
-  ],
-  "unsupported_condition_cues": [
-    "if",
-    "unless",
-    "when",
-    "until",
-    "hybrid",
-    "domain",
-    "swap",
-    "check",
-    "escrow",
-    "pledge"
   ],
   "version": "talk_rules_v2"
 }
@@ -420,6 +901,7 @@ For every candidate `c in C(state)` across scenarios `m in 0..M` (stored without
 - **Upward bias disclosure & split-half measurement (Winner's curse):** Because `v_max` takes the maximum over up to `K` noisy `M`-scenario estimates, `v_max` is biased upward (`E[max_c EV_hat(c)] >= max_c E[EV_hat(c)]`), pulling `regret_equity` upward and compressing mid-pack `score_norm`. Always require `scenarios_m` (`M`) to be **even (`>= 2`)** so the split-half estimator partitions scenarios into two equal disjoint halves (`H_A = 0..(M/2)` and `H_B = (M/2)..M`), and measure and report this upward bias via **split-half (held-out scenario) re-estimation**: selection uses one half (`c*_A = argmax_{c in span} EV_{H_A}(c)`) and evaluation uses the other half (`EV_{H_B}(c*_A)`), defining the bias estimate as the mean over both directions of `EV_{H_A}(c*_A) - EV_{H_B}(c*_A)` and `EV_{H_B}(c*_B) - EV_{H_A}(c*_B)` (`c*_B = argmax_{c in span} EV_{H_B}(c)`). State that this estimates selection bias at `M/2` scenarios, which is an upper estimate for `M` scenarios, and report it alongside raw `ev_total_equity` and `sensitivity_indep_percentile`.
 - **Pre-registered second sensitivity score (`sensitivity_indep_percentile`, `sensitivity_indep_rank`):** Rank and percentile of `ev_total_equity(c)` among the **arm-independent candidates only** (`is_arm_independent == true`: passive + `ClubBot` + synthetics), insensitive to whether another arm emitted an extreme candidate.
 - **CRN paired Monte Carlo standard error (`paired_se_equity`):** sample standard error across `m in 0..M` of paired per-scenario differences against `c_best` (`sum_m` integer differences ordered `0..M`).
+- **Talk-extractor coverage diagnostics (`talk_extraction_counts`, `talk_counts`):** Every `StateScoreOutput` echoes `talk_extraction_counts` (`negotiation`, `talk`, and `total` counts of `{ seen, matched, ambiguous }` peer messages targeting `focal_seat`), `JoinedDecisionRow` preserves `talk_extraction_counts`, and `PerArmSummaryRow::talk_counts` reports descriptive per-arm totals across distinct states (`n_states`, `totals`) alongside per-state `min`/`max`/`mean`/`median` distributions (`per_state_seen`, `per_state_matched`, `per_state_ambiguous`). No gating or normalization check branches on these counts.
 - **Descriptive-only pairwise contrasts:** Post-unblinding pairwise arm contrasts (`EV(on) - EV(off)`, `EV(on) - EV(control)`, `EV(control) - EV(off)`) and paired per-scenario SEs reported from unblinded tables are **descriptive only**. The pre-registered inferential analysis is the **mixed model** and the **cluster sign-flip test over seed means**, which are not defined in this document.
 
 ### 7.2 Unblinded D5 Pre-Registration Mechanism Measures
@@ -432,7 +914,7 @@ Joined post-scoring by `(state_id, arm, replicate)` **only after** `scorer_freez
 4. **Illegal-order rate:** Fraction with reply-level refusal (`parse_failure` or `refusal_code.is_some()`), mean `refused_market_actions`, and fraction with whole-bundle reveal rejection (`refused_bundle.is_some()` / `refused_bundle_legs > 0`).
 5. **Deal-keeping (two explicit lines):**
    - *(a) Engine-recorded pledges:* count structured Track-2 `pledges` / `audited_pledges` (`crates/league-core/src/eval/host.rs:85-88`) and terminal `broken_promises` (`crates/league-core/src/scoring.rs:595`) directly on their own reporting line wherever engine pledges exist.
-   - *(b) Text-parsed talk commitments:* extracted deterministically from `decisions/day-DD-talk-<Guild>.json` (`driver.rs:2038`, `reply.rs:577`) and `to-seat/day-DD-act-<Guild>.negotiation.json` (`view.rs:48`) using `talk_extractor_version`, reported as `honoured_commitments / applicable_commitments` with `applicable_commitments` stated separately (never imputing `0/0`).
+   - *(b) Text-parsed talk commitments:* extracted deterministically from `decisions/day-DD-talk-<Guild>.json` (`driver.rs:2038`, `reply.rs:577`) and `to-seat/day-DD-act-<Guild>.negotiation.json` (`view.rs:48`) using closed-grammar `talk_extractor_version`, reported as `honoured_commitments / applicable_commitments` with `applicable_commitments` stated separately (never imputing `0/0`), alongside descriptive per-arm `talk_counts` (`seen`, `matched`, `ambiguous`) showing what fell outside the closed grammar.
 
 ---
 
@@ -453,9 +935,22 @@ BlindScoringRequest {
   pre_act_pair_sha256: String,                    // 64-hex digest matching compute_pre_act_pair_sha256_hex
   focal_seat: u8,                                 // 0..4
   talk_commitments: Vec<ExtractedTalkCommitment>, // neutral counterfactual commitment specs (no raw text)
+  talk_extraction_counts: TalkExtractionCounts,   // per-source & total { seen, matched, ambiguous } counts (no prose)
   candidates: Vec<BlindCandidate>,                // sorted ascending by candidate_id; duplicates merged
   scorer_seed: u64,                               // explicit recorded seed
   scorer_config_sha256: String,                   // SHA-256 of canonical ScorerConfig JSON (§5.2)
+}
+
+TalkExtractionCounts {
+  negotiation: TalkSourceCounts,                  // counts over negotiation whispers to focal_seat
+  talk: TalkSourceCounts,                         // counts over outgoing talk whispers to focal_seat
+  total: TalkSourceCounts,                        // element-wise sum (negotiation + talk)
+}
+
+TalkSourceCounts {
+  seen: u64,                                      // total messages inspected (matched + ambiguous)
+  matched: u64,                                   // messages where every clause matched a closed template
+  ambiguous: u64,                                 // messages failing closed on byte, number, or unlisted clause
 }
 
 BlindCandidate {

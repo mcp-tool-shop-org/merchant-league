@@ -21,10 +21,11 @@ use league_eval::{
     EvalDecisionRecord, EvalError, EvalManifest, EvalSetupFile, FreezeOptions, JoinOptions,
     JoinedDecisionsFile, PerArmSummaryFile, PlayOptions, ScorerFreezeFile, TalkRulesV2Table,
     eval_wording_slot, execute_cli_with_git_sha, extract_talk_commitments_for_state,
-    extract_talk_commitments_from_messages, resolve_eval_seat_guilds,
-    run_branch_with_transport_and_git_sha, run_build_blind_inputs, run_freeze, run_join,
-    run_play_with_transport_and_git_sha, talk_rules_v2_digest, talk_rules_v2_digest_for,
-    write_freeze_file_with_writer,
+    extract_talk_commitments_from_messages, extract_talk_commitments_with_counts_for_state,
+    resolve_eval_seat_guilds, run_branch_with_transport_and_git_sha, run_build_blind_inputs,
+    run_freeze, run_join, run_play_with_transport_and_git_sha, talk_rules_v2_digest,
+    talk_rules_v2_digest_for, write_freeze_file_with_writer,
+    write_freeze_file_with_writer_and_remover,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
@@ -33,9 +34,9 @@ use league_relay::{
 use league_scorer::cli::run_cli as run_scorer_cli;
 use league_scorer::{
     BlindScoringRequest, CandidateScoreOutput, ScorerConfig, ScorerError, StateScoreOutput,
-    TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2, candidate_id_for_submission,
-    compute_blind_inputs_manifest_sha256, sha256_hex, to_sorted_compact_json,
-    to_sorted_pretty_json,
+    TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts,
+    TalkSourceCounts, candidate_id_for_submission, compute_blind_inputs_manifest_sha256,
+    sha256_hex, to_sorted_compact_json, to_sorted_pretty_json,
 };
 use league_seat_types::UNIT_SCALE;
 use serde_json::{Value, json};
@@ -1737,41 +1738,51 @@ fn talk_extractor_grammar_variants_ignored_clauses_and_errors() -> TestResult {
         "UNKNOWN_FOCAL_SEAT"
     );
 
-    // Exercise compound good forms (`raw0`, `refined:1`, `Foundry raw`, `Foundry refined`)
-    // and ignored clause patterns (punctuation, conditional, ambiguity, conflicting sides,
-    // price ordering, missing commit cue, non-numeric price tokens).
+    // Exercise compound good forms (`raw0`, `refined:0`, `Foundry raw`) under closed templates
+    // alongside neutral greeting clauses.
     let messages = vec![
         (
             1_u8,
             0_u8,
-            "@Foundry! I commit to sell 200 raw0 at 350 CRED.".to_owned(),
+            "I commit to sell 200 raw0 at 350 CRED.".to_owned(),
         ),
         (
             2_u8,
             0_u8,
-            "I commit to buy 300 refined:0 for 420 CRED; If you accept, I will buy 100 raw0 at 200."
-                .to_owned(),
+            "I commit to buy 300 refined:0 for 420 CRED.".to_owned(),
         ),
         (
             3_u8,
             0_u8,
-            "I will buy 150 Foundry raw for 310 CRED. ... Maybe I commit to buy 100 raw0 at 100."
-                .to_owned(),
-        ),
-        (
-            1_u8,
-            0_u8,
-            "Hello Foundry! Buying selling 100 Foundry refined for 200 CRED. \
-             I commit to sell at 100 for 200 raw0 300 CRED. \
-             I commit to sell 100 raw0 50 CRED foo at 200. \
-             I commit to sell raw0 at 200 CRED. \
-             I commit to sell 100 raw0 at CRED. \
-             I commit to sell 100 raw0 at roughly 200 CRED."
-                .to_owned(),
+            "Hi! I will buy 150 Foundry raw for 310 CRED.".to_owned(),
         ),
     ];
     let extracted = extract_talk_commitments_from_messages(0, &seat_guilds, &messages, &obs)?;
     assert_eq!(extracted.len(), 3);
+
+    // Unlisted clauses, conditionals, hedges, conflicting/malformed orders all fail closed.
+    for fail_closed_msg in [
+        "@Foundry! I commit to sell 200 raw0 at 350 CRED.",
+        "I commit to buy 300 refined:0 for 420 CRED; If you accept, I will buy 100 raw0 at 200.",
+        "I will buy 150 Foundry raw for 310 CRED. ... Maybe I commit to buy 100 raw0 at 100.",
+        "Hello Foundry! Buying selling 100 Foundry refined for 200 CRED.",
+        "I commit to sell at 100 for 200 raw0 300 CRED.",
+        "I commit to sell 100 raw0 50 CRED foo at 200.",
+        "I commit to sell raw0 at 200 CRED.",
+        "I commit to sell 100 raw0 at CRED.",
+        "I commit to sell 100 raw0 at roughly 200 CRED.",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1_u8, 0_u8, fail_closed_msg.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "unlisted/malformed clause must fail closed: `{fail_closed_msg}`"
+        );
+    }
 
     // Exercise decisions dir with missing seat, no_reply, refusal, and matching negotiation+talk.
     let game_dir = tmp.path().join("mixed_talk_game");
@@ -3266,15 +3277,15 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
 
     // Mutating any single field of `TalkRulesV2Table` changes the digest.
     let mut t = base.clone();
+    t.allow_thousands_comma_groups = false;
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.allowed_ascii_chars = "abc";
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.ambiguity_cues = &["maybe"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.buy_tokens = &["buy"];
+    t.buy_tokens = &["bid"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -3286,7 +3297,7 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.commitment_cues = &["will sell"];
+    t.commitment_templates = &[&["i", "sell", "<AMOUNT>", "<GOOD>", "<PRICE_CUE>", "<PRICE>"]];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -3302,39 +3313,11 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.exactly_one_amount_before_price = false;
+    t.negation_prefixes = &[&["won't"]];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.exactly_one_good_before_price = false;
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.exactly_one_price_after_cue = false;
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.exactly_one_price_cue = false;
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.explicit_retraction_cues = &["cancel"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.fail_closed_negation_cues = &["not"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.negated_offer_cues = &["won't"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.negated_offer_max_gap_tokens = 3;
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.negated_offer_verbs = &["sell"];
+    t.neutral_templates = &[&["hi"]];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -3358,19 +3341,19 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.sell_tokens = &["sell"];
+    t.retraction_optional_lead_tokens = &["now"];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.retraction_templates = &[&["cancel"]];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
+    t.sell_tokens = &["ask"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
     t.token_join_chars = &["_"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.token_trim_chars = &["."];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.unsupported_condition_cues = &["if"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base;
@@ -3471,18 +3454,15 @@ fn talk_v2_scaling_decimals_overflow_merge_and_retraction_scoping() -> TestResul
             &seat_guilds,
             &[
                 (1, 0, "I will sell 1000 raw 1 at 250 CRED.".to_owned()),
-                (
-                    1,
-                    0,
-                    "Correction: I will sell 500 raw 1 at 300 CRED.".to_owned(),
-                ),
+                (1, 0, "I will sell 500 raw 1 at 300 CRED.".to_owned()),
             ],
             &obs,
         )?
         .is_empty()
     );
 
-    // Retraction scoping: filler negation keeps the offer; verb-governed negation retracts it.
+    // Retraction scoping: listed neutral greeting keeps the clean offer; unlisted filler or
+    // verb-governed negation retracts/fails closed cleanly.
     let expected_five = vec![league_scorer::ExtractedTalkCommitment {
         proposer_seat: 1,
         counterparty_seat: 0,
@@ -3502,21 +3482,26 @@ fn talk_v2_scaling_decimals_overflow_merge_and_retraction_scoping() -> TestResul
         extract_talk_commitments_from_messages(
             0,
             &seat_guilds,
-            &[(1, 0, "Don't worry: I will sell 5 raw 0 at 10".to_owned())],
+            &[(1, 0, "Hi: I will sell 5 raw 0 at 10".to_owned())],
             &obs,
         )?,
         expected_five
     );
-    // Comma leaves `Don't` and `sell` in one clause, so fail-closed negation triggers ambiguity.
-    assert!(
-        extract_talk_commitments_from_messages(
-            0,
-            &seat_guilds,
-            &[(1, 0, "Don't worry, I will sell 5 raw 0 at 10".to_owned())],
-            &obs,
-        )?
-        .is_empty()
-    );
+    // Unlisted filler clauses fail closed even if paired with a valid offer clause.
+    for unlisted_msg in [
+        "Don't worry: I will sell 5 raw 0 at 10",
+        "Don't worry, I will sell 5 raw 0 at 10",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, unlisted_msg.to_owned())],
+                &obs,
+            )?
+            .is_empty()
+        );
+    }
     assert!(
         extract_talk_commitments_from_messages(
             0,
@@ -4113,7 +4098,7 @@ fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
         );
     }
 
-    // Typographic curly quotes and filler negation preserve valid ASCII offers.
+    // Listed neutral clause preserves valid ASCII offers; ASCII and curly double quotes fail closed.
     let expected_five = vec![league_scorer::ExtractedTalkCommitment {
         proposer_seat: 1,
         counterparty_seat: 0,
@@ -4133,24 +4118,26 @@ fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
         extract_talk_commitments_from_messages(
             0,
             &seat_guilds,
-            &[(
-                1,
+            &[(1, 0, "Thanks: I will sell 5 raw 0 at 10".to_owned())],
+            &obs,
+        )?,
+        expected_five
+    );
+    for quoted in [
+        "\"I will sell 5 raw 0 at 10\"",
+        "\u{201c}I will sell 5 raw 0 at 10\u{201d}",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
                 0,
-                "Don\u{2019}t worry: I will sell 5 raw 0 at 10".to_owned()
-            )],
-            &obs,
-        )?,
-        expected_five
-    );
-    assert_eq!(
-        extract_talk_commitments_from_messages(
-            0,
-            &seat_guilds,
-            &[(1, 0, "\u{201c}I will sell 5 raw 0 at 10\u{201d}".to_owned())],
-            &obs,
-        )?,
-        expected_five
-    );
+                &seat_guilds,
+                &[(1, 0, quoted.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "quoted message must fail closed: `{quoted}`"
+        );
+    }
 
     // Ambiguous whole messages (unlisted em-dash, non-ASCII text/scripts, unmapped prime,
     // backtick, `~`, `<`, `(`, or fail-closed negation + trade verb) yield nothing and latch
@@ -4347,8 +4334,8 @@ fn talk_rules_v2_sec52_doc_matches_frozen_table() -> TestResult {
 
     // Negative controls proving doc drift fails immediately.
     let bad_val = doc_text.replacen(
-        "\"negated_offer_max_gap_tokens\": 2",
-        "\"negated_offer_max_gap_tokens\": 3",
+        "\"allow_thousands_comma_groups\": true",
+        "\"allow_thousands_comma_groups\": false",
         1,
     );
     assert_ne!(bad_val, doc_text);
@@ -4529,5 +4516,786 @@ fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
         "unexpected error: {err_dup_am}"
     );
     fs::remove_file(&dup_am_path)?;
+    Ok(())
+}
+
+#[test]
+fn talk_v2_closed_grammar_rejects_unlisted_clauses_and_latches_pair() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9116), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    for bad_msg in [
+        "I will sell 5 raw 0 at 10. No.",
+        "I will sell 5 raw 0 at 10. Not.",
+        "I will sell 5 raw 0 at 10. Never!",
+        "I will sell 5 raw 0 at 10. Maybe not.",
+        "I will sell 5 raw 0 at 10. Maybe.",
+        "I will sell 5 raw 0 at 10. If you pay first.",
+        "I will sell 5 raw 0 at 10. Unless Foundry objects.",
+        "I wouldn't sell 5 raw 0 at 10",
+        "I couldn't sell 5 raw 0 at 10",
+        "I didn't sell 5 raw 0 at 10",
+        "I refuse to sell 5 raw 0 at 10",
+        "I will_not sell 5 raw 0 at 10",
+        "I will:not sell 5 raw 0 at 10",
+        "Quarry posted: I will sell 5 raw 0 at 10",
+        "Quarry wrote \"I will sell 5 raw 0 at 10\"",
+        "Foundry will sell 5 raw 0 at 10",
+        "You will sell 5 raw 0 at 10",
+        "Will you sell 5 raw 0 at 10",
+        "Sell me 5 raw 0 at 10",
+        "I will sell 5 raw 0 at 10,5",
+        "I will sell 5,5 raw 0 at 10",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, bad_msg.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "unlisted message must fail closed alone: `{bad_msg}`"
+        );
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, bad_msg.to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "unlisted message must latch prior offer empty: `{bad_msg}`"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn talk_v2_insert_word_sweep_across_commitment_templates_emits_zero_offers() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9117), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+    let rules = TalkRulesV2Table::frozen();
+    let sweep_words = [
+        "not", "no", "never", "maybe", "if", "unless", "would", "wouldn't", "refuse", "he",
+        "wrote", "you", "me", "foundry", "please", "probably",
+    ];
+
+    let mut total_cases = 0_usize;
+    for template in rules.commitment_templates {
+        let mut tokens: Vec<&str> = Vec::new();
+        for &slot in *template {
+            match slot {
+                "<SIDE>" => tokens.push("sell"),
+                "<AMOUNT>" => tokens.push("5"),
+                "<GOOD>" => {
+                    tokens.push("raw");
+                    tokens.push("0");
+                }
+                "<PRICE_CUE>" => tokens.push("at"),
+                "<PRICE>" => tokens.push("10"),
+                "<CRED?>" => tokens.push("cred"),
+                lit => tokens.push(lit),
+            }
+        }
+        let clean = format!("{}.", tokens.join(" "));
+        assert_eq!(
+            extract_talk_commitments_from_messages(0, &seat_guilds, &[(1, 0, clean)], &obs)?.len(),
+            1,
+            "base template must extract 1 offer"
+        );
+
+        for word in sweep_words {
+            for pos in 0..=tokens.len() {
+                let mut mutated = Vec::with_capacity(tokens.len() + 1);
+                mutated.extend_from_slice(&tokens[..pos]);
+                mutated.push(word);
+                mutated.extend_from_slice(&tokens[pos..]);
+                let body = format!("{}.", mutated.join(" "));
+                let out = extract_talk_commitments_from_messages(
+                    0,
+                    &seat_guilds,
+                    &[(1, 0, body.clone())],
+                    &obs,
+                )?;
+                assert!(
+                    out.is_empty(),
+                    "insert-word sweep invented commitment for `{body}`: {out:?}"
+                );
+                total_cases += 1;
+            }
+        }
+    }
+    assert_eq!(total_cases, 2000);
+    eprintln!("INSERT_WORD_SWEEP_CASES={total_cases}");
+    Ok(())
+}
+
+#[test]
+fn talk_v2_closed_grammar_valid_templates_retractions_and_thousands_commas() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9118), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    for (msg, expected_side, expected_good, expected_amt, expected_price) in [
+        (
+            "Hi! I will sell 5 raw 0 at 10.",
+            OfferSide::Sell,
+            AssetId::Raw(0),
+            5 * UNIT_SCALE,
+            10 * UNIT_SCALE,
+        ),
+        (
+            "Hello! I'll buy 1,000 refined 0 for 250 CRED.",
+            OfferSide::Buy,
+            AssetId::Refined(0),
+            1_000 * UNIT_SCALE,
+            250 * UNIT_SCALE,
+        ),
+        (
+            "Greetings; we will sell 12,500 Foundry raw @ 30 creds.",
+            OfferSide::Sell,
+            AssetId::Raw(0),
+            12_500 * UNIT_SCALE,
+            30 * UNIT_SCALE,
+        ),
+        (
+            "Thanks. We'll buy 7 ref1 at 15.",
+            OfferSide::Buy,
+            AssetId::Refined(1),
+            7 * UNIT_SCALE,
+            15 * UNIT_SCALE,
+        ),
+        (
+            "Thank you! I commit to sell 9 raw:0 for 40.",
+            OfferSide::Sell,
+            AssetId::Raw(0),
+            9 * UNIT_SCALE,
+            40 * UNIT_SCALE,
+        ),
+        (
+            "Ok. We commit to buy 3 raw_1 at 22.",
+            OfferSide::Buy,
+            AssetId::Raw(1),
+            3 * UNIT_SCALE,
+            22 * UNIT_SCALE,
+        ),
+        (
+            "Okay! I offer to sell 4 Quarry refined at 55 CRED.",
+            OfferSide::Sell,
+            AssetId::Refined(1),
+            4 * UNIT_SCALE,
+            55 * UNIT_SCALE,
+        ),
+        (
+            "Noted. We offer to buy 6 raw 0 for 12.",
+            OfferSide::Buy,
+            AssetId::Raw(0),
+            6 * UNIT_SCALE,
+            12 * UNIT_SCALE,
+        ),
+        (
+            "Understood. I agree to sell 8 refined Foundry @ 90.",
+            OfferSide::Sell,
+            AssetId::Refined(0),
+            8 * UNIT_SCALE,
+            90 * UNIT_SCALE,
+        ),
+        (
+            "We agree to buy 2 raw 0 at 18 CRED.",
+            OfferSide::Buy,
+            AssetId::Raw(0),
+            2 * UNIT_SCALE,
+            18 * UNIT_SCALE,
+        ),
+        (
+            "I will post sell 15 raw 1 for 25.",
+            OfferSide::Sell,
+            AssetId::Raw(1),
+            15 * UNIT_SCALE,
+            25 * UNIT_SCALE,
+        ),
+        (
+            "I'll post buy 11 refined 1 at 65.",
+            OfferSide::Buy,
+            AssetId::Refined(1),
+            11 * UNIT_SCALE,
+            65 * UNIT_SCALE,
+        ),
+    ] {
+        let out = extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, msg.to_owned())],
+            &obs,
+        )?;
+        assert_eq!(
+            out,
+            vec![league_scorer::ExtractedTalkCommitment {
+                proposer_seat: 1,
+                counterparty_seat: 0,
+                offered_action: MarketAction::PostOffer {
+                    seat: 1,
+                    order: OfferProposal {
+                        side: expected_side,
+                        good: expected_good,
+                        amount: expected_amt,
+                        price_per_unit_cred: expected_price,
+                        domain_id: None,
+                        is_hybrid: false,
+                    },
+                },
+            }],
+            "failed valid template `{msg}`"
+        );
+    }
+
+    // Retractions and closed-grammar refusals retract a prior active offer.
+    for retract_msg in [
+        "Cancel.",
+        "Actually I retract raw 0.",
+        "Actually, I retract my offer on raw 0.",
+        "We withdraw.",
+        "Never mind.",
+        "Walk back raw 0.",
+        "I can't trade raw 0.",
+        "We don't commit to sell raw 0.",
+        "I will not sell 5 raw 0 at 10.",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, retract_msg.to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "retraction must drop prior offer: `{retract_msg}`"
+        );
+    }
+
+    // Asset-scoped retraction only drops the retracted good while leaving another asset intact.
+    let scoped = extract_talk_commitments_from_messages(
+        0,
+        &seat_guilds,
+        &[
+            (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+            (1, 0, "I will buy 3 raw 1 at 20.".to_owned()),
+            (1, 0, "Actually retract raw 0.".to_owned()),
+        ],
+        &obs,
+    )?;
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(
+        scoped[0].offered_action,
+        MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Buy,
+                good: AssetId::Raw(1),
+                amount: 3 * UNIT_SCALE,
+                price_per_unit_cred: 20 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        }
+    );
+
+    // Malformed comma placement fails closed and latches the pair empty.
+    for bad_comma in [
+        "I will sell 5 raw 0 at 10,5.",
+        "I will sell 5,5 raw 0 at 10.",
+        "I will sell 1,00 raw 0 at 10.",
+        "I will sell 1000, raw 0 at 10.",
+        "I will sell ,1000 raw 0 at 10.",
+        "I will sell 1,,000 raw 0 at 10.",
+        "I will sell 0,000 raw 0 at 10.",
+        "I will sell 1_000 raw 0 at 10.",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, bad_comma.to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "malformed numeric comma must latch pair empty: `{bad_comma}`"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn talk_v2_extract_state_merge_latch_and_state_isolation() -> TestResult {
+    let tmp = TmpDir::new("state_merge_latch")?;
+    let host = EvalHost::from_standard_setup(TableId(9119), 4, 1, 0)?;
+    let obs = host.observe_seat(Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    let write_talk = |dir: &Path, body: &str| -> TestResult {
+        let dec_dir = dir.join("decisions");
+        fs::create_dir_all(&dec_dir)?;
+        let rec = EvalDecisionRecord {
+            game_id: host.game_id().to_owned(),
+            table_id: 9119,
+            day: 1,
+            round: Round::Talk,
+            seat: 1,
+            guild: "Quarry".to_owned(),
+            arm: EvalArm::Off,
+            seat_kind: "Model".to_owned(),
+            keeps_notes: false,
+            notes_present: false,
+            raw_reply: Some(
+                json!({
+                    "messages": [{ "to_guild": "Foundry", "body": body }],
+                    "market_actions": [],
+                    "bundle": {}
+                })
+                .to_string(),
+            ),
+            discarded_reply_path: None,
+            discarded_reply_sha256: None,
+            attempts: 1,
+            failed_attempts: Vec::new(),
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            wall_secs: None,
+            tool_calls_used: 0,
+            cleared_non_empty_actions: false,
+            prompt_token_ids_sha256s: Vec::new(),
+            prompt_token_ids_source: None,
+            prompt_token_ids_template_check: None,
+            reply_token_ids: Vec::new(),
+            reply_top_logprobs: Vec::new(),
+            intermediate_bundle_sha256s: Vec::new(),
+            refused_market_actions: 0,
+            refused_bundle_legs: 0,
+            parse_failure: false,
+            refusal_code: None,
+            refusal_reason: None,
+            loaded_history_sha256: BTreeMap::new(),
+            invalid_recipients: Vec::new(),
+            no_reply: false,
+            apply_report: None,
+            refused_bundle: None,
+            club_bot_baseline: None,
+        };
+        fs::write(
+            dec_dir.join("day-01-talk-Quarry.json"),
+            serde_json::to_string_pretty(&rec)?,
+        )?;
+        Ok(())
+    };
+
+    // State 1: negotiation latched ambiguous while talk holds a clean offer -> yields nothing.
+    let s1 = tmp.path().join("state1_neg_ambig");
+    fs::create_dir_all(s1.join("to-seat"))?;
+    fs::write(
+        s1.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "Actually\u{2014}cancel that.".to_owned(),
+            }],
+        })?,
+    )?;
+    write_talk(&s1, "I will sell 5 raw 0 at 10.")?;
+    assert!(extract_talk_commitments_for_state(&s1, 1, 0, &seat_guilds, &obs)?.is_empty());
+
+    // Inverse direction: talk ambiguous while negotiation holds a clean offer -> yields nothing.
+    let s_talk_ambig = tmp.path().join("state_talk_ambig");
+    fs::create_dir_all(s_talk_ambig.join("to-seat"))?;
+    fs::write(
+        s_talk_ambig.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "I will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    write_talk(&s_talk_ambig, "Maybe.")?;
+    assert!(
+        extract_talk_commitments_for_state(&s_talk_ambig, 1, 0, &seat_guilds, &obs)?.is_empty()
+    );
+
+    // State 2 with clean messages is completely isolated from State 1's ambiguous latch.
+    let s2 = tmp.path().join("state2_clean");
+    fs::create_dir_all(s2.join("to-seat"))?;
+    fs::write(
+        s2.join("to-seat/day-01-act-Foundry.negotiation.json"),
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: "b".to_owned(),
+            whispers: vec![UntrustedWhisper {
+                from_guild: "Quarry".to_owned(),
+                intent_header: None,
+                body: "I will sell 5 raw 0 at 10.".to_owned(),
+            }],
+        })?,
+    )?;
+    write_talk(&s2, "I will sell 5 raw 0 at 10.")?;
+    let clean_out = extract_talk_commitments_for_state(&s2, 1, 0, &seat_guilds, &obs)?;
+    assert_eq!(clean_out.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn talk_extraction_counts_blind_sha_and_join_arm_summary() -> TestResult {
+    let tmp = TmpDir::new("counts_pipeline")?;
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let git_sha = clean_git_sha_source();
+    let transport = SyntheticPipelineTransport;
+
+    let play_1 = tmp.path().join("play_c1");
+    let m1 = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_1.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9120,
+            seed: 61,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+    let branch_1 = tmp.path().join("branch_c1");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_1.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            serving_manifest_path: Some(serving_path.clone()),
+            arms: vec![EvalArm::Off, EvalArm::Control, EvalArm::On],
+            out_dir: branch_1.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    // Inject mixed matched + ambiguous messages into State 1 (same pair `Quarry -> Foundry`, so
+    // the ambiguous message latches commitments to empty while recording 2 seen / 1 matched / 1 ambiguous
+    // in negotiation, and 2 seen / 1 matched / 1 ambiguous in talk).
+    let neg_1_path = play_1.join("to-seat/day-01-act-Foundry.negotiation.json");
+    let neg_1_orig = fs::read_to_string(&neg_1_path)?;
+    fs::write(
+        &neg_1_path,
+        serde_json::to_string_pretty(&NegotiationInputs {
+            batna: eval_wording_slot("eval_batna").to_owned(),
+            whispers: vec![
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: "Thanks.".to_owned(),
+                },
+                UntrustedWhisper {
+                    from_guild: "Quarry".to_owned(),
+                    intent_header: None,
+                    body: "No.".to_owned(),
+                },
+            ],
+        })?,
+    )?;
+    let talk_1_path = play_1.join("decisions/day-01-talk-Quarry.json");
+    let mut talk_1_rec: EvalDecisionRecord = serde_json::from_slice(&fs::read(&talk_1_path)?)?;
+    talk_1_rec.raw_reply = Some(
+        json!({
+            "messages": [
+                { "to_guild": "Foundry", "body": "Hi." },
+                { "to_guild": "Foundry", "body": "I will sell 5 raw 0 at 10,5." }
+            ],
+            "market_actions": [],
+            "bundle": {},
+            "notes": "mixed_talk"
+        })
+        .to_string(),
+    );
+    fs::write(&talk_1_path, serde_json::to_string_pretty(&talk_1_rec)?)?;
+
+    // Check direct state extraction counts first.
+    let (save1, seal1) = (
+        play_1.join("checkpoints/day-01-pre-act.save.json"),
+        play_1.join("checkpoints/day-01-pre-act.seal"),
+    );
+    let host1 = EvalHost::fork_from_checkpoint(&save1, &seal1)?;
+    let obs1 = host1.observe_seat(Seat(0))?;
+    let guilds1 = resolve_eval_seat_guilds(&play_1, obs1.spec.seat_count)?;
+    let ext1 = extract_talk_commitments_with_counts_for_state(&play_1, 1, 0, &guilds1, &obs1)?;
+    assert!(ext1.commitments.is_empty());
+    assert_eq!(
+        ext1.counts,
+        TalkExtractionCounts {
+            negotiation: TalkSourceCounts {
+                ambiguous: 1,
+                matched: 1,
+                seen: 2,
+            },
+            talk: TalkSourceCounts {
+                ambiguous: 1,
+                matched: 1,
+                seen: 2,
+            },
+            total: TalkSourceCounts {
+                ambiguous: 2,
+                matched: 2,
+                seen: 4,
+            },
+        }
+    );
+
+    // State 2 with purely clean messages (1 matched in talk, 0 in negotiation).
+    let play_2 = tmp.path().join("play_c2");
+    let m2 = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_2.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9121,
+            seed: 62,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+    let branch_2 = tmp.path().join("branch_c2");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_2.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Off, EvalArm::Control, EvalArm::On],
+            out_dir: branch_2.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let blind_a = tmp.path().join("blind_a");
+    let arm_map_a = tmp.path().join("arm_map_a");
+    let ckpts_a = tmp.path().join("ckpts_a");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_1.clone(), branch_1.clone(), play_2, branch_2],
+        out_blind_dir: blind_a.clone(),
+        out_arm_map_dir: arm_map_a.clone(),
+        out_checkpoints_dir: Some(ckpts_a.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 71,
+    })?;
+
+    let sid1 = format!("{}-day-01-seat-0", m1.game_id);
+    let sid2 = format!("{}-day-01-seat-0", m2.game_id);
+    let blind1_bytes = fs::read(blind_a.join(format!("{sid1}.json")))?;
+    let blind1_req: BlindScoringRequest = serde_json::from_slice(&blind1_bytes)?;
+    assert_eq!(blind1_req.talk_extraction_counts, ext1.counts);
+    let blind1_sha_before = sha256_hex(&blind1_bytes);
+
+    // Changing only counts (replacing ambiguous `No.` with neutral `Ok.` while keeping commitments empty)
+    // must change blind_request_sha256.
+    let mut alt_neg = serde_json::from_str::<NegotiationInputs>(&neg_1_orig)?;
+    alt_neg.whispers = vec![
+        UntrustedWhisper {
+            from_guild: "Quarry".to_owned(),
+            intent_header: None,
+            body: "Thanks.".to_owned(),
+        },
+        UntrustedWhisper {
+            from_guild: "Quarry".to_owned(),
+            intent_header: None,
+            body: "Ok.".to_owned(),
+        },
+    ];
+    fs::write(&neg_1_path, serde_json::to_string_pretty(&alt_neg)?)?;
+    let blind_alt = tmp.path().join("blind_alt");
+    let arm_map_alt = tmp.path().join("arm_map_alt");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_1, branch_1],
+        out_blind_dir: blind_alt.clone(),
+        out_arm_map_dir: arm_map_alt,
+        out_checkpoints_dir: None,
+        config_path: cfg_path.clone(),
+        scorer_seed: 71,
+    })?;
+    let blind1_alt_bytes = fs::read(blind_alt.join(format!("{sid1}.json")))?;
+    let blind1_alt_req: BlindScoringRequest = serde_json::from_slice(&blind1_alt_bytes)?;
+    assert_eq!(blind1_alt_req.talk_commitments, blind1_req.talk_commitments);
+    assert_ne!(
+        blind1_alt_req.talk_extraction_counts,
+        blind1_req.talk_extraction_counts
+    );
+    assert_ne!(sha256_hex(&blind1_alt_bytes), blind1_sha_before);
+
+    // Score, freeze, and join both states; verify counts appear per arm in summary report.
+    let scores_dir = tmp.path().join("scores");
+    assert_eq!(
+        run_scorer_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_a.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_a.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                scores_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut Vec::new(),
+        ),
+        0
+    );
+    let score2: StateScoreOutput = serde_json::from_slice(&fs::read(
+        scores_dir.join("scores").join(format!("{sid2}.json")),
+    )?)?;
+    let freeze_path = tmp.path().join("freeze.json");
+    run_freeze(
+        &FreezeOptions {
+            blind_dir: blind_a.clone(),
+            config_path: cfg_path,
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: freeze_path.clone(),
+            scorer_crate_dir: None,
+        },
+        &git_sha,
+    )?;
+    let joined_dir = tmp.path().join("joined");
+    let report = run_join(&JoinOptions {
+        freeze_path,
+        arm_map_dir: arm_map_a,
+        scores_dir,
+        out_dir: joined_dir.clone(),
+        blind_dir: Some(blind_a),
+    })?;
+    assert_eq!(report.states_joined, 2);
+
+    let summary: PerArmSummaryFile =
+        serde_json::from_slice(&fs::read(joined_dir.join("per_arm_summary.json"))?)?;
+    assert_eq!(summary.arms.len(), 3);
+    // State 1 has seen=4, matched=2, ambiguous=2; State 2 has the single synthetic Talk whisper (seen=1, matched=1, ambiguous=0).
+    let expected_s2_counts = score2.talk_extraction_counts;
+    for arm_row in &summary.arms {
+        assert_eq!(arm_row.talk_counts.n_states, 2);
+        assert_eq!(
+            arm_row.talk_counts.totals.total.seen,
+            4 + expected_s2_counts.total.seen
+        );
+        assert_eq!(
+            arm_row.talk_counts.totals.total.matched,
+            2 + expected_s2_counts.total.matched
+        );
+        assert_eq!(
+            arm_row.talk_counts.totals.total.ambiguous,
+            2 + expected_s2_counts.total.ambiguous
+        );
+        assert_eq!(arm_row.talk_counts.per_state_ambiguous.min, 0);
+        assert_eq!(arm_row.talk_counts.per_state_ambiguous.max, 2);
+        assert_eq!(arm_row.talk_counts.per_state_ambiguous.median, Some(1.0));
+        assert_eq!(arm_row.talk_counts.per_state_seen.max, 4);
+    }
+    Ok(())
+}
+
+#[test]
+fn write_freeze_file_reports_partial_cleanup_removal_failure() -> TestResult {
+    let tmp = TmpDir::new("freeze_rm_err")?;
+    let freeze_path = tmp.path().join("scorer_freeze.json");
+    let err = write_freeze_file_with_writer_and_remover(
+        &freeze_path,
+        |_file| Err(std::io::Error::other("simulated write failure")),
+        |_path| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "simulated remove failure",
+            ))
+        },
+    )
+    .err()
+    .ok_or("expected EVAL_IO when both write and partial cleanup fail")?;
+    assert_eq!(err.code(), "EVAL_IO");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("simulated write failure")
+            && msg.contains("also failed to remove partial file")
+            && msg.contains("simulated remove failure"),
+        "unexpected cleanup failure error: {msg}"
+    );
+    let _ = fs::remove_file(&freeze_path);
     Ok(())
 }

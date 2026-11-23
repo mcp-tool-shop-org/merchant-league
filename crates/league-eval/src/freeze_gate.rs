@@ -14,9 +14,10 @@ use std::path::{Path, PathBuf};
 
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, CandidateScoreOutput, ScorerConfig, StateScoreOutput,
-    TALK_EXTRACTOR_VERSION_V2, compute_blind_inputs_manifest_sha256,
-    compute_blind_inputs_manifest_sha256_from_entries, compute_scorer_tree_sha256,
-    is_valid_sha256_hex, parse_blind_scoring_request_strict, to_sorted_pretty_json,
+    TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts,
+    compute_blind_inputs_manifest_sha256, compute_blind_inputs_manifest_sha256_from_entries,
+    compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
+    to_sorted_pretty_json,
 };
 use serde::{Deserialize, Serialize};
 
@@ -157,10 +158,45 @@ pub struct JoinedDecisionRow {
     pub excluded_by_prescreen: bool,
     /// Whether `v_max == v_min` (`§7.1`).
     pub degenerate_flat_set: bool,
+    /// Per-state talk message extraction counts echoed from `StateScoreOutput`.
+    #[serde(default)]
+    pub talk_extraction_counts: TalkExtractionCounts,
     /// Unblinded `decision.json` provenance path.
     pub decision_path: PathBuf,
     /// Unblinded `outcome.json` provenance path.
     pub outcome_path: PathBuf,
+}
+
+/// Descriptive distribution of one per-state count across states in an arm (`§7.1`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CountDistribution {
+    /// Maximum count observed across `n_states` (`0` when `n_states == 0`).
+    pub max: u64,
+    /// Arithmetic mean across `n_states` (`None` when `n_states == 0`).
+    pub mean: Option<f64>,
+    /// Median across `n_states` (`None` when `n_states == 0`).
+    pub median: Option<f64>,
+    /// Minimum count observed across `n_states` (`0` when `n_states == 0`).
+    pub min: u64,
+    /// Number of distinct states aggregated.
+    pub n_states: usize,
+    /// Sum of counts across `n_states`.
+    pub total: u64,
+}
+
+/// Descriptive per-arm talk message count totals and per-state distributions (`§7.1`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PerArmTalkCountsSummary {
+    /// Number of distinct states observed under this arm.
+    pub n_states: usize,
+    /// Element-wise sums across distinct states in this arm (`negotiation`, `talk`, `total`).
+    pub totals: TalkExtractionCounts,
+    /// Per-state distribution of `total.seen`.
+    pub per_state_seen: CountDistribution,
+    /// Per-state distribution of `total.matched`.
+    pub per_state_matched: CountDistribution,
+    /// Per-state distribution of `total.ambiguous`.
+    pub per_state_ambiguous: CountDistribution,
 }
 
 /// Descriptive per-arm summary row (`§7.1` last bullet).
@@ -184,6 +220,9 @@ pub struct PerArmSummaryRow {
     pub mean_regret_equity: Option<f64>,
     /// Mean arm-independent percentile sensitivity across scored entries (`None` when `0`).
     pub mean_sensitivity_indep_percentile: Option<f64>,
+    /// Descriptive talk message count totals and per-state distributions for this arm (`§7.1`).
+    #[serde(default)]
+    pub talk_counts: PerArmTalkCountsSummary,
 }
 
 /// Joined descriptive summary output written to `<out>/per_arm_summary.json`.
@@ -298,6 +337,17 @@ pub fn write_freeze_file_with_writer(
     out_path: &Path,
     write_fn: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
 ) -> Result<(), EvalError> {
+    write_freeze_file_with_writer_and_remover(out_path, write_fn, |path| fs::remove_file(path))
+}
+
+/// Variant of [`write_freeze_file_with_writer`] accepting a cleanup callback so partial-file
+/// removal error paths can be verified cleanly across platforms.
+#[doc(hidden)]
+pub fn write_freeze_file_with_writer_and_remover(
+    out_path: &Path,
+    write_fn: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+    remove_fn: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<(), EvalError> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -314,7 +364,7 @@ pub fn write_freeze_file_with_writer(
         })?;
     if let Err(e) = write_fn(&mut file) {
         drop(file);
-        if let Err(rm_err) = fs::remove_file(out_path) {
+        if let Err(rm_err) = remove_fn(out_path) {
             return Err(EvalError::Io(format!(
                 "write {}: {e} (also failed to remove partial file: {rm_err})",
                 out_path.display()
@@ -701,6 +751,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
                 first_draft_score_norm: draft_score.and_then(|s| s.score_norm),
                 excluded_by_prescreen: score.prescreen.excluded_by_prescreen,
                 degenerate_flat_set: score.degenerate_flat_set,
+                talk_extraction_counts: score.talk_extraction_counts.clone(),
                 decision_path: entry.decision_path.clone(),
                 outcome_path: entry.outcome_path.clone(),
             });
@@ -732,6 +783,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         let sum_regret: f64 = arm_rows.iter().map(|r| r.committed_regret_equity).sum();
         let sum_norm: f64 = norm_vals.iter().sum();
         let sum_pct: f64 = pct_vals.iter().sum();
+        let talk_counts = summarize_arm_talk_counts(&arm_rows);
 
         arm_summaries.push(PerArmSummaryRow {
             arm,
@@ -744,6 +796,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
             mean_regret_equity: (n_decisions > 0).then(|| sum_regret / (n_decisions as f64)),
             mean_sensitivity_indep_percentile: (!pct_vals.is_empty())
                 .then(|| sum_pct / (pct_vals.len() as f64)),
+            talk_counts,
         });
     }
 
@@ -782,4 +835,66 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         decisions_joined: decisions_file.rows.len(),
         arm_summaries,
     })
+}
+
+fn add_source_counts(acc: &mut TalkSourceCounts, rhs: &TalkSourceCounts) {
+    acc.ambiguous = acc.ambiguous.saturating_add(rhs.ambiguous);
+    acc.matched = acc.matched.saturating_add(rhs.matched);
+    acc.seen = acc.seen.saturating_add(rhs.seen);
+}
+
+fn compute_count_distribution(values: &[u64]) -> CountDistribution {
+    let n_states = values.len();
+    if n_states == 0 {
+        return CountDistribution::default();
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let total = sorted.iter().copied().fold(0_u64, u64::saturating_add);
+    let min = sorted[0];
+    let max = sorted[n_states - 1];
+    let mean = Some((total as f64) / (n_states as f64));
+    let median = if n_states % 2 == 1 {
+        Some(sorted[n_states / 2] as f64)
+    } else {
+        let lo = sorted[n_states / 2 - 1] as f64;
+        let hi = sorted[n_states / 2] as f64;
+        Some((lo + hi) / 2.0)
+    };
+    CountDistribution {
+        max,
+        mean,
+        median,
+        min,
+        n_states,
+        total,
+    }
+}
+
+fn summarize_arm_talk_counts(arm_rows: &[&JoinedDecisionRow]) -> PerArmTalkCountsSummary {
+    let mut per_state: BTreeMap<&str, &TalkExtractionCounts> = BTreeMap::new();
+    for row in arm_rows {
+        per_state
+            .entry(row.state_id.as_str())
+            .or_insert(&row.talk_extraction_counts);
+    }
+    let mut totals = TalkExtractionCounts::default();
+    let mut seen_vals = Vec::with_capacity(per_state.len());
+    let mut matched_vals = Vec::with_capacity(per_state.len());
+    let mut ambiguous_vals = Vec::with_capacity(per_state.len());
+    for counts in per_state.values() {
+        add_source_counts(&mut totals.negotiation, &counts.negotiation);
+        add_source_counts(&mut totals.talk, &counts.talk);
+        add_source_counts(&mut totals.total, &counts.total);
+        seen_vals.push(counts.total.seen);
+        matched_vals.push(counts.total.matched);
+        ambiguous_vals.push(counts.total.ambiguous);
+    }
+    PerArmTalkCountsSummary {
+        n_states: per_state.len(),
+        totals,
+        per_state_seen: compute_count_distribution(&seen_vals),
+        per_state_matched: compute_count_distribution(&matched_vals),
+        per_state_ambiguous: compute_count_distribution(&ambiguous_vals),
+    }
 }

@@ -76,9 +76,9 @@ pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 /// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
 
-/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; enforces per-message `allowed_ascii_chars` validation and fail-closed pair ambiguity/negation latching; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
+/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; enforces per-message `allowed_ascii_chars` validation, thousands-comma grouping, whole-clause closed grammar matching, and fail-closed pair latching; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
-    "a874531c2c7e93a10cb6f47990e5096e48e7fd5a58921d32db81b7e3c8924239";
+    "8edf70e7a60f3550f79b82dd354af84185094addd0333a9724bf701b0f56bfaa";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -559,6 +559,100 @@ pub struct BlindCandidate {
     pub submission: EvalActSubmission,
 }
 
+/// Per-source talk message extraction counts included in [`BlindScoringRequest`] (`§4.3`, `§8.1`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TalkSourceCounts {
+    /// Messages failing closed as ambiguous for their `(proposer, counterparty)` pair.
+    pub ambiguous: u64,
+    /// Messages in which every clause matched a closed-grammar template cleanly.
+    pub matched: u64,
+    /// Total peer messages targeting `focal_seat` inspected from this source (`matched + ambiguous`).
+    pub seen: u64,
+}
+
+impl TalkSourceCounts {
+    /// Checks `matched + ambiguous == seen`.
+    pub fn validate(&self, label: &str) -> Result<(), ScorerError> {
+        let sum = self.matched.checked_add(self.ambiguous).ok_or_else(|| {
+            ScorerError::InvalidTalkCommitment(format!("{label} talk counts overflow u64"))
+        })?;
+        if sum != self.seen {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "{label} seen count {} != matched {} + ambiguous {}",
+                self.seen, self.matched, self.ambiguous
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Per-state message extraction counts covered by `blind_request_sha256` (`§4.3`, `§7.1`, `§8.1`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TalkExtractionCounts {
+    /// Counts from `to-seat/day-DD-act-<Guild>.negotiation.json` whispers targeting `focal_seat`.
+    pub negotiation: TalkSourceCounts,
+    /// Counts from `decisions/day-DD-talk-<Guild>.json` replies targeting `focal_seat`.
+    pub talk: TalkSourceCounts,
+    /// Element-wise sum of `negotiation` and `talk` counts.
+    pub total: TalkSourceCounts,
+}
+
+impl TalkExtractionCounts {
+    /// Constructs verified totals from per-source `negotiation` and `talk` counts.
+    pub fn from_sources(
+        negotiation: TalkSourceCounts,
+        talk: TalkSourceCounts,
+    ) -> Result<Self, ScorerError> {
+        negotiation.validate("negotiation")?;
+        talk.validate("talk")?;
+        let seen = negotiation.seen.checked_add(talk.seen).ok_or_else(|| {
+            ScorerError::InvalidTalkCommitment("total seen talk count overflow".to_owned())
+        })?;
+        let matched = negotiation
+            .matched
+            .checked_add(talk.matched)
+            .ok_or_else(|| {
+                ScorerError::InvalidTalkCommitment("total matched talk count overflow".to_owned())
+            })?;
+        let ambiguous = negotiation
+            .ambiguous
+            .checked_add(talk.ambiguous)
+            .ok_or_else(|| {
+                ScorerError::InvalidTalkCommitment("total ambiguous talk count overflow".to_owned())
+            })?;
+        let out = Self {
+            negotiation,
+            talk,
+            total: TalkSourceCounts {
+                ambiguous,
+                matched,
+                seen,
+            },
+        };
+        out.validate()?;
+        Ok(out)
+    }
+
+    /// Verifies per-source `seen == matched + ambiguous` and `total == negotiation + talk`.
+    pub fn validate(&self) -> Result<(), ScorerError> {
+        self.negotiation.validate("negotiation")?;
+        self.talk.validate("talk")?;
+        self.total.validate("total")?;
+        if self.negotiation.seen.checked_add(self.talk.seen) != Some(self.total.seen)
+            || self.negotiation.matched.checked_add(self.talk.matched) != Some(self.total.matched)
+            || self.negotiation.ambiguous.checked_add(self.talk.ambiguous)
+                != Some(self.total.ambiguous)
+        {
+            return Err(ScorerError::InvalidTalkCommitment(
+                "talk_extraction_counts.total disagrees with negotiation + talk".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Arm-blind scoring request for one `(state_id, pre_act_checkpoint, focal_seat)` (`§8.1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -583,6 +677,9 @@ pub struct BlindScoringRequest {
     pub state_id: String,
     /// Neutral counterfactual talk-phase trade commitments (`§4.3`).
     pub talk_commitments: Vec<ExtractedTalkCommitment>,
+    /// Per-source and total talk message classification counts (`§4.3`, `§8.1`).
+    #[serde(default)]
+    pub talk_extraction_counts: TalkExtractionCounts,
 }
 
 /// Parses raw JSON bytes into [`BlindScoringRequest`], refusing unknown or non-canonical fields
@@ -651,6 +748,7 @@ impl BlindScoringRequest {
         for commitment in &self.talk_commitments {
             validate_talk_commitment(commitment, self.focal_seat, EVAL_TABLE_SEAT_COUNT)?;
         }
+        self.talk_extraction_counts.validate()?;
         let cfg_hash = config.sha256_hex()?;
         if self.scorer_config_sha256 != cfg_hash {
             return Err(ScorerError::ConfigHashMismatch {
@@ -829,6 +927,9 @@ pub struct StateScoreOutput {
     pub scorer_seed: u64,
     /// Arm-blind canonical state identifier.
     pub state_id: String,
+    /// Per-source and total talk message classification counts echoed from [`BlindScoringRequest`].
+    #[serde(default)]
+    pub talk_extraction_counts: TalkExtractionCounts,
     /// Maximum `ev_total_equity` over `in_span == true` candidates.
     pub v_max: f64,
     /// Minimum `ev_total_equity` over `in_span == true` candidates.

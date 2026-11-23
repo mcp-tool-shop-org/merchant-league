@@ -27,7 +27,7 @@ use crate::error::EvalError;
 use crate::records::{BranchArmOutcome, EvalArm, EvalDecisionRecord, EvalSetupFile};
 use crate::reply::parse_eval_act_reply;
 use crate::talk_extract::{
-    extract_talk_commitments_for_state, resolve_eval_seat_guilds, talk_rules_v2_digest,
+    extract_talk_commitments_with_counts_for_state, resolve_eval_seat_guilds, talk_rules_v2_digest,
 };
 
 /// Options for [`run_build_blind_inputs`].
@@ -515,13 +515,15 @@ pub fn run_build_blind_inputs(
         let bot_tie_seed = host.bot_tie_seed();
 
         let seat_guilds = resolve_eval_seat_guilds(source_game_dir, obs.spec.seat_count)?;
-        let talk_commitments = extract_talk_commitments_for_state(
+        let talk_extracted = extract_talk_commitments_with_counts_for_state(
             source_game_dir,
             day,
             focal_seat,
             &seat_guilds,
             &obs,
         )?;
+        let talk_commitments = talk_extracted.commitments;
+        let talk_extraction_counts = talk_extracted.counts;
 
         let mut candidates =
             generate_arm_independent_candidates(&obs, &own_mandate, &config, bot_tie_seed)?;
@@ -582,6 +584,7 @@ pub fn run_build_blind_inputs(
             pre_act_pair_sha256: pair_sha.clone(),
             focal_seat,
             talk_commitments,
+            talk_extraction_counts,
             candidates: deduped,
             scorer_seed: opts.scorer_seed,
             scorer_config_sha256: config_sha.clone(),

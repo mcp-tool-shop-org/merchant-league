@@ -291,6 +291,7 @@ pub fn score_outcomes(
         scorer_config_sha256: request.scorer_config_sha256.clone(),
         scorer_seed: request.scorer_seed,
         state_id: request.state_id.clone(),
+        talk_extraction_counts: request.talk_extraction_counts.clone(),
         v_max,
         v_min,
         winners_curse,

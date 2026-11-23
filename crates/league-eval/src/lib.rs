@@ -31,13 +31,13 @@ pub use driver::{
     run_play_with_transport_and_git_sha, seat_keeps_notes, validate_eval_seats_file,
 };
 pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
-#[doc(hidden)]
-pub use freeze_gate::write_freeze_file_with_writer;
 pub use freeze_gate::{
-    DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, FreezeOptions, JoinOptions, JoinReport, JoinedDecisionRow,
-    JoinedDecisionsFile, PerArmSummaryFile, PerArmSummaryRow, ScorerFreezeFile, run_freeze,
-    run_join,
+    CountDistribution, DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, FreezeOptions, JoinOptions, JoinReport,
+    JoinedDecisionRow, JoinedDecisionsFile, PerArmSummaryFile, PerArmSummaryRow,
+    PerArmTalkCountsSummary, ScorerFreezeFile, run_freeze, run_join,
 };
+#[doc(hidden)]
+pub use freeze_gate::{write_freeze_file_with_writer, write_freeze_file_with_writer_and_remover};
 pub use records::{
     BranchArmOutcome, BranchManifest, BranchSummary, DecisionTokenTopLogprobs,
     DecisionTopLogprobEntry, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
@@ -65,7 +65,8 @@ pub use serving::{
     validate_crate_git_sha_and_cleanliness, validate_serving_manifest_input,
 };
 pub use talk_extract::{
-    TalkRulesV2Table, extract_talk_commitments_for_state, extract_talk_commitments_from_messages,
+    TalkExtractionResult, TalkRulesV2Table, extract_talk_commitments_for_state,
+    extract_talk_commitments_from_messages, extract_talk_commitments_with_counts_for_state,
     resolve_eval_seat_guilds, talk_rules_v2_digest, talk_rules_v2_digest_for,
 };
 pub use view::{

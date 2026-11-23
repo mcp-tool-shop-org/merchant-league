@@ -22,7 +22,7 @@ use crate::types::{
     SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES,
     SYNTH_PROJECT_RANK_BY_EQUITY, SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS,
     SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScorerConfig,
-    candidate_id_for_submission, is_valid_sha256_hex, validate_state_id,
+    TalkExtractionCounts, candidate_id_for_submission, is_valid_sha256_hex, validate_state_id,
 };
 
 /// Deduplicates `candidates` by canonical `candidate_id` (`sha256_hex` of compact submission JSON),
@@ -996,6 +996,7 @@ pub fn build_arm_independent_request(
         scorer_seed,
         state_id: state_id.to_owned(),
         talk_commitments: Vec::new(),
+        talk_extraction_counts: TalkExtractionCounts::default(),
     };
     req.validate(config)?;
     Ok(req)
