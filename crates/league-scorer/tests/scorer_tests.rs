@@ -22,8 +22,8 @@ use league_scorer::{
     ScorerError, StateScoreOutput, apply_talk_commitments, build_arm_independent_request,
     candidate_id_for_submission, canonicalize_talk_commitments, compute_pre_act_pair_sha256_hex,
     decide_peer_turn, dedupe_candidates, draw_honour_commitment, draw_scenarios,
-    execute_blind_request, fork_checkpoint_sanitized, generate_arm_independent_candidates,
-    is_valid_sha256_hex, parse_blind_scoring_request_strict, posture_for_scenario,
+    execute_blind_request, generate_arm_independent_candidates, is_valid_sha256_hex,
+    parse_blind_scoring_request_strict, posture_for_scenario, probe_checkpoint_sanitized,
     run_single_rollout, score_outcomes, sha256_hex, to_sorted_compact_json, to_sorted_pretty_json,
     validate_talk_commitment, verify_checkpoint_pair,
 };
@@ -2892,11 +2892,11 @@ fn part4_hardenings_and_end_to_end_s2_determinism() -> TestResult {
     );
     assert!(String::from_utf8_lossy(&err_nested).contains("UNKNOWN_SUBMISSION_FIELD"));
 
-    // 4d: Directory paths are stripped from fork_checkpoint_sanitized error messages.
+    // 4d: Directory paths are stripped from probe_checkpoint_sanitized error messages.
     let secret_dir = tmp.path().join("very_secret_parent_dir_token");
     fs::create_dir_all(&secret_dir)?;
     let missing_save_path = secret_dir.join("missing_target.save.json");
-    let sanitize_err = fork_checkpoint_sanitized(&missing_save_path, &cas_seal)
+    let sanitize_err = probe_checkpoint_sanitized(&missing_save_path, &cas_seal)
         .err()
         .ok_or("expected missing file error")?;
     let sanitize_msg = sanitize_err.to_string();

@@ -98,50 +98,24 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 2,
-      "changed": 13,
+      "added": 0,
+      "changed": 3,
       "moved": 0,
-      "parts": 5,
+      "parts": 1,
       "removed": 0
     },
     "items": [
       {
-        "kind": "sequence",
-        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, before `InvalidScorerConfig`.",
-        "subjects": [
-          "crates/league-scorer/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, after `Json`.",
-        "subjects": [
-          "crates/league-scorer/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` lost a step, `Usage`.",
-        "subjects": [
-          "crates/league-scorer/src/cli.rs"
-        ]
-      },
-      {
-        "kind": "sequence",
-        "sentence": "And 1 more change to the order of work.",
-        "subjects": []
-      },
-      {
         "kind": "counts",
-        "sentence": "2 files added and 13 changed content, across 5 parts.",
+        "sentence": "Nothing structural changed since 2026-11-23; 3 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "58d7882800f73143c4e6ab8acf9fa172b2db8832",
-      "generatedAt": "2026-11-22T23:40:43.573Z"
+      "commit": "6522b2c9ff1f1f7298d3cdc3211d2c1fcfbd8ac9",
+      "generatedAt": "2026-11-23T03:56:15.457Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
@@ -225,7 +199,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "6522b2c9ff1f1f7298d3cdc3211d2c1fcfbd8ac9",
+  "commit": "e7364a66a1faad44fc27a29551f73ab9d93389ec",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -763,7 +737,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-23T03:56:15.457Z",
+  "generatedAt": "2026-11-23T04:07:38.346Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "41 writes and 32 reads use paths built at run time and are not named here.",

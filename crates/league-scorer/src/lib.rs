@@ -25,8 +25,8 @@ pub use postures::{
     submission_from_club_bot,
 };
 pub use rollout::{
-    execute_blind_request, fork_checkpoint_sanitized, run_single_rollout,
-    verify_and_fork_checkpoint, verify_checkpoint_digests, verify_checkpoint_pair,
+    execute_blind_request, probe_checkpoint_sanitized, run_single_rollout,
+    verify_checkpoint_digests, verify_checkpoint_pair,
 };
 pub use scenarios::{ScenarioAssignment, draw_scenarios};
 pub use scoring::score_outcomes;

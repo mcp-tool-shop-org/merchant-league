@@ -11460,7 +11460,7 @@
           "path": "crates/league-scorer/src/error.rs"
         },
         {
-          "hash": "d8c8b74700ba1859d7a10b1a89d1ad73022bf463c002fc6dc95906180be774cc",
+          "hash": "a7e3c9966ca003c3946efe9dfb5dd068c1fa9b01b0072b654f4a019176655e94",
           "importsFiles": [
             "crates/league-scorer/src/candidates.rs",
             "crates/league-scorer/src/cli.rs",
@@ -11637,6 +11637,7 @@
           "exports": [
             "execute_blind_request",
             "fork_checkpoint_sanitized",
+            "probe_checkpoint_sanitized",
             "run_single_rollout",
             "verify_and_fork_checkpoint",
             "verify_checkpoint_digests",
@@ -11646,35 +11647,35 @@
             {
               "in": "verify_checkpoint_digests",
               "kind": "err",
-              "line": 66
-            },
-            {
-              "in": "verify_checkpoint_digests",
-              "kind": "err",
               "line": 72
             },
             {
               "in": "verify_checkpoint_digests",
               "kind": "err",
-              "line": 80
+              "line": 78
+            },
+            {
+              "in": "verify_checkpoint_digests",
+              "kind": "err",
+              "line": 86
             },
             {
               "in": "run_single_rollout",
               "kind": "err",
-              "line": 147
+              "line": 153
             },
             {
               "in": "run_single_rollout",
               "kind": "err",
-              "line": 152
+              "line": 158
             },
             {
               "in": "execute_blind_request",
               "kind": "err",
-              "line": 236
+              "line": 242
             }
           ],
-          "hash": "0bcbf2431904c9018a060ace72ed1d98c4097c1d96e1bf84eec4856ee6c50f44",
+          "hash": "1b330b0ff8cb625fc2098c1e3c8c6c7e4234bf25d0a0e7118a238f262b55711b",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/error.rs",
@@ -11948,7 +11949,7 @@
           "path": "crates/league-scorer/src/types.rs"
         },
         {
-          "hash": "a0b5d6147e8378a39c57aae6d919dd4459feca7df68c14106b8e584451f5be27",
+          "hash": "ce0a1611284c3d723512dbe41450795277515179c2bb1945bd929d031e90ea78",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/cli.rs",
@@ -17305,7 +17306,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "6522b2c9ff1f1f7298d3cdc3211d2c1fcfbd8ac9",
+    "commit": "e7364a66a1faad44fc27a29551f73ab9d93389ec",
     "tracked": 643
   },
   "landings": [

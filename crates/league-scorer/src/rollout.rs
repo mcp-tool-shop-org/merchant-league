@@ -19,13 +19,19 @@ use crate::types::{
 };
 
 /// Forks `EvalHost` from `(save_path, seal_path)`, stripping directory paths from any engine error (`§6.1`, Part 4d).
-pub fn fork_checkpoint_sanitized(
+pub(crate) fn fork_checkpoint_sanitized(
     save_path: &Path,
     seal_path: &Path,
 ) -> Result<EvalHost, ScorerError> {
     EvalHost::fork_from_checkpoint(save_path, seal_path).map_err(|e| {
         ScorerError::Engine(sanitize_error_text(&e.to_string(), &[save_path, seal_path]))
     })
+}
+
+/// Validates checkpoint forkability via `EvalHost::fork_from_checkpoint`, stripping directory paths from any error.
+pub fn probe_checkpoint_sanitized(save_path: &Path, seal_path: &Path) -> Result<(), ScorerError> {
+    let _host = fork_checkpoint_sanitized(save_path, seal_path)?;
+    Ok(())
 }
 
 /// Reads and verifies `.save.json`, `.seal`, and optional pair SHA-256 digests, returning the pair hex digest.
@@ -85,7 +91,7 @@ pub fn verify_checkpoint_digests(
 }
 
 /// Re-verifies checkpoint bytes against digests immediately before calling `EvalHost::fork_from_checkpoint`.
-pub fn verify_and_fork_checkpoint(
+pub(crate) fn verify_and_fork_checkpoint(
     save_path: &Path,
     seal_path: &Path,
     expected_save_sha256: &str,
