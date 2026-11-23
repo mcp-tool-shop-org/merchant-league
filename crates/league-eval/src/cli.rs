@@ -727,6 +727,7 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
     let mut scores_dir: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
     let mut blind_dir: Option<PathBuf> = None;
+    let mut source_game_dirs: Vec<PathBuf> = Vec::new();
 
     let mut iter = args.iter().cloned();
     while let Some(arg_os) = iter.next() {
@@ -743,6 +744,9 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
             "--scores" => scores_dir = Some(PathBuf::from(take_value(&mut iter, "--scores")?)),
             "--out" => out_dir = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
             "--blind" => blind_dir = Some(PathBuf::from(take_value(&mut iter, "--blind")?)),
+            "--source-game" => {
+                source_game_dirs.push(PathBuf::from(take_value(&mut iter, "--source-game")?));
+            }
             other => {
                 return Err(EvalError::Usage(format!("unknown `join` flag '{other}'")));
             }
@@ -759,6 +763,7 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
         out_dir: out_dir
             .ok_or_else(|| EvalError::Usage("`join` requires `--out <dir>`".to_owned()))?,
         blind_dir,
+        source_game_dirs,
     };
     let report = run_join(&opts)?;
     writeln!(

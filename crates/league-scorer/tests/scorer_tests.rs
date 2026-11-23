@@ -5829,6 +5829,10 @@ fn blind_request_and_state_score_output_require_talk_extraction_counts() -> Test
         .ok_or("expected missing talk_extraction_counts error")?;
     assert_eq!(err.code(), "INVALID_JSON");
     assert_eq!(err.exit_code(), EXIT_USER_ERROR);
+    assert!(
+        err.to_string().contains("talk_extraction_counts"),
+        "expected missing-field error to name `talk_extraction_counts`, got: {err}"
+    );
 
     let outcome = ScenarioRolloutOutcome {
         mandate_bonus: 0,
@@ -5842,7 +5846,13 @@ fn blind_request_and_state_score_output_require_talk_extraction_counts() -> Test
         .as_object_mut()
         .ok_or("expected StateScoreOutput JSON object")?
         .remove("talk_extraction_counts");
-    assert!(serde_json::from_value::<StateScoreOutput>(out_val).is_err());
+    let out_err = serde_json::from_value::<StateScoreOutput>(out_val)
+        .err()
+        .ok_or("expected missing StateScoreOutput talk_extraction_counts error")?;
+    assert!(
+        out_err.to_string().contains("talk_extraction_counts"),
+        "expected StateScoreOutput missing-field error to name `talk_extraction_counts`, got: {out_err}"
+    );
     Ok(())
 }
 

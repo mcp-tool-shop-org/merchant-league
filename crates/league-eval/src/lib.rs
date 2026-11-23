@@ -11,6 +11,7 @@ pub mod cli;
 pub mod driver;
 pub mod error;
 pub mod freeze_gate;
+pub mod mechanisms;
 pub mod records;
 pub mod reply;
 pub mod schema;
@@ -38,6 +39,12 @@ pub use freeze_gate::{
 };
 #[doc(hidden)]
 pub use freeze_gate::{write_freeze_file_with_writer, write_freeze_file_with_writer_and_remover};
+pub use mechanisms::{
+    DecisionMechanismMetrics, HTTP_REPLY_OK_STATUS, MECHANISM_DATA_LIMITS, PerArmMechanismSummary,
+    REFUSED_BUNDLE_LEGS_MIN_COUNT, ReasoningLengthCounts, TALK_COMMITMENT_HONOUR_WINDOW_DAYS,
+    TALK_COMMITMENT_MIN_FILL_BPS, TALK_COMMITMENT_PRICE_TOLERANCE_MILLI_CRED,
+    TOOL_CALL_USED_MIN_COUNT, measure_reasoning_length_in_memory, summarize_arm_mechanisms,
+};
 pub use records::{
     BranchArmOutcome, BranchManifest, BranchSummary, DecisionTokenTopLogprobs,
     DecisionTopLogprobEntry, EvalArm, EvalDecisionRecord, EvalManifest, EvalManifestSeat,
