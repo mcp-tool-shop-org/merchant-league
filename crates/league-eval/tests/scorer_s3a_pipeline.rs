@@ -3,9 +3,10 @@
 //! All tests use deterministic synthetic fixtures and local mock transports; no external run
 //! directory or real model endpoint is ever touched.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -23,6 +24,7 @@ use league_eval::{
     extract_talk_commitments_from_messages, resolve_eval_seat_guilds,
     run_branch_with_transport_and_git_sha, run_build_blind_inputs, run_freeze, run_join,
     run_play_with_transport_and_git_sha, talk_rules_v2_digest, talk_rules_v2_digest_for,
+    write_freeze_file_with_writer,
 };
 use league_relay::{
     CONTROL_WORDING_ARM, NegotiationInputs, PREVIEW_WORDING_ARM, RawHttpResponse, Round,
@@ -3288,10 +3290,6 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.cue_precedence = &["commitment", "retraction"];
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
     t.decimal_dot_keeps_clause = false;
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3316,10 +3314,6 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.merge_policy = "other";
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
     t.negated_offer_cues = &["won't"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3340,6 +3334,10 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
+    t.quote_normalizations = &[("\u{2019}", "'")];
+    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
+
+    let mut t = base.clone();
     t.raw_prefixes = &["r"];
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
@@ -3348,11 +3346,7 @@ fn talk_rules_v2_digest_pins_every_table_field_and_source_bytes() -> TestResult 
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
-    t.retraction_scope_policy = "other";
-    assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
-
-    let mut t = base.clone();
-    t.seat_ref_forms = &["seat_index"];
+    t.reject_non_ascii_clauses = false;
     assert_ne!(talk_rules_v2_digest_for(&t, sample_src)?, base_digest);
 
     let mut t = base.clone();
@@ -4063,5 +4057,381 @@ fn relay_setup_without_wording_arm_key_refused_with_control_wording_arm_mismatch
     .ok_or("expected CONTROL_WORDING_ARM_MISMATCH on non-string wording_arm")?;
     assert_eq!(err_non_str.code(), "CONTROL_WORDING_ARM_MISMATCH");
     let _ = sid;
+    Ok(())
+}
+
+#[test]
+fn talk_v2_curly_apostrophe_and_non_ascii_rejection() -> TestResult {
+    let host = EvalHost::from_standard_setup(TableId(9113), 4, 1, 0)?;
+    let obs = host.observe_seat(league_core::Seat(0))?;
+    let seat_guilds = vec![
+        "Foundry".to_owned(),
+        "Quarry".to_owned(),
+        "Harbor".to_owned(),
+        "Glassworks".to_owned(),
+    ];
+
+    // Typographic apostrophe refusals (U+2019, U+2018, U+02BC, U+FF07) normalize to ASCII `'`,
+    // never invent an offer, and retract a prior matching offer.
+    for msg in [
+        "I won\u{2019}t sell 5 raw 0 at 10",
+        "I won\u{2018}t sell 5 raw 0 at 10",
+        "I can\u{02bc}t sell 5 raw 0 at 10",
+        "I don\u{ff07}t commit to sell 5 raw 0 at 10",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, msg.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "curly-apostrophe refusal must yield empty: `{msg}`"
+        );
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[
+                    (1, 0, "I will sell 5 raw 0 at 10.".to_owned()),
+                    (1, 0, msg.to_owned()),
+                ],
+                &obs,
+            )?
+            .is_empty(),
+            "curly-apostrophe refusal must retract prior offer: `{msg}`"
+        );
+    }
+
+    // Typographic curly quotes and filler negation preserve valid ASCII offers.
+    let expected_five = vec![league_scorer::ExtractedTalkCommitment {
+        proposer_seat: 1,
+        counterparty_seat: 0,
+        offered_action: MarketAction::PostOffer {
+            seat: 1,
+            order: OfferProposal {
+                side: OfferSide::Sell,
+                good: AssetId::Raw(0),
+                amount: 5 * UNIT_SCALE,
+                price_per_unit_cred: 10 * UNIT_SCALE,
+                domain_id: None,
+                is_hybrid: false,
+            },
+        },
+    }];
+    assert_eq!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(
+                1,
+                0,
+                "Don\u{2019}t worry: I will sell 5 raw 0 at 10".to_owned()
+            )],
+            &obs,
+        )?,
+        expected_five
+    );
+    assert_eq!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(1, 0, "\u{201c}I will sell 5 raw 0 at 10\u{201d}".to_owned())],
+            &obs,
+        )?,
+        expected_five
+    );
+
+    // Non-ASCII text (non-Latin script or accented/unmapped Unicode) drops the clause cleanly.
+    for non_ascii in [
+        "Не буду sell 5 raw 0 at 10",
+        "Не продаю: I won\u{2019}t sell 5 raw 0 at 10; Не буду sell 5 raw 0 at 10",
+        "私は sell 5 raw 0 at 10",
+        "I will sell 5 raw 0 at 10 caf\u{00e9}",
+        "I won\u{2032}t sell 5 raw 0 at 10",
+    ] {
+        assert!(
+            extract_talk_commitments_from_messages(
+                0,
+                &seat_guilds,
+                &[(1, 0, non_ascii.to_owned())],
+                &obs,
+            )?
+            .is_empty(),
+            "non-ASCII clause must be discarded: `{non_ascii}`"
+        );
+    }
+
+    // One clean ASCII offer plus one non-ASCII clause keeps only the ASCII offer.
+    assert_eq!(
+        extract_talk_commitments_from_messages(
+            0,
+            &seat_guilds,
+            &[(
+                1,
+                0,
+                "I will sell 5 raw 0 at 10. Не буду sell 4 raw 1 at 20.".to_owned()
+            )],
+            &obs,
+        )?,
+        expected_five
+    );
+    Ok(())
+}
+
+fn verify_talk_rules_sec52_doc(doc_text: &str) -> Result<(), String> {
+    let sec_start = doc_text
+        .find("#### 5.2.1 Frozen Talk Extractor Rule Table")
+        .ok_or_else(|| "missing `#### 5.2.1` section in docs/decision-scorer.md".to_owned())?;
+    let sec_end = doc_text[sec_start..]
+        .find("## 6. Horizon Valuation")
+        .map(|off| sec_start + off)
+        .ok_or_else(|| "missing `## 6. Horizon Valuation` after `#### 5.2.1`".to_owned())?;
+    let section = &doc_text[sec_start..sec_end];
+
+    let start_marker = "<!-- talk_rules_v2_table:start -->";
+    let end_marker = "<!-- talk_rules_v2_table:end -->";
+    let block_start = section
+        .find(start_marker)
+        .ok_or_else(|| format!("missing `{start_marker}` marker"))?
+        + start_marker.len();
+    let block_end = section[block_start..]
+        .find(end_marker)
+        .map(|off| block_start + off)
+        .ok_or_else(|| format!("missing `{end_marker}` marker"))?;
+    let prose_part = &section[..block_start - start_marker.len()];
+    let fenced = section[block_start..block_end].trim();
+    let doc_json = fenced
+        .strip_prefix("```json")
+        .and_then(|s| s.strip_suffix("```"))
+        .map(str::trim)
+        .ok_or_else(|| {
+            "expected fenced ```json block inside talk_rules_v2_table markers".to_owned()
+        })?;
+
+    let doc_json_lf = doc_json.replace("\r\n", "\n");
+    let expected_json = to_sorted_pretty_json(&TalkRulesV2Table::frozen())
+        .map_err(|e| format!("serialize frozen table: {e}"))?;
+    if doc_json_lf != expected_json.trim() {
+        return Err(format!(
+            "docs/decision-scorer.md §5.2.1 talk_rules_v2 JSON differs from TalkRulesV2Table::frozen():\ndoc:\n{doc_json_lf}\nexpected:\n{expected_json}"
+        ));
+    }
+
+    let doc_val: Value =
+        serde_json::from_str(&doc_json_lf).map_err(|e| format!("parse doc table JSON: {e}"))?;
+    let obj = doc_val
+        .as_object()
+        .ok_or_else(|| "talk_rules_v2 JSON must be an object".to_owned())?;
+    let json_keys: BTreeSet<String> = obj.keys().cloned().collect();
+
+    let mut bullet_keys = BTreeSet::new();
+    for line in prose_part.lines() {
+        if let Some(after) = line.trim_start().strip_prefix("- **`")
+            && let Some((name, _rest)) = after.split_once("`:**")
+            && !bullet_keys.insert(name.to_owned())
+        {
+            return Err(format!("duplicate bullet for `{name}` in §5.2.1"));
+        }
+    }
+    if bullet_keys != json_keys {
+        return Err(format!(
+            "§5.2.1 bullet keys {bullet_keys:?} disagree with TalkRulesV2Table fields {json_keys:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn talk_rules_v2_sec52_doc_matches_frozen_table() -> TestResult {
+    let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/decision-scorer.md");
+    let doc_text = fs::read_to_string(&doc_path)?;
+    verify_talk_rules_sec52_doc(&doc_text).map_err(std::io::Error::other)?;
+
+    // Negative controls proving doc drift fails immediately.
+    let bad_val = doc_text.replacen(
+        "\"negated_offer_max_gap_tokens\": 2",
+        "\"negated_offer_max_gap_tokens\": 3",
+        1,
+    );
+    assert_ne!(bad_val, doc_text);
+    assert!(verify_talk_rules_sec52_doc(&bad_val).is_err());
+
+    let missing_bullet = doc_text.replacen("- **`quote_normalizations`:**", "- **`other`:**", 1);
+    assert_ne!(missing_bullet, doc_text);
+    assert!(verify_talk_rules_sec52_doc(&missing_bullet).is_err());
+    Ok(())
+}
+
+#[test]
+fn write_freeze_file_removes_partial_file_on_write_error_allowing_retry() -> TestResult {
+    let tmp = TmpDir::new("freeze_partial_cleanup")?;
+    let freeze_path = tmp.path().join("scorer_freeze.json");
+
+    let err = write_freeze_file_with_writer(&freeze_path, |file| {
+        file.write_all(b"{\"partial\":")?;
+        Err(std::io::Error::other("simulated write failure"))
+    })
+    .err()
+    .ok_or("expected write_freeze_file_with_writer to return Io error")?;
+    assert_eq!(err.code(), "EVAL_IO");
+    assert!(
+        !freeze_path.exists(),
+        "partial freeze file must be deleted on write failure"
+    );
+
+    // Retry succeeds cleanly instead of failing with FREEZE_FILE_EXISTS.
+    write_freeze_file_with_writer(&freeze_path, |file| file.write_all(b"{\"complete\":true}"))?;
+    assert_eq!(fs::read(&freeze_path)?, b"{\"complete\":true}");
+
+    // Existing completed freeze file still refuses overwrite with FREEZE_FILE_EXISTS.
+    let exists_err = write_freeze_file_with_writer(&freeze_path, |file| file.write_all(b"again"))
+        .err()
+        .ok_or("expected FREEZE_FILE_EXISTS on completed file")?;
+    assert_eq!(exists_err.code(), "FREEZE_FILE_EXISTS");
+    Ok(())
+}
+
+#[test]
+fn join_refuses_duplicate_state_id_in_scores_and_arm_map() -> TestResult {
+    let tmp = TmpDir::new("join_dup_state_id")?;
+    let wrapper_path = copy_pinned_wrapper(tmp.path())?;
+    let seats_path = write_two_model_two_bot_seats(tmp.path())?;
+    let serving_path = write_serving_manifest(tmp.path())?;
+    let git_sha = clean_git_sha_source();
+    let transport = SyntheticPipelineTransport;
+
+    let play_dir = tmp.path().join("play_d");
+    let play_manifest = run_play_with_transport_and_git_sha(
+        &PlayOptions {
+            game_dir: play_dir.clone(),
+            seats_path: seats_path.clone(),
+            wrapper_path: wrapper_path.clone(),
+            wrapper_version: None,
+            serving_manifest_path: Some(serving_path.clone()),
+            arm: EvalArm::Control,
+            table_id: 9114,
+            seed: 51,
+            turns: 1,
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+    let branch_dir = tmp.path().join("branch_d");
+    let _ = run_branch_with_transport_and_git_sha(
+        &BranchOptions {
+            checkpoint_prefix: Some(play_dir.join("checkpoints/day-01-pre-act")),
+            list_path: None,
+            focal_seat: Some("Foundry".to_owned()),
+            seats_path,
+            wrapper_path,
+            serving_manifest_path: Some(serving_path),
+            arms: vec![EvalArm::Control],
+            out_dir: branch_dir.clone(),
+            memory_mode: league_relay::MemoryMode::Snapshot,
+            live: false,
+            cap_credits: None,
+            cap_gpu_secs: None,
+            allowed_vm_hosts: Vec::new(),
+        },
+        &transport,
+        None,
+        &git_sha,
+    )?;
+
+    let cfg = fast_test_scorer_config();
+    let cfg_path = tmp.path().join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let blind_dir = tmp.path().join("blind");
+    let arm_map_dir = tmp.path().join("arm_map");
+    let ckpts_dir = tmp.path().join("ckpts");
+    run_build_blind_inputs(&BuildBlindInputsOptions {
+        run_dirs: vec![play_dir, branch_dir],
+        out_blind_dir: blind_dir.clone(),
+        out_arm_map_dir: arm_map_dir.clone(),
+        out_checkpoints_dir: Some(ckpts_dir.clone()),
+        config_path: cfg_path.clone(),
+        scorer_seed: 19,
+    })?;
+    let scores_dir = tmp.path().join("scores");
+    assert_eq!(
+        run_scorer_cli(
+            [
+                "score",
+                "--blind-inputs",
+                blind_dir.to_str().ok_or("utf8")?,
+                "--checkpoints",
+                ckpts_dir.to_str().ok_or("utf8")?,
+                "--config",
+                cfg_path.to_str().ok_or("utf8")?,
+                "--out",
+                scores_dir.to_str().ok_or("utf8")?,
+            ],
+            &mut Vec::new(),
+            &mut Vec::new(),
+        ),
+        0
+    );
+    let freeze_path = tmp.path().join("freeze.json");
+    run_freeze(
+        &FreezeOptions {
+            blind_dir,
+            config_path: cfg_path,
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: freeze_path.clone(),
+            scorer_crate_dir: None,
+        },
+        &git_sha,
+    )?;
+
+    let sid = format!("{}-day-01-seat-0", play_manifest.game_id);
+
+    // 1. Duplicate `state_id` across score files must be refused with FREEZE_MANIFEST_MISMATCH.
+    let dup_score_path = scores_dir.join("scores").join(format!("{sid}-dup.json"));
+    fs::copy(
+        scores_dir.join("scores").join(format!("{sid}.json")),
+        &dup_score_path,
+    )?;
+    let err_dup_score = run_join(&JoinOptions {
+        freeze_path: freeze_path.clone(),
+        arm_map_dir: arm_map_dir.clone(),
+        scores_dir: scores_dir.clone(),
+        out_dir: tmp.path().join("out_dup_score"),
+        blind_dir: None,
+    })
+    .err()
+    .ok_or("expected FREEZE_MANIFEST_MISMATCH on duplicate score state_id")?;
+    assert_eq!(err_dup_score.code(), "FREEZE_MANIFEST_MISMATCH");
+    assert!(
+        err_dup_score.to_string().contains("duplicate state_id"),
+        "unexpected error: {err_dup_score}"
+    );
+    fs::remove_file(&dup_score_path)?;
+
+    // 2. Duplicate `state_id` across arm_map/ files must be refused with FREEZE_MANIFEST_MISMATCH.
+    let dup_am_path = arm_map_dir.join(format!("{sid}-dup.json"));
+    fs::copy(arm_map_dir.join(format!("{sid}.json")), &dup_am_path)?;
+    let err_dup_am = run_join(&JoinOptions {
+        freeze_path,
+        arm_map_dir,
+        scores_dir,
+        out_dir: tmp.path().join("out_dup_am"),
+        blind_dir: None,
+    })
+    .err()
+    .ok_or("expected FREEZE_MANIFEST_MISMATCH on duplicate arm_map state_id")?;
+    assert_eq!(err_dup_am.code(), "FREEZE_MANIFEST_MISMATCH");
+    assert!(
+        err_dup_am.to_string().contains("duplicate state_id"),
+        "unexpected error: {err_dup_am}"
+    );
+    fs::remove_file(&dup_am_path)?;
     Ok(())
 }

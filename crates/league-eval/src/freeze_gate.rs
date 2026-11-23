@@ -287,23 +287,37 @@ pub fn run_freeze(
             .map_err(|e| EvalError::Io(format!("create freeze parent dir: {e}")))?;
     }
     let json_text = to_sorted_pretty_json(&freeze)?;
+    write_freeze_file_with_writer(&opts.out_path, |file| file.write_all(json_text.as_bytes()))?;
+    Ok(freeze)
+}
+
+/// Atomically creates a new freeze file (`create_new(true)`) and removes the partial file if
+/// writing fails, so subsequent retries are not blocked by `FREEZE_FILE_EXISTS`.
+#[doc(hidden)]
+pub fn write_freeze_file_with_writer(
+    out_path: &Path,
+    write_fn: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+) -> Result<(), EvalError> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&opts.out_path)
+        .open(out_path)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 EvalError::FreezeFileExists(format!(
                     "freeze file already exists at {}; refusing to overwrite",
-                    opts.out_path.display()
+                    out_path.display()
                 ))
             } else {
-                EvalError::Io(format!("create {}: {e}", opts.out_path.display()))
+                EvalError::Io(format!("create {}: {e}", out_path.display()))
             }
         })?;
-    file.write_all(json_text.as_bytes())
-        .map_err(|e| EvalError::Io(format!("write {}: {e}", opts.out_path.display())))?;
-    Ok(freeze)
+    if let Err(e) = write_fn(&mut file) {
+        drop(file);
+        let _ = fs::remove_file(out_path);
+        return Err(EvalError::Io(format!("write {}: {e}", out_path.display())));
+    }
+    Ok(())
 }
 
 fn validate_blind_inputs_dir_against_config(
@@ -570,7 +584,12 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
             format!("{}.json", state.state_id),
             state.blind_input_sha256.clone(),
         );
-        arm_maps.insert(state.state_id.clone(), state);
+        let state_id = state.state_id.clone();
+        if arm_maps.insert(state_id.clone(), state).is_some() {
+            return Err(EvalError::FreezeManifestMismatch(format!(
+                "duplicate state_id `{state_id}` across --arm-map files"
+            )));
+        }
     }
 
     let reconstructed_manifest_sha =
@@ -618,7 +637,12 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
             format!("{}.json", score.state_id),
             score.blind_request_sha256.clone(),
         );
-        scores_by_state.insert(score.state_id.clone(), score);
+        let state_id = score.state_id.clone();
+        if scores_by_state.insert(state_id.clone(), score).is_some() {
+            return Err(EvalError::FreezeManifestMismatch(format!(
+                "duplicate state_id `{state_id}` across --scores files"
+            )));
+        }
     }
 
     let scored_manifest_sha =

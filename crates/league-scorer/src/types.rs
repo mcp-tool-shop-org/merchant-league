@@ -76,9 +76,9 @@ pub const HONOUR_PPM_SCALE: u64 = 1_000_000;
 /// Frozen talk-commitment extraction rules version identifier (`§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_VERSION_V2: &str = "talk_rules_v2";
 
-/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical rule table JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source, `§5.2`, `§8.2`).
+/// Frozen canonical SHA-256 of `talk_rules_v2` (canonical `TalkRulesV2Table` JSON + LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes; upstream reply/record/whisper loaders are pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`, `§5.2`, `§8.2`).
 pub const TALK_EXTRACTOR_RULES_DIGEST_V2: &str =
-    "160d5af0e970655103ef93b67a945a3bf36a26ed26ee1a04892c6d30342cfcfb";
+    "9af92adfb19b8e5c08b171ad5c1ee93981f2cba56726dbb8aabeabea3d0f49f5";
 
 /// Encodes a 32-byte digest into 64 lowercase hexadecimal ASCII characters.
 fn encode_digest_hex(digest: &[u8; 32]) -> String {
@@ -797,7 +797,9 @@ pub struct CandidateScoreOutput {
 /// Omits all timestamps, durations, hostnames, filesystem paths, and arm labels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StateScoreOutput {
-    /// SHA-256 hex digest of the exact blind scoring request bytes scored for this state (`§8.2`).
+    /// SHA-256 hex digest of the blind scoring request (`§8.2`). `league-scorer score` records the
+    /// exact file bytes read from `--blind-inputs/<state_id>.json`; direct library calls to
+    /// `execute_blind_request` default to the SHA-256 of `to_sorted_pretty_json(request)`.
     pub blind_request_sha256: String,
     /// Winning `in_span` candidate identifier achieving `v_max` (ties broken by ascending `candidate_id`).
     pub c_best: String,

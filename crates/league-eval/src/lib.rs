@@ -31,6 +31,8 @@ pub use driver::{
     run_play_with_transport_and_git_sha, seat_keeps_notes, validate_eval_seats_file,
 };
 pub use error::{EXIT_OK, EXIT_PARTIAL_SUCCESS, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, EvalError};
+#[doc(hidden)]
+pub use freeze_gate::write_freeze_file_with_writer;
 pub use freeze_gate::{
     DESCRIPTIVE_ONLY_INFERENTIAL_STATUS, FreezeOptions, JoinOptions, JoinReport, JoinedDecisionRow,
     JoinedDecisionsFile, PerArmSummaryFile, PerArmSummaryRow, ScorerFreezeFile, run_freeze,

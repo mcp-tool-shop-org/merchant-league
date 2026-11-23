@@ -274,6 +274,8 @@ pub fn score_outcomes(
     let winners_curse = compute_winners_curse(request, &totals, half)?;
 
     Ok(StateScoreOutput {
+        // Default for direct library callers; the `score` CLI overwrites this with `sha256_hex`
+        // over the exact request file bytes read from `--blind-inputs/<state_id>.json`.
         blind_request_sha256: sha256_hex(to_sorted_pretty_json(request)?.as_bytes()),
         c_best,
         candidates: candidate_outputs,

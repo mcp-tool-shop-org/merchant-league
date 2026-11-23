@@ -26,8 +26,12 @@ use crate::reply::parse_eval_talk_reply;
 /// Canonical frozen rule table for `talk_rules_v2` (`§4.3`, `§5.2`).
 ///
 /// Field names appear in strict alphabetical order so compact JSON serialization and
-/// `talk_extractor_rules_digest` remain deterministic. Every extraction rule lives either here as
-/// data or in this source file hashed into [`talk_rules_v2_digest`].
+/// `talk_extractor_rules_digest` remain deterministic. `talk_extractor_rules_digest` pins this
+/// rule table together with LF-normalized `crates/league-eval/src/talk_extract.rs` source bytes
+/// (covering clause splitting, precedence, good matching, verb-governed negation scoping, and
+/// cross-source merging). Upstream reply parsing (`crates/league-eval/src/reply.rs`), decision
+/// records (`crates/league-eval/src/records.rs`), and `NegotiationInputs` (`league-relay`) are
+/// pinned by `scorer_git_sha` and `blind_inputs_manifest_sha256`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TalkRulesV2Table {
     /// Cues indicating uncertainty, hedging, or questions (discard clause).
@@ -44,8 +48,6 @@ pub struct TalkRulesV2Table {
     pub contradiction_latches_pair_asset: bool,
     /// Optional unit suffixes following price figures (`CRED`).
     pub cred_tokens: &'static [&'static str],
-    /// Precedence order when classifying each clause.
-    pub cue_precedence: &'static [&'static str],
     /// Whether `.` followed immediately by an ASCII digit stays inside the current clause.
     pub decimal_dot_keeps_clause: bool,
     /// Require exactly one positive whole-number amount before the price cue.
@@ -58,8 +60,6 @@ pub struct TalkRulesV2Table {
     pub exactly_one_price_cue: bool,
     /// Explicit cancellation cues that retract any prior matching commitment cleanly.
     pub explicit_retraction_cues: &'static [&'static str],
-    /// Cross-source merge policy across `to-seat/*.negotiation.json` and `decisions/*-talk-*.json`.
-    pub merge_policy: &'static str,
     /// Negation cues that trigger retraction only when governing a trade verb nearby.
     pub negated_offer_cues: &'static [&'static str],
     /// Maximum token distance after a negated cue within which a trade verb triggers retraction.
@@ -70,14 +70,14 @@ pub struct TalkRulesV2Table {
     pub number_unit_scale: i64,
     /// Prepositions/symbols separating order amount/good from limit unit price.
     pub price_cues: &'static [&'static str],
+    /// Typographic apostrophe/quote `(from, to)` normalizations applied before clause tokenization.
+    pub quote_normalizations: &'static [(&'static str, &'static str)],
     /// Prefixes identifying `AssetId::Raw(i)`.
     pub raw_prefixes: &'static [&'static str],
     /// Prefixes identifying `AssetId::Refined(i)`.
     pub refined_prefixes: &'static [&'static str],
-    /// Retraction scoping policy name.
-    pub retraction_scope_policy: &'static str,
-    /// Supported seat/good reference grammar forms.
-    pub seat_ref_forms: &'static [&'static str],
+    /// Whether clauses still containing non-ASCII characters after quote normalization are discarded.
+    pub reject_non_ascii_clauses: bool,
     /// Tokens designating a sell offer (`OfferSide::Sell`).
     pub sell_tokens: &'static [&'static str],
     /// Non-alphanumeric characters kept inside compound tokens.
@@ -145,12 +145,6 @@ impl TalkRulesV2Table {
             ],
             contradiction_latches_pair_asset: true,
             cred_tokens: &["cred", "creds"],
-            cue_precedence: &[
-                "retraction",
-                "ambiguity",
-                "unsupported_condition",
-                "commitment",
-            ],
             decimal_dot_keeps_clause: true,
             exactly_one_amount_before_price: true,
             exactly_one_good_before_price: true,
@@ -167,7 +161,6 @@ impl TalkRulesV2Table {
                 "rescind",
                 "walk back",
             ],
-            merge_policy: "per_source_then_union_with_retraction_dominance",
             negated_offer_cues: &["won't", "will not", "cannot", "can't", "don't", "do not"],
             negated_offer_max_gap_tokens: 2,
             negated_offer_verbs: &[
@@ -176,16 +169,18 @@ impl TalkRulesV2Table {
             ],
             number_unit_scale: UNIT_SCALE,
             price_cues: &["@", "at", "for"],
+            quote_normalizations: &[
+                ("\u{2018}", "'"),
+                ("\u{2019}", "'"),
+                ("\u{02bc}", "'"),
+                ("\u{ff07}", "'"),
+                ("\u{201c}", "\""),
+                ("\u{201d}", "\""),
+                ("\u{ff02}", "\""),
+            ],
             raw_prefixes: &["raw"],
             refined_prefixes: &["refined", "ref"],
-            retraction_scope_policy: "governs_offer_or_standalone_retraction",
-            seat_ref_forms: &[
-                "seat_index",
-                "guild_name_case_insensitive",
-                "compound_prefix_ref",
-                "prefix_then_ref",
-                "guild_then_prefix",
-            ],
+            reject_non_ascii_clauses: true,
             sell_tokens: &["sell", "selling", "ask"],
             token_join_chars: &["_", "'", ":", "."],
             token_trim_chars: &[".", ":", "_"],
@@ -602,12 +597,26 @@ enum ClauseEffect {
     Offer(OfferProposal),
 }
 
+fn normalize_clause_text(clause: &str, rules: &TalkRulesV2Table) -> String {
+    let mut normalized = clause.to_owned();
+    for &(from, to) in rules.quote_normalizations {
+        if normalized.contains(from) {
+            normalized = normalized.replace(from, to);
+        }
+    }
+    normalized
+}
+
 fn interpret_clause(
     clause: &str,
     rules: &TalkRulesV2Table,
     seat_guilds: &[String],
 ) -> ClauseEffect {
-    let lower = clause.to_ascii_lowercase();
+    let normalized = normalize_clause_text(clause, rules);
+    if rules.reject_non_ascii_clauses && !normalized.is_ascii() {
+        return ClauseEffect::Ignore;
+    }
+    let lower = normalized.to_ascii_lowercase();
     let tokens = tokenize_clause(&lower, rules);
     if tokens.is_empty() {
         return ClauseEffect::Ignore;
