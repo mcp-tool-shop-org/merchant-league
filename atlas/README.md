@@ -1,25 +1,20 @@
 # merchant-league: how it works
 
-Mapped at 2026-11-22 from commit 58d7882 by Atlas 1.26.0.
+Mapped at 2026-11-23 from commit 6522b2c by Atlas 1.26.0.
 
 ## What this is
 
 Merchant League: a slow-turn trading game for 2 to 6 players, played only on the XRPL Testnet. (written by a person)
 
-16 parts, mostly Rust (402 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
+16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).
 
-## What changed since 2026-11-22 (fd899c3)
+## What changed since 2026-11-22 (58d7882)
 
-- league-scorer now imports league-core.
-- CI now also runs crates/league-scorer/tests/.
-- CI now also checks crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs.
-- league-scorer (crates/league-scorer/Cargo.toml) is a new command. It runs crates/league-scorer/src/main.rs.
-- crates/league-core/ is now also read by crates/league-scorer/Cargo.toml.
-- crates/league-relay/tests/fixtures/control_arm_r2_wording.json is now read by crates/league-relay/tests/relay_integration.rs.
-- crates/league-scorer/ is now read by Cargo.toml.
-- And 1 more new writer or reader of a place.
-- league-scorer is a new part, drawn from `crates/league-scorer/**`.
-- 14 files added and 17 changed content, across 6 parts.
+- In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, before `InvalidScorerConfig`.
+- In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, after `Json`.
+- In crates/league-scorer/src/cli.rs, `main_entry` lost a step, `Usage`.
+- And 1 more change to the order of work.
+- 2 files added and 13 changed content, across 5 parts.
 
 ## What comes in
 
@@ -110,7 +105,7 @@ Nothing in the files this map could read writes to a tracked place; 1 file could
 
 ## Hand-authored
 
-People write .github/, docs/ and the repository root; 39 writes with paths built at run time may land here.
+People write .github/, docs/ and the repository root; 41 writes with paths built at run time may land here.
 
 ## Where to start
 
@@ -121,9 +116,9 @@ Read those in order to follow one run of league-tui end to end. This path follow
 ## What this map cannot see
 
 - 1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.
-- 39 writes and 33 reads use paths built at run time and are not named here.
+- 41 writes and 32 reads use paths built at run time and are not named here.
 - 1 write goes to places this repository does not track, so it is not listed as generated.
-- 18 writes and 48 reads go to a path their caller passes, not to this repository.
+- 18 writes and 49 reads go to a path their caller passes, not to this repository.
 - 2 writes go to a temporary directory, not to this repository.
 - There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.
 - 378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.

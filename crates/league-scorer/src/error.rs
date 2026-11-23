@@ -1,6 +1,7 @@
 //! Structured domain errors and exit codes for `league-scorer`.
 
 use std::fmt;
+use std::path::Path;
 
 use league_core::{StructuredError, ToStructuredError};
 
@@ -13,15 +14,51 @@ pub const EXIT_USER_ERROR: i32 = 1;
 /// Process exit code for runtime I/O, host replay, or internal execution failures.
 pub const EXIT_RUNTIME_ERROR: i32 = 2;
 
-/// Domain error returned by `league-scorer` validation, scenario draws, rollouts, scoring, and CLI.
+/// Strips directory prefixes of known paths from error strings so full filesystem paths never appear.
+#[must_use]
+pub fn sanitize_error_text(msg: &str, sensitive_paths: &[&Path]) -> String {
+    let mut cleaned = msg.to_owned();
+    for path in sensitive_paths {
+        let base = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "<file>".to_owned());
+        let full = path.to_string_lossy().into_owned();
+        if !full.is_empty() {
+            cleaned = cleaned.replace(&full, &base);
+            let fwd = full.replace('\\', "/");
+            cleaned = cleaned.replace(&fwd, &base);
+        }
+        if let Some(parent) = path.parent() {
+            let parent_str = parent.to_string_lossy().into_owned();
+            if !parent_str.is_empty() {
+                for sep in ["/", "\\"] {
+                    let with_sep = format!("{parent_str}{sep}");
+                    let with_fwd_sep = format!("{}{sep}", parent_str.replace('\\', "/"));
+                    cleaned = cleaned.replace(&with_sep, "");
+                    cleaned = cleaned.replace(&with_fwd_sep, "");
+                }
+                cleaned = cleaned.replace(&parent_str, "<dir>");
+                let fwd_parent = parent_str.replace('\\', "/");
+                cleaned = cleaned.replace(&fwd_parent, "<dir>");
+            }
+        }
+    }
+    cleaned
+}
+
+/// Domain error returned by `league-scorer` validation, candidate generation, rollouts, scoring, and CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScorerError {
     /// Invalid CLI arguments or conflicting flags (`exit 1`).
     Usage(String),
     /// Unsupported `BlindScoringRequest::schema_version` (`exit 1`).
     UnsupportedSchemaVersion(u32),
-    /// Invalid or unsafe `state_id` (`exit 1`).
+    /// Invalid, unsafe, or colliding `state_id` (`exit 1`).
     InvalidStateId(String),
+    /// Request JSON filename stem does not equal `BlindScoringRequest::state_id` (`exit 1`).
+    StateIdFilenameMismatch(String),
     /// Malformed 64-character lowercase SHA-256 hex digest (`exit 1`).
     InvalidHexDigest {
         /// Name of the offending digest field.
@@ -58,6 +95,8 @@ pub enum ScorerError {
         /// Computed SHA-256 of `submission`.
         actual: String,
     },
+    /// Candidate `submission` payload contains unknown or non-canonical JSON fields (`exit 1`).
+    UnknownSubmissionField(String),
     /// `BlindScoringRequest::scorer_config_sha256` disagrees with loaded `ScorerConfig` (`exit 1`).
     ConfigHashMismatch {
         /// Hash declared on request.
@@ -65,10 +104,8 @@ pub enum ScorerError {
         /// Hash of loaded `ScorerConfig`.
         actual: String,
     },
-    /// Posture requested in `ScorerConfig` is not implemented yet in S1 (`exit 1`).
-    PostureNotImplemented(String),
-    /// Non-empty `talk_commitments` requested before S2 (`exit 1`).
-    TalkCommitmentsNotImplemented(usize),
+    /// Invalid `ExtractedTalkCommitment` in `BlindScoringRequest` (`exit 1`).
+    InvalidTalkCommitment(String),
     /// Invalid scenario count `M` or `ScorerConfig` invariant (`exit 1`).
     InvalidScorerConfig(String),
     /// JSON parse or serialization failure (`exit 1` for input configs/requests, `exit 2` internally).
@@ -106,6 +143,7 @@ impl ScorerError {
             Self::Usage(_) => "USAGE_ERROR",
             Self::UnsupportedSchemaVersion(_) => "UNSUPPORTED_SCHEMA_VERSION",
             Self::InvalidStateId(_) => "INVALID_STATE_ID",
+            Self::StateIdFilenameMismatch(_) => "STATE_ID_FILENAME_MISMATCH",
             Self::InvalidHexDigest { .. } => "INVALID_HEX_DIGEST",
             Self::InvalidFocalSeat { .. } => "INVALID_FOCAL_SEAT",
             Self::EmptyCandidates(_) => "EMPTY_CANDIDATES",
@@ -113,9 +151,9 @@ impl ScorerError {
             Self::UnsortedCandidates { .. } => "UNSORTED_CANDIDATES",
             Self::DuplicateCandidateId(_) => "DUPLICATE_CANDIDATE_ID",
             Self::CandidateIdMismatch { .. } => "CANDIDATE_ID_MISMATCH",
+            Self::UnknownSubmissionField(_) => "UNKNOWN_SUBMISSION_FIELD",
             Self::ConfigHashMismatch { .. } => "CONFIG_HASH_MISMATCH",
-            Self::PostureNotImplemented(_) => "POSTURE_NOT_IMPLEMENTED",
-            Self::TalkCommitmentsNotImplemented(_) => "TALK_COMMITMENTS_NOT_IMPLEMENTED",
+            Self::InvalidTalkCommitment(_) => "INVALID_TALK_COMMITMENT",
             Self::InvalidScorerConfig(_) => "INVALID_SCORER_CONFIG",
             Self::Json(_) => "INVALID_JSON",
             Self::NoBlindInputs(_) => "NO_BLIND_INPUTS",
@@ -137,6 +175,7 @@ impl ScorerError {
             Self::Usage(_)
             | Self::UnsupportedSchemaVersion(_)
             | Self::InvalidStateId(_)
+            | Self::StateIdFilenameMismatch(_)
             | Self::InvalidHexDigest { .. }
             | Self::InvalidFocalSeat { .. }
             | Self::EmptyCandidates(_)
@@ -144,9 +183,9 @@ impl ScorerError {
             | Self::UnsortedCandidates { .. }
             | Self::DuplicateCandidateId(_)
             | Self::CandidateIdMismatch { .. }
+            | Self::UnknownSubmissionField(_)
             | Self::ConfigHashMismatch { .. }
-            | Self::PostureNotImplemented(_)
-            | Self::TalkCommitmentsNotImplemented(_)
+            | Self::InvalidTalkCommitment(_)
             | Self::InvalidScorerConfig(_)
             | Self::Json(_)
             | Self::NoBlindInputs(_)
@@ -165,12 +204,15 @@ impl ScorerError {
     #[must_use]
     pub const fn hint(&self) -> &'static str {
         match self {
-            Self::Usage(_) => "Run `league-scorer --help` and supply all required score flags.",
+            Self::Usage(_) => "Run `league-scorer --help` and verify all required flags.",
             Self::UnsupportedSchemaVersion(_) => {
                 "Generate blind scoring requests with schema_version = 1."
             }
             Self::InvalidStateId(_) => {
-                "Use a non-empty ASCII state_id free of path separators, colons, or whitespace."
+                "Use unique case-insensitive ASCII state_ids matching `<source_game_id>-day-<DD>-seat-<idx>`."
+            }
+            Self::StateIdFilenameMismatch(_) => {
+                "Rename each blind input JSON file so its stem matches `request.state_id`."
             }
             Self::InvalidHexDigest { .. } => {
                 "Provide a 64-character lowercase hexadecimal SHA-256 digest."
@@ -190,19 +232,19 @@ impl ScorerError {
             Self::CandidateIdMismatch { .. } => {
                 "Recompute candidate_id as sha256_hex(serde_json::to_vec(&submission))."
             }
+            Self::UnknownSubmissionField(_) => {
+                "Serialize each candidate submission using strict EvalActSubmission schema fields only."
+            }
             Self::ConfigHashMismatch { .. } => {
                 "Pass the matching ScorerConfig JSON or rebuild requests against the frozen config."
             }
-            Self::PostureNotImplemented(_) => {
-                "Configure all-Standard posture weights/schedule for S1 scoring."
-            }
-            Self::TalkCommitmentsNotImplemented(_) => {
-                "Pass an empty talk_commitments array in S1 scoring requests."
+            Self::InvalidTalkCommitment(_) => {
+                "Ensure commitment seats are distinct in-range peer seats matching offered_action."
             }
             Self::InvalidScorerConfig(_) => {
-                "Verify scenarios_m is an even integer >= 2 and all config fields are valid."
+                "Verify scenarios_m is even >= 2, posture settings are valid, and all config fields are well-formed."
             }
-            Self::Json(_) => "Ensure request and config JSON match the strict S1 schemas.",
+            Self::Json(_) => "Ensure request and config JSON match the strict scorer schemas.",
             Self::NoBlindInputs(_) => {
                 "Provide at least one *.json request file inside --blind-inputs."
             }
@@ -233,10 +275,12 @@ impl fmt::Display for ScorerError {
         match self {
             Self::Usage(msg)
             | Self::InvalidStateId(msg)
+            | Self::StateIdFilenameMismatch(msg)
             | Self::EmptyCandidates(msg)
             | Self::NoInSpanCandidates(msg)
             | Self::DuplicateCandidateId(msg)
-            | Self::PostureNotImplemented(msg)
+            | Self::UnknownSubmissionField(msg)
+            | Self::InvalidTalkCommitment(msg)
             | Self::InvalidScorerConfig(msg)
             | Self::Json(msg)
             | Self::NoBlindInputs(msg)
@@ -280,10 +324,6 @@ impl fmt::Display for ScorerError {
             Self::ConfigHashMismatch { expected, actual } => write!(
                 f,
                 "{code}: request scorer_config_sha256 `{expected}` != loaded config `{actual}`"
-            ),
-            Self::TalkCommitmentsNotImplemented(len) => write!(
-                f,
-                "{code}: posture/compliance feature not built yet (received {len} talk_commitments)"
             ),
             Self::FocalMandateNotInDeck => write!(
                 f,

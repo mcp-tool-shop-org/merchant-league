@@ -201,9 +201,9 @@ pub struct ScorerConfig {
     pub posture_weights: PostureWeights,
     /// Exclude states with `v_max_indep == v_min_indep` in the `§3.2` arm-blind pre-screen.
     pub prescreen_exclude_flat_sets: bool,
-    /// Minimum distinct feasible candidates required in `C_indep(state)` (`§3.2`).
+    /// Minimum distinct feasible candidates required in `C_indep(state)` (`§3.2`, placeholder until pilot calibration).
     pub prescreen_min_arm_indep_candidates: usize,
-    /// Minimum arm-independent `v_max_indep - v_min_indep` span in integer equity (`§3.2`).
+    /// Minimum arm-independent `v_max_indep - v_min_indep` span in integer equity (`§3.2`, placeholder until pilot calibration).
     pub prescreen_min_arm_indep_span: i64,
     /// Perturbation scalings applied to feasible composite drafts (bps).
     pub quantity_scales_bps: Vec<u16>,
@@ -242,6 +242,7 @@ impl Default for ScorerConfig {
             ],
             posture_weights: PostureWeights::default(),
             prescreen_exclude_flat_sets: true,
+            // Placeholder defaults until arm-blind pilot calibration (§3.2, §5.2).
             prescreen_min_arm_indep_candidates: 2,
             prescreen_min_arm_indep_span: 1,
             quantity_scales_bps: vec![5000, 10_000],
@@ -265,8 +266,20 @@ impl Default for ScorerConfig {
     }
 }
 
+/// Allowed bucket identifiers for [`ScorerConfig::synth_slot_fill_order`].
+pub const SYNTH_SLOT_BUCKET_NAMES: [&str; 8] = [
+    "cleared_pass_b",
+    "claims_council",
+    "upkeep_inputs",
+    "cross_quotes",
+    "batches",
+    "debt",
+    "composite_drops",
+    "scaled",
+];
+
 impl ScorerConfig {
-    /// Builds an S1-valid all-Standard `ScorerConfig` using `scenarios_m` CRN scenarios.
+    /// Builds an all-Standard `ScorerConfig` using `scenarios_m` CRN scenarios (useful for baseline tests).
     #[must_use]
     pub fn s1_standard(scenarios_m: usize) -> Self {
         Self {
@@ -287,8 +300,8 @@ impl ScorerConfig {
         Ok(sha256_hex(&bytes))
     }
 
-    /// Validates all S1 invariants and refuses unbuilt postures (`Active` / `Conservative`).
-    pub fn validate_for_s1(&self) -> Result<(), ScorerError> {
+    /// Validates all `ScorerConfig` invariants (`§5.2`, `§7.1`).
+    pub fn validate(&self) -> Result<(), ScorerError> {
         if self.scenarios_m < 2 || !self.scenarios_m.is_multiple_of(2) {
             return Err(ScorerError::InvalidScorerConfig(format!(
                 "scenarios_m must be an even integer >= 2 for split-half Winner's curse, got {}",
@@ -300,23 +313,31 @@ impl ScorerConfig {
                 "posture_schedule cannot be empty".to_owned(),
             ));
         }
-        for posture in &self.posture_schedule {
-            if *posture != PostureKind::Standard {
-                return Err(ScorerError::PostureNotImplemented(format!(
-                    "posture not built yet: `{posture:?}` in posture_schedule"
+        let weight_sum = u64::from(self.posture_weights.standard)
+            + u64::from(self.posture_weights.active)
+            + u64::from(self.posture_weights.conservative);
+        if weight_sum == 0 {
+            return Err(ScorerError::InvalidScorerConfig(
+                "posture_weights sum must be > 0".to_owned(),
+            ));
+        }
+        if self.synth_slot_fill_order.is_empty() {
+            return Err(ScorerError::InvalidScorerConfig(
+                "synth_slot_fill_order cannot be empty".to_owned(),
+            ));
+        }
+        let mut seen_slots = std::collections::BTreeSet::new();
+        for slot in &self.synth_slot_fill_order {
+            if !SYNTH_SLOT_BUCKET_NAMES.contains(&slot.as_str()) {
+                return Err(ScorerError::InvalidScorerConfig(format!(
+                    "unknown synth_slot_fill_order bucket `{slot}`"
                 )));
             }
-        }
-        if self.posture_weights.active > 0 || self.posture_weights.conservative > 0 {
-            return Err(ScorerError::PostureNotImplemented(format!(
-                "posture not built yet: non-zero active ({}) or conservative ({}) weight",
-                self.posture_weights.active, self.posture_weights.conservative
-            )));
-        }
-        if self.posture_weights.standard == 0 {
-            return Err(ScorerError::InvalidScorerConfig(
-                "posture_weights.standard must be > 0".to_owned(),
-            ));
+            if !seen_slots.insert(slot.as_str()) {
+                return Err(ScorerError::InvalidScorerConfig(format!(
+                    "duplicate synth_slot_fill_order bucket `{slot}`"
+                )));
+            }
         }
         if !matches!(
             self.mandate_stratification_mode.as_str(),
@@ -354,7 +375,7 @@ impl ScorerConfig {
     }
 }
 
-/// Neutral counterfactual talk-phase trade commitment (`§4.3`, `§8.1`). Deferred to S2.
+/// Neutral counterfactual talk-phase trade commitment (`§4.3`, `§8.1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractedTalkCommitment {
@@ -364,6 +385,82 @@ pub struct ExtractedTalkCommitment {
     pub offered_action: MarketAction,
     /// Seat index of the proposing peer (`0..4`).
     pub proposer_seat: u8,
+}
+
+/// Validates a single [`ExtractedTalkCommitment`] against table bounds and counterparty consistency (`§4.3`).
+pub fn validate_talk_commitment(
+    commitment: &ExtractedTalkCommitment,
+    focal_seat: u8,
+    seat_count: u8,
+) -> Result<(), ScorerError> {
+    if commitment.proposer_seat >= seat_count {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {} out of range 0..{seat_count}",
+            commitment.proposer_seat
+        )));
+    }
+    if commitment.counterparty_seat >= seat_count {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "counterparty_seat {} out of range 0..{seat_count}",
+            commitment.counterparty_seat
+        )));
+    }
+    if commitment.proposer_seat == commitment.counterparty_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {} equals counterparty_seat",
+            commitment.proposer_seat
+        )));
+    }
+    if commitment.proposer_seat == focal_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "proposer_seat {focal_seat} cannot match focal_seat"
+        )));
+    }
+    let actor = commitment.offered_action.actor_seat();
+    if actor != commitment.proposer_seat {
+        return Err(ScorerError::InvalidTalkCommitment(format!(
+            "offered_action actor_seat {actor} != proposer_seat {}",
+            commitment.proposer_seat
+        )));
+    }
+    match &commitment.offered_action {
+        MarketAction::CreateCheck { check, .. } if check.payee != commitment.counterparty_seat => {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "CreateCheck payee {} != counterparty_seat {}",
+                check.payee, commitment.counterparty_seat
+            )));
+        }
+        MarketAction::CreateEscrow { escrow, .. }
+            if escrow.destination != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "CreateEscrow destination {} != counterparty_seat {}",
+                escrow.destination, commitment.counterparty_seat
+            )));
+        }
+        MarketAction::FlagWashFreeze { target_seat, .. }
+            if *target_seat != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "FlagWashFreeze target_seat {target_seat} != counterparty_seat {}",
+                commitment.counterparty_seat
+            )));
+        }
+        MarketAction::RecordIntentPledge { pledge, .. }
+            if pledge.promisor != commitment.proposer_seat
+                || pledge.counterparty != commitment.counterparty_seat =>
+        {
+            return Err(ScorerError::InvalidTalkCommitment(format!(
+                "RecordIntentPledge ({}, {}) != ({}, {})",
+                pledge.promisor,
+                pledge.counterparty,
+                commitment.proposer_seat,
+                commitment.counterparty_seat
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// One anonymized candidate submission inside a [`BlindScoringRequest`] (`§8.1`).
@@ -403,12 +500,49 @@ pub struct BlindScoringRequest {
     pub scorer_seed: u64,
     /// Canonical arm-blind state identifier (cross-platform filename stem).
     pub state_id: String,
-    /// Neutral counterfactual talk-phase trade commitments (must be empty in S1).
+    /// Neutral counterfactual talk-phase trade commitments (`§4.3`).
     pub talk_commitments: Vec<ExtractedTalkCommitment>,
 }
 
+/// Parses raw JSON bytes into [`BlindScoringRequest`], refusing unknown or non-canonical fields
+/// inside nested `candidate.submission` structs without modifying `league-core` (`§8.1`).
+pub fn parse_blind_scoring_request_strict(
+    bytes: &[u8],
+) -> Result<BlindScoringRequest, ScorerError> {
+    let raw_val: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| ScorerError::Json(format!("parse BlindScoringRequest JSON: {e}")))?;
+    let parsed: BlindScoringRequest = serde_json::from_value(raw_val.clone())
+        .map_err(|e| ScorerError::Json(format!("parse BlindScoringRequest schema: {e}")))?;
+    let Some(raw_cands) = raw_val.get("candidates").and_then(|v| v.as_array()) else {
+        return Err(ScorerError::UnknownSubmissionField(
+            "missing candidates array in raw JSON".to_owned(),
+        ));
+    };
+    if raw_cands.len() != parsed.candidates.len() {
+        return Err(ScorerError::UnknownSubmissionField(
+            "candidates array length mismatch".to_owned(),
+        ));
+    }
+    for (idx, (raw_cand, parsed_cand)) in raw_cands.iter().zip(parsed.candidates.iter()).enumerate()
+    {
+        let Some(raw_sub) = raw_cand.get("submission") else {
+            return Err(ScorerError::UnknownSubmissionField(format!(
+                "candidate[{idx}] missing submission object"
+            )));
+        };
+        let canonical_sub = serde_json::to_value(&parsed_cand.submission)
+            .map_err(|e| ScorerError::Json(format!("re-serialize submission: {e}")))?;
+        if *raw_sub != canonical_sub {
+            return Err(ScorerError::UnknownSubmissionField(format!(
+                "candidate[{idx}] submission contains unknown or non-canonical JSON fields"
+            )));
+        }
+    }
+    Ok(parsed)
+}
+
 impl BlindScoringRequest {
-    /// Validates every S1 structural, hashing, ordering, and config-binding requirement.
+    /// Validates every structural, hashing, ordering, talk-commitment, and config-binding invariant.
     pub fn validate(&self, config: &ScorerConfig) -> Result<(), ScorerError> {
         if self.schema_version != BLIND_SCORING_SCHEMA_VERSION {
             return Err(ScorerError::UnsupportedSchemaVersion(self.schema_version));
@@ -433,10 +567,8 @@ impl BlindScoringRequest {
                 seat_count: EVAL_TABLE_SEAT_COUNT,
             });
         }
-        if !self.talk_commitments.is_empty() {
-            return Err(ScorerError::TalkCommitmentsNotImplemented(
-                self.talk_commitments.len(),
-            ));
+        for commitment in &self.talk_commitments {
+            validate_talk_commitment(commitment, self.focal_seat, EVAL_TABLE_SEAT_COUNT)?;
         }
         let cfg_hash = config.sha256_hex()?;
         if self.scorer_config_sha256 != cfg_hash {

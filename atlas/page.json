@@ -98,91 +98,48 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 14,
-      "changed": 17,
+      "added": 2,
+      "changed": 13,
       "moved": 0,
-      "parts": 6,
+      "parts": 5,
       "removed": 0
     },
     "items": [
       {
-        "kind": "import-added",
-        "sentence": "league-scorer now imports league-core.",
+        "kind": "sequence",
+        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, before `InvalidScorerConfig`.",
         "subjects": [
-          "league-scorer",
-          "league-core"
+          "crates/league-scorer/src/cli.rs"
         ]
       },
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-scorer/tests/.",
+        "kind": "sequence",
+        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` gained a step, `sanitize_error_text`, after `Json`.",
         "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-scorer/tests/"
+          "crates/league-scorer/src/cli.rs"
         ]
       },
       {
-        "kind": "door",
-        "sentence": "CI now also checks crates/league-scorer/src/lib.rs and crates/league-scorer/src/main.rs.",
+        "kind": "sequence",
+        "sentence": "In crates/league-scorer/src/cli.rs, `main_entry` lost a step, `Usage`.",
         "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-scorer/src/lib.rs",
-          "crates/league-scorer/src/main.rs"
+          "crates/league-scorer/src/cli.rs"
         ]
       },
       {
-        "kind": "door",
-        "sentence": "league-scorer (crates/league-scorer/Cargo.toml) is a new command. It runs crates/league-scorer/src/main.rs.",
-        "subjects": [
-          "crates/league-scorer/Cargo.toml",
-          "crates/league-scorer/src/main.rs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-core/ is now also read by crates/league-scorer/Cargo.toml.",
-        "subjects": [
-          "crates/league-core/",
-          "crates/league-scorer/Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-relay/tests/fixtures/control_arm_r2_wording.json is now read by crates/league-relay/tests/relay_integration.rs.",
-        "subjects": [
-          "crates/league-relay/tests/fixtures/control_arm_r2_wording.json",
-          "crates/league-relay/tests/relay_integration.rs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-scorer/ is now read by Cargo.toml.",
-        "subjects": [
-          "crates/league-scorer/",
-          "Cargo.toml"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "And 1 more new writer or reader of a place.",
+        "kind": "sequence",
+        "sentence": "And 1 more change to the order of work.",
         "subjects": []
       },
       {
-        "kind": "part",
-        "sentence": "league-scorer is a new part, drawn from `crates/league-scorer/**`.",
-        "subjects": [
-          "league-scorer"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "14 files added and 17 changed content, across 6 parts.",
+        "sentence": "2 files added and 13 changed content, across 5 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "fd899c39e064ed7073ecd85da2cf53ab51391fe1",
-      "generatedAt": "2026-11-22T12:05:41.578Z"
+      "commit": "58d7882800f73143c4e6ab8acf9fa172b2db8832",
+      "generatedAt": "2026-11-22T23:40:43.573Z"
     },
     "unchanged": false
   },
@@ -268,9 +225,9 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "58d7882800f73143c4e6ab8acf9fa172b2db8832",
+  "commit": "6522b2c9ff1f1f7298d3cdc3211d2c1fcfbd8ac9",
   "defaultBranch": "main",
-  "derived": "16 parts, mostly Rust (402 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
+  "derived": "16 parts, mostly Rust (404 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
     {
       "checks": [
@@ -323,7 +280,7 @@
         {
           "boundary": "league-scorer",
           "depth": 0,
-          "files": 10
+          "files": 12
         },
         {
           "boundary": "league-season",
@@ -595,7 +552,7 @@
         {
           "boundary": "league-scorer",
           "depth": 0,
-          "files": 7
+          "files": 9
         },
         {
           "boundary": "league-core",
@@ -806,12 +763,12 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-22T23:40:43.573Z",
+  "generatedAt": "2026-11-23T03:56:15.457Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
-    "39 writes and 33 reads use paths built at run time and are not named here.",
+    "41 writes and 32 reads use paths built at run time and are not named here.",
     "1 write goes to places this repository does not track, so it is not listed as generated.",
-    "18 writes and 48 reads go to a path their caller passes, not to this repository.",
+    "18 writes and 49 reads go to a path their caller passes, not to this repository.",
     "2 writes go to a temporary directory, not to this repository.",
     "There is a Dockerfile that no workflow runs; what deploys from it does so from outside this repository, and is not on this page.",
     "378 files belong to no part: site/astro.config.mjs, site/package-lock.json, site/package.json and 375 more.",
@@ -874,7 +831,7 @@
     "league-seat-ui",
     "league-tui"
   ],
-  "unnamedWrites": 39,
+  "unnamedWrites": 41,
   "unread": [],
   "unreadFiles": 1,
   "unreadNote": [],

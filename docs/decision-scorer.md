@@ -2,7 +2,7 @@
 
 This document specifies the offline, CPU-only, deterministic decision scorer referenced as `D4` in [`docs/eval-harness.md`](eval-harness.md) for the first Evaluation Mode comparison (`D5`: three arms `off`, `control`, `on` branched at saved pre-act states).
 
-**Scope boundary:** This is the design specification for the decision scorer. Stage S1 of the blind scoring kernel is implemented in [`crates/league-scorer`](../crates/league-scorer/README.md) (schema v1 validation, §5.2 `ScorerConfig`, Standard-posture undealt-mandate rollouts, §7.1/§3.2 scoring outputs, and the content-addressed CLI; S2 candidate generators/non-standard postures/talk compliance, S3 unblinded `league-eval` builder/`arm_map/`/freeze join gate, and S4 optional parallelism remain future stages). It requires **no** changes to `league-core`, to what any model or `ClubBot` seat is shown, or to any persisted Evaluation Mode file (`setup.json`, `checkpoints/`, `to-seat/`, `decisions/`, `outcome.json`, `receipt.json`, `relay/`). Every input named below is already written by `league-eval` and `EvalHost`.
+**Scope boundary:** This is the design specification for the decision scorer. Stages S1 and S2 of the blind scoring kernel are implemented in [`crates/league-scorer`](../crates/league-scorer/README.md) (schema v1 strict validation, §5.2 `ScorerConfig`, arm-independent candidate generators and `candidates` CLI, `Standard`/`Active`/`Conservative` peer postures, `Bernoulli(p_honour)` talk-commitment compliance, per-fork save/seal/pair SHA-256 re-verification, undealt-mandate sequential rollouts, and §7.1/§3.2 scoring outputs; S3 unblinded `league-eval` builder/`arm_map/`/freeze join gate and S4 optional parallelism remain future stages). It requires **no** changes to `league-core`, to what any model or `ClubBot` seat is shown, or to any persisted Evaluation Mode file (`setup.json`, `checkpoints/`, `to-seat/`, `decisions/`, `outcome.json`, `receipt.json`, `relay/`). Every input named below is already written by `league-eval` and `EvalHost`.
 
 ---
 
@@ -123,9 +123,9 @@ None of `ScorerConfig`, `crates/league-scorer`, or the fixed code constants belo
 | `parity_spread_threshold_bps` | Minimum spread vs shadow parity triggering liquidity posture `PostOffer` posts | `500` bps (`5%`) |
 | `talk_extractor_version` & `talk_extractor_rules_digest` | Frozen deterministic regex/keyword/retraction table version and SHA-256 | `"talk_rules_v1"` + frozen rules digest |
 | `mandate_stratification_mode` | Permutation stratification scheme over undealt `spec.mandate_deck` entries | `"uniform_undealt_fy_stratified"` |
-| `prescreen_min_arm_indep_span` | Minimum arm-independent `v_max_indep - v_min_indep` span to pass `§3.2` | Calibrated on pilot (`arm-blind`) |
+| `prescreen_min_arm_indep_span` | Minimum arm-independent `v_max_indep - v_min_indep` span to pass `§3.2` | `1` (placeholder until arm-blind pilot calibration) |
 | `prescreen_exclude_flat_sets` | Exclude states with `v_max_indep == v_min_indep` in `§3.2` | `true` |
-| `prescreen_min_arm_indep_candidates` | Minimum feasible candidates in `C_indep(state)` | Calibrated on pilot (`arm-blind`) |
+| `prescreen_min_arm_indep_candidates` | Minimum feasible candidates in `C_indep(state)` | `2` (placeholder until arm-blind pilot calibration) |
 | `strata_schedule` | Checkpoint stratification across early/mid/late season thirds (`league-eval select`) | `"2_early_2_mid_2_late_20_seeds"` (`docs/eval-harness.md` `D5`) |
 
 *Proposed fixed code constants (to be pinned by `scorer_tree_sha256` when `crates/league-scorer` is built, `§3.1`):* `SYNTH_MAX_CONVERTER_BATCHES = 4`, `SYNTH_MAX_PROJECT_BATCHES = 4`, `SYNTH_PROJECT_RANK_BY_EQUITY` (fixed rule: rank coverable project batches by descending equity, then ascending project ID), `SYNTH_CONVERTER_INPUT_DEFICIT_COVER = true`, `SYNTH_CLAIM_MATURING_EXACT = true`, `SYNTH_COUNCIL_SELF_NOMINATION = true`, and `DROP_TIE_BREAK_BY_CANDIDATE_ID` (tie-break only when legs under `composite_greedy_rules` share equal upkeep risk). **Build requirement:** when `crates/league-scorer` is built, it must contain no unlisted free value outside the proposed `ScorerConfig` fields and these proposed fixed constants.
@@ -188,7 +188,7 @@ For every candidate `c in C(state)` across scenarios `m in 0..M` (stored without
 - **Primary normalized phase-invariant score (`score_norm`):**
   - If `v_max > v_min`: `(ev_total_equity(c) - v_min) / (v_max - v_min)` (inside `[0.0, 1.0]` for `in_span == true` candidates).
   - If `v_max == v_min`: **`NA` (`null` in JSON, never `1.0`)**, with `degenerate_flat_set: true`. States whose arm-independent subset is already flat are excluded upfront by `§3.2`; any post-join flat state still emits `null` rather than `1.0`.
-- **Upward bias disclosure & split-half measurement (Winner's curse):** Because `v_max` takes the maximum over up to `K` noisy `M`-scenario estimates, `v_max` is biased upward (`E[max_c EV_hat(c)] >= max_c E[EV_hat(c)]`), pulling `regret_equity` upward and compressing mid-pack `score_norm`. Always measure and report this upward bias via **split-half (held-out scenario) re-estimation** across disjoint scenario halves (`H_A = 0..(M/2)` and `H_B = (M/2)..M`): selection uses one half (`c*_A = argmax_{c in span} EV_{H_A}(c)`) and evaluation uses the other half (`EV_{H_B}(c*_A)`), defining the bias estimate as the mean over both directions of `EV_{H_A}(c*_A) - EV_{H_B}(c*_A)` and `EV_{H_B}(c*_B) - EV_{H_A}(c*_B)` (`c*_B = argmax_{c in span} EV_{H_B}(c)`). State that this estimates selection bias at `M/2` scenarios, which is an upper estimate for `M` scenarios, and report it alongside raw `ev_total_equity` and `sensitivity_indep_percentile`.
+- **Upward bias disclosure & split-half measurement (Winner's curse):** Because `v_max` takes the maximum over up to `K` noisy `M`-scenario estimates, `v_max` is biased upward (`E[max_c EV_hat(c)] >= max_c E[EV_hat(c)]`), pulling `regret_equity` upward and compressing mid-pack `score_norm`. Always require `scenarios_m` (`M`) to be **even (`>= 2`)** so the split-half estimator partitions scenarios into two equal disjoint halves (`H_A = 0..(M/2)` and `H_B = (M/2)..M`), and measure and report this upward bias via **split-half (held-out scenario) re-estimation**: selection uses one half (`c*_A = argmax_{c in span} EV_{H_A}(c)`) and evaluation uses the other half (`EV_{H_B}(c*_A)`), defining the bias estimate as the mean over both directions of `EV_{H_A}(c*_A) - EV_{H_B}(c*_A)` and `EV_{H_B}(c*_B) - EV_{H_A}(c*_B)` (`c*_B = argmax_{c in span} EV_{H_B}(c)`). State that this estimates selection bias at `M/2` scenarios, which is an upper estimate for `M` scenarios, and report it alongside raw `ev_total_equity` and `sensitivity_indep_percentile`.
 - **Pre-registered second sensitivity score (`sensitivity_indep_percentile`, `sensitivity_indep_rank`):** Rank and percentile of `ev_total_equity(c)` among the **arm-independent candidates only** (`is_arm_independent == true`: passive + `ClubBot` + synthetics), insensitive to whether another arm emitted an extreme candidate.
 - **CRN paired Monte Carlo standard error (`paired_se_equity`):** sample standard error across `m in 0..M` of paired per-scenario differences against `c_best` (`sum_m` integer differences ordered `0..M`).
 - **Descriptive-only pairwise contrasts:** Post-unblinding pairwise arm contrasts (`EV(on) - EV(off)`, `EV(on) - EV(control)`, `EV(control) - EV(off)`) and paired per-scenario SEs reported from unblinded tables are **descriptive only**. The pre-registered inferential analysis is the **mixed model** and the **cluster sign-flip test over seed means**, which are not defined in this document.
@@ -218,7 +218,7 @@ An unblinded builder prepares staging inputs into two disjoint locations:
 ```text
 BlindScoringRequest {
   schema_version: u32,                            // fixed = 1
-  state_id: String,                               // canonical "<source_game_id>:day-<DD>:seat-<idx>" (no arm)
+  state_id: String,                               // canonical "<source_game_id>-day-<DD>-seat-<idx>" (no arm)
   pre_act_save_sha256: String,                    // 64-hex SHA-256 of checkpoints/day-DD-pre-act.save.json bytes
   pre_act_seal_sha256: String,                    // 64-hex SHA-256 of checkpoints/day-DD-pre-act.seal bytes
   pre_act_pair_sha256: String,                    // 64-hex digest matching compute_pre_act_pair_sha256_hex
@@ -238,6 +238,8 @@ BlindCandidate {
 ```
 
 Removed/excluded from `BlindScoringRequest` and `blind_inputs/`: filesystem paths, wall-clock timestamps, `arm` (`off` / `control` / `on`), replicate index, `wording_arm`, branch output paths (`<out>/<arm>/...`), `raw_reply`, `discarded_reply_path`, `tool_calls_used`, `intermediate_bundle_sha256s` labels, `<Guild>.jsonl`, `<Guild>.scratchpad.md`, `http-reply-round-*.json`, and `tool-round-*.json`.
+
+> **Amendment (`2026-11-22`):** `state_id` separators were changed from `:` (`<source_game_id>:day-<DD>:seat-<idx>`) to `-` (`<source_game_id>-day-<DD>-seat-<idx>`) because `:` is illegal in Windows filenames and `league-scorer` requires request and output filenames (`<state_id>.json`) to remain portable across platforms.
 
 Separately, `arm_map/<state_id>.json` (held exclusively by the run operator's reporting step) stores `Vec<{ arm, replicate, committed_candidate_id, first_draft_candidate_id, decision_path, outcome_path }>` for post-freeze reporting.
 
