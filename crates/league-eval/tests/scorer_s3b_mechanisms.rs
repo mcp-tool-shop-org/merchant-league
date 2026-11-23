@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use league_core::{
-    AssetId, EvalActSubmission, EvalHost, EvalSeatApplyReport, MarketAction, OfferProposal,
-    OfferSide, PublicSweepReceipt, SealedOrderBundle, Seat, TableId,
+    AiPreviewRequest, AssetId, EvalActSubmission, EvalHost, EvalSaveSnapshot, EvalSeatApplyReport,
+    MarketAction, OfferProposal, OfferSide, PublicSweepReceipt, SealedOrderBundle, Seat, TableId,
+    preview_seat_bundle,
 };
 use league_eval::{
     ArmMapEntry, ArmMapStateFile, BranchArmOutcome, CRATE_GIT_SHA, CrateGitShaSource,
@@ -35,6 +36,7 @@ use league_scorer::{
 use league_seat_types::{
     BrokenPromiseRecord, FillKind, FillRecord, FinalScoreboard, SeatScoreEntry, UNIT_SCALE,
 };
+use serde::de::DeserializeOwned;
 use serde_json::json;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -788,7 +790,8 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
     let (dec_on_p, out_on_p) =
         write_arm_outcome_pair(&tmp.path().join("arm_on"), &dec_on, &out_on)?;
 
-    // Flat state (State 2) on control arm with empty relay/seats dir -> revision_gain_score_norm == None, sidecar chars == Some(0).
+    // Flat state (State 2) on control arm with empty relay/seats dir and no calls.jsonl ->
+    // revision_gain_score_norm == None, sidecar chars == None.
     let arm_ctrl_2 = tmp.path().join("arm_ctrl_2");
     let mut dec_ctrl_2 = base_decision_record(EvalArm::Control, 1, 0, "Foundry");
     dec_ctrl_2.completion_tokens = 10;
@@ -958,7 +961,10 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
         .ok_or("missing expected item")?;
     assert_eq!(c2_row.mechanisms.revision_gain_ev_total_equity, Some(2.0));
     assert_eq!(c2_row.mechanisms.revision_gain_score_norm, None);
-    assert_eq!(c2_row.mechanisms.total_reasoning_chars, Some(0));
+    assert_eq!(c2_row.mechanisms.tool_round_reasoning_chars, None);
+    assert_eq!(c2_row.mechanisms.http_reply_reasoning_chars, None);
+    assert_eq!(c2_row.mechanisms.total_reasoning_chars, None);
+    assert_eq!(c2_row.mechanisms.unparseable_sidecars, 0);
 
     let on_row = joined
         .rows
@@ -995,10 +1001,11 @@ fn measures_1_to_4_and_missing_data_in_join_report() -> TestResult {
         Some(6.0)
     );
     assert_eq!(ctrl_sum.mechanisms.mean_revision_gain_score_norm, Some(0.5));
-    assert_eq!(ctrl_sum.mechanisms.n_with_reasoning_sidecars, 2);
+    assert_eq!(ctrl_sum.mechanisms.n_with_reasoning_sidecars, 1);
     assert_eq!(ctrl_sum.mechanisms.n_with_reply_token_ids, 1);
-    assert_eq!(ctrl_sum.mechanisms.mean_total_reasoning_chars, Some(5.0));
+    assert_eq!(ctrl_sum.mechanisms.mean_total_reasoning_chars, Some(10.0));
     assert_eq!(ctrl_sum.mechanisms.mean_reply_token_ids_len, Some(5.0));
+    assert_eq!(ctrl_sum.mechanisms.n_unparseable_sidecars, 0);
     assert_eq!(ctrl_sum.mechanisms.n_with_pre_act_pledge_snapshot, 0);
     assert_eq!(ctrl_sum.mechanisms.n_with_terminal_scoreboard, 0);
     assert_eq!(ctrl_sum.mechanisms.n_with_talk_commitment_inputs, 0);
@@ -1415,6 +1422,130 @@ fn measure_5a_pledges_and_5b_deal_keeping_cover_all_buckets() -> TestResult {
     Ok(())
 }
 
+fn make_call_log_entry(
+    day: &str,
+    round: Round,
+    guild: &str,
+    outcome: &str,
+    resv_id: &str,
+) -> CallLogEntry {
+    CallLogEntry {
+        time_utc: "2026-11-23T00:00:00Z".to_owned(),
+        day: day.to_owned(),
+        round,
+        guild: guild.to_owned(),
+        attempt: 1,
+        trigger: "turn".to_owned(),
+        model_requested: "m".to_owned(),
+        model_returned: Some("m".to_owned()),
+        request_body_sha256: "00".repeat(32),
+        http_reply_sha256: None,
+        reply_sha256: None,
+        prompt_tokens: Some(10),
+        completion_tokens: Some(10),
+        total_tokens: Some(20),
+        reasoning_tokens: None,
+        cost_unit: league_relay::CostUnit::default(),
+        wall_secs: Some(0.1),
+        cost: None,
+        charged_credits: 0.0,
+        latency_ms: 100,
+        outcome: outcome.to_owned(),
+        error: None,
+        reservation_id: Some(resv_id.to_owned()),
+    }
+}
+
+fn make_tool_round_record(
+    day: &str,
+    guild: &str,
+    resv_id: &str,
+    round_index: usize,
+    reasoning: Option<&str>,
+) -> SavedToolRoundRecord {
+    SavedToolRoundRecord {
+        day: day.to_owned(),
+        round: Round::Act,
+        guild: guild.to_owned(),
+        run_id: "r".to_owned(),
+        reservation_id: resv_id.to_owned(),
+        request_body_sha256: "00".repeat(32),
+        round_index,
+        attempt: 1,
+        outcome: "TOOL_CALL".to_owned(),
+        assistant_content: None,
+        assistant_content_sha256: None,
+        reasoning: reasoning.map(str::to_owned),
+        assistant_reply_sha256: "00".repeat(32),
+        body_redacted: false,
+        calls: Vec::new(),
+    }
+}
+
+fn make_http_reply_record(
+    day: &str,
+    guild: &str,
+    resv_id: &str,
+    round_index: usize,
+    status: u16,
+    body: String,
+) -> SavedHttpReplyRecord {
+    SavedHttpReplyRecord {
+        day: day.to_owned(),
+        round: Round::Act,
+        guild: guild.to_owned(),
+        run_id: "r".to_owned(),
+        reservation_id: resv_id.to_owned(),
+        request_body_sha256: "00".repeat(32),
+        round_index,
+        attempt: 1,
+        status,
+        is_late: false,
+        body_redacted: false,
+        redacted_secret_field_paths: Vec::new(),
+        body_sha256: "00".repeat(32),
+        body,
+        prompt_token_ids_sha256: None,
+        prompt_token_ids_count: None,
+        prompt_token_ids_source: None,
+        prompt_token_ids_template_check: None,
+    }
+}
+
+fn find_sentinel_hits_recursive(
+    root: &Path,
+    needle: &str,
+) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    let mut hits = Vec::new();
+    if !root.exists() {
+        return Ok(hits);
+    }
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)?
+            .map(|res| res.map(|e| e.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                let bytes = fs::read(&path)?;
+                let text = String::from_utf8_lossy(&bytes);
+                if text.contains(needle) {
+                    hits.push(path);
+                }
+            }
+        }
+    }
+    Ok(hits)
+}
+
+/// Test-only unguarded serde parser proving that malformed inputs quote sentinel strings if parsed unsafely.
+fn leaky_serde_parse_control<T: DeserializeOwned>(raw: &str) -> Result<T, String> {
+    serde_json::from_str::<T>(raw).map_err(|e| e.to_string())
+}
+
 #[test]
 fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() -> TestResult {
     let tmp = TmpDir::new("sentinel_noleak")?;
@@ -1424,32 +1555,30 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
         write_minimal_source_game(&src_dir, &mut host, EvalArm::Control, "g_sent")?;
 
     let sentinel = "PRIVATE_REASONING_WHISPER_SENTINEL_7X9Q";
-    fs::write(
-        src_dir.join("decisions/day-01-talk-Foundry.json"),
-        to_sorted_pretty_json(&EvalDecisionRecord {
-            raw_reply: Some(
-                json!({
-                    "messages": [{ "to_guild": "Quarry", "body": format!("Hello {sentinel}?") }],
-                    "market_actions": [],
-                    "bundle": {},
-                    "notes": "talk"
-                })
-                .to_string(),
-            ),
-            ..base_decision_record(EvalArm::Control, 1, 0, "Foundry")
-        })?,
-    )?;
-    fs::write(
-        src_dir.join("to-seat/day-01-act-Quarry.negotiation.json"),
-        to_sorted_pretty_json(&NegotiationInputs {
-            batna: "b".to_owned(),
-            whispers: vec![UntrustedWhisper {
-                from_guild: "Foundry".to_owned(),
-                intent_header: None,
-                body: format!("Ambiguous {sentinel}?"),
-            }],
-        })?,
-    )?;
+    let talk_dec_path = src_dir.join("decisions/day-01-talk-Foundry.json");
+    let orig_talk_dec = to_sorted_pretty_json(&EvalDecisionRecord {
+        raw_reply: Some(
+            json!({
+                "messages": [{ "to_guild": "Quarry", "body": format!("Hello {sentinel}?") }],
+                "market_actions": [],
+                "bundle": {},
+                "notes": "talk"
+            })
+            .to_string(),
+        ),
+        ..base_decision_record(EvalArm::Control, 1, 0, "Foundry")
+    })?;
+    fs::write(&talk_dec_path, &orig_talk_dec)?;
+    let neg_path = src_dir.join("to-seat/day-01-act-Quarry.negotiation.json");
+    let orig_neg = to_sorted_pretty_json(&NegotiationInputs {
+        batna: "b".to_owned(),
+        whispers: vec![UntrustedWhisper {
+            from_guild: "Foundry".to_owned(),
+            intent_header: None,
+            body: format!("Ambiguous {sentinel}?"),
+        }],
+    })?;
+    fs::write(&neg_path, &orig_neg)?;
 
     let arm_dir = tmp.path().join("arm_ctrl");
     let dec = base_decision_record(EvalArm::Control, 1, 0, "Foundry");
@@ -1467,52 +1596,46 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
             receipt: default_receipt(1),
         },
     )?;
+    let orig_dec = fs::read_to_string(&dec_p)?;
     fs::create_dir_all(arm_dir.join("relay/seats"))?;
+    let calls_path = arm_dir.join("relay/calls.jsonl");
+    let orig_calls = format!(
+        "{}\n{}\n",
+        serde_json::to_string(&make_call_log_entry(
+            "01",
+            Round::Act,
+            "Foundry",
+            "TOOL_CALL",
+            "r0"
+        ))?,
+        serde_json::to_string(&make_call_log_entry(
+            "01",
+            Round::Act,
+            "Foundry",
+            "OK",
+            "r1"
+        ))?,
+    );
+    fs::write(&calls_path, &orig_calls)?;
     let tool_path = arm_dir.join("relay/seats/Foundry.day-01-act.tool-round-0.json");
-    fs::write(
-        &tool_path,
-        serde_json::to_string(&SavedToolRoundRecord {
-            day: "01".to_owned(),
-            round: Round::Act,
-            guild: "Foundry".to_owned(),
-            run_id: "r".to_owned(),
-            reservation_id: "r0".to_owned(),
-            request_body_sha256: "00".repeat(32),
-            round_index: 0,
-            attempt: 1,
-            outcome: "TOOL_CALL".to_owned(),
-            assistant_content: None,
-            assistant_content_sha256: None,
-            reasoning: Some(format!("tool-{sentinel}")),
-            assistant_reply_sha256: "00".repeat(32),
-            body_redacted: false,
-            calls: Vec::new(),
-        })?,
-    )?;
+    let orig_tool = serde_json::to_string(&make_tool_round_record(
+        "01",
+        "Foundry",
+        "r0",
+        0,
+        Some(&format!("tool-{sentinel}")),
+    ))?;
+    fs::write(&tool_path, &orig_tool)?;
     let http_path = arm_dir.join("relay/seats/Foundry.day-01-act.http-reply-round-1.json");
-    fs::write(
-        &http_path,
-        serde_json::to_string(&SavedHttpReplyRecord {
-            day: "01".to_owned(),
-            round: Round::Act,
-            guild: "Foundry".to_owned(),
-            run_id: "r".to_owned(),
-            reservation_id: "r1".to_owned(),
-            request_body_sha256: "00".repeat(32),
-            round_index: 1,
-            attempt: 1,
-            status: 200,
-            is_late: false,
-            body_redacted: false,
-            redacted_secret_field_paths: Vec::new(),
-            body_sha256: "00".repeat(32),
-            body: json!({"choices": [{"message": {"reasoning": format!("http-{sentinel}"), "content": "{}"}}]}).to_string(),
-            prompt_token_ids_sha256: None,
-            prompt_token_ids_count: None,
-            prompt_token_ids_source: None,
-            prompt_token_ids_template_check: None,
-        })?,
-    )?;
+    let orig_http = serde_json::to_string(&make_http_reply_record(
+        "01",
+        "Foundry",
+        "r1",
+        1,
+        200,
+        json!({"choices": [{"message": {"reasoning": format!("http-{sentinel}"), "content": "{}"}}]}).to_string(),
+    ))?;
+    fs::write(&http_path, &orig_http)?;
 
     let counts = measure_reasoning_length_in_memory(&arm_dir, 1, "Foundry")?;
     assert_eq!(
@@ -1547,7 +1670,7 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
             replicate: 0,
             committed_candidate_id: c0,
             first_draft_candidate_id: None,
-            decision_path: dec_p,
+            decision_path: dec_p.clone(),
             outcome_path: out_p,
             setup_path: Some(src_dir.join("setup.json")),
             manifest_path: Some(src_dir.join("manifest.json")),
@@ -1570,108 +1693,140 @@ fn sentinels_never_leak_to_files_stdout_or_stderr_on_success_or_error_paths() ->
         &clean_git_sha_source(),
     )?;
 
-    // 1) Full CLI join success path.
-    let out_ok = tmp.path().join("joined_ok");
+    let outputs_root = tmp.path().join("all_outputs");
+    fs::create_dir_all(&outputs_root)?;
     let git_sha = clean_git_sha_source();
-    let (code, stdout, stderr) = run_eval_cli(
-        &[
-            "join",
-            "--freeze",
-            freeze_path.to_str().ok_or("missing expected item")?,
-            "--arm-map",
-            arm_map_dir.to_str().ok_or("missing expected item")?,
-            "--scores",
-            scores_dir.to_str().ok_or("missing expected item")?,
-            "--out",
-            out_ok.to_str().ok_or("missing expected item")?,
-            "--source-game",
-            src_dir.to_str().ok_or("missing expected item")?,
-        ],
-        &git_sha,
-    );
-    assert_eq!(code, 0, "stderr={stderr}");
-    assert!(!stdout.contains(sentinel));
-    assert!(!stderr.contains(sentinel));
-    for entry in fs::read_dir(&out_ok)? {
-        let p = entry?.path();
-        if p.is_file() {
-            let txt = fs::read_to_string(&p)?;
-            assert!(
-                !txt.contains(sentinel),
-                "sentinel leaked into {}",
-                p.display()
-            );
-        }
-    }
-
-    // 2) Error path with sentinel inside malformed HTTP sidecar JSON.
-    let orig_http = fs::read_to_string(&http_path)?;
-    fs::write(
-        &http_path,
-        json!({"day": 123, "reasoning": sentinel}).to_string(),
-    )?;
-    let out_err1 = tmp.path().join("joined_err1");
-    let (c_err1, out1, err1) = run_eval_cli(
-        &[
+    let run_cli_join = |out_name: &str, with_src: bool| -> (PathBuf, i32, String, String) {
+        let out_dir = outputs_root.join(out_name);
+        let mut args = vec![
             "--error-format",
             "json",
             "join",
             "--freeze",
-            freeze_path.to_str().ok_or("missing expected item")?,
+            freeze_path.to_str().unwrap_or_default(),
             "--arm-map",
-            arm_map_dir.to_str().ok_or("missing expected item")?,
+            arm_map_dir.to_str().unwrap_or_default(),
             "--scores",
-            scores_dir.to_str().ok_or("missing expected item")?,
+            scores_dir.to_str().unwrap_or_default(),
             "--out",
-            out_err1.to_str().ok_or("missing expected item")?,
-        ],
-        &git_sha,
-    );
-    assert_ne!(c_err1, 0);
-    assert!(!out1.contains(sentinel));
-    assert!(!err1.contains(sentinel), "stderr leaked sentinel: {err1}");
-    fs::write(&http_path, orig_http)?;
+            out_dir.to_str().unwrap_or_default(),
+        ];
+        if with_src {
+            args.push("--source-game");
+            args.push(src_dir.to_str().unwrap_or_default());
+        }
+        let (c, so, se) = run_eval_cli(&args, &git_sha);
+        (out_dir, c, so, se)
+    };
 
-    // 3) Error path with sentinel inside malformed negotiation.json.
-    fs::write(
-        src_dir.join("to-seat/day-01-act-Quarry.negotiation.json"),
-        json!({"batna": 1, "whispers": [{"from_guild": sentinel, "body": sentinel}]}).to_string(),
-    )?;
-    let out_err2 = tmp.path().join("joined_err2");
-    let (c_err2, out2, err2) = run_eval_cli(
-        &[
-            "join",
-            "--freeze",
-            freeze_path.to_str().ok_or("missing expected item")?,
-            "--arm-map",
-            arm_map_dir.to_str().ok_or("missing expected item")?,
-            "--scores",
-            scores_dir.to_str().ok_or("missing expected item")?,
-            "--out",
-            out_err2.to_str().ok_or("missing expected item")?,
-            "--source-game",
-            src_dir.to_str().ok_or("missing expected item")?,
-        ],
-        &git_sha,
-    );
-    assert_ne!(c_err2, 0);
-    assert!(!out2.contains(sentinel));
-    assert!(!err2.contains(sentinel), "stderr leaked sentinel: {err2}");
+    // 1) Full CLI join success path.
+    let (out_ok, code, stdout, stderr) = run_cli_join("joined_ok", true);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(!stdout.contains(sentinel));
+    assert!(!stderr.contains(sentinel));
+    assert!(find_sentinel_hits_recursive(&out_ok, sentinel)?.is_empty());
 
-    // 4) Error path with unknown --source-game dir and unknown CLI flag.
+    // 2) Five malformed sidecars where serde quotes the sentinel on type/enum errors, each run
+    // independently, plus a malformed required decision.json failure run.
+    let bad_tool = json!({"day": "01", "round": sentinel}).to_string();
+    let bad_http = json!({"day": "01", "status": sentinel}).to_string();
+    let bad_calls = json!({"day": "01", "round": sentinel}).to_string();
+    let bad_neg = json!({"batna": "b", "whispers": sentinel}).to_string();
+    let bad_talk = json!({"day": sentinel}).to_string();
+    let bad_dec = json!({"round": sentinel}).to_string();
+
+    // Positive control on payloads: verify naive serde formatting genuinely quotes sentinel.
+    assert!(
+        leaky_serde_parse_control::<SavedToolRoundRecord>(&bad_tool)
+            .is_err_and(|e| e.contains(sentinel))
+    );
+    assert!(
+        leaky_serde_parse_control::<SavedHttpReplyRecord>(&bad_http)
+            .is_err_and(|e| e.contains(sentinel))
+    );
+    assert!(
+        leaky_serde_parse_control::<CallLogEntry>(&bad_calls).is_err_and(|e| e.contains(sentinel))
+    );
+    assert!(
+        leaky_serde_parse_control::<NegotiationInputs>(&bad_neg)
+            .is_err_and(|e| e.contains(sentinel))
+    );
+    assert!(
+        leaky_serde_parse_control::<EvalDecisionRecord>(&bad_talk)
+            .is_err_and(|e| e.contains(sentinel))
+    );
+    assert!(
+        leaky_serde_parse_control::<EvalDecisionRecord>(&bad_dec)
+            .is_err_and(|e| e.contains(sentinel))
+    );
+
+    let sidecar_runs: [(&str, &Path, &str, &str); 5] = [
+        ("err_tool", &tool_path, &orig_tool, &bad_tool),
+        ("err_http", &http_path, &orig_http, &bad_http),
+        ("err_calls", &calls_path, &orig_calls, &bad_calls),
+        ("err_neg", &neg_path, &orig_neg, &bad_neg),
+        ("err_talk", &talk_dec_path, &orig_talk_dec, &bad_talk),
+    ];
+    for (run_name, target_path, orig_content, bad_content) in sidecar_runs {
+        fs::write(target_path, bad_content)?;
+        let (out_dir, rc, so, se) = run_cli_join(run_name, true);
+        assert_eq!(rc, 0, "run={run_name} stderr={se}");
+        assert!(
+            !so.contains(sentinel),
+            "stdout leaked sentinel in {run_name}"
+        );
+        assert!(
+            !se.contains(sentinel),
+            "stderr leaked sentinel in {run_name}"
+        );
+        let sum: PerArmSummaryFile =
+            serde_json::from_slice(&fs::read(out_dir.join("per_arm_summary.json"))?)?;
+        assert!(
+            sum.arms[0].mechanisms.n_unparseable_sidecars >= 1,
+            "expected n_unparseable_sidecars >= 1 in {run_name}"
+        );
+        fs::write(target_path, orig_content)?;
+    }
+
+    // Required decision.json failing with sentinel on enum error must abort without leaking.
+    fs::write(&dec_p, &bad_dec)?;
+    let (_, c_dec_err, out_dec_err, err_dec_err) = run_cli_join("err_req_dec", false);
+    assert_ne!(c_dec_err, 0);
+    assert!(!out_dec_err.contains(sentinel));
+    assert!(
+        !err_dec_err.contains(sentinel),
+        "stderr leaked sentinel: {err_dec_err}"
+    );
+    fs::write(&dec_p, &orig_dec)?;
+
+    // Unknown flag & missing --source-game dir error checks.
     let (c_err3, _, _) = run_eval_cli(&["join", "--unknown-join-flag", "x"], &git_sha);
     assert_ne!(c_err3, 0);
     let err_missing_src = run_join(&JoinOptions {
         freeze_path,
         arm_map_dir,
         scores_dir,
-        out_dir: tmp.path().join("joined_err3"),
+        out_dir: outputs_root.join("err_missing_src"),
         blind_dir: None,
         source_game_dirs: vec![tmp.path().join("missing_source_game_dir")],
     })
     .err()
     .ok_or("expected missing --source-game error")?;
     assert_eq!(err_missing_src.code(), "MISSING_SOURCE_SETUP");
+
+    // Walk every output directory recursively and assert zero hits anywhere.
+    let all_hits = find_sentinel_hits_recursive(&outputs_root, sentinel)?;
+    assert!(all_hits.is_empty(), "sentinel hits found: {all_hits:?}");
+
+    // Control check on recursive walker: a leaked error written in a nested subdir IS detected.
+    let control_leak = tmp.path().join("control_leak/sub/nested_err.log");
+    fs::create_dir_all(control_leak.parent().ok_or("missing parent")?)?;
+    let leaked_msg = leaky_serde_parse_control::<SavedHttpReplyRecord>(&bad_http)
+        .err()
+        .ok_or("expected control parse error")?;
+    fs::write(&control_leak, leaked_msg)?;
+    let detected = find_sentinel_hits_recursive(&tmp.path().join("control_leak"), sentinel)?;
+    assert_eq!(detected, vec![control_leak]);
     Ok(())
 }
 
@@ -2051,9 +2206,10 @@ fn measure_5b_neg_merge_recursive_source_scan_and_sidecar_filters() -> TestResul
         })?,
     )?;
     let counts = measure_reasoning_length_in_memory(&arm_dir, 2, "Foundry")?;
-    assert_eq!(counts.tool_round_reasoning_chars, Some(0));
-    assert_eq!(counts.http_reply_reasoning_chars, Some(0));
-    assert_eq!(counts.total_reasoning_chars, Some(0));
+    assert_eq!(counts.tool_round_reasoning_chars, None);
+    assert_eq!(counts.http_reply_reasoning_chars, None);
+    assert_eq!(counts.total_reasoning_chars, None);
+    assert_eq!(counts.unparseable_sidecars, 1);
 
     let s0 = sample_submission(0);
     let c0 = candidate_id_for_submission(&s0)?;
@@ -2118,5 +2274,564 @@ fn measure_5b_neg_merge_recursive_source_scan_and_sidecar_filters() -> TestResul
     assert_eq!(m.honoured_commitments, Some(0));
     assert_eq!(m.third_party_fill_commitments, Some(1));
     assert_eq!(m.honour_rate, Some(0.0));
+    assert_eq!(m.unparseable_sidecars, 1);
+    Ok(())
+}
+
+struct SingleJoinHarness {
+    src_dir: PathBuf,
+    arm_dir: PathBuf,
+    dec_path: PathBuf,
+    out_path: PathBuf,
+    freeze_path: PathBuf,
+    arm_map_dir: PathBuf,
+    scores_dir: PathBuf,
+}
+
+fn prepare_single_decision_join(
+    base: &Path,
+    host: &mut EvalHost,
+    game_id: &str,
+) -> Result<SingleJoinHarness, Box<dyn std::error::Error>> {
+    let src_dir = base.join("src");
+    let (save_sha, seal_sha, pair_sha) =
+        write_minimal_source_game(&src_dir, host, EvalArm::Control, game_id)?;
+
+    let arm_dir = base.join("arm_ctrl");
+    let dec = base_decision_record(EvalArm::Control, 1, 0, "Foundry");
+    let (dec_path, out_path) = write_arm_outcome_pair(
+        &arm_dir,
+        &dec,
+        &BranchArmOutcome {
+            source_game_id: game_id.to_owned(),
+            table_id: 9200,
+            day: 1,
+            focal_seat: 0,
+            focal_guild: "Foundry".to_owned(),
+            arm: EvalArm::Control,
+            decision: dec.clone(),
+            receipt: default_receipt(1),
+        },
+    )?;
+
+    let blind_dir = base.join("blind");
+    let arm_map_dir = base.join("arm_map");
+    let scores_dir = base.join("scores");
+    let cfg = ScorerConfig::default();
+    let s0 = sample_submission(0);
+    let c0 = candidate_id_for_submission(&s0)?;
+    build_blind_and_score_files(
+        &blind_dir,
+        &arm_map_dir,
+        &scores_dir,
+        &format!("{game_id}-day-01-seat-0"),
+        game_id,
+        1,
+        0,
+        &save_sha,
+        &seal_sha,
+        &pair_sha,
+        &cfg,
+        vec![ArmMapEntry {
+            arm: EvalArm::Control,
+            replicate: 0,
+            committed_candidate_id: c0,
+            first_draft_candidate_id: None,
+            decision_path: dec_path.clone(),
+            outcome_path: out_path.clone(),
+            setup_path: Some(src_dir.join("setup.json")),
+            manifest_path: Some(src_dir.join("manifest.json")),
+        }],
+        vec![(s0, 10.0, Some(0.5))],
+        false,
+    )?;
+
+    let cfg_path = base.join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+    let freeze_path = base.join("freeze.json");
+    run_freeze(
+        &FreezeOptions {
+            blind_dir,
+            config_path: cfg_path,
+            control_wording_arm: CONTROL_WORDING_ARM.to_owned(),
+            out_path: freeze_path.clone(),
+            scorer_crate_dir: None,
+        },
+        &clean_git_sha_source(),
+    )?;
+
+    Ok(SingleJoinHarness {
+        src_dir,
+        arm_dir,
+        dec_path,
+        out_path,
+        freeze_path,
+        arm_map_dir,
+        scores_dir,
+    })
+}
+
+fn run_single_join(
+    harness: &SingleJoinHarness,
+    out_dir: &Path,
+) -> Result<(JoinedDecisionsFile, PerArmSummaryFile), Box<dyn std::error::Error>> {
+    run_join(&JoinOptions {
+        freeze_path: harness.freeze_path.clone(),
+        arm_map_dir: harness.arm_map_dir.clone(),
+        scores_dir: harness.scores_dir.clone(),
+        out_dir: out_dir.to_path_buf(),
+        blind_dir: None,
+        source_game_dirs: vec![harness.src_dir.clone()],
+    })?;
+    let joined: JoinedDecisionsFile =
+        serde_json::from_slice(&fs::read(out_dir.join("joined_decisions.json"))?)?;
+    let summary: PerArmSummaryFile =
+        serde_json::from_slice(&fs::read(out_dir.join("per_arm_summary.json"))?)?;
+    Ok((joined, summary))
+}
+
+#[test]
+fn unparseable_optional_sidecars_emit_null_count_and_preserve_s3a_report() -> TestResult {
+    let tmp = TmpDir::new("unparseable_sidecars")?;
+
+    let write_clean_talk_and_neg = |src_dir: &Path| -> TestResult {
+        fs::write(
+            src_dir.join("to-seat/day-01-act-Quarry.negotiation.json"),
+            to_sorted_pretty_json(&NegotiationInputs {
+                batna: "b".to_owned(),
+                whispers: vec![UntrustedWhisper {
+                    from_guild: "Foundry".to_owned(),
+                    intent_header: None,
+                    body: "I will sell 1 raw 0 at 10.".to_owned(),
+                }],
+            })?,
+        )?;
+        fs::write(
+            src_dir.join("decisions/day-01-talk-Foundry.json"),
+            to_sorted_pretty_json(&EvalDecisionRecord {
+                raw_reply: Some(
+                    json!({
+                        "messages": [{ "to_guild": "Quarry", "body": "I will sell 1 raw 0 at 10." }],
+                        "market_actions": [],
+                        "bundle": {},
+                        "notes": "talk"
+                    })
+                    .to_string(),
+                ),
+                ..base_decision_record(EvalArm::Control, 1, 0, "Foundry")
+            })?,
+        )?;
+        Ok(())
+    };
+
+    let write_clean_relay = |arm_dir: &Path| -> TestResult {
+        fs::create_dir_all(arm_dir.join("relay/seats"))?;
+        fs::write(
+            arm_dir.join("relay/calls.jsonl"),
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&make_call_log_entry(
+                    "01",
+                    Round::Act,
+                    "Foundry",
+                    "TOOL_CALL",
+                    "r0"
+                ))?,
+                serde_json::to_string(&make_call_log_entry(
+                    "01",
+                    Round::Act,
+                    "Foundry",
+                    "OK",
+                    "r1"
+                ))?,
+            ),
+        )?;
+        fs::write(
+            arm_dir.join("relay/seats/Foundry.day-01-act.tool-round-0.json"),
+            serde_json::to_string(&make_tool_round_record(
+                "01",
+                "Foundry",
+                "r0",
+                0,
+                Some("tool"),
+            ))?,
+        )?;
+        fs::write(
+            arm_dir.join("relay/seats/Foundry.day-01-act.http-reply-round-1.json"),
+            serde_json::to_string(&make_http_reply_record(
+                "01",
+                "Foundry",
+                "r1",
+                1,
+                200,
+                json!({"choices": [{"message": {"reasoning": "http_reply", "content": "{}"}}]})
+                    .to_string(),
+            ))?,
+        )?;
+        Ok(())
+    };
+
+    // 1) Corrupt tool-round JSON -> tool & total null, http intact, S3a intact.
+    {
+        let mut host = EvalHost::from_standard_setup(TableId(9210), 4, 1, 11)?;
+        let h = prepare_single_decision_join(&tmp.path().join("c_tool"), &mut host, "g_t")?;
+        write_clean_relay(&h.arm_dir)?;
+        write_clean_talk_and_neg(&h.src_dir)?;
+        fs::write(
+            h.arm_dir
+                .join("relay/seats/Foundry.day-01-act.tool-round-0.json"),
+            b"{truncated",
+        )?;
+        let (joined, sum) = run_single_join(&h, &tmp.path().join("c_tool/out"))?;
+        assert_eq!(joined.rows[0].committed_ev_total_equity, 10.0);
+        assert_eq!(joined.rows[0].committed_score_norm, Some(0.5));
+        assert_eq!(sum.arms[0].mean_ev_total_equity, Some(10.0));
+        let m = &joined.rows[0].mechanisms;
+        assert_eq!(m.tool_round_reasoning_chars, None);
+        assert_eq!(m.http_reply_reasoning_chars, Some(10));
+        assert_eq!(m.total_reasoning_chars, None);
+        assert_eq!(m.unparseable_sidecars, 1);
+        assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 1);
+        assert_eq!(m.extracted_outgoing_commitments, Some(1));
+    }
+
+    // 2) Corrupt HTTP-reply JSON (and non-JSON HTTP 200 body) -> http & total null, tool intact, S3a intact.
+    for (label, payload) in [
+        ("c_http_env", b"{bad-http".to_vec()),
+        (
+            "c_http_body",
+            serde_json::to_vec(&make_http_reply_record(
+                "01",
+                "Foundry",
+                "r1",
+                1,
+                200,
+                "plain non-json body".to_owned(),
+            ))?,
+        ),
+    ] {
+        let mut host = EvalHost::from_standard_setup(TableId(9211), 4, 1, 12)?;
+        let h = prepare_single_decision_join(&tmp.path().join(label), &mut host, "g_h")?;
+        write_clean_relay(&h.arm_dir)?;
+        fs::write(
+            h.arm_dir
+                .join("relay/seats/Foundry.day-01-act.http-reply-round-1.json"),
+            payload,
+        )?;
+        let (joined, sum) = run_single_join(&h, &tmp.path().join(label).join("out"))?;
+        assert_eq!(joined.rows[0].committed_ev_total_equity, 10.0);
+        let m = &joined.rows[0].mechanisms;
+        assert_eq!(m.tool_round_reasoning_chars, Some(4));
+        assert_eq!(m.http_reply_reasoning_chars, None);
+        assert_eq!(m.total_reasoning_chars, None);
+        assert_eq!(m.unparseable_sidecars, 1);
+        assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 1);
+    }
+
+    // 3) Corrupt line in calls.jsonl -> all 3 reasoning char metrics null, S3a intact.
+    {
+        let mut host = EvalHost::from_standard_setup(TableId(9212), 4, 1, 13)?;
+        let h = prepare_single_decision_join(&tmp.path().join("c_calls"), &mut host, "g_c")?;
+        write_clean_relay(&h.arm_dir)?;
+        fs::write(h.arm_dir.join("relay/calls.jsonl"), "{bad-call-line}\n")?;
+        let (joined, sum) = run_single_join(&h, &tmp.path().join("c_calls/out"))?;
+        assert_eq!(joined.rows[0].committed_ev_total_equity, 10.0);
+        let m = &joined.rows[0].mechanisms;
+        assert_eq!(m.tool_round_reasoning_chars, None);
+        assert_eq!(m.http_reply_reasoning_chars, None);
+        assert_eq!(m.total_reasoning_chars, None);
+        assert_eq!(m.unparseable_sidecars, 1);
+        assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 1);
+    }
+
+    // 4) Corrupt negotiation.json & 5) corrupt talk decision -> Measure 5(b) all None, 5(a) + S3a preserved.
+    for (label, rel_path) in [
+        ("c_neg", "to-seat/day-01-act-Quarry.negotiation.json"),
+        ("c_talk", "decisions/day-01-talk-Foundry.json"),
+    ] {
+        let mut host = EvalHost::from_standard_setup(TableId(9213), 4, 1, 14)?;
+        let h = prepare_single_decision_join(&tmp.path().join(label), &mut host, "g_5b")?;
+        write_clean_talk_and_neg(&h.src_dir)?;
+        fs::write(h.src_dir.join(rel_path), b"{corrupt")?;
+        let (joined, sum) = run_single_join(&h, &tmp.path().join(label).join("out"))?;
+        assert_eq!(joined.rows[0].committed_ev_total_equity, 10.0);
+        assert_eq!(joined.rows[0].committed_score_norm, Some(0.5));
+        let m = &joined.rows[0].mechanisms;
+        assert_eq!(m.pre_act_pledges_count, Some(0));
+        assert_eq!(m.extracted_outgoing_commitments, None);
+        assert_eq!(m.applicable_commitments, None);
+        assert_eq!(m.honoured_commitments, None);
+        assert_eq!(m.honour_rate, None);
+        assert_eq!(m.focal_talk_counts, None);
+        assert_eq!(m.unparseable_sidecars, 1);
+        assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 1);
+    }
+
+    // 6) Corrupt scoreboard.json -> terminal_broken_promises_count == None, 5(a) pre-act + 5(b) + S3a preserved,
+    // and corrupt required decision.json still fails closed.
+    {
+        let mut host = EvalHost::from_standard_setup(TableId(9214), 4, 1, 15)?;
+        let h = prepare_single_decision_join(&tmp.path().join("c_sb"), &mut host, "g_sb")?;
+        write_clean_talk_and_neg(&h.src_dir)?;
+        fs::write(h.src_dir.join("scoreboard.json"), b"{bad-scoreboard")?;
+        let (joined, sum) = run_single_join(&h, &tmp.path().join("c_sb/out"))?;
+        assert_eq!(joined.rows[0].committed_ev_total_equity, 10.0);
+        let m = &joined.rows[0].mechanisms;
+        assert_eq!(m.terminal_broken_promises_count, None);
+        assert_eq!(m.pre_act_pledges_count, Some(0));
+        assert_eq!(m.extracted_outgoing_commitments, Some(1));
+        assert_eq!(m.unparseable_sidecars, 1);
+        assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 1);
+
+        fs::write(&h.dec_path, b"{corrupt-required-decision")?;
+        assert!(run_single_join(&h, &tmp.path().join("c_sb/out_fail")).is_err());
+        let clean_dec = fs::read_to_string(&h.out_path)?;
+        let outcome: BranchArmOutcome = serde_json::from_str(&clean_dec)?;
+        fs::write(&h.dec_path, to_sorted_pretty_json(&outcome.decision)?)?;
+        fs::write(&h.out_path, b"{corrupt-required-outcome")?;
+        assert!(run_single_join(&h, &tmp.path().join("c_sb/out_fail2")).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn reasoning_null_vs_zero_and_missing_calls_jsonl() -> TestResult {
+    let tmp = TmpDir::new("reasoning_null_zero")?;
+
+    // 1) Missing calls.jsonl with valid populated sidecars -> None (no unfiltered counting), unparseable == 0.
+    let arm_no_calls = tmp.path().join("no_calls");
+    fs::create_dir_all(arm_no_calls.join("relay/seats"))?;
+    fs::write(
+        arm_no_calls.join("relay/seats/Foundry.day-01-act.tool-round-0.json"),
+        serde_json::to_string(&make_tool_round_record(
+            "01",
+            "Foundry",
+            "r0",
+            0,
+            Some("uncounted without calls"),
+        ))?,
+    )?;
+    fs::write(
+        arm_no_calls.join("relay/seats/Foundry.day-01-act.http-reply-round-1.json"),
+        serde_json::to_string(&make_http_reply_record(
+            "01",
+            "Foundry",
+            "r1",
+            1,
+            200,
+            json!({"choices": [{"message": {"reasoning": "also uncounted"}}]}).to_string(),
+        ))?,
+    )?;
+    let no_calls_counts = measure_reasoning_length_in_memory(&arm_no_calls, 1, "Foundry")?;
+    assert_eq!(no_calls_counts.tool_round_reasoning_chars, None);
+    assert_eq!(no_calls_counts.http_reply_reasoning_chars, None);
+    assert_eq!(no_calls_counts.total_reasoning_chars, None);
+    assert_eq!(no_calls_counts.unparseable_sidecars, 0);
+
+    // 2) Excluded / omitted reasoning (`reasoning: None` / missing key) with clean calls.jsonl -> None, unparseable == 0.
+    let arm_excluded = tmp.path().join("excluded");
+    fs::create_dir_all(arm_excluded.join("relay/seats"))?;
+    fs::write(
+        arm_excluded.join("relay/calls.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&make_call_log_entry(
+                "01",
+                Round::Act,
+                "Foundry",
+                "TOOL_CALL",
+                "r0"
+            ))?,
+            serde_json::to_string(&make_call_log_entry(
+                "01",
+                Round::Act,
+                "Foundry",
+                "OK",
+                "r1"
+            ))?,
+        ),
+    )?;
+    fs::write(
+        arm_excluded.join("relay/seats/Foundry.day-01-act.tool-round-0.json"),
+        serde_json::to_string(&make_tool_round_record("01", "Foundry", "r0", 0, None))?,
+    )?;
+    fs::write(
+        arm_excluded.join("relay/seats/Foundry.day-01-act.http-reply-round-1.json"),
+        serde_json::to_string(&make_http_reply_record(
+            "01",
+            "Foundry",
+            "r1",
+            1,
+            200,
+            json!({"choices": [{"message": {"content": "{}"}}]}).to_string(),
+        ))?,
+    )?;
+    let excluded_counts = measure_reasoning_length_in_memory(&arm_excluded, 1, "Foundry")?;
+    assert_eq!(excluded_counts.tool_round_reasoning_chars, None);
+    assert_eq!(excluded_counts.http_reply_reasoning_chars, None);
+    assert_eq!(excluded_counts.total_reasoning_chars, None);
+    assert_eq!(excluded_counts.unparseable_sidecars, 0);
+
+    // 3) Clean sidecars holding explicit empty strings (`""`) -> Some(0), summed cleanly in join summary.
+    let mut host = EvalHost::from_standard_setup(TableId(9215), 4, 1, 16)?;
+    let h = prepare_single_decision_join(&tmp.path().join("empty_ok"), &mut host, "g_emp")?;
+    fs::create_dir_all(h.arm_dir.join("relay/seats"))?;
+    fs::write(
+        h.arm_dir.join("relay/calls.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&make_call_log_entry(
+                "01",
+                Round::Act,
+                "Foundry",
+                "TOOL_CALL",
+                "r0"
+            ))?,
+            serde_json::to_string(&make_call_log_entry(
+                "01",
+                Round::Act,
+                "Foundry",
+                "OK",
+                "r1"
+            ))?,
+        ),
+    )?;
+    fs::write(
+        h.arm_dir
+            .join("relay/seats/Foundry.day-01-act.tool-round-0.json"),
+        serde_json::to_string(&make_tool_round_record("01", "Foundry", "r0", 0, Some("")))?,
+    )?;
+    fs::write(
+        h.arm_dir
+            .join("relay/seats/Foundry.day-01-act.http-reply-round-1.json"),
+        serde_json::to_string(&make_http_reply_record(
+            "01",
+            "Foundry",
+            "r1",
+            1,
+            200,
+            json!({"choices": [{"message": {"reasoning": "", "content": "{}"}}]}).to_string(),
+        ))?,
+    )?;
+    let (joined, sum) = run_single_join(&h, &tmp.path().join("empty_ok/out"))?;
+    let m = &joined.rows[0].mechanisms;
+    assert_eq!(m.tool_round_reasoning_chars, Some(0));
+    assert_eq!(m.http_reply_reasoning_chars, Some(0));
+    assert_eq!(m.total_reasoning_chars, Some(0));
+    assert_eq!(m.unparseable_sidecars, 0);
+    assert_eq!(sum.arms[0].mechanisms.n_with_reasoning_sidecars, 1);
+    assert_eq!(sum.arms[0].mechanisms.mean_total_reasoning_chars, Some(0.0));
+    assert_eq!(sum.arms[0].mechanisms.n_unparseable_sidecars, 0);
+    Ok(())
+}
+
+fn verify_sec72_method_alignment(doc_text: &str, mechanisms_src: &str) -> Result<(), String> {
+    let required_doc = [
+        "EvalHost::observe_seat",
+        "EngineState::{pledges, audited_pledges}",
+        "EvalSaveSnapshot::{pledges, audited_pledges}",
+        "EvalHost::apply_market_action",
+        "TurnEngine::handle_post_offer",
+        "preview_seat_bundle",
+        "n_unparseable_sidecars",
+    ];
+    for pat in required_doc {
+        if !doc_text.contains(pat) {
+            return Err(format!("doc missing `{pat}`"));
+        }
+    }
+    let required_code = ["observe_seat(", "apply_market_action("];
+    for pat in required_code {
+        if !mechanisms_src.contains(pat) {
+            return Err(format!("mechanisms.rs missing `{pat}`"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn sec72_measure5_methods_align_with_doc_and_preview_equivalence() -> TestResult {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let doc_text = fs::read_to_string(root.join("docs/decision-scorer.md"))?;
+    let mech_src = fs::read_to_string(root.join("crates/league-eval/src/mechanisms.rs"))?;
+    verify_sec72_method_alignment(&doc_text, &mech_src).map_err(std::io::Error::other)?;
+    let drifted_doc = doc_text.replace("EvalHost::apply_market_action", "REMOVED_METHOD");
+    assert!(verify_sec72_method_alignment(&drifted_doc, &mech_src).is_err());
+
+    // Build a pre-act checkpoint containing a recorded IntentPledge on Day 2 and check both
+    // Measure 5(a) snapshot vs observe_seat parity and Measure 5(b) apply_market_action vs
+    // preview_seat_bundle parity for a legal and an illegal offer.
+    let tmp = TmpDir::new("m5_equiv")?;
+    let mut host = EvalHost::from_standard_setup(TableId(9216), 4, 2, 77)?;
+    let mut t1_subs = BTreeMap::new();
+    t1_subs.insert(
+        0,
+        EvalActSubmission {
+            market_actions: vec![MarketAction::RecordIntentPledge {
+                seat: 0,
+                pledge: league_seat_types::IntentPledge {
+                    pledge_id: 1,
+                    promisor: 0,
+                    counterparty: 1,
+                    target: league_seat_types::IntentTarget::VoteForSeat {
+                        office_turn: 4,
+                        candidate: 1,
+                    },
+                    honor_weight: 50,
+                    memo_digest: [9; 32],
+                },
+            }],
+            ..EvalActSubmission::default()
+        },
+    );
+    let _ = host.apply_act_submissions(&t1_subs)?;
+    let _ = host.sweep_turn()?;
+    let (save_path, seal_path) = host.write_pre_act_checkpoint(tmp.path())?;
+    let snap: EvalSaveSnapshot = serde_json::from_slice(&fs::read(&save_path)?)?;
+    let obs = host.observe_seat(Seat(0))?;
+    assert!(!snap.pledges.is_empty());
+    assert_eq!(snap.pledges, obs.pledges);
+    assert_eq!(snap.audited_pledges, obs.audited_pledges);
+
+    let preview_state = obs.to_public_preview_state();
+    let legal = MarketAction::PostOffer {
+        seat: 0,
+        order: OfferProposal {
+            side: OfferSide::Sell,
+            good: AssetId::Raw(0),
+            amount: UNIT_SCALE,
+            price_per_unit_cred: 10 * UNIT_SCALE,
+            domain_id: None,
+            is_hybrid: false,
+        },
+    };
+    let excessive_units = (obs.seats[0].raw[0] / UNIT_SCALE) + 10_000;
+    let illegal = MarketAction::PostOffer {
+        seat: 0,
+        order: OfferProposal {
+            side: OfferSide::Sell,
+            good: AssetId::Raw(0),
+            amount: excessive_units * UNIT_SCALE,
+            price_per_unit_cred: 10 * UNIT_SCALE,
+            domain_id: None,
+            is_hybrid: false,
+        },
+    };
+
+    for (action, expected_legal) in [(legal, true), (illegal, false)] {
+        let mut fork = EvalHost::fork_from_checkpoint(&save_path, &seal_path)?;
+        let via_apply = fork.apply_market_action(action.clone()).is_ok();
+        let via_preview = preview_seat_bundle(
+            &preview_state,
+            &AiPreviewRequest {
+                seat: 0,
+                market_actions: vec![action],
+                bundle: SealedOrderBundle::default(),
+            },
+        )
+        .is_ok_and(|p| p.refused_market_actions.is_empty());
+        assert_eq!(via_apply, expected_legal);
+        assert_eq!(via_apply, via_preview);
+    }
     Ok(())
 }

@@ -70,14 +70,17 @@ pub const MECHANISM_DATA_LIMITS: [&str; 7] = [
 /// Strictly numeric return type produced by single-pass in-memory reasoning-length readers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReasoningLengthCounts {
-    /// Total character length of `SavedToolRoundRecord::reasoning` when `relay/seats/` exists.
+    /// Total character length of `SavedToolRoundRecord::reasoning` when `calls.jsonl` and matching
+    /// tool-round sidecars parsed cleanly with non-omitted `reasoning` (`None` otherwise).
     pub tool_round_reasoning_chars: Option<u64>,
     /// Total character length of HTTP 200 non-late `reasoning` / `reasoning_content` when
-    /// `relay/seats/` exists.
+    /// `calls.jsonl` and matching HTTP-reply sidecars parsed cleanly with non-omitted fields.
     pub http_reply_reasoning_chars: Option<u64>,
     /// Deduplicated character sum across tool-round and HTTP-reply streams by reservation ID when
-    /// `relay/seats/` exists.
+    /// `calls.jsonl` and all matching sidecars parsed cleanly with non-omitted reasoning fields.
     pub total_reasoning_chars: Option<u64>,
+    /// Count of unparseable optional `calls.jsonl` lines or reasoning sidecar files encountered.
+    pub unparseable_sidecars: u32,
 }
 
 /// Purely numeric stack-only per-sidecar reasoning count returned without holding any text.
@@ -116,11 +119,14 @@ pub struct DecisionMechanismMetrics {
     /// Measure 2: `committed_score_norm - first_draft_score_norm` (`None` if no draft or flat span).
     pub revision_gain_score_norm: Option<f64>,
 
-    /// Measure 3: character count across `SavedToolRoundRecord::reasoning` (`None` if `relay/seats/` absent).
+    /// Measure 3: character count across `SavedToolRoundRecord::reasoning` (`None` when
+    /// `relay/seats/` or `relay/calls.jsonl` is absent, reasoning was excluded, or sidecars failed to parse).
     pub tool_round_reasoning_chars: Option<u64>,
-    /// Measure 3: character count across HTTP 200 non-late `message.reasoning` / `reasoning_content`.
+    /// Measure 3: character count across HTTP 200 non-late `message.reasoning` / `reasoning_content`
+    /// (`None` when absent, excluded, or unparseable; `Some(0)` only for explicit empty fields).
     pub http_reply_reasoning_chars: Option<u64>,
-    /// Measure 3: reservation-deduplicated reasoning character sum (`None` if `relay/seats/` absent).
+    /// Measure 3: reservation-deduplicated reasoning character sum (`None` when absent, excluded,
+    /// or unparseable; `Some(0)` only when sidecars parsed cleanly with explicit empty fields).
     pub total_reasoning_chars: Option<u64>,
     /// Measure 3 companion: `EvalDecisionRecord::completion_tokens`.
     pub completion_tokens: u64,
@@ -161,6 +167,9 @@ pub struct DecisionMechanismMetrics {
     pub honour_rate: Option<f64>,
     /// Measure 5(b): outgoing focal-to-peer `talk_rules_v2` message classification counts.
     pub focal_talk_counts: Option<TalkExtractionCounts>,
+    /// Count of unparseable optional sidecars encountered for this decision (`0` when clean).
+    #[serde(default)]
+    pub unparseable_sidecars: u32,
 }
 
 /// Descriptive per-arm §7.2 mechanism summary embedded in `PerArmSummaryRow::mechanisms`.
@@ -184,13 +193,13 @@ pub struct PerArmMechanismSummary {
     /// Measure 2: mean `revision_gain_score_norm` over `n_with_revision_gain_score_norm` (`None` when `0`).
     pub mean_revision_gain_score_norm: Option<f64>,
 
-    /// Measure 3: decisions with readable `relay/seats/` reasoning sidecars.
+    /// Measure 3: decisions with cleanly parsed non-null `total_reasoning_chars`.
     pub n_with_reasoning_sidecars: usize,
     /// Measure 3: decisions with non-empty `reply_token_ids`.
     pub n_with_reply_token_ids: usize,
-    /// Measure 3: mean `tool_round_reasoning_chars` over `n_with_reasoning_sidecars`.
+    /// Measure 3: mean `tool_round_reasoning_chars` over decisions with non-null counts.
     pub mean_tool_round_reasoning_chars: Option<f64>,
-    /// Measure 3: mean `http_reply_reasoning_chars` over `n_with_reasoning_sidecars`.
+    /// Measure 3: mean `http_reply_reasoning_chars` over decisions with non-null counts.
     pub mean_http_reply_reasoning_chars: Option<f64>,
     /// Measure 3: mean `total_reasoning_chars` over `n_with_reasoning_sidecars`.
     pub mean_total_reasoning_chars: Option<f64>,
@@ -243,6 +252,9 @@ pub struct PerArmMechanismSummary {
     pub honour_rate: Option<f64>,
     /// Measure 5(b): per-arm outgoing focal-to-peer talk classification counts (`None` when `0` states).
     pub focal_talk_counts: Option<PerArmTalkCountsSummary>,
+    /// Total unparseable optional sidecars encountered across `n_decisions` in this arm.
+    #[serde(default)]
+    pub n_unparseable_sidecars: u64,
 }
 
 /// Parses JSON without quoting any string content from the payload in errors.
@@ -286,23 +298,40 @@ fn sha256_bytes32(bytes: &[u8]) -> [u8; 32] {
     out
 }
 
+enum CallsFilterState {
+    Missing,
+    Corrupt(u32),
+    Ready(BTreeSet<[u8; 32]>),
+}
+
+pub(crate) enum SidecarReadOutcome {
+    Counted(SidecarReasoningCount),
+    FilteredOut,
+    Unparseable,
+}
+
 fn collect_act_reservation_digests(
     calls_path: &Path,
     day_str: &str,
     guild: &str,
-) -> Result<Option<BTreeSet<[u8; 32]>>, EvalError> {
+) -> CallsFilterState {
     if !calls_path.is_file() {
-        return Ok(None);
+        return CallsFilterState::Missing;
     }
-    let raw = fs::read_to_string(calls_path)
-        .map_err(|e| EvalError::Io(format!("read {}: {e}", calls_path.display())))?;
+    let Ok(raw) = fs::read_to_string(calls_path) else {
+        return CallsFilterState::Corrupt(1);
+    };
     let mut digests = BTreeSet::new();
+    let mut bad_lines: u32 = 0;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let entry: CallLogEntry = parse_json_prose_safe(trimmed, calls_path)?;
+        let Ok(entry) = parse_json_prose_safe::<CallLogEntry>(trimmed, calls_path) else {
+            bad_lines = bad_lines.saturating_add(1);
+            continue;
+        };
         if entry.day == day_str
             && entry.round == Round::Act
             && entry.guild.eq_ignore_ascii_case(guild)
@@ -311,69 +340,82 @@ fn collect_act_reservation_digests(
             digests.insert(sha256_bytes32(resv_id.as_bytes()));
         }
     }
-    Ok(Some(digests))
+    if bad_lines > 0 {
+        CallsFilterState::Corrupt(bad_lines)
+    } else {
+        CallsFilterState::Ready(digests)
+    }
 }
 
 /// Single-pass in-memory reader for one `SavedToolRoundRecord` JSON file.
 ///
 /// Holds `SavedToolRoundRecord::reasoning` only inside this stack frame, drops it upon counting,
-/// and returns strictly fixed-size numbers and digests (`None` when filtered out).
+/// and returns strictly fixed-size numbers and digests (`FilteredOut` / `Unparseable` otherwise).
 pub(crate) fn read_tool_round_reasoning_chars(
     path: &Path,
     day_str: &str,
     guild: &str,
-    resv_filter: Option<&BTreeSet<[u8; 32]>>,
-) -> Result<Option<SidecarReasoningCount>, EvalError> {
-    let bytes =
-        fs::read(path).map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
-    let rec: SavedToolRoundRecord = parse_json_slice_prose_safe(&bytes, path)?;
+    resv_filter: &BTreeSet<[u8; 32]>,
+) -> SidecarReadOutcome {
+    let Ok(bytes) = fs::read(path) else {
+        return SidecarReadOutcome::Unparseable;
+    };
+    let Ok(rec) = parse_json_slice_prose_safe::<SavedToolRoundRecord>(&bytes, path) else {
+        return SidecarReadOutcome::Unparseable;
+    };
     drop(bytes);
     let resv_digest = sha256_bytes32(rec.reservation_id.as_bytes());
     let matches_round =
         rec.day == day_str && rec.round == Round::Act && rec.guild.eq_ignore_ascii_case(guild);
-    let matches_resv = resv_filter.is_none_or(|allowed| allowed.contains(&resv_digest));
-    if !matches_round || !matches_resv {
-        return Ok(None);
+    if !matches_round || !resv_filter.contains(&resv_digest) {
+        return SidecarReadOutcome::FilteredOut;
     }
     let reasoning_chars = rec.reasoning.as_deref().map(|s| s.chars().count() as u64);
     let round_index = rec.round_index;
     let attempt = rec.attempt;
     drop(rec);
-    Ok(Some(SidecarReasoningCount {
+    SidecarReadOutcome::Counted(SidecarReasoningCount {
         round_index,
         attempt,
         reservation_digest: resv_digest,
         reasoning_chars,
-    }))
+    })
 }
 
 /// Single-pass in-memory reader for one `SavedHttpReplyRecord` JSON file.
 ///
 /// Parses `body` only inside this stack frame, extracts `choices[0].message.reasoning` or
 /// fallback `reasoning_content`, drops all strings/JSON values immediately, and returns strictly
-/// fixed-size numbers and digests (`None` when filtered out or non-200 / late / error).
+/// fixed-size numbers and digests (`FilteredOut` on non-200/late/error JSON, `Unparseable` on
+/// invalid JSON envelope or non-JSON 200 body).
 pub(crate) fn read_http_reply_reasoning_chars(
     path: &Path,
     day_str: &str,
     guild: &str,
-    resv_filter: Option<&BTreeSet<[u8; 32]>>,
-) -> Result<Option<SidecarReasoningCount>, EvalError> {
-    let bytes =
-        fs::read(path).map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
-    let rec: SavedHttpReplyRecord = parse_json_slice_prose_safe(&bytes, path)?;
+    resv_filter: &BTreeSet<[u8; 32]>,
+) -> SidecarReadOutcome {
+    let Ok(bytes) = fs::read(path) else {
+        return SidecarReadOutcome::Unparseable;
+    };
+    let Ok(rec) = parse_json_slice_prose_safe::<SavedHttpReplyRecord>(&bytes, path) else {
+        return SidecarReadOutcome::Unparseable;
+    };
     drop(bytes);
     let resv_digest = sha256_bytes32(rec.reservation_id.as_bytes());
     let matches_round =
         rec.day == day_str && rec.round == Round::Act && rec.guild.eq_ignore_ascii_case(guild);
-    let matches_resv = resv_filter.is_none_or(|allowed| allowed.contains(&resv_digest));
-    if !matches_round || !matches_resv || rec.status != HTTP_REPLY_OK_STATUS || rec.is_late {
-        return Ok(None);
+    if !matches_round
+        || !resv_filter.contains(&resv_digest)
+        || rec.status != HTTP_REPLY_OK_STATUS
+        || rec.is_late
+    {
+        return SidecarReadOutcome::FilteredOut;
     }
-    let Ok(body_val) = serde_json::from_str::<serde_json::Value>(&rec.body) else {
-        return Ok(None);
+    let Ok(body_val) = parse_json_prose_safe::<serde_json::Value>(&rec.body, path) else {
+        return SidecarReadOutcome::Unparseable;
     };
     if !body_val.get("error").is_none_or(serde_json::Value::is_null) {
-        return Ok(None);
+        return SidecarReadOutcome::FilteredOut;
     }
     let msg = body_val
         .get("choices")
@@ -393,12 +435,12 @@ pub(crate) fn read_http_reply_reasoning_chars(
     let attempt = rec.attempt;
     drop(body_val);
     drop(rec);
-    Ok(Some(SidecarReasoningCount {
+    SidecarReadOutcome::Counted(SidecarReasoningCount {
         round_index,
         attempt,
         reservation_digest: resv_digest,
         reasoning_chars,
-    }))
+    })
 }
 
 /// Computes Measure 3 character counts in a single directory pass over `<arm_dir>/relay/seats/`.
@@ -415,7 +457,16 @@ pub fn measure_reasoning_length_in_memory(
     }
     let day_str = format!("{day:02}");
     let calls_path = arm_dir.join("relay").join("calls.jsonl");
-    let resv_filter = collect_act_reservation_digests(&calls_path, &day_str, guild)?;
+    let resv_filter = match collect_act_reservation_digests(&calls_path, &day_str, guild) {
+        CallsFilterState::Missing => return Ok(ReasoningLengthCounts::default()),
+        CallsFilterState::Corrupt(bad_lines) => {
+            return Ok(ReasoningLengthCounts {
+                unparseable_sidecars: bad_lines,
+                ..ReasoningLengthCounts::default()
+            });
+        }
+        CallsFilterState::Ready(digests) => digests,
+    };
 
     let tool_prefix = format!("{guild}.day-{day_str}-act.tool-round-");
     let http_prefix = format!("{guild}.day-{day_str}-act.http-reply-round-");
@@ -436,6 +487,9 @@ pub fn measure_reasoning_length_in_memory(
 
     let mut tool_seen: BTreeMap<(usize, u8, [u8; 32]), Option<u64>> = BTreeMap::new();
     let mut http_seen: BTreeMap<(usize, u8, [u8; 32]), Option<u64>> = BTreeMap::new();
+    let mut tool_unparseable = false;
+    let mut http_unparseable = false;
+    let mut unparseable_sidecars: u32 = 0;
 
     for path in files {
         let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
@@ -444,35 +498,54 @@ pub fn measure_reasoning_length_in_memory(
         if !fname.ends_with(".json") {
             continue;
         }
-        if fname.starts_with(&tool_prefix)
-            && let Some(c) =
-                read_tool_round_reasoning_chars(&path, &day_str, guild, resv_filter.as_ref())?
-        {
-            tool_seen.insert(
-                (c.round_index, c.attempt, c.reservation_digest),
-                c.reasoning_chars,
-            );
-        } else if fname.starts_with(&http_prefix)
-            && let Some(c) =
-                read_http_reply_reasoning_chars(&path, &day_str, guild, resv_filter.as_ref())?
-        {
-            http_seen.insert(
-                (c.round_index, c.attempt, c.reservation_digest),
-                c.reasoning_chars,
-            );
+        if fname.starts_with(&tool_prefix) {
+            match read_tool_round_reasoning_chars(&path, &day_str, guild, &resv_filter) {
+                SidecarReadOutcome::Counted(c) => {
+                    tool_seen.insert(
+                        (c.round_index, c.attempt, c.reservation_digest),
+                        c.reasoning_chars,
+                    );
+                }
+                SidecarReadOutcome::FilteredOut => {}
+                SidecarReadOutcome::Unparseable => {
+                    tool_unparseable = true;
+                    unparseable_sidecars = unparseable_sidecars.saturating_add(1);
+                }
+            }
+        } else if fname.starts_with(&http_prefix) {
+            match read_http_reply_reasoning_chars(&path, &day_str, guild, &resv_filter) {
+                SidecarReadOutcome::Counted(c) => {
+                    http_seen.insert(
+                        (c.round_index, c.attempt, c.reservation_digest),
+                        c.reasoning_chars,
+                    );
+                }
+                SidecarReadOutcome::FilteredOut => {}
+                SidecarReadOutcome::Unparseable => {
+                    http_unparseable = true;
+                    unparseable_sidecars = unparseable_sidecars.saturating_add(1);
+                }
+            }
         }
     }
 
-    let tool_sum: u64 = tool_seen
-        .values()
-        .flatten()
-        .copied()
-        .fold(0_u64, u64::saturating_add);
-    let http_sum: u64 = http_seen
-        .values()
-        .flatten()
-        .copied()
-        .fold(0_u64, u64::saturating_add);
+    let tool_has_field = tool_seen.values().any(Option::is_some);
+    let http_has_field = http_seen.values().any(Option::is_some);
+
+    let tool_round_reasoning_chars = (!tool_unparseable && tool_has_field).then(|| {
+        tool_seen
+            .values()
+            .flatten()
+            .copied()
+            .fold(0_u64, u64::saturating_add)
+    });
+    let http_reply_reasoning_chars = (!http_unparseable && http_has_field).then(|| {
+        http_seen
+            .values()
+            .flatten()
+            .copied()
+            .fold(0_u64, u64::saturating_add)
+    });
 
     let mut by_resv: BTreeMap<[u8; 32], (Option<u64>, Option<u64>)> = BTreeMap::new();
     for ((_, _, resv), chars_opt) in tool_seen {
@@ -487,15 +560,19 @@ pub fn measure_reasoning_length_in_memory(
             slot.1 = Some(slot.1.unwrap_or(0).saturating_add(c));
         }
     }
-    let total_sum: u64 = by_resv
-        .into_values()
-        .map(|(tool_chars, http_chars)| tool_chars.or(http_chars).unwrap_or(0))
-        .fold(0_u64, u64::saturating_add);
+    let total_reasoning_chars = (!tool_unparseable && !http_unparseable && !by_resv.is_empty())
+        .then(|| {
+            by_resv
+                .into_values()
+                .map(|(tool_chars, http_chars)| tool_chars.or(http_chars).unwrap_or(0))
+                .fold(0_u64, u64::saturating_add)
+        });
 
     Ok(ReasoningLengthCounts {
-        tool_round_reasoning_chars: Some(tool_sum),
-        http_reply_reasoning_chars: Some(http_sum),
-        total_reasoning_chars: Some(total_sum),
+        tool_round_reasoning_chars,
+        http_reply_reasoning_chars,
+        total_reasoning_chars,
+        unparseable_sidecars,
     })
 }
 
@@ -757,13 +834,18 @@ fn extract_outgoing_for_pair(
     Ok((merged, neg_counts, talk_counts))
 }
 
+struct OutgoingCommitmentScan {
+    extracted: Option<(Vec<ExtractedTalkCommitment>, TalkExtractionCounts)>,
+    unparseable_files: u32,
+}
+
 /// Extracts outgoing focal-to-peer talk commitments in memory and drops all raw prose immediately.
 fn extract_outgoing_commitments_in_memory(
     source_dir: &Path,
     day: u8,
     focal_seat: u8,
     obs: &SeatObservation,
-) -> Result<Option<(Vec<ExtractedTalkCommitment>, TalkExtractionCounts)>, EvalError> {
+) -> Result<OutgoingCommitmentScan, EvalError> {
     let seat_count = obs.spec.seat_count;
     let seat_guilds = resolve_eval_seat_guilds(source_dir, seat_count)?;
     let Some(focal_guild) = seat_guilds.get(usize::from(focal_seat)) else {
@@ -774,6 +856,7 @@ fn extract_outgoing_commitments_in_memory(
     let day_str = format!("{day:02}");
 
     let mut any_neg_file = false;
+    let mut unparseable_files: u32 = 0;
     let mut neg_by_peer: BTreeMap<u8, Vec<(u8, u8, String)>> = BTreeMap::new();
     for (peer_idx, peer_guild) in seat_guilds.iter().enumerate() {
         let Ok(peer_seat) = u8::try_from(peer_idx) else {
@@ -789,9 +872,15 @@ fn extract_outgoing_commitments_in_memory(
             continue;
         }
         any_neg_file = true;
-        let raw = fs::read_to_string(&neg_path)
-            .map_err(|e| EvalError::Io(format!("read {}: {e}", neg_path.display())))?;
-        let neg: NegotiationInputs = parse_json_prose_safe(&raw, &neg_path)?;
+        let Ok(raw) = fs::read_to_string(&neg_path) else {
+            unparseable_files = unparseable_files.saturating_add(1);
+            continue;
+        };
+        let Ok(neg) = parse_json_prose_safe::<NegotiationInputs>(&raw, &neg_path) else {
+            drop(raw);
+            unparseable_files = unparseable_files.saturating_add(1);
+            continue;
+        };
         drop(raw);
         for w in neg.whispers {
             if w.from_guild == *focal_guild {
@@ -815,37 +904,48 @@ fn extract_outgoing_commitments_in_memory(
         .join(format!("day-{day_str}-talk-{focal_guild}.json"));
     let talk_file_exists = talk_dec_path.is_file();
     if talk_file_exists {
-        let raw = fs::read_to_string(&talk_dec_path)
-            .map_err(|e| EvalError::Io(format!("read {}: {e}", talk_dec_path.display())))?;
-        let rec: EvalDecisionRecord = parse_json_prose_safe(&raw, &talk_dec_path)?;
-        drop(raw);
-        if !rec.no_reply
-            && let Some(raw_reply) = rec.raw_reply.as_deref()
-        {
-            let parsed = parse_eval_talk_reply(
-                raw_reply,
-                focal_seat,
-                focal_guild,
-                &seat_guilds,
-                rec.keeps_notes,
-            );
-            if parsed.refusal_code.is_none() {
-                for (recipient_guild, w) in parsed.accepted_whispers {
-                    if let Some(&peer_seat) = guild_to_seat.get(recipient_guild.as_str())
-                        && peer_seat != focal_seat
-                    {
-                        talk_by_peer
-                            .entry(peer_seat)
-                            .or_default()
-                            .push((focal_seat, peer_seat, w.body));
+        let parsed_rec = fs::read_to_string(&talk_dec_path)
+            .ok()
+            .and_then(|raw| parse_json_prose_safe::<EvalDecisionRecord>(&raw, &talk_dec_path).ok());
+        match parsed_rec {
+            Some(rec) => {
+                if !rec.no_reply
+                    && let Some(raw_reply) = rec.raw_reply.as_deref()
+                {
+                    let parsed = parse_eval_talk_reply(
+                        raw_reply,
+                        focal_seat,
+                        focal_guild,
+                        &seat_guilds,
+                        rec.keeps_notes,
+                    );
+                    if parsed.refusal_code.is_none() {
+                        for (recipient_guild, w) in parsed.accepted_whispers {
+                            if let Some(&peer_seat) = guild_to_seat.get(recipient_guild.as_str())
+                                && peer_seat != focal_seat
+                            {
+                                talk_by_peer
+                                    .entry(peer_seat)
+                                    .or_default()
+                                    .push((focal_seat, peer_seat, w.body));
+                            }
+                        }
                     }
                 }
+            }
+            None => {
+                unparseable_files = unparseable_files.saturating_add(1);
             }
         }
     }
 
-    if !any_neg_file && !talk_file_exists {
-        return Ok(None);
+    if unparseable_files > 0 || (!any_neg_file && !talk_file_exists) {
+        drop(neg_by_peer);
+        drop(talk_by_peer);
+        return Ok(OutgoingCommitmentScan {
+            extracted: None,
+            unparseable_files,
+        });
     }
 
     let mut all_commitments = Vec::new();
@@ -877,7 +977,10 @@ fn extract_outgoing_commitments_in_memory(
 
     let counts = TalkExtractionCounts::from_sources(neg_total, talk_total)
         .map_err(|e| EvalError::SchemaValidation(format!("outgoing talk counts: {e}")))?;
-    Ok(Some((all_commitments, counts)))
+    Ok(OutgoingCommitmentScan {
+        extracted: Some((all_commitments, counts)),
+        unparseable_files: 0,
+    })
 }
 
 fn price_at_or_better_for_counterparty(order: &OfferProposal, unit_price_cred: i64) -> bool {
@@ -1038,22 +1141,23 @@ fn evaluate_talk_commitments(
     Ok(counts)
 }
 
-fn read_terminal_broken_promises(
-    source_dir: &Path,
-    focal_seat: u8,
-) -> Result<Option<u32>, EvalError> {
+fn read_terminal_broken_promises(source_dir: &Path, focal_seat: u8) -> (Option<u32>, u32) {
     let sb_path = source_dir.join("scoreboard.json");
     if !sb_path.is_file() {
-        return Ok(None);
+        return (None, 0);
     }
-    let raw = fs::read_to_string(&sb_path)
-        .map_err(|e| EvalError::Io(format!("read {}: {e}", sb_path.display())))?;
-    let sb: FinalScoreboard = parse_json_prose_safe(&raw, &sb_path)?;
-    Ok(sb
+    let Ok(raw) = fs::read_to_string(&sb_path) else {
+        return (None, 1);
+    };
+    let Ok(sb) = parse_json_prose_safe::<FinalScoreboard>(&raw, &sb_path) else {
+        return (None, 1);
+    };
+    let count = sb
         .standings
         .into_iter()
         .find(|entry| entry.seat == focal_seat)
-        .map(|entry| entry.broken_promises))
+        .map(|entry| entry.broken_promises);
+    (count, 0)
 }
 
 /// Computes `DecisionMechanismMetrics` for one joined `(state_id, arm, replicate)` decision.
@@ -1142,9 +1246,12 @@ pub(crate) fn compute_decision_mechanisms(
     let mut honour_rate = None;
     let mut focal_talk_counts = None;
 
+    let mut unparseable_sidecars = reasoning_counts.unparseable_sidecars;
+
     if let Some(src_dir) = source_game_dir {
-        terminal_broken_promises_count =
-            read_terminal_broken_promises(src_dir, arm_map.focal_seat)?;
+        let (term_broken, sb_bad) = read_terminal_broken_promises(src_dir, arm_map.focal_seat);
+        terminal_broken_promises_count = term_broken;
+        unparseable_sidecars = unparseable_sidecars.saturating_add(sb_bad);
         if let Some((save_path, seal_path, _host, obs)) =
             verify_and_fork_pre_act_host(src_dir, arm_map)?
         {
@@ -1163,12 +1270,15 @@ pub(crate) fn compute_decision_mechanisms(
             pre_act_pledges_count = Some(focal_pledges);
             pre_act_audited_pledges_count = Some(focal_audited);
 
-            if let Some((outgoing, out_counts)) = extract_outgoing_commitments_in_memory(
+            let outgoing_scan = extract_outgoing_commitments_in_memory(
                 src_dir,
                 arm_map.day,
                 arm_map.focal_seat,
                 &obs,
-            )? {
+            )?;
+            unparseable_sidecars =
+                unparseable_sidecars.saturating_add(outgoing_scan.unparseable_files);
+            if let Some((outgoing, out_counts)) = outgoing_scan.extracted {
                 let eval_counts = evaluate_talk_commitments(
                     &outgoing,
                     &save_path,
@@ -1222,6 +1332,7 @@ pub(crate) fn compute_decision_mechanisms(
         partial_bilateral_fill_commitments,
         honour_rate,
         focal_talk_counts,
+        unparseable_sidecars,
     })
 }
 
@@ -1409,6 +1520,11 @@ pub fn summarize_arm_mechanisms(arm_rows: &[&JoinedDecisionRow]) -> PerArmMechan
         Some(summarize_arm_talk_counts_from_slices(&pairs))
     };
 
+    let n_unparseable_sidecars: u64 = arm_rows
+        .iter()
+        .map(|r| u64::from(r.mechanisms.unparseable_sidecars))
+        .fold(0_u64, u64::saturating_add);
+
     PerArmMechanismSummary {
         n_decisions,
         n_with_tool_call,
@@ -1446,5 +1562,6 @@ pub fn summarize_arm_mechanisms(arm_rows: &[&JoinedDecisionRow]) -> PerArmMechan
         partial_bilateral_fill_commitments_total,
         honour_rate,
         focal_talk_counts,
+        n_unparseable_sidecars,
     }
 }
