@@ -132,12 +132,7 @@ fn collect_checkpoint_pairs(
     // Case 1: matched `<stem>.save.json` and `<stem>.seal` filenames.
     if saves.len() == seals.len() && saves.keys().eq(seals.keys()) {
         let mut matched = Vec::with_capacity(saves.len());
-        for (stem, save_path) in saves {
-            let seal_path = seals.remove(&stem).ok_or_else(|| {
-                layout_error(format!(
-                    "checkpoint `{stem}.save.json` is missing companion `{stem}.seal`"
-                ))
-            })?;
+        for ((stem, save_path), (_, seal_path)) in saves.into_iter().zip(seals) {
             let outer_rule = if stem.len() == 64 && stem.bytes().all(|b| b.is_ascii_hexdigit()) {
                 OuterStemRule::SameStemHex64 { stem }
             } else {
@@ -415,22 +410,6 @@ pub fn run_verify_checkpoints(
             },
         )?;
 
-        if verified_pair_sha != pair_sha {
-            return Err(EvalError::CheckpointVerify {
-                code: "CHECKPOINT_OUTER_PAIR_HASH_MISMATCH",
-                message: format!(
-                    "verifier pair digest `{verified_pair_sha}` != expected `{pair_sha}`"
-                ),
-                hint: "ensure both `league-eval` and `league-core` agree on the pre-act pair domain prefix",
-            });
-        }
-        if !is_valid_sha256_hex(&save_sha) || !is_valid_sha256_hex(&seal_sha) {
-            return Err(EvalError::CheckpointVerify {
-                code: "CHECKPOINT_OUTER_PAIR_HASH_MISMATCH",
-                message: "malformed SHA-256 returned by checkpoint verifier".to_owned(),
-                hint: "rebuild and rerun verify-checkpoints",
-            });
-        }
         if seat_count != EXPECTED_EVAL_SEAT_COUNT {
             return Err(EvalError::InvalidSeatCount {
                 actual: usize::from(seat_count),

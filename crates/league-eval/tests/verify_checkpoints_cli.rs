@@ -1584,7 +1584,9 @@ fn verify_checkpoints_and_join_cover_remaining_layout_and_manifest_error_branche
     let cas_v1_dir = tmp.path().join("cas_v1_single");
     fs::create_dir_all(&cas_v1_dir)?;
     let mut seal_v1_val: serde_json::Value = serde_json::from_slice(&seal_bytes)?;
-    seal_v1_val["format_version"] = json!(1);
+    let seal_v1_obj = seal_v1_val.as_object_mut().ok_or("seal obj")?;
+    seal_v1_obj.insert("format_version".to_owned(), json!(1));
+    seal_v1_obj.remove("save_sha256");
     let seal_v1_bytes = serde_json::to_vec(&seal_v1_val)?;
     let seal_v1_sha = sha256_hex(&seal_v1_bytes);
     fs::write(

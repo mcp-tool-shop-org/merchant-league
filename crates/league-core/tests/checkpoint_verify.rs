@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use league_core::eval::host::checkpoint_verify::{
-    CheckpointVerifyError, compute_eval_save_v2_sha256_hex, sha256_bytes_hex,
-    verify_and_construct_pre_act_bytes, verify_checkpoint_causal,
+    CheckpointVerifyError, compute_eval_save_v2_sha256_hex, decode_strict_checkpoint_pair,
+    sha256_bytes_hex, verify_and_construct_pre_act_bytes, verify_checkpoint_causal,
     verify_checkpoint_causal_against_chain, verify_checkpoint_causal_with_probe_fault_for_test,
 };
 use league_core::{
@@ -1507,10 +1507,9 @@ fn strict_error_variants_skip_serializing_fields_and_action_replay_paths() {
     let lt_offset = e_seal_str.find("\"logged_turns\":[").unwrap_or(0);
     let null_lock_seal = {
         let mut s = e_seal_str.clone();
-        if let Some(rel) = s[lt_offset..].find("\"market_actions\":[],") {
-            let ins = lt_offset + rel + "\"market_actions\":[],".len();
-            s.insert_str(ins, "\"cancel_lock_at\":null,");
-        }
+        let rel = must_some(s[lt_offset..].find("\"turn\":1,"), "turn:1 in logged_turns");
+        let ins = lt_offset + rel + "\"turn\":1,".len();
+        s.insert_str(ins, "\"cancel_lock_at\":null,");
         s.into_bytes()
     };
     assert!(matches!(
@@ -1571,6 +1570,8 @@ fn strict_error_variants_skip_serializing_fields_and_action_replay_paths() {
         h_fork_pre.read_recorded_act_submissions(&act_seal_p),
         Err(EngineError::InvalidConfig(_))
     ));
+    let pre1_save = must_ok(fs::read(&pre_save_p), "read turn1 save");
+    let pre1_seal = must_ok(fs::read(&pre_seal_p), "read turn1 seal");
     let _ = fs::remove_dir_all(&tmp_act);
     let mut act_subs = act_subs;
 
@@ -1590,7 +1591,7 @@ fn strict_error_variants_skip_serializing_fields_and_action_replay_paths() {
             promisor: 0,
             counterparty: 1,
             target: league_core::IntentTarget::VoteForSeat {
-                office_turn: 2,
+                office_turn: 4,
                 candidate: 1,
             },
             honor_weight: 50,
@@ -1614,6 +1615,139 @@ fn strict_error_variants_skip_serializing_fields_and_action_replay_paths() {
     let l_save = must_ok(fs::read(&ls_p), "read lock save");
     let l_seal = must_ok(fs::read(&ll_p), "read lock seal");
     assert!(verify_checkpoint_causal(&l_save, &l_seal).is_ok());
+
+    // Exercise additional strict pre-act decoding and Gate 2 tip-divergence checks:
+    // 1. seal_turn == 0 -> TipStateDigestMismatch.
+    let turn0_seal = {
+        let mut v = e_seal_str.clone();
+        let hdr_t = must_some(v.find("\"turn\":2,"), "hdr turn");
+        v.replace_range(hdr_t..hdr_t + "\"turn\":2,".len(), "\"turn\":0,");
+        let st_off = must_some(v.find("\"state\":{"), "state obj");
+        let st_t = must_some(v[st_off..].find("\"turn\":2,"), "state turn");
+        v.replace_range(
+            st_off + st_t..st_off + st_t + "\"turn\":2,".len(),
+            "\"turn\":0,",
+        );
+        v.into_bytes()
+    };
+    assert!(matches!(
+        decode_strict_checkpoint_pair(&e_save, &turn0_seal),
+        Err(CheckpointVerifyError::TipStateDigestMismatch { .. })
+    ));
+
+    // 2. Act-recorded header (`pre_act_checkpoint_sha256`) on pre-act pair (both with & without `save_sha256`) -> PairBindingMismatch.
+    let pre_act_hex = "c".repeat(64);
+    let save_sha_span = find_json_field_value_span(&e_seal, 0, "save_sha256");
+    let pre_act_with_save = {
+        let mut s = e_seal_str.clone();
+        let pos = must_some(s.find("\"save_sha256\":"), "save_sha256 key");
+        s.insert_str(
+            pos,
+            &format!("\"pre_act_checkpoint_sha256\":\"{pre_act_hex}\","),
+        );
+        s.into_bytes()
+    };
+    assert!(matches!(
+        decode_strict_checkpoint_pair(&e_save, &pre_act_with_save),
+        Err(CheckpointVerifyError::PairBindingMismatch { .. })
+    ));
+    let pre_act_without_save = {
+        let old_kv = format!(
+            "\"save_sha256\":{}",
+            must_ok(
+                std::str::from_utf8(&e_seal[save_sha_span.0..save_sha_span.1]),
+                "utf8"
+            )
+        );
+        e_seal_str
+            .replacen(
+                &old_kv,
+                &format!("\"pre_act_checkpoint_sha256\":\"{pre_act_hex}\""),
+                1,
+            )
+            .into_bytes()
+    };
+    assert!(matches!(
+        decode_strict_checkpoint_pair(&e_save, &pre_act_without_save),
+        Err(CheckpointVerifyError::PairBindingMismatch { .. })
+    ));
+
+    // 3. Non-empty `recorded_act_submissions` fails `ensure_pre_act_state` inside `decode_strict_checkpoint_pair`.
+    let lock_seal_str = String::from_utf8(l_seal).unwrap_or_default();
+    let default_sub_json = must_ok(
+        serde_json::to_string(&EvalActSubmission::default()),
+        "serialize default EvalActSubmission",
+    );
+    let bad_cur_lock_s = lock_seal_str.replacen(
+        "\"recorded_act_submissions\":{}",
+        &format!("\"recorded_act_submissions\":{{\"0\":{default_sub_json}}}"),
+        1,
+    );
+    assert!(matches!(
+        decode_strict_checkpoint_pair(&l_save, bad_cur_lock_s.as_bytes()),
+        Err(CheckpointVerifyError::PairBindingMismatch { .. })
+    ));
+
+    // 4. Turn-1 pre-act checkpoint whose save & engine.state both mutate identically passes
+    //    `decode_strict_checkpoint_pair` (since `logged_turns` is empty) and fails at Gate 2 tip replay check.
+    let old_p1_sha = compute_eval_save_v2_sha256_hex(&pre1_save);
+    let bump_first_cred = |mut s: String, key: &str| -> String {
+        let seats_p = must_some(s.find("\"seats\":"), "seats arr");
+        let cred_p = seats_p + must_some(s[seats_p..].find(key), "cred key") + key.len();
+        let end_p = cred_p
+            + s[cred_p..]
+                .find(|c: char| !c.is_ascii_digit() && c != '-')
+                .unwrap_or(0);
+        let old_val: i64 = must_ok(s[cred_p..end_p].parse(), "parse cred");
+        s.replace_range(cred_p..end_p, &(old_val + 777).to_string());
+        s
+    };
+    let mut_pre1_save = bump_first_cred(
+        String::from_utf8(pre1_save).unwrap_or_default(),
+        "\"cred\": ",
+    )
+    .into_bytes();
+    let new_p1_sha = compute_eval_save_v2_sha256_hex(&mut_pre1_save);
+    let mut_pre1_seal = {
+        let pre1_s = String::from_utf8(pre1_seal).unwrap_or_default();
+        let st_pos = must_some(pre1_s.find("\"engine\":{"), "engine obj");
+        let seats_rel = must_some(pre1_s[st_pos..].find("\"seats\":["), "engine seats");
+        let abs_seats = st_pos + seats_rel;
+        let cred_rel =
+            must_some(pre1_s[abs_seats..].find("\"cred\":"), "engine cred") + "\"cred\":".len();
+        let abs_cred = abs_seats + cred_rel;
+        let end_p = abs_cred
+            + pre1_s[abs_cred..]
+                .find(|c: char| !c.is_ascii_digit() && c != '-')
+                .unwrap_or(0);
+        let old_val: i64 = must_ok(pre1_s[abs_cred..end_p].parse(), "parse engine cred");
+        let mut s = pre1_s;
+        s.replace_range(abs_cred..end_p, &(old_val + 777).to_string());
+        s.replacen(
+            &format!("\"save_sha256\":\"{old_p1_sha}\""),
+            &format!("\"save_sha256\":\"{new_p1_sha}\""),
+            1,
+        )
+        .into_bytes()
+    };
+    assert!(matches!(
+        verify_checkpoint_causal(&mut_pre1_save, &mut_pre1_seal),
+        Err(CheckpointVerifyError::TipStateDigestMismatch { .. })
+    ));
+
+    // 5. Non-numeric `"format_version": "two"` triggers non-u32 `into_engine_error` fallback via `EvalHost::fork_from_checkpoint`.
+    let non_num_save_p = tmp_lock.join("bad_ver.save.json");
+    let non_num_save = String::from_utf8(e_save.clone())
+        .unwrap_or_default()
+        .replacen("\"format_version\": 2,", "\"format_version\": \"two\",", 1);
+    must_ok(
+        fs::write(&non_num_save_p, non_num_save),
+        "write bad_ver save",
+    );
+    assert!(matches!(
+        EvalHost::fork_from_checkpoint(&non_num_save_p, &el_p),
+        Err(EngineError::InvalidConfig(_))
+    ));
     let _ = fs::remove_dir_all(&tmp_lock);
 
     let vrf_span = find_json_field_value_span(&e_seal, 0, "eval_vrf_proof");
