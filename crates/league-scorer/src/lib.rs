@@ -31,9 +31,10 @@ pub use postures::{
 };
 pub use rollout::{
     VERIFIED_CHECKPOINTS_SCHEMA_VERSION, execute_blind_request, execute_blind_request_verified,
-    execute_blind_request_verified_with_hook, probe_checkpoint_sanitized, run_single_rollout,
+    execute_blind_request_verified_with_hook, execute_blind_request_verified_with_mid_batch_hook,
+    execute_blind_request_with_mid_batch_hook, probe_checkpoint_sanitized, run_single_rollout,
     run_single_rollout_from_host, run_single_rollout_with_replay_log, verify_checkpoint_digests,
-    verify_checkpoint_pair,
+    verify_checkpoint_pair, verify_checkpoint_pair_unchanged_after_batch,
 };
 pub use scenarios::{ScenarioAssignment, draw_scenarios};
 pub use scoring::score_outcomes;

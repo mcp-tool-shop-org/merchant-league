@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use league_core::eval::host::checkpoint_verify::{CheckpointVerifyError, verify_checkpoint_causal};
 use league_core::{
     ClubBot, EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActSubmission, EvalHost, Seat,
-    TableId,
+    TableId, ToStructuredError as _,
 };
 use league_scorer::cli::run_cli_with_build_id;
 use league_scorer::{
@@ -21,8 +21,10 @@ use league_scorer::{
     VerifiedCheckpointsManifest, build_arm_independent_request,
     build_arm_independent_request_verified, compute_blind_inputs_manifest_sha256,
     compute_pre_act_pair_sha256_hex, compute_scorer_tree_sha256, execute_blind_request,
-    execute_blind_request_verified, execute_blind_request_verified_with_hook, sha256_hex,
-    to_sorted_compact_json, to_sorted_pretty_json,
+    execute_blind_request_verified, execute_blind_request_verified_with_hook,
+    execute_blind_request_verified_with_mid_batch_hook, execute_blind_request_with_mid_batch_hook,
+    run_single_rollout_from_host, score_outcomes, sha256_hex, to_sorted_compact_json,
+    to_sorted_pretty_json, verify_checkpoint_pair_unchanged_after_batch,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -766,6 +768,413 @@ fn gate3_manifest_validation_verified_candidate_builder_and_rollout_errors() -> 
         EXIT_OK,
         "{}",
         String::from_utf8_lossy(&cli_ok_err)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn post_batch_unchanged_checkpoint_matches_baseline_byte_for_byte() -> TestResult {
+    use league_scorer::{
+        apply_talk_commitments, canonicalize_talk_commitments, decide_peer_turn, draw_scenarios,
+        posture_for_scenario,
+    };
+
+    let tmp = TmpDir::new("post_batch_unchanged")?;
+    let fix = setup_gate3_fixture(&tmp.path, COMMIT_A, BUILD_B)?;
+    let cas_seal = fix
+        .ckpts_dir
+        .join(format!("{}.seal", fix.req.pre_act_seal_sha256));
+
+    // Reconstruct expected baseline score output directly from the verified host.
+    let save_bytes = fs::read(&fix.cas_save)?;
+    let seal_bytes = fs::read(&cas_seal)?;
+    let base_host = EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes)?;
+    let day = base_host.turn();
+    let focal_obs = base_host.observe_seat(Seat(fix.req.focal_seat))?;
+    let focal_mandate = *focal_obs.own_mandate().ok_or("missing focal own_mandate")?;
+    let scenarios = draw_scenarios(
+        &focal_obs.spec,
+        focal_mandate,
+        fix.req.focal_seat,
+        fix.req.scorer_seed,
+        &fix.req.pre_act_pair_sha256,
+        day,
+        fix.cfg.scenarios_m,
+    )?;
+    let canonical_commitments = canonicalize_talk_commitments(&fix.req.talk_commitments)?;
+    let mut peer_day_subs_by_m = Vec::with_capacity(scenarios.len());
+    for (m_idx, scenario) in scenarios.iter().enumerate() {
+        let posture = posture_for_scenario(&fix.cfg, m_idx);
+        let mut peer_subs = BTreeMap::new();
+        for s in 0..base_host.seat_count() {
+            if s != fix.req.focal_seat {
+                let obs_s = base_host.observe_seat(Seat(s))?;
+                let mandate = *scenario
+                    .peer_mandates
+                    .get(&s)
+                    .ok_or("missing peer mandate")?;
+                let seed = scenario.bot_base_seed.wrapping_add(u64::from(s));
+                let base_sub = decide_peer_turn(posture, seed, &obs_s, &mandate, &fix.cfg)?;
+                let final_sub = apply_talk_commitments(
+                    &obs_s,
+                    base_sub,
+                    &canonical_commitments,
+                    fix.req.scorer_seed,
+                    &fix.req.pre_act_pair_sha256,
+                    m_idx,
+                    fix.cfg.p_honour,
+                )?;
+                peer_subs.insert(s, final_sub);
+            }
+        }
+        peer_day_subs_by_m.push(peer_subs);
+    }
+    let mut outcomes = Vec::with_capacity(fix.req.candidates.len());
+    for candidate in &fix.req.candidates {
+        let mut row = Vec::with_capacity(scenarios.len());
+        for (m_idx, scenario) in scenarios.iter().enumerate() {
+            let posture = posture_for_scenario(&fix.cfg, m_idx);
+            let (outcome, _) = run_single_rollout_from_host(
+                &base_host,
+                fix.req.focal_seat,
+                &candidate.submission,
+                &peer_day_subs_by_m[m_idx],
+                focal_mandate,
+                scenario,
+                posture,
+                &fix.cfg,
+            )?;
+            row.push(outcome);
+        }
+        outcomes.push(row);
+    }
+    let baseline = score_outcomes(&fix.req, &fix.cfg, day, &outcomes)?;
+    let baseline_json = to_sorted_pretty_json(&baseline)?;
+
+    let direct = execute_blind_request(&fix.req, &fix.cfg, &fix.cas_save, &cas_seal)?;
+    let verified = execute_blind_request_verified(
+        &fix.req,
+        &fix.cfg,
+        &fix.cas_save,
+        &cas_seal,
+        &fix.manifest,
+        BUILD_B,
+    )?;
+    assert_eq!(to_sorted_pretty_json(&direct)?, baseline_json);
+    assert_eq!(to_sorted_pretty_json(&verified)?, baseline_json);
+    Ok(())
+}
+
+fn assert_changed_during_batch_error(err: &ScorerError, tmp_path: &Path) {
+    assert_eq!(err.code(), "CHECKPOINT_CHANGED_DURING_BATCH");
+    assert_eq!(err.exit_code(), EXIT_RUNTIME_ERROR);
+    assert!(!err.hint().is_empty());
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("CHECKPOINT_CHANGED_DURING_BATCH: "),
+        "msg={msg}"
+    );
+    let tmp_str = tmp_path.to_string_lossy();
+    assert!(
+        !msg.contains(tmp_str.as_ref()),
+        "temp dir leaked in error: {msg}"
+    );
+    let structured = err.to_structured_error();
+    assert_eq!(structured.code, "CHECKPOINT_CHANGED_DURING_BATCH");
+    assert_eq!(structured.hint, err.hint());
+    assert!(matches!(err, ScorerError::CheckpointChangedDuringBatch(_)));
+}
+
+#[test]
+fn post_batch_refuses_mid_batch_save_or_seal_mutation_and_deletion() -> TestResult {
+    let tmp = TmpDir::new("mid_batch_change")?;
+    let fix = setup_gate3_fixture(&tmp.path, COMMIT_A, BUILD_B)?;
+    let cas_seal = fix
+        .ckpts_dir
+        .join(format!("{}.seal", fix.req.pre_act_seal_sha256));
+    let orig_save = fs::read(&fix.cas_save)?;
+    let orig_seal = fs::read(&cas_seal)?;
+
+    // 1. Mutating `.save.json` mid-batch refuses unverified execution.
+    let mut fired = false;
+    let mut hook_save = |c_idx: usize, m_idx: usize| {
+        if c_idx == 0 && m_idx == 0 && !fired {
+            fired = true;
+            let mut tampered = orig_save.clone();
+            tampered[0] ^= 0x01;
+            if let Err(err) = fs::write(&fix.cas_save, &tampered) {
+                panic!("tamper save failed: {err}");
+            }
+        }
+    };
+    let err_save = execute_blind_request_with_mid_batch_hook(
+        &fix.req,
+        &fix.cfg,
+        &fix.cas_save,
+        &cas_seal,
+        Some(&mut hook_save),
+    )
+    .err()
+    .ok_or("expected mid-batch save change refusal")?;
+    assert_changed_during_batch_error(&err_save, &tmp.path);
+    assert!(err_save.to_string().contains("save changed during batch"));
+    fs::write(&fix.cas_save, &orig_save)?;
+
+    // 2. Mutating `.seal` mid-batch refuses verified execution.
+    let mut fired_seal = false;
+    let mut hook_seal = |c_idx: usize, m_idx: usize| {
+        if c_idx == 0 && m_idx == 0 && !fired_seal {
+            fired_seal = true;
+            let mut tampered = orig_seal.clone();
+            tampered[0] ^= 0x01;
+            if let Err(err) = fs::write(&cas_seal, &tampered) {
+                panic!("tamper seal failed: {err}");
+            }
+        }
+    };
+    let err_seal = execute_blind_request_verified_with_mid_batch_hook(
+        &fix.req,
+        &fix.cfg,
+        &fix.cas_save,
+        &cas_seal,
+        &fix.manifest,
+        BUILD_B,
+        Some(&mut hook_seal),
+        None,
+    )
+    .err()
+    .ok_or("expected mid-batch seal change refusal")?;
+    assert_changed_during_batch_error(&err_seal, &tmp.path);
+    assert!(err_seal.to_string().contains("seal changed during batch"));
+    fs::write(&cas_seal, &orig_seal)?;
+
+    // 3. Removing `.save.json` mid-batch refuses execution without leaking directories.
+    let mut fired_rm_save = false;
+    let mut hook_rm_save = |c_idx: usize, m_idx: usize| {
+        if c_idx == 0 && m_idx == 0 && !fired_rm_save {
+            fired_rm_save = true;
+            if let Err(err) = fs::remove_file(&fix.cas_save) {
+                panic!("remove save failed: {err}");
+            }
+        }
+    };
+    let err_rm_save = execute_blind_request_with_mid_batch_hook(
+        &fix.req,
+        &fix.cfg,
+        &fix.cas_save,
+        &cas_seal,
+        Some(&mut hook_rm_save),
+    )
+    .err()
+    .ok_or("expected mid-batch missing save refusal")?;
+    assert_changed_during_batch_error(&err_rm_save, &tmp.path);
+    fs::write(&fix.cas_save, &orig_save)?;
+
+    // 4. Removing `.seal` mid-batch refuses verified execution.
+    let mut fired_rm_seal = false;
+    let mut hook_rm_seal = |c_idx: usize, m_idx: usize| {
+        if c_idx == 0 && m_idx == 0 && !fired_rm_seal {
+            fired_rm_seal = true;
+            if let Err(err) = fs::remove_file(&cas_seal) {
+                panic!("remove seal failed: {err}");
+            }
+        }
+    };
+    let err_rm_seal = execute_blind_request_verified_with_mid_batch_hook(
+        &fix.req,
+        &fix.cfg,
+        &fix.cas_save,
+        &cas_seal,
+        &fix.manifest,
+        BUILD_B,
+        Some(&mut hook_rm_seal),
+        None,
+    )
+    .err()
+    .ok_or("expected mid-batch missing seal refusal")?;
+    assert_changed_during_batch_error(&err_rm_seal, &tmp.path);
+    fs::write(&cas_seal, &orig_seal)?;
+
+    // 5. Direct post-batch helper covers unchanged pass plus save/seal/pair mismatch & missing file.
+    verify_checkpoint_pair_unchanged_after_batch(
+        &fix.cas_save,
+        &cas_seal,
+        &fix.req.pre_act_save_sha256,
+        &fix.req.pre_act_seal_sha256,
+        &fix.req.pre_act_pair_sha256,
+    )?;
+    let bad_save = verify_checkpoint_pair_unchanged_after_batch(
+        &fix.cas_save,
+        &cas_seal,
+        &"f".repeat(64),
+        &fix.req.pre_act_seal_sha256,
+        &fix.req.pre_act_pair_sha256,
+    )
+    .err()
+    .ok_or("expected save digest mismatch")?;
+    assert_changed_during_batch_error(&bad_save, &tmp.path);
+
+    let bad_seal = verify_checkpoint_pair_unchanged_after_batch(
+        &fix.cas_save,
+        &cas_seal,
+        &fix.req.pre_act_save_sha256,
+        &"e".repeat(64),
+        &fix.req.pre_act_pair_sha256,
+    )
+    .err()
+    .ok_or("expected seal digest mismatch")?;
+    assert_changed_during_batch_error(&bad_seal, &tmp.path);
+
+    let bad_pair = verify_checkpoint_pair_unchanged_after_batch(
+        &fix.cas_save,
+        &cas_seal,
+        &fix.req.pre_act_save_sha256,
+        &fix.req.pre_act_seal_sha256,
+        &"d".repeat(64),
+    )
+    .err()
+    .ok_or("expected pair digest mismatch")?;
+    assert_changed_during_batch_error(&bad_pair, &tmp.path);
+    assert!(bad_pair.to_string().contains("pair changed during batch"));
+
+    Ok(())
+}
+
+#[test]
+fn cli_score_multi_state_batch_refuses_whole_batch_without_partial_files_on_checkpoint_change()
+-> TestResult {
+    let tmp = TmpDir::new("cli_multi_state")?;
+    let mut host =
+        EvalHost::from_standard_setup(TableId(940_002), 4, 11, 21)?.with_engine_commit(COMMIT_A)?;
+
+    let mut pairs = Vec::new();
+    for day_idx in 0..2_u8 {
+        let mut subs = BTreeMap::new();
+        for s in 0..host.seat_count() {
+            let obs = host.observe_seat(Seat(s))?;
+            let mandate = *obs.own_mandate().ok_or("missing own_mandate")?;
+            let dec = ClubBot::new(host.bot_tie_seed().wrapping_add(u64::from(s)))
+                .decide_full_turn(&obs, &mandate);
+            subs.insert(
+                s,
+                EvalActSubmission {
+                    market_actions: dec.pass_a_actions,
+                    pass_b_actions: dec.pass_b_actions,
+                    bundle: dec.bundle,
+                },
+            );
+        }
+        host.apply_act_submissions(&subs)?;
+        host.sweep_turn()?;
+        let raw_dir = tmp.path.join(format!("raw_{day_idx}"));
+        let (raw_save, raw_seal) = host.write_pre_act_checkpoint(&raw_dir)?;
+        let save_bytes = fs::read(&raw_save)?;
+        let seal_bytes = fs::read(&raw_seal)?;
+        pairs.push((
+            sha256_hex(&save_bytes),
+            sha256_hex(&seal_bytes),
+            save_bytes,
+            seal_bytes,
+        ));
+    }
+
+    let ckpts_dir = tmp.path.join("checkpoints");
+    let blind_dir = tmp.path.join("blind_inputs");
+    fs::create_dir_all(&ckpts_dir)?;
+    fs::create_dir_all(&blind_dir)?;
+    let cfg = ScorerConfig {
+        k_synth_max: 1,
+        scenarios_m: 2,
+        ..ScorerConfig::default()
+    };
+    let cfg_path = tmp.path.join("cfg.json");
+    fs::write(&cfg_path, to_sorted_pretty_json(&cfg)?)?;
+
+    for (idx, (save_sha, seal_sha, save_bytes, seal_bytes)) in pairs.iter().enumerate() {
+        let cas_save = ckpts_dir.join(format!("{save_sha}.save.json"));
+        let cas_seal = ckpts_dir.join(format!("{seal_sha}.seal"));
+        fs::write(&cas_save, save_bytes)?;
+        fs::write(&cas_seal, seal_bytes)?;
+        let state_id = format!("game940002-day-0{}-seat-0", idx + 2);
+        let req = build_arm_independent_request(
+            &cas_save, &cas_seal, save_sha, seal_sha, 0, &state_id, &cfg, 77,
+        )?;
+        fs::write(
+            blind_dir.join(format!("{state_id}.json")),
+            to_sorted_compact_json(&req)?,
+        )?;
+    }
+
+    // 1. Clean 2-state CLI batch writes both score files and re-verifies prior checkpoint pairs.
+    let ok_out = tmp.path.join("out_ok");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code_ok = run_cli_with_build_id(
+        [
+            "score",
+            "--blind-inputs",
+            blind_dir.to_str().ok_or("utf8")?,
+            "--checkpoints",
+            ckpts_dir.to_str().ok_or("utf8")?,
+            "--config",
+            cfg_path.to_str().ok_or("utf8")?,
+            "--out",
+            ok_out.to_str().ok_or("utf8")?,
+        ],
+        BUILD_B,
+        &mut stdout,
+        &mut stderr,
+    );
+    assert_eq!(
+        code_ok,
+        EXIT_OK,
+        "stderr={}",
+        String::from_utf8_lossy(&stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&stdout).trim(), "scored_states=2");
+    assert!(
+        ok_out
+            .join("scores/game940002-day-02-seat-0.json")
+            .is_file()
+    );
+    assert!(
+        ok_out
+            .join("scores/game940002-day-03-seat-0.json")
+            .is_file()
+    );
+
+    // 2. Corrupting the second state's seal fails the whole batch with zero partial files written.
+    let second_seal_path = ckpts_dir.join(format!("{}.seal", pairs[1].1));
+    let mut tampered = pairs[1].3.clone();
+    tampered[0] ^= 0x01;
+    fs::write(&second_seal_path, &tampered)?;
+
+    let fail_out = tmp.path.join("out_fail");
+    let mut fail_stdout = Vec::new();
+    let mut fail_stderr = Vec::new();
+    let code_fail = run_cli_with_build_id(
+        [
+            "score",
+            "--blind-inputs",
+            blind_dir.to_str().ok_or("utf8")?,
+            "--checkpoints",
+            ckpts_dir.to_str().ok_or("utf8")?,
+            "--config",
+            cfg_path.to_str().ok_or("utf8")?,
+            "--out",
+            fail_out.to_str().ok_or("utf8")?,
+        ],
+        BUILD_B,
+        &mut fail_stdout,
+        &mut fail_stderr,
+    );
+    assert_ne!(code_fail, EXIT_OK);
+    let written: Vec<_> = fs::read_dir(fail_out.join("scores"))?.collect();
+    assert!(
+        written.is_empty(),
+        "failed multi-state batch must emit zero partial score files, found {}",
+        written.len()
     );
 
     Ok(())

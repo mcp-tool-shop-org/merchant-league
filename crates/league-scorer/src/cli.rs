@@ -10,7 +10,10 @@ use league_core::{StructuredError, ToStructuredError as _};
 
 use crate::candidates::{build_arm_independent_request, build_arm_independent_request_verified};
 use crate::error::{EXIT_OK, ScorerError, sanitize_error_text};
-use crate::rollout::{execute_blind_request, execute_blind_request_verified};
+use crate::rollout::{
+    execute_blind_request, execute_blind_request_verified,
+    verify_checkpoint_pair_unchanged_after_batch,
+};
 use crate::types::{
     ScorerConfig, ScorerFreezeBlindView, VerifiedCheckpointsManifest,
     compute_blind_inputs_manifest_sha256, compute_scorer_tree_sha256, is_valid_sha256_hex,
@@ -691,6 +694,7 @@ fn execute_score_command(
         ))
     })?;
 
+    let mut pending_outputs = Vec::with_capacity(requests.len());
     for (req, req_sha256) in &requests {
         let save_path = args
             .checkpoints_dir
@@ -712,7 +716,42 @@ fn execute_score_command(
         output.blind_request_sha256 = req_sha256.clone();
         let json_text = to_sorted_pretty_json(&output)?;
         let out_path = scores_dir.join(format!("{}.json", req.state_id));
-        fs::write(&out_path, json_text.as_bytes()).map_err(|e| {
+        pending_outputs.push((out_path, json_text.into_bytes()));
+    }
+
+    if let Some((last_req, _)) = requests.last() {
+        let mut verified_pairs = BTreeSet::new();
+        verified_pairs.insert((
+            last_req.pre_act_save_sha256.as_str(),
+            last_req.pre_act_seal_sha256.as_str(),
+            last_req.pre_act_pair_sha256.as_str(),
+        ));
+        for (req, _) in &requests[..requests.len() - 1] {
+            let key = (
+                req.pre_act_save_sha256.as_str(),
+                req.pre_act_seal_sha256.as_str(),
+                req.pre_act_pair_sha256.as_str(),
+            );
+            if verified_pairs.insert(key) {
+                let save_path = args
+                    .checkpoints_dir
+                    .join(format!("{}.save.json", req.pre_act_save_sha256));
+                let seal_path = args
+                    .checkpoints_dir
+                    .join(format!("{}.seal", req.pre_act_seal_sha256));
+                verify_checkpoint_pair_unchanged_after_batch(
+                    &save_path,
+                    &seal_path,
+                    &req.pre_act_save_sha256,
+                    &req.pre_act_seal_sha256,
+                    &req.pre_act_pair_sha256,
+                )?;
+            }
+        }
+    }
+
+    for (out_path, bytes) in pending_outputs {
+        fs::write(&out_path, &bytes).map_err(|e| {
             ScorerError::Io(sanitize_error_text(
                 &format!("write score JSON: {e}"),
                 &[&out_path],

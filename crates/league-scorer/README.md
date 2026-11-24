@@ -38,14 +38,18 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
   threshold `threshold_ppm` is derived once via `p_honour_to_ppm` before pure-integer SHA-256 draws
   and fail-closed `preview_seat_bundle` legality pruning.
 - **Sequential season-close rollouts (`rollout.rs`):** `execute_blind_request` and
-  `execute_blind_request_verified` read each `.save.json` and `.seal` pair once into memory,
-  verify outer save/seal/pair SHA-256 digests (and, when `--verified-checkpoints <file>` is
+  `execute_blind_request_verified` read each `.save.json` and `.seal` pair once into memory before
+  the batch, verify outer save/seal/pair SHA-256 digests (and, when `--verified-checkpoints <file>` is
   supplied, validate `VerifiedCheckpointsManifest` build-ID parity with `LEAGUE_SCORER_GIT_SHA`,
   format `v2` versions, `engine_commit` syntax, and tip `expected_state_digest`), construct
   `base_host` via `EvalHost::fork_from_verified_checkpoint_bytes` (refusing `v1` checkpoints and
   closing the double-read TOCTOU window), clone `base_host` in memory per `(c, m)` rollout
-  (`run_single_rollout_from_host`), and re-verify `base_host`'s canonical state digest and public
-  snapshot after the `K * M` batch (`InMemoryBaseStateCorrupted`). Standalone
+  (`run_single_rollout_from_host`, zero in-loop disk reads), re-verify `base_host`'s canonical state
+  digest and public snapshot after the `K * M` batch (`InMemoryBaseStateCorrupted`), and re-read
+  and re-verify the on-disk `.save.json` and `.seal` pair once after the batch against the kept bytes
+  and SHA-256 digests (`CHECKPOINT_CHANGED_DURING_BATCH`, while `league-scorer score` stages outputs
+  in memory and re-verifies prior checkpoint pairs so a mid-batch file change refuses the whole
+  batch with zero partial files written). Standalone
   `run_single_rollout` / `run_single_rollout_with_replay_log` likewise uses single-read
   `EvalHost::fork_from_verified_checkpoint_bytes`. Both paths strip directory components from
   error output (`sanitize_error_text`), advance to natural close using counterfactual peer
@@ -73,4 +77,4 @@ Arm-blind, deterministic CPU decision-scoring kernel for Merchant League v2 eval
 ## Remaining work
 
 - **Evaluation orchestrator (`league-eval`):** `build-blind-inputs`, `verify-checkpoints`, `freeze`, and `join` are implemented in [`crates/league-eval`](../league-eval/README.md).
-- **Optional deterministic parallelism (`S4`):** parallel execution across rollouts remains future work (scoring currently executes sequentially without `rayon`).
+- **Pilot timing measurement & conditional parallelism:** per-stage timing (`file_read`, `sha256_verify`, `strict_decode_parse`, `policy_and_candidates`, `engine_steps_to_close`), cold-vs-warm measurement, multi-process aggregation (`scripts/run-pilot-timing.mjs`), and `1`-vs-`N` `std::thread::scope` + `AtomicUsize` verification live in `crates/league-scorer/tests/timing_bench.rs`; the product scorer stays single-threaded (with zero `rayon` or new crate dependencies) unless the pilot numbers cross the threshold in [`docs/decision-scorer.md`](../../docs/decision-scorer.md) `§6.2`.
