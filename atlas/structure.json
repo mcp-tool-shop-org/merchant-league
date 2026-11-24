@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "6a602112d90eaecb3a311b10e6f761fe5ea906e36dfc80444dfbf27103d1f904",
+          "hash": "59d9d48dbb72846d34064ee75259e7e0e4fe8a70d0558fa28d5fef9211cdb7be",
           "path": "docs/checkpoint-trust.md"
         },
         {
@@ -48,7 +48,7 @@
           "path": "docs/club-mode-design.md"
         },
         {
-          "hash": "ef9cb9462d97946660ba31aee9c39a25d328ad31491c450e9bcefac52bc02d25",
+          "hash": "03e2793e0206731db49daadfa8f317c35a9252241331a2e8a167e76e66158d6e",
           "path": "docs/decision-scorer.md"
         },
         {
@@ -11047,7 +11047,7 @@
           "path": "crates/league-scorer/Cargo.toml"
         },
         {
-          "hash": "d2e8d37bf0099e060cdc868f8e9ee54620da8b8924c2a24e9aa77f54c1e1d48d",
+          "hash": "f3b83d5ee1adf2322d1b54a9c81b037718ddd0be5a216ae17199a923a8ea1c3d",
           "path": "crates/league-scorer/README.md"
         },
         {
@@ -11142,27 +11142,22 @@
             {
               "in": "parse",
               "kind": "err",
-              "line": 49
+              "line": 52
             },
             {
               "in": "run_cli_with_build_id",
               "kind": "match-err",
-              "line": 89
+              "line": 92
             },
             {
               "in": "take_path",
               "kind": "err",
-              "line": 131
+              "line": 134
             },
             {
               "in": "take_string",
               "kind": "err",
-              "line": 145
-            },
-            {
-              "in": "run_cli_args",
-              "kind": "err",
-              "line": 215
+              "line": 148
             },
             {
               "in": "run_cli_args",
@@ -11170,82 +11165,87 @@
               "line": 218
             },
             {
+              "in": "run_cli_args",
+              "kind": "err",
+              "line": 221
+            },
+            {
               "in": "set_unique",
               "kind": "err",
-              "line": 227
+              "line": 230
             },
             {
               "in": "parse_score_flags",
               "kind": "err",
-              "line": 284
+              "line": 287
             },
             {
               "in": "parse_candidates_flags",
               "kind": "err",
-              "line": 376
+              "line": 379
             },
             {
               "in": "validate_checkpoints_layout",
               "kind": "err",
-              "line": 435
+              "line": 438
             },
             {
               "in": "validate_checkpoints_layout",
               "kind": "err",
-              "line": 443
+              "line": 446
             },
             {
               "in": "validate_checkpoints_layout",
               "kind": "err",
-              "line": 448
+              "line": 451
             },
             {
               "in": "collect_blind_request_files",
               "kind": "err",
-              "line": 476
+              "line": 479
             },
             {
               "in": "execute_candidates_command",
               "kind": "err",
-              "line": 516
+              "line": 519
             },
             {
               "in": "execute_candidates_command",
               "kind": "err",
-              "line": 522
+              "line": 525
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 609
+              "line": 612
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 622
+              "line": 625
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 630
+              "line": 633
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 643
+              "line": 646
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 671
+              "line": 674
             },
             {
               "in": "execute_score_command",
               "kind": "err",
-              "line": 678
+              "line": 681
             }
           ],
-          "hash": "8ca598f1c0755f323739646fb05bfe15f91cba1975543a4f957e09e13a33a0b6",
+          "hash": "1bea63cc1f78994709c82759f6db8ad6cfa8a804136677275bac37cbb6c00296",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/candidates.rs",
@@ -11259,7 +11259,7 @@
               "calls": [
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 185,
+                  "line": 188,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11269,7 +11269,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 190,
+                  "line": 193,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11278,7 +11278,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 197,
+                  "line": 200,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11288,7 +11288,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11298,7 +11298,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11307,16 +11307,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -11326,7 +11316,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 284,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 287,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11335,7 +11335,7 @@
                   "via": "parse_score_flags"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11343,7 +11343,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -11352,7 +11352,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11361,7 +11361,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11369,7 +11369,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11379,7 +11379,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11388,7 +11388,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11397,7 +11397,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -11406,7 +11406,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11415,7 +11415,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11423,7 +11423,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11432,7 +11432,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11442,7 +11442,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11451,7 +11451,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11459,7 +11459,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11468,7 +11468,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 604,
+                  "line": 607,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11487,7 +11487,7 @@
               "calls": [
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 185,
+                  "line": 188,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11497,7 +11497,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 190,
+                  "line": 193,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11506,7 +11506,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 197,
+                  "line": 200,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11516,7 +11516,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11526,7 +11526,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11535,16 +11535,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -11554,7 +11544,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 284,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 287,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11563,7 +11563,7 @@
                   "via": "parse_score_flags"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11571,7 +11571,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -11580,7 +11580,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11589,7 +11589,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11597,7 +11597,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11607,7 +11607,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11616,7 +11616,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11625,7 +11625,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -11634,7 +11634,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11643,7 +11643,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11651,7 +11651,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11660,7 +11660,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11670,7 +11670,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11679,7 +11679,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11687,7 +11687,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11696,7 +11696,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 604,
+                  "line": 607,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11715,7 +11715,7 @@
               "calls": [
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 185,
+                  "line": 188,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11725,7 +11725,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 190,
+                  "line": 193,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11734,7 +11734,7 @@
                   "via": "run_cli_args"
                 },
                 {
-                  "line": 197,
+                  "line": 200,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11744,7 +11744,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11754,7 +11754,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11763,16 +11763,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -11782,7 +11772,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 284,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 287,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11791,7 +11791,7 @@
                   "via": "parse_score_flags"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11799,7 +11799,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -11808,7 +11808,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11817,7 +11817,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11825,7 +11825,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11835,7 +11835,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11844,7 +11844,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11853,7 +11853,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -11862,7 +11862,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -11871,7 +11871,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11879,7 +11879,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11888,7 +11888,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11898,7 +11898,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -11907,7 +11907,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -11915,7 +11915,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -11924,7 +11924,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 604,
+                  "line": 607,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -11942,7 +11942,7 @@
             {
               "calls": [
                 {
-                  "line": 116,
+                  "line": 119,
                   "name": "new",
                   "receiver": "StructuredError",
                   "target": {
@@ -11958,7 +11958,7 @@
             {
               "calls": [
                 {
-                  "line": 129,
+                  "line": 132,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11967,7 +11967,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11983,7 +11983,7 @@
             {
               "calls": [
                 {
-                  "line": 142,
+                  "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -11992,7 +11992,7 @@
                 },
                 {
                   "branch": "s.is_empty()",
-                  "line": 145,
+                  "line": 148,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12009,7 +12009,7 @@
               "calls": [
                 {
                   "branch": "s == \"--help\" || s == \"-h\"",
-                  "line": 185,
+                  "line": 188,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12018,7 +12018,7 @@
                 },
                 {
                   "branch": "s == \"--version\" || s == \"-V\"",
-                  "line": 190,
+                  "line": 193,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12026,7 +12026,7 @@
                   }
                 },
                 {
-                  "line": 197,
+                  "line": 200,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12035,7 +12035,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12045,7 +12045,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12054,16 +12054,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -12073,7 +12063,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 284,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 287,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12082,7 +12082,7 @@
                   "via": "parse_score_flags"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12090,7 +12090,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -12099,7 +12099,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12108,7 +12108,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12116,7 +12116,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12126,7 +12126,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12135,7 +12135,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12144,7 +12144,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12153,7 +12153,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12162,7 +12162,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12170,7 +12170,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12179,7 +12179,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12189,7 +12189,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12198,7 +12198,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12206,7 +12206,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12215,7 +12215,7 @@
                   "via": "execute_score_command"
                 },
                 {
-                  "line": 604,
+                  "line": 607,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12234,7 +12234,7 @@
               "calls": [
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12250,7 +12250,7 @@
             {
               "calls": [
                 {
-                  "line": 129,
+                  "line": 132,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12260,7 +12260,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12270,7 +12270,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12279,16 +12279,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -12298,7 +12288,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 284,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 287,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12314,7 +12314,7 @@
             {
               "calls": [
                 {
-                  "line": 129,
+                  "line": 132,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12324,7 +12324,7 @@
                 },
                 {
                   "branch": "raw.is_empty()",
-                  "line": 131,
+                  "line": 134,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12334,7 +12334,7 @@
                 },
                 {
                   "branch": "slot.is_some()",
-                  "line": 227,
+                  "line": 230,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12343,16 +12343,6 @@
                   "via": "set_unique"
                 },
                 {
-                  "line": 142,
-                  "name": "Usage",
-                  "receiver": "ScorerError",
-                  "target": {
-                    "file": "crates/league-scorer/src/error.rs"
-                  },
-                  "via": "take_string"
-                },
-                {
-                  "branch": "s.is_empty()",
                   "line": 145,
                   "name": "Usage",
                   "receiver": "ScorerError",
@@ -12362,7 +12352,17 @@
                   "via": "take_string"
                 },
                 {
-                  "line": 342,
+                  "branch": "s.is_empty()",
+                  "line": 148,
+                  "name": "Usage",
+                  "receiver": "ScorerError",
+                  "target": {
+                    "file": "crates/league-scorer/src/error.rs"
+                  },
+                  "via": "take_string"
+                },
+                {
+                  "line": 345,
                   "name": "Usage",
                   "receiver": "ScorerError",
                   "target": {
@@ -12378,14 +12378,14 @@
             {
               "calls": [
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -12393,7 +12393,7 @@
                   }
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12409,14 +12409,14 @@
             {
               "calls": [
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12425,7 +12425,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12433,7 +12433,7 @@
                   }
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12441,7 +12441,7 @@
                   }
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12449,7 +12449,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12465,14 +12465,14 @@
             {
               "calls": [
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12480,7 +12480,7 @@
                   }
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12489,7 +12489,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12505,7 +12505,7 @@
             {
               "calls": [
                 {
-                  "line": 489,
+                  "line": 492,
                   "name": "MissingVerifiedCheckpoints",
                   "receiver": "ScorerError",
                   "target": {
@@ -12513,14 +12513,14 @@
                   }
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12528,14 +12528,14 @@
                   }
                 },
                 {
-                  "line": 502,
+                  "line": 505,
                   "name": "sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
                   }
                 },
                 {
-                  "line": 503,
+                  "line": 506,
                   "name": "parse_verified_checkpoints_manifest_strict",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12550,7 +12550,7 @@
             {
               "calls": [
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12558,7 +12558,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -12567,7 +12567,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12576,7 +12576,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12584,7 +12584,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12594,7 +12594,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12603,7 +12603,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12612,7 +12612,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12621,7 +12621,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12630,14 +12630,14 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 515,
+                  "line": 518,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
                   }
                 },
                 {
-                  "line": 489,
+                  "line": 492,
                   "name": "MissingVerifiedCheckpoints",
                   "receiver": "ScorerError",
                   "target": {
@@ -12646,7 +12646,7 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12654,7 +12654,7 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12663,7 +12663,7 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 502,
+                  "line": 505,
                   "name": "sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12671,7 +12671,7 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 503,
+                  "line": 506,
                   "name": "parse_verified_checkpoints_manifest_strict",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12679,28 +12679,28 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 536,
+                  "line": 539,
                   "name": "build_arm_independent_request_verified",
                   "target": {
                     "file": "crates/league-scorer/src/candidates.rs"
                   }
                 },
                 {
-                  "line": 549,
+                  "line": 552,
                   "name": "build_arm_independent_request",
                   "target": {
                     "file": "crates/league-scorer/src/candidates.rs"
                   }
                 },
                 {
-                  "line": 562,
+                  "line": 565,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 562,
+                  "line": 565,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12708,21 +12708,21 @@
                   }
                 },
                 {
-                  "line": 567,
+                  "line": 570,
                   "name": "to_sorted_pretty_json",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
                   }
                 },
                 {
-                  "line": 570,
+                  "line": 573,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 570,
+                  "line": 573,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12738,7 +12738,7 @@
             {
               "calls": [
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12746,7 +12746,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 406,
+                  "line": 409,
                   "name": "InvalidScorerConfig",
                   "receiver": "ScorerError",
                   "target": {
@@ -12755,7 +12755,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 412,
+                  "line": 415,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12764,7 +12764,7 @@
                   "via": "load_and_validate_config"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12772,7 +12772,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 420,
+                  "line": 423,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12782,7 +12782,7 @@
                 },
                 {
                   "branch": "!file_type.is_file()",
-                  "line": 435,
+                  "line": 438,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12791,7 +12791,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 443,
+                  "line": 446,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12800,7 +12800,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 447,
+                  "line": 450,
                   "name": "is_valid_sha256_hex",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12809,7 +12809,7 @@
                 },
                 {
                   "branch": "!is_valid_sha256_hex(stem)",
-                  "line": 448,
+                  "line": 451,
                   "name": "InvalidCheckpointsLayout",
                   "receiver": "ScorerError",
                   "target": {
@@ -12818,7 +12818,7 @@
                   "via": "validate_checkpoints_layout"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12826,7 +12826,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 458,
+                  "line": 461,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12835,7 +12835,7 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 466,
+                  "line": 469,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12845,7 +12845,7 @@
                 },
                 {
                   "branch": "paths.is_empty()",
-                  "line": 476,
+                  "line": 479,
                   "name": "NoBlindInputs",
                   "receiver": "ScorerError",
                   "target": {
@@ -12854,14 +12854,14 @@
                   "via": "collect_blind_request_files"
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
                   }
                 },
                 {
-                  "line": 598,
+                  "line": 601,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12869,7 +12869,7 @@
                   }
                 },
                 {
-                  "line": 604,
+                  "line": 607,
                   "name": "Json",
                   "receiver": "ScorerError",
                   "target": {
@@ -12878,7 +12878,7 @@
                 },
                 {
                   "branch": "actual_cfg_sha != freeze.scorer_config_sha256",
-                  "line": 609,
+                  "line": 612,
                   "name": "FreezeConfigMismatch",
                   "receiver": "ScorerError",
                   "target": {
@@ -12886,7 +12886,7 @@
                   }
                 },
                 {
-                  "line": 620,
+                  "line": 623,
                   "name": "compute_scorer_tree_sha256",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12894,7 +12894,7 @@
                 },
                 {
                   "branch": "actual_tree_sha != freeze.scorer_tree_sha256",
-                  "line": 622,
+                  "line": 625,
                   "name": "FreezeTreeMismatch",
                   "receiver": "ScorerError",
                   "target": {
@@ -12902,7 +12902,7 @@
                   }
                 },
                 {
-                  "line": 628,
+                  "line": 631,
                   "name": "compute_blind_inputs_manifest_sha256",
                   "target": {
                     "file": "crates/league-scorer/src/types.rs"
@@ -12910,7 +12910,7 @@
                 },
                 {
                   "branch": "actual_manifest_sha != freeze.blind_inputs_manifest_sha256",
-                  "line": 630,
+                  "line": 633,
                   "name": "FreezeManifestMismatch",
                   "receiver": "ScorerError",
                   "target": {
@@ -12918,7 +12918,7 @@
                   }
                 },
                 {
-                  "line": 637,
+                  "line": 640,
                   "name": "MissingVerifiedCheckpoints",
                   "receiver": "ScorerError",
                   "target": {
@@ -12926,7 +12926,7 @@
                   }
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "sanitize_error_text",
                   "target": {
                     "file": "crates/league-scorer/src/error.rs"
@@ -12934,7 +12934,7 @@
                   "via": "load_verified_checkpoints"
                 },
                 {
-                  "line": 496,
+                  "line": 499,
                   "name": "Io",
                   "receiver": "ScorerError",
                   "target": {
@@ -12955,7 +12955,7 @@
           "exports": [
             "sanitize_error_text"
           ],
-          "hash": "73a7be210ac55d327532ebbbaf43611df56933cd57ac913074f900a864628409",
+          "hash": "8d9c53c4b19f295da2e1cda6598f90b081c00ef53b00704c9259622c961fabb1",
           "importsFiles": [
             "crates/league-core/src/eval/checkpoint_verify.rs",
             "crates/league-core/src/lib.rs"
@@ -12963,7 +12963,7 @@
           "path": "crates/league-scorer/src/error.rs"
         },
         {
-          "hash": "61f4c5b16a8fa0a87f539eee0e97e958e6affb71d6601d20e01eaf83c9b68baa",
+          "hash": "d0c03c17b5fd6eecb2e52021961a0f90132eb3a0261438687fdc08da8c5e0040",
           "importOrder": [
             "crates/league-scorer/src/candidates.rs",
             "crates/league-scorer/src/cli.rs",
@@ -13004,7 +13004,7 @@
                   "inner": [
                     {
                       "branch": "s == \"--help\" || s == \"-h\"",
-                      "line": 185,
+                      "line": 188,
                       "name": "Io",
                       "receiver": "ScorerError",
                       "target": {
@@ -13014,7 +13014,7 @@
                     },
                     {
                       "branch": "s == \"--version\" || s == \"-V\"",
-                      "line": 190,
+                      "line": 193,
                       "name": "Io",
                       "receiver": "ScorerError",
                       "target": {
@@ -13023,7 +13023,7 @@
                       "via": "run_cli_args"
                     },
                     {
-                      "line": 197,
+                      "line": 200,
                       "name": "Usage",
                       "receiver": "ScorerError",
                       "target": {
@@ -13033,7 +13033,7 @@
                     },
                     {
                       "branch": "raw.is_empty()",
-                      "line": 131,
+                      "line": 134,
                       "name": "Usage",
                       "receiver": "ScorerError",
                       "target": {
@@ -13043,7 +13043,7 @@
                     },
                     {
                       "branch": "slot.is_some()",
-                      "line": 227,
+                      "line": 230,
                       "name": "Usage",
                       "receiver": "ScorerError",
                       "target": {
@@ -13052,16 +13052,6 @@
                       "via": "set_unique"
                     },
                     {
-                      "line": 142,
-                      "name": "Usage",
-                      "receiver": "ScorerError",
-                      "target": {
-                        "file": "crates/league-scorer/src/error.rs"
-                      },
-                      "via": "take_string"
-                    },
-                    {
-                      "branch": "s.is_empty()",
                       "line": 145,
                       "name": "Usage",
                       "receiver": "ScorerError",
@@ -13071,7 +13061,17 @@
                       "via": "take_string"
                     },
                     {
-                      "line": 284,
+                      "branch": "s.is_empty()",
+                      "line": 148,
+                      "name": "Usage",
+                      "receiver": "ScorerError",
+                      "target": {
+                        "file": "crates/league-scorer/src/error.rs"
+                      },
+                      "via": "take_string"
+                    },
+                    {
+                      "line": 287,
                       "name": "Usage",
                       "receiver": "ScorerError",
                       "target": {
@@ -13080,7 +13080,7 @@
                       "via": "parse_score_flags"
                     },
                     {
-                      "line": 406,
+                      "line": 409,
                       "name": "sanitize_error_text",
                       "target": {
                         "file": "crates/league-scorer/src/error.rs"
@@ -13088,7 +13088,7 @@
                       "via": "load_and_validate_config"
                     },
                     {
-                      "line": 406,
+                      "line": 409,
                       "name": "InvalidScorerConfig",
                       "receiver": "ScorerError",
                       "target": {
@@ -13097,7 +13097,7 @@
                       "via": "load_and_validate_config"
                     },
                     {
-                      "line": 412,
+                      "line": 415,
                       "name": "Json",
                       "receiver": "ScorerError",
                       "target": {
@@ -13106,7 +13106,7 @@
                       "via": "load_and_validate_config"
                     },
                     {
-                      "line": 420,
+                      "line": 423,
                       "name": "sanitize_error_text",
                       "target": {
                         "file": "crates/league-scorer/src/error.rs"
@@ -13161,6 +13161,8 @@
             "execute_blind_request",
             "execute_blind_request_verified",
             "execute_blind_request_verified_with_hook",
+            "execute_blind_request_verified_with_mid_batch_hook",
+            "execute_blind_request_with_mid_batch_hook",
             "fork_checkpoint_sanitized",
             "probe_checkpoint_sanitized",
             "run_single_rollout",
@@ -13168,7 +13170,8 @@
             "run_single_rollout_with_replay_log",
             "verify_and_fork_checkpoint",
             "verify_checkpoint_digests",
-            "verify_checkpoint_pair"
+            "verify_checkpoint_pair",
+            "verify_checkpoint_pair_unchanged_after_batch"
           ],
           "failurePaths": [
             {
@@ -13187,37 +13190,52 @@
               "line": 121
             },
             {
-              "in": "run_single_rollout_from_host",
+              "in": "check_post_batch_pair_bytes",
               "kind": "err",
-              "line": 253
+              "line": 210
+            },
+            {
+              "in": "check_post_batch_pair_bytes",
+              "kind": "err",
+              "line": 218
+            },
+            {
+              "in": "check_post_batch_pair_bytes",
+              "kind": "err",
+              "line": 224
             },
             {
               "in": "run_single_rollout_from_host",
               "kind": "err",
-              "line": 258
+              "line": 347
             },
             {
-              "in": "execute_blind_request_verified_with_hook",
+              "in": "run_single_rollout_from_host",
               "kind": "err",
-              "line": 399
+              "line": 352
             },
             {
-              "in": "execute_blind_request_verified_with_hook",
+              "in": "execute_blind_request_verified_with_mid_batch_hook",
               "kind": "err",
-              "line": 408
+              "line": 540
+            },
+            {
+              "in": "execute_blind_request_verified_with_mid_batch_hook",
+              "kind": "err",
+              "line": 549
             },
             {
               "in": "execute_blind_request_on_loaded_host",
               "kind": "err",
-              "line": 442
+              "line": 601
             },
             {
               "in": "execute_blind_request_on_loaded_host",
               "kind": "err",
-              "line": 538
+              "line": 700
             }
           ],
-          "hash": "8e8d5fb6b6cb135febf03bde72fca62520dc622886a5e6264514f94cc78241a8",
+          "hash": "c7b07dcd4c75f79e9e420f90e6c3c002746ce8f375f817bab8daef9a8ff94652",
           "importsFiles": [
             "crates/league-core/src/eval/checkpoint_verify.rs",
             "crates/league-core/src/lib.rs",
@@ -13611,7 +13629,7 @@
           "path": "crates/league-scorer/src/types.rs"
         },
         {
-          "hash": "df12b45afe178f0541f4eb6e2bdc03d9b3fc15580ad85fd7c1d839f3d049f3e4",
+          "hash": "f47d041d50f22f68e84767884695d2970ce435462850a722a3b25a302b87e0e2",
           "importsFiles": [
             "crates/league-core/src/eval/checkpoint_verify.rs",
             "crates/league-core/src/lib.rs",
@@ -13642,7 +13660,7 @@
           "testsInside": true
         },
         {
-          "hash": "2cd8e139f432bed707eea1a1e6cde559d93cfaa436f87ed076e8eedbd5e188f5",
+          "hash": "870d4e908688302d637382d926d5d326b2a3ccb62f5a45020eb565022a8b5507",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/lib.rs"
@@ -13660,14 +13678,14 @@
       "origin": "authored",
       "outsidePlaces": [
         {
-          "reads": 10,
+          "reads": 11,
           "where": [
             "caller"
           ],
           "writes": 0
         }
       ],
-      "outsideReads": 10,
+      "outsideReads": 11,
       "role": "code",
       "testRunners": [
         "cargo test"
@@ -17189,7 +17207,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "954080f0a13e44aab4472aa8282083e79e929ef661c58c16b0c7feed85665337",
+          "hash": "9e2b7aafc231a35bc1af4a00475f2a0750c4cfe2d52a79d716af8d1519e9873f",
           "path": "CHANGELOG.md"
         },
         {
@@ -17269,7 +17287,7 @@
     },
     {
       "dynamicReads": 4,
-      "dynamicSpawns": 0,
+      "dynamicSpawns": 4,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 0,
       "entryPoints": [],
@@ -17320,6 +17338,51 @@
           "path": "scripts/check-testnet-only.sh"
         },
         {
+          "failurePaths": [
+            {
+              "in": "parsePositiveInt",
+              "kind": "throw",
+              "line": 46
+            },
+            {
+              "in": "parseArgs",
+              "kind": "throw",
+              "line": 89
+            },
+            {
+              "in": "parseArgs",
+              "kind": "throw",
+              "line": 99
+            },
+            {
+              "in": "runChecked",
+              "kind": "throw",
+              "line": 115
+            },
+            {
+              "in": "runChecked",
+              "kind": "throw",
+              "line": 120
+            },
+            {
+              "in": "buildTimingBenchBinary",
+              "kind": "catch",
+              "line": 158
+            },
+            {
+              "in": "buildTimingBenchBinary",
+              "kind": "throw",
+              "line": 172
+            },
+            {
+              "kind": "catch",
+              "line": 264
+            }
+          ],
+          "hash": "80fdc7581b0ccab33dec8ed4eab8afae85ec4994d1e6d1fbe7434cbafa9f8bef",
+          "path": "scripts/run-pilot-timing.mjs"
+        },
+        {
           "hash": "95a56e6daec6a95ecef2c9d0003e70a38db6b8060094edf62f9fc699b2cd3d73",
           "path": "scripts/smoke-container.sh"
         },
@@ -17338,6 +17401,24 @@
       "importConfidence": "full",
       "name": "scripts",
       "origin": "authored",
+      "outsidePlaces": [
+        {
+          "reads": 0,
+          "where": [
+            "caller"
+          ],
+          "writes": 2
+        },
+        {
+          "reads": 1,
+          "where": [
+            "temp"
+          ],
+          "writes": 0
+        }
+      ],
+      "outsideReads": 1,
+      "outsideWrites": 2,
       "role": "code",
       "testRunners": [
         "node --test"
@@ -19020,8 +19101,8 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
-    "tracked": 657
+    "commit": "9ca990b83e51651df8b4a628b93b4b0a89b5f509",
+    "tracked": 658
   },
   "landings": [
     {
