@@ -102,45 +102,44 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 7,
-      "changed": 25,
+      "added": 0,
+      "changed": 11,
       "moved": 0,
       "parts": 5,
       "removed": 0
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "CI now also runs crates/league-scorer/build.rs.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "crates/league-scorer/build.rs"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md is now also read by crates/league-eval/tests/verify_checkpoints_cli.rs.",
-        "subjects": [
-          "crates/league-eval/wrappers/v2_seat_brief_2026_11_21_r3.md",
-          "crates/league-eval/tests/verify_checkpoints_cli.rs"
-        ]
-      },
-      {
         "kind": "counts",
-        "sentence": "7 files added and 25 changed content, across 5 parts.",
+        "sentence": "Nothing structural changed since 2026-11-24; 11 files changed content.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "3cd4f615e768b2e7d7b48f3086365e948b992c89",
-      "generatedAt": "2026-11-23T19:53:24.446Z"
+      "commit": "cf4068dd3ebc9ca8445cf7d1727d39cb845f14e1",
+      "generatedAt": "2026-11-24T06:18:41.348Z"
     },
-    "unchanged": false
+    "unchanged": true
   },
   "changesTogether": [
     {
       "a": "crates/league-eval/src/driver.rs",
       "b": "crates/league-eval/tests/play_and_branch.rs",
+      "either": 7,
+      "partLabels": [
+        "league-eval",
+        "league-eval"
+      ],
+      "parts": [
+        "league-eval",
+        "league-eval"
+      ],
+      "relation": "inside",
+      "shared": 7
+    },
+    {
+      "a": "crates/league-eval/src/cli.rs",
+      "b": "crates/league-eval/src/lib.rs",
       "either": 6,
       "partLabels": [
         "league-eval",
@@ -154,39 +153,9 @@
       "shared": 6
     },
     {
-      "a": "crates/league-eval/src/cli.rs",
-      "b": "crates/league-eval/src/lib.rs",
-      "either": 5,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 5
-    },
-    {
-      "a": "crates/league-eval/src/driver.rs",
-      "b": "crates/league-eval/src/records.rs",
-      "either": 6,
-      "partLabels": [
-        "league-eval",
-        "league-eval"
-      ],
-      "parts": [
-        "league-eval",
-        "league-eval"
-      ],
-      "relation": "inside",
-      "shared": 5
-    },
-    {
       "a": "crates/league-eval/src/driver.rs",
       "b": "crates/league-eval/tests/addendum_item9.rs",
-      "either": 6,
+      "either": 7,
       "partLabels": [
         "league-eval",
         "league-eval"
@@ -196,12 +165,12 @@
         "league-eval"
       ],
       "relation": "inside",
-      "shared": 5
+      "shared": 6
     },
     {
-      "a": "crates/league-eval/src/records.rs",
+      "a": "crates/league-eval/tests/addendum_item9.rs",
       "b": "crates/league-eval/tests/play_and_branch.rs",
-      "either": 6,
+      "either": 7,
       "partLabels": [
         "league-eval",
         "league-eval"
@@ -209,6 +178,21 @@
       "parts": [
         "league-eval",
         "league-eval"
+      ],
+      "relation": "inside",
+      "shared": 6
+    },
+    {
+      "a": "crates/league-gen/src/empirical.rs",
+      "b": "crates/league-gen/tests/properties.rs",
+      "either": 6,
+      "partLabels": [
+        "league-gen",
+        "league-gen"
+      ],
+      "parts": [
+        "league-gen",
+        "league-gen"
       ],
       "relation": "inside",
       "shared": 5
@@ -219,7 +203,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 11 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 0,
-  "commit": "cf4068dd3ebc9ca8445cf7d1727d39cb845f14e1",
+  "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
   "defaultBranch": "main",
   "derived": "16 parts, mostly Rust (416 files), shell (5), JavaScript (4), Python (3), CSS (2), TypeScript (2) and Astro (1). Work enters through 10 doors; the busiest is CI, which reaches 13 parts. It deploys a site to GitHub Pages. People run league-eval, league-relay, league-scorer and league-tui. xrpl is a command built from vendor/xrpl-rust (nothing ships it).",
   "doors": [
@@ -763,7 +747,7 @@
   ],
   "engine": "1.26.0",
   "generated": [],
-  "generatedAt": "2026-11-24T06:18:41.348Z",
+  "generatedAt": "2026-11-24T09:53:20.292Z",
   "limits": [
     "1 file uses syntax the parser cannot read (crates/league-ledger/tests/vectors/LICENSE-xrpl.js), so what it imports is not known.",
     "53 writes and 55 reads use paths built at run time and are not named here.",

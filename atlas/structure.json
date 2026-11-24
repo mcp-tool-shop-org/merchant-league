@@ -40,7 +40,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "4bd662d28002ca2c07794659181e9d46b4fe4376b79a9456d2bfd509b3df11fd",
+          "hash": "6a602112d90eaecb3a311b10e6f761fe5ea906e36dfc80444dfbf27103d1f904",
           "path": "docs/checkpoint-trust.md"
         },
         {
@@ -48,7 +48,7 @@
           "path": "docs/club-mode-design.md"
         },
         {
-          "hash": "f3cf2b6d9885a8f4fa481a5b27b9856a21b424e521a960a6baa5e53dec9d4729",
+          "hash": "ef9cb9462d97946660ba31aee9c39a25d328ad31491c450e9bcefac52bc02d25",
           "path": "docs/decision-scorer.md"
         },
         {
@@ -60,7 +60,7 @@
           "path": "docs/design.md"
         },
         {
-          "hash": "5c4c36261e7ec1a93e9668beed9cd201588c88591ce9f254398c2909acb14826",
+          "hash": "8dd66fd5cb82a8fa46540208857594a4b8cf48c8cdbc9a55e0d4e75a35bc8f89",
           "path": "docs/eval-harness.md"
         },
         {
@@ -1279,122 +1279,127 @@
             {
               "in": "visit_map",
               "kind": "err",
-              "line": 474
+              "line": 459
             },
             {
               "in": "parse_strict_json_value",
               "kind": "err",
-              "line": 500
+              "line": 485
             },
             {
               "in": "check_version_header_raw",
               "kind": "err",
-              "line": 550
+              "line": 535
             },
             {
               "in": "check_version_header_raw",
               "kind": "err",
-              "line": 556
+              "line": 541
             },
             {
               "in": "check_unknown_and_skipped_fields",
               "kind": "err",
-              "line": 621
+              "line": 606
             },
             {
               "in": "check_unknown_and_skipped_fields",
               "kind": "err",
-              "line": 628
+              "line": 613
             },
             {
               "in": "parse_strict_typed_seal_raw",
               "kind": "err",
-              "line": 677
+              "line": 662
             },
             {
               "in": "parse_strict_typed_seal_raw",
               "kind": "err",
-              "line": 684
+              "line": 669
             },
             {
               "in": "parse_strict_typed_seal_raw",
               "kind": "err",
-              "line": 694
+              "line": 679
             },
             {
               "in": "parse_strict_typed_seal_raw",
               "kind": "err",
-              "line": 701
+              "line": 686
             },
             {
               "in": "verify_written_pair_round_trip",
               "kind": "err",
-              "line": 736
+              "line": 721
             },
             {
               "in": "verify_written_pair_round_trip",
               "kind": "err",
-              "line": 744
+              "line": 729
             },
             {
               "in": "verify_written_pair_round_trip",
               "kind": "err",
-              "line": 752
+              "line": 737
             },
             {
               "in": "verify_written_pair_round_trip",
               "kind": "err",
-              "line": 760
+              "line": 745
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 781
+              "line": 766
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 789
+              "line": 774
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 797
+              "line": 782
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 807
+              "line": 792
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 815
+              "line": 800
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 824
+              "line": 809
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 832
+              "line": 817
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 844
+              "line": 829
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 854
+              "line": 839
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 866
+              "line": 851
+            },
+            {
+              "in": "decode_strict_checkpoint_pair",
+              "kind": "err",
+              "line": 857
             },
             {
               "in": "decode_strict_checkpoint_pair",
@@ -1404,105 +1409,85 @@
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 887
+              "line": 911
             },
             {
               "in": "decode_strict_checkpoint_pair",
               "kind": "err",
-              "line": 926
-            },
-            {
-              "in": "decode_strict_checkpoint_pair",
-              "kind": "err",
-              "line": 939
+              "line": 924
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1024
+              "line": 1027
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1033
+              "line": 1045
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1065
+              "line": 1058
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1083
+              "line": 1102
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1096
+              "line": 1117
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1140
+              "line": 1134
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1155
+              "line": 1158
             },
             {
               "in": "verify_checkpoint_causal_inner",
               "kind": "err",
-              "line": 1172
-            },
-            {
-              "in": "verify_checkpoint_causal_inner",
-              "kind": "err",
-              "line": 1196
-            },
-            {
-              "in": "verify_checkpoint_causal_inner",
-              "kind": "err",
-              "line": 1245
+              "line": 1207
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1321
+              "line": 1283
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1331
+              "line": 1293
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1341
+              "line": 1303
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1352
+              "line": 1314
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1360
+              "line": 1322
             },
             {
               "in": "verify_and_construct_pre_act_bytes",
               "kind": "err",
-              "line": 1376
-            },
-            {
-              "in": "verify_and_construct_pre_act_bytes",
-              "kind": "err",
-              "line": 1386
+              "line": 1338
             }
           ],
-          "hash": "69d2fb8706728cc89335e347d60cd19222f75dfd9274d89cc2460b58db71b7b1",
+          "hash": "983f8223c75cc397ed5d2a2e71237f569d568169d3bbfaebf447492a84587337",
           "importOrder": [
             "crates/league-core/src/bot.rs",
             "crates/league-core/src/commit.rs",
@@ -2628,7 +2613,7 @@
           "path": "crates/league-core/src/types.rs"
         },
         {
-          "hash": "e8cf798afbfc64b48e8f6e2c7ebe6f6de23b5f05969aeedf3fd0b368b973c29d",
+          "hash": "26958b03bdc9b69ea111ccdc54af1f91daa4483b070b30a7adb96965909d0e27",
           "importsFiles": [
             "crates/league-core/src/eval/checkpoint_verify.rs",
             "crates/league-core/src/lib.rs"
@@ -2848,7 +2833,7 @@
           "path": "crates/league-eval/Cargo.toml"
         },
         {
-          "hash": "7377eeb1551f7de899f8987461311b33fdf88a01b0701c34a6c17b9f3be746d3",
+          "hash": "b5413cf0e0d2b700246a91455bb1d45b8ea8843fc90d0bafaa5440753fb1dfd2",
           "path": "crates/league-eval/README.md"
         },
         {
@@ -5115,7 +5100,7 @@
               "line": 866
             }
           ],
-          "hash": "3d31052845e257663b657df9b64fd72a5eecf9de2057b6b9b0118be47e989b51",
+          "hash": "c8482d9a175d2285fc2ba1bd65cb3b1a99d7e9b8bdd1ed8be299568270982722",
           "importOrder": [
             "crates/league-scorer/src/lib.rs",
             "crates/league-eval/src/blind_builder.rs",
@@ -5770,90 +5755,80 @@
             {
               "in": "collect_checkpoint_pairs",
               "kind": "err",
-              "line": 172
+              "line": 167
             },
             {
               "in": "collect_checkpoint_pairs",
               "kind": "err",
-              "line": 178
+              "line": 173
             },
             {
               "in": "pair_content_addressed_checkpoints",
               "kind": "err",
-              "line": 193
+              "line": 188
             },
             {
               "in": "pair_content_addressed_checkpoints",
               "kind": "err",
-              "line": 210
+              "line": 205
             },
             {
               "in": "pair_content_addressed_checkpoints",
               "kind": "err",
-              "line": 253
+              "line": 248
             },
             {
               "in": "verify_blind_dir_covered_by_manifest",
               "kind": "err",
-              "line": 267
+              "line": 262
             },
             {
               "in": "verify_blind_dir_covered_by_manifest",
               "kind": "err",
-              "line": 285
+              "line": 280
             },
             {
               "in": "verify_blind_dir_covered_by_manifest",
               "kind": "err",
-              "line": 294
+              "line": 289
             },
             {
               "in": "verify_blind_dir_covered_by_manifest",
               "kind": "err",
-              "line": 302
+              "line": 297
             },
             {
               "in": "write_readonly_manifest_atomic",
               "kind": "match-err",
-              "line": 332
+              "line": 327
             },
             {
               "in": "write_readonly_manifest_atomic",
               "kind": "err",
-              "line": 338
+              "line": 333
             },
             {
               "in": "run_verify_checkpoints",
               "kind": "err",
-              "line": 363
+              "line": 358
             },
             {
               "in": "run_verify_checkpoints",
               "kind": "err",
-              "line": 387
+              "line": 382
+            },
+            {
+              "in": "run_verify_checkpoints",
+              "kind": "err",
+              "line": 414
             },
             {
               "in": "run_verify_checkpoints",
               "kind": "err",
               "line": 419
-            },
-            {
-              "in": "run_verify_checkpoints",
-              "kind": "err",
-              "line": 428
-            },
-            {
-              "in": "run_verify_checkpoints",
-              "kind": "err",
-              "line": 435
-            },
-            {
-              "in": "run_verify_checkpoints",
-              "kind": "err",
-              "line": 440
             }
           ],
-          "hash": "9601c17026342b588805aaa0a43983936d7899e1467257ee02b3bb7ddbfcceff",
+          "hash": "e5ea8b1768d2fca1614b53a57cb0214a6b4f1bcdc3f87afe49741edb4cf3067e",
           "importOrder": [
             "crates/league-core/src/lib.rs",
             "crates/league-scorer/src/lib.rs",
@@ -5997,7 +5972,7 @@
           "testsInside": true
         },
         {
-          "hash": "d3a5e8739c8c8c643ca7c14f56fe1e962fa302ab98228d69ca0c69a555fa0183",
+          "hash": "f24eade3dc1753c8ecc969865f66f6b752c6942d641d8e7791ca55f7d351bbac",
           "importsFiles": [
             "crates/league-core/src/lib.rs",
             "crates/league-eval/src/lib.rs",
@@ -11072,7 +11047,7 @@
           "path": "crates/league-scorer/Cargo.toml"
         },
         {
-          "hash": "e09e0f326c45616a179615dad7c3fa43206c5297ac5cb18cae430e10f1f66d9b",
+          "hash": "d2e8d37bf0099e060cdc868f8e9ee54620da8b8924c2a24e9aa77f54c1e1d48d",
           "path": "crates/league-scorer/README.md"
         },
         {
@@ -17214,7 +17189,7 @@
           "path": ".polyglot-pins.json"
         },
         {
-          "hash": "a54e287de1d8b8f5f05a583e1d519dc80f49403f2b8321175f19e55c950c1f86",
+          "hash": "954080f0a13e44aab4472aa8282083e79e929ef661c58c16b0c7feed85665337",
           "path": "CHANGELOG.md"
         },
         {
@@ -19045,7 +19020,7 @@
   ],
   "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "cf4068dd3ebc9ca8445cf7d1727d39cb845f14e1",
+    "commit": "c11a2263c0e09112ba8c233ef687f9c14bbfcf75",
     "tracked": 657
   },
   "landings": [
