@@ -8,10 +8,17 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use league_core::{EvalActSubmission, MarketAction, Units};
+use league_core::eval::host::checkpoint_verify::{
+    CheckpointVerifyError, is_valid_git_commit_sha40, parse_strict_json_value,
+};
+use league_core::{
+    EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EvalActSubmission, HARD_TURN_CAP,
+    MarketAction, Units,
+};
 use league_seat_types::UNIT_SCALE;
 
 use crate::error::{ScorerError, sanitize_error_text};
+use crate::rollout::VERIFIED_CHECKPOINTS_SCHEMA_VERSION;
 
 /// Fixed schema version accepted by S1 blind scoring requests.
 pub const BLIND_SCORING_SCHEMA_VERSION: u32 = 1;
@@ -928,6 +935,177 @@ pub struct StateScoreOutput {
     pub winners_curse: WinnersCurseSummary,
 }
 
+/// Verified preflight entry emitted by `league-eval verify-checkpoints` for one checkpoint pair.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifiedCheckpointEntry {
+    /// Lowercase 64-hex domain-separated pair SHA-256 (lookup key).
+    pub pre_act_pair_sha256: String,
+    /// Lowercase 64-hex SHA-256 of `<sha>.save.json`.
+    pub pre_act_save_sha256: String,
+    /// Lowercase 64-hex SHA-256 of `<sha>.seal`.
+    pub pre_act_seal_sha256: String,
+    /// Lowercase 40-hex engine commit provenance stamped in `EvalSealPayload::engine_commit`.
+    pub engine_commit: String,
+    /// Tip turn index (`1..=32`).
+    pub turn: u8,
+    /// Table seat count (`4`).
+    pub seat_count: u8,
+    /// Lowercase 64-hex canonical `TurnEngine::state_digest()` at tip `turn`.
+    pub expected_state_digest: String,
+    /// Lowercase 64-hex cumulative turn chain digest `C_{turn - 1}`.
+    pub turn_chain_digest: String,
+    /// Lowercase 64-hex post-probe `TurnEngine::state_digest()`.
+    pub post_probe_state_digest: String,
+}
+
+/// Preflight manifest written by `league-eval verify-checkpoints` (`Gate 2`) and checked by
+/// `league-scorer` (`Gate 3`) and `league-eval freeze` / `join`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifiedCheckpointsManifest {
+    /// Manifest schema version (`1`).
+    pub schema_version: u32,
+    /// Verified 40-hex commit SHA of the verifying `league-eval` build.
+    pub engine_build_id: String,
+    /// Evaluation `.save.json` format version (`EVAL_SAVE_FORMAT_VERSION == 2`).
+    pub save_format_version: u32,
+    /// Evaluation `.seal` format version (`EVAL_SEAL_FORMAT_VERSION == 2`).
+    pub seal_format_version: u32,
+    /// Entries sorted strictly ascending and unique by `pre_act_pair_sha256`.
+    pub entries: Vec<VerifiedCheckpointEntry>,
+}
+
+/// Strictly parses `verified_checkpoints.json` bytes, refusing syntax errors, trailing bytes,
+/// duplicate JSON object keys at any depth, and unrecognized fields.
+pub fn parse_verified_checkpoints_manifest_strict(
+    bytes: &[u8],
+) -> Result<VerifiedCheckpointsManifest, ScorerError> {
+    let val = parse_strict_json_value("verified_checkpoints", bytes)?;
+    serde_json::from_value(val)
+        .map_err(|e| ScorerError::Json(format!("parse VerifiedCheckpointsManifest JSON: {e}")))
+}
+
+impl VerifiedCheckpointsManifest {
+    /// Validates manifest schema, build-id parity against `scorer_build_id`, format versions,
+    /// sorted uniqueness, digest formatting, and 40-hex commit provenance on every entry.
+    pub fn validate_for_scorer(&self, scorer_build_id: &str) -> Result<(), ScorerError> {
+        if !is_valid_git_commit_sha40(scorer_build_id) {
+            return Err(ScorerError::CheckpointVerify(
+                CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                    field: "scorer_engine_build_id".to_owned(),
+                    found: scorer_build_id.to_owned(),
+                    expected: "40 lowercase hex git commit sha".to_owned(),
+                },
+            ));
+        }
+        if self.schema_version != VERIFIED_CHECKPOINTS_SCHEMA_VERSION {
+            return Err(ScorerError::CheckpointVerify(
+                CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                    field: "verified_checkpoints.schema_version".to_owned(),
+                    found: self.schema_version.to_string(),
+                    expected: VERIFIED_CHECKPOINTS_SCHEMA_VERSION.to_string(),
+                },
+            ));
+        }
+        if !is_valid_git_commit_sha40(&self.engine_build_id)
+            || self.engine_build_id != scorer_build_id
+        {
+            return Err(ScorerError::CheckpointVerify(
+                CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                    field: "verified_checkpoints.engine_build_id".to_owned(),
+                    found: self.engine_build_id.clone(),
+                    expected: scorer_build_id.to_owned(),
+                },
+            ));
+        }
+        if self.save_format_version != EVAL_SAVE_FORMAT_VERSION {
+            return Err(ScorerError::CheckpointVerify(
+                CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                    field: "verified_checkpoints.save_format_version".to_owned(),
+                    found: self.save_format_version.to_string(),
+                    expected: EVAL_SAVE_FORMAT_VERSION.to_string(),
+                },
+            ));
+        }
+        if self.seal_format_version != EVAL_SEAL_FORMAT_VERSION {
+            return Err(ScorerError::CheckpointVerify(
+                CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                    field: "verified_checkpoints.seal_format_version".to_owned(),
+                    found: self.seal_format_version.to_string(),
+                    expected: EVAL_SEAL_FORMAT_VERSION.to_string(),
+                },
+            ));
+        }
+        if self.entries.is_empty() {
+            return Err(ScorerError::Json(
+                "verified_checkpoints.entries must not be empty".to_owned(),
+            ));
+        }
+        let mut prev_pair: Option<&str> = None;
+        for entry in &self.entries {
+            for (field, val) in [
+                ("entry.pre_act_pair_sha256", &entry.pre_act_pair_sha256),
+                ("entry.pre_act_save_sha256", &entry.pre_act_save_sha256),
+                ("entry.pre_act_seal_sha256", &entry.pre_act_seal_sha256),
+                ("entry.expected_state_digest", &entry.expected_state_digest),
+                ("entry.turn_chain_digest", &entry.turn_chain_digest),
+                (
+                    "entry.post_probe_state_digest",
+                    &entry.post_probe_state_digest,
+                ),
+            ] {
+                if !is_valid_sha256_hex(val) {
+                    return Err(ScorerError::InvalidHexDigest {
+                        field,
+                        value: val.clone(),
+                    });
+                }
+            }
+            if !is_valid_git_commit_sha40(&entry.engine_commit) {
+                return Err(ScorerError::CheckpointVerify(
+                    CheckpointVerifyError::IncompatibleEngineOrSchemaVersion {
+                        field: "verified_checkpoints.entry.engine_commit".to_owned(),
+                        found: entry.engine_commit.clone(),
+                        expected: "40 lowercase hex git commit sha".to_owned(),
+                    },
+                ));
+            }
+            if entry.turn == 0 || entry.turn > HARD_TURN_CAP {
+                return Err(ScorerError::InvalidCheckpointState(format!(
+                    "verified checkpoint entry turn {} out of 1..={HARD_TURN_CAP}",
+                    entry.turn
+                )));
+            }
+            if entry.seat_count != EVAL_TABLE_SEAT_COUNT {
+                return Err(ScorerError::InvalidCheckpointState(format!(
+                    "verified checkpoint entry seat_count {} != {EVAL_TABLE_SEAT_COUNT}",
+                    entry.seat_count
+                )));
+            }
+            if let Some(prev) = prev_pair
+                && prev >= entry.pre_act_pair_sha256.as_str()
+            {
+                return Err(ScorerError::Json(format!(
+                    "verified_checkpoints.entries must be strictly ascending and unique (`{prev}` vs `{}`)",
+                    entry.pre_act_pair_sha256
+                )));
+            }
+            prev_pair = Some(entry.pre_act_pair_sha256.as_str());
+        }
+        Ok(())
+    }
+
+    /// Looks up a verified checkpoint entry by `pre_act_pair_sha256`.
+    #[must_use]
+    pub fn find_entry(&self, pair_sha256: &str) -> Option<&VerifiedCheckpointEntry> {
+        self.entries
+            .binary_search_by(|e| e.pre_act_pair_sha256.as_str().cmp(pair_sha256))
+            .ok()
+            .map(|idx| &self.entries[idx])
+    }
+}
+
 /// Blinded projection of `scorer_freeze.json` read by `league-scorer score --freeze` (`§8.2` step 4).
 ///
 /// Intentionally omits `deny_unknown_fields` so unblinded fields (such as `control_wording_arm`)
@@ -940,6 +1118,9 @@ pub struct ScorerFreezeBlindView {
     pub scorer_config_sha256: String,
     /// Canonical SHA-256 over `crates/league-scorer/**`.
     pub scorer_tree_sha256: String,
+    /// Lowercase 64-hex SHA-256 of the frozen preflight `verified_checkpoints.json` manifest.
+    #[serde(default)]
+    pub verified_checkpoints_sha256: String,
 }
 
 impl ScorerFreezeBlindView {
@@ -961,6 +1142,17 @@ impl ScorerFreezeBlindView {
             return Err(ScorerError::InvalidHexDigest {
                 field: "blind_inputs_manifest_sha256",
                 value: self.blind_inputs_manifest_sha256.clone(),
+            });
+        }
+        if self.verified_checkpoints_sha256.is_empty() {
+            return Err(ScorerError::MissingVerifiedCheckpoints(
+                "scorer_freeze.json is missing required verified_checkpoints_sha256".to_owned(),
+            ));
+        }
+        if !is_valid_sha256_hex(&self.verified_checkpoints_sha256) {
+            return Err(ScorerError::InvalidHexDigest {
+                field: "verified_checkpoints_sha256",
+                value: self.verified_checkpoints_sha256.clone(),
             });
         }
         Ok(())

@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use league_core::eval::host::checkpoint_verify::{
+    CheckpointVerifyError, verify_and_construct_pre_act_bytes,
+};
 use league_core::{
     ClubBot, EvalActSubmission, EvalHost, PrivateMandate, SeasonReplayLog, Seat, TurnPhase,
 };
@@ -17,8 +20,11 @@ use crate::scenarios::{ScenarioAssignment, draw_scenarios};
 use crate::scoring::score_outcomes;
 use crate::types::{
     BlindScoringRequest, EVAL_TABLE_SEAT_COUNT, PostureKind, ScenarioRolloutOutcome, ScorerConfig,
-    StateScoreOutput, compute_pre_act_pair_sha256_hex, sha256_hex,
+    StateScoreOutput, VerifiedCheckpointsManifest, compute_pre_act_pair_sha256_hex, sha256_hex,
 };
+
+/// Fixed schema version for preflight `verified_checkpoints.json` manifests.
+pub const VERIFIED_CHECKPOINTS_SCHEMA_VERSION: u32 = 1;
 
 /// Forks `EvalHost` from `(save_path, seal_path)`, stripping directory paths from any engine error (`§6.1`).
 pub(crate) fn fork_checkpoint_sanitized(
@@ -36,19 +42,15 @@ pub fn probe_checkpoint_sanitized(save_path: &Path, seal_path: &Path) -> Result<
     Ok(())
 }
 
-/// Reads and verifies `.save.json`, `.seal`, and optional pair SHA-256 digests, returning the pair hex digest.
-pub fn verify_checkpoint_digests(
+fn read_checkpoint_pair_once(
     save_path: &Path,
     seal_path: &Path,
-    expected_save_sha256: &str,
-    expected_seal_sha256: &str,
-    expected_pair_sha256: Option<&str>,
-) -> Result<String, ScorerError> {
+    save_label: &str,
+    seal_label: &str,
+) -> Result<(Vec<u8>, Vec<u8>), ScorerError> {
     let save_bytes = fs::read(save_path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
-            ScorerError::CheckpointNotFound(format!(
-                "missing checkpoint save for `{expected_save_sha256}`"
-            ))
+            ScorerError::CheckpointNotFound(format!("missing checkpoint save for `{save_label}`"))
         } else {
             ScorerError::Io(sanitize_error_text(
                 &format!("read checkpoint save: {err}"),
@@ -58,9 +60,7 @@ pub fn verify_checkpoint_digests(
     })?;
     let seal_bytes = fs::read(seal_path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
-            ScorerError::CheckpointNotFound(format!(
-                "missing checkpoint seal for `{expected_seal_sha256}`"
-            ))
+            ScorerError::CheckpointNotFound(format!("missing checkpoint seal for `{seal_label}`"))
         } else {
             ScorerError::Io(sanitize_error_text(
                 &format!("read checkpoint seal: {err}"),
@@ -68,20 +68,53 @@ pub fn verify_checkpoint_digests(
             ))
         }
     })?;
+    Ok((save_bytes, seal_bytes))
+}
 
-    let actual_save = sha256_hex(&save_bytes);
+/// Reads and verifies `.save.json`, `.seal`, and optional pair SHA-256 digests, returning the pair hex digest.
+pub fn verify_checkpoint_digests(
+    save_path: &Path,
+    seal_path: &Path,
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    expected_pair_sha256: Option<&str>,
+) -> Result<String, ScorerError> {
+    let (save_bytes, seal_bytes) = read_checkpoint_pair_once(
+        save_path,
+        seal_path,
+        expected_save_sha256,
+        expected_seal_sha256,
+    )?;
+    let (_, _, actual_pair) = verify_checkpoint_byte_digests(
+        &save_bytes,
+        &seal_bytes,
+        expected_save_sha256,
+        expected_seal_sha256,
+        expected_pair_sha256,
+    )?;
+    Ok(actual_pair)
+}
+
+fn verify_checkpoint_byte_digests(
+    save_bytes: &[u8],
+    seal_bytes: &[u8],
+    expected_save_sha256: &str,
+    expected_seal_sha256: &str,
+    expected_pair_sha256: Option<&str>,
+) -> Result<(String, String, String), ScorerError> {
+    let actual_save = sha256_hex(save_bytes);
     if actual_save != expected_save_sha256 {
         return Err(ScorerError::CheckpointHashMismatch(format!(
             "save SHA-256 mismatch: expected `{expected_save_sha256}`, got `{actual_save}`"
         )));
     }
-    let actual_seal = sha256_hex(&seal_bytes);
+    let actual_seal = sha256_hex(seal_bytes);
     if actual_seal != expected_seal_sha256 {
         return Err(ScorerError::CheckpointHashMismatch(format!(
             "seal SHA-256 mismatch: expected `{expected_seal_sha256}`, got `{actual_seal}`"
         )));
     }
-    let actual_pair = compute_pre_act_pair_sha256_hex(&save_bytes, &seal_bytes);
+    let actual_pair = compute_pre_act_pair_sha256_hex(save_bytes, seal_bytes);
     if let Some(expected_pair) = expected_pair_sha256
         && actual_pair != expected_pair
     {
@@ -89,10 +122,11 @@ pub fn verify_checkpoint_digests(
             "pair SHA-256 mismatch: expected `{expected_pair}`, got `{actual_pair}`"
         )));
     }
-    Ok(actual_pair)
+    Ok((actual_save, actual_seal, actual_pair))
 }
 
-/// Re-verifies checkpoint bytes against digests immediately before calling `EvalHost::fork_from_checkpoint`.
+/// Reads the checkpoint pair once, verifies outer SHA-256 digests, and forks `EvalHost` directly
+/// from the verified bytes without re-reading disk (closing double-read TOCTOU).
 pub(crate) fn verify_and_fork_checkpoint(
     save_path: &Path,
     seal_path: &Path,
@@ -100,14 +134,23 @@ pub(crate) fn verify_and_fork_checkpoint(
     expected_seal_sha256: &str,
     expected_pair_sha256: Option<&str>,
 ) -> Result<(EvalHost, String), ScorerError> {
-    let pair_sha = verify_checkpoint_digests(
+    let (save_bytes, seal_bytes) = read_checkpoint_pair_once(
         save_path,
         seal_path,
         expected_save_sha256,
         expected_seal_sha256,
+    )?;
+    let (_, _, pair_sha) = verify_checkpoint_byte_digests(
+        &save_bytes,
+        &seal_bytes,
+        expected_save_sha256,
+        expected_seal_sha256,
         expected_pair_sha256,
     )?;
-    let host = fork_checkpoint_sanitized(save_path, seal_path)?;
+    let host =
+        EvalHost::fork_from_verified_checkpoint_bytes(&save_bytes, &seal_bytes).map_err(|e| {
+            ScorerError::Engine(sanitize_error_text(&e.to_string(), &[save_path, seal_path]))
+        })?;
     Ok((host, pair_sha))
 }
 
@@ -178,8 +221,33 @@ pub fn run_single_rollout_with_replay_log(
     config: &ScorerConfig,
 ) -> Result<(ScenarioRolloutOutcome, SeasonReplayLog), ScorerError> {
     let (save_sha, seal_sha, pair_sha) = expected_digests;
-    let (mut host, _) =
+    let (host, _) =
         verify_and_fork_checkpoint(save_path, seal_path, save_sha, seal_sha, Some(pair_sha))?;
+    run_single_rollout_from_host(
+        &host,
+        focal_seat,
+        focal_submission,
+        peer_day_submissions,
+        focal_mandate,
+        scenario,
+        posture,
+        config,
+    )
+}
+
+/// Clones `base_host` in memory and executes one deterministic turn-to-close counterfactual rollout.
+#[allow(clippy::too_many_arguments)]
+pub fn run_single_rollout_from_host(
+    base_host: &EvalHost,
+    focal_seat: u8,
+    focal_submission: &EvalActSubmission,
+    peer_day_submissions: &BTreeMap<u8, EvalActSubmission>,
+    focal_mandate: PrivateMandate,
+    scenario: &ScenarioAssignment,
+    posture: PostureKind,
+    config: &ScorerConfig,
+) -> Result<(ScenarioRolloutOutcome, SeasonReplayLog), ScorerError> {
+    let mut host = base_host.clone();
     let seat_count = host.seat_count();
     if seat_count != EVAL_TABLE_SEAT_COUNT {
         return Err(ScorerError::InvalidCheckpointState(format!(
@@ -257,9 +325,9 @@ pub fn run_single_rollout_with_replay_log(
     ))
 }
 
-/// Verifies checkpoint hashes before every fork, draws `scenarios_m` counterfactual scenarios with
-/// configured postures and talk-commitment compliance, runs sequential rollouts over `(c, m)`, and
-/// computes deterministic scores (`§4.2`, `§4.3`, `§6.1`, `§7.1`).
+/// Loads the checkpoint once via single-read verification, clones `base_host` in memory across all
+/// `(c, m)` rollouts (`K * M`), checks the post-batch base-state canary, and computes deterministic
+/// scores (`§4.2`, `§4.3`, `§6.1`, `§7.1`).
 pub fn execute_blind_request(
     request: &BlindScoringRequest,
     config: &ScorerConfig,
@@ -269,21 +337,121 @@ pub fn execute_blind_request(
     config.validate()?;
     request.validate(config)?;
 
-    let (probe, _) = verify_and_fork_checkpoint(
+    let (base_host, _) = verify_and_fork_checkpoint(
         save_path,
         seal_path,
         &request.pre_act_save_sha256,
         &request.pre_act_seal_sha256,
         Some(&request.pre_act_pair_sha256),
     )?;
-    let seat_count = probe.seat_count();
+    execute_blind_request_on_loaded_host(request, config, base_host, None)
+}
+
+/// Executes Gate 3 verified scoring against `VerifiedCheckpointsManifest` and `scorer_build_id`:
+/// validates build-ID parity, checks outer file hashes on a single disk read, verifies tip canonical
+/// digest against the manifest, clones `base_host` in memory per rollout, and runs the post-batch
+/// base-state canary (`InMemoryBaseStateCorrupted`).
+pub fn execute_blind_request_verified(
+    request: &BlindScoringRequest,
+    config: &ScorerConfig,
+    save_path: &Path,
+    seal_path: &Path,
+    verified_manifest: &VerifiedCheckpointsManifest,
+    scorer_build_id: &str,
+) -> Result<StateScoreOutput, ScorerError> {
+    execute_blind_request_verified_with_hook(
+        request,
+        config,
+        save_path,
+        seal_path,
+        verified_manifest,
+        scorer_build_id,
+        None,
+    )
+}
+
+/// Variant of [`execute_blind_request_verified`] exposing an in-memory post-batch canary hook for
+/// Gate 3 fault-injection testing (`M10`).
+#[doc(hidden)]
+pub fn execute_blind_request_verified_with_hook(
+    request: &BlindScoringRequest,
+    config: &ScorerConfig,
+    save_path: &Path,
+    seal_path: &Path,
+    verified_manifest: &VerifiedCheckpointsManifest,
+    scorer_build_id: &str,
+    post_batch_hook: Option<fn(&mut EvalHost)>,
+) -> Result<StateScoreOutput, ScorerError> {
+    config.validate()?;
+    request.validate(config)?;
+    verified_manifest.validate_for_scorer(scorer_build_id)?;
+
+    let entry = verified_manifest
+        .find_entry(&request.pre_act_pair_sha256)
+        .ok_or_else(|| {
+            ScorerError::CheckpointVerify(CheckpointVerifyError::OuterFileHashMismatch {
+                file: "pair".to_owned(),
+                expected: request.pre_act_pair_sha256.clone(),
+                actual: "missing_from_verified_checkpoints_manifest".to_owned(),
+            })
+        })?;
+    if entry.pre_act_save_sha256 != request.pre_act_save_sha256 {
+        return Err(ScorerError::CheckpointVerify(
+            CheckpointVerifyError::OuterFileHashMismatch {
+                file: "save".to_owned(),
+                expected: entry.pre_act_save_sha256.clone(),
+                actual: request.pre_act_save_sha256.clone(),
+            },
+        ));
+    }
+    if entry.pre_act_seal_sha256 != request.pre_act_seal_sha256 {
+        return Err(ScorerError::CheckpointVerify(
+            CheckpointVerifyError::OuterFileHashMismatch {
+                file: "seal".to_owned(),
+                expected: entry.pre_act_seal_sha256.clone(),
+                actual: request.pre_act_seal_sha256.clone(),
+            },
+        ));
+    }
+
+    let (save_bytes, seal_bytes) = read_checkpoint_pair_once(
+        save_path,
+        seal_path,
+        &request.pre_act_save_sha256,
+        &request.pre_act_seal_sha256,
+    )?;
+    let base_host = verify_and_construct_pre_act_bytes(
+        &save_bytes,
+        &seal_bytes,
+        Some(&entry.pre_act_save_sha256),
+        Some(&entry.pre_act_seal_sha256),
+        Some(&entry.pre_act_pair_sha256),
+        Some((entry.turn, entry.seat_count, &entry.expected_state_digest)),
+    )?;
+    execute_blind_request_on_loaded_host(request, config, base_host, post_batch_hook)
+}
+
+fn execute_blind_request_on_loaded_host(
+    request: &BlindScoringRequest,
+    config: &ScorerConfig,
+    mut base_host: EvalHost,
+    post_batch_hook: Option<fn(&mut EvalHost)>,
+) -> Result<StateScoreOutput, ScorerError> {
+    let seat_count = base_host.seat_count();
     if seat_count != EVAL_TABLE_SEAT_COUNT {
         return Err(ScorerError::InvalidCheckpointState(format!(
             "expected {EVAL_TABLE_SEAT_COUNT}-seat Evaluation table, got {seat_count}"
         )));
     }
-    let day = probe.turn();
-    let focal_obs = probe
+    let day = base_host.turn();
+    let pre_batch_digest = base_host
+        .canonical_state_digest_hex()
+        .map_err(|e| ScorerError::Engine(format!("digest pre-batch base_host: {e}")))?;
+    let pre_batch_save = base_host
+        .public_save_snapshot()
+        .map_err(|e| ScorerError::Engine(format!("snapshot pre-batch base_host: {e}")))?;
+
+    let focal_obs = base_host
         .observe_seat(Seat(request.focal_seat))
         .map_err(|e| ScorerError::Engine(format!("observe focal seat: {e}")))?;
     let focal_mandate = focal_obs.own_mandate().copied().ok_or_else(|| {
@@ -304,7 +472,7 @@ pub fn execute_blind_request(
     let mut peer_observations = Vec::with_capacity(usize::from(seat_count.saturating_sub(1)));
     for s in 0..seat_count {
         if s != request.focal_seat {
-            let obs_s = probe
+            let obs_s = base_host
                 .observe_seat(Seat(s))
                 .map_err(|e| ScorerError::Engine(format!("observe peer seat {s}: {e}")))?;
             peer_observations.push((s, obs_s));
@@ -336,22 +504,14 @@ pub fn execute_blind_request(
         }
         peer_day_subs_by_m.push(peer_subs);
     }
-    drop(probe);
 
-    let digests = (
-        request.pre_act_save_sha256.as_str(),
-        request.pre_act_seal_sha256.as_str(),
-        request.pre_act_pair_sha256.as_str(),
-    );
     let mut outcomes = Vec::with_capacity(request.candidates.len());
     for candidate in &request.candidates {
         let mut row = Vec::with_capacity(scenarios.len());
         for (m_idx, scenario) in scenarios.iter().enumerate() {
             let posture = posture_for_scenario(config, m_idx);
-            let outcome = run_single_rollout(
-                save_path,
-                seal_path,
-                digests,
+            let (outcome, _) = run_single_rollout_from_host(
+                &base_host,
                 request.focal_seat,
                 &candidate.submission,
                 &peer_day_subs_by_m[m_idx],
@@ -363,6 +523,24 @@ pub fn execute_blind_request(
             row.push(outcome);
         }
         outcomes.push(row);
+    }
+
+    if let Some(hook) = post_batch_hook {
+        hook(&mut base_host);
+    }
+    let post_batch_digest = base_host
+        .canonical_state_digest_hex()
+        .map_err(|e| ScorerError::Engine(format!("digest post-batch base_host: {e}")))?;
+    let post_batch_save = base_host
+        .public_save_snapshot()
+        .map_err(|e| ScorerError::Engine(format!("snapshot post-batch base_host: {e}")))?;
+    if post_batch_digest != pre_batch_digest || post_batch_save != pre_batch_save {
+        return Err(ScorerError::CheckpointVerify(
+            CheckpointVerifyError::InMemoryBaseStateCorrupted {
+                expected: pre_batch_digest,
+                actual: post_batch_digest,
+            },
+        ));
     }
 
     score_outcomes(request, config, day, &outcomes)

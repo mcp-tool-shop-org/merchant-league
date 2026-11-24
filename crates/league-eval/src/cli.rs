@@ -20,6 +20,7 @@ use crate::freeze_gate::{FreezeOptions, JoinOptions, run_freeze, run_join};
 use crate::records::{EvalArm, summarize_branch_outcomes};
 use crate::select::{SelectOptions, run_select};
 use crate::serving::CrateGitShaSource;
+use crate::verify_checkpoints::{VerifyCheckpointsOptions, run_verify_checkpoints};
 use crate::{EXIT_OK, EvalError};
 
 const HELP_TEXT: &str = "\
@@ -35,6 +36,7 @@ COMMANDS:
   branch              Replay a frozen pre-act checkpoint across `--arms <off,control,on>` holding peer actions fixed
   select              Deterministically select stratified early/mid/late pre-act checkpoints across games
   build-blind-inputs  Build anonymized `blind_inputs/` and disjoint `arm_map/` from run directories
+  verify-checkpoints  Verify pre-act checkpoints causally and atomically write read-only `verified_checkpoints.json`
   freeze              Write write-once `scorer_freeze.json` on a clean worktree before scoring or joining
   join                Enforce the freeze gate and join blind scores with `arm_map/` (descriptive only)
 ";
@@ -194,7 +196,7 @@ fn run_cli_args(
 
     let Some(subcmd_os) = iter.next() else {
         return Err(EvalError::Usage(
-            "missing subcommand (`play`, `branch`, `select`, `build-blind-inputs`, `freeze`, or `join`); run with `--help`"
+            "missing subcommand (`play`, `branch`, `select`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, or `join`); run with `--help`"
                 .to_owned(),
         ));
     };
@@ -215,10 +217,11 @@ fn run_cli_args(
         "branch" => cmd_branch(&rest, redaction_keys, git_sha, stdout),
         "select" => cmd_select(&rest, stdout),
         "build-blind-inputs" => cmd_build_blind_inputs(&rest, stdout),
+        "verify-checkpoints" => cmd_verify_checkpoints(&rest, git_sha, stdout),
         "freeze" => cmd_freeze(&rest, git_sha, stdout),
         "join" => cmd_join(&rest, stdout),
         other => Err(EvalError::Usage(format!(
-            "unknown subcommand '{other}'; expected `play`, `branch`, `select`, `build-blind-inputs`, `freeze`, or `join`"
+            "unknown subcommand '{other}'; expected `play`, `branch`, `select`, `build-blind-inputs`, `verify-checkpoints`, `freeze`, or `join`"
         ))),
     }
 }
@@ -660,6 +663,61 @@ fn cmd_build_blind_inputs(args: &[OsString], stdout: &mut dyn Write) -> Result<(
     Ok(())
 }
 
+fn cmd_verify_checkpoints(
+    args: &[OsString],
+    git_sha: &CrateGitShaSource<'_>,
+    stdout: &mut dyn Write,
+) -> Result<(), EvalError> {
+    let mut checkpoints_dir: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+    let mut blind_dir: Option<PathBuf> = None;
+
+    let mut iter = args.iter().cloned();
+    while let Some(arg_os) = iter.next() {
+        let arg = arg_os
+            .into_string()
+            .map_err(|_| EvalError::Usage("argument contains non-UTF-8 characters".to_owned()))?;
+        match arg.as_str() {
+            "--error-format" => {
+                let val = take_value(&mut iter, "--error-format")?;
+                let _ = ErrorFormat::parse(&val)?;
+            }
+            "--checkpoints" => {
+                checkpoints_dir = Some(PathBuf::from(take_value(&mut iter, "--checkpoints")?));
+            }
+            "--out" => {
+                out_path = Some(PathBuf::from(take_value(&mut iter, "--out")?));
+            }
+            "--blind" => {
+                blind_dir = Some(PathBuf::from(take_value(&mut iter, "--blind")?));
+            }
+            other => {
+                return Err(EvalError::Usage(format!(
+                    "unknown `verify-checkpoints` flag '{other}'"
+                )));
+            }
+        }
+    }
+
+    let opts = VerifyCheckpointsOptions {
+        checkpoints_dir: checkpoints_dir.ok_or_else(|| {
+            EvalError::Usage("`verify-checkpoints` requires `--checkpoints <dir>`".to_owned())
+        })?,
+        out_path: out_path.ok_or_else(|| {
+            EvalError::Usage("`verify-checkpoints` requires `--out <file>`".to_owned())
+        })?,
+        blind_dir,
+    };
+    let report = run_verify_checkpoints(&opts, git_sha)?;
+    writeln!(
+        stdout,
+        "verified_count={} verified_checkpoints_sha256={} engine_build_id={}",
+        report.verified_count, report.verified_checkpoints_sha256, report.engine_build_id
+    )
+    .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
+    Ok(())
+}
+
 fn cmd_freeze(
     args: &[OsString],
     git_sha: &CrateGitShaSource<'_>,
@@ -669,6 +727,7 @@ fn cmd_freeze(
     let mut config_path: Option<PathBuf> = None;
     let mut control_wording_arm: Option<String> = None;
     let mut out_path: Option<PathBuf> = None;
+    let mut verified_checkpoints_path: Option<PathBuf> = None;
     let mut scorer_crate_dir: Option<PathBuf> = None;
 
     let mut iter = args.iter().cloned();
@@ -687,6 +746,12 @@ fn cmd_freeze(
                 control_wording_arm = Some(take_value(&mut iter, "--control-wording-arm")?);
             }
             "--out" => out_path = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--verified-checkpoints" => {
+                verified_checkpoints_path = Some(PathBuf::from(take_value(
+                    &mut iter,
+                    "--verified-checkpoints",
+                )?));
+            }
             "--scorer-crate-dir" => {
                 scorer_crate_dir =
                     Some(PathBuf::from(take_value(&mut iter, "--scorer-crate-dir")?));
@@ -707,15 +772,21 @@ fn cmd_freeze(
         })?,
         out_path: out_path
             .ok_or_else(|| EvalError::Usage("`freeze` requires `--out <file>`".to_owned()))?,
+        verified_checkpoints_path: verified_checkpoints_path.ok_or_else(|| {
+            EvalError::MissingVerifiedCheckpoints(
+                "`freeze` requires `--verified-checkpoints <file>`".to_owned(),
+            )
+        })?,
         scorer_crate_dir,
     };
     let freeze = run_freeze(&opts, git_sha)?;
     writeln!(
         stdout,
-        "freeze_written={} config_sha256={} manifest_sha256={}",
+        "freeze_written={} config_sha256={} manifest_sha256={} verified_checkpoints_sha256={}",
         opts.out_path.display(),
         freeze.scorer_config_sha256,
-        freeze.blind_inputs_manifest_sha256
+        freeze.blind_inputs_manifest_sha256,
+        freeze.verified_checkpoints_sha256
     )
     .map_err(|e| EvalError::Io(format!("write stdout: {e}")))?;
     Ok(())
@@ -726,6 +797,7 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
     let mut arm_map_dir: Option<PathBuf> = None;
     let mut scores_dir: Option<PathBuf> = None;
     let mut out_dir: Option<PathBuf> = None;
+    let mut verified_checkpoints_path: Option<PathBuf> = None;
     let mut blind_dir: Option<PathBuf> = None;
     let mut source_game_dirs: Vec<PathBuf> = Vec::new();
 
@@ -743,6 +815,12 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
             "--arm-map" => arm_map_dir = Some(PathBuf::from(take_value(&mut iter, "--arm-map")?)),
             "--scores" => scores_dir = Some(PathBuf::from(take_value(&mut iter, "--scores")?)),
             "--out" => out_dir = Some(PathBuf::from(take_value(&mut iter, "--out")?)),
+            "--verified-checkpoints" => {
+                verified_checkpoints_path = Some(PathBuf::from(take_value(
+                    &mut iter,
+                    "--verified-checkpoints",
+                )?));
+            }
             "--blind" => blind_dir = Some(PathBuf::from(take_value(&mut iter, "--blind")?)),
             "--source-game" => {
                 source_game_dirs.push(PathBuf::from(take_value(&mut iter, "--source-game")?));
@@ -762,6 +840,7 @@ fn cmd_join(args: &[OsString], stdout: &mut dyn Write) -> Result<(), EvalError> 
             .ok_or_else(|| EvalError::Usage("`join` requires `--scores <dir>`".to_owned()))?,
         out_dir: out_dir
             .ok_or_else(|| EvalError::Usage("`join` requires `--out <dir>`".to_owned()))?,
+        verified_checkpoints_path,
         blind_dir,
         source_game_dirs,
     };

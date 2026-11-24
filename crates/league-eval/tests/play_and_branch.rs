@@ -486,15 +486,25 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
     let seats_path = write_seats(&tmp, "seats.json", focal_local_three_clubbot_seats());
 
     // Prepare turn-0 sealed source once using EvalHost + persist_eval_game_state (`R8`).
+    let turn0_engine_commit =
+        if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+            CRATE_GIT_SHA
+        } else {
+            TEST_FALLBACK_GIT_SHA
+        };
     let turn0_host = must_ok(
-        EvalHost::from_standard_setup_with_model_seats(
-            TableId(11),
-            4,
-            7,
-            12345,
-            &[true, false, false, false],
-        ),
-        "from_standard_setup_with_model_seats",
+        must_ok(
+            EvalHost::from_standard_setup_with_model_seats(
+                TableId(11),
+                4,
+                7,
+                12345,
+                &[true, false, false, false],
+            ),
+            "from_standard_setup_with_model_seats",
+        )
+        .with_engine_commit(turn0_engine_commit),
+        "with_engine_commit",
     );
     let game_a = tmp.join("dup_a");
     let game_b = tmp.join("dup_b");
@@ -753,10 +763,15 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
         let raw_b = must_ok(fs::read(&pb), &format!("read game_b/{rel}"));
 
         if rel.ends_with(".save.json") {
-            assert_eq!(
-                raw_a, raw_b,
-                "C3: EvalSaveSnapshot `{rel}` has no game_id and must be byte-identical without masking"
+            let mut va: Value = must_ok(serde_json::from_slice(&raw_a), "parse save a");
+            let mut vb: Value = must_ok(serde_json::from_slice(&raw_b), "parse save b");
+            assert_ne!(
+                va["game_id"], vb["game_id"],
+                "expected distinct game_id in `{rel}`"
             );
+            va["game_id"] = Value::Null;
+            vb["game_id"] = Value::Null;
+            assert_eq!(va, vb, "normalized `{rel}` diverged across duplicate runs");
         } else if rel == "relay/calls.jsonl" {
             let ta = String::from_utf8_lossy(&raw_a);
             let tb = String::from_utf8_lossy(&raw_b);
@@ -813,6 +828,13 @@ fn item11_duplicate_tables_determinism_and_r5_r8_r9_checks() {
             if rel.ends_with("-act-recorded.seal") {
                 va["pre_act_checkpoint_sha256"] = Value::Null;
                 vb["pre_act_checkpoint_sha256"] = Value::Null;
+            } else if rel.ends_with(".seal") {
+                assert_ne!(
+                    va["save_sha256"], vb["save_sha256"],
+                    "expected distinct save_sha256 across distinct forked game_ids in `{rel}`"
+                );
+                va["save_sha256"] = Value::Null;
+                vb["save_sha256"] = Value::Null;
             }
             assert_eq!(va, vb, "normalized `{rel}` diverged across duplicate runs");
         } else {
@@ -1184,18 +1206,28 @@ fn item15_null_branch_matches_play_receipt_and_leaks_zero_seal_secrets_under_out
     let deal_seed = [0xA1_u8; 32];
     let seat_salts = [[0xB1_u8; 32], [0xB2_u8; 32], [0xB3_u8; 32], [0xB4_u8; 32]];
     let eval_seed = [0xC5_u8; 32];
+    let turn0_engine_commit =
+        if CRATE_GIT_SHA.len() == 40 && CRATE_GIT_SHA.bytes().all(|b| b.is_ascii_hexdigit()) {
+            CRATE_GIT_SHA
+        } else {
+            TEST_FALLBACK_GIT_SHA
+        };
     let turn0 = must_ok(
-        EvalHost::from_explicit_entropy_with_model_seats(
-            TableId(15),
-            4,
-            7,
-            deal_seed,
-            &seat_salts,
-            eval_seed,
-            0x777,
-            &[true, false, false, false],
-        ),
-        "from_explicit_entropy_with_model_seats item15",
+        must_ok(
+            EvalHost::from_explicit_entropy_with_model_seats(
+                TableId(15),
+                4,
+                7,
+                deal_seed,
+                &seat_salts,
+                eval_seed,
+                0x777,
+                &[true, false, false, false],
+            ),
+            "from_explicit_entropy_with_model_seats item15",
+        )
+        .with_engine_commit(turn0_engine_commit),
+        "with_engine_commit item15",
     );
     must_ok(
         persist_eval_game_state(&turn0, &src_game),
@@ -2831,7 +2863,11 @@ fn error_surfaces_cli_variants_and_resume_validation_coverage() {
     // Exercise ReplayRefusalCode::as_str & BranchArmOutcome + persist_eval_game_state type checks cleanly.
     let _: (&str, Option<BranchArmOutcome>) =
         (ReplyRefusalCode::MessageRecipientInvalid.as_str(), None);
-    let h = must_ok(EvalHost::from_standard_setup(TableId(99), 4, 1, 2), "h");
+    let h = must_ok(
+        must_ok(EvalHost::from_standard_setup(TableId(99), 4, 1, 2), "h")
+            .with_engine_commit(&"a".repeat(40)),
+        "engine_commit",
+    );
     let _ = must_ok(persist_eval_game_state(&h, &tmp.join("p_test")), "persist");
 
     let _ = fs::remove_dir_all(&tmp);

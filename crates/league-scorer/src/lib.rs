@@ -6,6 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Build-time git commit SHA captured by `build.rs` (`""` when git was unavailable; verified at Gate 3 runtime).
+pub const CRATE_GIT_SHA: &str = env!("LEAGUE_SCORER_GIT_SHA");
+
 pub mod candidates;
 pub mod cli;
 pub mod error;
@@ -16,17 +19,21 @@ pub mod scoring;
 pub mod types;
 
 pub use candidates::{
-    build_arm_independent_request, dedupe_candidates, generate_arm_independent_candidates,
+    build_arm_independent_request, build_arm_independent_request_verified, dedupe_candidates,
+    generate_arm_independent_candidates,
 };
 pub use error::{EXIT_OK, EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ScorerError, sanitize_error_text};
+pub use league_core::{EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION};
 pub use postures::{
     apply_talk_commitments, canonicalize_talk_commitments, decide_peer_turn,
     draw_honour_commitment, p_honour_to_ppm, posture_for_scenario, preview_submission,
     prune_refused_market_actions, submission_from_club_bot,
 };
 pub use rollout::{
-    execute_blind_request, probe_checkpoint_sanitized, run_single_rollout,
-    run_single_rollout_with_replay_log, verify_checkpoint_digests, verify_checkpoint_pair,
+    VERIFIED_CHECKPOINTS_SCHEMA_VERSION, execute_blind_request, execute_blind_request_verified,
+    execute_blind_request_verified_with_hook, probe_checkpoint_sanitized, run_single_rollout,
+    run_single_rollout_from_host, run_single_rollout_with_replay_log, verify_checkpoint_digests,
+    verify_checkpoint_pair,
 };
 pub use scenarios::{ScenarioAssignment, draw_scenarios};
 pub use scoring::score_outcomes;
@@ -42,9 +49,10 @@ pub use types::{
     SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX,
     SYNTH_SLOT_BUCKET_NAMES, ScenarioRolloutOutcome, ScorerConfig, ScorerFreezeBlindView,
     StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2,
-    TalkExtractionCounts, TalkSourceCounts, WinnersCurseSummary, candidate_id_for_submission,
-    compute_blind_inputs_manifest_sha256, compute_blind_inputs_manifest_sha256_from_entries,
-    compute_pre_act_pair_sha256_hex, compute_scorer_tree_sha256, is_valid_sha256_hex,
-    parse_blind_scoring_request_strict, sha256_hex, to_sorted_compact_json, to_sorted_pretty_json,
-    validate_state_id, validate_talk_commitment,
+    TalkExtractionCounts, TalkSourceCounts, VerifiedCheckpointEntry, VerifiedCheckpointsManifest,
+    WinnersCurseSummary, candidate_id_for_submission, compute_blind_inputs_manifest_sha256,
+    compute_blind_inputs_manifest_sha256_from_entries, compute_pre_act_pair_sha256_hex,
+    compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
+    parse_verified_checkpoints_manifest_strict, sha256_hex, to_sorted_compact_json,
+    to_sorted_pretty_json, validate_state_id, validate_talk_commitment,
 };

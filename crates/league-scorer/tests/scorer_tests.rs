@@ -9,27 +9,31 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use league_core::eval::host::checkpoint_verify::verify_checkpoint_causal;
 use league_core::{
-    AiPreviewRequest, AssetId, CharterRole, CheckProposal, ClubBot, CommitmentHash, EscrowProposal,
-    EvalActSubmission, EvalHost, GradedMandateCard, IntentPledge, IntentTarget, MandateKind,
-    MarketAction, OfferProposal, OfferSide, PublicTableSpec, SealedOrderBundle, Seat, TableId,
+    AiPreviewRequest, AssetId, CharterRole, CheckProposal, ClubBot, CommitmentHash,
+    EVAL_SAVE_FORMAT_VERSION, EVAL_SEAL_FORMAT_VERSION, EscrowProposal, EvalActSubmission,
+    EvalHost, GradedMandateCard, IntentPledge, IntentTarget, MandateKind, MarketAction,
+    OfferProposal, OfferSide, PublicTableSpec, SealedOrderBundle, Seat, TableId,
     ToStructuredError as _, TurnPhase, mul_units_parity, preview_seat_bundle, replay_eval_season,
     town_import_cost_cred,
 };
 use league_scorer::cli::run_cli;
 use league_scorer::{
     BLIND_SCORING_SCHEMA_VERSION, BlindCandidate, BlindScoringRequest,
-    COMPOSITE_GREEDY_RULES_DEFAULT, DROP_TIE_BREAK_BY_CANDIDATE_ID, EXIT_OK, EXIT_RUNTIME_ERROR,
-    EXIT_USER_ERROR, ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind, PostureWeights,
-    SYNTH_CHARTER_BID_CRED, SYNTH_CLAIM_MATURING_EXACT, SYNTH_CONVERTER_INPUT_DEFICIT_COVER,
-    SYNTH_COUNCIL_SELF_NOMINATION, SYNTH_DROP_DEFAULT_ACTION_RISK_CRED,
-    SYNTH_DROP_PROJECT_RISK_CRED, SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER,
-    SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES, SYNTH_PROJECT_RANK_BY_EQUITY,
-    SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS, SYNTH_QUOTE_MIN_UNITS,
-    SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX, ScenarioRolloutOutcome, ScorerConfig,
-    ScorerError, ScorerFreezeBlindView, StateScoreOutput, TALK_EXTRACTOR_RULES_DIGEST_V2,
-    TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts, apply_talk_commitments,
-    build_arm_independent_request, candidate_id_for_submission, canonicalize_talk_commitments,
+    COMPOSITE_GREEDY_RULES_DEFAULT, CRATE_GIT_SHA, DROP_TIE_BREAK_BY_CANDIDATE_ID, EXIT_OK,
+    EXIT_RUNTIME_ERROR, EXIT_USER_ERROR, ExtractedTalkCommitment, HONOUR_PPM_SCALE, PostureKind,
+    PostureWeights, SYNTH_CHARTER_BID_CRED, SYNTH_CLAIM_MATURING_EXACT,
+    SYNTH_CONVERTER_INPUT_DEFICIT_COVER, SYNTH_COUNCIL_SELF_NOMINATION,
+    SYNTH_DROP_DEFAULT_ACTION_RISK_CRED, SYNTH_DROP_PROJECT_RISK_CRED,
+    SYNTH_DROP_UPKEEP_SELL_RISK_MULTIPLIER, SYNTH_MAX_CONVERTER_BATCHES, SYNTH_MAX_PROJECT_BATCHES,
+    SYNTH_PROJECT_RANK_BY_EQUITY, SYNTH_QUOTE_CRED_SHARE_BPS, SYNTH_QUOTE_MAX_UNITS,
+    SYNTH_QUOTE_MIN_UNITS, SYNTH_SCALE_SEED_PER_AXIS, SYNTH_SCALE_SEED_POOL_MAX,
+    ScenarioRolloutOutcome, ScorerConfig, ScorerError, ScorerFreezeBlindView, StateScoreOutput,
+    TALK_EXTRACTOR_RULES_DIGEST_V2, TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts,
+    TalkSourceCounts, VERIFIED_CHECKPOINTS_SCHEMA_VERSION, VerifiedCheckpointEntry,
+    VerifiedCheckpointsManifest, apply_talk_commitments, build_arm_independent_request,
+    candidate_id_for_submission, canonicalize_talk_commitments,
     compute_blind_inputs_manifest_sha256, compute_blind_inputs_manifest_sha256_from_entries,
     compute_pre_act_pair_sha256_hex, compute_scorer_tree_sha256, decide_peer_turn,
     dedupe_candidates, draw_honour_commitment, draw_scenarios, execute_blind_request,
@@ -42,6 +46,7 @@ use league_scorer::{
 use league_seat_types::UNIT_SCALE;
 
 type TestResult = Result<(), Box<dyn Error>>;
+const TEST_ENGINE_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -159,7 +164,8 @@ fn make_real_checkpoint_pair(
     table_seed: u64,
     focal_seat: u8,
 ) -> Result<TestCheckpointFixture, Box<dyn Error>> {
-    let mut host = EvalHost::from_standard_setup(TableId(table_seed), 4, 1, 0)?;
+    let mut host = EvalHost::from_standard_setup(TableId(table_seed), 4, 1, 0)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     let raw_ckpt = tmp.join("raw_ckpt");
     fs::create_dir_all(&raw_ckpt)?;
     let (raw_save, raw_seal) = host.write_pre_act_checkpoint(&raw_ckpt)?;
@@ -1718,7 +1724,8 @@ fn rollout_and_scoring_edge_cases_are_refused_cleanly() -> TestResult {
     );
 
     // 5-seat checkpoint refused by both run_single_rollout and execute_blind_request.
-    let mut host5 = EvalHost::from_standard_setup(TableId(8109), 5, 1, 0)?;
+    let mut host5 = EvalHost::from_standard_setup(TableId(8109), 5, 1, 0)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     let raw5_dir = tmp.path().join("raw5");
     fs::create_dir_all(&raw5_dir)?;
     let (save5, seal5) = host5.write_pre_act_checkpoint(&raw5_dir)?;
@@ -2127,12 +2134,43 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
     let scorer_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let real_tree_sha = compute_scorer_tree_sha256(scorer_manifest_dir)?;
     let real_manifest_sha = compute_blind_inputs_manifest_sha256(&blind_dir)?;
+    let save_bytes_for_vc =
+        fs::read(ckpts_dir.join(format!("{}.save.json", req.pre_act_save_sha256)))?;
+    let seal_bytes_for_vc = fs::read(ckpts_dir.join(format!("{}.seal", req.pre_act_seal_sha256)))?;
+    let (_, vc_summary) = verify_checkpoint_causal(&save_bytes_for_vc, &seal_bytes_for_vc)?;
+    let build_id = if CRATE_GIT_SHA.len() == 40 {
+        CRATE_GIT_SHA
+    } else {
+        TEST_ENGINE_COMMIT
+    };
+    let vc_manifest = VerifiedCheckpointsManifest {
+        schema_version: VERIFIED_CHECKPOINTS_SCHEMA_VERSION,
+        engine_build_id: build_id.to_owned(),
+        save_format_version: EVAL_SAVE_FORMAT_VERSION,
+        seal_format_version: EVAL_SEAL_FORMAT_VERSION,
+        entries: vec![VerifiedCheckpointEntry {
+            pre_act_pair_sha256: vc_summary.pre_act_pair_sha256,
+            pre_act_save_sha256: vc_summary.pre_act_save_sha256,
+            pre_act_seal_sha256: vc_summary.pre_act_seal_sha256,
+            engine_commit: vc_summary.engine_commit,
+            turn: vc_summary.turn,
+            seat_count: vc_summary.seat_count,
+            expected_state_digest: vc_summary.expected_state_digest,
+            turn_chain_digest: vc_summary.turn_chain_digest,
+            post_probe_state_digest: vc_summary.post_probe_state_digest,
+        }],
+    };
+    let vc_path = tmp.path().join("verified_checkpoints.json");
+    let vc_text = to_sorted_pretty_json(&vc_manifest)?;
+    fs::write(&vc_path, vc_text.as_bytes())?;
+    let real_vc_sha = sha256_hex(vc_text.as_bytes());
     let valid_freeze_path = tmp.path().join("valid_freeze.json");
     let valid_freeze_json = serde_json::json!({
         "blind_inputs_manifest_sha256": real_manifest_sha,
         "control_wording_arm": "v2_control_2026_11_22_r2",
         "scorer_config_sha256": cfg_sha,
         "scorer_tree_sha256": real_tree_sha,
+        "verified_checkpoints_sha256": real_vc_sha,
     });
     fs::write(
         &valid_freeze_path,
@@ -2142,7 +2180,7 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
     let mut err_freeze_ok = Vec::new();
     let mut out_freeze_ok_msg = Vec::new();
     assert_eq!(
-        run_cli(
+        league_scorer::cli::run_cli_with_build_id(
             [
                 "score",
                 "--blind-inputs",
@@ -2153,9 +2191,12 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
                 cfg_path.to_str().ok_or("utf8")?,
                 "--freeze",
                 valid_freeze_path.to_str().ok_or("utf8")?,
+                "--verified-checkpoints",
+                vc_path.to_str().ok_or("utf8")?,
                 "--out",
                 freeze_ok_out.to_str().ok_or("utf8")?,
             ],
+            build_id,
             &mut out_freeze_ok_msg,
             &mut err_freeze_ok,
         ),
@@ -2166,16 +2207,19 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
         blind_inputs_manifest_sha256: real_manifest_sha.clone(),
         scorer_config_sha256: "f".repeat(64),
         scorer_tree_sha256: real_tree_sha.clone(),
+        verified_checkpoints_sha256: real_vc_sha.clone(),
     };
     let bad_tree_freeze = ScorerFreezeBlindView {
         blind_inputs_manifest_sha256: real_manifest_sha.clone(),
         scorer_config_sha256: cfg_sha.clone(),
         scorer_tree_sha256: "e".repeat(64),
+        verified_checkpoints_sha256: real_vc_sha.clone(),
     };
     let bad_manifest_freeze = ScorerFreezeBlindView {
         blind_inputs_manifest_sha256: "d".repeat(64),
         scorer_config_sha256: cfg_sha.clone(),
         scorer_tree_sha256: real_tree_sha,
+        verified_checkpoints_sha256: real_vc_sha,
     };
     for (idx, (freeze_view, expected_code)) in [
         (bad_cfg_freeze, "FREEZE_CONFIG_MISMATCH"),
@@ -2189,7 +2233,7 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
         fs::write(&p, to_sorted_pretty_json(&freeze_view)?)?;
         let mut err_buf = Vec::new();
         assert_eq!(
-            run_cli(
+            league_scorer::cli::run_cli_with_build_id(
                 [
                     "score",
                     "--blind-inputs",
@@ -2200,12 +2244,15 @@ fn cli_covers_all_flag_errors_io_failures_and_formats() -> TestResult {
                     cfg_path.to_str().ok_or("utf8")?,
                     "--freeze",
                     p.to_str().ok_or("utf8")?,
+                    "--verified-checkpoints",
+                    vc_path.to_str().ok_or("utf8")?,
                     "--out",
                     tmp.path()
                         .join(format!("out_bad_freeze_{idx}"))
                         .to_str()
                         .ok_or("utf8")?,
                 ],
+                build_id,
                 &mut Vec::new(),
                 &mut err_buf,
             ),
@@ -2234,7 +2281,8 @@ fn arm_independent_generators_respect_legality_budget_fill_order_and_dedup() -> 
     let ckpts_dir = tmp.path().join("checkpoints");
     fs::create_dir_all(&ckpts_dir)?;
 
-    let mut host = EvalHost::from_standard_setup(TableId(8201), 4, 1, 17)?;
+    let mut host = EvalHost::from_standard_setup(TableId(8201), 4, 1, 17)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     // Advance to turn 2 with ClubBot turns so order books, production inputs, and refined units exist.
     for _ in 0..2 {
         let mut subs = BTreeMap::new();
@@ -2413,7 +2461,8 @@ fn arm_independent_generators_respect_legality_budget_fill_order_and_dedup() -> 
     assert!(parsed_req.validate(&cfg).is_ok());
 
     // Sensitivity check against a different checkpoint (day 1 fresh table).
-    let mut fresh_host = EvalHost::from_standard_setup(TableId(8202), 4, 1, 99)?;
+    let mut fresh_host = EvalHost::from_standard_setup(TableId(8202), 4, 1, 99)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     let (raw_s1, raw_seal1) = fresh_host.write_pre_act_checkpoint(&tmp.path().join("raw_d1"))?;
     let b_s1 = fs::read(&raw_s1)?;
     let b_seal1 = fs::read(&raw_seal1)?;
@@ -2500,7 +2549,8 @@ fn postures_schedule_active_liquidity_and_conservative_reserves() -> TestResult 
 
     // Construct a real Turn-2 checkpoint where seat 2 has resting wide spread on Raw(0) and tight on Raw(1).
     let tmp = UniqueTmpDir::new("s2_postures")?;
-    let mut host = EvalHost::from_standard_setup(TableId(8210), 4, 1, 21)?;
+    let mut host = EvalHost::from_standard_setup(TableId(8210), 4, 1, 21)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     // Sweep Turn 1 so each seat receives starting endowment/yield, then construct Turn 2 book:
     // wide spread on `wide_g` (Seat 1 excess > reserve) and tight spread on `tight_g`.
     let mut turn1_subs = BTreeMap::new();
@@ -3296,7 +3346,8 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
     // - maturing check + unconditioned escrow payable to Seat 0
     // - competing multi-level Buy/Sell resting offers on Raw goods (testing best_buy/best_sell updates)
     // - excess CRED locked/released so Seat 0 accumulates cred_debt and then holds spare CRED
-    let mut host = EvalHost::from_standard_setup(TableId(8250), 4, 1, 31)?;
+    let mut host = EvalHost::from_standard_setup(TableId(8250), 4, 1, 31)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     let mut day1 = BTreeMap::new();
     for s in 0..4_u8 {
         let obs = host.observe_seat(Seat(s))?;
@@ -3681,7 +3732,8 @@ fn coverage_s2_turn4_turn6_books_debt_claims_and_cli_edges() -> TestResult {
         Some("INVALID_FOCAL_SEAT")
     );
 
-    let mut host5 = EvalHost::from_standard_setup(TableId(8251), 5, 1, 0)?;
+    let mut host5 = EvalHost::from_standard_setup(TableId(8251), 5, 1, 0)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     let raw5_dir = tmp.path().join("raw5");
     fs::create_dir_all(&raw5_dir)?;
     let (s5, seal5) = host5.write_pre_act_checkpoint(&raw5_dir)?;
@@ -4886,7 +4938,8 @@ fn preview_error_fails_closed_across_pruning_and_commitments() -> TestResult {
 #[test]
 fn rollout_replay_parity_covers_active_conservative_and_honoured_commitments() -> TestResult {
     let tmp = UniqueTmpDir::new("replay_parity_s2")?;
-    let mut host = EvalHost::from_standard_setup(TableId(8263), 4, 1, 0)?;
+    let mut host = EvalHost::from_standard_setup(TableId(8263), 4, 1, 0)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
 
     // Turn 1: play unmodified ClubBot.
     let mut t1_subs = BTreeMap::new();
@@ -5460,7 +5513,8 @@ fn rollout_engine_error_branches_report_step_and_strip_paths() -> TestResult {
     let secret_dir = tmp.path().join("secret_rollout_err_dir_token");
     fs::create_dir_all(&secret_dir)?;
 
-    let mut host = EvalHost::from_standard_setup(TableId(8266), 4, 1, 0)?;
+    let mut host = EvalHost::from_standard_setup(TableId(8266), 4, 1, 0)?
+        .with_engine_commit(TEST_ENGINE_COMMIT)?;
     // Advance Turn 1 so Turn 2 has 1 logged turn and 1 live_state_digest in `.seal`.
     let mut t1_subs = BTreeMap::new();
     for s in 0..4_u8 {
@@ -5534,23 +5588,53 @@ fn rollout_engine_error_branches_report_step_and_strip_paths() -> TestResult {
         "dir path leaked in apply error: {apply_msg}"
     );
 
-    // 2. Finalize error branch (`finalize_eval_season: ...`) driven by a seal whose
-    // `live_state_digests[0]` mismatches replay while passing fork snapshot validation.
-    let mut seal_json: serde_json::Value = serde_json::from_slice(&seal_bytes)?;
-    let first_byte = seal_json["live_state_digests"][0][0]
-        .as_u64()
-        .ok_or("expected live_state_digests[0][0] integer")?;
-    seal_json["live_state_digests"][0][0] = serde_json::json!(first_byte ^ 1);
-    let bad_seal_bytes = serde_json::to_vec(&seal_json)?;
+    // 2. Finalize error branch (`finalize_eval_season: ...`) driven by a Turn-3 seal whose
+    // historical `live_state_digests[0]` mismatches Turn-1 replay while tip `live_state_digests[1]`
+    // and canonical encoding pass single-read fork checks.
+    host.apply_act_submissions(&BTreeMap::new())?;
+    host.sweep_turn()?;
+    let (save3_path, seal3_path) = host.write_pre_act_checkpoint(&secret_dir)?;
+    let seal3_bytes = fs::read(&seal3_path)?;
+    let needle = b"\"live_state_digests\":";
+    let key_pos = seal3_bytes
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .ok_or("missing live_state_digests key")?;
+    let val_start = key_pos + needle.len();
+    let mut depth = 0_usize;
+    let mut val_end = val_start;
+    while val_end < seal3_bytes.len() {
+        match seal3_bytes[val_end] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    val_end += 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+        val_end += 1;
+    }
+    let mut digests: Vec<[u8; 32]> = serde_json::from_slice(&seal3_bytes[val_start..val_end])?;
+    digests[0][0] ^= 1;
+    let new_digests_bytes = serde_json::to_vec(&digests)?;
+    let mut bad_seal_bytes = Vec::with_capacity(seal3_bytes.len() + new_digests_bytes.len());
+    bad_seal_bytes.extend_from_slice(&seal3_bytes[..val_start]);
+    bad_seal_bytes.extend_from_slice(&new_digests_bytes);
+    bad_seal_bytes.extend_from_slice(&seal3_bytes[val_end..]);
     let bad_seal_sha = sha256_hex(&bad_seal_bytes);
-    let bad_pair_sha = compute_pre_act_pair_sha256_hex(&save_bytes, &bad_seal_bytes);
-    let bad_seal_path = secret_dir.join("bad_digest_turn2.seal");
+    let save3_bytes = fs::read(&save3_path)?;
+    let save3_sha = sha256_hex(&save3_bytes);
+    let bad_pair_sha = compute_pre_act_pair_sha256_hex(&save3_bytes, &bad_seal_bytes);
+    let bad_seal_path = secret_dir.join("bad_digest_turn3.seal");
     fs::write(&bad_seal_path, &bad_seal_bytes)?;
 
     let finalize_err = run_single_rollout_with_replay_log(
-        &save_path,
+        &save3_path,
         &bad_seal_path,
-        (&save_sha, &bad_seal_sha, &bad_pair_sha),
+        (&save3_sha, &bad_seal_sha, &bad_pair_sha),
         0,
         &EvalActSubmission::default(),
         &valid_peer_subs,
@@ -5606,6 +5690,7 @@ fn s3a_freeze_helpers_and_cli_validation_cover_error_branches() -> TestResult {
         blind_inputs_manifest_sha256: valid_hex.clone(),
         scorer_config_sha256: valid_hex.clone(),
         scorer_tree_sha256: valid_hex.clone(),
+        verified_checkpoints_sha256: valid_hex.clone(),
     };
     valid_view.validate()?;
 
@@ -5770,7 +5855,8 @@ fn s3a_freeze_helpers_and_cli_validation_cover_error_branches() -> TestResult {
         to_sorted_pretty_json(&ScorerFreezeBlindView {
             blind_inputs_manifest_sha256: "bad".to_owned(),
             scorer_config_sha256: valid_hex.clone(),
-            scorer_tree_sha256: valid_hex,
+            scorer_tree_sha256: valid_hex.clone(),
+            verified_checkpoints_sha256: valid_hex,
         })?,
     )?;
     err_buf.clear();

@@ -13,6 +13,8 @@ use league_core::{
 };
 use sha2::{Digest, Sha256};
 
+const TEST_ENGINE_COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
 fn test_layout_seed_beacon_candidates(seed: u64) -> [[u8; 32]; 2] {
     let mut padded = [0_u8; 32];
     padded[..8].copy_from_slice(&seed.to_le_bytes());
@@ -69,8 +71,20 @@ fn eval_host_save_seal_round_trip_is_byte_exact_and_omits_raw_seed() {
     );
     let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x31 + i; 32])).collect();
     let mut host = must_ok(
-        EvalHost::from_explicit_setup(TableId(910_101), 4, 7, [0x4A; 32], &salts, eval_seed, 55),
-        "EvalHost::from_explicit_setup",
+        must_ok(
+            EvalHost::from_explicit_setup(
+                TableId(910_101),
+                4,
+                7,
+                [0x4A; 32],
+                &salts,
+                eval_seed,
+                55,
+            ),
+            "EvalHost::from_explicit_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
 
     // 1. Turn 0 round-trip byte-exact.
@@ -172,8 +186,20 @@ fn eval_host_pre_act_checkpoint_and_act_recorded_replay_produce_identical_receip
     );
     let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([0x41 + i; 32])).collect();
     let mut host = must_ok(
-        EvalHost::from_explicit_setup(TableId(910_102), 4, 7, [0x4B; 32], &salts, eval_seed, 88),
-        "EvalHost::from_explicit_setup",
+        must_ok(
+            EvalHost::from_explicit_setup(
+                TableId(910_102),
+                4,
+                7,
+                [0x4B; 32],
+                &salts,
+                eval_seed,
+                88,
+            ),
+            "EvalHost::from_explicit_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let bots: Vec<ClubBot> = (0..4).map(|i| ClubBot::new(200 + i as u64)).collect();
 
@@ -368,8 +394,12 @@ fn eval_host_refuses_club_and_game_specs_and_seals() {
     // 4. R2: refuse TableMode::Club and TableMode::Game inside an Eval seal's JSON via
     // INVALID_SEAL_TABLE_MODE.
     let eval_host = must_ok(
-        EvalHost::from_standard_setup(TableId(910_115), 4, 7, 1),
-        "EvalHost::from_standard_setup",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(910_115), 4, 7, 1),
+            "EvalHost::from_standard_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let (eval_save, eval_seal) = must_ok(eval_host.write_game_save_and_seal(&tmp), "write eval");
     let eval_seal_bytes = must_ok(fs::read(&eval_seal), "read eval_seal");
@@ -403,8 +433,12 @@ fn eval_host_refuses_club_and_game_specs_and_seals() {
 fn eval_host_tampered_save_returns_save_seal_snapshot_mismatch() {
     let tmp = unique_tmp_dir("tamper_save");
     let host = must_ok(
-        EvalHost::from_standard_setup(TableId(910_106), 4, 7, 12),
-        "EvalHost::from_standard_setup",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(910_106), 4, 7, 12),
+            "EvalHost::from_standard_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let save_path = tmp.join("eval-910106.save.json");
     let seal_path = tmp.join("eval-910106.seal");
@@ -447,8 +481,12 @@ fn eval_host_tampered_save_returns_save_seal_snapshot_mismatch() {
 fn eval_host_turn_0_fork_deals_identical_mandates_and_runs_independently_to_eval_replay() {
     let tmp = unique_tmp_dir("turn0_fork");
     let source = must_ok(
-        EvalHost::from_standard_setup(TableId(910_107), 4, 7, 33),
-        "EvalHost::from_standard_setup",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(910_107), 4, 7, 33),
+            "EvalHost::from_standard_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let save0 = tmp.join("eval-910107.save.json");
     let seal0 = tmp.join("eval-910107.seal");
@@ -591,8 +629,12 @@ fn eval_host_canary_bytes_appear_in_seal_and_nowhere_in_save_json() {
     );
 
     let mut host = must_ok(
-        EvalHost::from_explicit_setup(tid, 4, 7, deal_seed, &seat_salts, eval_seed, 99),
-        "EvalHost::from_explicit_setup",
+        must_ok(
+            EvalHost::from_explicit_setup(tid, 4, 7, deal_seed, &seat_salts, eval_seed, 99),
+            "EvalHost::from_explicit_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
 
     // Pre-act checkpoint canary scan (R6: hex + json_array + decimal_list).
@@ -736,8 +778,20 @@ fn explicit_pre_act_host(tid: TableId, layout_seed: u64, tag: u8) -> EvalHost {
     );
     let salts: Vec<RevealSalt> = (0..4).map(|i| RevealSalt([tag + 1 + i; 32])).collect();
     must_ok(
-        EvalHost::from_explicit_setup(tid, 4, layout_seed, [tag + 9; 32], &salts, eval_seed, 55),
-        "EvalHost::from_explicit_setup",
+        must_ok(
+            EvalHost::from_explicit_setup(
+                tid,
+                4,
+                layout_seed,
+                [tag + 9; 32],
+                &salts,
+                eval_seed,
+                55,
+            ),
+            "EvalHost::from_explicit_setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     )
 }
 
@@ -1344,8 +1398,12 @@ fn eval_host_public_api_guard_and_persistence_edge_cases() {
     assert!(EvalHost::from_standard_setup(TableId(920_099), 3, 7, 1).is_err());
 
     let mut manual = must_ok(
-        EvalHost::from_standard_setup(TableId(920_040), 4, 7, 1),
-        "setup",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(920_040), 4, 7, 1),
+            "setup",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     assert_eq!(manual.layout_seed(), 7);
     assert_eq!(manual.public_spec().table_id, TableId(920_040));
@@ -1398,8 +1456,12 @@ fn eval_host_public_api_guard_and_persistence_edge_cases() {
 
     // Pass A & Pass B invalid own action + MISSING_PRE_ACT_CHECKPOINT + pre-act mismatch + missing files.
     let mut act_host = must_ok(
-        EvalHost::from_standard_setup(TableId(920_041), 4, 7, 1),
-        "setup2",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(920_041), 4, 7, 1),
+            "setup2",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     assert!(
         act_host
@@ -1442,8 +1504,12 @@ fn eval_host_public_api_guard_and_persistence_edge_cases() {
         must_ok(act_host.write_game_save_and_seal(&tmp), "save reveal pair");
 
     let mut h_pre = must_ok(
-        EvalHost::from_standard_setup(TableId(920_042), 4, 7, 1),
-        "setup3",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(920_042), 4, 7, 1),
+            "setup3",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let ckpt_dir = tmp.join("ckpts_42");
     let (pre_save, pre_seal) = must_ok(h_pre.write_pre_act_checkpoint(&ckpt_dir), "write pre");
@@ -1510,8 +1576,12 @@ fn eval_host_public_api_guard_and_persistence_edge_cases() {
     );
 
     let turn0 = must_ok(
-        EvalHost::from_standard_setup(TableId(920_043), 4, 7, 1),
-        "setup4",
+        must_ok(
+            EvalHost::from_standard_setup(TableId(920_043), 4, 7, 1),
+            "setup4",
+        )
+        .with_engine_commit(TEST_ENGINE_COMMIT),
+        "with_engine_commit",
     );
     let t0_dir = tmp.join("t0_dir");
     let _ = must_ok(turn0.write_game_save_and_seal(&t0_dir), "write t0");
@@ -1561,5 +1631,149 @@ fn eval_host_public_api_guard_and_persistence_edge_cases() {
             .is_err()
     );
 
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn eval_host_refuses_persist_without_valid_40_hex_engine_commit() {
+    let tmp = unique_tmp_dir("missing_engine_commit");
+    let mut host = must_ok(
+        EvalHost::from_standard_setup(TableId(920_050), 4, 7, 1),
+        "setup",
+    );
+    assert_eq!(host.engine_commit(), None);
+    let err_write = host
+        .write_game_save_and_seal(&tmp)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(
+        err_write.contains("INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION"),
+        "expected missing commit refusal, got: {err_write}"
+    );
+    for bad in ["", "short", &"A".repeat(40), &"z".repeat(40)] {
+        let err = host
+            .set_engine_commit(bad)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(
+            err.contains("INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION"),
+            "expected invalid commit refusal for `{bad}`, got: {err}"
+        );
+    }
+    must_ok(host.set_engine_commit(TEST_ENGINE_COMMIT), "valid commit");
+    assert_eq!(host.engine_commit(), Some(TEST_ENGINE_COMMIT));
+    must_ok(host.write_game_save_and_seal(&tmp), "persist with commit");
+
+    // Exercise additional v2 pair binding, non-canonical, and header refusal branches on `read_game_save_and_seal`.
+    let save_p = tmp.join("eval-920050.save.json");
+    let seal_p = tmp.join("eval-920050.seal");
+    let save_str = must_ok(fs::read_to_string(&save_p), "read save");
+    let seal_str = must_ok(fs::read_to_string(&seal_p), "read seal");
+    let mut bad_dir_idx = 0usize;
+    let mut assert_bad_pair = |tag: &str, bad_save: &str, bad_seal: &str, expected_substr: &str| {
+        bad_dir_idx += 1;
+        let d = tmp.join(format!("bad_{bad_dir_idx}_{tag}"));
+        must_ok(fs::create_dir_all(&d), "mkdir");
+        must_ok(
+            fs::write(d.join("eval-920050.save.json"), bad_save),
+            "write bad save",
+        );
+        must_ok(
+            fs::write(d.join("eval-920050.seal"), bad_seal),
+            "write bad seal",
+        );
+        let err = EvalHost::read_game_save_and_seal(&d, TableId(920_050))
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(
+            err.contains(expected_substr),
+            "case `{tag}` expected `{expected_substr}`, got: {err}"
+        );
+    };
+
+    let bad_save_sha_seal = {
+        let mut s = seal_str.clone();
+        if let Some(pos) = s.find("\"save_sha256\":\"") {
+            let start = pos + "\"save_sha256\":\"".len();
+            s.replace_range(start..start + 64, &"0".repeat(64));
+        }
+        s
+    };
+    assert_bad_pair(
+        "wrong_save_sha",
+        &save_str,
+        &bad_save_sha_seal,
+        "PAIR_BINDING_MISMATCH",
+    );
+    let ws_save = format!("{save_str} ");
+    let ws_save_sha = {
+        let mut hasher = Sha256::new();
+        hasher.update(b"league-core/eval-save/v2|");
+        hasher.update(ws_save.as_bytes());
+        hex::encode(hasher.finalize())
+    };
+    let ws_save_seal = {
+        let mut s = seal_str.clone();
+        if let Some(pos) = s.find("\"save_sha256\":\"") {
+            let start = pos + "\"save_sha256\":\"".len();
+            s.replace_range(start..start + 64, &ws_save_sha);
+        }
+        s
+    };
+    assert_bad_pair(
+        "noncanonical_save_ws",
+        &ws_save,
+        &ws_save_seal,
+        "NON_CANONICAL_ENCODING",
+    );
+    assert_bad_pair(
+        "noncanonical_seal_ws",
+        &save_str,
+        &format!("{seal_str} "),
+        "NON_CANONICAL_ENCODING",
+    );
+    assert_bad_pair(
+        "missing_save_format_version",
+        &save_str,
+        &seal_str.replacen("\"save_format_version\":2,", "", 1),
+        "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION",
+    );
+    assert_bad_pair(
+        "wrong_save_format_version",
+        &save_str,
+        &seal_str.replacen(
+            "\"save_format_version\":2,",
+            "\"save_format_version\":1,",
+            1,
+        ),
+        "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION",
+    );
+    assert_bad_pair(
+        "missing_engine_commit",
+        &save_str,
+        &seal_str.replacen(
+            &format!("\"engine_commit\":\"{TEST_ENGINE_COMMIT}\","),
+            "",
+            1,
+        ),
+        "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION",
+    );
+    assert_bad_pair(
+        "bad_engine_commit",
+        &save_str,
+        &seal_str.replacen(TEST_ENGINE_COMMIT, "xyz", 1),
+        "INCOMPATIBLE_ENGINE_OR_SCHEMA_VERSION",
+    );
+    let turn_mismatch_seal = seal_str.replacen(",\"turn\":1,", ",\"turn\":2,", 1);
+    assert_ne!(turn_mismatch_seal, seal_str);
+    assert_bad_pair(
+        "turn_mismatch",
+        &save_str,
+        &turn_mismatch_seal,
+        "PAIR_BINDING_MISMATCH",
+    );
     let _ = fs::remove_dir_all(&tmp);
 }

@@ -973,14 +973,18 @@ fn test_5_seat_view() {
     }
 
     let host = must_ok(
-        EvalHost::from_standard_setup_with_model_seats(
-            TableId(5),
-            4,
-            7,
-            11,
-            &[true, false, false, false],
-        ),
-        "from_standard_setup_with_model_seats",
+        must_ok(
+            EvalHost::from_standard_setup_with_model_seats(
+                TableId(5),
+                4,
+                7,
+                11,
+                &[true, false, false, false],
+            ),
+            "from_standard_setup_with_model_seats",
+        )
+        .with_engine_commit("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        "with_engine_commit",
     );
     let obs = must_ok(host.observe_seat(Seat(0)), "observe_seat");
     let pretty_obs = must_ok(

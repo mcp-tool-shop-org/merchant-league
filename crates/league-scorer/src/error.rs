@@ -3,6 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
+use league_core::eval::host::checkpoint_verify::CheckpointVerifyError;
 use league_core::{StructuredError, ToStructuredError};
 
 /// Process exit code for clean completion.
@@ -110,6 +111,12 @@ pub enum ScorerError {
     FreezeTreeMismatch(String),
     /// `--freeze` `blind_inputs_manifest_sha256` disagrees with `--blind-inputs` (`exit 1`).
     FreezeManifestMismatch(String),
+    /// Required `--verified-checkpoints` flag or `verified_checkpoints_sha256` freeze binding missing (`exit 1`).
+    MissingVerifiedCheckpoints(String),
+    /// `--verified-checkpoints` SHA-256 disagrees with `--freeze` `verified_checkpoints_sha256` (`exit 1`).
+    FreezeVerifiedCheckpointsMismatch(String),
+    /// Typed causal/canonical checkpoint verification failure (`exit 1` or `exit 2`).
+    CheckpointVerify(CheckpointVerifyError),
     /// Invalid `ExtractedTalkCommitment` in `BlindScoringRequest` (`exit 1`).
     InvalidTalkCommitment(String),
     /// Invalid scenario count `M` or `ScorerConfig` invariant (`exit 1`).
@@ -162,6 +169,9 @@ impl ScorerError {
             Self::FreezeConfigMismatch(_) => "FREEZE_CONFIG_MISMATCH",
             Self::FreezeTreeMismatch(_) => "FREEZE_TREE_MISMATCH",
             Self::FreezeManifestMismatch(_) => "FREEZE_MANIFEST_MISMATCH",
+            Self::MissingVerifiedCheckpoints(_) => "MISSING_VERIFIED_CHECKPOINTS",
+            Self::FreezeVerifiedCheckpointsMismatch(_) => "FREEZE_VERIFIED_CHECKPOINTS_MISMATCH",
+            Self::CheckpointVerify(err) => err.code(),
             Self::InvalidTalkCommitment(_) => "INVALID_TALK_COMMITMENT",
             Self::InvalidScorerConfig(_) => "INVALID_SCORER_CONFIG",
             Self::Json(_) => "INVALID_JSON",
@@ -197,6 +207,17 @@ impl ScorerError {
             | Self::FreezeConfigMismatch(_)
             | Self::FreezeTreeMismatch(_)
             | Self::FreezeManifestMismatch(_)
+            | Self::MissingVerifiedCheckpoints(_)
+            | Self::FreezeVerifiedCheckpointsMismatch(_)
+            | Self::CheckpointVerify(
+                CheckpointVerifyError::OuterFileHashMismatch { .. }
+                | CheckpointVerifyError::UnexpectedEofOrMalformedEncoding { .. }
+                | CheckpointVerifyError::PairBindingMismatch { .. }
+                | CheckpointVerifyError::TipStateDigestMismatch { .. }
+                | CheckpointVerifyError::NonCanonicalEncoding { .. }
+                | CheckpointVerifyError::UnknownFieldRejected { .. }
+                | CheckpointVerifyError::IncompatibleEngineOrSchemaVersion { .. },
+            )
             | Self::InvalidTalkCommitment(_)
             | Self::InvalidScorerConfig(_)
             | Self::Json(_)
@@ -205,7 +226,13 @@ impl ScorerError {
             | Self::CheckpointNotFound(_)
             | Self::CheckpointHashMismatch(_)
             | Self::InvalidCheckpointState(_) => EXIT_USER_ERROR,
-            Self::FocalMandateNotInDeck
+            Self::CheckpointVerify(
+                CheckpointVerifyError::ReplayDigestMismatch { .. }
+                | CheckpointVerifyError::ChainHashMismatch { .. }
+                | CheckpointVerifyError::ProbeStepDivergence { .. }
+                | CheckpointVerifyError::InMemoryBaseStateCorrupted { .. },
+            )
+            | Self::FocalMandateNotInDeck
             | Self::InsufficientMandatePool { .. }
             | Self::Engine(_)
             | Self::Io(_) => EXIT_RUNTIME_ERROR,
@@ -259,6 +286,13 @@ impl ScorerError {
             Self::FreezeManifestMismatch(_) => {
                 "Pass the exact blind_inputs directory whose manifest digest is recorded in scorer_freeze.json."
             }
+            Self::MissingVerifiedCheckpoints(_) => {
+                "Run `league-eval verify-checkpoints` and pass `--verified-checkpoints <file>` (recorded as `verified_checkpoints_sha256` in scorer_freeze.json)."
+            }
+            Self::FreezeVerifiedCheckpointsMismatch(_) => {
+                "Pass the exact verified_checkpoints.json whose SHA-256 is recorded in scorer_freeze.json."
+            }
+            Self::CheckpointVerify(err) => err.hint(),
             Self::InvalidTalkCommitment(_) => {
                 "Ensure commitment seats are distinct in-range peer seats matching offered_action."
             }
@@ -304,6 +338,8 @@ impl fmt::Display for ScorerError {
             | Self::FreezeConfigMismatch(msg)
             | Self::FreezeTreeMismatch(msg)
             | Self::FreezeManifestMismatch(msg)
+            | Self::MissingVerifiedCheckpoints(msg)
+            | Self::FreezeVerifiedCheckpointsMismatch(msg)
             | Self::InvalidTalkCommitment(msg)
             | Self::InvalidScorerConfig(msg)
             | Self::Json(msg)
@@ -314,6 +350,7 @@ impl fmt::Display for ScorerError {
             | Self::InvalidCheckpointState(msg)
             | Self::Engine(msg)
             | Self::Io(msg) => write!(f, "{code}: {msg}"),
+            Self::CheckpointVerify(err) => fmt::Display::fmt(err, f),
             Self::UnsupportedSchemaVersion(ver) => {
                 write!(
                     f,
@@ -362,6 +399,12 @@ impl fmt::Display for ScorerError {
 }
 
 impl std::error::Error for ScorerError {}
+
+impl From<CheckpointVerifyError> for ScorerError {
+    fn from(value: CheckpointVerifyError) -> Self {
+        Self::CheckpointVerify(value)
+    }
+}
 
 impl ToStructuredError for ScorerError {
     fn to_structured_error(&self) -> StructuredError {

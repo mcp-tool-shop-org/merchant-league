@@ -13,11 +13,12 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use league_scorer::{
-    BLIND_SCORING_SCHEMA_VERSION, CandidateScoreOutput, ScorerConfig, StateScoreOutput,
-    TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts,
-    compute_blind_inputs_manifest_sha256, compute_blind_inputs_manifest_sha256_from_entries,
-    compute_scorer_tree_sha256, is_valid_sha256_hex, parse_blind_scoring_request_strict,
-    to_sorted_pretty_json,
+    BLIND_SCORING_SCHEMA_VERSION, BlindScoringRequest, CandidateScoreOutput, ScorerConfig,
+    StateScoreOutput, TALK_EXTRACTOR_VERSION_V2, TalkExtractionCounts, TalkSourceCounts,
+    VerifiedCheckpointsManifest, compute_blind_inputs_manifest_sha256,
+    compute_blind_inputs_manifest_sha256_from_entries, compute_scorer_tree_sha256,
+    is_valid_sha256_hex, parse_blind_scoring_request_strict,
+    parse_verified_checkpoints_manifest_strict, sha256_hex, to_sorted_pretty_json,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +35,9 @@ use crate::talk_extract::talk_rules_v2_digest;
 /// Descriptive-only inferential tag required by `§7.1`.
 pub const DESCRIPTIVE_ONLY_INFERENTIAL_STATUS: &str = "descriptive_only";
 
+/// Plain readout statement documenting shared counterfactual environment randomness across `M` scenarios.
+pub const SCENARIO_RANDOMNESS_SCOPE_STATEMENT: &str = "Counterfactual scenarios m in 0..M share the base game's future environment RNG stream (market shocks and season-close rolls) and vary only sampled peer hidden mandates and talk-commitment honour draws; within a fixed scenario m, distinct focal actions that alter sweep state transitions can shift downstream environment draws.";
+
 /// Options for [`run_freeze`].
 #[derive(Debug, Clone)]
 pub struct FreezeOptions {
@@ -45,6 +49,8 @@ pub struct FreezeOptions {
     pub control_wording_arm: String,
     /// Output path for write-once `scorer_freeze.json` (`--out <file>`).
     pub out_path: PathBuf,
+    /// Path to preflight `verified_checkpoints.json` (`--verified-checkpoints <file>`).
+    pub verified_checkpoints_path: PathBuf,
     /// Optional path to `crates/league-scorer` directory (defaults to compile-time sibling path).
     pub scorer_crate_dir: Option<PathBuf>,
 }
@@ -67,6 +73,9 @@ pub struct ScorerFreezeFile {
     pub talk_extractor_rules_digest: String,
     /// Talk commitment extractor version (`talk_rules_v2`).
     pub talk_extractor_version: String,
+    /// Canonical SHA-256 of preflight `verified_checkpoints.json`.
+    #[serde(default)]
+    pub verified_checkpoints_sha256: String,
 }
 
 impl ScorerFreezeFile {
@@ -80,6 +89,11 @@ impl ScorerFreezeFile {
                 self.scorer_git_sha
             )));
         }
+        if self.verified_checkpoints_sha256.trim().is_empty() {
+            return Err(EvalError::MissingVerifiedCheckpoints(
+                "freeze file missing required `verified_checkpoints_sha256`".to_owned(),
+            ));
+        }
         for (field, val) in [
             ("scorer_tree_sha256", &self.scorer_tree_sha256),
             ("scorer_config_sha256", &self.scorer_config_sha256),
@@ -90,6 +104,10 @@ impl ScorerFreezeFile {
             (
                 "blind_inputs_manifest_sha256",
                 &self.blind_inputs_manifest_sha256,
+            ),
+            (
+                "verified_checkpoints_sha256",
+                &self.verified_checkpoints_sha256,
             ),
         ] {
             if !is_valid_sha256_hex(val) {
@@ -123,6 +141,8 @@ pub struct JoinOptions {
     pub scores_dir: PathBuf,
     /// Output directory where descriptive joined tables are written (`--out <dir>`).
     pub out_dir: PathBuf,
+    /// Path to verified preflight manifest `verified_checkpoints.json` (`--verified-checkpoints <file>`).
+    pub verified_checkpoints_path: Option<PathBuf>,
     /// Optional explicit `blind_inputs/` directory to cross-check directly on disk.
     pub blind_dir: Option<PathBuf>,
     /// Optional source game directories carrying `setup.json`, `checkpoints/`, `decisions/`,
@@ -175,6 +195,9 @@ pub struct JoinedDecisionRow {
     pub decision_path: PathBuf,
     /// Unblinded `outcome.json` provenance path.
     pub outcome_path: PathBuf,
+    /// Recorded 40-hex engine commit SHA stamped on this state's pre-act checkpoint seal.
+    #[serde(default)]
+    pub checkpoint_engine_commit: String,
 }
 
 /// Descriptive distribution of one per-state count across states in an arm (`§7.1`).
@@ -247,6 +270,18 @@ pub struct PerArmSummaryFile {
     pub inferential_status: String,
     /// Freeze SHA-256 of the verified `scorer_freeze.json`.
     pub freeze_sha256: String,
+    /// Canonical SHA-256 of `verified_checkpoints.json` frozen in `scorer_freeze.json`.
+    #[serde(default)]
+    pub verified_checkpoints_sha256: String,
+    /// Verified 40-hex build ID of `league-scorer` / `league-eval verify-checkpoints` (`scorer_git_sha`).
+    #[serde(default)]
+    pub scorer_engine_build_id: String,
+    /// Sorted unique 40-hex engine commit provenances recorded on joined checkpoints.
+    #[serde(default)]
+    pub checkpoint_engine_commits: Vec<String>,
+    /// Explicit scope statement for scenario counterfactual environment randomness across `M` scenarios.
+    #[serde(default)]
+    pub scenario_randomness_scope: String,
     /// Sorted per-arm descriptive summaries.
     pub arms: Vec<PerArmSummaryRow>,
     /// Fixed §7.2.3 statement of what the recorded Evaluation data cannot tell.
@@ -263,6 +298,18 @@ pub struct JoinedDecisionsFile {
     pub inferential_status: String,
     /// SHA-256 of `scorer_freeze.json`.
     pub freeze_sha256: String,
+    /// Canonical SHA-256 of `verified_checkpoints.json` frozen in `scorer_freeze.json`.
+    #[serde(default)]
+    pub verified_checkpoints_sha256: String,
+    /// Verified 40-hex build ID of `league-scorer` / `league-eval verify-checkpoints` (`scorer_git_sha`).
+    #[serde(default)]
+    pub scorer_engine_build_id: String,
+    /// Sorted unique 40-hex engine commit provenances recorded on joined checkpoints.
+    #[serde(default)]
+    pub checkpoint_engine_commits: Vec<String>,
+    /// Explicit scope statement for scenario counterfactual environment randomness across `M` scenarios.
+    #[serde(default)]
+    pub scenario_randomness_scope: String,
     /// Joined rows in canonical `(state_id, arm, replicate)` order.
     pub rows: Vec<JoinedDecisionRow>,
 }
@@ -321,8 +368,29 @@ pub fn run_freeze(
         .unwrap_or_else(default_scorer_crate_dir);
     let scorer_tree_sha256 = compute_scorer_tree_sha256(&scorer_crate_dir)?;
 
-    validate_blind_inputs_dir_against_config(&opts.blind_dir, &config)?;
+    let blind_requests = validate_blind_inputs_dir_against_config(&opts.blind_dir, &config)?;
     let blind_inputs_manifest_sha256 = compute_blind_inputs_manifest_sha256(&opts.blind_dir)?;
+
+    let (verified_checkpoints_sha256, vc_manifest) =
+        load_and_verify_checkpoints_manifest(&opts.verified_checkpoints_path, &scorer_git_sha)?;
+    for req in &blind_requests {
+        let Some(entry) = vc_manifest.find_entry(&req.pre_act_pair_sha256) else {
+            return Err(EvalError::VerifiedCheckpointsMismatch(format!(
+                "blind request `{}` checkpoint `{}` is missing from {}",
+                req.state_id,
+                req.pre_act_pair_sha256,
+                opts.verified_checkpoints_path.display()
+            )));
+        };
+        if entry.pre_act_save_sha256 != req.pre_act_save_sha256
+            || entry.pre_act_seal_sha256 != req.pre_act_seal_sha256
+        {
+            return Err(EvalError::VerifiedCheckpointsMismatch(format!(
+                "blind request `{}` save/seal SHA-256 disagrees with verified checkpoint `{}`",
+                req.state_id, req.pre_act_pair_sha256
+            )));
+        }
+    }
 
     let freeze = ScorerFreezeFile {
         blind_inputs_manifest_sha256,
@@ -332,6 +400,7 @@ pub fn run_freeze(
         scorer_tree_sha256,
         talk_extractor_rules_digest: config.talk_extractor_rules_digest,
         talk_extractor_version: config.talk_extractor_version,
+        verified_checkpoints_sha256,
     };
     freeze.validate()?;
 
@@ -391,10 +460,40 @@ pub fn write_freeze_file_with_writer_and_remover(
     Ok(())
 }
 
+fn load_and_verify_checkpoints_manifest(
+    path: &Path,
+    expected_build_id: &str,
+) -> Result<(String, VerifiedCheckpointsManifest), EvalError> {
+    if !path.is_file() {
+        return Err(EvalError::MissingVerifiedCheckpoints(format!(
+            "missing verified_checkpoints.json at {}; run `league-eval verify-checkpoints` first",
+            path.display()
+        )));
+    }
+    let bytes =
+        fs::read(path).map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
+    let manifest_sha256 = sha256_hex(&bytes);
+    let manifest = parse_verified_checkpoints_manifest_strict(&bytes).map_err(|e| {
+        EvalError::VerifiedCheckpointsMismatch(format!(
+            "invalid verified_checkpoints.json {}: {e}",
+            path.display()
+        ))
+    })?;
+    manifest
+        .validate_for_scorer(expected_build_id)
+        .map_err(|e| {
+            EvalError::VerifiedCheckpointsMismatch(format!(
+                "verified_checkpoints.json {} failed build/schema validation: {e}",
+                path.display()
+            ))
+        })?;
+    Ok((manifest_sha256, manifest))
+}
+
 fn validate_blind_inputs_dir_against_config(
     blind_dir: &Path,
     config: &ScorerConfig,
-) -> Result<(), EvalError> {
+) -> Result<Vec<BlindScoringRequest>, EvalError> {
     let read_dir = fs::read_dir(blind_dir).map_err(|e| {
         EvalError::FreezeManifestMismatch(format!(
             "cannot read --blind {}: {e}",
@@ -418,6 +517,7 @@ fn validate_blind_inputs_dir_against_config(
             blind_dir.display()
         )));
     }
+    let mut requests = Vec::with_capacity(paths.len());
     for path in paths {
         let bytes =
             fs::read(&path).map_err(|e| EvalError::Io(format!("read {}: {e}", path.display())))?;
@@ -433,8 +533,9 @@ fn validate_blind_inputs_dir_against_config(
                 req.state_id
             )));
         }
+        requests.push(req);
     }
-    Ok(())
+    Ok(requests)
 }
 
 fn collect_json_files(dir: &Path, label: &str) -> Result<Vec<PathBuf>, EvalError> {
@@ -636,6 +737,21 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         .map_err(|e| EvalError::Io(format!("parse {}: {e}", opts.freeze_path.display())))?;
     freeze.validate()?;
 
+    let vc_path = opts.verified_checkpoints_path.as_deref().ok_or_else(|| {
+        EvalError::MissingVerifiedCheckpoints(
+            "`join` requires `--verified-checkpoints <file>` matching scorer_freeze.json"
+                .to_owned(),
+        )
+    })?;
+    let (actual_vc_sha256, vc_manifest) =
+        load_and_verify_checkpoints_manifest(vc_path, &freeze.scorer_git_sha)?;
+    if actual_vc_sha256 != freeze.verified_checkpoints_sha256 {
+        return Err(EvalError::VerifiedCheckpointsMismatch(format!(
+            "verified_checkpoints.json sha256 `{actual_vc_sha256}` != freeze `{}`",
+            freeze.verified_checkpoints_sha256
+        )));
+    }
+
     let arm_map_paths = collect_json_files(&opts.arm_map_dir, "--arm-map")?;
     if arm_map_paths.is_empty() {
         return Err(EvalError::FreezeManifestMismatch(format!(
@@ -733,9 +849,28 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         ));
     }
 
-    // Verify every freeze/manifest/config/wording gate BEFORE inspecting unblinded decision or
-    // sidecar files for §7.2 mechanism reporting.
+    // Verify every freeze/manifest/config/wording/verified-checkpoint gate BEFORE inspecting
+    // unblinded decision or sidecar files for §7.2 mechanism reporting.
+    let mut checkpoint_commits_set = BTreeSet::new();
+    let mut state_engine_commits: BTreeMap<String, String> = BTreeMap::new();
     for (state_id, arm_map) in &arm_maps {
+        let Some(vc_entry) = vc_manifest.find_entry(&arm_map.pre_act_pair_sha256) else {
+            return Err(EvalError::VerifiedCheckpointsMismatch(format!(
+                "arm_map state `{state_id}` checkpoint `{}` is missing from verified_checkpoints.json",
+                arm_map.pre_act_pair_sha256
+            )));
+        };
+        if vc_entry.pre_act_save_sha256 != arm_map.pre_act_save_sha256
+            || vc_entry.pre_act_seal_sha256 != arm_map.pre_act_seal_sha256
+        {
+            return Err(EvalError::VerifiedCheckpointsMismatch(format!(
+                "arm_map state `{state_id}` save/seal SHA-256 disagrees with verified_checkpoints.json entry `{}`",
+                arm_map.pre_act_pair_sha256
+            )));
+        }
+        checkpoint_commits_set.insert(vc_entry.engine_commit.clone());
+        state_engine_commits.insert(state_id.clone(), vc_entry.engine_commit.clone());
+
         let score = &scores_by_state[state_id];
         verify_score_matches_arm_map(score, arm_map, &freeze)?;
         for entry in &arm_map.entries {
@@ -748,12 +883,14 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
             }
         }
     }
+    let checkpoint_engine_commits: Vec<String> = checkpoint_commits_set.into_iter().collect();
 
     let source_games = index_source_game_dirs(&opts.source_game_dirs)?;
 
     let mut rows = Vec::new();
     for (state_id, arm_map) in &arm_maps {
         let score = &scores_by_state[state_id];
+        let checkpoint_engine_commit = state_engine_commits[state_id].clone();
         let source_game_dir = source_games
             .get(&arm_map.source_game_id)
             .map(PathBuf::as_path);
@@ -800,6 +937,7 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
                 mechanisms,
                 decision_path: entry.decision_path.clone(),
                 outcome_path: entry.outcome_path.clone(),
+                checkpoint_engine_commit: checkpoint_engine_commit.clone(),
             });
         }
     }
@@ -855,6 +993,10 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
         inferential_status: DESCRIPTIVE_ONLY_INFERENTIAL_STATUS.to_owned(),
         freeze_sha256: freeze_sha256.clone(),
+        verified_checkpoints_sha256: freeze.verified_checkpoints_sha256.clone(),
+        scorer_engine_build_id: freeze.scorer_git_sha.clone(),
+        checkpoint_engine_commits: checkpoint_engine_commits.clone(),
+        scenario_randomness_scope: SCENARIO_RANDOMNESS_SCOPE_STATEMENT.to_owned(),
         arms: arm_summaries.clone(),
         data_limits: MECHANISM_DATA_LIMITS
             .iter()
@@ -865,6 +1007,10 @@ pub fn run_join(opts: &JoinOptions) -> Result<JoinReport, EvalError> {
         schema_version: BLIND_SCORING_SCHEMA_VERSION,
         inferential_status: DESCRIPTIVE_ONLY_INFERENTIAL_STATUS.to_owned(),
         freeze_sha256,
+        verified_checkpoints_sha256: freeze.verified_checkpoints_sha256,
+        scorer_engine_build_id: freeze.scorer_git_sha,
+        checkpoint_engine_commits,
+        scenario_randomness_scope: SCENARIO_RANDOMNESS_SCOPE_STATEMENT.to_owned(),
         rows,
     };
 
